@@ -137,13 +137,20 @@ extension Workspace {
     /// (a sync, another window), the reducer refuses it with
     /// `.formulationChanged` and nothing is applied, so text written for the
     /// old wording never lands on the new one. Without it, the task's current
-    /// formulation. Saving removes the task's decision-form drafts (FR-052).
+    /// formulation. `expectedTask` is the task as the card showed it: any
+    /// change since (notes, dates, project, tags, subtasks, a cosmetic title
+    /// edit) is refused the same way. While the review is not exposed every
+    /// decision is refused with `.reviewUnavailable`. Saving removes the
+    /// task's decision-form drafts (FR-052); a refusal keeps them.
     @discardableResult
     public func decide(
         _ type: DecisionType, on taskID: TaskID, title: String? = nil, waitingFor: String? = nil, reason: String? = nil,
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
-        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil
+        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: TaskStamp? = nil
     ) throws(GTDValidationError) -> DecisionID {
+        // Nothing of the review acts while it is not exposed (the flag or
+        // release switch turned off with a card or form open); drafts stay.
+        guard reviewExposed else { throw .reviewUnavailable }
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())
         let startsFormulation: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
@@ -154,7 +161,7 @@ extension Workspace {
             newFormulationID: startsFormulation.contains(type) ? FormulationID.make(makeID()) : nil,
             stallReason: stallReason, title: title, waitingFor: waitingFor, reason: reason, sessionID: sessionID,
             aiUse: aiUse, navigatorRequestID: navigatorRequestID,
-            followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil
+            followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil, expectedTask: expectedTask
         )
         try perform(.decideTask(command))
         edit { document in

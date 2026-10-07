@@ -210,13 +210,26 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var followUpTaskID: TaskID?
         /// False once the undo snapshot was dropped by local retention (7 days).
         public var undoRetained: Bool
+        /// FR-011: the task as the card or form showed it (its revision and
+        /// `updatedAt`). A person's decision on a task that changed since is
+        /// stale. Checked only when the person decides (not on replay, where
+        /// the server's `expected_revision` and yield rule decide) and never
+        /// stored or sent, so it is not part of the encoded command.
+        public var expectedTask: TaskStamp? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case decisionID, taskID, type, formulationID, newFormulationID, stallReason, title, waitingFor, reason
+            case sessionID, aiUse, navigatorRequestID, followUpTaskID, undoRetained
+        }
 
         public init(
             decisionID: DecisionID, taskID: TaskID, type: DecisionType, formulationID: FormulationID? = nil,
             newFormulationID: FormulationID? = nil, stallReason: StallReason? = nil, title: String? = nil,
             waitingFor: String? = nil, reason: String? = nil, sessionID: ReviewSessionID? = nil, aiUse: AIUse = .none,
-            navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true
+            navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true,
+            expectedTask: TaskStamp? = nil
         ) {
+            self.expectedTask = expectedTask
             self.decisionID = decisionID
             self.taskID = taskID
             self.type = type
@@ -485,6 +498,8 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case reviewNotFound
     /// More items than one request takes (bulk release 500, park acknowledgements 200).
     case tooManyItems
+    /// The weekly review is not exposed (the flag or release switch is off).
+    case reviewUnavailable
 
     public var message: String {
         switch self {
@@ -530,6 +545,7 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .extensionReasonTooLong: "Keep the reason under \(GTDLimits.title) characters."
         case .reviewNotFound: "This review is no longer on this device."
         case .tooManyItems: "That's more than can be saved at once. Try fewer tasks."
+        case .reviewUnavailable: "The weekly review is turned off for now. Nothing was changed."
         }
     }
 }

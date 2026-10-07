@@ -207,6 +207,74 @@ import Testing
         #expect(workspace.whileAwayShouldShowAtAppOpen(), "back on: it shows, the same day")
     }
 
+    @Test("020-FR-011 a sync that changes only the notes while the card is open makes the decision stale; unchanged decides")
+    func notesChangedBySyncMakeDecisionStale() async throws {
+        let world = World()
+        let (_, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+        await workspace.syncNow()
+
+        // The card opens and records the task as shown.
+        let shown = try #require(workspace.task(task))
+        let opened = TaskStamp(shown)
+        // Another device edits only the notes; this device syncs while the card is open.
+        let tablet = await world.device()
+        try await tablet.signIn()
+        await tablet.workspace.syncNow()
+        let there = try #require(tablet.workspace.state.tasks.values.first { $0.title == "Renovate the bathroom" })
+        try tablet.workspace.updateTask(there.id, TaskChanges(details: .set("Tiles first")))
+        await tablet.workspace.syncNow()
+        world.clock.advance(by: 60)
+        await workspace.syncNow()
+        let current = try #require(workspace.task(task))
+        #expect(current.details == "Tiles first" && current.formulation?.id == shown.formulation?.id)
+
+        await workspace.flush()
+        let queued = workspace.document.outbox.count
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.someday, on: task, formulationID: shown.formulation?.id, expectedTask: opened)
+        }
+        #expect(workspace.task(task) == current, "nothing applied")
+        await workspace.flush()
+        #expect(workspace.document.outbox.count == queued, "nothing queued")
+
+        // "Decide again": the card records the task as it is now, and the decision applies.
+        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: TaskStamp(current))
+        #expect(workspace.task(task)?.state == .someday)
+    }
+
+    @Test("020-FR-042 020-FR-052 with the review switched off a decision is refused: nothing applied or queued, the draft kept")
+    func decideRefusedWhileHidden() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let shown = try #require(workspace.task(task))
+        let key = DraftKey.decisionForm(.reformulate, task: task, formulation: shown.formulation?.id)
+        workspace.saveDraft("Measure the bathroom wall", for: key)
+        await workspace.flush()
+        let queued = workspace.document.outbox.count
+
+        // The release switch (signed in: the flag) goes off while the form is open.
+        workspace.accountlessReviewEnabled = false
+        #expect(throws: GTDValidationError.reviewUnavailable) {
+            try workspace.decide(
+                .reformulate, on: task, title: "Measure the bathroom wall", formulationID: shown.formulation?.id,
+                expectedTask: TaskStamp(shown)
+            )
+        }
+        #expect(workspace.task(task) == shown, "nothing applied")
+        #expect(workspace.draft(for: key) == "Measure the bathroom wall", "the typed text is kept")
+        await workspace.flush()
+        #expect(workspace.document.outbox.count == queued, "nothing queued")
+
+        workspace.accountlessReviewEnabled = true
+        try workspace.decide(.reformulate, on: task, title: "Measure the bathroom wall", formulationID: shown.formulation?.id)
+        #expect(workspace.task(task)?.title == "Measure the bathroom wall")
+    }
+
     @Test("020-FR-011 a follow-up decision mints task_ and form_ client ids")
     func followUpIDs() async throws {
         let workspace = try await activatedWorkspace()

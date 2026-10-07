@@ -57,6 +57,8 @@ struct DecisionFormView: View {
     let onSaved: (DecisionID, DecisionType, String) -> Void
     let onStale: () -> Void
     let onCloseCard: () -> Void
+    /// The task as the card showed it: any change since makes the save stale.
+    let expectedTask: TaskStamp?
     /// Previews only: starts the field with this text instead of a draft.
     private let seedText: String?
 
@@ -82,8 +84,10 @@ struct DecisionFormView: View {
     init(
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
         isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
-        onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, seedText: String? = nil
+        onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: TaskStamp? = nil,
+        seedText: String? = nil
     ) {
+        self.expectedTask = expectedTask
         self.form = form
         self.taskID = taskID
         self.formulationID = formulationID
@@ -182,6 +186,10 @@ struct DecisionFormView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { persistDraft() }
+        }
+        // The review switched off: the card closes; the typed text is kept.
+        .onChange(of: workspace.reviewExposed) { _, exposed in
+            if !exposed { persistDraft() }
         }
     }
 
@@ -363,19 +371,23 @@ struct DecisionFormView: View {
             switch form {
             case .reformulate:
                 decisionID = try workspace.decide(
-                    .reformulate, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID
+                    .reformulate, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID,
+                    expectedTask: expectedTask
                 )
             case .firstStep:
                 decisionID = try workspace.decide(
-                    .firstStep, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID
+                    .firstStep, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID,
+                    expectedTask: expectedTask
                 )
             case .waiting:
                 decisionID = try workspace.decide(
-                    .waiting, on: taskID, waitingFor: value, stallReason: stallReason, formulationID: formulationID
+                    .waiting, on: taskID, waitingFor: value, stallReason: stallReason, formulationID: formulationID,
+                    expectedTask: expectedTask
                 )
             case .extend:
                 decisionID = try workspace.decide(
-                    .extend, on: taskID, reason: value, stallReason: stallReason, formulationID: formulationID
+                    .extend, on: taskID, reason: value, stallReason: stallReason, formulationID: formulationID,
+                    expectedTask: expectedTask
                 )
             }
             // `decide` removed the drafts; nothing may write them back.
@@ -387,9 +399,14 @@ struct DecisionFormView: View {
         } catch {
             switch error {
             case .formulationChanged, .taskNotFound:
+                // The draft stays: it is keyed by the wording, which may be unchanged.
+                persistDraft()
                 onStale()
             case .decisionNotAllowed:
                 problem = ReviewCopy.decisionNotAllowed
+            case .reviewUnavailable:
+                persistDraft()
+                problem = error.message
             default:
                 problem = error.message
             }

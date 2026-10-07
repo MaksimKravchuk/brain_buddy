@@ -184,6 +184,68 @@ struct ReducerReviewTests {
         }
     }
 
+    /// `decide` carrying the stamp of the task as the card showed it.
+    private func decide(_ type: DecisionType, shown: TaskRecord, decision: Int = 1) -> GTDCommand {
+        .decideTask(
+            .init(
+                decisionID: Review.decision(decision), taskID: shown.id, type: type,
+                formulationID: shown.formulation?.id, expectedTask: TaskStamp(shown)
+            )
+        )
+    }
+
+    @Test("020-FR-011 a decision on a task that changed in any way since the card showed it is stale; unchanged applies")
+    func decisionOnChangedTaskIsStale() throws {
+        let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        let edits: [(String, TaskChanges)] = [
+            ("notes", TaskChanges(details: .set("Tiles first"))),
+            ("priority", TaskChanges(priority: .set(.high))),
+            ("due date", TaskChanges(dueDate: .set(CalendarDay(year: 2026, month: 10, day: 20)!))),
+            ("cosmetic title", TaskChanges(title: .set("call bob."))),
+        ]
+        for (what, changes) in edits {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            // Another window edits the task while the card is open.
+            try Review.apply(.updateTask(.init(taskID: "t1", changes: changes)), at: Review.now, to: &state)
+            #expect(state.tasks["t1"]?.formulation?.id == shown.formulation?.id, "\(what): same wording")
+            let before = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+            #expect(state == before, "\(what): nothing applied")
+        }
+
+        // A sync brings the server's newer revision with only the notes changed.
+        var state = Review.state([asking])
+        let shown = try #require(state.tasks["t1"])
+        state.tasks["t1"]?.details = "Measured the wall"
+        state.tasks["t1"]?.serverRevision = 5
+        state.tasks["t1"]?.updatedAt = Review.now
+        #expect(Review.error { try Review.apply(decide(.complete, shown: shown), to: &state) } == .formulationChanged)
+
+        // Unchanged since the card showed it: applied.
+        var unchanged = Review.state([asking])
+        try Review.apply(decide(.someday, shown: try #require(unchanged.tasks["t1"])), to: &unchanged)
+        #expect(unchanged.tasks["t1"]?.state == .someday)
+
+        // Replay never re-checks it: there the server's revision and yield rule decide (http §3).
+        var replayed = state
+        try Review.apply(decide(.complete, shown: shown), to: &replayed, mode: .replay)
+        #expect(replayed.tasks["t1"]?.state == .completed)
+    }
+
+    @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
+    func expectedTaskIsNotEncoded() throws {
+        let shown = Review.nextTask("t1", started: t0, serverRevision: 4)
+        let command = decide(.someday, shown: shown)
+        let data = try JSONEncoder().encode(command)
+        #expect(!String(decoding: data, as: UTF8.self).contains("expectedTask"))
+        guard case .decideTask(let decoded) = try JSONDecoder().decode(GTDCommand.self, from: data) else {
+            Issue.record("Expected a decision")
+            return
+        }
+        #expect(decoded.expectedTask == nil && decoded.taskID == "t1" && decoded.type == .someday)
+    }
+
     // MARK: - Undo (T051, FR-048)
 
     @Test("020-FR-048 undo restores the task field for field, clock included, and deletes an unchanged follow-up")

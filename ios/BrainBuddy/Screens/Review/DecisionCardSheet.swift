@@ -40,8 +40,9 @@ struct DecisionCardTarget: Identifiable, Hashable {
 /// decisions in a fixed order, an optional stall reason that marks one of
 /// them "Recommended" without disabling any (FR-007), the third-stall offer
 /// (FR-005; iOS has no canvas, so only "Release to Someday"), and stale
-/// protection (FR-011): when the task's wording changed since the card opened,
-/// nothing is applied and the card says so. Every rule is Core's; the card
+/// protection (FR-011): when the task changed in any way since the card
+/// opened (Core compares its revision and `updatedAt`), nothing is applied
+/// and the card says so. When the review stops being exposed the card closes. Every rule is Core's; the card
 /// dispatches through `Workspace.decide`, which applies offline and queues
 /// the decision. Two-step decisions push their form (M-04).
 struct DecisionCardSheet: View {
@@ -85,7 +86,8 @@ struct DecisionCardSheet: View {
                             isStale = true
                             path = []
                         },
-                        onCloseCard: { dismiss() }
+                        onCloseCard: { dismiss() },
+                        expectedTask: opened?.stamp
                     )
                 }
         }
@@ -95,6 +97,12 @@ struct DecisionCardSheet: View {
         .onAppear(perform: recordOpenedWording)
         .onChange(of: path) { _, newPath in
             if newPath.isEmpty { formIsDirty = false }
+        }
+        // The review switched off (`weekly_review_disabled`): the card goes,
+        // nothing is decided, and an open form keeps its draft (it saves it on
+        // the same change). `Workspace.decide` refuses meanwhile too.
+        .onChange(of: workspace.reviewExposed) { _, exposed in
+            if !exposed { dismiss() }
         }
     }
 
@@ -120,11 +128,13 @@ struct DecisionCardSheet: View {
     private struct OpenedWording: Hashable {
         var title: String
         var formulationID: FormulationID?
+        /// The task as shown: any change since makes a decision stale (Core decides).
+        var stamp: TaskStamp
     }
 
     private func recordOpenedWording() {
         guard opened == nil, let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id)
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: TaskStamp(task))
     }
 
     private func showsStale(_ task: TaskRecord) -> Bool {
@@ -139,7 +149,7 @@ struct DecisionCardSheet: View {
 
     private func decideAgain() {
         guard let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id)
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: TaskStamp(task))
         isStale = false
         problem = nil
     }
@@ -159,7 +169,8 @@ struct DecisionCardSheet: View {
         let title = task.title
         do {
             let decisionID = try workspace.decide(
-                decision, on: taskID, stallReason: stallReason, formulationID: opened?.formulationID
+                decision, on: taskID, stallReason: stallReason, formulationID: opened?.formulationID,
+                expectedTask: opened?.stamp
             )
             finish(decisionID, decision: decision, title: title)
         } catch {
