@@ -566,7 +566,8 @@ export function DecisionDialog({
                   {COPY.draftBack}
                   <button
                     type="button"
-                    className="min-h-11 rounded-lg px-2 font-medium text-sky-700 hover:bg-sky-50"
+                    disabled={busy}
+                    className="min-h-11 rounded-lg px-2 font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50"
                     onClick={() => {
                       persistText(initialText, view);
                       setRestored(false);
@@ -585,7 +586,12 @@ export function DecisionDialog({
                   value={text}
                   maxLength={500}
                   placeholder={formCopy.placeholder}
-                  className="min-h-11 rounded-lg border border-slate-300 px-3 text-base font-normal text-slate-900 outline-hidden focus:border-brand-primary sm:text-sm"
+                  // D-02 "saving": the other controls are disabled. The field is
+                  // read-only rather than disabled so focus stays in it, and the
+                  // text sent is the text shown (Retry resends exactly that).
+                  readOnly={busy}
+                  aria-disabled={busy ? true : undefined}
+                  className="min-h-11 rounded-lg border border-slate-300 px-3 text-base font-normal text-slate-900 outline-hidden focus:border-brand-primary read-only:bg-slate-50 read-only:text-slate-600 sm:text-sm"
                   onChange={(event) => persistText(event.currentTarget.value, view)}
                 />
               </label>
@@ -602,7 +608,7 @@ export function DecisionDialog({
               ) : null}
               {cosmetic ? <p className="m-0 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">{COPY.cosmetic}</p> : null}
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <button type="button" className="min-h-11 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-surface-sunken" onClick={() => guarded(backToCard)}>
+                <button type="button" disabled={busy} className="min-h-11 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-surface-sunken disabled:opacity-50" onClick={() => guarded(backToCard)}>
                   Back
                 </button>
                 <button

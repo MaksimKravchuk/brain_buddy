@@ -833,6 +833,44 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("Measure");
   });
 
+  it.each([
+    ["Reformulate", "New wording", "Measure the bathroom walls", "Save new wording"],
+    ["Find a first step", "First step", "Measure", "Save first step"],
+    ["Move to Waiting for", "Waiting for", "Anna", "Move to Waiting for"],
+    ["Keep 7 more days", "Reason, required", "Quote due Friday", /^Keep until/]
+  ] as const)("020-FR-011 020-FR-052 while the %s form is saving its field takes no typing, keeps focus, and is editable again after a failure", async (decision, field, typed, save) => {
+    const user = userEvent.setup();
+    let fail: () => void = () => undefined;
+    decide.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new ApiError("Server Error", 500, null, "corr_busy"));
+    }));
+    renderDialog(asksTask());
+    await user.click(decisionButton(new RegExp(`^${decision}`)));
+    const input = screen.getByRole("textbox", { name: field });
+    await user.clear(input);
+    await user.type(input, typed);
+    await user.type(input, "{Enter}");
+    await waitFor(() => expect(decide).toHaveBeenCalledTimes(1));
+
+    expect(input).toHaveAttribute("readonly");
+    expect(input).toHaveAttribute("aria-disabled", "true");
+    expect(input).toHaveFocus();
+    await user.type(input, " and more");
+    expect(input).toHaveValue(typed);
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+
+    await act(async () => fail());
+
+    expect(screen.getByRole("button", { name: save })).toBeEnabled();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_busy");
+    expect(input).not.toHaveAttribute("readonly");
+    expect(input).not.toHaveAttribute("aria-disabled");
+    await user.type(input, "!");
+    expect(input).toHaveValue(`${typed}!`);
+  });
+
   it("020-FR-040 offline: decisions are disabled with the reason, reasons still work", async () => {
     const user = userEvent.setup();
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
