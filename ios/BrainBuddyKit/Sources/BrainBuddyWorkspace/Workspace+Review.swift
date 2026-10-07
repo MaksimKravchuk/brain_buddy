@@ -93,7 +93,9 @@ extension Workspace {
     }
 
     /// FR-015: why `id` cannot return to Next from "While you were away".
-    public func parkReturnProblem(of id: TaskID) -> ParkReturnProblem? { GTDQueries.parkReturnProblem(of: id, in: state) }
+    public func parkReturnProblem(of id: TaskID, shown: ParkAck? = nil) -> ParkReturnProblem? {
+        GTDQueries.parkReturnProblem(of: id, shown: shown, in: state)
+    }
 
     /// Tasks listed once on "While you were away" because linking dropped
     /// their unsent "Keep 7 more days" (ios-commands §7).

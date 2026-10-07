@@ -272,6 +272,40 @@ struct QueriesReviewTests {
         #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state).isEmpty)
     }
 
+    @Test("020-FR-015 a shown park replaced by a later park of the same task is changed elsewhere: no Return, not in Return all")
+    func shownParkReplacedByLaterPark() throws {
+        let now = Review.now
+        var parked = Review.task("t1", title: "Return the old router", state: .someday)
+        parked.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([parked])
+        let shown = try #require(GTDQueries.unseenParkAcks(in: state).first)
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == nil, "the park the sheet showed")
+        #expect(WhileAwayOutcome.initial(for: nil).offersReturn)
+
+        // Returned to Next (Undo), then the same formulation parked again later.
+        state.tasks["t1"]?.state = .next
+        state.tasks["t1"]?.parked = nil
+        state.tasks["t1"]?.state = .someday
+        state.tasks["t1"]?.parked = ParkMarker(at: now.addingTimeInterval(8 * Review.day), formulationID: Review.form(1))
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil, "on its own the new park can return")
+        let problem = GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state)
+        #expect(problem == .changedElsewhere, "not the park that was shown")
+        let outcome = WhileAwayOutcome.initial(for: problem)
+        #expect(outcome == .changedElsewhere && !outcome.offersReturn, "no Return to Next, and Return all skips it")
+
+        // A different formulation at the shown instant is not the shown park either.
+        state.tasks["t1"]?.parked = ParkMarker(at: now, formulationID: Review.form(2))
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == .changedElsewhere)
+
+        // The archived-project problem still applies to the shown park.
+        state.tasks["t1"]?.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        state.projects["p1"] = ProjectRecord(id: "p1", name: "Old flat", state: .archived, createdAt: now)
+        state.tasks["t1"]?.projectID = "p1"
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == .projectArchived(name: "Old flat"))
+        #expect(!WhileAwayOutcome.archived(project: "Old flat").offersReturn)
+        #expect(!WhileAwayOutcome.returned.offersReturn && !WhileAwayOutcome.notice.offersReturn)
+    }
+
     @Test("020-FR-028 wins, capacity, Waiting and Someday due, projects without a next action and restart candidates over a state")
     func stateQueries() {
         let now = Review.now

@@ -125,6 +125,9 @@ public enum WhileAwayOutcome: Hashable, Sendable {
     /// "Account linked: extension restarted", no button.
     case notice
 
+    /// The row offers "Return to Next" and counts for "Return all".
+    public var offersReturn: Bool { self == .waiting }
+
     /// A listed park's row before the person acts on it: only a park that
     /// can return offers "Return to Next" (`GTDQueries.parkReturnProblem`).
     public static func initial(for problem: ParkReturnProblem?) -> WhileAwayOutcome {

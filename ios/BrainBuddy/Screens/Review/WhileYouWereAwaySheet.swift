@@ -59,10 +59,12 @@ struct WhileYouWereAwaySheet: View {
         let zone = TimeZone.current
         let parks = parkIDs.compactMap { id -> WhileAwayRow? in
             guard let task = workspace.task(id) else { return nil }
-            let blocked = workspace.parkReturnProblem(of: id)
+            // Checked against the park this sheet listed: a later park of the task is not it.
+            let blocked = workspace.parkReturnProblem(of: id, shown: shownPark(id))
             var place = task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject
             if case .projectArchived(let name)? = blocked { place = ReviewCopy.archivedPlace(name) }
-            let detail = task.parked.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0.at, in: zone), place: place) } ?? place
+            let parkedAt = shownPark(id)?.parkedAt ?? task.parked?.at
+            let detail = parkedAt.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0, in: zone), place: place) } ?? place
             // A park that changed elsewhere offers no "Return to Next" (Core's mapping).
             let initial = WhileAwayOutcome.initial(for: blocked)
             return WhileAwayRow(id: id, title: task.title, detail: detail, outcome: outcomes[id] ?? initial)
@@ -90,6 +92,9 @@ struct WhileYouWereAwaySheet: View {
         summary = nil
     }
 
+    /// The park this sheet listed for `id`.
+    private func shownPark(_ id: TaskID) -> ParkAck? { shownParks.first { $0.taskID == id } }
+
     // MARK: Returning
 
     /// Returns one task with the ordinary move to Next; says why when it
@@ -97,7 +102,7 @@ struct WhileYouWereAwaySheet: View {
     @discardableResult
     private func returnTask(_ id: TaskID) -> Bool {
         problem = nil
-        switch workspace.parkReturnProblem(of: id) {
+        switch workspace.parkReturnProblem(of: id, shown: shownPark(id)) {
         case .changedElsewhere?:
             outcomes[id] = .changedElsewhere
             if let task = workspace.task(id) { summary = ReviewCopy.returnChangedElsewhere(title: task.title) }
@@ -124,7 +129,7 @@ struct WhileYouWereAwaySheet: View {
     }
 
     private func returnAll() {
-        let pending = rows.filter { $0.outcome == .waiting }
+        let pending = rows.filter { $0.outcome.offersReturn }
         var returned = 0
         var blocked: [WhileAwayRow] = []
         for row in pending {
@@ -216,7 +221,7 @@ struct WhileAwayContent: View {
     }
 
     private var parkCount: Int { rows.filter { $0.outcome != .notice }.count }
-    private var returnable: Int { rows.filter { $0.outcome == .waiting }.count }
+    private var returnable: Int { rows.filter { $0.outcome.offersReturn }.count }
     /// "Return the other 3 to Next" once a row was returned (design M-09).
     private var someReturned: Bool { rows.contains { $0.outcome == .returned } }
 

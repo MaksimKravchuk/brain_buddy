@@ -304,8 +304,14 @@ extension GTDQueries {
     /// now, or nil. A task no longer parked in Someday changed elsewhere; a
     /// park in an archived project needs the project restored first (spec
     /// edge case "Task in an archived project"; http.md `project_archived`).
-    public static func parkReturnProblem(of id: TaskID, in state: GTDState) -> ParkReturnProblem? {
-        guard let task = state.tasks[id], task.state == .someday, task.parked != nil else { return .changedElsewhere }
+    /// With `shown` (the park M-09 listed), a later park of the same task (a
+    /// repeat park after an Undo, a park synced in) is not the one shown: it
+    /// changed elsewhere, so the row never acts on a park it did not show.
+    public static func parkReturnProblem(of id: TaskID, shown: ParkAck? = nil, in state: GTDState) -> ParkReturnProblem? {
+        guard let task = state.tasks[id], task.state == .someday, let marker = task.parked else { return .changedElsewhere }
+        if let shown, shown.taskID != id || shown.formulationID != marker.formulationID || shown.parkedAt != marker.at {
+            return .changedElsewhere
+        }
         if let projectID = task.projectID, let project = state.projects[projectID], project.state != .active {
             return .projectArchived(name: project.name)
         }
