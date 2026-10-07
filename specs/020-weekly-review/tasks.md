@@ -398,11 +398,11 @@ a contract):
 
 - [ ] T136 [US4] Write and observe RED, then GREEN, `ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift`: the copied run traces `review_traces_runs.json` (T131: start, replace, merged progress from two clients, a progress change retried after the 24 h retention merged once, finish) replay against `BrainBuddyFakeServer` with the recorded statuses and responses; fix any fake-server drift in `ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Review.swift`. The decision and park traces replay earlier, in T173 (slice PR-04). *(020-FR-029, 020-SC-007)*
 - [ ] T137 [US4] The review cover and shared step chrome in the new `ios/BrainBuddy/Screens/Review/ReviewCover.swift`, presented from `ios/BrainBuddy/App/AppRouteView.swift`: Leave and Skip at the top, the primary action at the bottom, "N of M", the leave sheet ("Take a break? …"), leave with unsaved text first, review ended elsewhere, closed after a week, moved on elsewhere, VoiceOver focus to the step title on every change and to the next item's title after each decision, instant transitions under Reduce Motion; up to Dynamic Type AX5 every step body scrolls above the bottom bar and the step bar ("N of M" and the step segments) scrolls sideways at accessibility sizes per `ReviewLayout`, with Leave and Skip keeping 44 pt targets (owner decision 2026-10-06, design "Mobile viability"). *(020-FR-029, 020-FR-034, 020-FR-052)*
-- [ ] T138 [US4] M-11 in the new `ios/BrainBuddy/Screens/Review/ReviewEntryScreen.swift`: Quick (~5) with its contents (Full (~20) is deferred, Notes), the resume card from any device, "offline review replaced another", "earlier review closed after a week", the check failure with Ref, VoiceOver focus to the heading. *(020-FR-027, 020-FR-028, 020-FR-029, 020-FR-045)*
+- [ ] T138 [US4] M-11 in the new `ios/BrainBuddy/Screens/Review/ReviewEntryScreen.swift`: Quick (~5) / Full (~20) with their contents, the resume card from any device, "offline review replaced another", "earlier review closed after a week", the check failure with Ref, VoiceOver focus to the heading. *(020-FR-027, 020-FR-028, 020-FR-029, 020-FR-045)*
 - [ ] T139 [US4] M-10 in the new `ios/BrainBuddy/Screens/Review/RestartScreen.swift`: the neutral welcome or "Your first review" copy, "See which ones", Release (bulk release), Undo until "Start the review" or Close, "released, resumed after interruption" after an app kill, "undone, some skipped", partial failure, empty; VoiceOver focus to the heading. *(020-FR-017, 020-FR-038)*
-- [ ] T140 [US4] M-13 and M-15 in the new `ios/BrainBuddy/Screens/Review/WinsStep.swift` and `ios/BrainBuddy/Screens/Review/InboxStep.swift` (the three choices over 15 items; one item at a time reusing the item view extracted from `ios/BrainBuddy/Screens/Process/ProcessInboxScreen.swift`, whose Undo also sends `inbox_processed_delta: -1`; the release with Undo until the step is left, also after an interruption). *(020-FR-028, 020-FR-030, 020-FR-034, 020-FR-048, 020-FR-052)*
+- [ ] T140 [US4] M-13, M-14 and M-15 in the new `ios/BrainBuddy/Screens/Review/WinsStep.swift`, `ios/BrainBuddy/Screens/Review/MindSweepStep.swift` (an unsaved line kept as a draft) and `ios/BrainBuddy/Screens/Review/InboxStep.swift` (the three choices over 15 items; one item at a time reusing the item view extracted from `ios/BrainBuddy/Screens/Process/ProcessInboxScreen.swift`, whose Undo also sends `inbox_processed_delta: -1`; the release with Undo until the step is left, also after an interruption). *(020-FR-028, 020-FR-030, 020-FR-034, 020-FR-048, 020-FR-052)*
 - [ ] T141 [US4] M-16 in the new `ios/BrainBuddy/Screens/Review/DecisionsStep.swift`: M-03 full-screen, "1 of N · earliest-asking first", "Not now" (progress `set_aside_task_id`), the Undo status line, "all decided", "all decided, one kept its wording", "some left", threshold changed mid-review. *(020-FR-002, 020-FR-006, 020-FR-034, 020-FR-048, 020-FR-050, 020-SC-002)*
-- DEFERRED T142 [US4] M-17 – M-21 in the new `ios/BrainBuddy/Screens/Review/RestOfNextStep.swift`, `ios/BrainBuddy/Screens/Review/WaitingStep.swift`, `ios/BrainBuddy/Screens/Review/ProjectsStep.swift` (the M-08 block from PR-08), `ios/BrainBuddy/Screens/Review/SomedayStep.swift` and `ios/BrainBuddy/Screens/Review/DatesStep.swift`: the capacity mirror without a limit; Waiting keep / follow-up / return / cancel with Undo and the archived-project block; Someday keep / move to Next / cancel with Undo; unsaved titles kept as drafts. *(020-FR-019, 020-FR-028, 020-FR-031, 020-FR-032, 020-FR-034, 020-FR-048, 020-FR-052)*
+- [ ] T142 [US4] M-17 – M-21 in the new `ios/BrainBuddy/Screens/Review/RestOfNextStep.swift`, `ios/BrainBuddy/Screens/Review/WaitingStep.swift`, `ios/BrainBuddy/Screens/Review/ProjectsStep.swift` (lists the projects without a next action; the M-08 navigator block of the deferred PR-08 is not built, Notes), `ios/BrainBuddy/Screens/Review/SomedayStep.swift` and `ios/BrainBuddy/Screens/Review/DatesStep.swift`: the capacity mirror without a limit; Waiting keep / follow-up / return / cancel with Undo and the archived-project block; Someday keep / move to Next / cancel with Undo; unsaved titles kept as drafts. *(020-FR-028, 020-FR-031, 020-FR-032, 020-FR-034, 020-FR-048, 020-FR-052)*
 - [ ] T143 [US4] M-22 in the new `ios/BrainBuddy/Screens/Review/SummaryStep.swift`: ten counts in fixed order (zero dimmed), in two columns, one column at accessibility text sizes per `ReviewLayout` (M-22 "accessibility text size"), the calm all-zero line, "done without any step", the next review date, the optional "Clear how to start the week?", Done → `finishSession`; the restart, summary and step strings added to `ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewCopy.swift` (the banned-term test stays green). *(020-FR-029, 020-FR-033, 020-SC-003)*
 
 ### Device decision Undo keeps the server's clock bookkeeping (slice PR-12, follow-up from PR-15)
@@ -418,10 +418,10 @@ a contract):
 - [ ] T146 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewShell.test.tsx` and extend `frontend/src/app/AppRoutes.test.tsx`: `/review` behind `ReviewGate`; a 240 px non-focusable rail and a 600 px column, "Step N of M" at 390 px; focus to the step heading on every change; Esc never closes the review; browser Back acts as Leave (the unsaved-text confirmation first; "Keep going" restores the history entry); the entry with the resume card, the last review summary card (SC-007) and "closed after a week"; step loading and step load failed; skip not saved; step action saving and failed; review ended or moved on elsewhere; the While-you-were-away rows inside the review; then GREEN `frontend/src/features/review/ReviewGate.tsx`, `frontend/src/features/review/ReviewShell.tsx`, `frontend/src/features/review/ReviewEntry.tsx`, `frontend/src/app/AppRoutes.tsx`, and the run, queue and bulk-release calls in `frontend/src/api/review.ts` and `frontend/src/api/reviewHooks.ts` (every session `PATCH` carries a `progress_<crypto.randomUUID()>` `progress_id` minted once per progress change and reused on its retries, contracts/http.md §6; a test asserts a retried PATCH resends the same id). *(020-FR-015, 020-FR-027, 020-FR-029, 020-FR-033, 020-FR-045, 020-FR-052, 020-SC-007)*
 - [ ] T147 [US4] Write and observe RED `frontend/src/features/review/__tests__/InboxStep.test.tsx` and `frontend/src/features/review/__tests__/RestartStep.test.tsx` (the new web Inbox step: over 15 → the three choices; one item at a time with the web choices; Undo returning the item and sending `inbox_processed_delta: -1`; saving and failed; partial failure; the release and "Undo the release" until the step is left, restored after a tab reload; releasing / release failed / undo failed. Restart: releasing / release failed / undoing / undo failed, Undo until moving on, "released, resumed after interruption"; the "set up but never reviewed" state (onboarded 21+ days ago, no counted review) shows the same offer under "Your first review / Let's make Next fit the week ahead." with no "Welcome back" or any wording implying the person was away, named for `020-FR-017`); then GREEN `frontend/src/features/review/steps/InboxStep.tsx` and `frontend/src/features/review/steps/RestartStep.tsx`. *(020-FR-017, 020-FR-030, 020-FR-034, 020-FR-045, 020-FR-048)*
 - [ ] T148 [US4] Write and observe RED `frontend/src/features/review/__tests__/DecisionsStep.test.tsx` (the inline card: Esc on the card does nothing, inside a form it returns to the card after the unsaved-text confirmation; keys 1–7; "Not now"; the Undo status line with Ctrl/Cmd+Z; "all decided, one kept its wording"); then GREEN `frontend/src/features/review/steps/DecisionsStep.tsx`. *(020-FR-002, 020-FR-034, 020-FR-048, 020-FR-050, 020-FR-052, 020-SC-002)*
-- [ ] T149 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewSteps.test.tsx` for the Wins and Summary steps (the Full-only steps are deferred, Notes); then GREEN `frontend/src/features/review/steps/WinsStep.tsx` and `frontend/src/features/review/steps/SummaryStep.tsx` (ten counts, 4 columns, 2 at 390 px; the calm line; clear start; Done; the "done without any step" state — every step skipped, then Done, status `completed_empty` — shows the same calm "Review done" screen with the next review and the question, with no reproach and no mention that it does not count, a test named for `020-FR-029` asserting the absence of any such wording). *(020-FR-028, 020-FR-029, 020-FR-033)*
-- [ ] T150 [US4] Write the Playwright journeys in `frontend/tests/e2e/weekly-review.spec.ts` on synthetic data: a stalled task seeded with `python -m app.cli review-seed-aged-task` → D-05 → decide → Undo; auto-park through `review-run-sweep` → While you were away → return; a quick review end-to-end; a run finished through the API as an iOS client would shows its summary on the `/review` entry (`020-SC-007`); the keyboard-only story E2E-A11Y-01; axe scans of D-01 (with the dialog), D-02, D-03, D-04, D-05 and D-06 at desktop and 390 px; no horizontal overflow at 390 × 851 for `/tasks/next`, the decision dialog, `/review` (summary), `/settings/account` and D-05; the flag-on drawer link at 390 px. *(020-FR-004, 020-FR-015, 020-FR-040, 020-FR-048, 020-FR-052, 020-SC-006, 020-SC-007)*
+- [ ] T149 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewSteps.test.tsx` for the other steps; then GREEN `frontend/src/features/review/steps/WinsStep.tsx`, `frontend/src/features/review/steps/MindSweepStep.tsx` (unsaved line), `frontend/src/features/review/steps/RestOfNextStep.tsx`, `frontend/src/features/review/steps/WaitingStep.tsx` (buttons stack at 390 px), `frontend/src/features/review/steps/ProjectsStep.tsx` (lists the projects without a next action; the navigator part of US3-8 is deferred, Notes), `frontend/src/features/review/steps/SomedayStep.tsx`, `frontend/src/features/review/steps/DatesStep.tsx` and `frontend/src/features/review/steps/SummaryStep.tsx` (ten counts, 4 columns, 2 at 390 px; the calm line; clear start; Done; the "done without any step" state — every step skipped, then Done, status `completed_empty` — shows the same calm "Review done" screen with the next review and the question, with no reproach and no mention that it does not count, a test named for `020-FR-029` asserting the absence of any such wording). *(020-FR-028, 020-FR-029, 020-FR-031, 020-FR-032, 020-FR-033, 020-FR-034, 020-FR-052)*
+- [ ] T150 [US4] Write the Playwright journeys in `frontend/tests/e2e/weekly-review.spec.ts` on synthetic data: a stalled task seeded with `python -m app.cli review-seed-aged-task` → D-05 → decide → Undo; auto-park through `review-run-sweep` → While you were away → return; a quick review end-to-end; a run finished through the API as an iOS client would shows its summary on the `/review` entry (`020-SC-007`); the keyboard-only story E2E-A11Y-01; axe scans of D-01 (with the dialog), D-02, D-03, D-04, D-05 and D-06 at desktop and 390 px; no horizontal overflow at 390 × 851 for `/tasks/next`, the decision dialog, `/review` (Waiting step and summary), `/settings/account` and D-05; the flag-on drawer link at 390 px. *(020-FR-004, 020-FR-015, 020-FR-040, 020-FR-048, 020-FR-052, 020-SC-006, 020-SC-007)*
 
-**Checkpoint**: The Quick review runs end-to-end on iOS and web (Full mode is deferred); US2's review-dependent scenarios (While you were away as the first review screen, restart mode) are now verifiable.
+**Checkpoint**: US4 (Quick and Full) runs end-to-end on iOS and web; US2's review-dependent scenarios (While you were away as the first review screen, restart mode) are now verifiable.
 
 ---
 
@@ -444,7 +444,7 @@ a contract):
 - [ ] T156 [US5] M-11 Lists row in `ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift`: it replaces `DeferredRow` when exposed; "Last review: N days ago" from counted reviews only, "Set up in a minute" when never reviewed. *(020-FR-038, 020-FR-042)*
 - DEFERRED T157 [US5] M-23 schedule rows (day, time, "Last review") in `ios/BrainBuddy/Screens/Settings/ReviewSettingsSection.swift`; the error with Ref and the offline note. *(020-FR-035, 020-FR-038, 020-FR-045)*
 - [ ] T158 [US5] Update `docs/native-ios-app.md` (l.19 "Weekly review stays visibly deferred" → flag-gated; the "Ids" section noting that review records, follow-up tasks and formulations carry client-supplied ids) and `ios/README.md` (l.356) (found by `/speckit-checklist`; `ios/README.md` was not in the plan's paths).
-- [ ] T159 [US5] Record `specs/020-weekly-review/evidence/manual-ios-increment3.md` (labelled manual, synthetic data): one decision per screen in the Inbox and decision steps (`020-FR-034`), the Lists row replacing `DeferredRow` (`020-FR-042`), 44 pt targets, VoiceOver focus on M-10, M-11 and M-12, every shipped screen (M-10 – M-13, M-15, M-16, M-22) at Dynamic Type AX5 (bodies scroll, the M-22 counts in one column, the step bar scrolling sideways; design "Mobile viability"); plus the Xcode-lane build.
+- [ ] T159 [US5] Record `specs/020-weekly-review/evidence/manual-ios-increment3.md` (labelled manual, synthetic data): one decision per screen in the Inbox, decision, Waiting and Someday steps (`020-FR-034`), the Lists row replacing `DeferredRow` (`020-FR-042`), 44 pt targets, VoiceOver focus on M-10, M-11 and M-12, every shipped screen (M-10 – M-22) at Dynamic Type AX5 (bodies scroll, the M-22 counts in one column, the step bar scrolling sideways; design "Mobile viability"); plus the Xcode-lane build.
 
 ### Web (slice PR-13)
 
@@ -454,7 +454,7 @@ a contract):
 - DEFERRED T163 [US5] Write and observe RED `frontend/src/features/review/__tests__/deviceZone.test.ts` (owner decision 2026-10-06, contracts/http.md §5, data-model E11; names carry `020-FR-035`): with no `bb.reviewLastZone.v1.<origin>.<account>` key the browser's zone is recorded and nothing is sent; when the browser's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, injected) differs from the recorded one, exactly one `PUT /review/settings` with `time_zone` and the current `expected_revision` is sent, a 409 refetches the state and resends only the zone, and the key is updated after success; when only the pulled `time_zone` differs (another device set it), nothing is sent; checked at web open and on window focus; the key is removed on sign-out or account switch and holds no content; then GREEN `frontend/src/features/review/deviceZone.ts`, started from `frontend/src/features/review/ReviewStartupDialogs.tsx` while the flag is effective and the owner is activated. *(020-FR-035, 020-FR-046)*
 - DEFERRED T172 [US5] Write and observe RED `frontend/src/features/review/__tests__/reviewSlot.test.ts` (targeted re-review 2026-10-06, contracts/http.md §5; names carry `020-FR-033` and `020-FR-036`): `nextReviewSlot(settings, lastCountedReviewAt, now, zone)` returns the next `review_weekday` at `review_time` in the injected browser zone, skips a slot with a counted review in the preceding 6 days (not after a `completed_empty` run), and with the stored `time_zone` `Europe/Berlin` and the browser in `America/New_York` returns Friday 16:00 New York time (it ignores `settings.time_zone`; it equals `next_review_at` only when the browser sits in the stored zone); then GREEN `frontend/src/features/review/reviewSlot.ts` and show its result as "Next review" in `frontend/src/features/review/steps/SummaryStep.tsx` (D-03 summary) instead of `next_review_at`. *(020-FR-033, 020-FR-036)*
 
-**Checkpoint**: Increment 3 (US4 Quick review + the US5 onboarding and "Last review") is complete on iOS and web; the notification, widget count, schedule settings and device-zone follow are deferred.
+**Checkpoint**: Increment 3 (US4 Quick and Full review + the US5 onboarding and "Last review") is complete on iOS and web; the notification, widget count, schedule settings and device-zone follow are deferred.
 
 ---
 
@@ -589,7 +589,7 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
 
 1. Increment 1: US1 + US2 (rule, card, markers, explainer, auto-park, While you were away) → owner on TestFlight and web.
 2. Increment 2: US3 is deferred beyond the PR-07 backend (Notes).
-3. Increment 3: US4 Quick review + the US5 onboarding and "Last review" → PR-14 turns on the full-feature gates.
+3. Increment 3: US4 (Quick and Full review) + the US5 onboarding and "Last review" → PR-14 turns on the full-feature gates.
 4. Increment 4: US6 after the Mac-sync spec (outside this task list).
 
 ### Parallel Team Strategy
@@ -636,18 +636,17 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     `/review/decisions/{id}/undo` path parameter taking the reference shape.
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
-  review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick review
-  (US4) and the onboarding. PR-05, PR-06 and PR-07 are in flight and unchanged. Deferred
+  review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and
+  Full review (US4; the owner kept Full the same day) and the onboarding. PR-05, PR-06
+  and PR-07 are in flight and unchanged. Deferred
   tasks keep their text in the phases above as input for the follow-up feature, are marked
   `DEFERRED`, belong to no slice, and no open checkbox waits on them (the rule of the Mac
   section). `/speckit-accept` records them as deferred by scope, not as failures.
   - Navigator clients (US3), former slices PR-08, PR-09, PR-10: T109 – T125. Only the
     PR-07 backend and the merged consent commands (T108) remain; the endpoints stay
     behind the flag with no caller.
-  - Full review mode: iOS T142 (Rest of Next, Waiting, Projects, Someday, Dates) and the
-    Mind sweep and Full entry parts of T138, T140; web the same steps in T149. The
-    backend queues (PR-11) and the iOS core (PR-03) stay, so their tests still name
-    FR-028, FR-031 and FR-032.
+  - The navigator block of the projects step (US3-8, M-08): the Full review's Projects
+    step (T142, T149) only lists the projects without a next action.
   - Cues and schedule (US5): T154 (iOS notification scheduler and device time-zone
     hook), T155 (widget chip), T157 and T162 (day and time settings), T163 (web device
     zone), T172 (web next-review slot). The summary shows the server's `next_review_at`.
@@ -1220,9 +1219,9 @@ last `acceptance` entry.
     },
     {
       "id": "PR-12",
-      "outcome": "iOS app increment 3, Quick review only (rescoped 2026-10-07): run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, the wins, Inbox, decisions and summary steps (M-13, M-15, M-16, M-22), Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence; and the follow-up from PR-15: the device decision Undo keeps the server's clock bookkeeping (floor kept, clamp on restore) through a shared pure restore with new vectors.",
-      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T143", "T153", "T156", "T158", "T159", "T174", "T175", "T176"],
-      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-043", "020-FR-018", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
+      "outcome": "iOS app increment 3 (rescoped 2026-10-07: no navigator block, notification, widget chip or day/time settings): run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, M-13 - M-22 steps, Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence; and the follow-up from PR-15: the device decision Undo keeps the server's clock bookkeeping (floor kept, clamp on restore) through a shared pure restore with new vectors.",
+      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T142", "T143", "T153", "T156", "T158", "T159", "T174", "T175", "T176"],
+      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-043", "020-FR-018", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
       "paths": [
         "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Review.swift",
@@ -1232,9 +1231,15 @@ last `acceptance` entry.
         "ios/BrainBuddy/Screens/Review/ReviewEntryScreen.swift",
         "ios/BrainBuddy/Screens/Review/RestartScreen.swift",
         "ios/BrainBuddy/Screens/Review/WinsStep.swift",
+        "ios/BrainBuddy/Screens/Review/MindSweepStep.swift",
         "ios/BrainBuddy/Screens/Review/InboxStep.swift",
         "ios/BrainBuddy/Screens/Process/ProcessInboxScreen.swift",
         "ios/BrainBuddy/Screens/Review/DecisionsStep.swift",
+        "ios/BrainBuddy/Screens/Review/RestOfNextStep.swift",
+        "ios/BrainBuddy/Screens/Review/WaitingStep.swift",
+        "ios/BrainBuddy/Screens/Review/ProjectsStep.swift",
+        "ios/BrainBuddy/Screens/Review/SomedayStep.swift",
+        "ios/BrainBuddy/Screens/Review/DatesStep.swift",
         "ios/BrainBuddy/Screens/Review/SummaryStep.swift",
         "ios/BrainBuddy/Screens/Review/OnboardingScreen.swift",
         "ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift",
@@ -1262,11 +1267,11 @@ last `acceptance` entry.
         "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_decisions_api.py -q --no-cov",
         "make test-backend",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-033,020-FR-034,020-FR-035,020-FR-038,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-038,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
       ],
       "acceptance": [
         "ReviewTraceReplayTests: review_traces_runs.json (PR-11) replays against BrainBuddyFakeServer with the recorded responses, incl. a progress change retried after the retention merged once",
-        "previews for every shipped M-10 - M-13, M-15, M-16 and M-22 state, incl. M-22 'accessibility text size'; ios-app lane green on the exact SHA",
+        "previews for every shipped M-10 - M-22 state, incl. M-22 'accessibility text size'; ios-app lane green on the exact SHA",
         "specs/020-weekly-review/evidence/manual-ios-increment3.md (labelled manual): one decision per screen, Lists row, VoiceOver focus M-10/M-11/M-12, every shipped screen at Dynamic Type AX5",
         "T175: an undone bulk release never leaves a Next task without a clock on the device, and no released item keeps its pre-release clock after the undo",
         "T176: the reducer refuses a progress step or active-seconds code outside the session's mode, so the server's out-of-mode 422 is never produced by a queued command",
@@ -1276,9 +1281,9 @@ last `acceptance` entry.
     },
     {
       "id": "PR-13",
-      "outcome": "Web increment 3, Quick review only (rescoped 2026-10-07): /review route (ReviewGate, ReviewShell, entry with resume and last-review summary), the wins, Inbox, decisions and summary steps and the restart states, onboarding dialog, sidebar and drawer link with 'Last review', session progress with a replay-safe progress_id, the Playwright suite with the keyboard-only story and axe scans.",
+      "outcome": "Web increment 3 (rescoped 2026-10-07: no navigator, day/time settings, device zone, next-review slot or active time): /review route (ReviewGate, ReviewShell, entry with resume and last-review summary), every step incl. the new web Inbox step and restart states, onboarding dialog, sidebar and drawer link with 'Last review', session progress with a replay-safe progress_id, the Playwright suite with the keyboard-only story and axe scans.",
       "tasks": ["T144", "T146", "T147", "T148", "T149", "T150", "T160", "T161"],
-      "requirements": ["020-FR-002", "020-FR-004", "020-FR-015", "020-FR-016", "020-FR-017", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-038", "020-FR-040", "020-FR-042", "020-FR-045", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-006", "020-SC-007"],
+      "requirements": ["020-FR-002", "020-FR-004", "020-FR-015", "020-FR-016", "020-FR-017", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-038", "020-FR-040", "020-FR-042", "020-FR-045", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-006", "020-SC-007"],
       "paths": [
         "frontend/tests/allure.fixtures.ts",
         "frontend/src/features/review/__tests__/ReviewShell.test.tsx",
@@ -1297,6 +1302,12 @@ last `acceptance` entry.
         "frontend/src/features/review/steps/DecisionsStep.tsx",
         "frontend/src/features/review/__tests__/ReviewSteps.test.tsx",
         "frontend/src/features/review/steps/WinsStep.tsx",
+        "frontend/src/features/review/steps/MindSweepStep.tsx",
+        "frontend/src/features/review/steps/RestOfNextStep.tsx",
+        "frontend/src/features/review/steps/WaitingStep.tsx",
+        "frontend/src/features/review/steps/ProjectsStep.tsx",
+        "frontend/src/features/review/steps/SomedayStep.tsx",
+        "frontend/src/features/review/steps/DatesStep.tsx",
         "frontend/src/features/review/steps/SummaryStep.tsx",
         "frontend/tests/e2e/weekly-review.spec.ts",
         "frontend/src/components/shell/__tests__/AppShell.test.tsx",
@@ -1310,7 +1321,7 @@ last `acceptance` entry.
         "cd frontend && npx playwright test tests/e2e/weekly-review.spec.ts",
         "make test-frontend",
         "make test-e2e",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-004,020-FR-015,020-FR-016,020-FR-017,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-038,020-FR-040,020-FR-042,020-FR-045,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-006,020-SC-007"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-004,020-FR-015,020-FR-016,020-FR-017,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-038,020-FR-040,020-FR-042,020-FR-045,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "Playwright: quick review end-to-end, SC-007 summary on /review, keyboard-only story E2E-A11Y-01, axe scans with no violations at desktop and 390 px, no horizontal overflow at 390 x 851",
