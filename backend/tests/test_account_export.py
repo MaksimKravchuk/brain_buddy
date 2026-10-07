@@ -237,6 +237,30 @@ def test_export_contains_every_store_and_no_secrets(api_client: TestClient) -> N
     assert archive.read(audio_files[0])  # non-empty raw bytes
 
 
+def test_021_FR_028_export_projects_hold_the_outcome_and_archive_fields(
+    api_client: TestClient,
+) -> None:
+    """tasks/projects.json carries desired_outcome, archived_at and the marker."""
+
+    project = api_client.post(
+        "/api/projects",
+        headers={"Idempotency-Key": "export-project"},
+        json={"name": "Garden", "desired_outcome": "Tomatoes by July"},
+    ).json()
+    api_client.post(
+        f"/api/projects/{project['id']}/archive",
+        headers={"Idempotency-Key": "export-project-archive"},
+        json={"expected_revision": project["revision"]},
+    )
+
+    projects = json.loads(_download_zip(api_client).read("tasks/projects.json"))
+
+    assert len(projects) == 1
+    assert projects[0]["desired_outcome"] == "Tomatoes by July"
+    assert projects[0]["archived_at"] is None
+    assert projects[0]["archived_before_lossless"] is True
+
+
 def test_export_omits_audio_once_raw_audio_is_deleted(api_client: TestClient) -> None:
     """Erased raw audio must not resurface in a later export."""
 

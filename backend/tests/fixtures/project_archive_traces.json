@@ -1,0 +1,297 @@
+{
+  "schema": "brainbuddy-project-archive-traces/v1",
+  "description": "Golden traces of the project archive, unarchive, listing, tolerant task PATCH and desired-outcome contract (spec 021, contracts/kit-commands.md section 7). Verified by backend/tests/test_project_archive_traces.py against the real API, so a fake server replaying them cannot drift from the backend. They describe the PR-02 behaviour: archive still clears members and sets the marker.",
+  "conventions": {
+    "owner": "Two signed-in accounts share one server. `as` on a request is `second` to use the other account; the default is the first.",
+    "request": "`path` is under the server origin; `key` is the Idempotency-Key header (omitted for reads); `{name}` in a path or body is replaced by a captured value.",
+    "expect": "`status` is exact. `body` is a subset match: every listed key must be present and equal, recursively; a list must have the same length and match element-wise; the string `$present` matches any non-null value.",
+    "capture": "Maps a variable name to a dotted path in the response body.",
+    "seed": "A state the API cannot reach yet. `archive_keeping_members` archives the project and stamps `archived_at` without touching its tasks (what lossless archive will do). `pre_feature_archive` archives it with `archived_at` null and the marker true (what an archive made before this feature looks like). Both add one revision."
+  },
+  "traces": [
+    {
+      "id": "TR-P01",
+      "title": "archive clears the members and sets the marker",
+      "requirements": ["021-FR-027"],
+      "steps": [
+        {
+          "name": "a project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "p01-project", "body": {"name": "Garden"}},
+          "expect": {"status": 201, "body": {"state": "active", "revision": 1, "desired_outcome": null, "archived_at": null, "archived_before_lossless": false}},
+          "capture": {"pid": "id"}
+        },
+        {
+          "name": "a task in it",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "p01-task", "body": {"title": "Dig", "project_id": "{pid}"}},
+          "expect": {"status": 201, "body": {"project_id": "{pid}"}},
+          "capture": {"tid": "id"}
+        },
+        {
+          "name": "archive",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/archive", "key": "p01-archive", "body": {"expected_revision": 1}},
+          "expect": {"status": 200, "body": {"state": "archived", "revision": 2, "archived_at": null, "archived_before_lossless": true, "open_task_count": 0}}
+        },
+        {
+          "name": "the task lost its project",
+          "request": {"method": "GET", "path": "/api/tasks/{tid}"},
+          "expect": {"status": 200, "body": {"project_id": null, "revision": 2}}
+        }
+      ]
+    },
+    {
+      "id": "TR-P02",
+      "title": "a repeat archive of a pre-feature archive keeps the marker",
+      "requirements": ["021-FR-027"],
+      "steps": [
+        {
+          "name": "a project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "p02-project", "body": {"name": "Orchard"}},
+          "expect": {"status": 201},
+          "capture": {"pid": "id"}
+        },
+        {"name": "archived before the feature", "seed": {"kind": "pre_feature_archive", "project": "{pid}"}},
+        {
+          "name": "the seeded archive",
+          "request": {"method": "GET", "path": "/api/projects/{pid}"},
+          "expect": {"status": 200, "body": {"state": "archived", "revision": 2, "archived_at": null, "archived_before_lossless": true}}
+        },
+        {
+          "name": "archive again",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/archive", "key": "p02-archive", "body": {"expected_revision": 2}},
+          "expect": {"status": 200, "body": {"state": "archived", "revision": 3, "archived_at": null, "archived_before_lossless": true}}
+        }
+      ]
+    },
+    {
+      "id": "TR-U01",
+      "title": "unarchive, its replay, and an active project with a stale revision",
+      "requirements": ["021-FR-026"],
+      "steps": [
+        {
+          "name": "a project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "u01-project", "body": {"name": "Shed"}},
+          "expect": {"status": 201},
+          "capture": {"pid": "id"}
+        },
+        {"name": "archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{pid}"}},
+        {
+          "name": "unarchive",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u01-unarchive", "body": {"expected_revision": 2}},
+          "expect": {"status": 200, "body": {"state": "active", "revision": 3, "archived_at": null, "archived_before_lossless": false}}
+        },
+        {
+          "name": "the same key replays the stored answer",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u01-unarchive", "body": {"expected_revision": 2}},
+          "expect": {"status": 200, "body": {"state": "active", "revision": 3}}
+        },
+        {
+          "name": "already active with a stale revision is 200 and unchanged",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u01-again", "body": {"expected_revision": 1}},
+          "expect": {"status": 200, "body": {"state": "active", "revision": 3}}
+        }
+      ]
+    },
+    {
+      "id": "TR-U02",
+      "title": "unarchive with a stale revision conflicts",
+      "requirements": ["021-FR-026"],
+      "steps": [
+        {
+          "name": "a project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "u02-project", "body": {"name": "Loft"}},
+          "expect": {"status": 201},
+          "capture": {"pid": "id"}
+        },
+        {"name": "archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{pid}"}},
+        {
+          "name": "stale revision",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u02-unarchive", "body": {"expected_revision": 1}},
+          "expect": {"status": 409}
+        },
+        {
+          "name": "still archived",
+          "request": {"method": "GET", "path": "/api/projects/{pid}"},
+          "expect": {"status": 200, "body": {"state": "archived", "revision": 2}}
+        }
+      ]
+    },
+    {
+      "id": "TR-U03",
+      "title": "unarchive into an active name clash conflicts",
+      "requirements": ["021-FR-026"],
+      "steps": [
+        {
+          "name": "a project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "u03-project", "body": {"name": "Cellar"}},
+          "expect": {"status": 201},
+          "capture": {"pid": "id"}
+        },
+        {"name": "archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{pid}"}},
+        {
+          "name": "a new active project with the same name",
+          "request": {"method": "POST", "path": "/api/projects", "key": "u03-twin", "body": {"name": "cellar"}},
+          "expect": {"status": 201}
+        },
+        {
+          "name": "unarchive clashes",
+          "request": {"method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u03-unarchive", "body": {"expected_revision": 2}},
+          "expect": {"status": 409}
+        }
+      ]
+    },
+    {
+      "id": "TR-U04",
+      "title": "unarchive of another account's project is a 404",
+      "requirements": ["021-FR-026"],
+      "steps": [
+        {
+          "name": "a project of the first account",
+          "request": {"method": "POST", "path": "/api/projects", "key": "u04-project", "body": {"name": "Attic"}},
+          "expect": {"status": 201},
+          "capture": {"pid": "id"}
+        },
+        {"name": "archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{pid}"}},
+        {
+          "name": "the second account cannot see it",
+          "request": {"as": "second", "method": "POST", "path": "/api/projects/{pid}/unarchive", "key": "u04-unarchive", "body": {"expected_revision": 2}},
+          "expect": {"status": 404}
+        }
+      ]
+    },
+    {
+      "id": "TR-L01",
+      "title": "GET /projects?state= selects active, archived or all",
+      "requirements": ["021-FR-026"],
+      "steps": [
+        {
+          "name": "Beta",
+          "request": {"method": "POST", "path": "/api/projects", "key": "l01-beta", "body": {"name": "Beta"}},
+          "expect": {"status": 201}
+        },
+        {
+          "name": "Alpha",
+          "request": {"method": "POST", "path": "/api/projects", "key": "l01-alpha", "body": {"name": "Alpha"}},
+          "expect": {"status": 201},
+          "capture": {"aid": "id"}
+        },
+        {"name": "Alpha archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{aid}"}},
+        {
+          "name": "default is active",
+          "request": {"method": "GET", "path": "/api/projects"},
+          "expect": {"status": 200, "body": [{"name": "Beta", "state": "active"}]}
+        },
+        {
+          "name": "active",
+          "request": {"method": "GET", "path": "/api/projects?state=active"},
+          "expect": {"status": 200, "body": [{"name": "Beta", "state": "active"}]}
+        },
+        {
+          "name": "archived",
+          "request": {"method": "GET", "path": "/api/projects?state=archived"},
+          "expect": {"status": 200, "body": [{"name": "Alpha", "state": "archived", "archived_at": "$present"}]}
+        },
+        {
+          "name": "all, by name",
+          "request": {"method": "GET", "path": "/api/projects?state=all"},
+          "expect": {"status": 200, "body": [{"name": "Alpha", "state": "archived"}, {"name": "Beta", "state": "active"}]}
+        },
+        {
+          "name": "an unknown state",
+          "request": {"method": "GET", "path": "/api/projects?state=bogus"},
+          "expect": {"status": 422}
+        }
+      ]
+    },
+    {
+      "id": "TR-T01",
+      "title": "PATCH /tasks tolerates a carried archived membership",
+      "requirements": ["021-FR-025"],
+      "steps": [
+        {
+          "name": "the task's project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "t01-a", "body": {"name": "Old"}},
+          "expect": {"status": 201},
+          "capture": {"aid": "id"}
+        },
+        {
+          "name": "another project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "t01-b", "body": {"name": "Older"}},
+          "expect": {"status": 201},
+          "capture": {"bid": "id"}
+        },
+        {
+          "name": "an active project",
+          "request": {"method": "POST", "path": "/api/projects", "key": "t01-c", "body": {"name": "Live"}},
+          "expect": {"status": 201},
+          "capture": {"cid": "id"}
+        },
+        {
+          "name": "a task in the first",
+          "request": {"method": "POST", "path": "/api/tasks", "key": "t01-task", "body": {"title": "Sort", "project_id": "{aid}"}},
+          "expect": {"status": 201},
+          "capture": {"tid": "id"}
+        },
+        {"name": "first archived, members kept", "seed": {"kind": "archive_keeping_members", "project": "{aid}"}},
+        {"name": "second archived", "seed": {"kind": "archive_keeping_members", "project": "{bid}"}},
+        {
+          "name": "project omitted",
+          "request": {"method": "PATCH", "path": "/api/tasks/{tid}", "key": "t01-omit", "body": {"title": "One", "expected_revision": 1}},
+          "expect": {"status": 200, "body": {"project_id": "{aid}", "revision": 2}}
+        },
+        {
+          "name": "the same archived project",
+          "request": {"method": "PATCH", "path": "/api/tasks/{tid}", "key": "t01-same", "body": {"title": "Two", "project_id": "{aid}", "expected_revision": 2}},
+          "expect": {"status": 200, "body": {"project_id": "{aid}", "revision": 3}}
+        },
+        {
+          "name": "a different archived project",
+          "request": {"method": "PATCH", "path": "/api/tasks/{tid}", "key": "t01-other", "body": {"project_id": "{bid}", "expected_revision": 3}},
+          "expect": {"status": 400, "body": {"message": "Task project must be active."}}
+        },
+        {
+          "name": "null",
+          "request": {"method": "PATCH", "path": "/api/tasks/{tid}", "key": "t01-null", "body": {"project_id": null, "expected_revision": 3}},
+          "expect": {"status": 200, "body": {"project_id": null, "revision": 4}}
+        },
+        {
+          "name": "an active project",
+          "request": {"method": "PATCH", "path": "/api/tasks/{tid}", "key": "t01-active", "body": {"project_id": "{cid}", "expected_revision": 4}},
+          "expect": {"status": 200, "body": {"project_id": "{cid}", "revision": 5}}
+        }
+      ]
+    },
+    {
+      "id": "TR-O01",
+      "title": "desired outcome: omitted keeps, null clears, blank clears",
+      "requirements": ["021-FR-028"],
+      "steps": [
+        {
+          "name": "create with an outcome",
+          "request": {"method": "POST", "path": "/api/projects", "key": "o01-create", "body": {"name": "Trip", "desired_outcome": "Two weeks away"}},
+          "expect": {"status": 201, "body": {"desired_outcome": "Two weeks away"}},
+          "capture": {"pid": "id"}
+        },
+        {
+          "name": "a rename keeps it",
+          "request": {"method": "PATCH", "path": "/api/projects/{pid}", "key": "o01-rename", "body": {"name": "Trip 2", "expected_revision": 1}},
+          "expect": {"status": 200, "body": {"name": "Trip 2", "desired_outcome": "Two weeks away", "revision": 2}}
+        },
+        {
+          "name": "null clears it",
+          "request": {"method": "PATCH", "path": "/api/projects/{pid}", "key": "o01-null", "body": {"desired_outcome": null, "expected_revision": 2}},
+          "expect": {"status": 200, "body": {"desired_outcome": null, "revision": 3}}
+        },
+        {
+          "name": "set again",
+          "request": {"method": "PATCH", "path": "/api/projects/{pid}", "key": "o01-set", "body": {"desired_outcome": "Back", "expected_revision": 3}},
+          "expect": {"status": 200, "body": {"desired_outcome": "Back", "revision": 4}}
+        },
+        {
+          "name": "blank clears it",
+          "request": {"method": "PATCH", "path": "/api/projects/{pid}", "key": "o01-blank", "body": {"desired_outcome": "   ", "expected_revision": 4}},
+          "expect": {"status": 200, "body": {"desired_outcome": null, "revision": 5}}
+        }
+      ]
+    }
+  ]
+}
