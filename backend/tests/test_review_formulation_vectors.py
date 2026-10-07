@@ -55,6 +55,12 @@ FIXTURE_COPIES: dict[str, tuple[str, ...]] = {
         "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/"
         "review_traces_tasks.json",
     ),
+    # Slice PR-11 (tasks.md T131): the run traces, replayed by the Swift sync
+    # tests against BrainBuddyFakeServer in slice PR-12.
+    "review_traces_runs.json": (
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/"
+        "review_traces_runs.json",
+    ),
 }
 
 

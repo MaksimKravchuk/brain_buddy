@@ -202,7 +202,7 @@ early.
   | `updateSettings` | 409 on `expected_revision` mismatch | refetch state, re-apply only the fields this change set (field-level last writer wins), resend with the new revision |
   | `acknowledgeParks` | idempotent, unknown ids ignored | always succeeds |
   | `startSession` | client `id`, `replace_open: true`; within the 24 h retention, replay by the same Idempotency-Key; after it, a stored session with the same owner, `id`, `mode` and `origin` answers as already applied and replaces nothing (the one de-duplication use of a client id, http "Client-supplied ids"); the device keeps the key until success | never set aside (an `id_conflict` cannot happen with UUIDs); if another device's open session was replaced, that device shows "review ended elsewhere" |
-  | `progressSession` | merged, no version conflict; replay-safe by the command's `progressID` at any age (http §6 "Progress is replay-safe") | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere"; a retry answered as already applied is a success |
+  | `progressSession` | merged, no version conflict; replay-safe by the command's `progressID` at any age (http §6 "Progress is replay-safe"); a `step` or `active_seconds` code outside the session's mode is 422 (http §6), which the reducer never produces: it refuses such a command before it is queued (T176, slice PR-12) | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere"; a retry answered as already applied is a success |
   | `finishSession` | idempotent | adopt the returned session |
   | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |
 

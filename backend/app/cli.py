@@ -4,16 +4,18 @@ Run via ``python -m app.cli <command>`` inside the backend container.
 ``create-invite`` mints a one-shot invite code that unlocks signup on
 ``POST /api/auth/signup``; ``purge-due-accounts`` hard-deletes accounts
 whose deletion grace period has elapsed (the maintenance sweep does the
-same on a timer — this is the manual/ops entrypoint).
+same on a timer — this is the manual/ops entrypoint). ``review-metrics``
+prints the weekly-review read-out (spec 020): aggregates only.
 """
 
 from __future__ import annotations
 
 import json
 import secrets
+import statistics
 import uuid
 from dataclasses import asdict
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 import typer
 
@@ -21,6 +23,7 @@ from app.container import build_container
 from app.core import get_config
 from app.core.config import AppConfig, AppEnvironment
 from app.exceptions import BrainBuddyError
+from app.modules.tasks.review_flow import ReviewMetrics
 from app.schemas.auth import Invite
 from app.schemas.review import ExplainerAcknowledgeRequest
 from app.schemas.tasks import TaskCreateRequest
@@ -158,6 +161,105 @@ def review_run_sweep() -> None:
         f"closed={result.closed} gap_floors={result.gap_floors} "
         f"snapshots_nulled={result.snapshots_nulled}"
     )
+
+
+# Minimum samples confirmed by the owner on 2026-10-06 (plan "Post-release
+# acceptance"): below them a figure reads "insufficient".
+SC003_MIN_ANSWERED = 6
+SC004_MIN_REVIEWS = 4
+SC005_MIN_SHOWN = 20
+
+
+def _share(part: int, whole: int, what: str, minimum: int | None) -> str:
+    """``71% (5 of 7 <what>; n=7)``; below ``minimum`` (or none) not a share."""
+
+    if minimum is not None and whole < minimum:
+        return f"insufficient (n={whole} {what}; minimum {minimum})"
+    if whole == 0:
+        return "none (n=0)"
+    return f"{100 * part / whole:.0f}% ({part} of {whole} {what}; n={whole})"
+
+
+def _median_minutes(seconds: list[int]) -> str:
+    if len(seconds) < SC004_MIN_REVIEWS:
+        return (
+            f"insufficient (n={len(seconds)} completed reviews; "
+            f"minimum {SC004_MIN_REVIEWS})"
+        )
+    return f"{statistics.median(seconds) / 60:.1f} (n={len(seconds)} completed reviews)"
+
+
+def _sc005_cloud_label(metrics: ReviewMetrics, since: date) -> str:
+    """Names the window the cloud share used when it is shorter than ``since``."""
+
+    if metrics.sc005_since == since:
+        return "SC-005 cloud proposals accepted: "
+    return (
+        f"SC-005 cloud proposals accepted since {metrics.sc005_since.isoformat()} "
+        "(navigator usage is kept 35 days): "
+    )
+
+
+def format_review_metrics(metrics: ReviewMetrics, since: date) -> list[str]:
+    """The read-out lines: aggregates with their sample sizes, nothing else."""
+
+    return [
+        f"review-metrics since {since.isoformat()} ({metrics.weeks} weeks)",
+        "SC-001 weeks with a counted review: "
+        f"{metrics.weeks_with_counted_review} of {metrics.weeks} "
+        f"(n={metrics.weeks} weeks)",
+        'SC-003 clear start "yes": '
+        + _share(
+            metrics.answered_yes,
+            metrics.answered_reviews,
+            "answered reviews",
+            SC003_MIN_ANSWERED,
+        ),
+        "SC-004 median active minutes, quick: "
+        + _median_minutes(metrics.active_seconds_quick),
+        "SC-004 median active minutes, full: "
+        + _median_minutes(metrics.active_seconds_full),
+        _sc005_cloud_label(metrics, since)
+        + _share(
+            metrics.cloud_accepted,
+            metrics.shown_requests,
+            "shown requests",
+            SC005_MIN_SHOWN,
+        ),
+        "SC-005 on-device proposals accepted, upper bound: "
+        + _share(
+            metrics.device_accepted,
+            metrics.device_decisions,
+            "decisions with on-device proposals",
+            None,
+        ),
+        "Parks returned: "
+        + _share(metrics.parks_returned, metrics.parks, "parks", None),
+    ]
+
+
+@app.command("review-metrics")
+def review_metrics(
+    owner: str = typer.Option(..., help="The owner's user id."),
+    since: datetime = typer.Option(
+        ..., formats=["%Y-%m-%d"], help="First day (UTC) of the read-out window."
+    ),
+) -> None:
+    """Spec 020 real-use read-out: content-free aggregates with sample sizes.
+
+    Read-only; run weekly in the production backend container (plan
+    "Post-release acceptance"). Prints no title, note, reason or id.
+    """
+
+    container = build_container(get_config())
+    flow = container.review_flow_service
+    first_day = since.date()
+    if first_day > flow.clock().date():
+        typer.echo("--since must not be in the future.", err=True)
+        raise typer.Exit(code=2)
+    metrics = flow.metrics(owner, since=first_day)
+    for line in format_review_metrics(metrics, first_day):
+        typer.echo(line)
 
 
 if __name__ == "__main__":  # pragma: no cover

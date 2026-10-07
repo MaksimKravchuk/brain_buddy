@@ -561,6 +561,32 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
             "422",
             "429",
         },
+        # Spec 020 slice PR-11 (review flow, contracts/http.md §6).
+        ("/api/review/sessions", "post"): {"400", "401", "409", "422"},
+        ("/api/review/sessions/{session_id}", "get"): {"401", "404", "422"},
+        ("/api/review/sessions/{session_id}", "patch"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/review/sessions/{session_id}/finish", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
+        ("/api/review/queues/{step}", "get"): {"401", "404", "422"},
+        ("/api/review/bulk-releases", "post"): {"400", "401", "409", "422"},
+        ("/api/review/bulk-releases/{bulk_id}/undo", "post"): {
+            "400",
+            "401",
+            "404",
+            "409",
+            "422",
+        },
     }
     expected_error_statuses.update(
         {

@@ -85,6 +85,7 @@ NewFormulationId = Annotated[str, _client_id("form")]
 FollowUpTaskId = Annotated[str, _client_id("task")]
 ProgressId = Annotated[str, _client_id("progress")]
 SessionRef = Annotated[str, _reference("review")]
+BulkReleaseRef = Annotated[str, _reference("bulk")]
 FormulationRef = Annotated[str, _reference("form")]
 TaskRef = Annotated[str, _reference("task")]
 NavigatorRequestId = Annotated[

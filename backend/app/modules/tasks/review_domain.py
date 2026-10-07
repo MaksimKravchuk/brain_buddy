@@ -191,7 +191,9 @@ class ReviewSessionDocument(StorageBaseModel):
     current_step: str | None = None
     steps: dict[str, StepStateDocument] = Field(default_factory=dict)
     active_seconds_by_step: dict[str, int] = Field(default_factory=dict)
-    decision_queue: list[str] = Field(default_factory=list)
+    decision_queue: list[str] | None = None
+    """The decision-step snapshot: ``None`` until taken, then kept as taken,
+    an empty list included (http §6; the iOS ``decisionQueue`` likewise)."""
     set_aside_task_ids: list[str] = Field(default_factory=list)
     applied_progress: dict[str, str] = Field(default_factory=dict)
     counts: SessionCountsDocument = Field(default_factory=SessionCountsDocument)
