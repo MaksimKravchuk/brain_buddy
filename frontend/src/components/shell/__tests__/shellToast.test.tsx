@@ -89,7 +89,15 @@ describe("020-FR-048 undo toast timing and keyboard rules", () => {
     [{ key: "z", ctrlKey: true, shiftKey: true }, false],
     [{ key: "z", ctrlKey: true, altKey: true }, false],
     [{ key: "z" }, false],
-    [{ key: "y", ctrlKey: true }, false]
+    [{ key: "y", ctrlKey: true }, false],
+    // Non-Latin layouts: the Z key types another letter, so its physical code decides.
+    [{ key: "я", code: "KeyZ", ctrlKey: true }, true],
+    [{ key: "Я", code: "KeyZ", metaKey: true }, true],
+    [{ key: "я", code: "KeyZ" }, false],
+    [{ key: "я", code: "KeyZ", ctrlKey: true, shiftKey: true }, false],
+    // A Latin layout that puts another character on the Z key (Dvorak's ";") is not Undo.
+    [{ key: ";", code: "KeyZ", ctrlKey: true }, false],
+    [{ key: "z", code: "Slash", ctrlKey: true }, true]
   ])("020-FR-048 reads %o as Undo: %s", (init, expected) => {
     expect(isUndoShortcut(new KeyboardEvent("keydown", init))).toBe(expected);
   });

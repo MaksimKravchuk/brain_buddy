@@ -31,9 +31,18 @@ export function useShellToast(): ShellNotify {
   return useContext(ShellToastContext);
 }
 
-/** Ctrl+Z / Cmd+Z with no other modifier. */
+/**
+ * Ctrl+Z / Cmd+Z with no other modifier. On a non-Latin layout (Russian "я")
+ * the Z key types another letter, so its physical code decides there; a Latin
+ * layout that puts another character on that key (Dvorak's ";") is read by
+ * the character it types, as the browser's own undo does.
+ */
 export function isUndoShortcut(event: KeyboardEvent): boolean {
-  return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "z";
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) {
+    return false;
+  }
+  const key = event.key.toLowerCase();
+  return key === "z" || (event.code === "KeyZ" && !/^[\x20-\x7e]$/.test(key));
 }
 
 /** Text fields keep Ctrl/Cmd+Z for their own typing undo. */

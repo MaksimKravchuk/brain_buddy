@@ -587,6 +587,17 @@ describe("020-FR-048 AppShell action toast", () => {
     expect(undoSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("020-FR-048 triggers Undo with Ctrl+Z on a Russian layout (\"я\" on the Z key), still not inside a text field", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+
+    fireEvent.keyDown(screen.getByLabelText("Scratch field"), { key: "я", code: "KeyZ", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document.body, { key: "я", code: "KeyZ", ctrlKey: true });
+    expect(undoSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("020-FR-048 lets a plain toast replace an action toast, so a stale Undo cannot fire", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
