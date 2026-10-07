@@ -10,6 +10,7 @@ import Foundation
 /// | Server raises | `kind` |
 /// |---|---|
 /// | `"<R> '<id>' has newer changes; reload before saving."`, detail `{resource, id}` | `.staleRevision` |
+/// | `"Review settings have newer changes; reload before saving."`, detail `{"resource": "Review settings", …}` | `.staleRevision` |
 /// | idempotency replay mismatch, detail `{"resource": "Idempotency-Key", …}` | `.idempotencyConflict` |
 /// | `"Project '<name>' already exists."` / `"Tag '<name>' already exists."` | `.duplicateName` |
 /// | anything else (for example signup's "An account with that email already exists.") | `.rejected` |
@@ -204,6 +205,13 @@ extension APIError {
         }
     }
 
+    /// `ReviewService.update_settings` (spec 020, `PUT /review/settings`)
+    /// answers a stale `expected_revision` with its own plural wording and no
+    /// `detail.reason`; it is a stale revision like every other (FR-035:
+    /// refetch, then resend only the changed fields).
+    static let reviewSettingsResource = "Review settings"
+    static let reviewSettingsStaleMessage = "Review settings have newer changes; reload before saving."
+
     static func conflictKind(message: String?, detail: JSONValue?) -> Kind {
         let resource = detail?["resource"]?.stringValue
         let identifier = detail?["id"]?.stringValue
@@ -213,7 +221,9 @@ extension APIError {
         if resource == "Idempotency-Key" || reason?.hasPrefix("idempotency_") == true {
             return .idempotencyConflict
         }
-        if text.hasSuffix("has newer changes; reload before saving.") || reason == "stale_revision" {
+        if text.hasSuffix("has newer changes; reload before saving.") || reason == "stale_revision"
+            || (resource == reviewSettingsResource && text == reviewSettingsStaleMessage)
+        {
             return .staleRevision(resource: resource ?? "", id: identifier ?? detail?["tree_id"]?.stringValue ?? "")
         }
         if let resource, resource == "Project" || resource == "Tag", let identifier,

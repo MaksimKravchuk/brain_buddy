@@ -387,7 +387,8 @@ extension StoreDocument {
         case (.review(.acknowledgeExplainer), .reviewState(let state)):
             mergeReviewState(state, now: now)
         case (.review(.updateSettings), .reviewSettings(let settings)):
-            base.review.settings = settings.settings
+            // The replayed change holds this device's `thresholdChangedAt`.
+            base.review.settings = settings.settings.keepingThresholdChange(of: scratch.review.settings)
         case (.review(.startSession(let start)), .session(let answer)):
             base.review = scratch.review
             base.review.sessions[start.sessionID] = answer.session(keeping: scratch.review.sessions[start.sessionID])
@@ -446,7 +447,7 @@ extension StoreDocument {
     /// which parks were seen.
     mutating func mergeReviewState(_ state: ReviewStateDTO, now: Date) {
         var review = base.review
-        review.settings = state.settings.settings
+        review.settings = state.settings.settings.keepingThresholdChange(of: heldReviewSettings())
         // An open session this build cannot read is still open: only its id is used.
         let openID = (state.openSession?.id ?? state.unreadableOpenSessionID).map { ReviewSessionID($0) }
         for session in review.sessions.values where session.status == .open && session.id != openID {
@@ -487,6 +488,18 @@ extension StoreDocument {
         }
         base.review = review
         local.serverClockOffset = state.serverNow.timeIntervalSince(now)
+    }
+
+    /// The review settings the device shows: the base's with the queued
+    /// settings changes applied (a change whose answer was lost may already
+    /// be on the server while it is still queued here).
+    func heldReviewSettings() -> ReviewSettings {
+        var scratch = GTDState(review: base.review)
+        for operation in outbox {
+            guard case .review(.updateSettings) = operation.command else { continue }
+            _ = try? GTDReducer.apply(operation.command, at: operation.issuedAt, to: &scratch, mode: .replay)
+        }
+        return scratch.review.settings
     }
 
     /// A gated read answered `404 weekly_review_disabled` (or a server without

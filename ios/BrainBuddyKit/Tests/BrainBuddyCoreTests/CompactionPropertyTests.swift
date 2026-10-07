@@ -42,7 +42,7 @@ struct CompactionPropertyTests {
             var outbox: [PendingOperation] = []
             for step in 0..<Self.steps {
                 let command = generator.next(for: state)
-                guard (try? GTDReducer.apply(command, at: Fixture.at(step), to: &state)) != nil else { continue }
+                guard (try? Self.applyExposed(command, at: Fixture.at(step), to: &state)) != nil else { continue }
                 let count = outbox.count
                 outbox = OutboxCompactor.appending(
                     PendingOperation(command: command, issuedAt: Fixture.at(step)), to: outbox, clockAware: true
@@ -98,6 +98,17 @@ struct CompactionPropertyTests {
         return Array(found.prefix(3))
     }
 
+    /// A person's command as the workspace applies it with the review
+    /// exposed: Core gets the exposure input for this apply only, so the
+    /// state stays comparable with replays of the base.
+    static func applyExposed(_ command: GTDCommand, at date: Date, to state: inout GTDState) throws(GTDValidationError) {
+        var exposed = state
+        exposed.review.accountlessReleaseSwitch = true
+        try GTDReducer.apply(command, at: date, to: &exposed)
+        exposed.review.accountlessReleaseSwitch = state.review.accountlessReleaseSwitch
+        state = exposed
+    }
+
     private func run(seed: UInt64, clockAware: Bool, includeReview: Bool = false) throws {
         var generator = CommandGenerator(seed: seed, includeReview: includeReview)
         // Even seeds start with no account (the outbox is all the data), odd
@@ -109,7 +120,7 @@ struct CompactionPropertyTests {
         for step in 0..<Self.steps {
             let command = generator.next(for: sequential)
             let date = Fixture.at(step)
-            guard (try? GTDReducer.apply(command, at: date, to: &sequential)) != nil else { continue }
+            guard (try? Self.applyExposed(command, at: date, to: &sequential)) != nil else { continue }
             accepted += 1
             let before = outbox
             outbox = OutboxCompactor.appending(

@@ -85,6 +85,224 @@ import Testing
         #expect(workspace.state == workspace.replayedState)
     }
 
+    @Test("020-FR-011 020-FR-052 a form decision is bound to the wording it was opened on: a reformulation elsewhere refuses it")
+    func decisionBoundToOpenedFormulation() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let opened = try #require(workspace.task(task)?.formulation?.id)
+        // Another window (or a sync) reformulates while the form is open.
+        try workspace.updateTask(task, TaskChanges(title: .set("Get 3 quotes for the bathroom")))
+        let current = try #require(workspace.task(task))
+        #expect(current.formulation?.id != opened)
+        clock.advance(by: 15 * Self.day)
+
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.reformulate, on: task, title: "Measure the bathroom wall", formulationID: opened)
+        }
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.extend, on: task, reason: "Waiting for the plumber", formulationID: opened)
+        }
+        #expect(workspace.task(task) == current, "nothing was applied")
+        await workspace.flush()
+        #expect(!workspace.document.outbox.contains { if case .decideTask = $0.command { true } else { false } })
+
+        // The same decision on the current wording goes through.
+        try workspace.decide(.extend, on: task, reason: "Waiting for the plumber", formulationID: current.formulation?.id)
+        #expect(workspace.task(task)?.formulation?.extendedAt != nil)
+    }
+
+    @Test("020-FR-005 020-FR-009 the card's third-stall offer and the extension preview use the classification zone")
+    func cardQueries() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        #expect(workspace.extensionInstants(of: task) == nil, "fresh: nothing to extend")
+        #expect(workspace.isThirdStall(task) == false)
+        clock.advance(by: 15 * Self.day)
+        let record = try #require(workspace.task(task))
+        let expected = GTDQueries.extensionInstants(
+            of: record, now: workspace.reviewNow, settings: workspace.state.review.settings, timeZone: "Europe/Berlin"
+        )
+        #expect(workspace.extensionInstants(of: task) == expected)
+        #expect(workspace.extensionInstants(of: task)?.askAt == workspace.reviewNow.addingTimeInterval(7 * Self.day))
+        #expect(workspace.isThirdStall(task) == false, "the first wording")
+        #expect(workspace.extensionInstants(of: "missing") == nil)
+    }
+
+    @Test("020-FR-015 closing While you were away without Continue keeps the parks unseen and shows the linking notices once")
+    func closeWhileAwayClearsNotices() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let parked = try nextTask("Clean out the garage", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 1)
+        let extended = try nextTask("Call the landlord", in: workspace)
+        workspace.edit { $0.local.linkedExtensionNotices = [extended] }
+        #expect(workspace.parkReturnProblem(of: parked) == nil)
+        #expect(workspace.linkedExtensionNotices == [extended])
+
+        workspace.closeWhileAway()
+        #expect(workspace.linkedExtensionNotices.isEmpty, "notices are shown once")
+        #expect(workspace.unseenParks().map(\.id).contains(parked), "a swipe-down is not seen")
+        #expect(!workspace.whileAwayShouldShowAtAppOpen(), "not again today")
+        clock.advance(by: Self.day)
+        #expect(workspace.whileAwayShouldShowAtAppOpen(), "the parks come back another day")
+        await workspace.flush()
+        #expect(try await workspace.store.load()?.local.linkedExtensionNotices == [])
+    }
+
+    @Test("020-FR-015 Continue marks seen only the parks the sheet showed; one that arrived meanwhile stays unseen")
+    func continueAcknowledgesShownParks() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let shownTask = try nextTask("Clean out the garage", in: workspace)
+        let arrivedTask = try nextTask("Sort the photo albums", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 2)
+        // The sheet appeared listing only the first (the second arrived while it was open).
+        let shown = workspace.unseenParkAcks().filter { $0.taskID == shownTask }
+        #expect(shown.count == 1)
+
+        try workspace.dismissWhileAway(shown: shown)
+        #expect(workspace.unseenParks().map(\.id) == [arrivedTask], "never displayed, so not seen")
+        await workspace.flush()
+        let acknowledged = workspace.document.outbox.flatMap { operation -> [ParkAck] in
+            if case .review(.acknowledgeParks(let items)) = operation.command { return items }
+            return []
+        }
+        #expect(acknowledged.map(\.taskID) == [shownTask])
+    }
+
+    @Test("020-FR-042 020-FR-015 While you were away taken away by the review switching off records nothing")
+    func whileAwayTakenAwayWhenHidden() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let parked = try nextTask("Clean out the garage", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 1)
+        let extended = try nextTask("Call the landlord", in: workspace)
+        workspace.edit { $0.local.linkedExtensionNotices = [extended] }
+        #expect(workspace.whileAwayShouldShowAtAppOpen())
+
+        // The release switch (signed in: the flag) goes off while M-09 is
+        // presented: the sheet is taken away, and its appear and close
+        // callbacks must not record it.
+        workspace.accountlessReviewEnabled = false
+        #expect(!workspace.reviewExposed)
+        workspace.markWhileAwayShown()
+        workspace.closeWhileAway()
+        #expect(workspace.localReview.wywaLastShownDay == nil, "not shown")
+        #expect(workspace.linkedExtensionNotices == [extended], "the once-only notices are kept")
+        #expect(workspace.unseenParks().map(\.id) == [parked], "not seen")
+
+        workspace.accountlessReviewEnabled = true
+        #expect(workspace.whileAwayShouldShowAtAppOpen(), "back on: it shows, the same day")
+    }
+
+    @Test("020-FR-011 a sync that changes only the notes while the card is open makes the decision stale; unchanged decides")
+    func notesChangedBySyncMakeDecisionStale() async throws {
+        let world = World()
+        let (_, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+        await workspace.syncNow()
+
+        // The card opens and records the task as shown.
+        let shown = try #require(workspace.task(task))
+        let opened = ShownTask(shown)
+        // Another device edits only the notes; this device syncs while the card is open.
+        let tablet = await world.device()
+        try await tablet.signIn()
+        await tablet.workspace.syncNow()
+        let there = try #require(tablet.workspace.state.tasks.values.first { $0.title == "Renovate the bathroom" })
+        try tablet.workspace.updateTask(there.id, TaskChanges(details: .set("Tiles first")))
+        await tablet.workspace.syncNow()
+        world.clock.advance(by: 60)
+        await workspace.syncNow()
+        let current = try #require(workspace.task(task))
+        #expect(current.details == "Tiles first" && current.formulation?.id == shown.formulation?.id)
+
+        await workspace.flush()
+        let queued = workspace.document.outbox.count
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.someday, on: task, formulationID: shown.formulation?.id, expectedTask: opened)
+        }
+        #expect(workspace.task(task) == current, "nothing applied")
+        await workspace.flush()
+        #expect(workspace.document.outbox.count == queued, "nothing queued")
+
+        // "Decide again": the card records the task as it is now, and the decision applies.
+        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: ShownTask(current))
+        #expect(workspace.task(task)?.state == .someday)
+    }
+
+    @Test("020-FR-011 a subtask added after the card opened stays a change once the server acknowledged it")
+    func childEditCountSurvivesAcknowledgement() async throws {
+        let world = World()
+        let (_, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+        await workspace.syncNow()
+
+        let shown = workspace.shownTask(of: try #require(workspace.task(task)))
+        #expect(shown.localChildEdits == 0)
+        _ = try workspace.addSubtask(to: task, title: "Measure the wall")
+        #expect(workspace.shownTask(of: try #require(workspace.task(task))).localChildEdits == 1)
+        // The sync acknowledges the subtask and rebuilds the state from the new base.
+        await workspace.syncNow()
+        await workspace.flush()
+        #expect(workspace.document.outbox.isEmpty, "acknowledged")
+        let current = try #require(workspace.task(task))
+        #expect(current.subtasks.first?.serverID != nil)
+        #expect(workspace.shownTask(of: current).localChildEdits == 1, "the count survives acknowledgement and replay")
+
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: shown)
+        }
+        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: workspace.shownTask(of: current))
+        #expect(workspace.task(task)?.state == .someday)
+    }
+
+    @Test("020-FR-042 020-FR-052 with the review switched off a decision is refused: nothing applied or queued, the draft kept")
+    func decideRefusedWhileHidden() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        clock.advance(by: 15 * Self.day)
+        let shown = try #require(workspace.task(task))
+        let key = DraftKey.decisionForm(.reformulate, task: task, formulation: shown.formulation?.id)
+        workspace.saveDraft("Measure the bathroom wall", for: key)
+        await workspace.flush()
+        let queued = workspace.document.outbox.count
+
+        // The release switch (signed in: the flag) goes off while the form is open.
+        workspace.accountlessReviewEnabled = false
+        #expect(throws: GTDValidationError.reviewUnavailable) {
+            try workspace.decide(
+                .reformulate, on: task, title: "Measure the bathroom wall", formulationID: shown.formulation?.id,
+                expectedTask: ShownTask(shown)
+            )
+        }
+        #expect(workspace.task(task) == shown, "nothing applied")
+        #expect(workspace.draft(for: key) == "Measure the bathroom wall", "the typed text is kept")
+        await workspace.flush()
+        #expect(workspace.document.outbox.count == queued, "nothing queued")
+
+        workspace.accountlessReviewEnabled = true
+        try workspace.decide(.reformulate, on: task, title: "Measure the bathroom wall", formulationID: shown.formulation?.id)
+        #expect(workspace.task(task)?.title == "Measure the bathroom wall")
+    }
+
     @Test("020-FR-011 a follow-up decision mints task_ and form_ client ids")
     func followUpIDs() async throws {
         let workspace = try await activatedWorkspace()
@@ -184,7 +402,7 @@ import Testing
         #expect(workspace.unseenParks().count == 10)
         #expect(workspace.localReview.parkBatchWaiting)
         #expect(workspace.applyDueAutoParks() == 0, "the rest wait for While you were away")
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.unseenParks().isEmpty)
         #expect(workspace.applyDueAutoParks() == 2)
         #expect(tasks.allSatisfy { workspace.task($0)?.state == .someday && workspace.task($0)?.parked != nil })
@@ -599,7 +817,7 @@ import Testing
         #expect(workspace.applyDueAutoParks() == 0)
         world.clock.advance(by: Self.day + 60)
         #expect(workspace.applyDueAutoParks() == 3)
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         // The newer ones ask (15 days in): two decisions and an extension.
         world.clock.advance(by: 3 * Self.day)
         let attempt = modern ? try await workspace.beginSignIn(serverURL: FakeBrainBuddyServer.baseURL) : nil
@@ -632,7 +850,7 @@ import Testing
         #expect(workspace.linkedExtensionNotices == [extended])
         #expect(workspace.issues.isEmpty)
         #expect(parked.allSatisfy { workspace.task($0)?.state == .someday })
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.linkedExtensionNotices.isEmpty)
     }
 
@@ -701,7 +919,7 @@ import Testing
         let workspace = await loadedWorkspace(store: store)
         workspace.accountlessReviewEnabled = true
         #expect(workspace.unseenParks().count == 201)
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.unseenParks().isEmpty)
         let ids = try workspace.bulkRelease(.inboxRemainder, taskIDs: (0..<501).map { TaskID("i\($0)") })
         #expect(ids.count == 2)

@@ -21,6 +21,8 @@ struct TaskListScreen: View {
     /// The default value is the destination's default options, so a fresh
     /// install starts with Next actions grouped by project.
     @AppStorage private var storedOptions: String
+    /// The decision card (M-03) a marker chip opened, as a large sheet.
+    @State private var decisionCard: DecisionCardTarget?
 
     init(destination: Destination) {
         self.destination = destination
@@ -34,7 +36,15 @@ struct TaskListScreen: View {
         let _ = dayChangeCount
         let options = effectiveOptions
         let result = workspace.list(destination, options: options)
+        let card = $decisionCard
         taskList(result, options: options)
+            // Marker chips (M-01) open the decision card over the list.
+            .environment(\.openDecisionCard, OpenDecisionCardAction { taskID in
+                card.wrappedValue = DecisionCardTarget(taskID: taskID)
+            })
+            .sheet(item: $decisionCard) { target in
+                DecisionCardSheet(taskID: target.taskID)
+            }
             .navigationTitle(title)
             .toolbar { toolbarContent(result) }
             .refreshable {
@@ -90,6 +100,9 @@ struct TaskListScreen: View {
 
     private func taskList(_ result: TaskListResult, options: ListOptions) -> some View {
         List {
+            if case .list(.next) = destination, !result.isEmpty {
+                reviewNotes
+            }
             if !result.isEmpty {
                 captionRow(for: result, options: options)
             }
@@ -111,9 +124,27 @@ struct TaskListScreen: View {
         .listStyle(.plain)
         .overlay {
             if result.isEmpty {
-                emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                if case .list(.next) = destination {
+                    // The empty state would cover notes in the list: they
+                    // sit above it instead.
+                    VStack(spacing: 0) {
+                        reviewNotes
+                            .padding(.horizontal, BBSpacing.s4)
+                        emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                            .frame(maxHeight: .infinity)
+                    }
+                } else {
+                    emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                }
             }
         }
+    }
+
+    /// Weekly review notes on Next (M-01 threshold changed, M-03 error rows);
+    /// each shows only when it applies.
+    @ViewBuilder private var reviewNotes: some View {
+        ReviewThresholdNote()
+        DecisionIssuesNote()
     }
 
     private func taskSection(_ section: TaskSection) -> some View {
@@ -262,6 +293,76 @@ private struct ProjectStatusRow: View {
                     .accessibilityHidden(true)
             }
             .accessibilityElement(children: .combine)
+            .listRowSeparator(.hidden)
+        }
+    }
+}
+
+/// M-01 "threshold just changed" (FR-039): after a threshold change, one
+/// dismissible note says how many tasks ask now and the date before which
+/// nothing moves to Someday (the owner park floor Core set). It shows until
+/// dismissed for that change, or until that date has passed
+/// (`ThresholdChangeNote`); sync keeps the change instant this device set.
+private struct ReviewThresholdNote: View {
+    @Environment(Workspace.self) private var workspace
+    /// The `thresholdChangedAt` (seconds since 1970) whose note was dismissed.
+    @AppStorage("review.thresholdNoteDismissedAt") private var dismissedChange: Double = 0
+
+    init() {}
+
+    var body: some View {
+        let settings = workspace.state.review.settings
+        if workspace.reviewExposed,
+            let changedAt = ThresholdChangeNote.change(
+                settings: settings, dismissedChange: dismissedChange, now: workspace.reviewNow
+            ),
+            let floor = settings.ownerParkFloorAt
+        {
+            HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s3) {
+                Text(
+                    Self.text(
+                        threshold: settings.thresholdDays, asking: workspace.askCount(),
+                        floor: ReviewCopy.day(floor, in: .current)
+                    )
+                )
+                .font(BBFont.meta)
+                .foregroundStyle(BBColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: BBSpacing.s2)
+                Button("OK") { dismissedChange = changedAt.timeIntervalSince1970 }
+                    .buttonStyle(.borderless)
+                    .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
+                    .accessibilityLabel("Dismiss the threshold note")
+            }
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    static func text(threshold: Int, asking: Int, floor: String) -> String {
+        let asks = asking == 1 ? "1 task asks for a decision." : "\(asking) tasks ask for a decision."
+        return "Your threshold is now \(threshold) days. \(asks) Nothing moves to Someday before \(floor)."
+    }
+}
+
+/// M-03 "error": decisions the server set aside after sync appear in Sync
+/// issues with their Ref (FR-045); Next carries a non-blocking note to them.
+private struct DecisionIssuesNote: View {
+    @Environment(Workspace.self) private var workspace
+
+    init() {}
+
+    var body: some View {
+        let count = workspace.issues.filter { issue in
+            if case .decideTask = issue.command { return true }
+            return false
+        }.count
+        let text: String = count == 1 ? "1 decision couldn't be saved" : "\(count) decisions couldn't be saved"
+        if count > 0 {
+            NavigationLink(value: AppRoute.syncIssues) {
+                Label(text, systemImage: "exclamationmark.circle")
+                .font(BBFont.meta)
+                .foregroundStyle(BBColor.textSecondary)
+            }
             .listRowSeparator(.hidden)
         }
     }

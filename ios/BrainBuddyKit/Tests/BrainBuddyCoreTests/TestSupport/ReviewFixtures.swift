@@ -31,9 +31,12 @@ enum Review {
         ReviewSettings(thresholdDays: threshold, timeZone: zone, activatedAt: activatedAt)
     }
 
-    /// A state with `tasks` and the given review settings.
+    /// A state with `tasks` and the given review settings, with the review
+    /// exposed (as on an account-less device whose release switch is on).
     static func state(_ tasks: [TaskRecord], settings: ReviewSettings = settings()) -> GTDState {
-        GTDState(tasks: Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) }), review: ReviewState(settings: settings))
+        var review = ReviewState(settings: settings)
+        review.accountlessReleaseSwitch = true
+        return GTDState(tasks: Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) }), review: review)
     }
 
     /// A Next task whose formulation started at `started`.

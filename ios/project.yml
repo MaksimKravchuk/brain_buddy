@@ -76,10 +76,23 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+      # The weekly review's account-less release switch (spec 020,
+      # contracts/ios-commands.md §8). Account-less auto-parks have no server
+      # and no remote kill switch, so Release (TestFlight, App Store) keeps it
+      # NO until the owner records the decision to turn it on (PR-14); Debug
+      # builds use it for account-less acceptance. Signed in, the account's
+      # `weekly_review` flag decides instead.
+      configs:
+        Debug:
+          BB_WEEKLY_REVIEW_LOCAL: "YES"
+        Release:
+          BB_WEEKLY_REVIEW_LOCAL: "NO"
     info:
       path: BrainBuddy/Resources/Info.plist
       properties:
         CFBundleDisplayName: Brain Buddy
+        # Read by ReviewExposure.accountlessReleaseSwitch (App/RootView.swift).
+        BBWeeklyReviewLocal: $(BB_WEEKLY_REVIEW_LOCAL)
         # XcodeGen's defaults are literal "1.0" / "1"; tie both to build settings.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
