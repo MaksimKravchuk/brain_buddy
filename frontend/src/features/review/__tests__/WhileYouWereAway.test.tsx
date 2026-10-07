@@ -198,6 +198,64 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
   });
 
+  it("020-FR-015 Continue waits while a row return is on its way", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    transitionTask.mockImplementationOnce((_id, payload) => new Promise((resolve) => {
+      release = () => resolve({ ...cv, state: "next", parked: null, revision: payload.expected_revision + 1 });
+    }));
+    renderDialog([portuguese, cv]);
+    await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await act(async () => release());
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  it("020-FR-015 Continue waits until Return all has settled every row, including between rows", async () => {
+    const user = userEvent.setup();
+    const releases: Array<() => void> = [];
+    transitionTask.mockImplementation((id, payload) => new Promise((resolve) => {
+      releases.push(() => resolve({ ...(id === cv.id ? cv : portuguese), state: "next", parked: null, revision: payload.expected_revision + 1 }));
+    }));
+    renderDialog([portuguese, cv]);
+    await user.click(await screen.findByRole("button", { name: "Return both to Next" }));
+    await waitFor(() => expect(releases).toHaveLength(1));
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await act(async () => releases[0]());
+    await waitFor(() => expect(releases).toHaveLength(2));
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await act(async () => releases[1]());
+
+    expect(await screen.findByText("All 2 are back in Next with a fresh start.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  it("020-FR-015 020-FR-042 another account's cached projects never stand in for this account's: returning waits for this account's own fetch", async () => {
+    let releaseProjects: () => void = () => undefined;
+    listProjects.mockReset();
+    listProjects.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseProjects = () => resolve(projects);
+    }));
+    getTask.mockImplementation(async (id) => [portuguese, garage, router].find((task) => task.id === id) as TaskResponse);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // user-0's projects are cached: in them, the router's project is not archived.
+    client.setQueryData(taskKeys.projects(getTaskCacheScope("user-0")), projects.map((project) => ({ ...project, state: "active" as const })));
+    render(
+      <QueryClientProvider client={client}>
+        <WhileYouWereAway parks={[park(portuguese), park(garage), park(router)]} onDone={onDone} />
+      </QueryClientProvider>
+    );
+
+    await screen.findByText("Return the old router");
+    expect(screen.getByRole("button", { name: "Return Return the old router to Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Return all 3 to Next" })).toBeDisabled();
+
+    await act(async () => releaseProjects());
+    expect(await within(row("Return the old router")).findByRole("button", { name: "Return unavailable: project Old flat is archived" })).toBeInTheDocument();
+  });
+
   it("020-FR-045 a failed return says so on its row with the Ref, and Retry resends it", async () => {
     const user = userEvent.setup();
     transitionTask.mockRejectedValueOnce(new ApiError("Couldn't reach Brain Buddy", 0, null, "corr_return"));

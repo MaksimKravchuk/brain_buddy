@@ -18,7 +18,14 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AuthUser } from "../../api/auth";
 import { ApiError, apiClient } from "../../api/client";
 import { describeReviewError, newIdempotencyKey, type UnseenPark } from "../../api/review";
-import { applyReviewTask, captureReviewScope, refreshAfterReviewWrite, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
+import {
+  applyReviewTask,
+  beginReviewContinuation,
+  refreshAfterReviewWrite,
+  useAcknowledgeParks,
+  useOnlineStatus,
+  type ReviewContinuation
+} from "../../api/reviewHooks";
 import { getTaskCacheScope, taskKeys, useProjects } from "../../api/taskHooks";
 import type { ProjectResponse, TaskResponse, TaskState } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
@@ -69,6 +76,8 @@ export function WhileYouWereAway({
   const acknowledgeMutation = useAcknowledgeParks();
   const [rows, setRows] = useState<Record<string, RowStatus>>({});
   const [summary, setSummary] = useState<string | null>(null);
+  // "Return all" is in flight, including the moments between two rows.
+  const [returningAll, setReturningAll] = useState(false);
   const [continueFailure, setContinueFailure] = useState<{ referenceId: string | undefined } | null>(null);
   const acknowledgeAttempt = useRef<{ body: string; key: string } | null>(null);
   // A failed return keeps its key, so Retry is a safe replay.
@@ -103,31 +112,40 @@ export function WhileYouWereAway({
   const archived = (task: TaskResponse) => projectOf(task)?.state === "archived";
   const setRow = (taskId: string, status: RowStatus) => setRows((current) => ({ ...current, [taskId]: status }));
 
-  const returnTask = async (task: TaskResponse): Promise<boolean> => {
+  // The account that pressed Return (begun before the first await): an answer
+  // after the session switched account changes no row and writes no cache.
+  const returnTask = async (task: TaskResponse, run: ReviewContinuation = beginReviewContinuation()): Promise<boolean> => {
     if (!projectsKnown) {
       return false;
     }
     const key = returnKeys.current.get(task.id) ?? newIdempotencyKey();
     returnKeys.current.set(task.id, key);
     setRow(task.id, { kind: "returning" });
-    // The account that pressed Return: a late answer is not written to another account's caches.
-    const scope = captureReviewScope();
     try {
       const returned = await apiClient.transitionTask(task.id, { action: "move", to_state: "next", expected_revision: task.revision }, key);
+      if (!run.stillCurrent()) {
+        return false;
+      }
       returnKeys.current.delete(task.id);
-      applyReviewTask(queryClient, returned, scope);
+      applyReviewTask(queryClient, returned, run.scope);
       setRow(task.id, { kind: "returned" });
       return true;
     } catch (error) {
+      if (!run.stillCurrent()) {
+        return false;
+      }
       const { kind, referenceId } = describeReviewError(error);
       if (kind === "stale") {
         returnKeys.current.delete(task.id);
         const current = await apiClient.getTask(task.id).catch(() => null);
+        if (!run.stillCurrent()) {
+          return false;
+        }
         // The caches must not keep the version that lost the race.
         if (current) {
-          applyReviewTask(queryClient, current, scope);
+          applyReviewTask(queryClient, current, run.scope);
         } else {
-          refreshAfterReviewWrite(queryClient, scope);
+          refreshAfterReviewWrite(queryClient, run.scope);
         }
         setRow(task.id, { kind: "stale", current });
       } else {
@@ -145,15 +163,23 @@ export function WhileYouWereAway({
   const candidates = tasks.filter(returnable);
   const eligible = projectsKnown ? candidates : [];
   const anyReturned = tasks.some((task) => rows[task.id]?.kind === "returned");
+  // Continue waits for every return to settle, so it never acknowledges a park mid-return.
+  const returning = returningAll || Object.values(rows).some((status) => status.kind === "returning");
 
   const returnAll = async () => {
+    const run = beginReviewContinuation();
     const alreadyBack = tasks.filter((task) => rows[task.id]?.kind === "returned").length;
     let returnedNow = 0;
+    setReturningAll(true);
     for (const task of eligible) {
-      if (await returnTask(task)) {
+      if (await returnTask(task, run)) {
         returnedNow += 1;
       }
+      if (!run.stillCurrent()) {
+        return;
+      }
     }
+    setReturningAll(false);
     const held = tasks.filter(archived);
     const backInNext = alreadyBack + returnedNow;
     if (held.length > 0) {
@@ -177,11 +203,16 @@ export function WhileYouWereAway({
     if (acknowledgeAttempt.current?.body !== sent) {
       acknowledgeAttempt.current = { body: sent, key: newIdempotencyKey() };
     }
+    const run = beginReviewContinuation();
     acknowledgeMutation.mutate(
       { body, idempotencyKey: acknowledgeAttempt.current.key },
       {
-        onSuccess: () => onDone(true),
-        onError: (error) => setContinueFailure({ referenceId: describeReviewError(error).referenceId })
+        onSuccess: () => {
+          if (run.stillCurrent()) onDone(true);
+        },
+        onError: (error) => {
+          if (run.stillCurrent()) setContinueFailure({ referenceId: describeReviewError(error).referenceId });
+        }
       }
     );
   };
@@ -325,7 +356,7 @@ export function WhileYouWereAway({
             {candidates.length >= 2 ? (
               <button
                 type="button"
-                disabled={!online || !projectsKnown}
+                disabled={!online || !projectsKnown || returningAll}
                 className="min-h-11 rounded-lg border border-slate-200 px-4 font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
                 onClick={() => void returnAll()}
               >
@@ -334,7 +365,7 @@ export function WhileYouWereAway({
             ) : null}
             <button
               type="button"
-              disabled={resolving || acknowledgeMutation.isPending}
+              disabled={resolving || returning || acknowledgeMutation.isPending}
               className="min-h-11 rounded-lg bg-sky-700 px-5 font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
               onClick={confirmSeen}
             >

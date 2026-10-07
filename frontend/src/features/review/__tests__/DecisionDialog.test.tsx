@@ -720,6 +720,36 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     expect(alert).not.toHaveTextContent(/Ref/);
   });
 
+  it.each([
+    ["applied", (task: TaskResponse) => Promise.resolve(decided(task, "first_step", { title: "Measure" }))],
+    ["refused", () => Promise.reject(new ApiError("Server Error", 500, null, "corr_late"))]
+  ])("020-FR-048 020-FR-042 a decision answered (%s) after the session switched account shows, closes and discards nothing", async (_label, answer) => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    let release: () => void = () => undefined;
+    decide.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      release = () => {
+        answer(task).then(resolve, reject);
+      };
+    }));
+    renderDialog(task);
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure");
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    await waitFor(() => expect(decide).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "b@example.test" }, status: "authed" });
+    });
+    await act(async () => release());
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(loadReviewDraft(scope, { kind: "task", taskId: "task-1", formulationId: "form_a" })?.text).toBe("Measure");
+  });
+
   it("020-FR-045 a decision the task's list no longer allows says so with the Ref and no retry", async () => {
     const user = userEvent.setup();
     decide.mockRejectedValueOnce(new ApiError("Bad", 400, { message: "x", detail: { reason: "decision_not_allowed" } }, "corr_7f3a"));

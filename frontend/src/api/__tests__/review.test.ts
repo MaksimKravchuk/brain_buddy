@@ -7,6 +7,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { ApiError, setUnauthorizedHandler } from "../client";
 import {
   applyReviewTask,
+  beginReviewContinuation,
   captureReviewScope,
   getReviewCacheScope,
   refreshAfterReviewWrite,
@@ -516,6 +517,20 @@ describe("020-FR-048 020-FR-042 a review write lands only in the account that st
     });
 
     b.unchanged();
+  });
+
+  it("020-FR-048 a continuation stays current only while the account that began it is signed in", () => {
+    act(() => useAuthStore.setState({ user: userA, status: "authed" }));
+    const run = beginReviewContinuation();
+    expect(run.scope).toEqual(getReviewCacheScope(userA.id));
+    expect(run.stillCurrent()).toBe(true);
+
+    act(() => useAuthStore.setState({ user: { ...userA, email: "renamed@example.test" } }));
+    expect(run.stillCurrent()).toBe(true);
+    act(() => useAuthStore.setState({ user: userB }));
+    expect(run.stillCurrent()).toBe(false);
+    act(() => useAuthStore.setState({ user: null, status: "anon" }));
+    expect(run.stillCurrent()).toBe(false);
   });
 
   it("020-FR-048 applyReviewTask and refreshAfterReviewWrite do nothing for a scope that is no longer signed in", () => {

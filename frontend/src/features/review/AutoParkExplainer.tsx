@@ -14,7 +14,15 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import { describeReviewError, newIdempotencyKey, type ReviewSettings, type ReviewState, type ThresholdDays } from "../../api/review";
-import { reviewKeys, useAcknowledgeExplainer, useOnlineStatus, useReviewClock, useUpdateReviewSettings } from "../../api/reviewHooks";
+import {
+  beginReviewContinuation,
+  reviewKeys,
+  useAcknowledgeExplainer,
+  useOnlineStatus,
+  useReviewClock,
+  useUpdateReviewSettings,
+  type ReviewContinuation
+} from "../../api/reviewHooks";
 import { formatReviewDate } from "./formulation";
 import { ThresholdControl } from "./ReviewSettingsSection";
 
@@ -67,7 +75,7 @@ export function AutoParkExplainer({
     return saved !== null && saved.revision > state.settings.revision ? saved : state.settings;
   };
 
-  const saveThreshold = async (): Promise<void> => {
+  const saveThreshold = async (run: ReviewContinuation): Promise<void> => {
     const server = serverSettings();
     if (threshold === server.threshold_days) {
       return;
@@ -84,19 +92,33 @@ export function AutoParkExplainer({
     } catch (error) {
       // A refused change (changed elsewhere, or anything else) re-reads the
       // state, so Retry is sent against the current revision.
-      void queryClient.invalidateQueries({ queryKey: reviewKeys.state() });
+      if (run.stillCurrent()) {
+        void queryClient.invalidateQueries({ queryKey: reviewKeys.state(run.scope) });
+      }
       throw error;
     }
   };
 
   const record = async () => {
+    // Begun before the first await: if the session switches account while the
+    // threshold is saving, the acknowledgement is never sent (it would go out
+    // with the next account's session and activate auto-park for it).
+    const run = beginReviewContinuation();
     setFailure(null);
     try {
-      await saveThreshold();
+      await saveThreshold(run);
+      if (!run.stillCurrent()) {
+        return;
+      }
       await acknowledgeMutation.mutateAsync({ timeZone, idempotencyKey: acknowledgeKey });
+      if (!run.stillCurrent()) {
+        return;
+      }
       onDone();
     } catch (error) {
-      setFailure({ referenceId: describeReviewError(error).referenceId });
+      if (run.stillCurrent()) {
+        setFailure({ referenceId: describeReviewError(error).referenceId });
+      }
     }
   };
 

@@ -239,6 +239,30 @@ describe("020-FR-051 D-05 auto-park explainer", () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
+  it("020-FR-051 020-FR-042 a threshold saved for one account never chains an acknowledgement after the session switched to another", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    updateSettings.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ ...unseen.settings, threshold_days: 21, owner_park_floor_at: iso(7 * DAY), revision: 2 });
+    }));
+    renderExplainer();
+
+    await user.click(screen.getByRole("button", { name: "Change the number of days" }));
+    await user.click(screen.getByRole("radio", { name: "21 days" }));
+    await user.click(screen.getByRole("button", { name: "Got it" }));
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "b@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+    await act(async () => release());
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("020-FR-045 a failure without a reference shows no empty Ref line", async () => {
     const user = userEvent.setup();
     acknowledge.mockRejectedValueOnce(new Error("socket hang up"));

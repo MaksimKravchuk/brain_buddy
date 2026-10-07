@@ -21,8 +21,7 @@ import { describeReviewError, isDecisionAlreadyUndone, newIdempotencyKey, review
 import type { DecisionRequest, DecisionResponse, DecisionType } from "../../api/review";
 import {
   applyReviewTask,
-  captureReviewScope,
-  isCurrentReviewScope,
+  beginReviewContinuation,
   refreshAfterReviewWrite,
   useDecideTask,
   useOnlineStatus,
@@ -153,19 +152,19 @@ function toastMessage(attempt: Attempt, title: string, keptUntil: string): strin
 async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: DecisionResponse, title: string): Promise<void> {
   // The account that pressed Undo: an answer that arrives after it signed out
   // writes nothing and says nothing to whoever is signed in now.
-  const scope = captureReviewScope();
+  const run = beginReviewContinuation();
   try {
     const undone = await reviewApi.undoDecision(response.decision.id, { expected_task_revision: response.task.revision }, newIdempotencyKey());
-    if (!isCurrentReviewScope(scope)) {
+    if (!run.stillCurrent()) {
       return;
     }
-    applyReviewTask(queryClient, undone.task, scope);
+    applyReviewTask(queryClient, undone.task, run.scope);
     notify(`“${title}” is back as it was`);
   } catch (error) {
-    if (!isCurrentReviewScope(scope)) {
+    if (!run.stillCurrent()) {
       return;
     }
-    refreshAfterReviewWrite(queryClient, scope);
+    refreshAfterReviewWrite(queryClient, run.scope);
     const { kind, referenceId } = describeReviewError(error);
     if (isDecisionAlreadyUndone(error, response.decision.id)) {
       // Already undone (a retry whose first delivery applied, http §3). A 404
@@ -174,6 +173,9 @@ async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: 
     }
     if (kind === "undo_unavailable" || kind === "stale") {
       const current = await apiClient.getTask(response.task.id).catch(() => response.task);
+      if (!run.stillCurrent()) {
+        return;
+      }
       notify(withReference(`Couldn't undo: “${title}” changed on another device. It's in ${LIST_NAMES[current.state]} now.`, referenceId));
       return;
     }
@@ -333,13 +335,18 @@ export function DecisionDialog({
   };
 
   const send = async (attempt: Attempt) => {
-    // The account that sent the decision: a stale answer's refetch is published to its caches only.
-    const scope = captureReviewScope();
+    // The account that sent the decision. An answer that arrives after the
+    // session switched account shows, closes and discards nothing, and a stale
+    // answer's refetch is published to this account's caches only.
+    const run = beginReviewContinuation();
     lastAttempt.current = attempt;
     setPending(attempt.type);
     setFailure(null);
     try {
       const response = await decideMutation.mutateAsync({ taskId: task.id, body: attempt.body, idempotencyKey: attempt.key });
+      if (!run.stillCurrent()) {
+        return;
+      }
       discardDraft();
       const title = (current as TaskResponse).title;
       notify(toastMessage(attempt, title, keepUntil), {
@@ -351,17 +358,23 @@ export function DecisionDialog({
       });
       onClose({ kind: "decided", task: response.task, leftNext: response.task.state !== "next" });
     } catch (error) {
+      if (!run.stillCurrent()) {
+        return;
+      }
       setPending(null);
       const { kind, referenceId } = describeReviewError(error);
       if (kind === "stale") {
         const was = current as TaskResponse;
         const fresh = await apiClient.getTask(task.id).catch(() => null);
+        if (!run.stillCurrent()) {
+          return;
+        }
         // The lists and detail must not keep the obsolete version, or closing
         // would let the person reopen a card for a wording that is gone.
         if (fresh) {
-          applyReviewTask(queryClient, fresh, scope);
+          applyReviewTask(queryClient, fresh, run.scope);
         } else {
-          refreshAfterReviewWrite(queryClient, scope);
+          refreshAfterReviewWrite(queryClient, run.scope);
         }
         setStale({ was, now: fresh });
         setCurrent(fresh);

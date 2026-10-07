@@ -68,6 +68,24 @@ export function isCurrentReviewScope(scope: ReviewWriteScope): boolean {
 }
 
 /**
+ * The rule for every in-flight review continuation (a decision, an Undo, a
+ * return, the explainer's chained save and acknowledgement): begin it before
+ * the first await, and after every await check `stillCurrent()` before doing
+ * anything visible or sending anything further. A continuation whose account
+ * has signed out (or switched) stops: no toast, no Undo, no chained request,
+ * no closing or discarding, no cache write.
+ */
+export interface ReviewContinuation {
+  scope: ReviewWriteScope;
+  stillCurrent: () => boolean;
+}
+
+export function beginReviewContinuation(): ReviewContinuation {
+  const scope = captureReviewScope();
+  return { scope, stillCurrent: () => isCurrentReviewScope(scope) };
+}
+
+/**
  * Put the server's task into the detail and list caches of the account that
  * started the write, then refetch. A late answer for an account that has
  * signed out (or switched) writes nothing: it is not this session's data.

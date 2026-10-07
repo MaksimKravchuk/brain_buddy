@@ -10,7 +10,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { describeReviewError, newIdempotencyKey, THRESHOLD_OPTIONS, type ThresholdDays } from "../../api/review";
-import { useOnlineStatus, useReviewState, useUpdateReviewSettings, useWeeklyReviewEnabled } from "../../api/reviewHooks";
+import { beginReviewContinuation, useOnlineStatus, useReviewState, useUpdateReviewSettings, useWeeklyReviewEnabled } from "../../api/reviewHooks";
 import { SectionCard } from "../../components/ui/SettingsSection";
 import { formatReviewDate } from "./formulation";
 
@@ -87,16 +87,19 @@ export function ReviewSettingsSection(): React.JSX.Element | null {
     attempt.current = { threshold, revision, key };
     setNote(null);
     setFailure(null);
+    const run = beginReviewContinuation();
     update.mutate(
       { body: { threshold_days: threshold, expected_revision: revision }, idempotencyKey: key },
       {
         onSuccess: (saved) => {
+          if (!run.stillCurrent()) return;
           attempt.current = null;
           setNote(
             `Saved. Markers in Next update now. Because of this change, nothing moves to Someday before ${formatReviewDate(saved.owner_park_floor_at as string)}.`
           );
         },
         onError: (error) => {
+          if (!run.stillCurrent()) return;
           setFailure({ referenceId: describeReviewError(error).referenceId });
           void stateQuery.refetch();
         }
