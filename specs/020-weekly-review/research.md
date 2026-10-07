@@ -353,7 +353,8 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
   (`backend/app/container.py:384-392`) wires it without a check, and
   `TaskTitleAutocompleteSettings` (`backend/app/core/config.py:475`) has no validator.
   The STT and reconciler builders degrade the same way. The navigator deliberately
-  differs: `_build_review_navigator_provider(config)` in the container **raises**
+  differs: `_build_review_navigator_provider(config)`, called only by the web app's
+  container build (the CLI builds with the navigator disabled), **raises**
   (naming the variable, never its value) when the provider is `openai` and the key
   variable is unset or empty, when it is `deterministic` outside TEST, or when it is
   unknown. Only `disabled` produces the disabled provider, which the API reports as
@@ -363,7 +364,8 @@ Recorded in spec.md Clarifications "Session 2026-10-06".
   check never reaches users, while a silently disabled navigator would look like a
   product bug. The first failing test of PR-07 is "container build raises without the
   key". Blast radius (campaign 2, kept): the same raise also stops an already-serving
-  machine that restarts during a secrets change, taking every route down; the runbook
+  machine that restarts during a secrets change, taking every route down and the
+  scheduled account purge with it (the manual CLI purge still runs); the runbook
   therefore sets the provider to `disabled` before any key rotation or removal and back
   afterwards (plan rollback section, `.env.example`, ADR-0027 draft §5).
 - **Rationale**: spec Assumptions: reuse the existing provider and cost-cap conventions;

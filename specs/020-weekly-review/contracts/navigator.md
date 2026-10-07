@@ -77,19 +77,50 @@ rule 5 runs on every client after them:
 2. Drop any proposal whose `formulation_key` equals the current title's or any
    `open_task_titles` entry's (FR-019 no duplicates), and duplicates among themselves.
 3. Grounding check (FR-021): drop a proposal containing a **capitalised token
-   (other than the first word), number, currency amount or date expression** that does not occur
-   (case-insensitively, after `formulation_key`) in the input fields. Date expressions
-   include, in any case, the relative dates `tonight`, `tomorrow`, `next week`,
-   `next month`, `this weekend`, `завтра`, `послезавтра` and `на следующей неделе`
-   besides month and weekday names; a phrase must occur whole in one input field.
-   Two prompt-sourced expressions are exempt. `today` and `сегодня`, in any case,
-   because the prompt asks for actions that "could be started today" (§3). A duration
-   of at most 30 minutes, because the prompt asks for actions that "would take under
-   30 minutes" and for "a 2-minute starter step" (§3): ASCII digits for 0–30 joined
-   to or followed by a minute word (`min`, `mins`, `minute`, `minutes`, `мин`, or a
-   word starting `минут`), as in "2-minute", "10 minute", "5 мин", "2 минуты". This is a cheap
-   deterministic backstop; the prompt is the primary control and SC-005 is measured on
-   the evaluation set (§5). Rules 1–4 share the vector file
+   (other than the first word), number, currency amount or date expression** that does
+   not occur in the input fields. Matching is the same on every platform:
+   - **Tokens**: the text is split on whitespace, meaning the characters for which
+     Python's `str.isspace()` is true (Unicode White_Space plus U+001C–U+001F).
+   - **Triggers**: a token is a trigger when its first letter is upper-case and it is
+     not the first token, when it contains a decimal digit (Unicode Nd) or a currency
+     symbol (Sc), or when its `formulation_key` is a date word.
+   - **Finding a term**: the term is the trigger's `formulation_key`. It must occur as
+     whole words in the `formulation_key` of one single input field (the title, the
+     notes, the project name or one sibling title): ` term ` within ` field `. A part
+     of a word does not count ("Ann" is not in "Anna").
+   - **Date words**: the normative table is `date_words` in `validator_vectors.json`.
+     A key is a date word when it equals an English word or a Russian form there, or
+     starts with a Russian stem. That covers month and weekday names in every
+     inflection, plus `tonight`, `tomorrow`, `завтра` and `послезавтра`. English `may`
+     is not in the table because it is the common verb; a capitalised "May" after the
+     first token is already a trigger. The forms of `среда` stay date words although
+     they also mean "environment": dropping such a proposal is the safe side of a
+     backstop, and a task about an environment usually names it in its input, which
+     grounds it.
+   - **Phrases**: `next week`, `next month`, `this weekend` and `на следующей неделе`
+     are terms when they occur as whole words in the `formulation_key` of the whole
+     text. Each must occur whole in one input field.
+   - **Durations are exempt**: a duration of at most 30 minutes is not a trigger,
+     because the prompt asks for actions that "would take under 30 minutes" and for "a
+     2-minute starter step" (§3). The bound is inclusive on purpose. The minute words
+     are `min`, `mins`, `minute`, `minutes`, `мин` and any word starting `минут`. A
+     duration is either:
+     - a token whose key is exactly an ASCII-digit number of at most 30 and one minute
+       word ("2-minute", "10-минутный"); or
+     - a token whose key is exactly such a number, immediately followed by a token
+       whose key's first word is a minute word ("10 minutes", "5 мин", "2 минуты").
+       The two tokens are exempt together.
+
+     Digits are tested after the NFKC step of `formulation_key`, so a fullwidth "２"
+     counts and an Arabic-Indic "٢" does not. "2minute" and "5мин" are one word, so
+     they are not exempt.
+   - **"today"**: `today` and `сегодня` are not date words. They are also exempt from
+     the capital-letter trigger, because the prompt asks for actions that "could be
+     started today" (§3), so the exemption only changes the result for a capitalised
+     "Today" or "Сегодня" after the first token.
+
+   This is a cheap deterministic backstop; the prompt is the primary control and
+   SC-005 is measured on the evaluation set (§5). Rules 1–4 share the vector file
    `backend/tests/fixtures/navigator/validator_vectors.json`.
 4. If ≥ 1 proposal survives → return them (M-05 "partial failure": fewer than 3 shown,
    no message). If none survive and the model returned a clarifying question that
@@ -143,8 +174,11 @@ User content (data role, delimited, never interpolated into instructions):
 <kind>first_step</kind>
 ```
 
-Inside a value, a `<` that would open or close one of these tags (any case or spacing)
-is sent as `&lt;`, so content cannot end its own field or start another.
+Inside a value (title, notes, project name, sibling titles), every `<` is sent as
+`&lt;`, so content cannot end its own field or start another. Escaping runs after
+`reduce_notes`. It does not count toward the 6 003-scalar notes limit, though it does
+count in the token estimate. Shared vectors:
+`backend/tests/fixtures/navigator/prompt_vectors.json`.
 
 For `project_next_action` the instruction's first line is "Propose 1 to 3 first next
 actions for this project."

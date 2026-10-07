@@ -118,6 +118,9 @@ Apple's on-device model never leave the device.
    daemon-thread loop outside tests) calls
    `AccountService.purge_due_accounts()`. Manual/ops entrypoint:
    `python -m app.cli purge-due-accounts`.
+   The CLI never reads the weekly-review navigator key, so the manual purge always
+   runs. The web app does not start with `openai` configured and no key, so the key
+   runbook (provider `disabled` first) also keeps scheduled purges on time.
 5. `purge_account` first durably stamps `deletion_requested_at` (a
    non-destructive marker write that never overwrites an existing timestamp),
    then deletes in a crash-safe, idempotent order — runtime feature-flag

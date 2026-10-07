@@ -622,9 +622,12 @@ already-serving machine with the key missing also fails, which takes every route
 not only the navigator. The runbook line in plan "Migration, deploy order and
 rollback" and in `.env.example` therefore says: set
 `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled` before rotating or removing the key,
-and set it back after the new key is in place. Only the web app builds the provider:
-the operational CLI (`python -m app.cli`, `purge-due-accounts` included) builds with the
-navigator disabled and never reads the key, so account purge never depends on it.
+and set it back after the new key is in place. Only the web app builds the provider.
+The operational CLI (`python -m app.cli`) builds with the navigator disabled and never
+reads the key, so the manual purge (`python -m app.cli purge-due-accounts`) can always
+run. The scheduled purge (`_run_maintenance_sweep`) runs inside the web app, which does
+not start while the key is missing, so the disabled-first runbook step also keeps
+scheduled purges on time.
 
 ### `POST /review/navigator/consent` → 200 / `DELETE /review/navigator/consent` → 204
 
@@ -662,6 +665,9 @@ backstop, which leaves reduced notes unchanged), project name ≤ 500, ≤ 20 ti
  "proposals": ["…", "…"], "clarifying_question": null}
 ```
 
+`notes_truncated` reports only what the server's backstop dropped; a client ORs it with
+its own reduction's flag before showing the hint (contracts/navigator.md §1).
+
 Exactly one of `proposals` (1..3, deduplicated against `open_task_titles` and each
 other by `formulation_key`) or `clarifying_question` is non-null. The server sees at
 most 20 sibling titles, so the full FR-019 "no duplicates" guarantee is completed by the
@@ -685,8 +691,13 @@ it. The sequence is: (1) under `command_lock(owner_id)`, read the owner's
 `reserved_cost_usd += estimate`); release the lock; (2) call the provider with no lock
 held (one overall 8 s deadline, `…_TIMEOUT_SECONDS`, not 8 s per httpx phase); (3) under
 the lock again, settle: replace the reservation with the actual token cost, or release
-it on timeout or failure; any other exception also releases it and then propagates
-(a bug, not `navigator_provider_error`). A reservation never settled
+it on timeout or failure. Any other exception also releases it and then propagates as
+a bug, not as `navigator_provider_error`. It propagates as `NavigatorInternalError`,
+whose message is the original class name only and whose original chain is suppressed,
+so the request middleware's `logger.exception` can never log input or model output
+echoed in an exception's text (FR-044). After a timeout the abandoned call may still
+complete at the provider and be billed although its reservation was released, so the
+daily cap can be exceeded by such calls. A reservation never settled
 (process crash) is released by the next day's row. Test: a provider stub that itself
 takes `command_lock` for another owner neither deadlocks nor waits (the
 `test_review_navigator.py` lock case).
