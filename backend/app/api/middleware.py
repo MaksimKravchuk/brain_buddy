@@ -63,6 +63,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             reset_correlation_id(token)
 
         response.headers[CORRELATION_HEADER] = correlation_id
+        # Nested BaseHTTPMiddleware layers lose stream-reader trace events on
+        # Python 3.11. Keep the required privacy headers in this existing layer.
+        if request.url.path.startswith(
+            (f"{self.api_prefix}/auth/", f"{self.api_prefix}/account/")
+        ):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
         duration_ms = (perf_counter() - start) * 1000
         log = self.logger.warning if response.status_code >= 400 else self.logger.info
         log(

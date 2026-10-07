@@ -222,6 +222,24 @@ INVARIANTS: tuple[Invariant, ...] = (
         "Feature-019 traceability must execute in the authoritative spec gate; "
         "unit-testing the validator alone cannot prove requirement coverage.",
     ),
+    MustMatch(
+        "Makefile",
+        "check-specs runs CLI requirement coverage",
+        r"^check-specs:(?:\n\t[^\n]*)*?\n\tpython3 scripts/check_requirement_coverage\.py specs/024-agent-cli[ \t]*$",
+        "Feature-023 traceability must run unfiltered in the authoritative spec gate.",
+    ),
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "Full CI requires cli-native",
+        r"^  full-ci:\n(?:    [^\n]*\n)*    needs:\n(?:      - [^\n]+\n)*      - cli-native[ \t]*$",
+        "All five native targets are a required CI dependency.",
+    ),
+    MustMatch(
+        ".github/workflows/ci.yml",
+        "Full CI requires cli-artifacts",
+        r"^  full-ci:\n(?:    [^\n]*\n)*    needs:\n(?:      - [^\n]+\n)*      - cli-artifacts[ \t]*$",
+        "Exact-source release artifact aggregation is required before Full CI passes.",
+    ),
     MustNotMatch(
         "Makefile",
         "no slice-filtered requirement coverage in the gates",

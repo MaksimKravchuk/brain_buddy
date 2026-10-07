@@ -38,6 +38,7 @@ services:
       # the manifest token, so a stack that moved cannot let a stale
       # confirmation hand an agent an address BrainBuddy no longer answers on.
       BRAIN_BUDDY_PUBLIC_BASE_URL: ${BRAIN_BUDDY_PUBLIC_BASE_URL:-}
+      BRAIN_BUDDY_CLI_VERIFICATION_ORIGIN: ${BRAIN_BUDDY_CLI_VERIFICATION_ORIGIN:-}
     volumes:
       - backend-data:/app/data
     ports:

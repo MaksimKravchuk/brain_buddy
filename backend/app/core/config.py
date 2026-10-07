@@ -997,11 +997,56 @@ def _build_modern_auth_settings() -> ModernAuthSettings:
     return ModernAuthSettings.model_validate({**values, "keyring": keyring})
 
 
+def _cli_verification_origin(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError("CLI verification origin is invalid.") from exc
+    if (
+        not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path
+        or parts.query
+        or parts.fragment
+        or parts.scheme not in {"http", "https"}
+        or (
+            parts.scheme == "http"
+            and parts.hostname not in {"localhost", "127.0.0.1", "::1"}
+        )
+        or any(character.isspace() for character in value)
+        or "\\" in value
+        or "?" in value
+        or "#" in value
+        or port == 0
+    ):
+        raise ValueError("CLI verification origin must be a trusted bare HTTPS origin.")
+    host = parts.hostname.lower()
+    try:
+        ip_address(host)
+    except ValueError:
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host):
+            raise ValueError("CLI verification origin hostname is invalid.") from None
+    if ":" in host:
+        host = "[" + host + "]"
+    default_port = 443 if parts.scheme == "https" else 80
+    return (
+        parts.scheme
+        + "://"
+        + host
+        + (f":{port}" if port is not None and port != default_port else "")
+    )
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
     environment: AppEnvironment = Field(default=AppEnvironment.DEVELOPMENT)
     api_prefix: str = Field(default="/api")
+    cli_verification_origin: str = ""
     mcp_enabled: bool = False
     mcp_allowed_hosts: list[str] = Field(
         default_factory=lambda: ["localhost:*", "127.0.0.1:*", "[::1]:*"]
@@ -1020,6 +1065,20 @@ class AppConfig(BaseModel):
     admin: AdminSettings = Field(default_factory=AdminSettings)
 
     model_config = ConfigDict(frozen=True)
+
+    @field_validator("cli_verification_origin")
+    @classmethod
+    def _validate_cli_origin(cls, value: str) -> str:
+        return _cli_verification_origin(value)
+
+    @model_validator(mode="after")
+    def _require_secure_cli_origin(self) -> AppConfig:
+        if (
+            self.environment == AppEnvironment.PRODUCTION
+            and self.cli_verification_origin.startswith("http:")
+        ):
+            raise ValueError("Production CLI verification requires HTTPS.")
+        return self
 
     @property
     def data_dir(self) -> Path:
@@ -1387,6 +1446,7 @@ def _build_config() -> AppConfig:
     return AppConfig(
         environment=environment,
         api_prefix=api_prefix,
+        cli_verification_origin=os.getenv("BRAIN_BUDDY_CLI_VERIFICATION_ORIGIN", ""),
         mcp_enabled=os.getenv("BRAIN_BUDDY_MCP_ENABLED", "").strip() == "1",
         mcp_allowed_hosts=[
             host.strip()

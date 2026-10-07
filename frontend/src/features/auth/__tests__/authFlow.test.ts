@@ -14,6 +14,7 @@ describe("023-FR-015/021 provider client proof and restricted destinations", () 
     saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination: "/", expiresAt: Date.now() + 60000 });
     history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${token}&grant=${token}`);
     const result = takeProviderCallback();
+    if (!("request" in result)) throw new Error("Expected a successful handoff");
     expect(location.hash).toBe("");
     expect(result.request.handoff_code).toBe(token);
     expect(result.request.client_verifier).toBe("v".repeat(43));
@@ -27,5 +28,15 @@ describe("023-FR-015/021 provider client proof and restricted destinations", () 
     expect(safeAuthDestination("//evil.example")).toBe("/");
     expect(safeAuthDestination("/settings/account/delete?expected_owner=A")).toBe("/settings/account/delete?expected_owner=A");
     expect(safeAuthDestination("/settings/account?redirect=https://evil.example")).toBe("/settings/account");
+  });
+  it.each(["state", "duplicate", "both", "unknown", "expired"])("rejects an invalid cancellation %s before returning a saved destination", failure => {
+    const token = "a".repeat(43);
+    saveProviderAttempt({ attemptId: token, state: token, verifier: "v".repeat(43), purpose: "login", destination: "/cli/authorize", expiresAt: Date.now() + (failure === "expired" ? -1 : 60000) });
+    const state = failure === "state" ? "b".repeat(43) : token;
+    const error = failure === "unknown" ? "unsafe-description" : "cancelled";
+    const extra = failure === "duplicate" ? "&error=cancelled" : failure === "both" ? `&grant=${token}` : "";
+    history.replaceState(null, "", `/auth/complete#attempt=${token}&state=${state}&error=${error}${extra}`);
+    expect(() => takeProviderCallback()).toThrow();
+    expect(location.hash).toBe(""); expect(sessionStorage.length).toBe(0);
   });
 });
