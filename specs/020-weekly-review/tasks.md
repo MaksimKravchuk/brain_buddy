@@ -616,6 +616,19 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
   date, work on them does not continue on the expired acceptance: first either the
   owner re-accepts (a new dated `founder_acceptance` record with its own expiry) or a
   targeted planning review is re-run over the artifacts the remaining slices rely on.
+- **Deferred review findings (PR-12).** From 2026-10-07, by the owner's decision, open
+  slices take only P1 review findings before merge. The P2s below are not lost; PR-12
+  triages each one into a task or drops it with a reason:
+  - web (#277): wrap a malformed JSON body from a review endpoint in `ApiError` with
+    its correlation id; block decision-dialog dismissal (Close, scrim, Escape) until a
+    save settles; While-you-were-away freshness tracks a post-mount settle rather than
+    comparing millisecond timestamps; a Return whose 409 re-read also fails shows an
+    unknown state with Retry, not "Now in Someday / maybe";
+  - backend (#278): replay repair in `_complete_session` keeps the recorded activity
+    time for `last_activity_at` instead of the retry time;
+  - carried over: the iOS visible-content staleness check, the design.md M-02 copy
+    amendment, a PR-04 deviations line, the TR-005 message, and the
+    `/review/decisions/{id}/undo` path parameter taking the reference shape.
 
 ## Disposition traceability
 

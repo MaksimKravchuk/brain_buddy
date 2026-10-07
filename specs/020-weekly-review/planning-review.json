@@ -150,7 +150,7 @@
         "advisory": 2
       },
       "resolution": "All 3 fixed in the commit that records this entry, each with a failing test first: (P1) the SC-005 cloud share counts decisions and shown requests from the later of --since and the oldest retained navigator_usage day and prints that day when it is later (plan.md); (P2) the session path ids take the session reference shape and the bulk-release Undo id the bulk reference shape, any other shape 422 before any lookup (http Client-supplied ids); (P2) the decision snapshot is null until taken and an empty snapshot stays taken (http §6 Queues, data-model E3).",
-      "artifacts_digest_after_fixes": "84364a3370116aa9b4457d7e98b28247c44794c0c27365b974527619122c52a3"
+      "artifacts_digest_after_fixes": "64bc29a3c31aefbdc116efbf74df98c34ff718d1b267354e7e9247b7a545f095"
     }
   }
 }
