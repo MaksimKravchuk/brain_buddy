@@ -245,6 +245,34 @@ import Testing
         #expect(workspace.task(task)?.state == .someday)
     }
 
+    @Test("020-FR-011 a subtask added after the card opened stays a change once the server acknowledged it")
+    func childEditCountSurvivesAcknowledgement() async throws {
+        let world = World()
+        let (_, workspace) = try await signedInDevice(world)
+        let task = try nextTask("Renovate the bathroom", in: workspace)
+        await workspace.syncNow()
+        world.clock.advance(by: 15 * Self.day)
+        await workspace.syncNow()
+
+        let shown = workspace.shownTask(of: try #require(workspace.task(task)))
+        #expect(shown.localChildEdits == 0)
+        _ = try workspace.addSubtask(to: task, title: "Measure the wall")
+        #expect(workspace.shownTask(of: try #require(workspace.task(task))).localChildEdits == 1)
+        // The sync acknowledges the subtask and rebuilds the state from the new base.
+        await workspace.syncNow()
+        await workspace.flush()
+        #expect(workspace.document.outbox.isEmpty, "acknowledged")
+        let current = try #require(workspace.task(task))
+        #expect(current.subtasks.first?.serverID != nil)
+        #expect(workspace.shownTask(of: current).localChildEdits == 1, "the count survives acknowledgement and replay")
+
+        #expect(throws: GTDValidationError.formulationChanged) {
+            try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: shown)
+        }
+        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: workspace.shownTask(of: current))
+        #expect(workspace.task(task)?.state == .someday)
+    }
+
     @Test("020-FR-042 020-FR-052 with the review switched off a decision is refused: nothing applied or queued, the draft kept")
     func decideRefusedWhileHidden() async throws {
         let clock = TestClock()

@@ -30,6 +30,12 @@ extension Workspace {
         return review.isExposed
     }
 
+    /// The task as a decision card or form shows it now (FR-011), with this
+    /// device's child edits on it; pass it to `decide(expectedTask:)`.
+    public func shownTask(of task: TaskRecord) -> ShownTask {
+        ShownTask(task, localChildEdits: localChildEdits[task.id] ?? 0)
+    }
+
     /// Core's exposure input (`ReviewState.accountlessReleaseSwitch`): the
     /// account-less release switch, nil when signed in (the pulled
     /// `review.server.exposed`, persisted in the base, decides).

@@ -277,6 +277,15 @@ public struct GTDState: Hashable, Sendable, Codable {
     public var tags: [TagID: TagRecord]
     /// The weekly review's records (spec 020, data-model E10).
     public var review: ReviewState
+    /// FR-011: how many child edits (subtask create, edit, complete, reopen,
+    /// cancel; comment add, edit) a person made per task on this device. Nil
+    /// means not tracked. The workspace hands its counters in for an
+    /// interactive apply and takes them back after; the reducer counts each
+    /// interactive child command and compares the count in the stale-
+    /// decision check. Replay, acknowledgement and hydration never change
+    /// it, so it only grows while a card is open. A device input, never
+    /// encoded or kept in the workspace's `state`.
+    public var localChildEdits: [TaskID: Int]? = nil
 
     public init(
         tasks: [TaskID: TaskRecord] = [:], projects: [ProjectID: ProjectRecord] = [:],

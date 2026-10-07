@@ -134,7 +134,7 @@ struct DecisionCardSheet: View {
 
     private func recordOpenedWording() {
         guard opened == nil, let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: ShownTask(task))
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: workspace.shownTask(of: task))
     }
 
     private func showsStale(_ task: TaskRecord) -> Bool {
@@ -149,7 +149,7 @@ struct DecisionCardSheet: View {
 
     private func decideAgain() {
         guard let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: ShownTask(task))
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: workspace.shownTask(of: task))
         isStale = false
         problem = nil
     }

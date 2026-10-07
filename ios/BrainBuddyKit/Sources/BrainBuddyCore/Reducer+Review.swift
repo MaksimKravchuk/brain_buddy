@@ -82,7 +82,11 @@ extension GTDReducer {
         // the card showed it (`ShownTask`: notes, dates, project, tags, a cosmetic
         // title edit, subtasks, comments) is stale. Replay leaves this
         // to the server's `expected_revision` and yield rule (http §3).
-        if mode == .interactive, let shown = command.expectedTask, !shown.matches(task) { throw .formulationChanged }
+        if mode == .interactive, let shown = command.expectedTask,
+            !shown.matches(task, localChildEdits: state.localChildEdits.map { $0[task.id] ?? 0 })
+        {
+            throw .formulationChanged
+        }
         let settings = clockSettings(state)
         var yielded = false
         /// The clock before the park is not on this device (another device or

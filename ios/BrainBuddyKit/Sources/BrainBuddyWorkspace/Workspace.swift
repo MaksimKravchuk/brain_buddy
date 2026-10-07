@@ -77,6 +77,10 @@ public final class Workspace {
     @ObservationIgnored var networkIsAvailable = true
     /// The account-less release switch (`BBWeeklyReviewLocal`, ios-commands §8).
     @ObservationIgnored public var accountlessReviewEnabled = false
+    /// This device's child edits per task since launch (`GTDState.localChildEdits`):
+    /// only grows, so acknowledgement, compaction and replay never move it.
+    /// In memory only: no decision card stays open across a relaunch.
+    @ObservationIgnored var localChildEdits: [TaskID: Int] = [:]
     /// The device's current zone (`TimeZone.current`; tests inject one).
     @ObservationIgnored public var deviceTimeZone: @Sendable () -> TimeZone = { TimeZone.current }
     /// Issues the user dismissed that are not removed on disk yet.
@@ -559,10 +563,15 @@ extension Workspace {
         // refuses a person's review actions while it is hidden); never kept
         // in `state` or stored.
         next.review.accountlessReleaseSwitch = accountlessReleaseSwitch
+        // This device's child-edit counts (FR-011): Core counts and compares
+        // them during the apply; they live here, not in `state`.
+        next.localChildEdits = localChildEdits
         for command in commands {
             try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
         }
         next.review.accountlessReleaseSwitch = nil
+        localChildEdits = next.localChildEdits ?? localChildEdits
+        next.localChildEdits = nil
         ReviewActivation.apply(
             to: &next, activatedAt: next.review.settings.activatedAt ?? local.activatedAt,
             startsMissingClocks: next.review.server == nil
@@ -825,6 +834,7 @@ extension Workspace {
         unpersisted = []
         pendingDismissals = []
         pendingEdits = []
+        localChildEdits = [:]
         deferredDocument = nil
         document = StoreDocument()
         syncStartedFor = nil

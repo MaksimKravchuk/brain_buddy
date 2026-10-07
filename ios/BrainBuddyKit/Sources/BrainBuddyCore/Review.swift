@@ -364,11 +364,12 @@ public struct TaskStamp: Hashable, Sendable, Codable {
 /// task's detail was read (a pulled task, `childrenSyncedAt == nil`) the
 /// device may hold only some children: then the children the card showed
 /// must be unchanged (present, same title, state and relative order, same
-/// comment body), a child created on this device since (no server id yet) is
-/// a change, and children with a server id that it did not show (the ones
-/// hydration fills in) are not. A child another device created and this one
-/// first sees through hydration cannot be told from one that already
-/// existed. Never encoded or stored.
+/// comment body), and children it did not show (the ones hydration fills in)
+/// are not a change. Every child edit made on this device since the card
+/// opened is a change whatever its acknowledgement state: the device's
+/// child-edit count (`GTDState.localChildEdits`) must be what the card saw.
+/// A child another device created before this one hydrated the task cannot
+/// be told from one that already existed. Never encoded or stored.
 public struct ShownTask: Hashable, Sendable {
     /// The task's own revision and `updatedAt`.
     public var stamp: TaskStamp
@@ -378,12 +379,23 @@ public struct ShownTask: Hashable, Sendable {
     public var childrenKnown: Bool
     public var subtasks: [SubtaskRecord]
     public var comments: [CommentRecord]
+    /// This device's child edits on the task when the card opened
+    /// (`GTDState.localChildEdits`).
+    public var localChildEdits: Int
 
-    public init(_ task: TaskRecord) {
+    public init(_ task: TaskRecord, localChildEdits: Int = 0) {
+        self.localChildEdits = localChildEdits
         stamp = TaskStamp(task)
         childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
         subtasks = Self.visible(task.subtasks)
         comments = Self.visible(task.comments)
+    }
+
+    /// `localChildEdits`: this device's child edits on the task now, nil when
+    /// not tracked.
+    public func matches(_ task: TaskRecord?, localChildEdits current: Int?) -> Bool {
+        if let current, current != localChildEdits { return false }
+        return matches(task)
     }
 
     public func matches(_ task: TaskRecord?) -> Bool {
@@ -393,17 +405,9 @@ public struct ShownTask: Hashable, Sendable {
         if childrenKnown { return currentSubtasks == subtasks && currentComments == comments }
         // Before full hydration: every child the card did show must still be
         // there as shown (a missing one was deleted elsewhere: hydration
-        // drops a cached child only when the server no longer lists it). A
-        // child it did not show is a change when it was created on this
-        // device (no server id until acknowledged); one with a server id is
-        // what hydration or a sync brought in.
-        let shownSubtaskIDs = Set(subtasks.map(\.id))
-        let shownCommentIDs = Set(comments.map(\.id))
-        if task.subtasks.contains(where: { $0.serverID == nil && !shownSubtaskIDs.contains($0.id) })
-            || task.comments.contains(where: { $0.serverID == nil && !shownCommentIDs.contains($0.id) })
-        {
-            return false
-        }
+        // drops a cached child only when the server no longer lists it).
+        // Children it did not show are what hydration or a sync brought in;
+        // this device's own child edits are caught by the child-edit count.
         let byID = Dictionary(currentSubtasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for shown in subtasks {
             guard let current = byID[shown.id], current.title == shown.title, current.state == shown.state else {

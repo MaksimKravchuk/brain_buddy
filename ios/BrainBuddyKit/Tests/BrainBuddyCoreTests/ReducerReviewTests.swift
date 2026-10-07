@@ -425,23 +425,89 @@ struct ReducerReviewTests {
         #expect(hydrated.tasks["t1"]?.state == .someday, "children the card did not show are not a change; relative order kept")
     }
 
-    @Test("020-FR-011 before full hydration a child created on this device since the card opened is a change; one hydration brings is not")
-    func newLocalChildBeforeHydration() throws {
+    /// `decide` with the card's snapshot taken with this device's child-edit count.
+    private func decide(_ type: DecisionType, shown: ShownTask, taskID: TaskID = "t1") -> GTDCommand {
+        .decideTask(
+            .init(
+                decisionID: Review.decision(1), taskID: taskID, type: type, formulationID: Review.form(1),
+                expectedTask: shown
+            )
+        )
+    }
+
+    @Test("020-FR-011 a child this device creates or edits after the card opened makes the decision stale, acknowledged or not")
+    func localChildEditsAreCounted() throws {
         var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
         cached.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
-        #expect(cached.childrenSyncedAt == nil)
-        let creates: [(String, GTDCommand)] = [
+        #expect(cached.childrenSyncedAt == nil, "not fully hydrated")
+        let edits: [(String, GTDCommand)] = [
             ("subtask created in another window", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
             ("comment added in another window", .createComment(.init(taskID: "t1", commentID: "c2", body: "Tiles are in"))),
         ]
-        for (what, create) in creates {
+        for (what, edit) in edits {
+            // Tracked, as the workspace does: the card captures the count.
             var state = Review.state([cached])
-            let shown = try #require(state.tasks["t1"])
-            try Review.apply(create, at: Review.now, to: &state)
-            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+            state.localChildEdits = [:]
+            let shown = ShownTask(try #require(state.tasks["t1"]), localChildEdits: 0)
+            try Review.apply(edit, at: Review.now, to: &state)
+            #expect(state.localChildEdits?["t1"] == 1, "\(what): counted")
+            var unsent = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &unsent) } == .formulationChanged, "\(what), not acknowledged")
+
+            // The server acknowledges it before the decision: it now carries a
+            // server id, like a child hydration brought in; the count still says.
+            var acknowledged = state
+            if let index = acknowledged.tasks["t1"]?.subtasks.firstIndex(where: { $0.id == "s2" }) {
+                acknowledged.tasks["t1"]?.subtasks[index].serverID = "subtask_2"
+                acknowledged.tasks["t1"]?.subtasks[index].serverRevision = 1
+            }
+            if let index = acknowledged.tasks["t1"]?.comments.firstIndex(where: { $0.id == "c2" }) {
+                acknowledged.tasks["t1"]?.comments[index].serverID = "comment_2"
+                acknowledged.tasks["t1"]?.comments[index].serverRevision = 1
+            }
+            #expect(
+                Review.error { try Review.apply(decide(.someday, shown: shown), to: &acknowledged) } == .formulationChanged,
+                "\(what), acknowledged"
+            )
         }
 
-        // Hydration brings existing server children (they carry server ids): applies.
+        // Replay never counts: acknowledgement and recompute keep the device's count.
+        var replayed = Review.state([cached])
+        replayed.localChildEdits = [:]
+        try Review.apply(.createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles")), to: &replayed, mode: .replay)
+        #expect(replayed.localChildEdits?["t1"] == nil)
+        // Untracked states (nil) are never counted.
+        var untracked = Review.state([cached])
+        try Review.apply(.createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles")), to: &untracked)
+        #expect(untracked.localChildEdits == nil)
+
+        // No child edit since the card opened, hydration bringing existing children: applies.
+        var hydrated = Review.state([cached])
+        hydrated.localChildEdits = ["t1": 3]
+        let shownBefore = ShownTask(try #require(hydrated.tasks["t1"]), localChildEdits: 3)
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 1)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shownBefore), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday)
+
+        // The shown child edited by sync is still caught after hydration.
+        var synced = Review.state([cached])
+        synced.localChildEdits = [:]
+        let shownSynced = ShownTask(try #require(synced.tasks["t1"]), localChildEdits: 0)
+        synced.tasks["t1"]?.subtasks[0].state = .completed
+        synced.tasks["t1"]?.childrenSyncedAt = Review.now
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shownSynced), to: &synced) } == .formulationChanged)
+    }
+
+    @Test("020-FR-011 before full hydration a child hydration brings is not a change")
+    func hydratedChildrenBeforeHydration() throws {
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        #expect(cached.childrenSyncedAt == nil)
+
+        // Hydration brings existing server children: applies.
         var hydrated = Review.state([cached])
         let shown = try #require(hydrated.tasks["t1"])
         hydrated.tasks["t1"]?.subtasks.append(
