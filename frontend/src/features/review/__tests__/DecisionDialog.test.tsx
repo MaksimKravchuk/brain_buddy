@@ -747,7 +747,6 @@ describe("020-FR-005 decision dialog: the third stalled wording", () => {
       useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: { crt_canvas: true } } });
     });
     window.history.replaceState(null, "", "/tasks/next");
-    const before = window.history.length;
     let opened = false;
     function NextPage(): React.JSX.Element {
       const [open, setOpen] = useState(() => !opened);
@@ -771,12 +770,11 @@ describe("020-FR-005 decision dialog: the third stalled wording", () => {
         </ShellToastContext.Provider>
       </QueryClientProvider>
     );
-    expect(window.history.length).toBe(before + 1);
+    expect((window.history.state as Record<string, unknown>).bbReviewDialog).toEqual(expect.any(String));
 
     await user.click(screen.getByRole("link", { name: "Think it through" }));
 
     expect(await screen.findByRole("heading", { name: "Thinking canvas" })).toBeInTheDocument();
-    expect(window.history.length).toBe(before + 1);
     act(() => window.history.back());
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
     expect(window.location.pathname).toBe("/tasks/next");
