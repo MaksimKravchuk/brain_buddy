@@ -1,288 +1,397 @@
+import AuthenticationServices
+import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddySync
 import BrainBuddyWorkspace
 import Foundation
 import SwiftUI
 import UIKit
 
-/// Signs in to a Brain Buddy server. Local data is uploaded to the account
-/// and merged; nothing on the device is lost if signing in fails.
-///
-/// Signing in again after a session ended (an account is still linked) is
-/// locked to that account's email and server: the device's tasks belong to
-/// it, so another account means signing out first.
+/// Modern methods collect proof in memory; Workspace validates the immutable
+/// owner and durable local work before installing any candidate session.
 struct SignInSheet: View {
-    private enum Field: Hashable {
-        case email, password, server
-    }
-
+    private enum Step { case choice, password, recovery, code, newPassword, collision }
+    private enum Field: Hashable { case email, password, code, newPassword, repeatPassword, server }
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.dismiss) private var dismiss
-
+    @State private var coordinator = ModernAuthCoordinator()
+    @State private var step: Step = .choice
     @State private var email: String
     @State private var password = ""
+    @State private var repeatedPassword = ""
+    @State private var code = ""
     @State private var serverAddress: String
     @State private var showsAdvanced: Bool
-    @State private var isSigningIn = false
+    @State private var methods: AuthMethodsDTO?
+    @State private var availabilityFailed = false
+    @State private var isBusy = false
     @State private var failureMessage: String?
     @State private var failureReferenceID: String?
-    /// Shown after a sign-in that cancelled a pending account deletion.
+    @State private var notice: String?
+    @State private var attempt: NativeSignInAttempt?
+    @State private var proof: ModernAuthCoordinator.Proof?
+    @State private var challenge: AuthChallengeDTO?
+    @State private var recovery = false
+    @State private var resetGrant: String?
+    @State private var resetExpiry: Date?
+    @State private var operation: Task<Void, Never>?
+    @State private var operationID = UUID()
     @State private var showsDeletionCancelledNotice = false
-    /// The linked account (if any) when Sign in was pressed, and whether it
-    /// worked: once signed in the form keeps showing what was submitted
-    /// while the sheet closes, instead of switching to the new account's state.
-    @State private var accountAtSubmit: LinkedAccount?
-    @State private var hasSignedIn = false
-    @FocusState private var focusedField: Field?
+    @FocusState private var focused: Field?
 
-    /// `email` and `serverURL` prefill the form, for example when a session expired.
     init(email: String = "", serverURL: URL? = nil) {
-        let defaultAddress = SignInServerAddress.defaultString
-        let address = serverURL?.absoluteString ?? defaultAddress
+        let address = serverURL?.absoluteString ?? SignInServerAddress.defaultString
         _email = State(initialValue: email)
         _serverAddress = State(initialValue: address)
-        _showsAdvanced = State(initialValue: address != defaultAddress)
+        _showsAdvanced = State(initialValue: address != SignInServerAddress.defaultString)
+    }
+
+    private var serverURL: URL? {
+        workspace.account?.serverURL ?? BrainBuddyAPI.serverURL(from: SignInServerAddress.url(from: serverAddress)?.absoluteString ?? "")
+    }
+    private var isOnline: Bool {
+        if case .offline = workspace.syncStatus { return false }
+        return coordinator.isOnline
+    }
+    private var api: BrainBuddyAPIClient? {
+        serverURL.map { BrainBuddyAPIClient(baseURL: $0, tokenStore: InMemorySessionTokenStore()) }
+    }
+    private var privacyURL: URL? {
+        guard let origin = methods?.webAccountOrigin,
+            let url = NativeAccountDestination.url(origin: origin, ownerID: "privacy", deleting: false),
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.path = "/privacy"
+        components.query = nil
+        return components.url
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                introSection
-                if let failureMessage {
-                    failureSection(failureMessage)
+                Section {
+                    Text(workspace.account == nil ? "Sign in or create an account" : "Sign in again")
+                        .font(.headline)
+                    Text("Your local tasks are kept if sign-in fails. Signing in merges them with your account.")
+                        .font(BBFont.secondary).foregroundStyle(BBColor.textSecondary)
+                    if let account = workspace.account {
+                        Text("Use the account linked to this iPhone. Sign out first to use another account.")
+                            .font(BBFont.secondary)
+                        LabeledContent("Server", value: SettingsScreen.hostDescription(account.serverURL))
+                    }
+                    if !isOnline { Text("Your local tasks are kept. Connect to the internet to sign in.") }
+                    if let notice { Text(notice).accessibilityAddTraits(.updatesFrequently) }
                 }
-                credentialsSection
-                advancedSection
+                if let failureMessage {
+                    Section {
+                        EditorValidationMessage(text: failureMessage)
+                        if let failureReferenceID { Text("Reference ID: \(failureReferenceID)").font(.footnote.monospaced()).textSelection(.enabled) }
+                    }
+                }
+                entrySection
+                if workspace.account == nil, step == .choice || step == .password || step == .recovery {
+                    Section {
+                        DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
+                            TextField("Server address", text: $serverAddress)
+                                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                                .focused($focused, equals: .server).frame(minHeight: 44)
+                            Text("Use an https address. http works only for localhost, during development.").font(BBFont.meta)
+                            Button("Use the default server") { serverAddress = SignInServerAddress.defaultString }.frame(minHeight: 44)
+                        }
+                    }.disabled(isBusy)
+                }
+                if let privacyURL { Section { Link("Privacy policy", destination: privacyURL).frame(minHeight: 44) } }
             }
-            .navigationTitle("Sign in")
+            .navigationTitle(step == .recovery || step == .newPassword ? "Reset your password" : "Sign in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isSigningIn)
+                    Button("Cancel") { cancelAndDismiss() }.frame(minHeight: 44)
                 }
             }
-            .safeAreaInset(edge: .bottom) { signInButton }
-            .onAppear {
-                focusedField = linkedAccount == nil && email.isEmpty ? Field.email : Field.password
-            }
+            .task(id: serverURL) { await loadMethods() }
+            .onAppear { focused = .email }
+            .onDisappear { cancelCurrentOperation(); coordinator.stopMonitoring() }
         }
-        .interactiveDismissDisabled(isSigningIn || showsDeletionCancelledNotice)
+        .interactiveDismissDisabled(isBusy || showsDeletionCancelledNotice)
         .alert("Your account deletion was cancelled", isPresented: $showsDeletionCancelledNotice) {
-            Button("OK") {
-                workspace.acknowledgeAccountDeletionNotice()
-                dismiss()
-            }
+            Button("OK") { workspace.acknowledgeAccountDeletionNotice(); dismiss() }
         } message: {
-            Text(
-                "Signing in cancels a deletion you requested in the last 14 days. Delete your account again on the web if you still want to."
-            )
+            Text("Your tasks are kept. Signing in cancels a deletion requested in the last 14 days. Delete your account again on the web if you still want to.")
         }
     }
 
-    /// The account this device is linked to while its session has ended
-    /// (signing in again), or nil for a first sign-in.
-    private var linkedAccount: LinkedAccount? {
-        hasSignedIn ? accountAtSubmit : workspace.account
-    }
-
-    // MARK: Sections
-
-    private var introSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: BBSpacing.s2) {
-                Text("Sync with Brain Buddy on the web")
-                    .font(.headline)
-                    .foregroundStyle(BBColor.textPrimary)
-                Text(introExplanation)
+    @ViewBuilder private var entrySection: some View {
+        switch step {
+        case .choice:
+            Section {
+                if methods?.google == true { action("Continue with Google") { startProvider(.google) } }
+                if methods?.apple == true {
+                    Button { startProvider(.apple) } label: {
+                        Label("Sign in with Apple", systemImage: "apple.logo").frame(maxWidth: .infinity, minHeight: 44)
+                    }.disabled(isBusy || !isOnline)
+                }
+                if methods == nil {
+                    Text(availabilityFailed ? "Couldn't load sign-in methods. Try again or use your password." : "Loading sign-in methods…")
+                    Button("Retry") { Task { await loadMethods() } }.frame(minHeight: 44).disabled(isBusy || !isOnline)
+                }
+                if methods?.email == true {
+                    emailField
+                    action("Continue with email", enabled: !email.isEmpty) { requestCode(recovering: false) }
+                }
+                Button("Use your password") { step = .password; focused = .email }.frame(minHeight: 44).disabled(isBusy)
+            }
+        case .password:
+            Section {
+                emailField
+                SecureField("Password", text: $password).textContentType(.password).focused($focused, equals: .password)
+                    .frame(minHeight: 44).onSubmit { passwordSignIn() }
+                action("Sign in", enabled: !email.isEmpty && !password.isEmpty) { passwordSignIn() }
+                Button("Forgot password?") { password = ""; step = .recovery; focused = .email }.frame(minHeight: 44).disabled(isBusy)
+                backButton
+            }.disabled(isBusy)
+        case .recovery:
+            Section {
+                emailField
+                Text("If this address can be used, you'll receive a code. For an older unverified account, use its existing password and verify your email in account settings.")
                     .font(BBFont.secondary)
-                    .foregroundStyle(BBColor.textSecondary)
-            }
-            .padding(.vertical, BBSpacing.s1)
-            .accessibilityElement(children: .combine)
-        }
-    }
-
-    private var introExplanation: String {
-        if linkedAccount != nil {
-            return "Your session ended. Sign in again to keep syncing — your changes are kept on this \(ThisDevice.name) until then."
-        }
-        return "What you've added on this \(ThisDevice.name) is uploaded to your account and merged with what's already there."
-    }
-
-    private func failureSection(_ message: String) -> some View {
-        Section {
-            VStack(alignment: .leading, spacing: 6) {
-                EditorValidationMessage(text: message)
-                if let failureReferenceID {
-                    Text("Reference ID: \(failureReferenceID)")
-                        .font(.footnote.monospaced())
-                        .foregroundStyle(BBColor.textTertiary)
-                        .textSelection(.enabled)
-                }
-            }
-        }
-    }
-
-    private var credentialsSection: some View {
-        Section {
-            if let account = linkedAccount {
-                // Locked: the tasks on this device belong to this account.
-                LabeledContent("Email", value: account.email)
-                    .textSelection(.enabled)
-                LabeledContent("Server", value: SettingsScreen.hostDescription(account.serverURL))
-            } else {
-                TextField("Email", text: $email)
-                    .textContentType(.username)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .email)
-                    .onSubmit { focusedField = .password }
-            }
-            SecureField("Password", text: $password)
-                .textContentType(.password)
-                .submitLabel(.go)
-                .focused($focusedField, equals: .password)
-                .onSubmit { signIn() }
-        } footer: {
-            if linkedAccount != nil {
-                VStack(alignment: .leading, spacing: BBSpacing.s1) {
-                    Text("Sign out first to use another account.")
-                    Text("If you asked to delete your account, signing in cancels that.")
-                }
-            }
-        }
-        .disabled(isSigningIn)
-    }
-
-    @ViewBuilder private var advancedSection: some View {
-        // A linked account keeps its server; it is shown with the email.
-        if linkedAccount == nil {
-            editableServerSection
-        }
-    }
-
-    private var editableServerSection: some View {
-        Section {
-            DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
-                TextField("Server address", text: $serverAddress)
-                    .keyboardType(.URL)
-                    .textContentType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .focused($focusedField, equals: .server)
-                    .onSubmit { signIn() }
-                Text("Use an https address. http works only for localhost, during development.")
-                    .font(BBFont.meta)
-                    .foregroundStyle(BBColor.textTertiary)
-                if serverAddress != SignInServerAddress.defaultString {
-                    Button("Use the default server") {
-                        serverAddress = SignInServerAddress.defaultString
+                action("Send recovery code", enabled: !email.isEmpty && methods?.email == true) { requestCode(recovering: true) }
+                backButton
+            }.disabled(isBusy)
+        case .code:
+            Section {
+                Text(recovery ? "Confirm your recovery code" : "Check your email").font(.headline)
+                Text("If this address can be used, you will receive a code. Use another email or method if it doesn't arrive.").font(BBFont.secondary)
+                TextField("Email code", text: $code).textContentType(.oneTimeCode).keyboardType(.numberPad)
+                    .focused($focused, equals: .code).frame(minHeight: 44)
+                    .onChange(of: code) { _, new in code = String(new.filter { $0.isASCII && $0.isNumber }.prefix(6)) }
+                action("Verify code", enabled: code.count == 6) { verifyCode() }
+                if let challenge {
+                    Text("Expires \(challenge.expiresAt.formatted(date: .omitted, time: .shortened))").font(BBFont.meta)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let seconds = max(0, Int(challenge.resendAt.timeIntervalSince(context.date).rounded(.up)))
+                        Button(seconds > 0 ? "Resend in \(seconds)s" : "Resend code") { resendCode() }
+                            .frame(minHeight: 44).disabled(seconds > 0 || isBusy || !isOnline || context.date >= challenge.expiresAt)
                     }
                 }
+                backButton
+            }.disabled(isBusy)
+        case .newPassword:
+            Section {
+                Text("At least 12 characters. Longer is better.")
+                SecureField("New password", text: $password).textContentType(.newPassword).focused($focused, equals: .newPassword).frame(minHeight: 44)
+                SecureField("Repeat password", text: $repeatedPassword).textContentType(.newPassword).focused($focused, equals: .repeatPassword).frame(minHeight: 44)
+                Text("Your other sessions will end after the reset.").font(BBFont.secondary)
+                action("Save password", enabled: password.count >= 12 && password == repeatedPassword) { savePassword() }
+                backButton
+            }.disabled(isBusy)
+        case .collision:
+            Section {
+                Text("Connect to your existing account").font(.headline)
+                Text("Sign in to your existing account, then explicitly connect this method in account settings. Matching email doesn't merge accounts.")
+                Button("Sign in to existing account") { returnToChoice() }.frame(minHeight: 44)
+                backButton
             }
         }
-        .disabled(isSigningIn)
     }
 
-    private var signInButton: some View {
-        Button {
-            signIn()
-        } label: {
-            HStack(spacing: BBSpacing.s2) {
-                if isSigningIn {
-                    ProgressView()
-                        .tint(BBColor.onBrand)
-                }
-                Text(signInTitle)
-            }
-            .frame(maxWidth: .infinity)
+    private var emailField: some View {
+        TextField("Email", text: $email).textContentType(.username).keyboardType(.emailAddress)
+            .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused, equals: .email).frame(minHeight: 44)
+    }
+    private var backButton: some View {
+        Button("Use another method") { returnToChoice() }.frame(minHeight: 44).disabled(isBusy)
+    }
+    private func action(_ title: String, enabled: Bool = true, body: @escaping () -> Void) -> some View {
+        Button(action: body) {
+            HStack { if isBusy { ProgressView() }; Text(isBusy ? "Please wait…" : title) }.frame(maxWidth: .infinity, minHeight: 44)
+        }.buttonStyle(.glassProminent).tint(BBColor.brandFill).disabled(!enabled || isBusy || !isOnline)
+    }
+
+    private func loadMethods() async {
+        guard let api else { methods = nil; availabilityFailed = true; return }
+        let url = api.baseURL
+        methods = nil
+        availabilityFailed = false
+        do {
+            let result = try await api.authMethods()
+            guard serverURL == url, !Task.isCancelled else { return }
+            methods = result
+        } catch {
+            if serverURL == url, !Task.isCancelled { availabilityFailed = true }
         }
-        .buttonStyle(.glassProminent)
-        .tint(BBColor.brandFill)
-        .controlSize(.large)
-        .disabled(!canSubmit || isSigningIn || hasSignedIn)
-        .padding(.horizontal, BBSpacing.s5)
-        .padding(.bottom, BBSpacing.s3)
     }
 
-    private var signInTitle: String { isSigningIn ? "Signing in…" : "Sign in" }
-
-    private var canSubmit: Bool {
-        if linkedAccount != nil { return !password.isEmpty }
-        return !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !password.isEmpty
-            && !serverAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    // MARK: Actions
-
-    private func signIn() {
-        guard canSubmit, !isSigningIn else { return }
-        let url: URL
-        let address: String
-        if let account = linkedAccount {
-            // Whatever the fields held, a linked device signs in to its own account.
-            url = account.serverURL
-            address = account.email
-        } else {
-            guard let typedURL = SignInServerAddress.url(from: serverAddress) else {
-                showsAdvanced = true
-                focusedField = .server
-                showFailure(
-                    "\(WorkspaceError.invalidServerURL.message) http works only for localhost.", referenceID: nil)
-                return
-            }
-            url = typedURL
-            address = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let secret = password
+    private func run(_ body: @escaping @MainActor () async throws -> Void) {
+        guard !isBusy, isOnline else { return }
+        isBusy = true // Immediate local feedback, before scheduling any I/O.
         failureMessage = nil
         failureReferenceID = nil
-        focusedField = nil
-        accountAtSubmit = workspace.account
-        isSigningIn = true
-        Task {
-            do {
-                try await workspace.signIn(serverURL: url, email: address, password: secret)
-                hasSignedIn = true
-                isSigningIn = false
-                password = ""
-                toasts.show("Signed in as \(address)", actionTitle: nil, action: nil)
-                if workspace.signInCancelledAccountDeletion {
-                    // Say so before closing; the sheet closes when it's acknowledged.
-                    showsDeletionCancelledNotice = true
-                } else {
-                    dismiss()
+        focused = nil
+        let id = UUID()
+        operationID = id
+        operation = Task { @MainActor in
+            do { try await body() } catch {
+                guard operationID == id, !Task.isCancelled else { return }
+                if let error = error as? WorkspaceError {
+                    if error.message.contains("Start a fresh sign-in.") { returnToChoice() }
+                    showFailure(error.message, reference: reference(error))
                 }
-            } catch let error as WorkspaceError {
-                isSigningIn = false
-                handle(error)
-            } catch {
-                isSigningIn = false
-                showFailure("Couldn't sign in. Check your connection and try again.", referenceID: nil)
+                else if let error = error as? APIError {
+                    if error.isUncertainOutcome { returnToChoice() }
+                    showFailure(error.isUncertainOutcome ? "We couldn't confirm whether this finished. Your local tasks are kept. Use a fresh sign-in or recovery code." : error.message, reference: error.referenceID)
+                }
+                else if error is CancellationError || (error as? ASAuthorizationError)?.code == .canceled || (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin {
+                    stopAttempt()
+                    showFailure("Sign-in was cancelled. Your local tasks are kept.", reference: nil)
+                } else { showFailure((error as? ModernAuthCoordinator.Failure)?.message ?? "Couldn't sign in. Try again or use another connected method.", reference: nil) }
             }
+            if operationID == id { isBusy = false; operation = nil }
         }
     }
-
-    private func handle(_ error: WorkspaceError) {
-        switch error {
-        case .signInFailed(let message, let referenceID):
-            showFailure(message, referenceID: referenceID)
-        case .invalidServerURL:
-            showsAdvanced = true
-            showFailure(error.message, referenceID: nil)
-        default:
-            showFailure(error.message, referenceID: nil)
+    private func freshAttempt() async throws -> NativeSignInAttempt {
+        if let attempt { await workspace.cancelSignIn(attempt) }
+        guard let url = serverURL else { throw WorkspaceError.invalidServerURL }
+        let result = try await workspace.beginSignIn(serverURL: url)
+        if Task.isCancelled { await workspace.cancelSignIn(result); throw CancellationError() }
+        attempt = result
+        return result
+    }
+    private func passwordSignIn() {
+        run {
+            let current = try await freshAttempt()
+            try await accept(try await workspace.completeSignIn(current, credential: .password(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)))
         }
     }
-
-    private func showFailure(_ message: String, referenceID: String?) {
+    private func requestCode(recovering: Bool) {
+        run {
+            _ = try await freshAttempt()
+            let newProof = try ModernAuthCoordinator.newProof()
+            proof = newProof
+            recovery = recovering
+            guard let api else { throw WorkspaceError.invalidServerURL }
+            let result = try await api.requestEmailCode(email: email.trimmingCharacters(in: .whitespacesAndNewlines), purpose: recovering ? .recover : .login, clientChallenge: newProof.challenge)
+            try Task.checkCancellation()
+            challenge = result
+            code = ""
+            step = .code
+            focused = .code
+        }
+    }
+    private func resendCode() {
+        run {
+            guard let challenge, let proof, let api else { return }
+            let result = try await api.resendEmailCode(challengeID: challenge.challengeID, verifier: proof.verifier)
+            try Task.checkCancellation()
+            self.challenge = result
+            code = ""
+            focused = .code
+        }
+    }
+    private func verifyCode() {
+        run {
+            guard let attempt, let proof, let challenge else { return }
+            try await accept(try await workspace.completeSignIn(attempt, credential: .emailCode(challengeID: challenge.challengeID, code: code, verifier: proof.verifier)))
+        }
+    }
+    private func startProvider(_ provider: NativeAuthProvider) {
+        run {
+            let attempt = try await freshAttempt()
+            let proof = try ModernAuthCoordinator.newProof()
+            self.proof = proof
+            guard let api else { throw WorkspaceError.invalidServerURL }
+            let start = try await api.startProvider(provider, clientChallenge: proof.challenge)
+            try Task.checkCancellation()
+            let credential = try await coordinator.authenticate(provider: provider, start: start, verifier: proof.verifier)
+            try Task.checkCancellation()
+            try await accept(try await workspace.completeSignIn(attempt, credential: credential))
+        }
+    }
+    private func accept(_ outcome: NativeSignInOutcome) async throws {
+        try Task.checkCancellation()
+        switch outcome {
+        case .signedIn(let result):
+            clearSecrets()
+            attempt = nil
+            toasts.show("Signed in as \(result.account.email)", actionTitle: nil, action: nil)
+            if result.deletionCancelled { showsDeletionCancelledNotice = true }
+            else { dismiss() }
+        case .continuation(.verifyMailbox(let challenge)):
+            self.challenge = challenge
+            recovery = false
+            step = .code
+            code = ""
+            focused = .code
+        case .continuation(.resetReady(let grant, let expiry)):
+            resetGrant = grant
+            resetExpiry = expiry
+            password = ""
+            repeatedPassword = ""
+            step = .newPassword
+            focused = .newPassword
+        case .continuation(.existingAccountRequired):
+            stopAttempt()
+            step = .collision
+        default: throw ModernAuthCoordinator.Failure(message: "The server returned an unexpected sign-in response.")
+        }
+    }
+    private func savePassword() {
+        run {
+            guard let grant = resetGrant, let expiry = resetExpiry, expiry > Date(), let proof, let api else {
+                throw ModernAuthCoordinator.Failure(message: "That recovery proof has expired. Request a fresh code.")
+            }
+            do {
+                try await api.resetPassword(grant: grant, verifier: proof.verifier, newPassword: password)
+            } catch let error as APIError {
+                if error.isUncertainOutcome {
+                    returnToChoice()
+                    step = .password
+                    notice = "We couldn't confirm the reset. Sign in with your intended new password to check, or request fresh recovery."
+                    return
+                }
+                throw error
+            }
+            try Task.checkCancellation()
+            returnToChoice()
+            step = .password
+            notice = "Password reset. Sign in with your new password."
+        }
+    }
+    private func stopAttempt() {
+        coordinator.cancel()
+        if let attempt { Task { await workspace.cancelSignIn(attempt) } }
+        attempt = nil
+        clearSecrets()
+    }
+    private func clearSecrets() {
+        proof = nil; challenge = nil; resetGrant = nil; resetExpiry = nil
+        code = ""; password = ""; repeatedPassword = ""
+    }
+    private func returnToChoice() {
+        stopAttempt()
+        step = .choice
+        failureMessage = nil
+        failureReferenceID = nil
+        focused = .email
+    }
+    private func cancelAndDismiss() {
+        cancelCurrentOperation()
+        dismiss()
+    }
+    private func cancelCurrentOperation() {
+        operationID = UUID()
+        operation?.cancel()
+        operation = nil
+        stopAttempt()
+        isBusy = false
+    }
+    private func reference(_ error: WorkspaceError) -> String? {
+        if case .signInFailed(_, let reference) = error { return reference }
+        return nil
+    }
+    private func showFailure(_ message: String, reference: String?) {
         failureMessage = message
-        failureReferenceID = referenceID
+        failureReferenceID = reference
         UIAccessibility.post(notification: .announcement, argument: message)
     }
 }

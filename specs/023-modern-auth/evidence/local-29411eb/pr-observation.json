@@ -1,0 +1,37 @@
+{
+  "scope": "Read-only state check; frozen implementation/base unchanged.",
+  "pull_requests": [
+    {
+      "number": 265,
+      "title": "docs(spec): 021 Mac ↔ backend sync — Spec Kit package",
+      "state": "closed",
+      "draft": false,
+      "merged": false,
+      "head": "claude/mac-sync-spec",
+      "head_sha": "1e63e42acb3206980cc66b297eee315f1893dcb7",
+      "base": "main",
+      "base_sha": "35bb95a1e76c1282c2a51a908a933eb4ced3fcbb",
+      "closed_at": "2026-10-06T17:57:59Z",
+      "merged_at": null,
+      "url": "https://github.com/MaksimKravchuk/brain_buddy/pull/265",
+      "updated_at": "2026-10-06T17:58:09Z"
+    },
+    {
+      "number": 270,
+      "title": "feat(auth): Google, Apple and email sign-in across web and iOS",
+      "state": "open",
+      "draft": true,
+      "merged": false,
+      "head": "feat/modern-auth",
+      "head_sha": "4439c003f63ef501df8c5ae6e582e95531be239e",
+      "base": "main",
+      "base_sha": "21f08d26698a434f7b1d16b991b2b43d4e0ea0f2",
+      "closed_at": null,
+      "merged_at": null,
+      "url": "https://github.com/MaksimKravchuk/brain_buddy/pull/270",
+      "updated_at": "2026-10-06T14:20:31Z"
+    }
+  ],
+  "retrieval_window_utc": "2026-10-06 around19:39UTC",
+  "recorded_at_utc": "2026-10-06T19:41:44.696023+00:00"
+}

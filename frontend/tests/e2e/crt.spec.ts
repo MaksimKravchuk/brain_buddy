@@ -545,6 +545,7 @@ function p95(samples: number[]): number {
 
 async function loginThroughUi(page: Page, email: string, password: string): Promise<void> {
   await page.goto("/login");
+  await page.getByRole("button", { name: "Use your password", exact: true }).click();
   await page.getByLabel("Email").click();
   await page.keyboard.type(email);
   await page.getByLabel("Password").click();

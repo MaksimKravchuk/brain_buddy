@@ -1,0 +1,18 @@
+{
+  "implementation_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+  "exit": 0,
+  "framework_summary": "Test run with776tests in74suites passed after56.959seconds",
+  "optional_live_backend_test_skipped": 1,
+  "required_package_failure_count": 0,
+  "modern_workspace_auth_cases_passed": 5,
+  "regressions_pre_fix": {
+    "passed": 2,
+    "failed": 3
+  },
+  "source_files_verified": 160,
+  "official_runtime_regular_files_verified": 11984,
+  "log": "/tmp/modern-auth-native-weekly-review-final-29411eb.log",
+  "log_sha256": "9aed719e0f72c58170f1407959fdc17171e4ed0cfb6e0b65beecf1f4772377bc",
+  "input_manifest": "/tmp/modern-auth-native-weekly-review-final-input-29411eb.json",
+  "scope": "Local canonical Swift script with documented SWIFT_IMAGE runtime/bind adaptation; current Xcode/CI/physical device unverified."
+}
