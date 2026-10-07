@@ -192,6 +192,21 @@ extension GTDQueries {
         .sorted { ($0.parked!.at, $0.id) < ($1.parked!.at, $1.id) }
     }
 
+    /// The acknowledgement of each unseen park, in `unseenParks` order: what
+    /// "While you were away" lists and may later acknowledge.
+    public static func unseenParkAcks(in state: GTDState) -> [ParkAck] {
+        unseenParks(in: state).compactMap { task in
+            task.parked.map { ParkAck(taskID: task.id, formulationID: $0.formulationID, parkedAt: $0.at) }
+        }
+    }
+
+    /// FR-015: what Continue on "While you were away" acknowledges: of the
+    /// parks the sheet `shown`, those still unseen as the same park.
+    public static func whileAwayAcknowledgements(shown: [ParkAck], in state: GTDState) -> [ParkAck] {
+        let unseen = Set(unseenParkAcks(in: state))
+        return shown.filter { unseen.contains($0) }
+    }
+
     /// FR-017: Next tasks at least 28 days into their formulation, not paused.
     public static func restartCandidates(in state: GTDState, now: Date, timeZone: String? = nil) -> [TaskRecord] {
         let settings = clockSettings(state, timeZone: timeZone)

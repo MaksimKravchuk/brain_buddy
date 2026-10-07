@@ -113,6 +113,29 @@ public enum WhileAwayPresentation {
     }
 }
 
+/// One row of "While you were away" (M-09) and what it offers.
+public enum WhileAwayOutcome: Hashable, Sendable {
+    /// Still parked in Someday: "Return to Next" offered.
+    case waiting
+    case returned
+    /// Its project is archived: restore the project first, no button.
+    case archived(project: String)
+    /// Moved or returned elsewhere: no button.
+    case changedElsewhere
+    /// "Account linked: extension restarted", no button.
+    case notice
+
+    /// A listed park's row before the person acts on it: only a park that
+    /// can return offers "Return to Next" (`GTDQueries.parkReturnProblem`).
+    public static func initial(for problem: ParkReturnProblem?) -> WhileAwayOutcome {
+        switch problem {
+        case nil: .waiting
+        case .changedElsewhere?: .changedElsewhere
+        case .projectArchived(let name)?: .archived(project: name)
+        }
+    }
+}
+
 /// A sheet the weekly review shows at app open (T092, T093), in this order.
 public enum ReviewStartupSheet: String, Hashable, Sendable, Identifiable {
     /// M-26.
@@ -158,13 +181,30 @@ public enum ReviewStartupPlanner {
         return nil
     }
 
-    /// The startup sheet that may stay up: one that is open when the review
-    /// stops being exposed (the flag turned off, `weekly_review_disabled`)
-    /// goes at once, so nothing of the review stays actionable (ios/AGENTS.md
-    /// "a non-interactive off state", FR-042). Taking it away records
-    /// nothing: the explainer is acknowledged only by "Got it" or Close.
-    public static func sheetToKeep(_ sheet: ReviewStartupSheet?, reviewExposed: Bool) -> ReviewStartupSheet? {
-        reviewExposed ? sheet : nil
+    /// The startup sheet that may stay up, or nil to take it away at once.
+    /// Taking a sheet away records nothing: the explainer is acknowledged
+    /// only by "Got it" or Close, and M-09 only by Continue.
+    ///
+    /// - The review stops being exposed (the flag turned off,
+    ///   `weekly_review_disabled`): either sheet goes, so nothing of the
+    ///   review stays actionable (ios/AGENTS.md "a non-interactive off
+    ///   state", FR-042).
+    /// - The explainer stays only while it is needed (FR-051): an
+    ///   activation another device recorded, arriving by sync, takes it away.
+    /// - "While you were away" not yet on screen goes once it has nothing to
+    ///   show (`whileAwayHasContent`: unseen parks or linking notices). Once
+    ///   on screen it lists the parks it appeared with and stays until
+    ///   Continue or Close, so returning its last park, or a sync marking its
+    ///   parks seen, does not pull it away mid-view.
+    public static func sheetToKeep(
+        _ sheet: ReviewStartupSheet?, reviewExposed: Bool, explainerNeeded: Bool, whileAwayOnScreen: Bool,
+        whileAwayHasContent: Bool
+    ) -> ReviewStartupSheet? {
+        guard let sheet, reviewExposed else { return nil }
+        switch sheet {
+        case .explainer: return explainerNeeded ? sheet : nil
+        case .whileAway: return whileAwayOnScreen || whileAwayHasContent ? sheet : nil
+        }
     }
 
     /// Whether a requested capture may be presented: one on screen stays;

@@ -100,10 +100,8 @@ struct TaskListScreen: View {
 
     private func taskList(_ result: TaskListResult, options: ListOptions) -> some View {
         List {
-            if case .list(.next) = destination {
-                // Weekly review notes on Next (M-01, M-03 error rows).
-                ReviewThresholdNote()
-                DecisionIssuesNote()
+            if case .list(.next) = destination, !result.isEmpty {
+                reviewNotes
             }
             if !result.isEmpty {
                 captionRow(for: result, options: options)
@@ -126,9 +124,27 @@ struct TaskListScreen: View {
         .listStyle(.plain)
         .overlay {
             if result.isEmpty {
-                emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                if case .list(.next) = destination {
+                    // The empty state would cover notes in the list: they
+                    // sit above it instead.
+                    VStack(spacing: 0) {
+                        reviewNotes
+                            .padding(.horizontal, BBSpacing.s4)
+                        emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                            .frame(maxHeight: .infinity)
+                    }
+                } else {
+                    emptyState(isFiltered: ListOptionsRules.isFiltered(options))
+                }
             }
         }
+    }
+
+    /// Weekly review notes on Next (M-01 threshold changed, M-03 error rows);
+    /// each shows only when it applies.
+    @ViewBuilder private var reviewNotes: some View {
+        ReviewThresholdNote()
+        DecisionIssuesNote()
     }
 
     private func taskSection(_ section: TaskSection) -> some View {

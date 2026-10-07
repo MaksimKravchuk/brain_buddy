@@ -246,6 +246,32 @@ struct QueriesReviewTests {
         #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == .changedElsewhere, "no longer parked")
     }
 
+    @Test("020-FR-015 Continue acknowledges only the parks While you were away showed, as the parks it showed")
+    func whileAwayAcknowledgesShownOnly() {
+        let now = Review.now
+        var first = Review.task("t1", title: "Return the old router", state: .someday)
+        first.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([first])
+        let shown = GTDQueries.unseenParkAcks(in: state)
+        #expect(shown == [ParkAck(taskID: "t1", formulationID: Review.form(1), parkedAt: now)])
+
+        // While the sheet is open, a sync brings another park.
+        var arrived = Review.task("t2", title: "Update the CV", state: .someday)
+        arrived.parked = ParkMarker(at: now.addingTimeInterval(60), formulationID: Review.form(2))
+        state.tasks["t2"] = arrived
+        #expect(GTDQueries.unseenParkAcks(in: state).count == 2)
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state) == shown, "the arrived park stays unseen")
+
+        // A shown park returned (in the sheet or elsewhere) or seen elsewhere needs no acknowledgement.
+        state.tasks["t1"]?.state = .next
+        state.tasks["t1"]?.parked = nil
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state).isEmpty)
+        // Parked again as a new park meanwhile: not the park that was shown.
+        state.tasks["t1"]?.state = .someday
+        state.tasks["t1"]?.parked = ParkMarker(at: now.addingTimeInterval(120), formulationID: Review.form(1))
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state).isEmpty)
+    }
+
     @Test("020-FR-028 wins, capacity, Waiting and Someday due, projects without a next action and restart candidates over a state")
     func stateQueries() {
         let now = Review.now

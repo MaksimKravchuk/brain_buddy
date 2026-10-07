@@ -5,7 +5,8 @@ import SwiftUI
 /// M-09 (spec 020, FR-015): the auto-parked tasks this person has not seen,
 /// at app open (at most once a calendar day, `WhileAwayPresentation`) with a
 /// one-tap "Return to Next" per row and "Return all N to Next". "Continue"
-/// marks them seen (`Workspace.dismissWhileAway()`); Close and a swipe-down
+/// marks the listed parks seen (`Workspace.dismissWhileAway(shown:)`; a park
+/// that arrived by sync while it was open stays unseen); Close and a swipe-down
 /// do not (`Workspace.closeWhileAway()`), so they show again on a later day.
 /// A return is the ordinary move to Next, which starts a fresh formulation
 /// (US2-4); whether a row can return is Core's (`parkReturnProblem`). When
@@ -17,7 +18,8 @@ struct WhileYouWereAwaySheet: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.dismiss) private var dismiss
     /// The parks and notices listed when the sheet appeared; returned rows
-    /// stay listed with their outcome.
+    /// stay listed with their outcome. Continue acknowledges `shownParks` only.
+    @State private var shownParks: [ParkAck] = []
     @State private var parkIDs: [TaskID] = []
     @State private var noticeIDs: [TaskID] = []
     @State private var outcomes: [TaskID: WhileAwayRow.Outcome] = [:]
@@ -61,12 +63,8 @@ struct WhileYouWereAwaySheet: View {
             var place = task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject
             if case .projectArchived(let name)? = blocked { place = ReviewCopy.archivedPlace(name) }
             let detail = task.parked.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0.at, in: zone), place: place) } ?? place
-            let initial: WhileAwayRow.Outcome
-            if case .projectArchived(let name)? = blocked {
-                initial = .archived(project: name)
-            } else {
-                initial = .waiting
-            }
+            // A park that changed elsewhere offers no "Return to Next" (Core's mapping).
+            let initial = WhileAwayOutcome.initial(for: blocked)
             return WhileAwayRow(id: id, title: task.title, detail: detail, outcome: outcomes[id] ?? initial)
         }
         let notices = noticeIDs.compactMap { id -> WhileAwayRow? in
@@ -85,7 +83,8 @@ struct WhileYouWereAwaySheet: View {
     }
 
     private func reloadLists() {
-        parkIDs = workspace.unseenParks().map(\.id)
+        shownParks = workspace.unseenParkAcks()
+        parkIDs = shownParks.map(\.taskID)
         noticeIDs = workspace.linkedExtensionNotices
         outcomes = [:]
         summary = nil
@@ -150,7 +149,7 @@ struct WhileYouWereAwaySheet: View {
     private func continueReview() {
         let batchWaiting = workspace.localReview.parkBatchWaiting
         do {
-            try workspace.dismissWhileAway()
+            try workspace.dismissWhileAway(shown: shownParks)
         } catch {
             problem = error.message
             return
@@ -175,15 +174,9 @@ struct WhileYouWereAwaySheet: View {
 
 /// One row: a park with its return state, or a linking notice.
 struct WhileAwayRow: Identifiable, Hashable {
-    enum Outcome: Hashable {
-        /// Still in Someday, "Return to Next" offered.
-        case waiting
-        case returned
-        case archived(project: String)
-        case changedElsewhere
-        /// "Account linked: extension restarted", no button.
-        case notice
-    }
+    /// Core's `WhileAwayOutcome`: still in Someday ("Return to Next"),
+    /// returned, archived project, changed elsewhere, or a linking notice.
+    typealias Outcome = WhileAwayOutcome
 
     let id: TaskID
     let title: String

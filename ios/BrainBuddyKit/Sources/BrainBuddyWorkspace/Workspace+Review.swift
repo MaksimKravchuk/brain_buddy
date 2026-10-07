@@ -240,12 +240,15 @@ extension Workspace {
         edit { $0.local.wywaLastShownDay = day }
     }
 
-    /// Continue or close on "While you were away" (M-09): the listed parks
-    /// are seen, linking notices go, and the next batch of due parks may apply.
-    public func dismissWhileAway() throws(GTDValidationError) {
-        let acks = unseenParks().compactMap { task in
-            task.parked.map { ParkAck(taskID: task.id, formulationID: $0.formulationID, parkedAt: $0.at) }
-        }
+    /// The unseen parks as M-09 lists them; pass the ones a sheet showed to
+    /// `dismissWhileAway(shown:)`.
+    public func unseenParkAcks() -> [ParkAck] { GTDQueries.unseenParkAcks(in: state) }
+
+    /// Continue on "While you were away" (M-09): the parks it `shown` are
+    /// seen (a park that arrived while it was open is not), linking notices
+    /// go, and the next batch of due parks may apply.
+    public func dismissWhileAway(shown: [ParkAck]) throws(GTDValidationError) {
+        let acks = GTDQueries.whileAwayAcknowledgements(shown: shown, in: state)
         // At most 200 items per request (http §5).
         let chunks = stride(from: 0, to: acks.count, by: ReviewLimits.parkAcknowledgements).map {
             Array(acks[$0..<min($0 + ReviewLimits.parkAcknowledgements, acks.count)])

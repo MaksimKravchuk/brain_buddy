@@ -163,11 +163,16 @@ private struct MainTabView: View {
     /// capture. Never over another presentation (a capture, Process inbox, a
     /// decision card, a move or tags sheet, a dialog): UIKit would refuse it
     /// and nothing would retry, so while one is up this checks again shortly.
-    /// When the review stops being exposed (the flag turned off), an open
-    /// startup sheet goes at once (Core's `sheetToKeep`); its dismissal
-    /// records nothing as shown or acknowledged.
+    /// A startup sheet that is no longer due goes at once (Core's
+    /// `sheetToKeep`): the review stopped being exposed, or another device's
+    /// explainer acknowledgement arrived. Its dismissal records nothing as
+    /// shown or acknowledged.
     private func presentStartupSheetIfDue() {
-        let kept = ReviewStartupPlanner.sheetToKeep(startupSheet, reviewExposed: workspace.reviewExposed)
+        let kept = ReviewStartupPlanner.sheetToKeep(
+            startupSheet, reviewExposed: workspace.reviewExposed, explainerNeeded: workspace.explainerNeeded,
+            whileAwayOnScreen: startupSheetAppeared,
+            whileAwayHasContent: !workspace.unseenParks().isEmpty || !workspace.linkedExtensionNotices.isEmpty
+        )
         if kept != startupSheet {
             startupSheet = kept
             return

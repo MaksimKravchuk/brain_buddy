@@ -222,22 +222,63 @@ struct ReviewPlannersTests {
     @Test("020-FR-042 020-FR-051 020-FR-015 an open startup sheet goes when the review stops being exposed")
     func startupSheetGoesWhenHidden() {
         for sheet in [ReviewStartupSheet.explainer, .whileAway] {
-            #expect(ReviewStartupPlanner.sheetToKeep(sheet, reviewExposed: true) == sheet, "exposed: it stays")
-            #expect(ReviewStartupPlanner.sheetToKeep(sheet, reviewExposed: false) == nil, "\(sheet) is taken away")
+            #expect(keep(sheet, exposed: true) == sheet, "exposed and due: it stays")
+            #expect(keep(sheet, exposed: false) == nil, "\(sheet) is taken away")
+            #expect(keep(sheet, exposed: false, onScreen: true) == nil, "\(sheet) on screen is taken away too")
         }
-        #expect(ReviewStartupPlanner.sheetToKeep(nil, reviewExposed: false) == nil)
-        #expect(ReviewStartupPlanner.sheetToKeep(nil, reviewExposed: true) == nil)
+        #expect(keep(nil, exposed: false) == nil)
+        #expect(keep(nil, exposed: true) == nil)
         // Taken away, the waiting capture is no longer held back, and nothing re-presents.
         #expect(
             ReviewStartupPlanner.captureMayPresent(
-                startupSheet: ReviewStartupPlanner.sheetToKeep(.explainer, reviewExposed: false), captureOnScreen: false,
-                reviewExposed: false, explainerNeeded: true
+                startupSheet: keep(.explainer, exposed: false), captureOnScreen: false, reviewExposed: false,
+                explainerNeeded: true
             )
         )
         let hidden = ReviewStartupPlanner.Context(
             reviewExposed: false, explainerNeeded: true, whileAwayDue: true, captureRequested: false, screenBusy: false
         )
         #expect(ReviewStartupPlanner.sheetToPresent(hidden) == nil)
+    }
+
+    /// `sheetToKeep` with the inputs a test does not vary set to "still due".
+    private func keep(
+        _ sheet: ReviewStartupSheet?, exposed: Bool = true, explainerNeeded: Bool = true, onScreen: Bool = false,
+        hasContent: Bool = true
+    ) -> ReviewStartupSheet? {
+        ReviewStartupPlanner.sheetToKeep(
+            sheet, reviewExposed: exposed, explainerNeeded: explainerNeeded, whileAwayOnScreen: onScreen,
+            whileAwayHasContent: hasContent
+        )
+    }
+
+    @Test("020-FR-051 an explainer acknowledged elsewhere goes at once, on screen or not")
+    func explainerGoesWhenNoLongerNeeded() {
+        #expect(keep(.explainer, explainerNeeded: true, onScreen: true) == .explainer)
+        #expect(keep(.explainer, explainerNeeded: false) == nil, "a pull brought another device's activation")
+        #expect(keep(.explainer, explainerNeeded: false, onScreen: true) == nil, "the one-time explainer is not left actionable")
+    }
+
+    @Test("020-FR-015 While you were away: dropped before it shows once nothing is left, kept on screen until closed")
+    func whileAwayKeptWhileOnScreen() {
+        #expect(keep(.whileAway, hasContent: true) == .whileAway)
+        #expect(
+            keep(.whileAway, onScreen: false, hasContent: false) == nil,
+            "its parks were seen elsewhere before it appeared: nothing to show"
+        )
+        #expect(
+            keep(.whileAway, onScreen: true, hasContent: false) == .whileAway,
+            "returning the last park inside it does not pull it away mid-view; Continue or Close ends it"
+        )
+        #expect(keep(.whileAway, explainerNeeded: false, onScreen: true) == .whileAway, "the explainer is not its business")
+    }
+
+    @Test("020-FR-015 a listed park that changed elsewhere is shown changed at once, without Return to Next")
+    func whileAwayInitialOutcome() {
+        #expect(WhileAwayOutcome.initial(for: nil) == .waiting)
+        #expect(WhileAwayOutcome.initial(for: .projectArchived(name: "Old flat")) == .archived(project: "Old flat"))
+        #expect(WhileAwayOutcome.initial(for: .changedElsewhere) == .changedElsewhere)
+        #expect(ReviewCopy.rowChangedElsewhere.isEmpty == false, "the row's existing copy")
     }
 
     @Test("020-FR-039 the threshold note shows after a change until dismissed for it or until its floor date passes")

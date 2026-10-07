@@ -155,6 +155,30 @@ import Testing
         #expect(try await workspace.store.load()?.local.linkedExtensionNotices == [])
     }
 
+    @Test("020-FR-015 Continue marks seen only the parks the sheet showed; one that arrived meanwhile stays unseen")
+    func continueAcknowledgesShownParks() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        let shownTask = try nextTask("Clean out the garage", in: workspace)
+        let arrivedTask = try nextTask("Sort the photo albums", in: workspace)
+        clock.advance(by: 21 * Self.day)
+        #expect(workspace.applyDueAutoParks() == 0)
+        clock.advance(by: Self.day)
+        #expect(workspace.applyDueAutoParks() == 2)
+        // The sheet appeared listing only the first (the second arrived while it was open).
+        let shown = workspace.unseenParkAcks().filter { $0.taskID == shownTask }
+        #expect(shown.count == 1)
+
+        try workspace.dismissWhileAway(shown: shown)
+        #expect(workspace.unseenParks().map(\.id) == [arrivedTask], "never displayed, so not seen")
+        await workspace.flush()
+        let acknowledged = workspace.document.outbox.flatMap { operation -> [ParkAck] in
+            if case .review(.acknowledgeParks(let items)) = operation.command { return items }
+            return []
+        }
+        #expect(acknowledged.map(\.taskID) == [shownTask])
+    }
+
     @Test("020-FR-042 020-FR-015 While you were away taken away by the review switching off records nothing")
     func whileAwayTakenAwayWhenHidden() async throws {
         let clock = TestClock()
@@ -282,7 +306,7 @@ import Testing
         #expect(workspace.unseenParks().count == 10)
         #expect(workspace.localReview.parkBatchWaiting)
         #expect(workspace.applyDueAutoParks() == 0, "the rest wait for While you were away")
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.unseenParks().isEmpty)
         #expect(workspace.applyDueAutoParks() == 2)
         #expect(tasks.allSatisfy { workspace.task($0)?.state == .someday && workspace.task($0)?.parked != nil })
@@ -697,7 +721,7 @@ import Testing
         #expect(workspace.applyDueAutoParks() == 0)
         world.clock.advance(by: Self.day + 60)
         #expect(workspace.applyDueAutoParks() == 3)
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         // The newer ones ask (15 days in): two decisions and an extension.
         world.clock.advance(by: 3 * Self.day)
         let attempt = modern ? try await workspace.beginSignIn(serverURL: FakeBrainBuddyServer.baseURL) : nil
@@ -730,7 +754,7 @@ import Testing
         #expect(workspace.linkedExtensionNotices == [extended])
         #expect(workspace.issues.isEmpty)
         #expect(parked.allSatisfy { workspace.task($0)?.state == .someday })
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.linkedExtensionNotices.isEmpty)
     }
 
@@ -799,7 +823,7 @@ import Testing
         let workspace = await loadedWorkspace(store: store)
         workspace.accountlessReviewEnabled = true
         #expect(workspace.unseenParks().count == 201)
-        try workspace.dismissWhileAway()
+        try workspace.dismissWhileAway(shown: workspace.unseenParkAcks())
         #expect(workspace.unseenParks().isEmpty)
         let ids = try workspace.bulkRelease(.inboxRemainder, taskIDs: (0..<501).map { TaskID("i\($0)") })
         #expect(ids.count == 2)
