@@ -379,6 +379,11 @@ def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
                 "Разобрать коробки",
             )
         }
+        allure.attach(
+            json.dumps(flagged, ensure_ascii=False, indent=2),
+            name="screen flags (synthetic proposals)",
+            attachment_type=allure.attachment_type.JSON,
+        )
     assert flagged == {
         "Разобрать коробки в июле": True,
         "Разобрать коробки завтра": True,
