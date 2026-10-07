@@ -152,18 +152,25 @@ early.
 - **Compaction** (`OutboxCompactor`): an unsent `decideTask` followed by its
   `undoDecision` cancels both (and the created follow-up task); an unsent
   `bulkRelease` followed by its `undoBulkRelease` cancels both. A decision and its
-  Undo do not cancel across an archive, a tag delete, or (for a decision in a review)
-  a later `startSession`, `progressSession` or `finishSession` or another decision of
-  the same review. An Undo restores the task field for field, `updatedAt` included.
-  `progressSession`
-  operations are never folded into each other, so each keeps the `progressID` it may
-  already have been sent with. Sent operations are never modified (existing rule).
-- **`undoDecision` answered 404** (http §3: the decision is already undone, e.g. a retry
-  of an undo whose response was lost): acknowledged as success, because the replay goal
+  Undo do not cancel across, among others, an archive, a tag delete, a later
+  `undoDecision` or `undoBulkRelease`, any operation that touches either task (the
+  decided task or its follow-up), any later `startSession`, `progressSession` or
+  `finishSession` (on any session, not only the decision's), or another decision of
+  the same review. `progressSession` operations are never folded into each other, so
+  each keeps the `progressID` it may already have been sent with. Sent operations are
+  never modified (existing rule).
+- A device's local replay: an Undo restores the task field for field, `updatedAt`
+  included. The server instead sets `updated_at` to now and applies the floors of
+  formulation-clock §3 "decision undo".
+- **`undoDecision` answered 404 naming the decision** (http §3: the decision is already
+  undone, e.g. a retry of an undo whose response was lost; a 404 naming the task is
+  not this case): acknowledged as success, because the replay goal
   (the decision is absent) holds; it is never set aside.
-- **Known limit, `undoBulkRelease`**: a restart item that the server's answer released
-  but this device's replay did not has no pre-release clock on the device; its Undo
-  restores it to Next without a local clock until the next pull.
+- **Known deviation (device only, signed in, until the next pull) from FR-017 and
+  formulation-clock §3 "undo of a bulk release", `undoBulkRelease`**: a restart item
+  that the server's answer released but this device's replay did not has no
+  pre-release clock on the device; its Undo restores it to Next without a local clock
+  until the next pull. Fix tracked for slice PR-12 together with T174.
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
   re-evaluates the decision. When the refetched task is parked for the decision's
@@ -263,7 +270,8 @@ clock snapshots older than 7 days, and deletes form drafts (FR-052) older than 7
 Signed in, a decision record that a queued `undoDecision` names is kept past 7 days
 without its snapshot, so the Undo reaches the server instead of being replayed as
 already done. An unsent `decideTask` or `bulkRelease` that a queued Undo names keeps
-its snapshot past 7 days, because that Undo replays from it.
+`undoRetained` past 7 days, so replay derives the snapshot (nothing is stored), because
+that Undo replays from it.
 - Widgets and intents never park (they open the workspace with `enableSync: false`
   and only read); the widget counts `park_due` tasks as "moves to Someday tomorrow"
   until the app applies the park.
