@@ -992,16 +992,24 @@ class Nav:
         return response.json()
 
     def grant(
-        self, provider: str = "openai", version: int = CONSENT_TEXT_VERSION
+        self,
+        provider: str = "openai",
+        version: int = CONSENT_TEXT_VERSION,
+        *,
+        key: str | None = None,
     ) -> Any:
         return self.client.post(
             CONSENT,
             json={"provider": provider, "consent_text_version": version},
-            headers=self.key(),
+            headers=self.key() if key is None else {"Idempotency-Key": key},
         )
 
-    def revoke(self) -> Any:
-        return self.client.delete(CONSENT, headers=self.key())
+    def revoke(self, *, key: str | None = None) -> Any:
+        headers = self.key() if key is None else {"Idempotency-Key": key}
+        return self.client.delete(CONSENT, headers=headers)
+
+    def consent_current(self) -> bool:
+        return bool(self.status()["consent_current"])
 
     def suggest(self, body: dict[str, Any] | None = None) -> Any:
         return self.client.post(SUGGESTIONS, json=body or _body())
@@ -1152,6 +1160,149 @@ def test_020_FR_024_regrant_after_revoke_keeps_content_free_history(
         ["consent_text_version", "granted_at", "revoked_at"]
     ]
     assert nav.suggest().status_code == 200
+
+
+def test_020_FR_024_late_grant_retry_after_a_revoke_replays_and_stays_revoked(
+    nav: Nav, frozen_clock: FrozenClock
+) -> None:
+    """grant(K1) → revoke(K2) → retry grant(K1): the original 200 is replayed
+    and nothing is written, so the newer revoke stands (no provider egress)."""
+
+    nav.flag("on")
+    spy = nav.spy(SpyProvider())
+    with allure.step("grant with K1, then revoke with K2 (another device)"):
+        first = nav.grant(key="consent-k1")
+        frozen_clock.advance(minutes=5)
+        assert nav.revoke(key="consent-k2").status_code == 204
+    assert first.status_code == 200, first.text
+    (revoked,) = nav.container.task_repo.list_navigator_consents(nav.owner_id)
+    with allure.step("a delayed retry of the grant with K1 arrives"):
+        frozen_clock.advance(minutes=5)
+        retry = nav.grant(key="consent-k1")
+    assert retry.status_code == 200, retry.text
+    assert retry.json() == first.json()
+    assert nav.container.task_repo.list_navigator_consents(nav.owner_id) == [revoked]
+    assert revoked.revoked_at is not None
+    assert nav.consent_current() is False
+    _assert_error(nav.suggest(), 400, "navigator_consent_required")
+    assert spy.inputs == []
+
+
+def test_020_FR_024_late_revoke_retry_after_a_regrant_replays_and_stays_granted(
+    nav: Nav, frozen_clock: FrozenClock
+) -> None:
+    """revoke(K2) → grant(K3) → retry revoke(K2): 204 replayed, no write, the
+    newer grant stands."""
+
+    nav.flag("on")
+    assert nav.grant().status_code == 200
+    with allure.step("revoke with K2, then grant again with K3"):
+        frozen_clock.advance(minutes=5)
+        assert nav.revoke(key="consent-k2").status_code == 204
+        frozen_clock.advance(minutes=5)
+        assert nav.grant(key="consent-k3").status_code == 200
+    (granted,) = nav.container.task_repo.list_navigator_consents(nav.owner_id)
+    with allure.step("a delayed retry of the revoke with K2 arrives"):
+        frozen_clock.advance(minutes=5)
+        retry = nav.revoke(key="consent-k2")
+    assert retry.status_code == 204, retry.text
+    assert retry.headers["X-Correlation-ID"]
+    assert nav.container.task_repo.list_navigator_consents(nav.owner_id) == [granted]
+    assert granted.revoked_at is None
+    assert nav.consent_current() is True
+    assert nav.suggest().status_code == 200
+
+
+def test_020_FR_024_revoke_replay_and_record_while_the_flag_is_off(
+    nav: Nav, frozen_clock: FrozenClock
+) -> None:
+    """Revoke stays privacy authority with the flag off: it revokes, stores
+    its key, and a same-key retry after a newer grant still replays."""
+
+    nav.flag("on")
+    assert nav.grant().status_code == 200
+    nav.flag("off")
+    with allure.step("flag off: revoke with K2"):
+        assert nav.revoke(key="consent-k2").status_code == 204
+    assert nav.consent_current() is False
+    record = nav.container.task_repo.get_idempotency(
+        owner_id=nav.owner_id, key="consent-k2"
+    )
+    assert record is not None
+    assert record.command == f"navigator_consent_revoke:{nav.owner_id}"
+    nav.flag("on")
+    frozen_clock.advance(minutes=5)
+    assert nav.grant().status_code == 200
+    nav.flag("off")
+    with allure.step("flag off: the K2 retry replays"):
+        assert nav.revoke(key="consent-k2").status_code == 204
+    assert nav.consent_current() is True
+
+
+def test_020_FR_024_consent_key_with_another_body_is_idempotency_conflict(
+    nav: Nav,
+) -> None:
+    """The same key with another grant body, or on the other consent command
+    for a grant, is 409 ``idempotency_conflict`` and changes nothing."""
+
+    nav.flag("on")
+    assert nav.grant(key="consent-k1").status_code == 200
+    nav.container.navigator_service.consent_text_version = CONSENT_TEXT_VERSION + 1
+    with allure.step("K1 again with another consent text version"):
+        other = nav.grant(version=CONSENT_TEXT_VERSION + 1, key="consent-k1")
+    nav.container.navigator_service.consent_text_version = CONSENT_TEXT_VERSION
+    assert other.status_code == 409, other.text
+    assert other.json()["detail"] == {"reason": "idempotency_conflict"}
+    assert other.headers["X-Correlation-ID"]
+    (stored,) = nav.container.task_repo.list_navigator_consents(nav.owner_id)
+    assert stored.consent_text_version == CONSENT_TEXT_VERSION
+    assert stored.history == []
+    with allure.step("a revoke key reused for a grant"):
+        assert nav.revoke(key="consent-k2").status_code == 204
+        reused = nav.grant(key="consent-k2")
+    assert reused.status_code == 409, reused.text
+    assert reused.json()["detail"] == {"reason": "idempotency_conflict"}
+    assert nav.consent_current() is False
+
+
+def test_020_FR_024_a_grant_key_reused_by_a_revoke_still_revokes(nav: Nav) -> None:
+    """Revoke is never refused for its key: a key a grant stored still
+    revokes, and the grant's record (its replay) is kept."""
+
+    nav.flag("on")
+    first = nav.grant(key="consent-k1")
+    with allure.step("revoke reusing the grant's K1"):
+        revoke = nav.revoke(key="consent-k1")
+    assert revoke.status_code == 204, revoke.text
+    assert nav.consent_current() is False
+    record = nav.container.task_repo.get_idempotency(
+        owner_id=nav.owner_id, key="consent-k1"
+    )
+    assert record is not None
+    assert record.command == f"navigator_consent_grant:{nav.owner_id}"
+    replay = nav.grant(key="consent-k1")
+    assert replay.json() == first.json()
+    assert nav.consent_current() is False
+
+
+def test_020_FR_043_consent_keys_expire_after_24_h_and_go_with_the_account(
+    nav: Nav, frozen_clock: FrozenClock
+) -> None:
+    """Consent idempotency records follow the store's 24 h retention and the
+    GDPR account purge, like every other review record."""
+
+    repo = nav.container.task_repo
+    nav.flag("on")
+    assert nav.grant(key="consent-k1").status_code == 200
+    with allure.step("past the 24 h retention the next write drops K1"):
+        frozen_clock.advance(hours=25)
+        assert nav.revoke(key="consent-k2").status_code == 204
+    assert repo.get_idempotency(owner_id=nav.owner_id, key="consent-k1") is None
+    assert repo.get_idempotency(owner_id=nav.owner_id, key="consent-k2") is not None
+    with allure.step("account purge removes the remaining records"):
+        nav.container.account_service.purge_account(nav.owner_id)
+    assert repo.list_idempotency_for_owner(owner_id=nav.owner_id) == []
+    assert not repo.resolve("task-commands", nav.owner_id).exists()
 
 
 @pytest.mark.parametrize(
@@ -1640,6 +1791,9 @@ def test_020_FR_044_suggestion_persists_nothing_and_logs_one_line(
 
     repo = ready.container.task_repo
     before = len(repo.list_idempotency_for_owner(owner_id=ready.owner_id))
+    commands = repo.resolve("task-commands", ready.owner_id)
+    # Only the fixture's consent grant, a keyed mutation, wrote a record.
+    commands_before = sorted(commands.iterdir()) if commands.exists() else []
     caplog.set_level(logging.DEBUG)
     body = _body(
         title=f"Renovate {SENTINEL_TITLE}",
@@ -1652,8 +1806,8 @@ def test_020_FR_044_suggestion_persists_nothing_and_logs_one_line(
     assert response.status_code == 200, response.text
     assert any(SENTINEL_TITLE in text for text in response.json()["proposals"])
     assert len(repo.list_idempotency_for_owner(owner_id=ready.owner_id)) == before
-    assert not repo.resolve("task-commands", ready.owner_id).exists() or not any(
-        repo.resolve("task-commands", ready.owner_id).iterdir()
+    assert (sorted(commands.iterdir()) if commands.exists() else []) == (
+        commands_before
     )
     (usage,) = ready.usage()
     assert usage.shown == 1

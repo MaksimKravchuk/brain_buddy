@@ -136,7 +136,7 @@
         "answer": "(1) Yes: 'today' and 'сегодня' are exempt like a duration of at most 30 minutes; 'tonight', 'tomorrow', 'завтра' and the other relative dates still drop. (2) Yes: nothing was dropped, so truncated = false (§1); clients OR the server flag with their own."
       },
       "resolution": "Two-round post-acceptance review of the PR-07 navigator contract amendments (203f626 → 4718e85): approved after fixes. Round 1 found no Blocker and three Important issues: purge wording true only for the CLI, the propagate rule letting exception text reach the middleware's traceback log (FR-044), and rule 3 not tight enough for identical Swift/JS implementations. Round 2 verified every fix: purge wording separated across http.md/.env.example/plan/research/data-retention; undeclared provider exceptions re-raised content-free as NavigatorInternalError with an end-to-end log test, then hardened against framework re-chaining; rule 3 defined in text with a normative date_words table, a code-equals-table test and 102 vectors; every < escaped with shared prompt_vectors.json.",
-      "artifacts_digest_after_fixes": "ad9c61f87f58a8bf4c216f8686a41b834757dc94b09f23903e5b58065879844c"
+      "artifacts_digest_after_fixes": "4a0a4e47386de70e8ff39ebab6d36b435fdaa5e204c8b3009edaa3eeb2946f26"
     }
   }
 }

@@ -1376,6 +1376,10 @@ class ReviewService:
         # ``bulk_release:``, ``undo_bulk_release:`` and ``review_session:``
         # belong to the review flow (slice PR-11); until it lands no such
         # record is written, and a stray one is left alone.
+        # ``navigator_consent_grant:`` and ``navigator_consent_revoke:`` are
+        # never re-applied: each is committed in the same transaction as its
+        # consent change, and re-applying an old grant (or revoke) is exactly
+        # the reversal of a newer privacy choice its record exists to stop.
 
     def _repair_decision(
         self, result: DecisionResultDocument, *, owner_id: str

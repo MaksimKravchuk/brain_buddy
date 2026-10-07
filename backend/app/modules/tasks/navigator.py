@@ -27,15 +27,26 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
-from app.schemas.review import NavigatorSuggestionRequest
+from pydantic import BaseModel
 
+from app.exceptions import IdempotencyConflictError
+from app.schemas.review import (
+    NavigatorConsentGrantRequest,
+    NavigatorSuggestionRequest,
+)
+from app.utils.idempotency import request_fingerprint
+
+from .domain import IdempotencyRecord
 from .formulation import formulation_key
 from .review_domain import (
     NavigatorConsentDocument,
+    NavigatorGrantResultDocument,
+    NavigatorRevokeResultDocument,
     NavigatorUsageDocument,
     ReviewRequestError,
 )
 from .review_rules import drop_duplicate_proposals
+from .service import serialized_write
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .repository import TaskRepository
@@ -679,6 +690,33 @@ def _round_usd(value: float) -> float:
     return max(0.0, round(value, 10))
 
 
+class _NoBody(BaseModel):
+    """The revoke's request body for its fingerprint: it has none."""
+
+
+_NO_BODY = _NoBody()
+
+
+def _grant_result(status: NavigatorStatus) -> NavigatorGrantResultDocument:
+    return NavigatorGrantResultDocument(
+        provider=status.provider,
+        consent=status.consent,
+        consent_current=status.consent_current,
+        consent_text_version=status.consent_text_version,
+        available=status.available,
+    )
+
+
+def _status_from(stored: NavigatorGrantResultDocument) -> NavigatorStatus:
+    return NavigatorStatus(
+        provider=stored.provider,
+        consent=stored.consent,
+        consent_current=stored.consent_current,
+        consent_text_version=stored.consent_text_version,
+        available=stored.available,
+    )
+
+
 class NavigatorService:
     """Consent, admission and suggestions of the cloud navigator (http §7).
 
@@ -686,7 +724,8 @@ class NavigatorService:
     ``RLock``): the cost is reserved under the lock, the provider is called
     with no lock held, and the reservation is settled (or released) under the
     lock again. Nothing a person wrote is stored or logged: the only writes
-    are the consent rows and the content-free ``navigator_usage`` counters.
+    are the consent rows with their Idempotency-Key records and the
+    content-free ``navigator_usage`` counters.
     """
 
     def __init__(
@@ -733,27 +772,104 @@ class NavigatorService:
             available=provider is not None,
         )
 
-    def grant_consent(
-        self, owner_id: str, *, provider: str, consent_text_version: int
-    ) -> NavigatorStatus:
-        """One-time consent for the configured provider and the current text."""
+    # Grant and revoke are ``serialized_write`` commands (http §7): under the
+    # owner lock, in one transaction with their Idempotency-Key record, so a
+    # same-key retry replays the stored answer and changes nothing. A delayed
+    # retry of an old grant therefore never undoes a newer revoke (FR-024),
+    # nor an old revoke a newer grant.
+    def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
+        """Consent records are never re-applied (``SerializedWriter``).
 
-        configured = self.provider.category
-        if configured is None or provider != configured:
-            raise navigator_error("provider_mismatch")
-        if consent_text_version != self.consent_text_version:
-            raise navigator_error("consent_text_outdated")
-        with self.task_repo.command_lock(owner_id):
-            existing = self._consent(owner_id, configured)
-            updated = granted_consent(
-                existing,
-                owner_id=owner_id,
-                provider=configured,
-                now=self.clock(),
-                version=self.consent_text_version,
+        Each record is committed with its consent change, so there is nothing
+        to repair, and re-applying an old grant or revoke is the reversal of
+        a newer privacy choice the record exists to prevent.
+        """
+
+        del owner_id, key
+
+    def _idempotency_record(
+        self, *, owner_id: str, key: str, command: str, request_hash: str
+    ) -> IdempotencyRecord | None:
+        """The stored record of ``key``; another command or body is a 409."""
+
+        record = self.task_repo.get_idempotency(owner_id=owner_id, key=key)
+        if record is None:
+            return None
+        if record.command != command or record.request_hash != request_hash:
+            raise IdempotencyConflictError()
+        return record
+
+    def _store_result(
+        self,
+        *,
+        owner_id: str,
+        key: str,
+        command: str,
+        request_hash: str,
+        result: BaseModel,
+    ) -> None:
+        self.task_repo.save_idempotency(
+            owner_id=owner_id,
+            record=IdempotencyRecord(
+                key=key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=owner_id,
+                response_body=result.model_dump(mode="json"),
+                created_at=self.clock(),
+            ),
+        )
+
+    @serialized_write
+    def grant_consent(
+        self,
+        payload: NavigatorConsentGrantRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> NavigatorStatus:
+        """One-time consent for the configured provider and the current text.
+
+        The same key and body replay the stored status without a write; the
+        same key with another body (or command) is ``idempotency_conflict``.
+        """
+
+        command = f"navigator_consent_grant:{owner_id}"
+        request_hash = request_fingerprint(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            logger.info("navigator_consent outcome=replayed owner_id=%s", owner_id)
+            return _status_from(
+                NavigatorGrantResultDocument.model_validate(record.response_body)
             )
-            if updated != existing:
-                self.task_repo.save_navigator_consent(updated)
+        configured = self.provider.category
+        if configured is None or payload.provider != configured:
+            raise navigator_error("provider_mismatch")
+        if payload.consent_text_version != self.consent_text_version:
+            raise navigator_error("consent_text_outdated")
+        existing = self._consent(owner_id, configured)
+        updated = granted_consent(
+            existing,
+            owner_id=owner_id,
+            provider=configured,
+            now=self.clock(),
+            version=self.consent_text_version,
+        )
+        if updated != existing:
+            self.task_repo.save_navigator_consent(updated)
+        result = self.status(owner_id)
+        self._store_result(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            result=_grant_result(result),
+        )
         logger.info(
             "navigator_consent outcome=granted owner_id=%s provider=%s "
             "consent_text_version=%d changed=%s",
@@ -762,22 +878,42 @@ class NavigatorService:
             self.consent_text_version,
             updated != existing,
         )
-        return self.status(owner_id)
+        return result
 
-    def revoke_consent(self, owner_id: str) -> None:
+    @serialized_write
+    def revoke_consent(self, *, owner_id: str, idempotency_key: str) -> None:
         """Revoke every stored grant; takes effect for the next request.
 
-        Never gated, also while the feature or the provider is switched off.
+        Never gated, also while the feature or the provider is switched off,
+        and never refused for its key: a replay of this key is a no-op, and a
+        key some other command stored still revokes (that record is kept).
         """
 
+        command = f"navigator_consent_revoke:{owner_id}"
+        request_hash = request_fingerprint(command, _NO_BODY)
+        record = self.task_repo.get_idempotency(owner_id=owner_id, key=idempotency_key)
+        if (
+            record is not None
+            and record.command == command
+            and record.request_hash == request_hash
+        ):
+            logger.info("navigator_consent outcome=replayed owner_id=%s", owner_id)
+            return
         revoked = 0
-        with self.task_repo.command_lock(owner_id):
-            now = self.clock()
-            for consent in self.task_repo.list_navigator_consents(owner_id):
-                updated = revoked_consent(consent, now=now)
-                if updated != consent:
-                    self.task_repo.save_navigator_consent(updated)
-                    revoked += 1
+        now = self.clock()
+        for consent in self.task_repo.list_navigator_consents(owner_id):
+            updated = revoked_consent(consent, now=now)
+            if updated != consent:
+                self.task_repo.save_navigator_consent(updated)
+                revoked += 1
+        if record is None:
+            self._store_result(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                result=NavigatorRevokeResultDocument(revoked_at=now, revoked=revoked),
+            )
         logger.info(
             "navigator_consent outcome=revoked owner_id=%s revoked=%d",
             owner_id,

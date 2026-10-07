@@ -131,7 +131,9 @@ example a decision undone since) is not matched; the request is then processed a
 and its own preconditions (`expected_revision`, eligibility) decide the outcome.
 Within the 24 h the ordinary Idempotency-Key replay applies, as before. Other mutations
 of this feature need no such rule: `POST /tasks/{id}/auto-park`, the explainer and
-park acknowledgements, `finish` and consent are idempotent by state, and
+park acknowledgements and `finish` are idempotent by state, the navigator consent grant
+and revoke replay their Idempotency-Key for the 24 h (§7: a late retry must never
+reverse a newer consent choice, so state alone is not enough there), and
 `PUT /review/settings` is protected by `expected_revision` (a stale retry gets 409 and
 the device rule of ios-commands §4; the values are absolute, so re-applying them is
 harmless). A retried `POST /review/decisions/{id}/undo` whose first delivery was
@@ -638,6 +640,20 @@ takes effect for every subsequent request immediately. The current version is a
 constant in `navigator.py`, bumped whenever the FR-019 data list or the provider
 changes; a stored grant with a lower version counts as absent.
 
+Grant and revoke **replay their Idempotency-Key for 24 h** ("Mutations", prefixes
+`navigator_consent_grant:` and `navigator_consent_revoke:`, §9). Each runs as one
+owner-serialized write that stores its key record in the same transaction as the
+consent change. The same key (and, for a grant, the same body) returns the stored
+answer (the grant's 200 status, the revoke's 204) and writes nothing, so a delayed
+retry of an old grant arriving after a revoke on another device never grants again,
+and an old revoke retry never cancels a newer grant (FR-024). A grant whose key holds
+another body or another command's record is 409 `idempotency_conflict`. Revoke is never
+refused for its key: a key another command already stored still revokes (that record
+is kept), and revoke stays ungated while `weekly_review` is off. The records are never
+reconciled (re-applying an old consent choice is the reversal they prevent); they are
+purged by the 24 h retention and with the account (FR-043), like every other
+idempotency record.
+
 ### `POST /review/navigator/suggestions` → 200
 
 Request (strict schema, `extra="forbid"` — nothing else can be sent, FR-019):
@@ -795,7 +811,10 @@ containing a sentinel string and asserts the sentinel is in no captured record.
 
 **Idempotency command prefixes** (one spelling everywhere, research R7):
 `decide_task:`, `undo_decision:`, `auto-park:`, `bulk_release:`, `undo_bulk_release:`,
-`review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`. They are
+`review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`, and the
+navigator's `navigator_consent_grant:` and `navigator_consent_revoke:` (§7; written by
+`NavigatorService` and never reconciled by any service, so they have no reconstructor;
+they are listed so `TaskService` skips them). The others are
 registered in
 `ReviewService`'s own `_apply_idempotent_record`, each with its own result
 reconstructor, not in `TaskService._apply_idempotent_record` (`service.py:1142`), whose

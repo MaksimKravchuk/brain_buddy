@@ -113,14 +113,13 @@ def grant_navigator_consent(
     current_user: User = Depends(require_weekly_review_enabled),
     navigator: NavigatorService = Depends(get_navigator_service),
 ) -> NavigatorStatusResponse:
-    """One-time cloud consent (FR-024); idempotent by state."""
+    """One-time cloud consent (FR-024); the key replays for 24 h."""
 
-    require_idempotency_key(idempotency_key)
     return status_response(
         navigator.grant_consent(
-            current_user.id,
-            provider=payload.provider,
-            consent_text_version=payload.consent_text_version,
+            payload,
+            owner_id=current_user.id,
+            idempotency_key=require_idempotency_key(idempotency_key),
         )
     )
 
@@ -135,10 +134,15 @@ def revoke_navigator_consent(
     current_user: User = Depends(get_current_user),
     navigator: NavigatorService = Depends(get_navigator_service),
 ) -> None:
-    """Revoke at once for every later request; never gated (FR-024)."""
+    """Revoke at once for every later request; never gated (FR-024).
 
-    require_idempotency_key(idempotency_key)
-    navigator.revoke_consent(current_user.id)
+    The key replays for 24 h, so a late retry never revokes a newer grant.
+    """
+
+    navigator.revoke_consent(
+        owner_id=current_user.id,
+        idempotency_key=require_idempotency_key(idempotency_key),
+    )
 
 
 @router.post(
