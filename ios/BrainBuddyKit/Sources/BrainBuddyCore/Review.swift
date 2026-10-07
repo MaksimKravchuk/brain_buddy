@@ -360,22 +360,31 @@ public struct TaskStamp: Hashable, Sendable, Codable {
 /// subtask or comment has its own revision), so the children are compared
 /// by what a person sees: ids, subtask title, state and order, comment body.
 /// Server ids, revisions, authors and server-set times are left out, so an
-/// acknowledgement that changes nothing visible is not a change. Never
-/// encoded or stored.
+/// acknowledgement that changes nothing visible is not a change. Children the
+/// device had not loaded yet when the card opened (a pulled task before its
+/// detail read, `childrenSyncedAt == nil`) are unknown, not empty: then only
+/// the task's own stamp counts, so hydration filling in children that
+/// already existed is not a change. Never encoded or stored.
 public struct ShownTask: Hashable, Sendable {
     /// The task's own revision and `updatedAt`.
     public var stamp: TaskStamp
+    /// The device held every child when the card opened: the task's detail
+    /// was read (`childrenSyncedAt`), or the server has not seen the task
+    /// yet, so all of its children are on the device.
+    public var childrenKnown: Bool
     public var subtasks: [SubtaskRecord]
     public var comments: [CommentRecord]
 
     public init(_ task: TaskRecord) {
         stamp = TaskStamp(task)
+        childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
         subtasks = Self.visible(task.subtasks)
         comments = Self.visible(task.comments)
     }
 
     public func matches(_ task: TaskRecord?) -> Bool {
         guard let task, stamp.matches(task) else { return false }
+        guard childrenKnown else { return true }
         return Self.visible(task.subtasks) == subtasks && Self.visible(task.comments) == comments
     }
 

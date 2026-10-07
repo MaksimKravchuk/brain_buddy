@@ -302,6 +302,7 @@ struct ReducerReviewTests {
         var asking = Review.nextTask("t1", started: t0, serverRevision: 4)
         asking.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
         asking.comments = [CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)]
+        asking.childrenSyncedAt = t0  // the card showed the task's children, hydrated
         // Another window: the reducer's child commands leave the parent as it is.
         let windowEdits: [(String, GTDCommand)] = [
             ("subtask added", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
@@ -347,6 +348,38 @@ struct ReducerReviewTests {
         var unchanged = Review.state([asking])
         try Review.apply(decide(.someday, shown: try #require(unchanged.tasks["t1"])), to: &unchanged)
         #expect(unchanged.tasks["t1"]?.state == .someday)
+    }
+
+    @Test("020-FR-011 children hydrated after the card opened are not a change; a parent edit still is; local tasks know their children")
+    func hydrationIsNotAChange() throws {
+        // Pulled, not hydrated yet: the list endpoint carries no children.
+        let unhydrated = Review.nextTask("t1", started: t0, serverRevision: 4)
+        #expect(unhydrated.serverID != nil && unhydrated.childrenSyncedAt == nil)
+        let existing = SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)
+        let comment = CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)
+
+        // Hydration fills the children that already existed: the decision applies.
+        var hydrated = Review.state([unhydrated])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks = [existing]
+        hydrated.tasks["t1"]?.comments = [comment]
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday, "unknown children becoming known is not an edit")
+
+        // A parent edit after an unhydrated snapshot is still stale.
+        var edited = Review.state([unhydrated])
+        try Review.apply(.updateTask(.init(taskID: "t1", changes: TaskChanges(details: .set("Tiles first")))), at: Review.now, to: &edited)
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &edited) } == .formulationChanged)
+
+        // A task the server has not seen yet: every child is on the device, so a child edit counts.
+        var local = Review.nextTask("t2", started: t0)
+        local.subtasks = [SubtaskRecord(id: "s2", title: "Buy tiles", orderKey: 0)]
+        #expect(local.serverID == nil && local.childrenSyncedAt == nil)
+        var state = Review.state([local])
+        let shownLocal = try #require(state.tasks["t2"])
+        try Review.apply(.transitionSubtask(.init(taskID: "t2", subtaskID: "s2", action: .complete)), at: Review.now, to: &state)
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shownLocal), to: &state) } == .formulationChanged)
     }
 
     @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
