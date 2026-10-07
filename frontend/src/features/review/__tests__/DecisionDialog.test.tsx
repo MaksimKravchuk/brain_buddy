@@ -604,6 +604,60 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     expect(decide.mock.calls[1][1]).toEqual(decide.mock.calls[0][1]);
   });
 
+  it("020-FR-045 020-FR-052 editing the text after a failed save clears the failure, so Retry never sends the old text", async () => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    decide
+      .mockRejectedValueOnce(new ApiError("Couldn't reach Brain Buddy", 0, null, "corr_old"))
+      .mockResolvedValueOnce(decided(task, "first_step", { title: "Measure the walls" }));
+    renderDialog(task);
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure");
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_old");
+
+    await user.type(screen.getByRole("textbox", { name: "First step" }), " the walls");
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(decide.mock.calls[1][1]).toMatchObject({ title: "Measure the walls" });
+    expect(decide.mock.calls[1][2]).not.toBe(decide.mock.calls[0][2]);
+  });
+
+  it("020-FR-040 020-FR-045 Retry is disabled while offline", async () => {
+    const user = userEvent.setup();
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    decide.mockRejectedValueOnce(new ApiError("Couldn't reach Brain Buddy", 0, null, "corr_off"));
+    renderDialog(asksTask());
+    await user.click(decisionButton(/^Done/));
+    const alert = await screen.findByRole("alert");
+
+    online.mockReturnValue(false);
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeDisabled();
+    online.mockReturnValue(true);
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(within(alert).getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("020-FR-045 a failure without a reference shows no empty Ref line", async () => {
+    const user = userEvent.setup();
+    decide.mockRejectedValueOnce(new Error("socket hang up"));
+    renderDialog(asksTask());
+
+    await user.click(decisionButton(/^Done/));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't save your decision. Nothing was changed.");
+    expect(alert).not.toHaveTextContent(/Ref/);
+  });
+
   it("020-FR-045 a decision the task's list no longer allows says so with the Ref and no retry", async () => {
     const user = userEvent.setup();
     decide.mockRejectedValueOnce(new ApiError("Bad", 400, { message: "x", detail: { reason: "decision_not_allowed" } }, "corr_7f3a"));
@@ -754,6 +808,26 @@ describe("020-FR-048 decision dialog: Undo", () => {
 
     expect(lastToast()).toEqual(["Couldn't undo. Nothing was changed. Ref corr_net"]);
   });
+
+  it("020-FR-048 020-FR-045 an Undo failure without a reference never shows \"Ref undefined\"", async () => {
+    const task = asksTask();
+    const action = await decideAndGetUndo(task, { state: "someday" });
+    undoDecision.mockRejectedValueOnce(new Error("socket hang up"));
+
+    await act(async () => action.onAction());
+
+    expect(lastToast()).toEqual(["Couldn't undo. Nothing was changed."]);
+    cleanup();
+    await settleHistory();
+
+    const second = await decideAndGetUndo(task, { state: "someday" });
+    undoDecision.mockRejectedValueOnce(new ApiError("Conflict", 409, null));
+    getTask.mockResolvedValueOnce({ ...task, state: "someday", revision: 10 });
+
+    await act(async () => second.onAction());
+
+    expect(lastToast()).toEqual(["Couldn't undo: “Renovate the bathroom” changed on another device. It's in Someday / maybe now."]);
+  });
 });
 
 describe("020-FR-052 decision dialog: drafts and the leave guard", () => {
@@ -823,6 +897,26 @@ describe("020-FR-052 decision dialog: drafts and the leave guard", () => {
     act(() => window.history.back());
     await user.click(await screen.findByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledWith({ kind: "closed" });
+  });
+
+  it("020-FR-052 browser Back, then Escape on the confirmation, keeps the guard: a second Back asks again", async () => {
+    const user = userEvent.setup();
+    const pushState = vi.spyOn(window.history, "pushState");
+    renderDialog(asksTask());
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure");
+
+    act(() => window.history.back());
+    await screen.findByRole("button", { name: "Keep editing" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "First step" })).toHaveFocus();
+    expect(pushState).toHaveBeenCalledTimes(2);
+
+    act(() => window.history.back());
+    expect(await screen.findByRole("alertdialog", { name: "Discard your new wording?" })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("Measure");
   });
 
   it("020-FR-052 an in-app link with unsaved text asks first, and Discard follows it", async () => {

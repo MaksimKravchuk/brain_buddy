@@ -17,7 +17,8 @@ import {
   parseUndoDecisionResponse,
   REVIEW_MUTATION_TIMEOUT_MS,
   reviewApi,
-  ReviewWireError
+  ReviewWireError,
+  withReference
 } from "../review";
 import fixtures from "../../features/review/__tests__/review_wire_fixtures.json";
 
@@ -228,6 +229,12 @@ describe("020-FR-045 failures expose the correlation id", () => {
     const fromClient = await reviewApi.getState().catch((error: unknown) => error);
     const sent = lastRequest().headers.get("X-Correlation-ID");
     expect(describeReviewError(fromClient)).toEqual({ kind: "other", referenceId: sent });
+  });
+
+  it("020-FR-045 appends a Ref only when there is one to quote", () => {
+    expect(withReference("Couldn't undo.", "corr_1")).toBe("Couldn't undo. Ref corr_1");
+    expect(withReference("Couldn't undo.", undefined)).toBe("Couldn't undo.");
+    expect(withReference("Couldn't undo.", "")).toBe("Couldn't undo.");
   });
 
   it("020-FR-045 turns a network failure into a Ref the person can quote", async () => {

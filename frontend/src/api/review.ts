@@ -341,6 +341,11 @@ const KNOWN_REASONS: ReadonlySet<string> = new Set<ReviewErrorKind>([
   "invalid_time_zone"
 ]);
 
+/** A message with its Ref appended, or the message alone when there is no Ref to quote (FR-045). */
+export function withReference(message: string, referenceId: string | undefined): string {
+  return referenceId ? `${message} Ref ${referenceId}` : message;
+}
+
 /** What failed, in the review's own terms, with the Ref to show (FR-045). */
 export function describeReviewError(error: unknown): { kind: ReviewErrorKind; referenceId: string | undefined } {
   if (!(error instanceof ApiError)) {

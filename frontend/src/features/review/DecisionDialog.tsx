@@ -17,7 +17,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { hasFeatureFlag, type AuthUser } from "../../api/auth";
 import { ApiError, apiClient, getApiBaseUrl } from "../../api/client";
-import { describeReviewError, newIdempotencyKey, reviewApi } from "../../api/review";
+import { describeReviewError, newIdempotencyKey, reviewApi, withReference } from "../../api/review";
 import type { DecisionRequest, DecisionResponse, DecisionType } from "../../api/review";
 import { applyReviewTask, refreshAfterReviewWrite, useDecideTask, useOnlineStatus, useReviewClock } from "../../api/reviewHooks";
 import type { TaskFormulationResponse, TaskResponse, TaskState } from "../../api/taskTypes";
@@ -156,10 +156,10 @@ async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: 
     }
     if (kind === "undo_unavailable" || kind === "stale") {
       const current = await apiClient.getTask(response.task.id).catch(() => response.task);
-      notify(`Couldn't undo: “${title}” changed on another device. It's in ${LIST_NAMES[current.state]} now. Ref ${referenceId}`);
+      notify(withReference(`Couldn't undo: “${title}” changed on another device. It's in ${LIST_NAMES[current.state]} now.`, referenceId));
       return;
     }
-    notify(`Couldn't undo. Nothing was changed. Ref ${referenceId}`);
+    notify(withReference("Couldn't undo. Nothing was changed.", referenceId));
   }
 }
 
@@ -252,6 +252,11 @@ export function DecisionDialog({
   const close = () => onClose({ kind: "closed" });
 
   const persistText = (value: string, form: DraftForm) => {
+    // A failure belongs to the text that was sent: once the text changes, its
+    // Retry would resend the old text, so the failure goes and Save sends anew.
+    if (value !== text) {
+      setFailure(null);
+    }
     setText(value);
     if (value === (form === "reformulate" ? currentTitle : "")) {
       removeReviewDraft(draftScope, draftTarget());
@@ -291,6 +296,13 @@ export function DecisionDialog({
         navigate(href, { replace: true });
       })
   });
+
+  /** "Keep editing" and Escape on the confirmation: after browser Back the guard entry is pushed again. */
+  const keepEditing = (rearm: boolean) => {
+    if (rearm) guard.rearm();
+    setConfirm(null);
+    fieldRef.current?.focus();
+  };
 
   const openForm = (form: DraftForm) => {
     setView(form);
@@ -384,8 +396,7 @@ export function DecisionDialog({
       event.preventDefault();
       event.stopPropagation();
       if (confirm) {
-        setConfirm(null);
-        fieldRef.current?.focus();
+        keepEditing(confirm.rearm);
       } else if (view) {
         guarded(backToCard);
       } else {
@@ -454,9 +465,14 @@ export function DecisionDialog({
           {failure ? (
             <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               <span>{failure.copy}</span>
-              <span className="text-xs">Ref {failure.referenceId}</span>
+              {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
               {failure.retry ? (
-                <button type="button" className="min-h-11 rounded-lg px-3 font-semibold text-amber-900 hover:bg-amber-100" onClick={() => void send(lastAttempt.current as Attempt)}>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  className="min-h-11 rounded-lg px-3 font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                  onClick={() => void send(lastAttempt.current as Attempt)}
+                >
                   Retry
                 </button>
               ) : null}
@@ -624,11 +640,7 @@ export function DecisionDialog({
                   ref={keepEditingRef}
                   type="button"
                   className="min-h-11 flex-1 rounded-lg bg-sky-700 px-3 text-sm font-semibold text-white hover:bg-sky-800"
-                  onClick={() => {
-                    if (confirm.rearm) guard.rearm();
-                    setConfirm(null);
-                    fieldRef.current?.focus();
-                  }}
+                  onClick={() => keepEditing(confirm.rearm)}
                 >
                   Keep editing
                 </button>
