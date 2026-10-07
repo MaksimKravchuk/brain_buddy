@@ -56,6 +56,10 @@ Owner decisions taken when approving the task list.
   - Dynamic Type: every iOS screen of the feature works up to the largest accessibility size (AX5): content scrolls, the summary counts become one column, and the review's step bar scrolls (design "Mobile viability").
 - Q: Are the six owner notes of planning-review campaign 2 accepted? → A: Yes, as recommended: the account-less staged exposure (edge case "Account-less iOS use"); tasks the person released are left out of the Someday step for 30 days (FR-032); the literal reading of "reached asks for a decision" (FR-005); the read-out minimum samples, with widening beyond the owner only after the 8-week read-out (plan "Post-release acceptance"); "Leave for now" pauses the review (FR-029); and the backend keeps refusing to start without the navigator key, with the key-rotation runbook (plan "Migration, deploy order and rollback").
 
+### Session 2026-10-07
+
+- Q: Which finished steps count as "nothing to decide" for a counted review (FR-029)? → A: A step whose queue is empty when it is finished (Inbox, decisions, Waiting, Someday, projects), and always Wins, Mind sweep, Rest of Next and Dates, whatever they show; the summary never qualifies. So a review that finishes only those always-qualifying steps is a counted review (SC-001, FR-017, FR-036). Owner decision 2026-10-07 (data-model E3).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A stalled task asks for a decision (Priority: P1)
