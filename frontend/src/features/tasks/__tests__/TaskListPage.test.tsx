@@ -2715,8 +2715,30 @@ describe("020-FR-004 D-01 Next actions age markers", () => {
     expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
   });
 
+  it("020-FR-039 020-FR-004 the note counts every task that asks, from the review state, not just the loaded or filtered rows", async () => {
+    withFlag();
+    reviewMocked.getState.mockResolvedValue({ ...seenState, counts: { asks_for_decision: 9, moves_tomorrow: 2 } });
+    // Only one asking task is on this (first, or filtered) page of Next.
+    mocked.listTasks.mockImplementation(async () => listResponse([asking, fresh]));
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByText(`Your threshold is now 7 days. 9 tasks ask for a decision. Nothing moves to Someday before ${formatReviewDate(iso(7 * DAY))}.`)).toBeInTheDocument();
+  });
+
+  it("020-FR-039 the note waits for the review state rather than guessing a count", async () => {
+    withFlag();
+    reviewMocked.getState.mockReturnValue(new Promise(() => undefined));
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByRole("link", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
+  });
+
   it("020-FR-039 the note reads in the singular, and belongs to the account that made the change", async () => {
     withFlag();
+    reviewMocked.getState.mockResolvedValue({ ...seenState, counts: { asks_for_decision: 1, moves_tomorrow: 0 } });
     mocked.listTasks.mockImplementation(async () => listResponse([asking, fresh]));
     act(() => announceThresholdChange("user-1", { threshold_days: 21, floor: iso(7 * DAY) }));
     const { unmount } = renderPage("/tasks/next?group=off");

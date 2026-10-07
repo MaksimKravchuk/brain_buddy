@@ -28,7 +28,7 @@ import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
 import { useTaskCompletionAnimation } from "./useTaskCompletionAnimation";
-import { useOnlineStatus, useReviewClock, useThresholdNotice, useWeeklyReviewEnabled, type ThresholdNotice } from "../../api/reviewHooks";
+import { useOnlineStatus, useReviewClock, useReviewState, useThresholdNotice, useWeeklyReviewEnabled, type ThresholdNotice } from "../../api/reviewHooks";
 import { DecisionDialog, type DecisionOutcome } from "../review/DecisionDialog";
 import { classifyFromInstants, formatReviewDate, formulationInstants, listMarkerFor, type ListMarker } from "../review/formulation";
 
@@ -244,6 +244,9 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   const [reviewFocusRequest, setReviewFocusRequest] = useState(0);
   const markerFor = (task: TaskResponse): ListMarker | null =>
     reviewEnabled ? listMarkerFor(classifyFromInstants(reviewNow, formulationInstants(task.formulation))) : null;
+  // The note's count is the server's aggregate (formulation-clock §5), never the
+  // loaded or filtered rows of this page.
+  const asksForDecision = useReviewState().data?.counts.asks_for_decision;
   const thresholdNotice = useThresholdNotice((store) => store.notice);
   const dismissThresholdNotice = useThresholdNotice((store) => store.dismiss);
   const cacheScope = getTaskCacheScope(accountId ?? null);
@@ -968,10 +971,10 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
             {REVIEW_OFFLINE_REASON}
           </p>
         ) : null}
-        {reviewEnabled && state === "next" && thresholdNotice?.accountId === accountId ? (
+        {reviewEnabled && state === "next" && thresholdNotice?.accountId === accountId && asksForDecision !== undefined ? (
           <ThresholdChangedNote
             notice={thresholdNotice as ThresholdNotice}
-            asking={openTasks.filter((task) => markerFor(task) !== null).length}
+            asking={asksForDecision}
             onDismiss={dismissThresholdNotice}
           />
         ) : null}
