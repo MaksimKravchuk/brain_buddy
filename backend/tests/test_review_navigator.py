@@ -1448,6 +1448,78 @@ def test_020_FR_025_unexpected_adapter_error_releases_and_propagates(
     assert SENTINEL_NOTES not in line
 
 
+def _rechained_internal_error() -> Exception:
+    """A wrapper whose chain a newer framework brought back (the original
+    exception as its visible context)."""
+
+    error = NavigatorInternalError("navigator provider raised _AdapterBug")
+    error.__context__ = _AdapterBug(f"input_value='{SENTINEL_NOTES}'")
+    error.__suppress_context__ = False
+    return error
+
+
+def _chained_value_error() -> Exception:
+    error = ValueError(f"model said {SENTINEL_TITLE}")
+    error.__cause__ = KeyError(SENTINEL_NOTES)
+    return error
+
+
+@pytest.mark.parametrize(
+    "make_error",
+    [
+        pytest.param(_rechained_internal_error, id="re-chained-internal-error"),
+        pytest.param(_chained_value_error, id="chained-value-error"),
+    ],
+)
+def test_020_FR_044_middleware_logs_navigator_failures_by_class_name_only(
+    caplog: pytest.LogCaptureFixture, make_error: Callable[[], Exception]
+) -> None:
+    """Review item A: whatever chain an exception carries (a framework may
+    re-chain the suppressed original), the request middleware logs a failure
+    on a navigator route by class name only: no message, no cause, no
+    context, so no sentinel in the record or its ``exc_text``."""
+
+    from fastapi import FastAPI
+
+    from app.api.middleware import CorrelationIdMiddleware
+
+    app = FastAPI()
+    app.add_middleware(CorrelationIdMiddleware, api_prefix="/api")
+    raised = make_error()
+
+    @app.post("/api/review/navigator/suggestions")
+    async def _boom() -> None:
+        raise raised
+
+    caplog.set_level(logging.DEBUG)
+    with allure.step("a navigator route fails with a chained exception"):
+        _evidence("failure", {"class": type(raised).__name__})
+        response = TestClient(app, raise_server_exceptions=False).post(
+            "/api/review/navigator/suggestions"
+        )
+    assert response.status_code == 500
+    failed = next(r for r in caplog.records if "api_request_failed" in r.getMessage())
+    formatted = logging.Formatter("%(message)s").format(failed)
+    assert type(raised).__name__ in formatted
+    for record in caplog.records:
+        text = logging.Formatter("%(message)s").format(record)
+        for sentinel in (SENTINEL_TITLE, SENTINEL_NOTES):
+            assert sentinel not in text
+            assert sentinel not in (record.exc_text or "")
+    # The record carries a stand-in, never the live exception, which outer
+    # layers (anyio's task group here) may re-chain after the middleware.
+    assert failed.exc_info is not None
+    logged = failed.exc_info[1]
+    assert logged is not raised
+    assert type(logged).__name__ == "RedactedError"
+    assert str(logged) == type(raised).__name__
+    assert (logged.__cause__, logged.__context__, failed.exc_info[2]) == (
+        None,
+        None,
+        None,
+    )
+
+
 def test_020_FR_044_unexpected_adapter_error_logs_no_content(
     ready: Nav, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -145,6 +145,14 @@
       "stall_reason": null,
       "project_name": null,
       "open_task_titles": []
+    },
+    "strasse": {
+      "kind": "first_step",
+      "task_title": "Renovate the bathroom",
+      "task_notes": "Tiles from the Straße shop",
+      "stall_reason": null,
+      "project_name": null,
+      "open_task_titles": []
     }
   },
   "vectors": [
@@ -1587,6 +1595,42 @@
       "expect": {
         "kind": "proposals",
         "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-full-case-folding",
+      "rule": 3,
+      "note": "formulation_key folds fully: STRASSE and Straße are both strasse",
+      "input": "strasse",
+      "proposals": [
+        "Visit the STRASSE shop",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Visit the STRASSE shop",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-stem-on-whole-key",
+      "rule": 3,
+      "note": "the stem check runs on the whole key 'в марте', which starts with 'в', so this hyphenated token is not a date word",
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в-марте",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Разобрать коробки в-марте",
           "Write down the next step"
         ]
       }
