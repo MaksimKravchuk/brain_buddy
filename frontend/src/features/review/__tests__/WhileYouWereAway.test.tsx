@@ -288,7 +288,9 @@ describe("020-FR-015 While you were away dialog", () => {
     });
     acknowledgeParks.mockResolvedValueOnce(undefined);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    // The detail cache still holds the Next version from before the park.
+    // The detail cache still holds the Next version from before the park, written
+    // in the very millisecond the dialog opens: freshness must not hinge on clocks.
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 9, 7, 12));
     client.setQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")), { ...cv, state: "next", parked: null, revision: 4 });
     render(
       <QueryClientProvider client={client}>
@@ -297,6 +299,7 @@ describe("020-FR-015 While you were away dialog", () => {
     );
 
     await screen.findByRole("button", { name: "Return Learn basic Portuguese to Next" });
+    now.mockRestore();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     expect(screen.queryByText("Now in Next actions")).not.toBeInTheDocument();
     expect(screen.queryByRole("listitem", { name: "Update the CV" })).not.toBeInTheDocument();

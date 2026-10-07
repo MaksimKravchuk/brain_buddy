@@ -84,8 +84,10 @@ export function WhileYouWereAway({
   const returnKeys = useRef(new Map<string, string>());
 
   // Only what was read (or written by this dialog) after it opened is trusted:
-  // a detail cached earlier may be the version from before the park.
-  const [openedAt] = useState(() => Date.now());
+  // a detail cached earlier may be the version from before the park. "After"
+  // means the query's data or error changed since mount (compared with what it
+  // held then), not a wall-clock comparison, so a cache write in the opening
+  // millisecond is never mistaken for a fresh read.
   const results = useQueries({
     queries: parks.map((park) => ({
       queryKey: taskKeys.detail(park.task_id, getTaskCacheScope(accountId)),
@@ -94,20 +96,21 @@ export function WhileYouWereAway({
       refetchOnMount: "always" as const
     }))
   });
+  const [baseline] = useState(() => results.map((result) => ({ data: result.dataUpdatedAt, error: result.errorUpdateCount })));
+  const readSinceOpen = (index: number): boolean =>
+    results[index].data !== undefined && results[index].dataUpdatedAt !== (baseline[index]?.data ?? 0);
+  const failedSinceOpen = (index: number): boolean => results[index].errorUpdateCount > (baseline[index]?.error ?? 0);
   /** This park's task as read since the dialog opened, or undefined. */
   const freshTask = (index: number): TaskResponse | undefined => {
     const result = results[index];
-    if (result.data === undefined || result.dataUpdatedAt < openedAt) {
+    if (result.data === undefined || !readSinceOpen(index)) {
       return undefined;
     }
     // A failed re-read leaves the older data in place: it is not trusted either,
     // unless this dialog already acted on the row (its own status then speaks).
     return result.errorUpdatedAt > result.dataUpdatedAt && rows[parks[index].task_id] === undefined ? undefined : result.data;
   };
-  const answeredSinceOpen = (index: number): boolean => {
-    const result = results[index];
-    return Math.max(result.dataUpdatedAt, result.errorUpdatedAt) >= openedAt;
-  };
+  const answeredSinceOpen = (index: number): boolean => readSinceOpen(index) || failedSinceOpen(index);
   const loaded = parks.flatMap((park, index) => {
     const task = freshTask(index);
     return task ? [{ park, task }] : [];
@@ -123,7 +126,7 @@ export function WhileYouWereAway({
     if (freshTask(index) !== undefined) {
       return true;
     }
-    return result.error instanceof ApiError && result.error.status === 404 && result.errorUpdatedAt >= openedAt;
+    return result.error instanceof ApiError && result.error.status === 404 && failedSinceOpen(index);
   });
 
   useLayoutEffect(() => {
