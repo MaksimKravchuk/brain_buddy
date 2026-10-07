@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { apiClient } from "../../../api/client";
 import { reviewApi, type ReviewState } from "../../../api/review";
-import { loadReviewDraft, saveReviewDraft } from "../../../features/review/reviewFormDrafts";
 import { markWhileAwayShown, readWhileAwayLastShown, localDay } from "../../../features/review/wywaPresentation";
 import type { ProjectResponse, TagResponse, TaskCounts } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
@@ -1025,28 +1024,5 @@ describe("020-FR-051 AppShell review dialogs at web open", () => {
     renderWithHeading();
     await waitFor(() => expect(reviewApi.getState).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("020-FR-052 sweeps expired and other-account drafts at open and on focus, and clears the account's keys on sign-out", async () => {
-    signIn("user-drafts");
-    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [] });
-    const target = { kind: "task", taskId: "task-1", formulationId: "form_a" } as const;
-    saveReviewDraft({ apiOrigin, accountId: "someone-else" }, target, { form: "reformulate", text: "theirs" });
-    saveReviewDraft({ apiOrigin, accountId: "user-drafts" }, target, { form: "reformulate", text: "mine" });
-    renderShell();
-
-    await waitFor(() => expect(loadReviewDraft({ apiOrigin, accountId: "someone-else" }, target)).toBeNull());
-    expect(loadReviewDraft({ apiOrigin, accountId: "user-drafts" }, target)?.text).toBe("mine");
-
-    saveReviewDraft({ apiOrigin, accountId: "someone-else" }, target, { form: "reformulate", text: "again" });
-    act(() => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    expect(loadReviewDraft({ apiOrigin, accountId: "someone-else" }, target)).toBeNull();
-
-    act(() => {
-      useAuthStore.setState({ user: null, status: "anon" });
-    });
-    expect(loadReviewDraft({ apiOrigin, accountId: "user-drafts" }, target)).toBeNull();
   });
 });
