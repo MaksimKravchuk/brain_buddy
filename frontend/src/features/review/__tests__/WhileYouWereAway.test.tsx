@@ -155,6 +155,49 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(client.getQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")))).toEqual(cv);
   });
 
+  it("020-FR-015 returning waits until the projects are known, so an archived project's task is never offered back", async () => {
+    let releaseProjects: () => void = () => undefined;
+    listProjects.mockReset();
+    listProjects.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseProjects = () => resolve(projects);
+    }));
+    renderDialog([portuguese, garage, router]);
+
+    await screen.findByText("Return the old router");
+    for (const name of ["Return Learn basic Portuguese to Next", "Return Clean out the garage to Next", "Return Return the old router to Next"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    expect(screen.getByRole("button", { name: "Return all 3 to Next" })).toBeDisabled();
+    expect(within(row("Return the old router")).getByText(`Parked ${formatReviewDate(router.parked?.at as string)}`)).toBeInTheDocument();
+    expect(within(dialog()).queryByText(/no project/)).not.toBeInTheDocument();
+
+    await act(async () => releaseProjects());
+
+    expect(await within(row("Return the old router")).findByRole("button", { name: "Return unavailable: project Old flat is archived" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Return Learn basic Portuguese to Next" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
+    expect(transitionTask).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-015 020-FR-045 projects that fail to load keep returning disabled, say so with the Ref, and Retry loads them", async () => {
+    const user = userEvent.setup();
+    listProjects.mockReset();
+    listProjects.mockRejectedValueOnce(new ApiError("Server Error", 500, null, "corr_projects")).mockResolvedValueOnce(projects);
+    renderDialog([portuguese, garage, router]);
+
+    const alert = await screen.findByText("We couldn't load your projects, so tasks can't be returned yet.");
+    expect(alert.parentElement).toHaveTextContent("Ref corr_projects");
+    expect(screen.getByRole("button", { name: "Return Return the old router to Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Return all 3 to Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+
+    await user.click(within(alert.parentElement as HTMLElement).getByRole("button", { name: "Retry" }));
+
+    expect(await within(row("Return the old router")).findByRole("button", { name: "Return unavailable: project Old flat is archived" })).toBeInTheDocument();
+    expect(screen.queryByText("We couldn't load your projects, so tasks can't be returned yet.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
+  });
+
   it("020-FR-045 a failed return says so on its row with the Ref, and Retry resends it", async () => {
     const user = userEvent.setup();
     transitionTask.mockRejectedValueOnce(new ApiError("Couldn't reach Brain Buddy", 0, null, "corr_return"));

@@ -61,7 +61,11 @@ export function WhileYouWereAway({
   const queryClient = useQueryClient();
   const online = useOnlineStatus();
   const accountId = useAuthStore((state) => (state.user as AuthUser).id);
-  const projects = useProjects().data ?? [];
+  // Returning waits for the projects: until they are known, a task in an
+  // archived project would look project-less and be offered back.
+  const projectsQuery = useProjects();
+  const projects = projectsQuery.data ?? [];
+  const projectsKnown = projectsQuery.data !== undefined;
   const acknowledgeMutation = useAcknowledgeParks();
   const [rows, setRows] = useState<Record<string, RowStatus>>({});
   const [summary, setSummary] = useState<string | null>(null);
@@ -100,6 +104,9 @@ export function WhileYouWereAway({
   const setRow = (taskId: string, status: RowStatus) => setRows((current) => ({ ...current, [taskId]: status }));
 
   const returnTask = async (task: TaskResponse): Promise<boolean> => {
+    if (!projectsKnown) {
+      return false;
+    }
     const key = returnKeys.current.get(task.id) ?? newIdempotencyKey();
     returnKeys.current.set(task.id, key);
     setRow(task.id, { kind: "returning" });
@@ -127,7 +134,9 @@ export function WhileYouWereAway({
     const status = rows[task.id]?.kind;
     return !archived(task) && (status === undefined || status === "failed");
   };
-  const eligible = tasks.filter(returnable);
+  // What "Return all" would cover once the projects are known; nothing goes back before.
+  const candidates = tasks.filter(returnable);
+  const eligible = projectsKnown ? candidates : [];
   const anyReturned = tasks.some((task) => rows[task.id]?.kind === "returned");
 
   const returnAll = async () => {
@@ -193,9 +202,9 @@ export function WhileYouWereAway({
     }
   };
 
-  const returnAllLabel = eligible.length === 2
+  const returnAllLabel = candidates.length === 2
     ? "Return both to Next"
-    : anyReturned ? `Return the other ${eligible.length} to Next` : `Return all ${eligible.length} to Next`;
+    : anyReturned ? `Return the other ${candidates.length} to Next` : `Return all ${candidates.length} to Next`;
 
   return (
     <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-slate-50/80 backdrop-blur-xs sm:items-center sm:p-6">
@@ -224,6 +233,17 @@ export function WhileYouWereAway({
           <p className="m-0 leading-relaxed">{intro(parks.length)}</p>
           {!online ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2">You&apos;re offline. Returning tasks needs a connection.</p> : null}
           {summary ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2">{summary}</p> : null}
+          {!projectsKnown && projectsQuery.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+              <span>We couldn&apos;t load your projects, so tasks can&apos;t be returned yet.</span>
+              {describeReviewError(projectsQuery.error).referenceId ? (
+                <span className="text-xs">Ref {describeReviewError(projectsQuery.error).referenceId}</span>
+              ) : null}
+              <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void projectsQuery.refetch()}>
+                Retry
+              </button>
+            </div>
+          ) : null}
           <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 p-0">
             {loaded.map(({ park, task }) => {
               const status = rows[task.id];
@@ -240,7 +260,9 @@ export function WhileYouWereAway({
                         <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[status.current?.state ?? "someday"]}`}</p>
                       ) : (
                         <p className="m-0 text-xs text-slate-500">
-                          {`Parked ${formatReviewDate(park.parked_at)} · ${project ? (project.state === "archived" ? `${project.name} (archived)` : project.name) : "no project"}`}
+                          {projectsKnown
+                            ? `Parked ${formatReviewDate(park.parked_at)} · ${project ? (project.state === "archived" ? `${project.name} (archived)` : project.name) : "no project"}`
+                            : `Parked ${formatReviewDate(park.parked_at)}`}
                         </p>
                       )}
                     </div>
@@ -259,7 +281,7 @@ export function WhileYouWereAway({
                       <button
                         type="button"
                         aria-label={`Return ${task.title} to Next`}
-                        disabled={!online || status?.kind === "returning"}
+                        disabled={!online || !projectsKnown || status?.kind === "returning"}
                         className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
                         onClick={() => void returnTask(task)}
                       >
@@ -293,10 +315,10 @@ export function WhileYouWereAway({
             </div>
           ) : null}
           <div className="mt-1 flex flex-wrap justify-end gap-2">
-            {eligible.length >= 2 ? (
+            {candidates.length >= 2 ? (
               <button
                 type="button"
-                disabled={!online}
+                disabled={!online || !projectsKnown}
                 className="min-h-11 rounded-lg border border-slate-200 px-4 font-medium text-slate-800 hover:border-slate-300 disabled:opacity-60"
                 onClick={() => void returnAll()}
               >
