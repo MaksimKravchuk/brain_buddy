@@ -97,6 +97,26 @@
       },
       "resolution": "Important item (decision-undo rule changed a shared contract without vectors or iOS alignment) resolved in e735439 by scoping the rule to the server, keeping the shared exact-restore rule and vectors unchanged, recording the ~25 h residual, and adding follow-up task T174 (slice PR-12, depends on PR-03 and PR-05) for device alignment; the FR-048 precedence was acknowledged by the owner (owner_decision). Advisories fixed in e735439: the sweep-gap row names the device auto-park; research R7 and T030 list park_ack:; http §3 details_too_long has web copy and the device offline check is queued with T174's slice.",
       "artifacts_digest_after_fixes": "1bd67c3fc7528e75db3e68b12eed0a69bb7b0ad9c5d2aad5d6fd6d182b0dab49"
+    },
+    "post_acceptance_review_5": {
+      "reason": "Compensating measure 5: contract wording that documents merged PR-03 (iOS kit) and PR-15 (backend) behaviour (PR #275: 78a26d8, d88d9bd) was reviewed instead of relying on the acceptance.",
+      "reviewed_range": "origin/main..d88d9bd (contracts/http.md, contracts/ios-commands.md, data-model.md)",
+      "reviewer": "claude-sonnet-5-5 subagent, read-only",
+      "date": "2026-10-07",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 0,
+        "important": 3,
+        "advisory": 6
+      },
+      "owner_decision": {
+        "by": "Max (product owner)",
+        "date": "2026-10-07",
+        "question": "Do Wins, Mind sweep, Rest of Next and Dates always count as having nothing to decide (FR-029), so a review that finishes only those steps is a counted review?",
+        "answer": "Yes (as the iOS kit already does); the server side follows in PR-11."
+      },
+      "resolution": "Fixed in b17c526: E10/§5/R15 state the device-only undoRetained exception honestly (no stored snapshot); E3 records the owner decision; the bulk-undo 'known limit' is relabelled a known deviation from FR-017 with the fix tracked for PR-12 (with T174); http §3 undo 404 cases completed, http.md:57 resource naming matches the backend, the compaction list and the device-only Undo sentence corrected, the open_session rule scoped to iOS clients. No behaviour change.",
+      "artifacts_digest_after_fixes": "f06dd65d283ce9d0a66ebfa14e66d7bfa6af532fe2d9dd020064f73fd8bbdbf6"
     }
   }
 }
