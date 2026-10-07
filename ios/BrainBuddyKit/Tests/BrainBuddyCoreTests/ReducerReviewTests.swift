@@ -382,6 +382,49 @@ struct ReducerReviewTests {
         #expect(Review.error { try Review.apply(decide(.someday, shown: shownLocal), to: &state) } == .formulationChanged)
     }
 
+    @Test("020-FR-011 before full hydration the children the card did show still count: changed or deleted is stale, added is not")
+    func shownChildrenCountBeforeHydration() throws {
+        // Pulled, not fully hydrated, but already holding a cached subtask and comment.
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [
+            SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0),
+            SubtaskRecord(id: "s2", serverID: "subtask_2", serverRevision: 1, title: "Buy tiles", orderKey: 1),
+        ]
+        cached.comments = [CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)]
+        #expect(cached.childrenSyncedAt == nil)
+
+        let changes: [(String, GTDCommand?, (inout TaskRecord) -> Void)] = [
+            ("cached subtask completed in another window", .transitionSubtask(.init(taskID: "t1", subtaskID: "s1", action: .complete)), { _ in }),
+            ("cached subtask renamed in another window", .updateSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy blue tiles")), { _ in }),
+            ("cached subtask deleted elsewhere", nil, { $0.subtasks.removeAll { $0.id == "s1" } }),
+            ("cached comment edited elsewhere", nil, { $0.comments[0].body = "Ask Ann and Bo" }),
+            ("cached comment deleted elsewhere", nil, { $0.comments = [] }),
+            ("cached subtasks reordered elsewhere", nil, { $0.subtasks[0].orderKey = 5 }),
+        ]
+        for (what, command, change) in changes {
+            var state = Review.state([cached])
+            let shown = try #require(state.tasks["t1"])
+            if let command { try Review.apply(command, at: Review.now, to: &state) }
+            change(&state.tasks["t1"]!)
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+        }
+
+        // Hydration adds the other children that already existed (and server order keys): applies.
+        var hydrated = Review.state([cached])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 2)
+        )
+        hydrated.tasks["t1"]?.subtasks[0].orderKey = 10
+        hydrated.tasks["t1"]?.subtasks[1].orderKey = 20
+        hydrated.tasks["t1"]?.comments.append(
+            CommentRecord(id: "c2", serverID: "comment_2", serverRevision: 1, body: "Tiles are in", authorID: "u2", createdAt: t0)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday, "children the card did not show are not a change; relative order kept")
+    }
+
     @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
     func expectedTaskIsNotEncoded() throws {
         let shown = Review.nextTask("t1", started: t0, serverRevision: 4)

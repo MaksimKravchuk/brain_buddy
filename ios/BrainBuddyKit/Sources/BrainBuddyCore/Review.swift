@@ -360,11 +360,12 @@ public struct TaskStamp: Hashable, Sendable, Codable {
 /// subtask or comment has its own revision), so the children are compared
 /// by what a person sees: ids, subtask title, state and order, comment body.
 /// Server ids, revisions, authors and server-set times are left out, so an
-/// acknowledgement that changes nothing visible is not a change. Children the
-/// device had not loaded yet when the card opened (a pulled task before its
-/// detail read, `childrenSyncedAt == nil`) are unknown, not empty: then only
-/// the task's own stamp counts, so hydration filling in children that
-/// already existed is not a change. Never encoded or stored.
+/// acknowledgement that changes nothing visible is not a change. Before the
+/// task's detail was read (a pulled task, `childrenSyncedAt == nil`) the
+/// device may hold only some children: then the children the card showed
+/// must be unchanged (present, same title, state and relative order, same
+/// comment body), and children it did not show (the ones hydration fills in)
+/// are not a change. Never encoded or stored.
 public struct ShownTask: Hashable, Sendable {
     /// The task's own revision and `updatedAt`.
     public var stamp: TaskStamp
@@ -384,8 +385,25 @@ public struct ShownTask: Hashable, Sendable {
 
     public func matches(_ task: TaskRecord?) -> Bool {
         guard let task, stamp.matches(task) else { return false }
-        guard childrenKnown else { return true }
-        return Self.visible(task.subtasks) == subtasks && Self.visible(task.comments) == comments
+        let currentSubtasks = Self.visible(task.subtasks)
+        let currentComments = Self.visible(task.comments)
+        if childrenKnown { return currentSubtasks == subtasks && currentComments == comments }
+        // Before full hydration: every child the card did show must still be
+        // there as shown (a missing one was deleted elsewhere: hydration
+        // drops a cached child only when the server no longer lists it);
+        // children it did not show are the ones hydration adds.
+        let byID = Dictionary(currentSubtasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for shown in subtasks {
+            guard let current = byID[shown.id], current.title == shown.title, current.state == shown.state else {
+                return false
+            }
+        }
+        let shownOrder = subtasks.sorted { ($0.orderKey, $0.id.rawValue) < ($1.orderKey, $1.id.rawValue) }.map(\.id)
+        let currentOrder = subtasks.compactMap { byID[$0.id] }
+            .sorted { ($0.orderKey, $0.id.rawValue) < ($1.orderKey, $1.id.rawValue) }.map(\.id)
+        guard shownOrder == currentOrder else { return false }
+        let commentsByID = Dictionary(currentComments.map { ($0.id, $0.body) }, uniquingKeysWith: { first, _ in first })
+        return comments.allSatisfy { commentsByID[$0.id] == $0.body }
     }
 
     static func visible(_ subtasks: [SubtaskRecord]) -> [SubtaskRecord] {
