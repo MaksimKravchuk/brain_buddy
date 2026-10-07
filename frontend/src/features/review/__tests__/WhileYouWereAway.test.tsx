@@ -228,6 +228,39 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(within(row("Update the CV")).queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("020-FR-011 a task changed on another device is published to the task caches as it is now", async () => {
+    const user = userEvent.setup();
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-cv" } }, "corr_stale"));
+    const client = renderDialog([portuguese, cv]);
+    const somedayList = [...taskKeys.lists(getTaskCacheScope("user-1")), { state: "someday" }];
+    client.setQueryData(somedayList, { pages: [{ items: [cv] }], pageParams: [null] });
+    await screen.findByRole("button", { name: "Return Update the CV to Next" });
+    const current = { ...cv, state: "next" as const, parked: null, revision: 7 };
+    // From now on the server has the other device's version.
+    getTask.mockImplementation(async (id) => (id === cv.id ? current : portuguese));
+
+    await user.click(screen.getByRole("button", { name: "Return Update the CV to Next" }));
+
+    await screen.findByText("“Update the CV” changed on another device, so it was left as it is there.");
+    expect(client.getQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")))).toEqual(current);
+    expect(client.getQueryData(somedayList)).toEqual({ pages: [{ items: [current] }], pageParams: [null] });
+  });
+
+  it("020-FR-011 a changed task whose current version cannot be read marks the task caches for a refetch", async () => {
+    const user = userEvent.setup();
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, null, "corr_stale"));
+    const client = renderDialog([portuguese, cv]);
+    const somedayList = [...taskKeys.lists(getTaskCacheScope("user-1")), { state: "someday" }];
+    client.setQueryData(somedayList, { pages: [{ items: [cv] }], pageParams: [null] });
+    await screen.findByRole("button", { name: "Return Update the CV to Next" });
+    getTask.mockRejectedValueOnce(new Error("offline"));
+
+    await user.click(screen.getByRole("button", { name: "Return Update the CV to Next" }));
+
+    await screen.findByText("“Update the CV” changed on another device, so it was left as it is there.");
+    expect(client.getQueryState(somedayList)?.isInvalidated).toBe(true);
+  });
+
   it("020-FR-011 a changed task whose current list cannot be read is still left alone", async () => {
     const user = userEvent.setup();
     transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, null, "corr_stale"));

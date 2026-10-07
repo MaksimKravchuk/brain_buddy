@@ -18,7 +18,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AuthUser } from "../../api/auth";
 import { ApiError, apiClient } from "../../api/client";
 import { describeReviewError, newIdempotencyKey, type UnseenPark } from "../../api/review";
-import { applyReviewTask, captureReviewScope, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
+import { applyReviewTask, captureReviewScope, refreshAfterReviewWrite, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
 import { getTaskCacheScope, taskKeys, useProjects } from "../../api/taskHooks";
 import type { ProjectResponse, TaskResponse, TaskState } from "../../api/taskTypes";
 import { useAuthStore } from "../../stores/authStore";
@@ -122,7 +122,14 @@ export function WhileYouWereAway({
       const { kind, referenceId } = describeReviewError(error);
       if (kind === "stale") {
         returnKeys.current.delete(task.id);
-        setRow(task.id, { kind: "stale", current: await apiClient.getTask(task.id).catch(() => null) });
+        const current = await apiClient.getTask(task.id).catch(() => null);
+        // The caches must not keep the version that lost the race.
+        if (current) {
+          applyReviewTask(queryClient, current, scope);
+        } else {
+          refreshAfterReviewWrite(queryClient, scope);
+        }
+        setRow(task.id, { kind: "stale", current });
       } else {
         setRow(task.id, { kind: "failed", referenceId });
       }
