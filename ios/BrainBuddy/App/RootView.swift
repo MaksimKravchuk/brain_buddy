@@ -219,10 +219,15 @@ private struct MainTabView: View {
     }
 
     private func startupSheetDismissed() {
+        let wasShown = startupSheetAppeared
         startupSheetAppeared = false
         // The sheet appeared without a tap: VoiceOver goes back to the
         // screen, starting at its navigation title (design "Keyboard and focus").
-        UIAccessibility.post(notification: .screenChanged, argument: nil)
+        // A sheet the 2 s release cleared never reached the screen, so
+        // VoiceOver stays where it is, possibly inside another modal.
+        if wasShown {
+            UIAccessibility.post(notification: .screenChanged, argument: nil)
+        }
         presentStartupSheetIfDue()
     }
 }
