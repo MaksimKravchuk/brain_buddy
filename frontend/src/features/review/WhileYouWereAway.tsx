@@ -3,7 +3,9 @@
  *
  * Lists the auto-parked tasks the person has not seen, each with a one-click
  * "Return to Next" (the existing `move → next` transition, which starts a new
- * formulation) and "Return all". "Continue" marks every park seen; Esc and
+ * formulation) and "Return all". "Continue" marks the parks seen once every
+ * task has loaded (a task that is gone counts; one that could not be read
+ * stays unseen); Esc and
  * Close leave them unseen, so the dialog comes back the next day (the caller
  * applies `wywaPresentation`). Per-row returning, failure with Ref and Retry,
  * changed-elsewhere and archived-project partial failures, and offline.
@@ -14,7 +16,7 @@ import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import type { AuthUser } from "../../api/auth";
-import { apiClient } from "../../api/client";
+import { ApiError, apiClient } from "../../api/client";
 import { describeReviewError, newIdempotencyKey, type UnseenPark } from "../../api/review";
 import { applyReviewTask, useAcknowledgeParks, useOnlineStatus } from "../../api/reviewHooks";
 import { getTaskCacheScope, taskKeys, useProjects } from "../../api/taskHooks";
@@ -64,7 +66,7 @@ export function WhileYouWereAway({
   const [rows, setRows] = useState<Record<string, RowStatus>>({});
   const [summary, setSummary] = useState<string | null>(null);
   const [continueFailure, setContinueFailure] = useState<{ referenceId: string | undefined } | null>(null);
-  const [acknowledgeKey] = useState(newIdempotencyKey);
+  const acknowledgeAttempt = useRef<{ body: string; key: string } | null>(null);
   // A failed return keeps its key, so Retry is a safe replay.
   const returnKeys = useRef(new Map<string, string>());
 
@@ -75,12 +77,19 @@ export function WhileYouWereAway({
       retry: false
     }))
   });
-  // Parks whose task cannot be read are not listed, but "Continue" still marks them seen.
   const loaded = parks.flatMap((park, index) => {
     const task = results[index].data;
     return task ? [{ park, task }] : [];
   });
   const tasks = loaded.map(({ task }) => task);
+  // "Continue" waits until every park's task has answered. It then marks seen
+  // the parks it showed and those whose task is gone (404); a park whose task
+  // could not be read for another reason stays unseen and comes back next time.
+  const resolving = results.some((result) => result.isPending);
+  const confirmed = parks.filter((_park, index) => {
+    const result = results[index];
+    return result.data !== undefined || (result.error instanceof ApiError && result.error.status === 404);
+  });
 
   useLayoutEffect(() => {
     headingRef.current?.focus();
@@ -128,19 +137,30 @@ export function WhileYouWereAway({
       }
     }
     const held = tasks.filter(archived);
+    const backInNext = alreadyBack + returnedNow;
     if (held.length > 0) {
-      const back = `${returnedNow} ${returnedNow === 1 ? "task is" : "tasks are"} back in Next.`;
+      const back = `${backInNext} ${backInNext === 1 ? "task is" : "tasks are"} back in Next.`;
       const reasons = held.map((task) => ` “${task.title}” stayed in Someday because its project “${(projectOf(task) as ProjectResponse).name}” is archived. Restore the project first to bring it back.`);
       setSummary(`${back}${reasons.join("")}`);
-    } else if (alreadyBack + returnedNow === tasks.length) {
+    } else if (backInNext === tasks.length) {
       setSummary(`All ${tasks.length} are back in Next with a fresh start.`);
     }
   };
 
   const confirmSeen = () => {
     setContinueFailure(null);
+    if (confirmed.length === 0) {
+      onDone(false);
+      return;
+    }
+    const body = { items: confirmed.map((park) => ({ task_id: park.task_id, formulation_id: park.formulation_id })) };
+    // Retry replays the same body under the same key; a different set of parks gets a new key.
+    const sent = JSON.stringify(body);
+    if (acknowledgeAttempt.current?.body !== sent) {
+      acknowledgeAttempt.current = { body: sent, key: newIdempotencyKey() };
+    }
     acknowledgeMutation.mutate(
-      { body: { items: parks.map((park) => ({ task_id: park.task_id, formulation_id: park.formulation_id })) }, idempotencyKey: acknowledgeKey },
+      { body, idempotencyKey: acknowledgeAttempt.current.key },
       {
         onSuccess: () => onDone(true),
         onError: (error) => setContinueFailure({ referenceId: describeReviewError(error).referenceId })
@@ -251,7 +271,7 @@ export function WhileYouWereAway({
                   {status?.kind === "failed" ? (
                     <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
                       <span>{`Couldn't return “${task.title}” to Next. It's still in Someday / maybe.`}</span>
-                      <span>Ref {status.referenceId}</span>
+                      {status.referenceId ? <span>Ref {status.referenceId}</span> : null}
                       <button type="button" className="min-h-11 rounded-lg px-2 font-semibold hover:bg-amber-100" onClick={() => void returnTask(task)}>
                         Retry
                       </button>
@@ -264,7 +284,7 @@ export function WhileYouWereAway({
           {continueFailure ? (
             <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
               <span>Couldn&apos;t save that you&apos;ve seen these. Try again.</span>
-              <span className="text-xs">Ref {continueFailure.referenceId}</span>
+              {continueFailure.referenceId ? <span className="text-xs">Ref {continueFailure.referenceId}</span> : null}
               <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={confirmSeen}>
                 Retry
               </button>
@@ -283,7 +303,7 @@ export function WhileYouWereAway({
             ) : null}
             <button
               type="button"
-              disabled={acknowledgeMutation.isPending}
+              disabled={resolving || acknowledgeMutation.isPending}
               className="min-h-11 rounded-lg bg-sky-700 px-5 font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
               onClick={confirmSeen}
             >

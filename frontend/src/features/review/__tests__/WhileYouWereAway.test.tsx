@@ -61,12 +61,12 @@ const park = (task: TaskResponse): UnseenPark => ({ task_id: task.id, formulatio
 
 const onDone = vi.fn();
 
-function renderDialog(tasks: TaskResponse[], parks: UnseenPark[] = tasks.map(park)) {
-  getTask.mockImplementation(async (id) => {
+function renderDialog(tasks: TaskResponse[], parks: UnseenPark[] = tasks.map(park), load?: (id: string) => Promise<TaskResponse>) {
+  getTask.mockImplementation(load ?? (async (id) => {
     const task = tasks.find((candidate) => candidate.id === id);
     if (!task) throw new ApiError("Not found", 404, null, "corr_missing");
     return task;
-  });
+  }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -220,7 +220,7 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(screen.queryByText(/back in Next/)).not.toBeInTheDocument();
   });
 
-  it("020-FR-015 Return the other N after one was returned, and one archived row left behind", async () => {
+  it("020-FR-015 Return the other N after one was returned, and one archived row left behind, counts every task back in Next", async () => {
     const user = userEvent.setup();
     renderDialog([portuguese, garage, cv, router, parked("task-shed", "Paint the shed", "project-home", "2026-10-07T09:00:00Z")]);
     await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
@@ -228,7 +228,8 @@ describe("020-FR-015 While you were away dialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Return the other 3 to Next" }));
 
-    expect(await screen.findByText("3 tasks are back in Next. “Return the old router” stayed in Someday because its project “Old flat” is archived. Restore the project first to bring it back.")).toBeInTheDocument();
+    expect(await screen.findByText("4 tasks are back in Next. “Return the old router” stayed in Someday because its project “Old flat” is archived. Restore the project first to bring it back.")).toBeInTheDocument();
+    expect(transitionTask).toHaveBeenCalledTimes(4);
   });
 
   it("020-FR-015 Return all where only one could go back reads in the singular", async () => {
@@ -287,11 +288,78 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(screen.queryByText("Update the CV")).not.toBeInTheDocument();
   });
 
+  it("020-FR-015 Continue waits until every park's task has loaded, and never marks a park seen that it could not show", async () => {
+    const user = userEvent.setup();
+    acknowledgeParks.mockResolvedValueOnce(undefined);
+    const gone: UnseenPark = { task_id: "task-gone", formulation_id: "form_task-gone", parked_at: "2026-10-07T09:00:00Z" };
+    let releaseGarage: () => void = () => undefined;
+    let failCv: () => void = () => undefined;
+    renderDialog([portuguese], [park(portuguese), park(garage), park(cv), gone], (id) => {
+      if (id === garage.id) return new Promise((resolve) => { releaseGarage = () => resolve(garage); });
+      if (id === cv.id) return new Promise((_resolve, reject) => { failCv = () => reject(new ApiError("Server Error", 503, null, "corr_load")); });
+      if (id === portuguese.id) return Promise.resolve(portuguese);
+      return Promise.reject(new ApiError("Not found", 404, null, "corr_missing"));
+    });
+
+    await screen.findByText("Learn basic Portuguese");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+    await act(async () => releaseGarage());
+    await screen.findByText("Clean out the garage");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+
+    await act(async () => failCv());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(true));
+    // The transiently unreadable park stays unseen, so it comes back next time;
+    // the one whose task is gone (404) is confirmed and marked seen.
+    expect(acknowledgeParks).toHaveBeenCalledWith(
+      {
+        items: [
+          { task_id: "task-pt", formulation_id: "form_task-pt" },
+          { task_id: "task-garage", formulation_id: "form_task-garage" },
+          { task_id: "task-gone", formulation_id: "form_task-gone" }
+        ]
+      },
+      expect.any(String)
+    );
+  });
+
+  it("020-FR-015 when no park's task could be read, Continue closes without marking anything seen", async () => {
+    const user = userEvent.setup();
+    renderDialog([], [park(cv)], () => Promise.reject(new ApiError("Couldn't reach Brain Buddy", 0, null, "corr_net")));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(onDone).toHaveBeenCalledWith(false);
+    expect(acknowledgeParks).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-045 failures without a reference show no empty Ref line", async () => {
+    const user = userEvent.setup();
+    transitionTask.mockRejectedValueOnce(new Error("socket hang up"));
+    acknowledgeParks.mockRejectedValueOnce(new Error("socket hang up"));
+    renderDialog([portuguese, cv]);
+
+    await user.click(await screen.findByRole("button", { name: "Return Update the CV to Next" }));
+    const message = await within(row("Update the CV")).findByRole("alert");
+    expect(message).toHaveTextContent("Couldn't return “Update the CV” to Next. It's still in Someday / maybe.");
+    expect(message).not.toHaveTextContent(/Ref/);
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    const alert = await screen.findByText("Couldn't save that you've seen these. Try again.");
+    expect(alert.parentElement).not.toHaveTextContent(/Ref/);
+  });
+
   it("020-FR-045 Continue not saved keeps the dialog with the Ref; Retry sends the same request", async () => {
     const user = userEvent.setup();
     acknowledgeParks.mockRejectedValueOnce(new ApiError("Server Error", 500, null, "corr_ack")).mockResolvedValueOnce(undefined);
     renderDialog([portuguese, cv]);
 
+    await screen.findByText("Update the CV");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     const alert = await screen.findByText("Couldn't save that you've seen these. Try again.");
