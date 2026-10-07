@@ -83,25 +83,47 @@ export function WhileYouWereAway({
   // A failed return keeps its key, so Retry is a safe replay.
   const returnKeys = useRef(new Map<string, string>());
 
+  // Only what was read (or written by this dialog) after it opened is trusted:
+  // a detail cached earlier may be the version from before the park.
+  const [openedAt] = useState(() => Date.now());
   const results = useQueries({
     queries: parks.map((park) => ({
       queryKey: taskKeys.detail(park.task_id, getTaskCacheScope(accountId)),
       queryFn: ({ signal }: { signal: AbortSignal }) => apiClient.getTask(park.task_id, signal),
-      retry: false
+      retry: false,
+      refetchOnMount: "always" as const
     }))
   });
+  /** This park's task as read since the dialog opened, or undefined. */
+  const freshTask = (index: number): TaskResponse | undefined => {
+    const result = results[index];
+    if (result.data === undefined || result.dataUpdatedAt < openedAt) {
+      return undefined;
+    }
+    // A failed re-read leaves the older data in place: it is not trusted either,
+    // unless this dialog already acted on the row (its own status then speaks).
+    return result.errorUpdatedAt > result.dataUpdatedAt && rows[parks[index].task_id] === undefined ? undefined : result.data;
+  };
+  const answeredSinceOpen = (index: number): boolean => {
+    const result = results[index];
+    return Math.max(result.dataUpdatedAt, result.errorUpdatedAt) >= openedAt;
+  };
   const loaded = parks.flatMap((park, index) => {
-    const task = results[index].data;
+    const task = freshTask(index);
     return task ? [{ park, task }] : [];
   });
   const tasks = loaded.map(({ task }) => task);
-  // "Continue" waits until every park's task has answered. It then marks seen
-  // the parks it showed and those whose task is gone (404); a park whose task
-  // could not be read for another reason stays unseen and comes back next time.
-  const resolving = results.some((result) => result.isPending);
+  // "Continue" waits until every park's task has answered since the dialog
+  // opened. It then marks seen the parks it showed and those whose task is
+  // gone (404); a park whose task could not be read for another reason stays
+  // unseen and comes back next time.
+  const resolving = parks.some((_park, index) => !answeredSinceOpen(index));
   const confirmed = parks.filter((_park, index) => {
     const result = results[index];
-    return result.data !== undefined || (result.error instanceof ApiError && result.error.status === 404);
+    if (freshTask(index) !== undefined) {
+      return true;
+    }
+    return result.error instanceof ApiError && result.error.status === 404 && result.errorUpdatedAt >= openedAt;
   });
 
   useLayoutEffect(() => {

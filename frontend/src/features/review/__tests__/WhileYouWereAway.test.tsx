@@ -279,6 +279,70 @@ describe("020-FR-015 While you were away dialog", () => {
     expect(screen.getByRole("button", { name: "Return both to Next" })).toBeEnabled();
   });
 
+  it("020-FR-015 a task cached from before its park is not trusted: Continue and the row wait for this dialog's own read", async () => {
+    const user = userEvent.setup();
+    let releaseCv: () => void = () => undefined;
+    getTask.mockImplementation((id) => {
+      if (id === cv.id) return new Promise((resolve) => { releaseCv = () => resolve(cv); });
+      return Promise.resolve(portuguese);
+    });
+    acknowledgeParks.mockResolvedValueOnce(undefined);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // The detail cache still holds the Next version from before the park.
+    client.setQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")), { ...cv, state: "next", parked: null, revision: 4 });
+    render(
+      <QueryClientProvider client={client}>
+        <WhileYouWereAway parks={[park(portuguese), park(cv)]} onDone={onDone} />
+      </QueryClientProvider>
+    );
+
+    await screen.findByRole("button", { name: "Return Learn basic Portuguese to Next" });
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.queryByText("Now in Next actions")).not.toBeInTheDocument();
+    expect(screen.queryByRole("listitem", { name: "Update the CV" })).not.toBeInTheDocument();
+
+    await act(async () => releaseCv());
+
+    expect(await screen.findByRole("button", { name: "Return Update the CV to Next" })).toBeEnabled();
+    expect(screen.queryByText("Now in Next actions")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(true));
+  });
+
+  it("020-FR-015 a row this dialog returned stays shown as returned when the re-read after it fails", async () => {
+    const user = userEvent.setup();
+    renderDialog([portuguese, cv]);
+    await screen.findByRole("button", { name: "Return Update the CV to Next" });
+    transitionTask.mockResolvedValueOnce({ ...cv, state: "next", parked: null, revision: 6 });
+    getTask.mockRejectedValue(new ApiError("Server Error", 503, null, "corr_reread"));
+
+    await user.click(screen.getByRole("button", { name: "Return Update the CV to Next" }));
+
+    await waitFor(() => expect(getTask.mock.calls.filter(([id]) => id === cv.id).length).toBeGreaterThan(1));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    expect(within(row("Update the CV")).getByText("Returned")).toBeInTheDocument();
+  });
+
+  it("020-FR-015 a task whose read fails while an older copy is cached is neither shown from that copy nor marked seen", async () => {
+    const user = userEvent.setup();
+    getTask.mockImplementation((id) => (id === cv.id ? Promise.reject(new ApiError("Server Error", 503, null, "corr_cv")) : Promise.resolve(portuguese)));
+    acknowledgeParks.mockResolvedValueOnce(undefined);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(taskKeys.detail(cv.id, getTaskCacheScope("user-1")), { ...cv, state: "next", parked: null, revision: 4 });
+    render(
+      <QueryClientProvider client={client}>
+        <WhileYouWereAway parks={[park(portuguese), park(cv)]} onDone={onDone} />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    expect(screen.queryByText("Now in Next actions")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(true));
+    expect(acknowledgeParks).toHaveBeenCalledWith({ items: [{ task_id: "task-pt", formulation_id: "form_task-pt" }] }, expect.any(String));
+  });
+
   it("020-FR-015 Continue waits while a row return is on its way", async () => {
     const user = userEvent.setup();
     let release: () => void = () => undefined;
