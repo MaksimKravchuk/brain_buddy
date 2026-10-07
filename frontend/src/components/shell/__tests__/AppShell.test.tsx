@@ -1025,4 +1025,49 @@ describe("020-FR-051 AppShell review dialogs at web open", () => {
     await waitFor(() => expect(reviewApi.getState).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("020-FR-051 020-FR-042 an explainer one account closed for later is still shown to the next account in the same open shell", async () => {
+    const user = userEvent.setup();
+    signIn("user-later-a");
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    vi.mocked(reviewApi.getState).mockResolvedValue(baseState);
+    renderWithHeading();
+
+    await screen.findByRole("dialog", { name: "How Next stays fresh" });
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    online.mockReturnValue(true);
+
+    // A session refresh swaps the account while the shell stays mounted.
+    signIn("user-later-b");
+
+    expect(await screen.findByRole("dialog", { name: "How Next stays fresh" })).toBeInTheDocument();
+  });
+
+  it("020-FR-051 020-FR-042 an account switch never hands one account's open explainer to the next", async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(reviewApi.getState).mockResolvedValue(baseState);
+    // B's state is already cached, so the dialog would otherwise be reused in place.
+    client.setQueryData(["review", "state", { accountId: "user-keep-b", apiOrigin }], baseState);
+    signIn("user-keep-a");
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/tasks/next"]}>
+          <AppShell counts={counts} projects={projects} tags={tags}>
+            <h1>Next actions</h1>
+          </AppShell>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    await screen.findByRole("dialog", { name: "How Next stays fresh" });
+    await user.click(screen.getByRole("button", { name: "Change the number of days" }));
+    await user.click(screen.getByRole("radio", { name: "28 days" }));
+
+    signIn("user-keep-b");
+
+    const fresh = await screen.findByRole("dialog", { name: "How Next stays fresh" });
+    expect(fresh).toHaveTextContent("If a next action keeps the same wording for 14 days, it asks for a decision.");
+    expect(within(fresh).getByRole("button", { name: "Change the number of days" })).toBeInTheDocument();
+  });
 });

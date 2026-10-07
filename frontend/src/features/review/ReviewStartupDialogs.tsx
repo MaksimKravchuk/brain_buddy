@@ -36,7 +36,10 @@ function focusMainHeading(): void {
 export function ReviewStartupDialogs(): React.JSX.Element | null {
   const accountId = useAuthStore((state) => (state.user as AuthUser).id);
   const stateQuery = useReviewState();
-  const [explainerLater, setExplainerLater] = useState(() => explainerLaterThisOpen.has(accountId));
+  // Which accounts closed the explainer for later: the one signed in now decides,
+  // so an account switch in an open shell never inherits the previous account's choice.
+  const [laterAccounts, setLaterAccounts] = useState<ReadonlySet<string>>(() => new Set(explainerLaterThisOpen));
+  const explainerLater = laterAccounts.has(accountId) || explainerLaterThisOpen.has(accountId);
   const [whileAway, setWhileAway] = useState<{ accountId: string; parks: UnseenPark[] | null } | null>(null);
   const state = stateQuery.data;
 
@@ -53,11 +56,13 @@ export function ReviewStartupDialogs(): React.JSX.Element | null {
   if (!state.explainer_seen) {
     return explainerLater ? null : (
       <AutoParkExplainer
+        // One instance per account: its threshold and request keys never carry over.
+        key={accountId}
         state={state}
         onDone={() => {
           // Recorded: the state now says seen. Closed offline: not again this open.
           explainerLaterThisOpen.add(accountId);
-          setExplainerLater(true);
+          setLaterAccounts((current) => new Set(current).add(accountId));
           focusMainHeading();
         }}
       />
@@ -78,6 +83,7 @@ export function ReviewStartupDialogs(): React.JSX.Element | null {
 
   return whileAway.parks ? (
     <WhileYouWereAway
+      key={accountId}
       parks={whileAway.parks}
       onDone={() => {
         setWhileAway({ accountId, parks: null });
