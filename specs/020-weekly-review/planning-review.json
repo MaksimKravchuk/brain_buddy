@@ -117,6 +117,26 @@
       },
       "resolution": "Fixed in b17c526: E10/§5/R15 state the device-only undoRetained exception honestly (no stored snapshot); E3 records the owner decision; the bulk-undo 'known limit' is relabelled a known deviation from FR-017 with the fix tracked for PR-12 (with T174); http §3 undo 404 cases completed, http.md:57 resource naming matches the backend, the compaction list and the device-only Undo sentence corrected, the open_session rule scoped to iOS clients. No behaviour change.",
       "artifacts_digest_after_fixes": "f06dd65d283ce9d0a66ebfa14e66d7bfa6af532fe2d9dd020064f73fd8bbdbf6"
+    },
+    "post_acceptance_review_8": {
+      "reason": "Compensating measure 5: the PR-07 navigator contract amendments (navigator.md §1/§2/§3/§5, http.md §7, plan.md, research.md R13, docs/data-retention.md) made while fixing the PR #272 review findings were reviewed instead of relying on the acceptance. Numbered 8 so it cannot collide with entries 6 and 7 of the PR-11 branch.",
+      "reviewed_range": "203f626..4718e85 (contracts/navigator.md, contracts/http.md, plan.md, research.md, docs/data-retention.md, .env.example), round-2 additions in the commit that records this entry",
+      "reviewer": "independent reviewer subagent (targeted contract review, two rounds), read-only",
+      "date": "2026-10-07",
+      "verdict": "pass",
+      "findings": {
+        "blocking": 0,
+        "important": 3,
+        "advisory": 4
+      },
+      "owner_decision": {
+        "by": "Coordinator under the owner's delegation",
+        "date": "2026-10-07",
+        "question": "(1) May rule 3 keep 'today' / 'сегодня', which the prompt itself asks for ('could be started today'), without grounding? (2) When reduce_notes keeps every line of an over-budget note (only CRs removed), is notes_truncated false?",
+        "answer": "(1) Yes: 'today' and 'сегодня' are exempt like a duration of at most 30 minutes; 'tonight', 'tomorrow', 'завтра' and the other relative dates still drop. (2) Yes: nothing was dropped, so truncated = false (§1); clients OR the server flag with their own."
+      },
+      "resolution": "Two-round post-acceptance review of the PR-07 navigator contract amendments (203f626 → 4718e85): approved after fixes. Round 1 found no Blocker and three Important issues: purge wording true only for the CLI, the propagate rule letting exception text reach the middleware's traceback log (FR-044), and rule 3 not tight enough for identical Swift/JS implementations. Round 2 verified every fix: purge wording separated across http.md/.env.example/plan/research/data-retention; undeclared provider exceptions re-raised content-free as NavigatorInternalError with an end-to-end log test, then hardened against framework re-chaining; rule 3 defined in text with a normative date_words table, a code-equals-table test and 102 vectors; every < escaped with shared prompt_vectors.json.",
+      "artifacts_digest_after_fixes": "77c4138c9cc0716ed6715f630c3d14e8483ad8c6fa6bf21f8a5e4adaaf46bae9"
     }
   }
 }

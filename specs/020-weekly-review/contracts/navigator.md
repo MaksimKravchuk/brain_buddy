@@ -81,16 +81,21 @@ rule 5 runs on every client after them:
    not occur in the input fields. Matching is the same on every platform:
    - **Tokens**: the text is split on whitespace, meaning the characters for which
      Python's `str.isspace()` is true (Unicode White_Space plus U+001C–U+001F).
-   - **Triggers**: a token is a trigger when its first letter is upper-case and it is
-     not the first token, when it contains a decimal digit (Unicode Nd) or a currency
-     symbol (Sc), or when its `formulation_key` is a date word.
+     Implementations code this set explicitly, because platform defaults differ (JS
+     `\s` and Swift's `isWhitespace` omit U+001C–U+001F).
+   - **Triggers**: a token is a trigger when its first alphabetic character is
+     upper-case and it is not the first token, when it contains a decimal digit
+     (Unicode Nd) or a currency symbol (Sc), or when its `formulation_key` is a date
+     word. `formulation_key` uses full Unicode case folding (`str.casefold()`, so "ß"
+     becomes "ss"), not simple lowercasing (formulation-clock §1).
    - **Finding a term**: the term is the trigger's `formulation_key`. It must occur as
      whole words in the `formulation_key` of one single input field (the title, the
      notes, the project name or one sibling title): ` term ` within ` field `. A part
      of a word does not count ("Ann" is not in "Anna").
    - **Date words**: the normative table is `date_words` in `validator_vectors.json`.
      A key is a date word when it equals an English word or a Russian form there, or
-     starts with a Russian stem. That covers month and weekday names in every
+     when the whole key starts with a Russian stem. A hyphenated "в-марте" has the key
+     "в марте", which does not start with a stem, so it is not a date word. That covers month and weekday names in every
      inflection, plus `tonight`, `tomorrow`, `завтра` and `послезавтра`. English `may`
      is not in the table because it is the common verb; a capitalised "May" after the
      first token is already a trigger. The forms of `среда` stay date words although
@@ -268,7 +273,11 @@ whose cell has passed the gate. Fixtures:
 question; notes that name people/places/amounts vs none; 0/5/20 sibling titles), each with
 `expected_kind`, `allowed_entities` and `sibling_titles`. No real user data. A
 deterministic pytest runs the §2 validator and the automatic screens over recorded
-outputs. Generating outputs is manual: cloud runs spend provider money and are
+outputs. A recording is scored only when it is complete for its cell. Its `eval_set`
+and `prompt_version` must be the current ones (`eval_v1`, `navigator-prompt/v1`), and it
+must hold exactly one output for every case of the languages it declares (`languages`;
+all 48 cases when absent). A missing, duplicate or unknown case id is refused and named,
+never scored. Generating outputs is manual: cloud runs spend provider money and are
 approval-gated (never unattended or from a subagent); on-device runs use the same
 quantized artifact on a Mac plus ~10 spot checks on an iPhone. Owner blind grading
 (accept / edit / reject); gate ≥ 50 % accepted overall **and** in the Russian subset, 0
