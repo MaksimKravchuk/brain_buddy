@@ -100,6 +100,13 @@ id = "generic-api-key"
   regexes = ['''^123e4567-e89b-(42d3-a456-426614174001|12d3-a456-426614174(00[1-9]|01[0-9]|02[0-7]|09[7-9]|10[0-6]|199))$''']
 
 [[allowlists]]
+description = "Synthetic weekly review run-trace idempotency key"
+regexTarget = "line"
+# The 020 golden run traces (backend fixture and its byte-identical iOS copy)
+# name each request's idempotency key; only this one scores as a generic key.
+regexes = ['''^\s*"key": "trr05-finish-empty",\s*$''']
+
+[[allowlists]]
 description = "Public immutable auth review input commit id"
 regexTarget = "line"
 regexes = ['''^\s*"prior_auth_commit": "bc7fc72c35b7bf794eff912c07bdd38a1d1f0816",\s*$''']

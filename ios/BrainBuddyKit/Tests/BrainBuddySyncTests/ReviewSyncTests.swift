@@ -672,6 +672,10 @@ struct ReviewSyncTests {
 
     /// Sends `body` as the signed-in device, bypassing the client's own checks.
     private func raw(_ device: Device, _ method: HTTPMethod, _ path: [String], _ body: Data) async throws -> Int {
+        try await rawResponse(device, method, path, body).statusCode
+    }
+
+    private func rawResponse(_ device: Device, _ method: HTTPMethod, _ path: [String], _ body: Data) async throws -> HTTPResponse {
         let token = try #require(try device.tokens.token(for: FakeBrainBuddyServer.baseURL))
         var url = FakeBrainBuddyServer.baseURL
         for segment in path { url.appendPathComponent(segment) }
@@ -683,7 +687,47 @@ struct ReviewSyncTests {
             ],
             body: body
         )
-        return try await device.transport.send(request).statusCode
+        return try await device.transport.send(request)
+    }
+
+    @Test("020-FR-028 the fake server refuses progress naming a step outside a quick review's mode with 422, as the backend does")
+    func fakeServerRefusesStepsOutsideTheMode() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .quick, entry: .list))))
+        await phone.sync()
+        let path = ["review", "sessions", Self.session(1).rawValue]
+        for (n, change) in [#""step":{"code":"dates","status":"finished"}"#, #""active_seconds":{"code":"rest_of_next","seconds":5}"#]
+            .enumerated()
+        {
+            let body = Data(#"{"progress_id":"\#(Self.progress(10 + n).rawValue)",\#(change)}"#.utf8)
+            let response = try await rawResponse(phone, .patch, path, body)
+            #expect(response.statusCode == 422, "\(change)")
+            let detail = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])["detail"] as? [[String: Any]]
+            #expect(detail?.first?["loc"] as? [String] == ["body", n == 0 ? "step" : "active_seconds", "code"])
+        }
+        let session = harness.server.reviewSnapshot(email: SyncHarness.email).sessions[Self.session(1).rawValue]
+        #expect(session?.qualifyingActivity == false)
+        let own = Data(#"{"progress_id":"\#(Self.progress(20).rawValue)","step":{"code":"wins","status":"finished"}}"#.utf8)
+        #expect(try await raw(phone, .patch, path, own) == 200)
+    }
+
+    @Test("020-FR-045 the fake server names an unknown review record in its 404 as the backend does")
+    func fakeServerNamesUnknownReviewRecords() async throws {
+        let (_, phone) = try await activated()
+        let session = Self.session(9).rawValue
+        let cases: [(HTTPMethod, [String], String, String)] = [
+            (.get, ["review", "sessions", session], "{}", "Review session"),
+            (.patch, ["review", "sessions", session], #"{"progress_id":"\#(Self.progress(9).rawValue)"}"#, "Review session"),
+            (.post, ["review", "sessions", session, "finish"], "{}", "Review session"),
+            (.post, ["review", "bulk-releases", Self.bulk(9).rawValue, "undo"], "{}", "Review bulk release"),
+            (.post, ["review", "decisions", Self.decision(9).rawValue, "undo"], #"{"expected_task_revision":1}"#, "Review decision"),
+        ]
+        for (method, path, body, resource) in cases {
+            let response = try await rawResponse(phone, method, path, Data(body.utf8))
+            #expect(response.statusCode == 404, "\(path)")
+            let detail = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])["detail"] as? [String: Any]
+            #expect(detail?["resource"] as? String == resource, "\(path)")
+        }
     }
 
     @Test("020-FR-029 finishing a step qualifies the review only when the step had nothing to decide (E3), on the server too")

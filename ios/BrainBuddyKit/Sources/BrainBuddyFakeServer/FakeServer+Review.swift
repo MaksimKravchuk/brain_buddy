@@ -470,7 +470,7 @@ extension ServerState {
             return try startSession(request, owner: owner, now: now)
         case (.get, 2) where rest[0] == "sessions":
             guard weeklyReview(owner) else { throw .reviewDisabled }
-            guard let session = data(owner).review.sessions[rest[1]] else { throw .notFound("review_session", rest[1]) }
+            guard let session = data(owner).review.sessions[rest[1]] else { throw .notFound("Review session", rest[1]) }
             return .json(200, session.dto)
         case (.patch, 2) where rest[0] == "sessions":
             return try progressSession(rest[1], request, owner: owner, now: now)
@@ -641,7 +641,7 @@ extension ServerState {
         let body = try RequestBody(request.body, allowing: ["expected_task_revision"])
         let expected = try body.int("expected_task_revision", minimum: 1)
         return try idempotentReview(request, body: body, owner: owner, command: "undo_decision:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard let decision = data.review.decisions[id] else { throw .notFound("review_decision", id) }
+            guard let decision = data.review.decisions[id] else { throw .notFound("Review decision", id) }
             let unavailable = FakeHTTPError.reason(409, "undo_unavailable", "This decision can no longer be undone.")
             let task = try data.task(decision.taskID)
             guard task.revision == decision.revisionAfter, expected == task.revision else { throw unavailable }
@@ -839,7 +839,15 @@ extension ServerState {
         let delta = try body.optionalInt("inbox_processed_delta")
         let digest = body.progressDigest
         return try idempotentReview(request, body: body, owner: owner, command: "review_progress:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var session = data.review.sessions[id] else { throw .notFound("review_session", id) }
+            guard var session = data.review.sessions[id] else { throw .notFound("Review session", id) }
+            // A step code outside the run's mode is 422, whatever the status (http §6).
+            for (field, value) in [("step", step), ("active_seconds", active)] {
+                if let code = value?["code"]?.stringValue.flatMap(ReviewStep.init(rawValue:)), session.steps[code] == nil {
+                    throw .validation(
+                        ["body", field, "code"], "The step is not part of this review's mode.", type: "step_outside_run"
+                    )
+                }
+            }
             if let known = session.appliedProgress[progressID] {
                 // Replay-safe at any age: the same change is merged once.
                 guard known == digest else { throw .idConflict }
@@ -878,7 +886,7 @@ extension ServerState {
         let body = try RequestBody(request.body, allowing: ["clear_start"])
         let clearStart = try body.value("clear_start", as: ClearStart.self)
         return try idempotentReview(request, body: body, owner: owner, command: "review_finish:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var session = data.review.sessions[id] else { throw .notFound("review_session", id) }
+            guard var session = data.review.sessions[id] else { throw .notFound("Review session", id) }
             if session.status == .open {
                 session.end(.finish, at: now)
                 session.lastActivityAt = now
@@ -949,7 +957,7 @@ extension ServerState {
     mutating func undoBulkRelease(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError) -> Reply {
         let body = RequestBody(fields: [:])
         return try idempotentReview(request, body: body, owner: owner, command: "undo_bulk_release:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var record = data.review.bulkReleases[id] else { throw .notFound("review_bulk_release", id) }
+            guard var record = data.review.bulkReleases[id] else { throw .notFound("Review bulk release", id) }
             if let result = record.undoResult { return .json(200, result) }
             var restored: [String] = []
             var skipped: [BulkSkippedItemDTO] = []
