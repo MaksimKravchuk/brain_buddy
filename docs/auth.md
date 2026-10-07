@@ -128,3 +128,36 @@ None of these are urgent at the current scale, but they're worth knowing about.
 - **Frontend auth store** — `frontend/src/stores/authStore.ts`
 - **Frontend pages** — `frontend/src/pages/{LoginPage,SignupPage}.tsx`
 - **Route guard** — `frontend/src/components/auth/ProtectedRoute.tsx`
+
+## CLI device approval (ADR-0029)
+
+`bb auth login` starts a ten-minute grant and opens the configured frontend
+`/cli/authorize` page. The user signs in through the existing password, email,
+Google or Apple entry and explicitly approves the short code from their own CLI.
+Headless clients show the same URL and code. Navigation never approves access.
+
+`BRAIN_BUDDY_CLI_VERIFICATION_ORIGIN` is a separate, validated frontend origin;
+production requires HTTPS. Missing configuration or a missing/OFF `cli_auth` row
+makes new device operations unavailable. The six required flag rows keep their
+existing semantics; only an explicit operator mutation creates the optional CLI
+row. Activation follows the compatible Identity/CLI release and rollback floor
+documented in `specs/024-agent-cli/contracts/rollout.md`.
+
+Identity stores hashes of the private proof and short code in `auth.sqlite3`,
+with at most 1024 ten-minute grants. Approval binds a current browser session,
+account authority version and provider generation. One transaction consumes the
+grant and inserts a distinct ordinary session. A lost exchange response cannot
+be replayed. Source logout blocks unconsumed grants; an already-issued CLI
+session has its own logout and follows existing bulk/provider revocation.
+
+All device request bodies are streamed under a 1 KiB cap before JSON validation.
+Errors and logs contain fixed outcomes and correlation references. Raw proofs,
+cookies, short codes and provider secrets are excluded from error telemetry and
+account exports. Startup and periodic privacy cleanup erase expired and corrupt
+grants even while exposure is OFF, using secure-delete and WAL checkpointing.
+
+The browser retains only the short code and its original deadline in tab storage
+through sign-in, clears the fragment before redirecting, and erases retained
+state on approval, denial, expiry or cancellation. Blocked storage falls back to
+manual entry. Native CLI credentials remain in the selected OS credential store
+(or explicit protected Unix file store), outside server-side exports.

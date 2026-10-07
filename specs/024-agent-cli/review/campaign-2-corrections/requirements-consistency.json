@@ -1,0 +1,36 @@
+{
+  "role": "requirements-consistency",
+  "verdict": "changes-required",
+  "summary": "Bounded correction verification of only the seven original requirements-consistency findings at current digest c5778eef47ef975a22cdd239ad289973151f6a9b07d422ecbf3269bd4a9e8ddd. Six findings are resolved in the planning contracts: shared AuthStore SQLite atomic grant/session handling and provider lineage, early fragment capture with tab-scoped expiry and exact shared-login return, six required flags plus optional seventh cli_auth, unique ADR-0029 with a matching hash, deterministic generic-write field rejection and confirmed-write error metadata, and numeric macOS15 native/released-install acceptance on both architectures. The generic operation scope correction remains internally inconsistent with its validation quickstart. No implementation, execution, release, or evidence-pass claims were assessed, and the preserved original changes-required report remains unchanged.",
+  "reviewed_files": [
+    "/tmp/bb-cli-reviews/requirements-consistency.json",
+    ".specify/workflows/runs/cli-023-r2/planning-context.json",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/023-agent-cli/spec.md",
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/design.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/contracts/cli.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "docs/decisions/0029-runtime-managed-cli-authentication.md"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "generic operation scope",
+      "description": "The generic API contract now correctly excludes every /auth route and assigns identity checks to the specialized bb auth command, but the validation quickstart still instructs users to call bb api GET /auth/me. A conforming client must reject that documented step locally, so the original generic-scope finding is not fully resolved across the reviewed artifacts.",
+      "evidence": [
+        "specs/023-agent-cli/contracts/cli.md:29 limits generic dispatch to an explicit member-business root allowlist, excludes auth routes locally, reserves all /auth routes for specialized authentication flows, and directs status/logout through bb auth.",
+        "specs/023-agent-cli/quickstart.md:13 already uses bb auth status as the supported identity check through /auth/me.",
+        "specs/023-agent-cli/quickstart.md:17 nevertheless requires bb api GET /auth/me as a validation step, which the corrected contract requires the CLI to refuse before dispatch."
+      ],
+      "recommendation": "Remove the generic /auth/me command from the quickstart. Keep bb auth status for identity validation and replace the generic API example with a route under the documented member-business allowlist, then retain a negative test proving generic /auth paths are rejected locally."
+    }
+  ],
+  "product_decisions": []
+}

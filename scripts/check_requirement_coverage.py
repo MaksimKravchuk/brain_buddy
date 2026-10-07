@@ -69,6 +69,7 @@ QUALIFIED_ID_RE = re.compile(r"^(\d{3})-((?:FR|SC)-\d+)$")
 # so a requirement traced there also needs the recorded macOS-host run that
 # its feature's plan names, which /speckit-accept checks.
 DEDICATED_TEST_TREES = (
+    "cli/tests",
     "backend/tests",
     "frontend/tests",
     "ios/BrainBuddyKit/Tests",
@@ -80,7 +81,7 @@ DEDICATED_TEST_TREES = (
 MIXED_TEST_TREES = ("frontend/src",)
 
 TEST_TREES = DEDICATED_TEST_TREES + MIXED_TEST_TREES
-TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".swift")
+TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".swift", ".rs")
 TEST_NAME_HINTS = ("test", "spec", "__tests__")
 
 
@@ -127,7 +128,8 @@ def marker_pattern(number: str, requirement: str) -> re.Pattern[str]:
     # Anchor on alphanumerics instead, which still rejects `2006-FR-001` and
     # `006-FR-0011`.
     return re.compile(
-        rf"(?<![A-Za-z0-9]){number}[-_]{prefix}[-_]{digits}(?![A-Za-z0-9])"
+        rf"(?<![A-Za-z0-9]){number}[-_]{prefix}[-_]{digits}(?![A-Za-z0-9])",
+        re.IGNORECASE,  # Rust requires snake_case function names; qualification stays exact.
     )
 
 

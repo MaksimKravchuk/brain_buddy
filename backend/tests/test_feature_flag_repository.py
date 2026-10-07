@@ -207,6 +207,62 @@ def test_020_FR_042_fresh_store_seeds_weekly_review_off(tmp_path: Path) -> None:
     assert overlay.flags["weekly_review"] == FlagOverride(mode=FlagMode.OFF)
 
 
+@pytest.mark.parametrize("mode", list(FlagMode))
+def test_024_FR_013_existing_cli_flag_survives_later_required_inventory_upgrade(
+    tmp_path: Path, mode: FlagMode
+) -> None:
+    """A healthy older CLI volume gains weekly_review OFF without losing CLI exposure."""
+    repo = _repo(tmp_path)
+    assert not repo.read().degraded
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute("DELETE FROM feature_flags WHERE flag='weekly_review'")
+        conn.execute(
+            "INSERT INTO feature_flags VALUES (?, ?, ?)",
+            ("cli_auth", mode.value, '["user_retained"]'),
+        )
+    upgraded = _repo(tmp_path).read()
+    assert not upgraded.degraded
+    assert set(upgraded.flags) == set(MANAGED_FLAGS) | {"cli_auth"}
+    assert upgraded.flags["weekly_review"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["cli_auth"] == FlagOverride(
+        mode=mode, selected_users=("user_retained",)
+    )
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        assert conn.execute(
+            "SELECT mode,selected_users FROM feature_flags WHERE flag='cli_auth'"
+        ).fetchone() == (mode.value, '["user_retained"]')
+
+
+@pytest.mark.parametrize(
+    "flag,mode,cohort,missing_core",
+    [
+        ("cli_auth", "invalid", "[]", False),
+        ("cli_auth", "on", "not-json", False),
+        ("cli_auth", "on", '["email@example.com"]', False),
+        ("unknown", "off", "[]", False),
+        ("cli_auth", "off", "[]", True),
+    ],
+)
+def test_024_FR_013_unhealthy_optional_inventory_is_not_repaired(
+    tmp_path: Path, flag: str, mode: str, cohort: str, missing_core: bool
+) -> None:
+    """Invalid optional/core/unknown rows remain fail-closed before upgrade writes."""
+    repo = _repo(tmp_path)
+    assert not repo.read().degraded
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute("DELETE FROM feature_flags WHERE flag='weekly_review'")
+        if missing_core:
+            conn.execute("DELETE FROM feature_flags WHERE flag='voice_brain_dump'")
+        conn.execute("INSERT INTO feature_flags VALUES (?, ?, ?)", (flag, mode, cohort))
+        before = conn.execute("SELECT * FROM feature_flags ORDER BY flag").fetchall()
+    assert _repo(tmp_path).read().degraded
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        assert (
+            conn.execute("SELECT * FROM feature_flags ORDER BY flag").fetchall()
+            == before
+        )
+
+
 def test_020_FR_042_fresh_store_forces_weekly_review_off_despite_environment(
     tmp_path: Path,
 ) -> None:

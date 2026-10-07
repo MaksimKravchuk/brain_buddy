@@ -1,0 +1,31 @@
+{
+  "accepted_by": "MaksimKravchuk (repository owner in this conversation)",
+  "accepted_on": "2026-10-06",
+  "expires_on": "2026-10-20",
+  "artifacts_digest": "2496d4980e0dce7dd51c305a552043f295a5997d10afd30c1b4368f5826186ca",
+  "approved_packet_digest": "28073fd7e1991aa4c27141ba0c0ed9bbe8e0f7eb100b6104829ac0c8a80498d5",
+  "approval_evidence": "User replied \"Делай\" to the explicit request to accept the linked corrected CLI plan for implementation in a separate branch.",
+  "scope": "Isolated CLI implementation/testing and ADR-0029. Production/landing/publication exact-SHA authority remains a later gate.",
+  "rationale": "The owner explicitly accepted the corrected concrete plan after six actual native review lenses and bounded correction checks. All recorded technical findings were closed. This acceptance retains the failed first campaign and the native transport limitations of campaign two, correlated/unverified model provenance, pending native/platform/release evidence and the modern-auth integration prerequisite. It permits isolated implementation with the listed safeguards, not a clean automated approval or a production release. Finalization changed only task/ADR acceptance metadata and the associated ADR hash; accepted implementation behavior is unchanged.",
+  "compensating_measures": [
+    "Run targeted auth atomicity/provider/version/revoke/purge and secret-sentinel tests plus required full suites, independent exact-SHA review/QA and CI.",
+    "Require each platform native binary/credential/installer evidence before publishing its release asset; Linux execution does not certify Mac/Windows.",
+    "Require the modern-auth landed implementation and completed SQLite import/release with a compatible predecessor before the CLI production activation.",
+    "Obtain recorded exact-SHA ASK landing and release authority with reviewed archives and standard production smoke."
+  ],
+  "campaign_history": [
+    {
+      "run_id": "cli-023-r1",
+      "status": "escalated",
+      "valid_lenses": 0,
+      "required_lenses": 6
+    },
+    {
+      "run_id": "cli-023-r2",
+      "status": "escalated",
+      "valid_native_lenses": 6,
+      "original_verdicts": "changes-required",
+      "reason": "Unchanged harness has no native oracle representation; actual native reports and all bounded correction findings remain archived."
+    }
+  ]
+}

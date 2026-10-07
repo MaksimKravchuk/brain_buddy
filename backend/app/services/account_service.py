@@ -400,6 +400,7 @@ class AccountService:
                         "relay_audit_entries": len(relay["audit"]),
                     },
                     "excluded": [
+                        "CLI device grants, hashed codes and source-session provenance (transient authorization material)",
                         "password hash (secret, not portable personal data)",
                         "session records (revoked secrets)",
                         "idempotency records (transient request-dedup copies "

@@ -13,6 +13,7 @@ _ERROR_DESCRIPTIONS = {
     404: "The requested resource is absent or belongs to another owner.",
     409: "The request conflicts with the current resource state.",
     413: "The request body exceeds the configured size limit.",
+    415: "The request media type is unsupported.",
     422: "The request path, query, or body does not match the API schema.",
     429: "Too many requests were made within the configured limit.",
     503: "A required store is temporarily unusable; the request was refused.",

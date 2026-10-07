@@ -118,6 +118,106 @@ def google_step(runtime, purpose="login", **extra):
     return result.json()
 
 
+@pytest.fixture
+def cancellable_provider(apple_runtime, anonymous_api_client, container):
+    auth, _, _, provider, clock = apple_runtime
+    container.modern_auth_service = auth
+    client = anonymous_api_client
+    client.app.state.container = container
+    client.app.state.config = client.app.state.config.model_copy(
+        update={"modern_auth": auth.settings}
+    )
+    client.base_url = "https://api.example.com"
+    return client, auth, provider, clock
+
+
+def cancelled_callback(client, provider, state, **extra):
+    fields = {"state": state, "error": "access_denied", **extra}
+    path = f"/api/auth/providers/{provider}/callback"
+    if provider == "apple":
+        return client.post(path, data=fields, follow_redirects=False)
+    return client.get(path, params=fields, follow_redirects=False)
+
+
+@pytest.mark.parametrize("provider", ["google", "apple"])
+def test_023_FR_004_024_FR_013_provider_cancel_returns_without_issuing_authority(
+    cancellable_provider, monkeypatch, provider
+):
+    """A bound cancellation clears the binder, consumes the attempt and offers recovery."""
+    client, auth, upstream, _ = cancellable_provider
+
+    def no_exchange(*_args, **_kwargs):
+        pytest.fail("Cancellation must not exchange a provider code")
+
+    monkeypatch.setattr(upstream, "exchange_" + provider, no_exchange)
+    start = client.post(
+        f"/api/auth/providers/{provider}/start",
+        json={"purpose": "login", "client": "web", "client_challenge": challenge()},
+    )
+    assert start.status_code == 200, start.text
+    started = start.json()
+    binder = client.cookies.get("brainbuddy_auth_binder")
+    response = cancelled_callback(client, provider, started["state"])
+    assert response.status_code == 303, response.text
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert response.headers["Cache-Control"] == "no-store"
+    location = urlsplit(response.headers["location"])
+    assert location.path == "/auth/complete"
+    assert parse_qs(location.fragment) == {
+        "attempt": [started["attempt_id"]],
+        "state": [started["state"]],
+        "error": ["cancelled"],
+    }
+    assert "access_denied" not in response.headers["location"]
+    with auth.store.transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM auth_attempts WHERE id=?", (started["attempt_id"],)
+        ).fetchone()
+        assert row["status"] == "failed" and row["sealed_payload"] is None
+        assert row["key_id"] is None and row["lease_id"] is None
+        assert conn.execute("SELECT count(*) FROM auth_handoffs").fetchone()[0] == 0
+    assert auth.auth.user_repo.list_users() == []
+    client.cookies.set("brainbuddy_auth_binder", binder)
+    assert cancelled_callback(client, provider, started["state"]).status_code == 400
+
+
+@pytest.mark.parametrize("provider", ["google", "apple"])
+@pytest.mark.parametrize("failure", ["binder", "state", "expired", "both", "oversized"])
+def test_023_FR_004_cancel_rejects_foreign_expired_or_ambiguous_attempt(
+    cancellable_provider, monkeypatch, provider, failure
+):
+    """Cancellation cannot bypass state, browser binding, expiry or bounded outcomes."""
+    client, auth, upstream, clock = cancellable_provider
+
+    def no_exchange(*_args, **_kwargs):
+        pytest.fail("Invalid cancellation must not exchange a provider code")
+
+    monkeypatch.setattr(upstream, "exchange_" + provider, no_exchange)
+    start = client.post(
+        f"/api/auth/providers/{provider}/start",
+        json={"purpose": "login", "client": "web", "client_challenge": challenge()},
+    )
+    assert start.status_code == 200, start.text
+    started = start.json()
+    if failure == "binder":
+        client.cookies.clear()
+    if failure == "expired":
+        clock.now += timedelta(minutes=10)
+    state = "x" * 43 if failure == "state" else started["state"]
+    extra = {"code": "synthetic"} if failure == "both" else {}
+    if failure == "oversized":
+        extra["error"] = "x" * 129
+    response = cancelled_callback(client, provider, state, **extra)
+    assert response.status_code in {400, 403, 404}
+    assert "location" not in response.headers
+    with auth.store.transaction() as conn:
+        row = conn.execute(
+            "SELECT status FROM auth_attempts WHERE id=?", (started["attempt_id"],)
+        ).fetchone()
+        assert row["status"] == "started"
+    assert auth.auth.user_repo.list_users() == []
+
+
 def test_023_FR_018_023_SC_004_email_owner_adds_password_exports_and_deletes(
     live_modern,
 ):
