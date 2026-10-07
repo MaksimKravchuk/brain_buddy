@@ -6,10 +6,17 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 
+import allure
 import pytest
 
-from app.exceptions import AdminAuthorizationError, ConflictError, NotFoundError
+from app.exceptions import (
+    AdminAuthorizationError,
+    ConflictError,
+    NotFoundError,
+    RepositoryError,
+)
 from app.schemas.auth import Invite
 from app.services.admin_service import AdminService
 from app.utils.time import utcnow
@@ -65,7 +72,11 @@ def test_009_FR_001_is_operator_false_when_allow_list_is_empty(container) -> Non
 def test_013_FR_005_FR_006_SC_003_admin_create_has_no_invite_or_session(
     container, admin_service
 ) -> None:
-    before = len(list(container.session_repo.sessions_dir.glob("*.json")))
+    _create_invite(container, "existing_session")
+    _signup(container, email="existing@example.com", code="existing_session")
+    with container.user_repo.store.connection() as connection:
+        before = connection.execute("SELECT count(*) FROM sessions").fetchone()[0]
+    assert before == 1
     admin_service.auth_service = container.auth_service
     created = admin_service.create_account(
         operator_id="op_1",
@@ -75,7 +86,17 @@ def test_013_FR_005_FR_006_SC_003_admin_create_has_no_invite_or_session(
     )
     assert created.email == "created@example.com"
     assert container.user_repo.get_by_email(created.email) is not None
-    assert len(list(container.session_repo.sessions_dir.glob("*.json"))) == before
+    with container.user_repo.store.connection() as connection:
+        assert (
+            connection.execute("SELECT count(*) FROM sessions").fetchone()[0] == before
+        )
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM sessions WHERE user_id=?", (created.id,)
+            ).fetchone()[0]
+            == 0
+        )
+    assert container.invite_repo.get("existing_session").is_used
 
 
 def test_013_FR_007_FR_008_FR_011_SC_004_admin_update_keeps_email_index_coherent(
@@ -143,31 +164,54 @@ def test_013_configured_operator_cannot_move_away_from_allow_list(
     assert unchanged.email == OPERATOR_EMAIL
 
 
-def test_013_admin_profile_update_rolls_back_index_when_user_write_fails(
-    container, admin_service, monkeypatch
+@allure.story("013-FR-007 023-FR-002 023-FR-012: atomic admin profile updates")
+def test_013_admin_profile_update_rolls_back_canonical_row_when_authority_cleanup_fails(
+    container, admin_service
 ) -> None:
+    """023-FR-002 023-FR-012: failure after the row update restores canonical email and payload."""
     _create_invite(container, "invite_atomic_update")
     user, _token = _signup(container, email=MEMBER_EMAIL, code="invite_atomic_update")
-    original_dump = container.user_repo.dump_model
-
-    def fail_updated_user(path, model):
-        if path.name == f"{user.id}.json" and model.email == "renamed@example.com":
-            raise OSError("injected user-file failure")
-        return original_dump(path, model)
-
-    monkeypatch.setattr(container.user_repo, "dump_model", fail_updated_user)
-
-    with pytest.raises(OSError):
-        admin_service.update_account(
-            operator_id="op_1",
-            account_id=user.id,
-            email="renamed@example.com",
-            display_name="Renamed",
+    with container.user_repo.store.connection() as connection:
+        before = tuple(
+            connection.execute("SELECT * FROM users WHERE id=?", (user.id,)).fetchone()
         )
+
+    denied: list[str] = []
+
+    def fail_authority_cleanup(action, table, _column, _database, _trigger):
+        if action == sqlite3.SQLITE_DELETE and table == "auth_proofs":
+            denied.append(table)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    with (
+        pytest.raises(RepositoryError),
+        container.user_repo.store.connection() as connection,
+    ):
+        connection.set_authorizer(fail_authority_cleanup)
+        try:
+            admin_service.update_account(
+                operator_id="op_1",
+                account_id=user.id,
+                email="renamed@example.com",
+                display_name="Renamed",
+            )
+        finally:
+            connection.set_authorizer(None)
 
     assert container.user_repo.get_by_email(MEMBER_EMAIL).id == user.id
     assert container.user_repo.get_by_email("renamed@example.com") is None
     assert container.user_repo.get_by_id(user.id).email == MEMBER_EMAIL
+    assert denied == ["auth_proofs"]
+    with container.user_repo.store.connection() as connection:
+        assert (
+            tuple(
+                connection.execute(
+                    "SELECT * FROM users WHERE id=?", (user.id,)
+                ).fetchone()
+            )
+            == before
+        )
 
 
 def test_013_FR_009_FR_011_SC_005_admin_delete_delegates_to_purge(
@@ -673,20 +717,45 @@ def test_013_user_email_transaction_returns_an_unchanged_account(
     assert unchanged == seeded_member
 
 
-def test_013_user_email_transaction_rolls_back_when_the_user_write_fails(
-    container, seeded_member, monkeypatch
+@allure.story("013-FR-011 023-FR-002 023-FR-012: transactional legacy email updates")
+def test_013_user_email_transaction_rolls_back_when_authority_cleanup_fails(
+    container, seeded_member
 ) -> None:
-    original_dump = container.user_repo.dump_model
+    """023-FR-002 023-FR-012: SQLite failure restores the row after an attempted email update."""
+    with container.user_repo.store.connection() as connection:
+        before = tuple(
+            connection.execute(
+                "SELECT * FROM users WHERE id=?", (seeded_member.id,)
+            ).fetchone()
+        )
 
-    def fail_updated_user(path, model):
-        if path.name == f"{seeded_member.id}.json":
-            raise OSError("injected user-file failure")
-        return original_dump(path, model)
+    denied: list[str] = []
 
-    monkeypatch.setattr(container.user_repo, "dump_model", fail_updated_user)
+    def fail_authority_cleanup(action, table, _column, _database, _trigger):
+        if action == sqlite3.SQLITE_DELETE and table == "auth_proofs":
+            denied.append(table)
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
 
-    with pytest.raises(OSError, match="injected user-file failure"):
-        container.user_repo.update_email(seeded_member.id, "renamed@example.com")
+    with (
+        pytest.raises(RepositoryError),
+        container.user_repo.store.connection() as connection,
+    ):
+        connection.set_authorizer(fail_authority_cleanup)
+        try:
+            container.user_repo.update_email(seeded_member.id, "renamed@example.com")
+        finally:
+            connection.set_authorizer(None)
 
     assert container.user_repo.get_by_email(MEMBER_EMAIL) == seeded_member
     assert container.user_repo.get_by_email("renamed@example.com") is None
+    assert denied == ["auth_proofs"]
+    with container.user_repo.store.connection() as connection:
+        assert (
+            tuple(
+                connection.execute(
+                    "SELECT * FROM users WHERE id=?", (seeded_member.id,)
+                ).fetchone()
+            )
+            == before
+        )

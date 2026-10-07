@@ -24,6 +24,16 @@ describe("apiClient", () => {
     setUnauthorizedHandler(null);
   });
 
+  it("023-FR-013 binds compatible password and deletion requests to the displayed owner", async () => {
+    fetchMock.mockResolvedValueOnce(response(undefined, 204)).mockResolvedValueOnce(response({ purge_at: "2026-10-20" }, 202));
+    await apiClient.changePassword({ current_password: "old-password-123", new_password: "new-password-123" }, "A");
+    await apiClient.requestAccountDeletion({ current_password: "new-password-123" }, "A");
+    for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      expect(new Headers(init.headers).get("X-BrainBuddy-Expected-Owner")).toBe("A");
+      expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    }
+  });
+
   it("declares the recorded media MIME type on audio uploads", async () => {
     fetchMock.mockResolvedValue(response({ id: "brain-dump-1" }));
     const audio = new Uint8Array([1, 2, 3]).buffer;

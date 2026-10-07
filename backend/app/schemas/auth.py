@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, field_validator
 
 from .common import StorageBaseModel, StrictBaseModel
 
@@ -14,7 +14,15 @@ class User(StorageBaseModel):
 
     id: str = Field(description="Unique user identifier.")
     email: str = Field(description="Normalized (lowercased) email address.")
-    password_hash: str = Field(description="Argon2id hash of the user's password.")
+    password_hash: str = Field(
+        default="", description="Argon2id hash, or empty when no password is set."
+    )
+    email_verified_at: datetime | None = Field(
+        default=None, description="UTC timestamp of proven mailbox ownership."
+    )
+    auth_version: int = Field(
+        default=0, ge=0, description="Monotonic authority version."
+    )
     created_at: datetime = Field(description="UTC timestamp when the account was made.")
     display_name: str | None = Field(
         default=None, description="Optional display name chosen by the user."
@@ -27,6 +35,15 @@ class User(StorageBaseModel):
             "before then clears this field."
         ),
     )
+
+    @field_validator("email_verified_at")
+    @classmethod
+    def verified_time_is_utc(cls, value: datetime | None) -> datetime | None:
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("Mailbox verification requires a timezone.")
+            return value.astimezone(UTC)
+        return value
 
 
 class Session(StorageBaseModel):
@@ -42,6 +59,16 @@ class Session(StorageBaseModel):
     user_id: str = Field(description="ID of the user the session belongs to.")
     created_at: datetime = Field(description="UTC timestamp when the session was made.")
     expires_at: datetime = Field(description="UTC timestamp when the session expires.")
+    auth_version: int = Field(
+        default=0, ge=0, description="Authority version at issuance."
+    )
+    auth_method: str = Field(default="password", description="Issuing login method.")
+    confirmed_at: datetime | None = Field(
+        default=None, description="Timestamp of same-account credential confirmation."
+    )
+    provider_binding_id: str | None = Field(
+        default=None, description="Provider binding responsible for this session."
+    )
 
 
 class Invite(StorageBaseModel):

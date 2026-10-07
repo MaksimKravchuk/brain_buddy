@@ -99,6 +99,7 @@ public final class Workspace {
     /// The account the sync service was started (or signed in) for.
     @ObservationIgnored private var syncStartedFor: String?
     @ObservationIgnored private var isSigningIn = false
+    @ObservationIgnored private var nativeSignInID: UUID?
     @ObservationIgnored private var networkUpdates: Task<Void, Never>?
     @ObservationIgnored private var todayCache: TodayCache?
     /// How many times `state` was rebuilt by a full replay (for tests).
@@ -388,6 +389,56 @@ public final class Workspace {
         if syncStatus == .localOnly { syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt) }
     }
 
+    /// Additive iOS authentication; legacy password callers keep their contract.
+    public func beginSignIn(serverURL: URL) async throws -> NativeSignInAttempt {
+        guard let sync else { throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil) }
+        await flush()
+        await installEventHandlerIfNeeded(sync)
+        do {
+            let attempt = try await sync.beginSignIn(serverURL: serverURL)
+            nativeSignInID = attempt.id
+            return attempt
+        } catch {
+            throw WorkspaceError.signInFailed(message: error.message, referenceID: error.referenceID)
+        }
+    }
+
+    public func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
+        guard let sync, nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil) }
+        await flush()
+        guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
+        if account == nil { try await convertLocalAutoParksForLinking() }
+        guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
+        isSigningIn = true
+        do {
+            let outcome = try await sync.completeSignIn(attempt, credential: credential)
+            guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
+            if case .signedIn(let result) = outcome {
+                syncStartedFor = result.account.id
+                if result.deletionCancelled { signInCancelledAccountDeletion = true }
+                await refreshFromStore()
+                guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
+                nativeSignInID = nil
+            }
+            isSigningIn = false
+            refreshDerivedState()
+            return outcome
+        } catch {
+            if nativeSignInID == attempt.id {
+                isSigningIn = false
+                refreshDerivedState()
+            }
+            if let failure = error as? SignInFailure { throw WorkspaceError.signInFailed(message: failure.message, referenceID: failure.referenceID) }
+            throw error
+        }
+    }
+
+    public func cancelSignIn(_ attempt: NativeSignInAttempt) async {
+        if nativeSignInID == attempt.id { nativeSignInID = nil; isSigningIn = false }
+        await sync?.cancelSignIn(attempt)
+        refreshDerivedState()
+    }
+
     /// Acknowledges `signInCancelledAccountDeletion` once the person was told.
     public func acknowledgeAccountDeletionNotice() {
         if signInCancelledAccountDeletion { signInCancelledAccountDeletion = false }
@@ -401,6 +452,8 @@ public final class Workspace {
         if pendingChangeCount > 0, !discardUnsyncedChanges {
             throw WorkspaceError.unsyncedChanges(count: pendingChangeCount)
         }
+        nativeSignInID = nil
+        isSigningIn = false
         // Let a write in flight finish, and write nothing new for this account.
         writesSuspended = true
         if let writer { await writer.value }

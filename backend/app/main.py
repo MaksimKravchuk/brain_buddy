@@ -3,8 +3,9 @@
 import logging
 import os
 import threading
+from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
 from app.api import api_router
 from app.api.account import router as account_router
@@ -13,6 +14,7 @@ from app.api.auth import router as auth_router
 from app.api.errors import register_exception_handlers
 from app.api.mcp import install_task_mcp
 from app.api.middleware import CorrelationIdMiddleware
+from app.api.modern_auth import router as modern_auth_router
 from app.api.review import register_review_exception_handlers
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
@@ -27,7 +29,17 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
 
 
 def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]:
-    """Purge due accounts, relay content, and expired CRT receipts."""
+    """Purge authentication metadata, due accounts, relay content, and CRT receipts."""
+
+    try:
+        container.modern_auth_service.cleanup_expired_metadata()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.warning("Authentication metadata cleanup deferred")
+
+    try:
+        container.auth_migration.cleanup_expired_backup()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.warning("Authentication backup cleanup deferred")
 
     purged_accounts = 0
     try:
@@ -211,6 +223,24 @@ def _maybe_seed_admin(container: Container) -> None:
     container.auth_service.seed_admin(email=admin_email, password=admin_password)
 
 
+def _start_auth_dispatch_thread(
+    container: Container, stop: threading.Event
+) -> threading.Thread:
+    def dispatch() -> None:
+        while not stop.is_set():
+            try:
+                container.modern_auth_service.dispatch_one()
+            except (
+                Exception
+            ):  # noqa: BLE001 - recover the loop without exposing credentials
+                logger.warning("Authentication delivery iteration deferred")
+            stop.wait(1)
+
+    thread = threading.Thread(target=dispatch, name="auth-delivery", daemon=True)
+    thread.start()
+    return thread
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
     config = get_config()
@@ -238,6 +268,8 @@ def create_app() -> FastAPI:
     app.state.container.voice_brain_dump_service.runner_wake = (
         app.state.voice_sweep_wake_event.set
     )
+    app.state.auth_dispatch_stop_event = threading.Event()
+    app.state.auth_dispatch_thread = None
     app.state.voice_sweep_thread = None
     app.state.privacy_maintenance_thread = None
     enable_test_voice_sweep = (
@@ -246,6 +278,11 @@ def create_app() -> FastAPI:
     background_maintenance_enabled = (
         config.environment is not AppEnvironment.TEST or enable_test_voice_sweep
     )
+
+    if config.modern_auth.crypto_ready and background_maintenance_enabled:
+        app.state.auth_dispatch_thread = _start_auth_dispatch_thread(
+            app.state.container, app.state.auth_dispatch_stop_event
+        )
 
     if _VOICE_SWEEP_INTERVAL_SECONDS > 0 and background_maintenance_enabled:
         # A real periodic sweep thread is only started outside tests: the
@@ -311,6 +348,28 @@ def create_app() -> FastAPI:
 
     app.add_middleware(CorrelationIdMiddleware)
     register_exception_handlers(app)
+
+    @app.middleware("http")
+    async def auth_privacy_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith(
+            (f"{config.api_prefix}/auth/", f"{config.api_prefix}/account/")
+        ):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.on_event("shutdown")
+    def close_auth_provider() -> None:
+        app.state.auth_dispatch_stop_event.set()
+        if app.state.auth_dispatch_thread is not None:
+            app.state.auth_dispatch_thread.join(timeout=12)
+        app.state.container.modern_auth_service.provider.close()
+
+    app.include_router(modern_auth_router, prefix=config.api_prefix)
     register_review_exception_handlers(app)
     app.include_router(auth_router, prefix=f"{config.api_prefix}/auth")
     app.include_router(account_router, prefix=f"{config.api_prefix}/account")

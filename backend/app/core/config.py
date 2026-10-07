@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import logging
 import math
 import os
+import re
 import socket
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -15,11 +19,14 @@ from pathlib import Path
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from dotenv import load_dotenv
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     field_serializer,
     field_validator,
     model_validator,
@@ -737,6 +744,259 @@ class AgentRelaySettings(BaseModel):
         return self
 
 
+AUTH_KEY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+_AUTH_HOST_PATTERN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\Z"
+)
+
+
+def _modern_auth_origin(value: object) -> str:
+    """Only an explicit, structurally valid HTTPS origin can select authority."""
+
+    if not isinstance(value, str) or any(char.isspace() for char in value):
+        return ""
+    try:
+        parts = urlsplit(value)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return ""
+    if (
+        parts.scheme != "https"
+        or not host
+        or parts.username is not None
+        or parts.password is not None
+        or parts.path not in {"", "/"}
+        or "?" in value
+        or "#" in value
+        or "*" in host
+        or host in _SPECIAL_USE_CALLBACK_NAMES
+        or host.endswith(_SPECIAL_USE_CALLBACK_SUFFIXES)
+        or port == 0
+    ):
+        return ""
+    address = _normalize_callback_address(host)
+    if address is not None:
+        if not _is_globally_routable(address):
+            return ""
+    elif not _AUTH_HOST_PATTERN.fullmatch(host) or "." not in host or len(host) > 253:
+        return ""
+    netloc = f"[{host}]" if ":" in host else host
+    return f"https://{netloc}" + (
+        f":{port}" if port is not None and port != 443 else ""
+    )
+
+
+class ModernAuthSettings(BaseModel):
+    """Optional modern methods fail closed without stopping password access.
+
+    Secrets are excluded from representations and dumps. Malformed optional
+    input becomes unusable configuration, avoiding secret-bearing validation
+    errors during startup. The secret box independently validates key material
+    when constructed; this configuration never creates a replacement key.
+    """
+
+    public_origin: str = ""
+    api_origin: str = ""
+    google_client_id: str = ""
+    google_client_secret: SecretStr = Field(
+        default_factory=lambda: SecretStr(""), repr=False, exclude=True
+    )
+    apple_team_id: str = ""
+    apple_key_id: str = ""
+    apple_private_key: SecretStr = Field(
+        default_factory=lambda: SecretStr(""), repr=False, exclude=True
+    )
+    apple_services_id: str = ""
+    apple_native_app_id: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_sender: str = ""
+    smtp_username: str = Field(default="", repr=False, exclude=True)
+    smtp_password: SecretStr = Field(
+        default_factory=lambda: SecretStr(""), repr=False, exclude=True
+    )
+    smtp_tls: str = "starttls"
+    current_key_id: str = ""
+    keyring: Mapping[str, SecretStr] = Field(
+        default_factory=lambda: MappingProxyType({}), repr=False, exclude=True
+    )
+
+    model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
+
+    @field_validator("public_origin", "api_origin", mode="before")
+    @classmethod
+    def _validate_origins(cls, value: object) -> str:
+        return _modern_auth_origin(value)
+
+    @field_validator(
+        "google_client_id",
+        "apple_team_id",
+        "apple_key_id",
+        "apple_services_id",
+        "apple_native_app_id",
+        "smtp_host",
+        "smtp_sender",
+        "smtp_username",
+        "smtp_tls",
+        "current_key_id",
+        mode="before",
+    )
+    @classmethod
+    def _safe_text(cls, value: object) -> str:
+        if not isinstance(value, str) or any(char.isspace() for char in value):
+            return ""
+        return value
+
+    @field_validator(
+        "google_client_secret", "apple_private_key", "smtp_password", mode="before"
+    )
+    @classmethod
+    def _secret_value(cls, value: object) -> SecretStr:
+        if isinstance(value, SecretStr):
+            return value
+        return SecretStr(value if isinstance(value, str) else "")
+
+    @field_validator("smtp_port", mode="before")
+    @classmethod
+    def _port(cls, value: object) -> int:
+        try:
+            port = (
+                int(value)
+                if isinstance(value, (str, int)) and not isinstance(value, bool)
+                else 0
+            )
+        except ValueError:
+            return 0
+        return port if 1 <= port <= 65_535 else 0
+
+    @field_validator("keyring", mode="before")
+    @classmethod
+    def _keyring(cls, value: object) -> Mapping[str, SecretStr]:
+        if not isinstance(value, Mapping):
+            return MappingProxyType({})
+        if any(
+            not isinstance(key, str) or not AUTH_KEY_ID_PATTERN.fullmatch(key)
+            for key in value
+        ):
+            return MappingProxyType({})
+        return MappingProxyType(
+            {key: cls._secret_value(secret) for key, secret in value.items()}
+        )
+
+    @field_validator("keyring")
+    @classmethod
+    def _freeze_keyring(cls, value: Mapping[str, SecretStr]) -> Mapping[str, SecretStr]:
+        return MappingProxyType(dict(value))
+
+    @property
+    def crypto_ready(self) -> bool:
+        if not self.current_key_id or self.current_key_id not in self.keyring:
+            return False
+        try:
+            return all(
+                len(base64.b64decode(secret.get_secret_value(), validate=True)) == 32
+                for secret in self.keyring.values()
+            )
+        except (ValueError, binascii.Error):
+            return False
+
+    @property
+    def _ready(self) -> bool:
+        return bool(self.public_origin and self.api_origin and self.crypto_ready)
+
+    @property
+    def google_available(self) -> bool:
+        return bool(
+            self._ready
+            and re.fullmatch(
+                r"[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", self.google_client_id
+            )
+            and self.google_client_secret.get_secret_value().strip()
+        )
+
+    @property
+    def _apple_ready(self) -> bool:
+        if (
+            not self._ready
+            or not re.fullmatch(r"[A-Z0-9]{10}", self.apple_team_id)
+            or not re.fullmatch(r"[A-Z0-9]{10}", self.apple_key_id)
+        ):
+            return False
+        try:
+            key = serialization.load_pem_private_key(
+                self.apple_private_key.get_secret_value().encode(), password=None
+            )
+        except (ValueError, TypeError):
+            return False
+        return isinstance(key, ec.EllipticCurvePrivateKey) and isinstance(
+            key.curve, ec.SECP256R1
+        )
+
+    @property
+    def apple_web_available(self) -> bool:
+        return bool(
+            self._apple_ready
+            and re.fullmatch(
+                r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+", self.apple_services_id
+            )
+        )
+
+    @property
+    def apple_native_available(self) -> bool:
+        return bool(
+            self._apple_ready
+            and re.fullmatch(
+                r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+", self.apple_native_app_id
+            )
+        )
+
+    @property
+    def apple_available(self) -> bool:
+        return self.apple_web_available or self.apple_native_available
+
+    @property
+    def email_available(self) -> bool:
+        return bool(
+            self._ready
+            and _AUTH_HOST_PATTERN.fullmatch(self.smtp_host)
+            and len(self.smtp_host) <= 253
+            and self.smtp_port
+            and re.fullmatch(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+", self.smtp_sender)
+            and self.smtp_username
+            and self.smtp_password.get_secret_value()
+            and self.smtp_tls in {"starttls", "tls"}
+        )
+
+
+def _build_modern_auth_settings() -> ModernAuthSettings:
+    """Read only explicit auth inputs; malformed secret JSON is unusable."""
+
+    def unique_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Invalid authentication secret configuration.")
+            result[key] = value
+        return result
+
+    try:
+        keyring = json.loads(
+            os.getenv("BRAIN_BUDDY_AUTH_KEYRING", "{}"), object_pairs_hook=unique_keys
+        )
+    except (ValueError, TypeError):
+        keyring = {}
+    values = {
+        name: os.getenv(f"BRAIN_BUDDY_AUTH_{name.upper()}", str(field.default))
+        for name, field in ModernAuthSettings.model_fields.items()
+        if name != "keyring" and field.default_factory is None
+    }
+    for name in ("google_client_secret", "apple_private_key", "smtp_password"):
+        values[name] = os.getenv(f"BRAIN_BUDDY_AUTH_{name.upper()}", "")
+    return ModernAuthSettings.model_validate({**values, "keyring": keyring})
+
+
 class AppConfig(BaseModel):
     """Top-level Brain Buddy application configuration."""
 
@@ -750,6 +1010,7 @@ class AppConfig(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     password_policy: PasswordPolicy = Field(default_factory=PasswordPolicy)
+    modern_auth: ModernAuthSettings = Field(default_factory=ModernAuthSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     task_title_autocomplete: TaskTitleAutocompleteSettings = Field(
         default_factory=TaskTitleAutocompleteSettings
@@ -1138,6 +1399,7 @@ def _build_config() -> AppConfig:
         logging=logging_config,
         session=session_config,
         password_policy=password_policy,
+        modern_auth=_build_modern_auth_settings(),
         voice=voice,
         task_title_autocomplete=task_title_autocomplete,
         agent_relay=agent_relay,
@@ -1167,6 +1429,7 @@ __all__ = [
     "FeatureFlagState",
     "ManagedFlagMigrationInput",
     "ManagedFlagMigrationSeed",
+    "ModernAuthSettings",
     "PasswordPolicy",
     "SessionSettings",
     "TaskTitleAutocompleteSettings",

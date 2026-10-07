@@ -53,6 +53,12 @@ def _scrub_leaky_voice_env() -> None:
 
 _scrub_leaky_voice_env()
 
+# Configuration loads dotenv at import. Remove real provider/mail settings
+# before building test containers; tests add synthetic values with monkeypatch.
+for _auth_env_name in list(os.environ):
+    if _auth_env_name.startswith("BRAIN_BUDDY_AUTH_"):
+        del os.environ[_auth_env_name]
+
 # --- Voice Brain Dump rollout flag default (T034) ---------------------------
 # The native voice Brain Dump feature ships behind a server-owned, default-OFF
 # rollout flag (``voice_brain_dump``, ADR-0008). The backend suite predates the

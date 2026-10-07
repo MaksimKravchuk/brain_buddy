@@ -1,0 +1,216 @@
+{
+  "review_type": "independent intermediate implementation security and privacy review",
+  "reviewer": "privacy-consent-security",
+  "input_sha": "5fc4a6a803a603e774e1068f06e0f5e276d161ac",
+  "review_worktree": "/workspace/brain_buddy-auth-security",
+  "verdict": "request_changes",
+  "full_acceptance": false,
+  "summary": "Three reproduced Apple integration defects require changes: relay-disable metadata does not govern email authority, notification revocation produces a state rejected by the methods contract and fresh-consent login, and completed account purge retains known-account notification fingerprints. Existing bounded tests pass; this is an intermediate code review and makes no delivery, live-provider or device acceptance claim.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/spec.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/native-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "docs/decisions/0028-modern-identity-authority.md",
+    "backend/app/api/modern_auth.py",
+    "backend/app/schemas/modern_auth.py",
+    "backend/app/services/modern_auth_service.py",
+    "backend/app/services/auth_provider_service.py",
+    "backend/app/services/auth_apple_lifecycle.py",
+    "backend/app/services/auth_mail_service.py",
+    "backend/app/services/auth_secret_box.py",
+    "backend/app/services/auth_service.py",
+    "backend/app/services/account_service.py",
+    "backend/app/services/admin_service.py",
+    "backend/app/services/auth_migration.py",
+    "backend/app/repositories/auth_store.py",
+    "backend/app/repositories/auth_metadata.py",
+    "backend/app/repositories/user.py",
+    "backend/app/repositories/session.py",
+    "backend/app/core/config.py",
+    "backend/app/core/logging.py",
+    "backend/app/container.py",
+    "backend/app/main.py",
+    "scripts/auth_migration_guard.py",
+    ".github/workflows/deploy-fly-production.yml",
+    "deploy/nginx/default.conf",
+    "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+    "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+    "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+    "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+    "backend/tests/test_modern_auth_service.py",
+    "backend/tests/test_modern_auth_api.py",
+    "backend/tests/test_auth_apple_lifecycle.py",
+    "backend/tests/test_auth_logging.py",
+    "backend/tests/test_auth_legacy_atomic.py",
+    "scripts/test_auth_migration_guard.py"
+  ],
+  "findings": [
+    {
+      "id": "SEC-001",
+      "priority": "P2",
+      "severity": "important",
+      "category": "Apple relay delivery and email authority",
+      "title": "Use the same relay-disabled flag in notification and email eligibility",
+      "locations": [
+        {
+          "file": "backend/app/services/modern_auth_service.py",
+          "line": 992
+        },
+        {
+          "file": "backend/app/services/auth_apple_lifecycle.py",
+          "line": 495
+        }
+      ],
+      "description": "A validated email-disabled notice writes email_delivery_disabled, but _email_usable checks email_disabled. The account therefore continues to advertise and enqueue this relay address for email login, recovery and reauthentication. The synthetic transport acknowledged a new post-notice code, and verification returned signed_in. This is an integration defect; the reproduction does not claim that a disabled live Apple relay will deliver mail or that account takeover was demonstrated.",
+      "reproduction_names": [
+        "repro_disabled_relay_email_stays_usable",
+        "repro_disabled_relay_login_result"
+      ],
+      "actual_results": [
+        "True",
+        "signed_in"
+      ],
+      "requirement": "FR-025 and accepted HTTP/data-model relay events affect only the matching relay destination and make its delivery method unavailable.",
+      "recommendation": "Unify the persisted metadata flag and its readers. Add an integration regression from a verified matching relay notice through account methods and each email-purpose eligibility decision, including email-enabled restoration and nonmatching-address isolation."
+    },
+    {
+      "id": "SEC-002",
+      "priority": "P1",
+      "severity": "important",
+      "category": "Apple revocation and reconnection",
+      "title": "Reconcile revoked bindings with the response schema and fresh-consent transition",
+      "locations": [
+        {
+          "file": "backend/app/services/auth_apple_lifecycle.py",
+          "line": 405
+        },
+        {
+          "file": "backend/app/schemas/modern_auth.py",
+          "line": 136
+        },
+        {
+          "file": "backend/app/services/modern_auth_service.py",
+          "line": 1286
+        },
+        {
+          "file": "backend/app/services/modern_auth_service.py",
+          "line": 949
+        },
+        {
+          "file": "backend/app/services/auth_apple_lifecycle.py",
+          "line": 171
+        }
+      ],
+      "description": "A validated consent-revoked/account-deleted notice sets state='revoked'. Account methods passes that value to ConnectedMethod, whose allowed states are active/disabled, producing a Pydantic literal_error for a surviving password session and an unhandled route failure. Fresh explicit Apple login also fails: completion reactivates only disabled bindings, then record_grant rejects revoked bindings. An assertion issued one second after the revocation was rejected and the binding stayed revoked. This prevents the accepted fresh-consent recovery/reconnection path and can strand an account whose remaining configured method is Apple.",
+      "reproduction_names": [
+        "repro_revoked_binding_breaks_account_methods",
+        "repro_fresh_apple_login_after_revocation",
+        "repro_binding_state_after_fresh_apple_login"
+      ],
+      "actual_results": [
+        "ValidationError: state literal_error",
+        "AuthAppleLifecycleError",
+        "revoked"
+      ],
+      "requirement": "FR-025, the active/disabled connected-method contract, and accepted strictly newer explicit consent/generation handling.",
+      "recommendation": "Define one consistent persisted/public state transition. Preserve revocation of old sessions/proofs, require strictly newer valid Apple consent before restoration, increment the generation atomically, and make login/link plus account-method responses cover revocation without schema failure. Add service/API integration regressions rather than manually resetting state in lifecycle-only tests."
+    },
+    {
+      "id": "SEC-003",
+      "priority": "P2",
+      "severity": "important",
+      "category": "Account erasure",
+      "title": "Remove or anonymize known-account Apple receipts during final purge",
+      "locations": [
+        {
+          "file": "backend/app/repositories/auth_store.py",
+          "line": 206
+        },
+        {
+          "file": "backend/app/services/auth_apple_lifecycle.py",
+          "line": 462
+        },
+        {
+          "file": "backend/app/repositories/auth_metadata.py",
+          "line": 21
+        },
+        {
+          "file": "backend/app/repositories/user.py",
+          "line": 180
+        }
+      ],
+      "description": "Notification receipts for a known binding retain an unkeyed subject fingerprint, generation and event times. The table has no owner foreign key, delete_for_user omits it, and final user deletion cannot cascade to it. A full AccountService.purge_account reproduction removed the user and bindings but left both known-account receipts unchanged (2 before, 2 after, users=0). These fingerprints remain correlatable to the provider subject in the owner's export until the eight-day receipt TTL. The TTL is bounded, but the accepted erasure exception names unknown/public abuse fingerprints; it does not authorize retaining known-account personal metadata after final purge.",
+      "reproduction_names": [
+        "repro_notification_receipts_after_complete_purge"
+      ],
+      "actual_results": [
+        "before=2, after=2, users=0"
+      ],
+      "requirement": "FR-018/SC-005 and data-model export/erasure: final purge removes all account-owned new records/jobs; unknown/public abuse fingerprints may expire on their bounded schedule.",
+      "recommendation": "Associate known-binding receipts with their owner for purge, or erase their subject/generation linkage at purge while retaining only a content-free global replay tombstone if needed. Verify complete purge and idempotent retry separately from unknown-subject receipt expiry."
+    }
+  ],
+  "verification": [
+    {
+      "name": "exact_snapshot",
+      "command": "git rev-parse HEAD; git status --short",
+      "working_directory": "/workspace/brain_buddy-auth-security",
+      "status": "passed",
+      "result": "HEAD=5fc4a6a803a603e774e1068f06e0f5e276d161ac; clean detached worktree after review/tests."
+    },
+    {
+      "name": "bounded_service_provider_mail_identity_migration_tests",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider tests/test_modern_auth_service.py tests/test_auth_mail_service.py tests/test_auth_provider_service.py tests/test_auth_apple_lifecycle.py tests/test_auth_legacy_atomic.py tests/test_auth_store.py tests/test_auth_migration.py tests/test_auth_migration_integration.py",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "passed",
+      "result": "192 passed, 6 warnings in 20.52s."
+    },
+    {
+      "name": "bounded_logging_and_rollback_guard_tests",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider tests/test_auth_logging.py -k 'not real_middleware' ../scripts/test_auth_migration_guard.py",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "passed",
+      "result": "55 passed, 1 deselected, 5 warnings, 4 subtests passed in 0.43s. Guard Fly calls are mocked; no remote probe was performed."
+    },
+    {
+      "name": "broader_http_test_attempt",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -m pytest -o addopts='' -p no:cacheprovider tests/test_modern_auth_service.py tests/test_modern_auth_api.py tests/test_auth_mail_service.py tests/test_auth_provider_service.py tests/test_auth_apple_lifecycle.py tests/test_auth_legacy_atomic.py tests/test_auth_store.py tests/test_auth_migration.py tests/test_auth_migration_integration.py tests/test_auth_logging.py",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "incomplete",
+      "result": "Collected 248 tests; 13 modern service tests completed, then execution stalled at the first TestClient HTTP fixture for approximately six minutes. Stopped with SIGINT (exit 130). No HTTP suite pass is claimed."
+    },
+    {
+      "name": "synthetic_apple_integration_reproductions",
+      "command": "PYTHONDONTWRITEBYTECODE=1 /workspace/brain_buddy-auth/backend/.venv/bin/python -",
+      "working_directory": "/workspace/brain_buddy-auth-security/backend",
+      "status": "reproduced_findings",
+      "fixture_boundary": "Temporary local database; existing conftest container; fake provider verification/exchange and mail transport; synthetic generated P-256 key. This tests post-verification lifecycle integration, not live signature/provider/device behavior.",
+      "stdin": "from pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom datetime import timedelta\nfrom urllib.parse import parse_qs, urlsplit\nimport pytest\nfrom pydantic import SecretStr, ValidationError\nfrom cryptography.hazmat.primitives.asymmetric import ec\nfrom cryptography.hazmat.primitives import serialization\nfrom tests import conftest\nfrom tests.test_modern_auth_service import make_modern, request, verify, challenge, VERIFIER\nfrom tests.test_auth_apple_lifecycle import Gateway, APPLE\nfrom app.services.auth_apple_lifecycle import AuthAppleLifecycle\nfrom app.services.auth_provider_service import AppleNotification, ProviderIdentity, ProviderTokens\nfrom app.schemas.modern_auth import ProviderStartRequest, ProviderCompleteRequest\n\nwith TemporaryDirectory(prefix='auth-security-review-') as directory:\n    data = Path(directory) / 'data'\n    data.mkdir()\n    mp = pytest.MonkeyPatch()\n    cg = conftest.container.__wrapped__(data, mp)\n    container = next(cg)\n    try:\n        service, mail, sent, provider, clock = make_modern(container)\n        owner = container.auth_service.seed_admin(email='relay@example.com', password='synthetic-long-password')\n        owner = container.user_repo.mutate(owner.id, lambda user: user.model_copy(update={'email_verified_at':clock()}))\n        _, token, _ = container.auth_service.login(email=owner.email, password='synthetic-long-password')\n        created = (clock() - timedelta(days=1)).isoformat()\n        with service.store.transaction() as c:\n            c.execute('INSERT INTO auth_identity_bindings(id,user_id,provider,issuer,namespace,subject,created_at,updated_at,email,is_private_email) VALUES(?,?,?,?,?,?,?,?,?,1)', ('apple-binding', owner.id, 'apple', APPLE, 'brainbuddy', 'apple-subject', created, clock().isoformat(), owner.email))\n        gateway = Gateway()\n        lifecycle = AuthAppleLifecycle(service.store, service.box, gateway, clock=clock)\n        service.apple = lifecycle\n        event_time = int(clock().timestamp())\n        gateway.notification = AppleNotification('delivery-review', 'email-disabled', 'apple-subject', 'com.example.web', event_time, event_time, owner.email, True)\n        lifecycle.process_notification('signed synthetic fixture')\n        print('repro_disabled_relay_email_stays_usable:', service._email_usable(owner))\n        pending = request(service, owner.email)\n        mail.dispatch_one()\n        result = verify(service, pending.challenge_id, sent[-1][1])\n        print('repro_disabled_relay_login_result:', result.payload.status)\n        gateway.notification = AppleNotification('revocation-review', 'consent-revoked', 'apple-subject', 'com.example.web', event_time, event_time)\n        lifecycle.process_notification('signed synthetic fixture')\n        try:\n            service.account_methods(raw_token=token)\n            print('repro_revoked_binding_breaks_account_methods: unexpectedly accepted')\n        except ValidationError as error:\n            print('repro_revoked_binding_breaks_account_methods:', [(e['loc'], e['type']) for e in error.errors(include_input=False)])\n        clock.now += timedelta(seconds=1)\n        key = ec.generate_private_key(ec.SECP256R1()).private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()\n        service.settings = service.settings.model_copy(update={'apple_team_id':'ABCDEFGHIJ','apple_key_id':'KLMNOPQRST','apple_private_key':SecretStr(key),'apple_services_id':'com.example.web','apple_native_app_id':'com.example.native'})\n        identity = ProviderIdentity('apple', APPLE, 'apple-subject', owner.email, True, True, 'com.example.web', int(clock().timestamp()))\n        provider.exchange_apple = lambda _code, **_kw: ProviderTokens(identity, 'com.example.web', SecretStr('synthetic-refresh'), 'refresh_token')\n        started = service.start_provider('apple', ProviderStartRequest(purpose='login', client='web', client_challenge=challenge()))\n        returned = service.provider_callback('apple', code='synthetic-code', state=started.payload.state, binder=started.binder)\n        parameters = parse_qs(urlsplit(returned.url).fragment)\n        try:\n            result = service.complete_provider(ProviderCompleteRequest(attempt_id=parameters['attempt'][0], state=parameters['state'][0], handoff_code=parameters['grant'][0], client_verifier=VERIFIER))\n            print('repro_fresh_apple_login_after_revocation:', result.payload.status)\n        except Exception as error:\n            print('repro_fresh_apple_login_after_revocation:', type(error).__name__)\n        with service.store.connection() as c:\n            print('repro_binding_state_after_fresh_apple_login:', c.execute('SELECT state FROM auth_identity_bindings WHERE id=?', ('apple-binding',)).fetchone()['state'])\n            before = c.execute('SELECT COUNT(*) FROM auth_apple_notification_receipts').fetchone()[0]\n        container.account_service.purge_account(owner.id)\n        with service.store.connection() as c:\n            print('repro_notification_receipts_after_complete_purge:', {'before':before, 'after':c.execute('SELECT COUNT(*) FROM auth_apple_notification_receipts').fetchone()[0], 'users':c.execute('SELECT COUNT(*) FROM users').fetchone()[0]})\n    finally:\n        try:\n            next(cg)\n        except StopIteration:\n            pass\n        mp.undo()\n",
+      "result": [
+        "repro_disabled_relay_email_stays_usable: True",
+        "repro_disabled_relay_login_result: signed_in",
+        "repro_revoked_binding_breaks_account_methods: [(('state',), 'literal_error')]",
+        "repro_fresh_apple_login_after_revocation: AuthAppleLifecycleError",
+        "repro_binding_state_after_fresh_apple_login: revoked",
+        "repro_notification_receipts_after_complete_purge: {'before': 2, 'after': 2, 'users': 0}"
+      ]
+    }
+  ],
+  "acceptance_limits": [
+    "Intermediate implementation review only; no speckit-accept grading or task checkoff.",
+    "Live Google/Apple configuration, real SMTP/relay delivery, provider notification signing/grouping and revocation smoke were not exercised.",
+    "iOS/macOS compilation, simulator/device cancellation/autofill and native UI journeys were not executed in this review; native source boundaries were inspected.",
+    "Exact-SHA full repository CI, deployment, operational migration/rollback and delivery evidence remain separate acceptance requirements.",
+    "Missing live-provider/device/delivery evidence is an operational limitation, not an additional code finding."
+  ],
+  "mutations": [
+    "Created the authorized detached review worktree.",
+    "Tests and reproductions used temporary synthetic local data.",
+    "Wrote only this generated implementation review JSON; no product/planning/test source edits, commits, production writes, deployment, network calls or remote comments."
+  ]
+}

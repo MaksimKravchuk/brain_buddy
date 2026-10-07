@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import logging.config
+import posixpath
+import re
 from contextvars import ContextVar, Token
-from typing import Any
+from typing import Any, cast
+from urllib.parse import unquote, urlsplit
 
 from .config import AGENT_PUSH_PATH, AppConfig, get_config
 
@@ -26,10 +29,19 @@ class CorrelationIdFilter(logging.Filter):
 
 
 REDACTED_PATH_MARKER = "[redacted]"
+_SAFE_UVICORN_MESSAGES = frozenset(
+    {
+        "Waiting for application startup.",
+        "Application startup complete.",
+        "Waiting for application shutdown.",
+        "Application shutdown complete.",
+        "Shutting down",
+    }
+)
 
 
 def sanitize_log_path(path: str, *, api_prefix: str) -> str:
-    """Hide the A2A push token in a request path before it is logged.
+    """Hide auth query/fragment credentials and the A2A push path token.
 
     The token has to travel in the path -- Hermes stores only the URL of a push
     config and signs with a secret BrainBuddy cannot know, so a header-only
@@ -52,21 +64,50 @@ def sanitize_log_path(path: str, *, api_prefix: str) -> str:
     """
 
     try:
+        if not isinstance(path, str) or any(ord(char) < 32 for char in path):
+            return REDACTED_PATH_MARKER
+        parsed = urlsplit(path)
+        if parsed.scheme == "brainbuddy" and parsed.hostname == "auth":
+            return "brainbuddy://auth/callback"
+        decoded = parsed.path
+        for _ in range(3):
+            candidate = unquote(decoded, errors="strict")
+            if candidate == decoded:
+                break
+            decoded = candidate
+        # Bound decoding work, but never treat a still-encoded credential
+        # target as an unrelated URL and retain its raw query.
+        if unquote(decoded, errors="strict") != decoded or any(
+            ord(char) < 32 for char in decoded
+        ):
+            return REDACTED_PATH_MARKER
+        decoded = decoded.split("?", 1)[0].split("#", 1)[0]
+        normalized = posixpath.normpath(decoded)
+        roots = (
+            f"{api_prefix.rstrip('/')}/auth",
+            f"{api_prefix.rstrip('/')}/account",
+            "/auth",
+            "/settings/account",
+        )
+        if any(
+            normalized == root or normalized.startswith(root + "/") for root in roots
+        ):
+            return normalized
         marker = f"{api_prefix.rstrip('/')}{AGENT_PUSH_PATH}/"
-        if not path.startswith(marker):
+        if not normalized.startswith(marker):
             return path
-        run_id, separator, _token = path[len(marker) :].partition("/")
+        run_id, separator, _token = normalized[len(marker) :].partition("/")
         if not separator:
             # No token segment yet. Inventing one would make a plain 404 look
             # like a redacted hit.
             return path
         return f"{marker}{run_id}/{REDACTED_PATH_MARKER}"
-    except Exception:  # pragma: no cover - defensive; the body cannot raise
+    except Exception:
         return REDACTED_PATH_MARKER
 
 
 class PushCallbackAccessFilter(logging.Filter):
-    """Strip the A2A push token from ``uvicorn.access`` lines (spec 014).
+    """Protect auth targets and A2A tokens at the server logging edges.
 
     ``CorrelationIdMiddleware`` sanitises BrainBuddy's own request log, but
     uvicorn writes an access line of its own *below* the middleware, and this
@@ -89,28 +130,122 @@ class PushCallbackAccessFilter(logging.Filter):
 
     @property
     def api_prefix(self) -> str:
-        if self._api_prefix is None:
-            # Resolved lazily, not at construction: the logging dict is built
-            # during startup, and reading configuration while it is being
-            # assembled would fix the prefix before it is settled.
-            self._api_prefix = get_config().api_prefix
-        return self._api_prefix
+        # configure_logging injects the settled configuration. Filtering must
+        # never load config, touch data or resolve DNS while logging a failure.
+        return self._api_prefix if self._api_prefix is not None else "/api"
+
+    @staticmethod
+    def _clear_details(record: logging.LogRecord) -> None:
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        record.__dict__.pop("color_message", None)
+        record.__dict__.pop("message", None)
+        correlation_id = getattr(record, "correlation_id", "-")
+        # nginx supplies a random 32-hex ID and the application generates
+        # UUIDs. An inbound header must not echo email, proof or log injection.
+        if not isinstance(correlation_id, str) or not re.fullmatch(
+            r"(?:-|[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
+            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+            correlation_id,
+        ):
+            record.correlation_id = REDACTED_PATH_MARKER
+
+    @classmethod
+    def _redact_record(cls, record: logging.LogRecord) -> None:
+        record.msg = f"server_log_payload {REDACTED_PATH_MARKER}"
+        record.args = ()
+        cls._clear_details(record)
+
+    @staticmethod
+    def _valid_middleware_record(record: logging.LogRecord) -> bool:
+        expected = {
+            "api_request method=%s path=%s status=%s duration_ms=%.1f": 4,
+            "api_request_failed method=%s path=%s duration_ms=%.1f": 3,
+        }
+        if not isinstance(record.msg, str):
+            return False
+        fields = expected.get(record.msg)
+        args = record.args
+        if not isinstance(args, tuple) or len(args) != fields:
+            return False
+        if (
+            not isinstance(args[0], str)
+            or not re.fullmatch(r"[A-Z]{1,16}", args[0])
+            or not isinstance(args[1], str)
+            or not isinstance(args[-1], (int, float))
+            or isinstance(args[-1], bool)
+        ):
+            return False
+        return fields == 3 or (
+            isinstance(args[2], int)
+            and not isinstance(args[2], bool)
+            and 100 <= args[2] <= 599
+        )
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             args = record.args
-            if not isinstance(args, tuple) or len(args) <= self._PATH_INDEX:
-                return True
-            path = args[self._PATH_INDEX]
-            if not isinstance(path, str):
-                return True
-            sanitized = sanitize_log_path(path, api_prefix=self.api_prefix)
-            if sanitized != path:
-                mutable = list(args)
-                mutable[self._PATH_INDEX] = sanitized
+            if record.name == "uvicorn.access":
+                if (
+                    record.msg != '%s - "%s %s HTTP/%s" %d'
+                    or not isinstance(args, tuple)
+                    or len(args) != 5
+                    or not all(isinstance(value, str) for value in args[:4])
+                    or not isinstance(args[4], int)
+                    or isinstance(args[4], bool)
+                    or not 100 <= args[4] <= 599
+                ):
+                    self._redact_record(record)
+                    return True
+                typed = cast(tuple[str, str, str, str, int], args)
+                if (
+                    not re.fullmatch(r"[0-9A-Fa-f:.\[\]-]+", typed[0])
+                    or not re.fullmatch(r"[A-Z]{1,16}", typed[1])
+                    or not re.fullmatch(r"[0-9](?:\.[0-9])?", typed[3])
+                ):
+                    self._redact_record(record)
+                    return True
+                mutable = list(typed)
+                mutable[self._PATH_INDEX] = sanitize_log_path(
+                    typed[2], api_prefix=self.api_prefix
+                )
                 record.args = tuple(mutable)
-        except Exception:  # pragma: no cover - a filter must never break logging
-            return True
+                self._clear_details(record)
+            elif record.name == "app.api.middleware":
+                if not self._valid_middleware_record(record):
+                    self._redact_record(record)
+                    return True
+                middleware_args = cast(tuple[Any, ...], args)
+                sanitized = sanitize_log_path(
+                    middleware_args[1], api_prefix=self.api_prefix
+                )
+                mutable = list(middleware_args)
+                mutable[1] = sanitized
+                record.args = tuple(mutable)
+                # The safe request message retains outcome/correlation data.
+                # Auth handler exceptions may echo rejected assertions/inputs.
+                if (
+                    sanitized != middleware_args[1]
+                    or "/auth" in sanitized
+                    or "/account" in sanitized
+                    or REDACTED_PATH_MARKER in sanitized
+                ):
+                    self._clear_details(record)
+            elif record.name.startswith("uvicorn"):
+                if (
+                    not isinstance(record.msg, str)
+                    or record.msg not in _SAFE_UVICORN_MESSAGES
+                    or record.args
+                    or record.exc_info
+                    or record.exc_text
+                    or record.stack_info
+                ):
+                    self._redact_record(record)
+                else:
+                    self._clear_details(record)
+        except Exception:
+            self._redact_record(record)
         return True
 
 
@@ -132,7 +267,7 @@ def get_correlation_id() -> str:
     return _correlation_id_var.get("-")
 
 
-def build_logging_dict(level: str) -> dict[str, Any]:
+def build_logging_dict(level: str, *, api_prefix: str = "/api") -> dict[str, Any]:
     """Create a dictionary config for Python's logging module."""
 
     return {
@@ -148,11 +283,9 @@ def build_logging_dict(level: str) -> dict[str, Any]:
             "correlation": {
                 "()": "app.core.logging.CorrelationIdFilter",
             },
-            # Attached to `uvicorn.access` below rather than to the handler: a
-            # filter on the handler would also see every application record and
-            # pay its cost for nothing.
             "push_callback": {
                 "()": "app.core.logging.PushCallbackAccessFilter",
+                "api_prefix": api_prefix,
             },
         },
         "handlers": {
@@ -160,7 +293,7 @@ def build_logging_dict(level: str) -> dict[str, Any]:
                 "class": "logging.StreamHandler",
                 "formatter": "default",
                 "level": level,
-                "filters": ["correlation"],
+                "filters": ["correlation", "push_callback"],
             }
         },
         "loggers": {
@@ -194,7 +327,9 @@ def configure_logging(config: AppConfig | None = None) -> None:
     """Configure logging for the application."""
 
     config = config or get_config()
-    logging.config.dictConfig(build_logging_dict(config.log_level))
+    logging.config.dictConfig(
+        build_logging_dict(config.log_level, api_prefix=config.api_prefix)
+    )
 
 
 def get_logger(name: str) -> logging.Logger:

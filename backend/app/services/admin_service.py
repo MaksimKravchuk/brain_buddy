@@ -53,6 +53,7 @@ class AdminService:
         self.user_repo = user_repo
         self.session_repo = session_repo
         self.operator_emails = operator_emails
+        self.available_auth_providers: frozenset[str] = frozenset()
         self.auth_service = auth_service
         self.account_service = account_service
 
@@ -117,11 +118,25 @@ class AdminService:
             self._audit(operator_id, "update", target.id, "conflict")
             raise ConflictError("User", "account")
         try:
-            updated = self.user_repo.update_profile(
-                target.id,
-                email=normalized,
-                display_name=display_name.strip() or None if display_name else None,
-            )
+            with self.user_repo.store.transaction() as connection:
+                fresh = self.user_repo.get_by_id(target.id)
+                if fresh is None:
+                    raise NotFoundError("Account", account_id)
+                if normalized != fresh.email and not fresh.password_hash:
+                    usable = connection.execute(
+                        "SELECT provider FROM auth_identity_bindings WHERE user_id=? AND state='active'",
+                        (fresh.id,),
+                    ).fetchall()
+                    if not any(
+                        binding["provider"] in self.available_auth_providers
+                        for binding in usable
+                    ):
+                        raise ConflictError("User", "account")
+                updated = self.user_repo.update_profile(
+                    target.id,
+                    email=normalized,
+                    display_name=display_name.strip() or None if display_name else None,
+                )
         except ConflictError:
             self._audit(operator_id, "update", target.id, "conflict")
             raise ConflictError("User", "account") from None

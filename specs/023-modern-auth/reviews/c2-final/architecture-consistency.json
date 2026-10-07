@@ -1,0 +1,29 @@
+{
+  "findings": [],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/contracts/native-auth.md"
+  ],
+  "role": "architecture-consistency",
+  "summary": "Bounded verification of corrected planning snapshot 270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd resolves both recorded architecture findings. The migration contract specifies ledger/image-matched rollback guards, fail-closed containment and exact-SHA forward repair without a second legacy storage mode. Mailbox verification atomically finalizes the staged provider attempt and returns signed_in without handoff replay. The added owner-mismatch 404 behavior now matches the declared errors. No blocking or important finding remains in this verification scope; implementation and release evidence remain required.",
+  "verdict": "pass"
+}
