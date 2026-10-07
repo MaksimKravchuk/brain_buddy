@@ -499,6 +499,27 @@ class TaskTitleAutocompleteSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+class ReviewNavigatorSettings(BaseModel):
+    """The weekly-review navigator's cloud provider (spec 020, research R13).
+
+    Unlike title completion, a misconfigured navigator does not degrade to a
+    disabled provider: ``openai`` without its key, ``deterministic`` outside
+    TEST, and any unknown provider make the container build raise
+    (``app.ai.review_navigator``). Only an explicit ``disabled`` turns it off.
+    """
+
+    provider: str = "disabled"
+    model: str = "gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    timeout_seconds: float = Field(default=8.0, gt=0, le=30)
+    max_input_tokens: int = Field(default=6000, ge=1, le=128_000)
+    max_output_tokens: int = Field(default=300, ge=1, le=4000)
+    max_cost_usd: float = Field(default=0.01, gt=0, le=5)
+    max_daily_cost_usd: float = Field(default=0.20, gt=0, le=100)
+
+    model_config = ConfigDict(frozen=True)
+
+
 AGENT_PUSH_PATH = "/a2a/push"
 """The A2A push-notification callback path below the configured API prefix.
 
@@ -1060,6 +1081,9 @@ class AppConfig(BaseModel):
     task_title_autocomplete: TaskTitleAutocompleteSettings = Field(
         default_factory=TaskTitleAutocompleteSettings
     )
+    review_navigator: ReviewNavigatorSettings = Field(
+        default_factory=ReviewNavigatorSettings
+    )
     agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
     admin: AdminSettings = Field(default_factory=AdminSettings)
@@ -1392,6 +1416,29 @@ def _build_config() -> AppConfig:
         ),
     )
 
+    review_navigator = ReviewNavigatorSettings(
+        provider=os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER", "disabled"),
+        model=os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_MODEL", "gpt-4o-mini"),
+        api_key_env=os.getenv(
+            "BRAIN_BUDDY_REVIEW_NAVIGATOR_API_KEY_ENV", "OPENAI_API_KEY"
+        ),
+        timeout_seconds=float(
+            os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_TIMEOUT_SECONDS", "8")
+        ),
+        max_input_tokens=int(
+            os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_INPUT_TOKENS", "6000")
+        ),
+        max_output_tokens=int(
+            os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_OUTPUT_TOKENS", "300")
+        ),
+        max_cost_usd=float(
+            os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_COST_USD", "0.01")
+        ),
+        max_daily_cost_usd=float(
+            os.getenv("BRAIN_BUDDY_REVIEW_NAVIGATOR_MAX_DAILY_COST_USD", "0.20")
+        ),
+    )
+
     agent_relay = AgentRelaySettings(
         public_base_url=_canonical_public_base_url(
             os.getenv("BRAIN_BUDDY_PUBLIC_BASE_URL", "http://localhost:8000"),
@@ -1462,6 +1509,7 @@ def _build_config() -> AppConfig:
         modern_auth=_build_modern_auth_settings(),
         voice=voice,
         task_title_autocomplete=task_title_autocomplete,
+        review_navigator=review_navigator,
         agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
         admin=_build_admin_settings(),
@@ -1491,6 +1539,7 @@ __all__ = [
     "ManagedFlagMigrationSeed",
     "ModernAuthSettings",
     "PasswordPolicy",
+    "ReviewNavigatorSettings",
     "SessionSettings",
     "TaskTitleAutocompleteSettings",
     "VoiceAudioLimits",

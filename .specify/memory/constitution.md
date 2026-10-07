@@ -1,25 +1,24 @@
 <!--
 Sync Impact Report:
-- Version change: 1.2.0 -> 2.0.0
-- Why MAJOR: ADR-0023 deliberately removes the universal full Spec Kit campaign
-  and duplicate review-plus-QA expectation for eligible bounded SHIP/SHOW work.
-  That is a breaking governance change even though exact-SHA delivery safeguards
-  remain unchanged.
-- Modified principles: None
-- Modified sections: Spec-Driven Development Workflow; Operational Guardrails;
-  Development Workflow & Quality Gates; Governance
+- Version change: 2.0.0 -> 3.0.0
+- Why MAJOR: Owner-approved proportionate testing replaces universal test-first
+  ordering with behavior/risk-based test selection and bounded test-first use.
+  Existing checks may fully satisfy a change; technical task count does not
+  determine test count. This reduces unnecessary agent work without changing
+  coverage/mutation thresholds, frozen acceptance criteria, or release gates.
+- Modified principles: II. Tested Delivery Across Stack
+- Modified sections: Spec-Driven Development Workflow;
+  Development Workflow & Quality Gates
 - Added sections: None
 - Removed sections: None
-- Dependent docs updated: AGENTS.md, .hermes.md,
+- Dependent docs updated: AGENTS.md, CLAUDE.md, .hermes.md,
   docs/autonomous-delivery-runbook.md, docs/spec-kit-workflow.md,
-  docs/spec-driven-kanban.md, docs/fly-deployment.md, README.md,
-  .specify/workflows/speckit/workflow.yml, and its synchronized registry entry
-- Templates requiring updates: None. Existing templates remain authoritative for
-  the full Spec Kit path; the fast lane does not generate partial Spec Kit artifacts.
+  .claude/agents/feature-implementer.md, .claude/skills/self-verify/SKILL.md,
+  .specify/agent-commands/speckit-{tasks,implement,pipeline}/SKILL.md
+- Templates updated: plan-template.md, tasks-template.md
 - Follow-up TODOs: None
-- Superseded report preserved in git history: 1.1.1 -> 1.2.0 introduced the
-  mandatory design citation and portable five-lens review gate and corrected the
-  verified-trunk wording after ADR-0008.
+- Superseded reports preserved in git history: 1.1.1 -> 1.2.0 introduced mandatory
+  design and portable review; 1.2.0 -> 2.0.0 adopted ADR-0023's fast lane.
 -->
 # BrainBuddy Constitution
 
@@ -33,11 +32,14 @@ Protect user trust by defaulting to local control, explicit consent, and reversi
 - Cloud persistence, external task routing, CRT promotion, destructive edits, and delete/undo behavior MUST be user-visible, idempotent where applicable, and auditable.
 
 ### II. Tested Delivery Across Stack
-Changes ship only with targeted automated validation covering the affected backend, frontend, workflow, and documentation gates.
-- New or changed behavior MUST include failing-then-passing tests or an explicitly documented non-code verification path when the change is docs/tooling only.
-- Backend behavior uses pytest/FastAPI TestClient; frontend behavior uses Vitest + Testing Library; CI coverage, lint, type, build, and smoke gates MUST be kept green before merge.
-- AI, persistence, voice, routing, and operation flows MUST cover edge cases for invalid payloads, timeouts, consent denial, idempotency, retries, cancellation, and partial failure.
-- Refactors without behavior change still require deterministic guardrails proving parity.
+Changes ship with evidence for the affected behavior and material failure risks. This principle is the canonical testing policy for every agent, planner, template, and reviewer.
+- Before implementation, state the expected observable result and material failure risks in the existing brief or spec. Derive test expectations from those accepted requirements, not from the implementation's current output.
+- Inspect and run relevant existing checks first. Reuse them when sufficient; extend or add tests only for missing behavior/risk coverage or a binding acceptance requirement. Zero new tests is valid. Technical task, function, file, and layer counts do not determine test count; do not duplicate the same guarantee across layers without a distinct risk.
+- Choose the least costly level that reliably detects the relevant failure: unit/property tests for pure rules, integration tests for boundaries and persistence, browser/device tests for interactions that require that environment. Preserve existing deterministic checks for behavior-preserving refactors.
+- Use test-first for automatically reproducible bug fixes and new or unprotected predefined critical invariants, such as owner isolation, consent enforcement, durable state, and idempotency: observe a meaningful test failure before implementing the fix or new invariant. An existing failing test is sufficient; an already protected invariant needs no duplicate test or artificial failure. For other changes, choose implementation/test order by feedback cost, with necessary writer checks complete before candidate freeze. Record concrete reproduction/verification evidence when a bug cannot be tested deterministically; docs-only changes may use non-code checks.
+- Cover applicable material failure modes for AI, persistence, voice, routing, and operations: invalid input, timeouts, consent denial, retries, cancellation, and partial failure. Preserve frozen acceptance requirements; amend them explicitly when the intended behavior changes. Never weaken assertions or change expected results merely to make a regression pass.
+- During iteration, run affected checks. Run the full applicable required suite on the prepared candidate under ADR-0023, not after every technical task; repeat checks when subsequent changes, failures, or unresolved risks invalidate their evidence. Existing coverage/mutation thresholds, Allure taxonomy, exact-SHA CI, independent acceptance, and release/smoke gates remain binding.
+- Keep test selection in the existing brief/plan and verification report: name reused checks and any necessary additions. Do not create a separate test inventory, approval step, or reporting gate for each change.
 
 ### III. Contract-First Interfaces
 Shared contracts are the source of truth and cannot drift across tiers, agents, or planning artifacts.
@@ -65,7 +67,7 @@ GitHub Spec Kit is the mandatory full authoring workflow when any canonical ADR-
 - When the full path applies, the canonical artifact flow is constitution -> `/speckit-specify` (what/why) -> `/speckit-clarify` -> `/speckit-design` (user-visible surfaces) -> `/speckit-plan` (how/architecture) -> `/speckit-review` -> `/speckit-checklist` -> `/speckit-tasks` -> `/speckit-analyze`. `/speckit-design` and the ADR-0011 `/speckit-review` gate are not optional additions to the upstream core: a plan MUST cite `design.md` when the feature has a user-visible surface, and implementation MUST NOT begin on a review verdict other than `approved` or `founder-accepted`. `docs/spec-kit-workflow.md` carries the full thirteen-stage path including the optional stage 0 assessment.
 - Use the official `github/spec-kit` CLI pinned to the repository-documented version through isolated `uv tool`/`uvx`; do not install it into application backend/frontend environments.
 - `specs/` contains the versioned Spec Kit artifacts. Implementation intent changes MUST amend the relevant spec/plan/tasks before product code proceeds.
-- Generated `tasks.md` is portable planning input organized by user story, dependency, and concrete file path. It does not bypass isolated worktrees, TDD, ADR-0023's applicable independent gate, CI, landing, or release gates.
+- Generated `tasks.md` is portable planning input organized by user story, dependency, and concrete file path. It does not bypass isolated worktrees, Principle II's testing policy, ADR-0023's applicable independent gate, CI, landing, or release gates.
 - Spec Kit is not an execution orchestrator for BrainBuddy. Implementation may be performed by a developer or standalone agent. An explicitly activated managed outcome may add a separate control-plane overlay without changing these repository-wide rules.
 
 ## Historical Spec Grandfathering
@@ -87,7 +89,7 @@ How features are specified, planned, implemented, reviewed, and released.
 - Start work by inspecting `.specify/memory/constitution.md`, relevant accepted ADRs, and any existing feature artifacts. Create the full Spec Kit set only when ADR-0023's full-path triggers apply.
 - Specs MUST define independently testable user stories, acceptance scenarios, edge cases, consent/privacy impact, observability impact, and success criteria.
 - Plans MUST document architecture, contract changes, persistence ownership, test strategy, release/smoke validation, and any justified constitution complexity.
-- Tasks MUST be grouped by independently shippable user story, include concrete file paths, and preserve tests-before-implementation ordering unless the spec explicitly waives tests.
+- Tasks MUST be grouped by independently shippable user story and include concrete file paths. Apply Principle II when selecting checks and their order; reference sufficient existing tests instead of generating new test tasks for each implementation task.
 - The applicable independent gate MUST block on constitution compliance, ADR alignment, consent enforcement, contract alignment, affected-stack validation, observability, and performance/mobile resilience. Full-path reviews additionally block on Spec Kit artifact completeness.
 
 ## Governance
@@ -97,4 +99,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance is checked by ADR-0023's risk-selected independent gate before SHIP/SHOW release and by the full review path for ineligible or ASK work; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 2.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-09-16
+**Version**: 3.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-07
