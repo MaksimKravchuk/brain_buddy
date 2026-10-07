@@ -551,6 +551,43 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/review/parks/acknowledge", "post"): {"400", "401", "409", "422"},
         ("/api/review/state", "get"): {"401", "404"},
     }
+    expected_error_statuses.update(
+        {
+            ("/api/auth/device/start", "post"): {
+                "404",
+                "413",
+                "415",
+                "422",
+                "429",
+            },
+            ("/api/auth/device/request", "post"): {
+                "403",
+                "404",
+                "413",
+                "415",
+                "422",
+                "429",
+            },
+            ("/api/auth/device/decision", "post"): {
+                "403",
+                "404",
+                "409",
+                "413",
+                "415",
+                "422",
+                "429",
+            },
+            ("/api/auth/device/token", "post"): {
+                "400",
+                "403",
+                "404",
+                "409",
+                "413",
+                "415",
+                "422",
+            },
+        }
+    )
     discovered_operations = {
         (path, method)
         for path, path_item in schema["paths"].items()

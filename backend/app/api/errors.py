@@ -25,6 +25,7 @@ from app.exceptions import (
 )
 from app.schemas import ErrorResponse, StaleRevisionDetail
 from app.services.auth_apple_lifecycle import AuthAppleLifecycleError
+from app.services.cli_auth import CliAuthError
 from app.services.modern_auth_service import ModernAuthError
 
 from .middleware import CORRELATION_HEADER
@@ -44,7 +45,55 @@ def _public_validation_errors(exc: RequestValidationError) -> list[dict[str, obj
     ]
 
 
+def _device_validation_error(
+    request: Request, correlation_id: str | None
+) -> JSONResponse | None:
+    config = getattr(request.app.state, "config", None)
+    if config is None:
+        return None
+    prefix = config.api_prefix.rstrip("/")
+    if request.url.path in {
+        prefix + "/auth/device/" + operation
+        for operation in ("start", "request", "decision", "token")
+    }:
+        payload = ErrorResponse(
+            message="CLI authorization request is invalid.",
+            detail={"code": "invalid_request"},
+            reference_id=correlation_id,
+        )
+        headers = {"Cache-Control": "no-store"}
+        if correlation_id:
+            headers[CORRELATION_HEADER] = correlation_id
+        return JSONResponse(
+            status_code=422,
+            content=payload.model_dump(by_alias=True),
+            headers=headers,
+        )
+    return None
+
+
 def _register_auth_handlers(app: FastAPI) -> None:
+    @app.exception_handler(CliAuthError)
+    async def handle_cli_auth_error(
+        request: Request, exc: CliAuthError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(
+            message="CLI authorization could not complete.",
+            detail={"code": exc.code},
+            reference_id=correlation_id,
+        )
+        headers = {"Cache-Control": "no-store"}
+        if correlation_id:
+            headers[CORRELATION_HEADER] = correlation_id
+        if exc.retry_after is not None:
+            headers["Retry-After"] = str(exc.retry_after)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=payload.model_dump(by_alias=True),
+            headers=headers,
+        )
+
     @app.exception_handler(AuthAppleLifecycleError)
     @app.exception_handler(ModernAuthError)
     async def handle_modern_auth_error(
@@ -59,27 +108,30 @@ def _register_auth_handlers(app: FastAPI) -> None:
         )
 
 
+async def handle_request_validation(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    correlation_id = getattr(request.state, "correlation_id", None)
+    device_error = _device_validation_error(request, correlation_id)
+    if device_error is not None:
+        return device_error
+    payload = ErrorResponse(
+        message="Request validation failed.",
+        detail=jsonable_encoder(_public_validation_errors(exc)),
+        reference_id=correlation_id,
+    )
+    response = JSONResponse(status_code=422, content=payload.model_dump(by_alias=True))
+    if correlation_id:
+        response.headers[CORRELATION_HEADER] = correlation_id
+    return response
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach exception handlers for known error types."""
 
     _register_auth_handlers(app)
 
-    @app.exception_handler(RequestValidationError)
-    async def handle_request_validation(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
-        correlation_id = getattr(request.state, "correlation_id", None)
-        payload = ErrorResponse(
-            message="Request validation failed.",
-            detail=jsonable_encoder(_public_validation_errors(exc)),
-            reference_id=correlation_id,
-        )
-        response = JSONResponse(
-            status_code=422, content=payload.model_dump(by_alias=True)
-        )
-        if correlation_id:
-            response.headers[CORRELATION_HEADER] = correlation_id
-        return response
+    app.exception_handler(RequestValidationError)(handle_request_validation)
 
     async def build_http_error_response(
         request: Request, exc: StarletteHTTPException
