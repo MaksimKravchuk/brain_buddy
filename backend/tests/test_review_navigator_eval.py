@@ -19,14 +19,17 @@ import json
 import os
 import re
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import allure
+import pytest
 
 from app.modules.tasks.formulation import formulation_key
 from app.modules.tasks.navigator import (
     MAX_PROPOSAL_CHARS,
+    PROMPT_VERSION,
     NavigatorInput,
     build_navigator_input,
     grounding_terms,
@@ -35,8 +38,94 @@ from app.modules.tasks.navigator import (
 from app.schemas.review import NavigatorSuggestionRequest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "navigator"
-EVAL_SET = FIXTURES / "eval_v1.json"
+EVAL_SET_ID = "eval_v1"
+EVAL_SET = FIXTURES / f"{EVAL_SET_ID}.json"
 SAMPLE = FIXTURES / "recorded_v1_sample.json"
+RECORDING_SCHEMA = "brainbuddy-navigator-recorded/v1"
+RECORDED_ENV = "BRAIN_BUDDY_NAVIGATOR_RECORDED"
+
+
+class RecordingError(ValueError):
+    """A recording that must not be scored (incomplete or mismatched)."""
+
+
+def _metadata_problems(eval_set: dict[str, Any], recorded: dict[str, Any]) -> list[str]:
+    expected = {
+        "schema": RECORDING_SCHEMA,
+        "eval_set": EVAL_SET_ID,
+        "prompt_version": PROMPT_VERSION,
+    }
+    assert eval_set["prompt_version"] == PROMPT_VERSION
+    return [
+        f"{field} is {recorded.get(field)!r}, expected {value!r}"
+        for field, value in expected.items()
+        if recorded.get(field) != value
+    ]
+
+
+def _cell_languages(
+    eval_set: dict[str, Any], recorded: dict[str, Any]
+) -> tuple[set[str], list[str]]:
+    """The languages of the recording's cell (``languages``, default all)."""
+
+    known = {case["language"] for case in eval_set["cases"]}
+    declared = recorded.get("languages")
+    if declared is None:
+        return known, []
+    unknown = sorted(set(declared) - known) if isinstance(declared, list) else []
+    if not isinstance(declared, list) or not declared or unknown:
+        return known, [
+            f"languages {declared!r} must be a non-empty subset of {sorted(known)}"
+        ]
+    return set(declared), []
+
+
+def validate_recording(
+    eval_set: dict[str, Any], recorded: dict[str, Any], *, require_complete: bool
+) -> None:
+    """Refuse a recording that must not be scored (contracts/navigator.md §5).
+
+    The schema, ``eval_set`` and ``prompt_version`` must be the current ones;
+    every output must name a case of the recording's cell (the languages in
+    ``languages``, default every case), at most once; with
+    ``require_complete`` every case of the cell needs exactly one output.
+    Raises ``RecordingError`` naming every missing, duplicate or unknown id.
+    """
+
+    problems = _metadata_problems(eval_set, recorded)
+    languages, language_problems = _cell_languages(eval_set, recorded)
+    problems += language_problems
+    applicable = {
+        case["id"] for case in eval_set["cases"] if case["language"] in languages
+    }
+    counts = Counter(output["case_id"] for output in recorded["outputs"])
+    duplicate = sorted(case_id for case_id, n in counts.items() if n > 1)
+    unknown = sorted(set(counts) - applicable)
+    missing = sorted(applicable - set(counts)) if require_complete else []
+    for label, ids in (
+        ("missing", missing),
+        ("duplicate", duplicate),
+        ("unknown", unknown),
+    ):
+        if ids:
+            problems.append(f"{label} case ids: {', '.join(ids)}")
+    if problems:
+        raise RecordingError("recording refused: " + "; ".join(problems))
+
+
+def recorded_file() -> tuple[Path, bool]:
+    """The recording to screen and whether it must be complete.
+
+    An owner recording named by ``BRAIN_BUDDY_NAVIGATOR_RECORDED`` is always
+    held to completeness; only the committed synthetic sample is partial.
+    """
+
+    named = os.environ.get(RECORDED_ENV)
+    if named:
+        return Path(named), True
+    return SAMPLE, False
+
+
 STALL_REASONS = {
     None,
     "unclear",
@@ -114,9 +203,16 @@ def _empty_bucket() -> dict[str, Any]:
 
 
 def screen_recorded_outputs(
-    eval_set: dict[str, Any], recorded: dict[str, Any]
+    eval_set: dict[str, Any],
+    recorded: dict[str, Any],
+    *,
+    require_complete: bool = True,
 ) -> dict[str, Any]:
     """The deterministic screen runner (aggregate scores only).
+
+    The recording is validated first (``validate_recording``): an incomplete
+    or mismatched recording is refused, never scored. Only the committed
+    synthetic sample is screened with ``require_complete=False``.
 
     For every recorded output: the §2 validation (what is shown, or the
     question, or ``malformed``), why each raw proposal was dropped (shape,
@@ -124,13 +220,13 @@ def screen_recorded_outputs(
     the invented-fact screen before and after validation.
     """
 
+    validate_recording(eval_set, recorded, require_complete=require_complete)
     cases = {case["id"]: case for case in eval_set["cases"]}
     report: dict[str, Any] = {
         "source": recorded["source"],
         "eval_set": recorded["eval_set"],
         "prompt_version": recorded["prompt_version"],
         "outputs": 0,
-        "unknown_cases": 0,
         "raw_proposals": 0,
         "dropped": {"shape": 0, "duplicate": 0, "grounding": 0},
         "shown_proposals": 0,
@@ -143,11 +239,7 @@ def screen_recorded_outputs(
         "by_language": {},
     }
     for output in recorded["outputs"]:
-        case = cases.get(output["case_id"])
-        if case is None:
-            report["unknown_cases"] += 1
-            continue
-        _screen_one(report, case, output)
+        _screen_one(report, cases[output["case_id"]], output)
     return report
 
 
@@ -300,7 +392,9 @@ def test_020_SC_005_screen_runner_scores_the_synthetic_sample() -> None:
     "0 confirmed invented facts" gate)."""
 
     with allure.step("screen the synthetic recorded sample"):
-        report = screen_recorded_outputs(load(EVAL_SET), load(SAMPLE))
+        report = screen_recorded_outputs(
+            load(EVAL_SET), load(SAMPLE), require_complete=False
+        )
         attach_report(report)
     assert report["source"] == "synthetic"
     assert report["outputs"] == 14
@@ -322,7 +416,9 @@ def test_020_SC_005_report_is_aggregate_only() -> None:
 
     eval_set = load(EVAL_SET)
     recorded = load(SAMPLE)
-    rendered = json.dumps(screen_recorded_outputs(eval_set, recorded))
+    rendered = json.dumps(
+        screen_recorded_outputs(eval_set, recorded, require_complete=False)
+    )
     for output in recorded["outputs"]:
         for text in [*output["proposals"], output["clarifying_question"] or ""]:
             for word in text.split():
@@ -334,17 +430,19 @@ def test_020_SC_005_report_is_aggregate_only() -> None:
 
 def test_020_FR_021_screens_hold_for_any_recorded_file() -> None:
     """For the sample, or an owner-supplied recording named by
-    ``BRAIN_BUDDY_NAVIGATOR_RECORDED``: after validation no invented fact, no
-    duplicate of a sent sibling, at most 3 one-line proposals of ≤ 200."""
+    ``BRAIN_BUDDY_NAVIGATOR_RECORDED`` (which must be complete for its cell):
+    after validation no invented fact, no duplicate of a sent sibling, at most
+    3 one-line proposals of ≤ 200."""
 
-    path = Path(os.environ.get("BRAIN_BUDDY_NAVIGATOR_RECORDED", str(SAMPLE)))
+    path, require_complete = recorded_file()
     eval_set = load(EVAL_SET)
     recorded = load(path)
-    report = screen_recorded_outputs(eval_set, recorded)
+    report = screen_recorded_outputs(
+        eval_set, recorded, require_complete=require_complete
+    )
     assert report["invented_facts_after_validation"] == 0
     assert report["duplicates_after_validation"] == 0
     assert report["shape_violations_after_validation"] == 0
-    assert report["unknown_cases"] == 0
     with allure.step("the aggregate read-out"):
         attach_report(report)
         print(json.dumps(report, sort_keys=True))
@@ -401,6 +499,151 @@ def test_020_SC_005_invented_screen_uses_the_rule_3_triggers() -> None:
         "Sort the boxes today": False,
         "Sort the boxes tomorrow": True,
     }
+
+
+def _complete_recording(languages: list[str] | None = None) -> dict[str, Any]:
+    """A recording with one (empty) output per applicable case."""
+
+    recording: dict[str, Any] = {
+        "schema": RECORDING_SCHEMA,
+        "eval_set": EVAL_SET_ID,
+        "prompt_version": PROMPT_VERSION,
+        "source": "cloud",
+        "model": "synthetic-test",
+        "outputs": [
+            {"case_id": case["id"], "proposals": [], "clarifying_question": None}
+            for case in load(EVAL_SET)["cases"]
+            if languages is None or case["language"] in languages
+        ],
+    }
+    if languages is not None:
+        recording["languages"] = languages
+    return recording
+
+
+def _first_case_id(language: str = "en") -> str:
+    return str(
+        next(c["id"] for c in load(EVAL_SET)["cases"] if c["language"] == language)
+    )
+
+
+def _missing(recording: dict[str, Any]) -> str:
+    dropped = recording["outputs"].pop(0)
+    return str(dropped["case_id"])
+
+
+def _duplicate(recording: dict[str, Any]) -> str:
+    recording["outputs"].append(dict(recording["outputs"][0]))
+    return str(recording["outputs"][0]["case_id"])
+
+
+def _unknown(recording: dict[str, Any]) -> str:
+    recording["outputs"].append(
+        {"case_id": "XX-99", "proposals": [], "clarifying_question": None}
+    )
+    return "XX-99"
+
+
+def _wrong_prompt(recording: dict[str, Any]) -> str:
+    recording["prompt_version"] = "navigator-prompt/v0"
+    return "navigator-prompt/v0"
+
+
+def _wrong_eval_set(recording: dict[str, Any]) -> str:
+    recording["eval_set"] = "eval_v0"
+    return "eval_v0"
+
+
+def _wrong_schema(recording: dict[str, Any]) -> str:
+    recording["schema"] = "something-else/v1"
+    return "something-else/v1"
+
+
+def _other_language(recording: dict[str, Any]) -> str:
+    case_id = _first_case_id("ru")
+    recording["outputs"].append(
+        {"case_id": case_id, "proposals": [], "clarifying_question": None}
+    )
+    return case_id
+
+
+@pytest.mark.parametrize(
+    ("languages", "break_it"),
+    [
+        pytest.param(None, _missing, id="missing-case"),
+        pytest.param(None, _duplicate, id="duplicate-case"),
+        pytest.param(None, _unknown, id="unknown-case"),
+        pytest.param(None, _wrong_prompt, id="wrong-prompt-version"),
+        pytest.param(None, _wrong_eval_set, id="wrong-eval-set"),
+        pytest.param(None, _wrong_schema, id="wrong-schema"),
+        pytest.param(["en"], _missing, id="en-cell-missing-case"),
+        pytest.param(["en"], _other_language, id="en-cell-with-a-ru-case"),
+    ],
+)
+def test_020_SC_005_incomplete_or_mismatched_recordings_are_refused(
+    languages: list[str] | None, break_it: Callable[[dict[str, Any]], str]
+) -> None:
+    """Codex P2: an owner recording is scored only when it is complete for
+    its cell: the current ``eval_set`` and ``prompt_version``, and exactly one
+    output per applicable case. A missing, duplicate or unknown id or a
+    mismatched version is refused, and the message names it."""
+
+    recording = _complete_recording(languages)
+    culprit = break_it(recording)
+    with (
+        allure.step("validate a broken recording"),
+        pytest.raises(RecordingError) as refused,
+    ):
+        allure.attach(
+            culprit, name="culprit", attachment_type=allure.attachment_type.TEXT
+        )
+        validate_recording(load(EVAL_SET), recording, require_complete=True)
+    assert culprit in str(refused.value)
+    with pytest.raises(RecordingError):
+        screen_recorded_outputs(load(EVAL_SET), recording)
+
+
+@pytest.mark.parametrize(
+    "languages",
+    [pytest.param(None, id="all-48"), pytest.param(["en"], id="en-cell")],
+)
+def test_020_SC_005_complete_recordings_are_scored(
+    languages: list[str] | None,
+) -> None:
+    """A complete recording (all 48 cases, or every case of the languages it
+    declares) passes validation and is scored."""
+
+    recording = _complete_recording(languages)
+    with allure.step("screen a complete recording"):
+        validate_recording(load(EVAL_SET), recording, require_complete=True)
+        report = screen_recorded_outputs(load(EVAL_SET), recording)
+        attach_report(report)
+    expected = 48 if languages is None else 12
+    assert report["outputs"] == expected
+    assert report["returned"]["malformed"] == expected
+
+
+def test_020_SC_005_owner_recordings_are_always_held_to_completeness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the committed synthetic sample is screened without completeness;
+    a file named by ``BRAIN_BUDDY_NAVIGATOR_RECORDED`` must be complete, so
+    the committed partial sample named that way is refused."""
+
+    monkeypatch.delenv(RECORDED_ENV, raising=False)
+    assert recorded_file() == (SAMPLE, False)
+    monkeypatch.setenv(RECORDED_ENV, str(SAMPLE))
+    assert recorded_file() == (SAMPLE, True)
+    with (
+        allure.step("the partial sample as an owner recording"),
+        pytest.raises(RecordingError, match="missing"),
+    ):
+        allure.attach(
+            str(SAMPLE.name),
+            name="recording",
+            attachment_type=allure.attachment_type.TEXT,
+        )
+        screen_recorded_outputs(load(EVAL_SET), load(SAMPLE))
 
 
 def attach_report(report: dict[str, Any]) -> None:
