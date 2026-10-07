@@ -1,6 +1,83 @@
 {
   "schema": "brainbuddy-navigator-validator-vectors/v1",
-  "format": "Canonical file (contracts/navigator.md §2 rules 1-4). 'inputs' are NavigatorInput values by name; each vector names one, gives the raw model output (proposals, clarifying_question) and the expected result: kind 'proposals' (the list shown), 'question' (the trimmed question) or 'malformed'. Every implementation of the validator (navigator.py, NavigatorOutputValidator, the web validator) runs this file; copies are byte-identical.",
+  "format": "Canonical file (contracts/navigator.md §2 rules 1-4). 'date_words' is the normative rule 3 word table, in formulation_key form: a token is a date word when its key equals an en_words or ru_words entry or starts with a ru_stems entry. 'inputs' are NavigatorInput values by name; each vector names one, gives the raw model output (proposals, clarifying_question) and the expected result: kind 'proposals' (the list shown), 'question' (the trimmed question) or 'malformed'. Every implementation of the validator (navigator.py, NavigatorOutputValidator, the web validator) runs this file; copies are byte-identical.",
+  "date_words": {
+    "en_words": [
+      "january",
+      "february",
+      "march",
+      "april",
+      "june",
+      "july",
+      "august",
+      "september",
+      "october",
+      "november",
+      "december",
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+      "tonight",
+      "tomorrow"
+    ],
+    "en_words_note": "'may' is deliberately absent: the lower-case word is the common verb, and a capitalised 'May' after the first word is caught by the capital-letter trigger",
+    "ru_stems": [
+      "январ",
+      "феврал",
+      "март",
+      "апрел",
+      "июн",
+      "июл",
+      "август",
+      "сентябр",
+      "октябр",
+      "ноябр",
+      "декабр",
+      "понедельник",
+      "вторник",
+      "четверг",
+      "пятниц",
+      "суббот",
+      "воскресень"
+    ],
+    "ru_words": [
+      "май",
+      "мая",
+      "мае",
+      "маю",
+      "маем",
+      "среда",
+      "среду",
+      "среды",
+      "среде",
+      "средой",
+      "завтра",
+      "послезавтра"
+    ],
+    "phrases": [
+      "next week",
+      "next month",
+      "this weekend",
+      "на следующей неделе"
+    ],
+    "prompt_sourced_words": [
+      "today",
+      "сегодня"
+    ],
+    "max_exempt_duration_minutes": 30,
+    "minute_words": [
+      "min",
+      "mins",
+      "minute",
+      "minutes",
+      "мин"
+    ],
+    "minute_stem": "минут"
+  },
   "inputs": {
     "bathroom": {
       "kind": "first_step",
@@ -57,6 +134,14 @@
       "kind": "first_step",
       "task_title": "Plan the week",
       "task_notes": "Pick the next tile",
+      "stall_reason": null,
+      "project_name": null,
+      "open_task_titles": []
+    },
+    "environment": {
+      "kind": "first_step",
+      "task_title": "Настроить среду разработки",
+      "task_notes": "Новый ноутбук",
       "stall_reason": null,
       "project_name": null,
       "open_task_titles": []
@@ -883,6 +968,122 @@
       }
     },
     {
+      "id": "r3-duration-2minute-no-space",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Take a 2minute look at the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-ru-5min-no-space",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Потратить 5мин на коробки",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-fullwidth-2-minutes",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Spend ２ minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Spend ２ minutes on the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-fullwidth-12-tiles",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Order １２ tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-arabic-indic-2-minutes",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend ٢ minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-nbsp-2-minutes",
+      "rule": 3,
+      "note": "duration exemption",
+      "input": "bathroom",
+      "proposals": [
+        "Spend 2\u00a0minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Spend 2\u00a0minutes on the tiles",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-duration-unit-not-next-token",
+      "rule": 3,
+      "input": "bathroom",
+      "proposals": [
+        "Spend 2 more minutes on the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
       "id": "r3-date-tomorrow",
       "rule": 3,
       "input": "bathroom",
@@ -1091,6 +1292,150 @@
       }
     },
     {
+      "id": "r3-date-ru-january",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в январе",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-february",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки до февраля",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-april",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки к апрелю",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-august",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в августе",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-tuesdays",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разбирать коробки по вторникам",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-thursday",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в четверг",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-saturday-gen",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки до субботы",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-wednesday",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки в среду",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-date-ru-sreda-environment",
+      "rule": 3,
+      "input": "garage",
+      "proposals": [
+        "Проверить среду для коробок",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
       "id": "r3-date-phrase-split-in-input",
       "rule": 3,
       "input": "split-words",
@@ -1191,6 +1536,74 @@
         "proposals": [
           "Сегодня разобрать коробки",
           "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-today-ru-capitalised",
+      "rule": 3,
+      "note": "today exemption",
+      "input": "garage",
+      "proposals": [
+        "Разобрать коробки Сегодня",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Разобрать коробки Сегодня",
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-whole-word-not-substring",
+      "rule": 3,
+      "note": "'Ann' is not a whole word of 'Ask Anna'",
+      "input": "bathroom",
+      "proposals": [
+        "Call Ann about the tiles",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-split-on-unit-separator",
+      "rule": 3,
+      "note": "U+001F separates tokens, so 'Boris' is a capitalised later token",
+      "input": "bathroom",
+      "proposals": [
+        "Measure\u001fBoris the wall",
+        "Write down the next step"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Write down the next step"
+        ]
+      }
+    },
+    {
+      "id": "r3-sreda-environment-grounded",
+      "rule": 3,
+      "note": "среда forms stay date words; an environment from the input is grounded",
+      "input": "environment",
+      "proposals": [
+        "Обновить среду разработки"
+      ],
+      "clarifying_question": null,
+      "expect": {
+        "kind": "proposals",
+        "proposals": [
+          "Обновить среду разработки"
         ]
       }
     },
