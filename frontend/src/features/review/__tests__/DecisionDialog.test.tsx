@@ -799,6 +799,37 @@ describe("020-FR-048 decision dialog: Undo", () => {
     expect(notify.mock.calls.length).toBe(toastsBefore);
   });
 
+  it.each([
+    ["the backend's own resource name", { resource: "Review decision", id: "decision_1" }],
+    ["no id", { resource: "Review decision" }],
+    ["any casing", { resource: "REVIEW_DECISION", id: "decision_1" }]
+  ])("020-FR-048 an Undo answered 404 for the decision (%s) is the undo already applied, and stays quiet", async (_label, detail) => {
+    const task = asksTask();
+    const action = await decideAndGetUndo(task, { state: "someday" });
+    const toastsBefore = notify.mock.calls.length;
+    undoDecision.mockRejectedValueOnce(new ApiError("Not found", 404, { message: "x", detail }, "corr_404"));
+
+    await act(async () => action.onAction());
+
+    expect(notify.mock.calls.length).toBe(toastsBefore);
+  });
+
+  it.each([
+    ["a deleted task", { message: "x", detail: { resource: "Task", id: "task-1" } }],
+    ["another decision", { message: "x", detail: { resource: "Review decision", id: "decision_other" } }],
+    ["another resource", { message: "x", detail: { resource: "Project", id: "project-home" } }],
+    ["no detail", { message: "Not found" }],
+    ["no body", null]
+  ])("020-FR-048 020-FR-045 an Undo answered 404 for %s is a failure with the Ref, not a success", async (_label, payload) => {
+    const task = asksTask();
+    const action = await decideAndGetUndo(task, { state: "someday" });
+    undoDecision.mockRejectedValueOnce(new ApiError("Not found", 404, payload, "corr_gone"));
+
+    await act(async () => action.onAction());
+
+    expect(lastToast()).toEqual(["Couldn't undo. Nothing was changed. Ref corr_gone"]);
+  });
+
   it("020-FR-048 an Undo that fails for another reason changes nothing and shows the Ref", async () => {
     const task = asksTask();
     const action = await decideAndGetUndo(task, { state: "someday" });

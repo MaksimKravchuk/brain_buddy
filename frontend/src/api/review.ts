@@ -341,6 +341,21 @@ const KNOWN_REASONS: ReadonlySet<string> = new Set<ReviewErrorKind>([
   "invalid_time_zone"
 ]);
 
+/**
+ * An undo answered 404 for this decision: it was already undone (a retry whose
+ * first delivery applied), which is the undo's goal (http §3). Only a 404 whose
+ * `detail.resource` names a decision (case-insensitive) and whose `detail.id`
+ * is this decision's, or absent, counts; a 404 for the task ("Task", the
+ * decision's task was deleted) or anything else is a failure.
+ */
+export function isDecisionAlreadyUndone(error: unknown, decisionId: string): boolean {
+  if (!(error instanceof ApiError) || error.status !== 404 || !isRecord(error.payload) || !isRecord(error.payload.detail)) {
+    return false;
+  }
+  const { resource, id } = error.payload.detail;
+  return typeof resource === "string" && resource.toLowerCase().includes("decision") && (id === undefined || id === null || id === decisionId);
+}
+
 /** A message with its Ref appended, or the message alone when there is no Ref to quote (FR-045). */
 export function withReference(message: string, referenceId: string | undefined): string {
   return referenceId ? `${message} Ref ${referenceId}` : message;

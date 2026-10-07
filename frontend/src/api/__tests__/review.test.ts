@@ -8,6 +8,7 @@ import { ApiError, setUnauthorizedHandler } from "../client";
 import { useThresholdNotice, useUpdateReviewSettings } from "../reviewHooks";
 import {
   describeReviewError,
+  isDecisionAlreadyUndone,
   newIdempotencyKey,
   parseDecisionResponse,
   parseErrorEnvelope,
@@ -229,6 +230,20 @@ describe("020-FR-045 failures expose the correlation id", () => {
     const fromClient = await reviewApi.getState().catch((error: unknown) => error);
     const sent = lastRequest().headers.get("X-Correlation-ID");
     expect(describeReviewError(fromClient)).toEqual({ kind: "other", referenceId: sent });
+  });
+
+  it("020-FR-048 counts an undo 404 as already undone only when it names this decision", () => {
+    const notFound = (payload: unknown) => new ApiError("Not found", 404, payload, "corr_404");
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: "Review decision", id: "decision_1" } }), "decision_1")).toBe(true);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: "review_decision" } }), "decision_1")).toBe(true);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: "Review decision", id: null } }), "decision_1")).toBe(true);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: "Review decision", id: "decision_2" } }), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: "Task", id: "task_1" } }), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: { resource: 7 } }), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(notFound({ message: "x", detail: "gone" }), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(notFound(null), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(new ApiError("Conflict", 409, { message: "x", detail: { resource: "Review decision" } }), "decision_1")).toBe(false);
+    expect(isDecisionAlreadyUndone(new Error("Not found"), "decision_1")).toBe(false);
   });
 
   it("020-FR-045 appends a Ref only when there is one to quote", () => {

@@ -16,8 +16,8 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { hasFeatureFlag, type AuthUser } from "../../api/auth";
-import { ApiError, apiClient, getApiBaseUrl } from "../../api/client";
-import { describeReviewError, newIdempotencyKey, reviewApi, withReference } from "../../api/review";
+import { apiClient, getApiBaseUrl } from "../../api/client";
+import { describeReviewError, isDecisionAlreadyUndone, newIdempotencyKey, reviewApi, withReference } from "../../api/review";
 import type { DecisionRequest, DecisionResponse, DecisionType } from "../../api/review";
 import { applyReviewTask, refreshAfterReviewWrite, useDecideTask, useOnlineStatus, useReviewClock } from "../../api/reviewHooks";
 import type { TaskFormulationResponse, TaskResponse, TaskState } from "../../api/taskTypes";
@@ -150,8 +150,9 @@ async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: 
   } catch (error) {
     refreshAfterReviewWrite(queryClient);
     const { kind, referenceId } = describeReviewError(error);
-    if (error instanceof ApiError && error.status === 404) {
-      // Already undone (a retry whose first delivery applied, http §3).
+    if (isDecisionAlreadyUndone(error, response.decision.id)) {
+      // Already undone (a retry whose first delivery applied, http §3). A 404
+      // for the task or anything else falls through to the failure below.
       return;
     }
     if (kind === "undo_unavailable" || kind === "stale") {
