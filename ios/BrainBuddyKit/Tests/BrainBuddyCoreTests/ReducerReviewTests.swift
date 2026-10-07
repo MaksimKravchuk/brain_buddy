@@ -425,6 +425,36 @@ struct ReducerReviewTests {
         #expect(hydrated.tasks["t1"]?.state == .someday, "children the card did not show are not a change; relative order kept")
     }
 
+    @Test("020-FR-011 before full hydration a child created on this device since the card opened is a change; one hydration brings is not")
+    func newLocalChildBeforeHydration() throws {
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        #expect(cached.childrenSyncedAt == nil)
+        let creates: [(String, GTDCommand)] = [
+            ("subtask created in another window", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
+            ("comment added in another window", .createComment(.init(taskID: "t1", commentID: "c2", body: "Tiles are in"))),
+        ]
+        for (what, create) in creates {
+            var state = Review.state([cached])
+            let shown = try #require(state.tasks["t1"])
+            try Review.apply(create, at: Review.now, to: &state)
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+        }
+
+        // Hydration brings existing server children (they carry server ids): applies.
+        var hydrated = Review.state([cached])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 1)
+        )
+        hydrated.tasks["t1"]?.comments.append(
+            CommentRecord(id: "c3", serverID: "comment_3", serverRevision: 1, body: "Ask Ann", authorID: "u2", createdAt: t0)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday)
+    }
+
     @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
     func expectedTaskIsNotEncoded() throws {
         let shown = Review.nextTask("t1", started: t0, serverRevision: 4)
