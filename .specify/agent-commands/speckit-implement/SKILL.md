@@ -1,6 +1,6 @@
 ---
 name: "speckit-implement"
-description: "Implement a feature directly from its approved tasks.md via an isolated worktree and TDD, preserving the repository's review, CI and landing gates."
+description: "Implement a feature directly from its approved tasks.md via an isolated worktree and Constitution Principle II's proportionate testing policy, preserving the repository's review, CI and landing gates."
 argument-hint: "Feature slug and explicit PR-NN slice when tasks.md has PR-срезы"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
@@ -101,8 +101,10 @@ Direct implementation removes a routing hop. It removes no gate:
 
 - **Isolated worktree and feature branch** — never implement on the primary
   worktree.
-- **Tests before implementation** — Constitution Principle II. Write the
-  failing test, watch it fail for the right reason, then implement.
+- **Proportionate testing** — read and apply
+  [Constitution Principle II](../../memory/constitution.md#ii-tested-delivery-across-stack)
+  for test selection, reuse, test-first applicability, and verification order.
+  Sufficient existing checks count; technical tasks do not each need a new test.
 - **Independent review** — the implementer does not grade its own work;
   `/speckit-accept` obtains a separate acceptance audit.
 - **CI** — `make verify-all` green before landing.
@@ -129,7 +131,7 @@ IMPLEMENTATION: complete | blocked
 feature:  specs/NNN-<slug>     branch: feat/<slug>
 slice:    PR-NN (or single-PR)   PR: <URL or not opened>
 tasks:    <n>/<n>              commits: <shas>
-tests added: <n>
+test evidence: <reused checks and any necessary additions>
 
 SELF-VERIFY: backend <pass|fail> frontend <pass|fail> e2e <pass|fail|n/a>
 LANDING CLASS: SHIP | SHOW | ASK  (per classify_path_risk.py)

@@ -81,6 +81,11 @@ earlier draft file was removed). PR-14 does not depend on the late PR-09: the cl
 FR-023 (a) and FR-049 that only PR-09 can show are accepted when PR-09 lands. The
 approval is a delivery boundary, not an authorization to merge or deploy.
 
+**Rescope 2026-10-07** (owner decision, Notes "Deferred to a follow-up feature"): the
+not-started slices PR-08, PR-09 and PR-10 left the manifest and PR-12, PR-13 and PR-14
+shrank, so 12 slices remain. Deferred tasks are marked `DEFERRED`, keep their text as
+input for the follow-up feature, and are not checklist items.
+
 **Owner decisions applied after approval** (same session): tasks T091 (account
 linking), T107 (privacy-policy sentence) and T163 (web device time zone) are new, and
 existing tasks were extended for the consent line, the time-zone rule, the retry after
@@ -314,6 +319,8 @@ a contract):
 
 ## Phase 5: User Story 3 — The AI navigator proposes a first step (Priority: P2)
 
+**Rescope 2026-10-07**: only the backend (slice PR-07, in flight) and the already merged iOS consent commands (T108) stay in this feature. The iOS, downloadable-model and web client tasks (T109 – T125, former slices PR-08, PR-09, PR-10) are `DEFERRED` to a follow-up feature (Notes).
+
 **Goal**: 1–3 grounded first steps from Apple's on-device model, a separately downloaded model, or the consented cloud provider; nothing written without confirmation.
 
 **Independent Test**: With a stubbed on-device model and the deterministic cloud provider, request suggestions for seeded stalled tasks; verify 1–3 proposals, no write before confirmation, the consent flow, the fallback messaging, offline behaviour, and no task content in logs (quickstart Scenario 4).
@@ -337,31 +344,31 @@ a contract):
 
 ### iOS navigator (slice PR-08)
 
-- [ ] T109 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift`: `NavigatorInputBuilder` builds exactly the FR-019 input with the shared `reduce_notes` vectors; `NavigatorOutputValidator` rules 1–4; `NavigatorProposalFilter.dropDuplicates` drops a duplicate of the 21st (unsent) sibling; `NavigatorRouter` picks Apple on-device when available for the task language, else the remembered fallback (`downloaded` if installed, `cloud` only with current consent, an account and `available: true`), else `unavailable(reason)`, never cloud silently; account-less cloud → `noAccount`; the route caption resolved before the tap; cancellation reported as `.cancelled`; with no downloadable model available the choice shows the download row unavailable and no non-AI path depends on it (the FR-049 clause that holds before PR-09; its other clauses are PR-09's). *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-022, 020-FR-023, 020-FR-024, 020-FR-049)*
-- [ ] T110 [US3] Make T109 GREEN in the new `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift` (`NavigatorInput`, `NavigatorInputBuilder`, `NavigatorOutputValidator`, `NavigatorProposalFilter`, `NavigatorRouter`, the `NavigatorModel` protocol and its availability and error enums) and `ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/StubNavigatorModel.swift`.
-- [ ] T111 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift` (requests carry no language field and echo the consent; 400/429/503/404 reasons map to `NavigatorError` with the reference id); then GREEN `ios/BrainBuddyKit/Sources/BrainBuddyAPI/NavigatorAPI.swift` (`CloudNavigatorModel`). *(020-FR-024, 020-FR-025, 020-FR-045)*
-- [ ] T112 [US3] Implement `ios/BrainBuddy/Navigator/AppleNavigatorModel.swift` behind `#if canImport(FoundationModels)`: `SystemLanguageModel.default.availability` → reasons; the task language from `NLLanguageRecognizer` must be in `supportedLanguages`; `unsupportedLanguageOrLocale` → `unavailable(.unsupportedLanguage)`; a `@Generable` `NavigatorReply` with `@Guide(.maximumCount(3))`; the locale pin ("The person's locale is <id>." / "You MUST respond in <language>."); the §2 validation still runs. *(020-FR-022, 020-FR-023)*
-- [ ] T113 [US3] Write and observe RED first, named for `020-FR-026`: in `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift`, `NavigatorAIUse.resolve(shownProposals:pickedProposal:savedText:requestID:)` gives `as_is` when a picked proposal is confirmed unedited, `edited` when it was picked and then edited, `not_used` when proposals were shown and the person saved their own text, `none` when no proposal was shown, and carries the server `request_id` only for a cloud route (on-device → `navigatorRequestID == nil`); in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift`, the `decideTask` built from each case is encoded through the PR-03 request body and the wire JSON is asserted (`"ai_use": "as_is" | "edited" | "not_used"`, `"navigator_request_id"` equal to the UUID the stubbed cloud response returned, `null` on device; no proposal text anywhere in the body). Then GREEN with `NavigatorAIUse` in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift` and its use in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`, and build the navigator UI: the new `ios/BrainBuddy/Navigator/NavigatorPanel.swift` (M-05 states incl. notes shortened, interrupted "Suggestion stopped." · "Suggest again", the clarifying question appending the answer to notes through a normal `updateTask` and re-running), `ios/BrainBuddy/Navigator/ModelChoiceSheet.swift` (M-06 choice per reason, cloud unavailable; the download row shown unavailable until PR-09) and `ios/BrainBuddy/Navigator/CloudConsentSheet.swift` (M-07: the provider and the five items, "Nothing else is sent." and "Notes are sent as written, including any names in them." (owner decision 2026-10-06), consent after revoke, consent text changed, declined, errors with Ref, offline, no account, the clarifying question (cloud)); "Suggest · on this iPhone" / "Suggest · OpenAI" in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`; focus returns to Suggest or the first proposal when M-06 or M-07 closes. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-022, 020-FR-023, 020-FR-024, 020-FR-025, 020-FR-026, 020-FR-045, 020-FR-052)*
-- [ ] T114 [US3] M-08 in the new `ios/BrainBuddy/Navigator/ProjectNextActionBlock.swift`, shown where `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift` says "This project needs a next action": proposals, "Add to Next actions" creating the task in Next in that project with `createTask`, the "model question" and empty-project states whose answer field is the next action itself, the typed next action kept as a draft. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-052)*
-- [ ] T115 [US3] M-23 "Suggestions" in the new `ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift`, placed in `ios/BrainBuddy/Screens/Settings/SettingsScreen.swift`: on-device status, the fallback choice (Ask me / Downloaded / Cloud), the cloud consent switch naming the provider with an immediate local revoke and the offline note, and the "feature switched off, consent stored" state. *(020-FR-023, 020-FR-024)*
-- [ ] T116 [US3] Record `specs/020-weekly-review/evidence/manual-ios-navigator.md` (labelled manual, synthetic data): `AppleNavigatorModel` on an Apple-Intelligence device (EN), with the time from tapping Suggest to the first visible proposal text measured over 5 runs on that device (each run and the median recorded; plan "Performance Goals": on-device first token visible ≤ 2 s, placeholder lines after 300 ms; a miss is recorded as a finding for the owner, not hidden), the unsupported-language path to M-06, VoiceOver focus after M-06 / M-07 close, the M-07 consent line about notes (`020-FR-024`), M-05 – M-08 at Dynamic Type AX5 with every sheet body scrolling and no clipped control (design "Mobile viability"), and the Xcode-lane build.
+- DEFERRED T109 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift`: `NavigatorInputBuilder` builds exactly the FR-019 input with the shared `reduce_notes` vectors; `NavigatorOutputValidator` rules 1–4; `NavigatorProposalFilter.dropDuplicates` drops a duplicate of the 21st (unsent) sibling; `NavigatorRouter` picks Apple on-device when available for the task language, else the remembered fallback (`downloaded` if installed, `cloud` only with current consent, an account and `available: true`), else `unavailable(reason)`, never cloud silently; account-less cloud → `noAccount`; the route caption resolved before the tap; cancellation reported as `.cancelled`; with no downloadable model available the choice shows the download row unavailable and no non-AI path depends on it (the FR-049 clause that holds before PR-09; its other clauses are PR-09's). *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-022, 020-FR-023, 020-FR-024, 020-FR-049)*
+- DEFERRED T110 [US3] Make T109 GREEN in the new `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift` (`NavigatorInput`, `NavigatorInputBuilder`, `NavigatorOutputValidator`, `NavigatorProposalFilter`, `NavigatorRouter`, the `NavigatorModel` protocol and its availability and error enums) and `ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/StubNavigatorModel.swift`.
+- DEFERRED T111 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift` (requests carry no language field and echo the consent; 400/429/503/404 reasons map to `NavigatorError` with the reference id); then GREEN `ios/BrainBuddyKit/Sources/BrainBuddyAPI/NavigatorAPI.swift` (`CloudNavigatorModel`). *(020-FR-024, 020-FR-025, 020-FR-045)*
+- DEFERRED T112 [US3] Implement `ios/BrainBuddy/Navigator/AppleNavigatorModel.swift` behind `#if canImport(FoundationModels)`: `SystemLanguageModel.default.availability` → reasons; the task language from `NLLanguageRecognizer` must be in `supportedLanguages`; `unsupportedLanguageOrLocale` → `unavailable(.unsupportedLanguage)`; a `@Generable` `NavigatorReply` with `@Guide(.maximumCount(3))`; the locale pin ("The person's locale is <id>." / "You MUST respond in <language>."); the §2 validation still runs. *(020-FR-022, 020-FR-023)*
+- DEFERRED T113 [US3] Write and observe RED first, named for `020-FR-026`: in `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift`, `NavigatorAIUse.resolve(shownProposals:pickedProposal:savedText:requestID:)` gives `as_is` when a picked proposal is confirmed unedited, `edited` when it was picked and then edited, `not_used` when proposals were shown and the person saved their own text, `none` when no proposal was shown, and carries the server `request_id` only for a cloud route (on-device → `navigatorRequestID == nil`); in `ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift`, the `decideTask` built from each case is encoded through the PR-03 request body and the wire JSON is asserted (`"ai_use": "as_is" | "edited" | "not_used"`, `"navigator_request_id"` equal to the UUID the stubbed cloud response returned, `null` on device; no proposal text anywhere in the body). Then GREEN with `NavigatorAIUse` in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift` and its use in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`, and build the navigator UI: the new `ios/BrainBuddy/Navigator/NavigatorPanel.swift` (M-05 states incl. notes shortened, interrupted "Suggestion stopped." · "Suggest again", the clarifying question appending the answer to notes through a normal `updateTask` and re-running), `ios/BrainBuddy/Navigator/ModelChoiceSheet.swift` (M-06 choice per reason, cloud unavailable; the download row shown unavailable until PR-09) and `ios/BrainBuddy/Navigator/CloudConsentSheet.swift` (M-07: the provider and the five items, "Nothing else is sent." and "Notes are sent as written, including any names in them." (owner decision 2026-10-06), consent after revoke, consent text changed, declined, errors with Ref, offline, no account, the clarifying question (cloud)); "Suggest · on this iPhone" / "Suggest · OpenAI" in `ios/BrainBuddy/Screens/Review/DecisionForms.swift`; focus returns to Suggest or the first proposal when M-06 or M-07 closes. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-022, 020-FR-023, 020-FR-024, 020-FR-025, 020-FR-026, 020-FR-045, 020-FR-052)*
+- DEFERRED T114 [US3] M-08 in the new `ios/BrainBuddy/Navigator/ProjectNextActionBlock.swift`, shown where `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift` says "This project needs a next action": proposals, "Add to Next actions" creating the task in Next in that project with `createTask`, the "model question" and empty-project states whose answer field is the next action itself, the typed next action kept as a draft. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-052)*
+- DEFERRED T115 [US3] M-23 "Suggestions" in the new `ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift`, placed in `ios/BrainBuddy/Screens/Settings/SettingsScreen.swift`: on-device status, the fallback choice (Ask me / Downloaded / Cloud), the cloud consent switch naming the provider with an immediate local revoke and the offline note, and the "feature switched off, consent stored" state. *(020-FR-023, 020-FR-024)*
+- DEFERRED T116 [US3] Record `specs/020-weekly-review/evidence/manual-ios-navigator.md` (labelled manual, synthetic data): `AppleNavigatorModel` on an Apple-Intelligence device (EN), with the time from tapping Suggest to the first visible proposal text measured over 5 runs on that device (each run and the median recorded; plan "Performance Goals": on-device first token visible ≤ 2 s, placeholder lines after 300 ms; a miss is recorded as a finding for the owner, not hidden), the unsupported-language path to M-06, VoiceOver focus after M-06 / M-07 close, the M-07 consent line about notes (`020-FR-024`), M-05 – M-08 at Dynamic Type AX5 with every sheet body scrolling and no clipped control (design "Mobile viability"), and the Xcode-lane build.
 
 ### Downloadable on-device model (slice PR-09, late; may slip)
 
-- [ ] T117 [US3] Write `docs/decisions/0028-ios-downloadable-navigator-model-dependency.md` (re-check the number when the slice starts): the dependency exception for the Core AI `coreai-models` package (app target only, never `BrainBuddyCore`), the model chosen by the offline SC-005 evaluation (Qwen3-1.7B 4-bit vs Gemma 4 E2B; MLX Swift as plan B), an Apple-hosted Background Assets pack, `#available(iOS 27, macOS 27, *)` with a memory check and `increased-memory-limit`; amend "No third-party dependencies" in `ios/AGENTS.md` for that one package. Needs the owner's recorded approval (ASK). *(020-FR-023)*
-- [ ] T118 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ModelDownloadMachineTests.swift` with injected `ModelDownloader` and `StorageProbe`: request-only start; progress; interruption and resume, including after an app kill from persisted state; finished while away; cancel removes the partial file; insufficient storage; retry; switch to cloud; delete; never required for non-AI parts; the router never falls back silently to cloud. *(020-FR-023, 020-FR-049)*
-- [ ] T119 [US3] Make T118 GREEN in the new `ios/BrainBuddyKit/Sources/BrainBuddyCore/ModelDownloadMachine.swift` and route the downloaded model in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`. *(020-FR-023, 020-FR-049)*
-- [ ] T120 [US3] Implement `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (`#available(iOS 27, macOS 27, *)`, memory check, `.notDownloaded` / `.deviceNotEligible` otherwise; the same prompt, `@Generable` reply and validation); add the M-06 download states to `ios/BrainBuddy/Navigator/ModelChoiceSheet.swift` and the M-23 downloading, interrupted and delete-with-confirmation rows to `ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift`; the entitlement and the Background Assets pack in `ios/project.yml`; the disk-space required-reason entry in `ios/Shared/PrivacyInfo.xcprivacy`. *(020-FR-023, 020-FR-049)*
-- [ ] T121 [US3] Extend `frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx` (RED first), `frontend/src/pages/PrivacyPolicyPage.tsx` and `docs/data-retention.md` with the downloaded model file, the device-local navigator preference, and the download request to Apple's asset hosting, which carries no task content (data-model E10). *(020-FR-049, 020-FR-043)*
-- [ ] T122 [US3] Record the downloaded-model SC-005 evaluation cell as aggregate scores only in `specs/020-weekly-review/evidence/navigator-eval-downloaded.md` (owner-generated, blind-graded; gate ≥ 50 % accepted overall and in the Russian subset, 0 confirmed invented facts) and the device checks in `specs/020-weekly-review/evidence/manual-ios-downloaded-model.md`. *(020-SC-005)*
+- DEFERRED T117 [US3] Write `docs/decisions/0028-ios-downloadable-navigator-model-dependency.md` (re-check the number when the slice starts): the dependency exception for the Core AI `coreai-models` package (app target only, never `BrainBuddyCore`), the model chosen by the offline SC-005 evaluation (Qwen3-1.7B 4-bit vs Gemma 4 E2B; MLX Swift as plan B), an Apple-hosted Background Assets pack, `#available(iOS 27, macOS 27, *)` with a memory check and `increased-memory-limit`; amend "No third-party dependencies" in `ios/AGENTS.md` for that one package. Needs the owner's recorded approval (ASK). *(020-FR-023)*
+- DEFERRED T118 [US3] Write and observe RED `ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ModelDownloadMachineTests.swift` with injected `ModelDownloader` and `StorageProbe`: request-only start; progress; interruption and resume, including after an app kill from persisted state; finished while away; cancel removes the partial file; insufficient storage; retry; switch to cloud; delete; never required for non-AI parts; the router never falls back silently to cloud. *(020-FR-023, 020-FR-049)*
+- DEFERRED T119 [US3] Make T118 GREEN in the new `ios/BrainBuddyKit/Sources/BrainBuddyCore/ModelDownloadMachine.swift` and route the downloaded model in `ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift`. *(020-FR-023, 020-FR-049)*
+- DEFERRED T120 [US3] Implement `ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift` (`#available(iOS 27, macOS 27, *)`, memory check, `.notDownloaded` / `.deviceNotEligible` otherwise; the same prompt, `@Generable` reply and validation); add the M-06 download states to `ios/BrainBuddy/Navigator/ModelChoiceSheet.swift` and the M-23 downloading, interrupted and delete-with-confirmation rows to `ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift`; the entitlement and the Background Assets pack in `ios/project.yml`; the disk-space required-reason entry in `ios/Shared/PrivacyInfo.xcprivacy`. *(020-FR-023, 020-FR-049)*
+- DEFERRED T121 [US3] Extend `frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx` (RED first), `frontend/src/pages/PrivacyPolicyPage.tsx` and `docs/data-retention.md` with the downloaded model file, the device-local navigator preference, and the download request to Apple's asset hosting, which carries no task content (data-model E10). *(020-FR-049, 020-FR-043)*
+- DEFERRED T122 [US3] Record the downloaded-model SC-005 evaluation cell as aggregate scores only in `specs/020-weekly-review/evidence/navigator-eval-downloaded.md` (owner-generated, blind-graded; gate ≥ 50 % accepted overall and in the Russian subset, 0 confirmed invented facts) and the device checks in `specs/020-weekly-review/evidence/manual-ios-downloaded-model.md`. *(020-SC-005)*
 
 ### Web navigator (slice PR-10)
 
-- [ ] T123 [US3] Write and observe RED `frontend/src/features/review/__tests__/navigatorInput.test.ts`: the shared `reduce_notes` vectors; the exact FR-019 input with no language field; the project-wide duplicate filter over every page of `GET /tasks?project_id=…` drops a duplicate of the 21st (unsent) title; then GREEN `frontend/src/features/review/navigatorInput.ts`. *(020-FR-019)*
-- [ ] T124 [US3] Write and observe RED `frontend/src/features/review/__tests__/NavigatorPanel.test.tsx` (the D-02 navigator states: the consent dialog focusing "Not now" and showing "Notes are sent as written, including any names in them." below "Nothing else is sent." (owner decision 2026-10-06); proposals as a radio group; notes shortened; input too large; timeout, cost cap and malformed banners with Ref; suggestions unavailable; the cloud clarifying question with "adding answer", "answer not saved" (draft kept), "answer saved, suggestion failed" and "answer saved, card current" adopting its own notes edit's revision; a revoke stops the tab at once; the D-02 "loading (suggesting)" state with "Stop", and "Stop" aborting the in-flight fetch through its `AbortController` (the mocked fetch observes the abort signal), leaving the form field and the card unchanged and showing "Suggestion stopped." with "Suggest again", which re-runs the request; the D-02 "interrupted (suggesting)" state: closing the dialog while "Asking OpenAI…" aborts the request and applies nothing; and, named for `020-FR-026`, the decision request body asserted on the wire: confirming a picked proposal unedited sends `"ai_use": "as_is"`, editing it first sends `"edited"`, saving the person's own text after proposals were shown sends `"not_used"`, and each echoes the server's `request_id` as `navigator_request_id` (no proposal text in the body), while a decision with no suggestion requested sends `"ai_use": "none"` and `navigator_request_id: null`); then GREEN `frontend/src/features/review/NavigatorPanel.tsx`, `frontend/src/features/review/CloudConsentDialog.tsx`, the Suggest entry and the `ai_use` / `navigator_request_id` fields of the decision in `frontend/src/features/review/DecisionDialog.tsx` and the abortable navigator calls in `frontend/src/api/review.ts`. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-024, 020-FR-025, 020-FR-026, 020-FR-045, 020-FR-052)*
-- [ ] T125 [US3] Write and observe RED in `frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx` and `frontend/src/features/account/__tests__/AccountSettingsPage.test.tsx`: the D-04 cloud consent switch names the provider, shows "Turning off…" until the `DELETE` succeeds, and is still shown when the flag is off and a consent exists; then GREEN `frontend/src/features/review/ReviewSettingsSection.tsx` and `frontend/src/features/account/AccountSettingsPage.tsx`. *(020-FR-024)*
+- DEFERRED T123 [US3] Write and observe RED `frontend/src/features/review/__tests__/navigatorInput.test.ts`: the shared `reduce_notes` vectors; the exact FR-019 input with no language field; the project-wide duplicate filter over every page of `GET /tasks?project_id=…` drops a duplicate of the 21st (unsent) title; then GREEN `frontend/src/features/review/navigatorInput.ts`. *(020-FR-019)*
+- DEFERRED T124 [US3] Write and observe RED `frontend/src/features/review/__tests__/NavigatorPanel.test.tsx` (the D-02 navigator states: the consent dialog focusing "Not now" and showing "Notes are sent as written, including any names in them." below "Nothing else is sent." (owner decision 2026-10-06); proposals as a radio group; notes shortened; input too large; timeout, cost cap and malformed banners with Ref; suggestions unavailable; the cloud clarifying question with "adding answer", "answer not saved" (draft kept), "answer saved, suggestion failed" and "answer saved, card current" adopting its own notes edit's revision; a revoke stops the tab at once; the D-02 "loading (suggesting)" state with "Stop", and "Stop" aborting the in-flight fetch through its `AbortController` (the mocked fetch observes the abort signal), leaving the form field and the card unchanged and showing "Suggestion stopped." with "Suggest again", which re-runs the request; the D-02 "interrupted (suggesting)" state: closing the dialog while "Asking OpenAI…" aborts the request and applies nothing; and, named for `020-FR-026`, the decision request body asserted on the wire: confirming a picked proposal unedited sends `"ai_use": "as_is"`, editing it first sends `"edited"`, saving the person's own text after proposals were shown sends `"not_used"`, and each echoes the server's `request_id` as `navigator_request_id` (no proposal text in the body), while a decision with no suggestion requested sends `"ai_use": "none"` and `navigator_request_id: null`); then GREEN `frontend/src/features/review/NavigatorPanel.tsx`, `frontend/src/features/review/CloudConsentDialog.tsx`, the Suggest entry and the `ai_use` / `navigator_request_id` fields of the decision in `frontend/src/features/review/DecisionDialog.tsx` and the abortable navigator calls in `frontend/src/api/review.ts`. *(020-FR-019, 020-FR-020, 020-FR-021, 020-FR-024, 020-FR-025, 020-FR-026, 020-FR-045, 020-FR-052)*
+- DEFERRED T125 [US3] Write and observe RED in `frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx` and `frontend/src/features/account/__tests__/AccountSettingsPage.test.tsx`: the D-04 cloud consent switch names the provider, shows "Turning off…" until the `DELETE` succeeds, and is still shown when the flag is off and a consent exists; then GREEN `frontend/src/features/review/ReviewSettingsSection.tsx` and `frontend/src/features/account/AccountSettingsPage.tsx`. *(020-FR-024)*
 
-**Checkpoint**: Increment 2 (US3) works with on-device and consented cloud routes; the downloadable model (PR-09) may land later without blocking US4/US5.
+**Checkpoint**: Increment 2 (US3) is the PR-07 backend only; no client calls it until the follow-up feature, and it stays behind the flag.
 
 ---
 
@@ -395,7 +402,7 @@ a contract):
 - [ ] T139 [US4] M-10 in the new `ios/BrainBuddy/Screens/Review/RestartScreen.swift`: the neutral welcome or "Your first review" copy, "See which ones", Release (bulk release), Undo until "Start the review" or Close, "released, resumed after interruption" after an app kill, "undone, some skipped", partial failure, empty; VoiceOver focus to the heading. *(020-FR-017, 020-FR-038)*
 - [ ] T140 [US4] M-13, M-14 and M-15 in the new `ios/BrainBuddy/Screens/Review/WinsStep.swift`, `ios/BrainBuddy/Screens/Review/MindSweepStep.swift` (an unsaved line kept as a draft) and `ios/BrainBuddy/Screens/Review/InboxStep.swift` (the three choices over 15 items; one item at a time reusing the item view extracted from `ios/BrainBuddy/Screens/Process/ProcessInboxScreen.swift`, whose Undo also sends `inbox_processed_delta: -1`; the release with Undo until the step is left, also after an interruption). *(020-FR-028, 020-FR-030, 020-FR-034, 020-FR-048, 020-FR-052)*
 - [ ] T141 [US4] M-16 in the new `ios/BrainBuddy/Screens/Review/DecisionsStep.swift`: M-03 full-screen, "1 of N · earliest-asking first", "Not now" (progress `set_aside_task_id`), the Undo status line, "all decided", "all decided, one kept its wording", "some left", threshold changed mid-review. *(020-FR-002, 020-FR-006, 020-FR-034, 020-FR-048, 020-FR-050, 020-SC-002)*
-- [ ] T142 [US4] M-17 – M-21 in the new `ios/BrainBuddy/Screens/Review/RestOfNextStep.swift`, `ios/BrainBuddy/Screens/Review/WaitingStep.swift`, `ios/BrainBuddy/Screens/Review/ProjectsStep.swift` (the M-08 block from PR-08), `ios/BrainBuddy/Screens/Review/SomedayStep.swift` and `ios/BrainBuddy/Screens/Review/DatesStep.swift`: the capacity mirror without a limit; Waiting keep / follow-up / return / cancel with Undo and the archived-project block; Someday keep / move to Next / cancel with Undo; unsaved titles kept as drafts. *(020-FR-019, 020-FR-028, 020-FR-031, 020-FR-032, 020-FR-034, 020-FR-048, 020-FR-052)*
+- [ ] T142 [US4] M-17 – M-21 in the new `ios/BrainBuddy/Screens/Review/RestOfNextStep.swift`, `ios/BrainBuddy/Screens/Review/WaitingStep.swift`, `ios/BrainBuddy/Screens/Review/ProjectsStep.swift` (lists the projects without a next action; the M-08 navigator block of the deferred PR-08 is not built, Notes), `ios/BrainBuddy/Screens/Review/SomedayStep.swift` and `ios/BrainBuddy/Screens/Review/DatesStep.swift`: the capacity mirror without a limit; Waiting keep / follow-up / return / cancel with Undo and the archived-project block; Someday keep / move to Next / cancel with Undo; unsaved titles kept as drafts. *(020-FR-028, 020-FR-031, 020-FR-032, 020-FR-034, 020-FR-048, 020-FR-052)*
 - [ ] T143 [US4] M-22 in the new `ios/BrainBuddy/Screens/Review/SummaryStep.swift`: ten counts in fixed order (zero dimmed), in two columns, one column at accessibility text sizes per `ReviewLayout` (M-22 "accessibility text size"), the calm all-zero line, "done without any step", the next review date, the optional "Clear how to start the week?", Done → `finishSession`; the restart, summary and step strings added to `ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewCopy.swift` (the banned-term test stays green). *(020-FR-029, 020-FR-033, 020-SC-003)*
 
 ### Device decision Undo keeps the server's clock bookkeeping (slice PR-12, follow-up from PR-15)
@@ -407,14 +414,14 @@ a contract):
 ### Web review (slice PR-13)
 
 - [ ] T144 [US4] Add the path rule for `frontend/tests/e2e/weekly-review.spec.ts` to `frontend/tests/allure.fixtures.ts` (single owner of this file).
-- [ ] T145 [US4] Write and observe RED `frontend/src/features/review/__tests__/activeTime.test.ts` against the `active_time` vectors; then GREEN `frontend/src/features/review/activeTime.ts`. *(020-SC-004)*
+- DEFERRED T145 [US4] Write and observe RED `frontend/src/features/review/__tests__/activeTime.test.ts` against the `active_time` vectors; then GREEN `frontend/src/features/review/activeTime.ts`. *(020-SC-004)*
 - [ ] T146 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewShell.test.tsx` and extend `frontend/src/app/AppRoutes.test.tsx`: `/review` behind `ReviewGate`; a 240 px non-focusable rail and a 600 px column, "Step N of M" at 390 px; focus to the step heading on every change; Esc never closes the review; browser Back acts as Leave (the unsaved-text confirmation first; "Keep going" restores the history entry); the entry with the resume card, the last review summary card (SC-007) and "closed after a week"; step loading and step load failed; skip not saved; step action saving and failed; review ended or moved on elsewhere; the While-you-were-away rows inside the review; then GREEN `frontend/src/features/review/ReviewGate.tsx`, `frontend/src/features/review/ReviewShell.tsx`, `frontend/src/features/review/ReviewEntry.tsx`, `frontend/src/app/AppRoutes.tsx`, and the run, queue and bulk-release calls in `frontend/src/api/review.ts` and `frontend/src/api/reviewHooks.ts` (every session `PATCH` carries a `progress_<crypto.randomUUID()>` `progress_id` minted once per progress change and reused on its retries, contracts/http.md §6; a test asserts a retried PATCH resends the same id). *(020-FR-015, 020-FR-027, 020-FR-029, 020-FR-033, 020-FR-045, 020-FR-052, 020-SC-007)*
 - [ ] T147 [US4] Write and observe RED `frontend/src/features/review/__tests__/InboxStep.test.tsx` and `frontend/src/features/review/__tests__/RestartStep.test.tsx` (the new web Inbox step: over 15 → the three choices; one item at a time with the web choices; Undo returning the item and sending `inbox_processed_delta: -1`; saving and failed; partial failure; the release and "Undo the release" until the step is left, restored after a tab reload; releasing / release failed / undo failed. Restart: releasing / release failed / undoing / undo failed, Undo until moving on, "released, resumed after interruption"; the "set up but never reviewed" state (onboarded 21+ days ago, no counted review) shows the same offer under "Your first review / Let's make Next fit the week ahead." with no "Welcome back" or any wording implying the person was away, named for `020-FR-017`); then GREEN `frontend/src/features/review/steps/InboxStep.tsx` and `frontend/src/features/review/steps/RestartStep.tsx`. *(020-FR-017, 020-FR-030, 020-FR-034, 020-FR-045, 020-FR-048)*
 - [ ] T148 [US4] Write and observe RED `frontend/src/features/review/__tests__/DecisionsStep.test.tsx` (the inline card: Esc on the card does nothing, inside a form it returns to the card after the unsaved-text confirmation; keys 1–7; "Not now"; the Undo status line with Ctrl/Cmd+Z; "all decided, one kept its wording"); then GREEN `frontend/src/features/review/steps/DecisionsStep.tsx`. *(020-FR-002, 020-FR-034, 020-FR-048, 020-FR-050, 020-FR-052, 020-SC-002)*
-- [ ] T149 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewSteps.test.tsx` for the other steps; then GREEN `frontend/src/features/review/steps/WinsStep.tsx`, `frontend/src/features/review/steps/MindSweepStep.tsx` (unsaved line), `frontend/src/features/review/steps/RestOfNextStep.tsx`, `frontend/src/features/review/steps/WaitingStep.tsx` (buttons stack at 390 px), `frontend/src/features/review/steps/ProjectsStep.tsx` (the web part of US3-8 through `NavigatorPanel`), `frontend/src/features/review/steps/SomedayStep.tsx`, `frontend/src/features/review/steps/DatesStep.tsx` and `frontend/src/features/review/steps/SummaryStep.tsx` (ten counts, 4 columns, 2 at 390 px; the calm line; clear start; Done; the "done without any step" state — every step skipped, then Done, status `completed_empty` — shows the same calm "Review done" screen with the next review and the question, with no reproach and no mention that it does not count, a test named for `020-FR-029` asserting the absence of any such wording). *(020-FR-019, 020-FR-028, 020-FR-029, 020-FR-031, 020-FR-032, 020-FR-033, 020-FR-034, 020-FR-052)*
-- [ ] T150 [US4] Write the Playwright journeys in `frontend/tests/e2e/weekly-review.spec.ts` on synthetic data: a stalled task seeded with `python -m app.cli review-seed-aged-task` → D-05 → decide → Undo; auto-park through `review-run-sweep` → While you were away → return; a quick review end-to-end; a run finished through the API as an iOS client would shows its summary on the `/review` entry (`020-SC-007`); the consent decline with the deterministic provider; the keyboard-only story E2E-A11Y-01; axe scans of D-01 (with the dialog), D-02, D-03, D-04, D-05 and D-06 at desktop and 390 px; no horizontal overflow at 390 × 851 for `/tasks/next`, the decision dialog, `/review` (Waiting step and summary), `/settings/account` and D-05; the flag-on drawer link at 390 px. *(020-FR-004, 020-FR-015, 020-FR-024, 020-FR-040, 020-FR-048, 020-FR-052, 020-SC-006, 020-SC-007)*
+- [ ] T149 [US4] Write and observe RED `frontend/src/features/review/__tests__/ReviewSteps.test.tsx` for the other steps; then GREEN `frontend/src/features/review/steps/WinsStep.tsx`, `frontend/src/features/review/steps/MindSweepStep.tsx` (unsaved line), `frontend/src/features/review/steps/RestOfNextStep.tsx`, `frontend/src/features/review/steps/WaitingStep.tsx` (buttons stack at 390 px), `frontend/src/features/review/steps/ProjectsStep.tsx` (lists the projects without a next action; the navigator part of US3-8 is deferred, Notes), `frontend/src/features/review/steps/SomedayStep.tsx`, `frontend/src/features/review/steps/DatesStep.tsx` and `frontend/src/features/review/steps/SummaryStep.tsx` (ten counts, 4 columns, 2 at 390 px; the calm line; clear start; Done; the "done without any step" state — every step skipped, then Done, status `completed_empty` — shows the same calm "Review done" screen with the next review and the question, with no reproach and no mention that it does not count, a test named for `020-FR-029` asserting the absence of any such wording). *(020-FR-028, 020-FR-029, 020-FR-031, 020-FR-032, 020-FR-033, 020-FR-034, 020-FR-052)*
+- [ ] T150 [US4] Write the Playwright journeys in `frontend/tests/e2e/weekly-review.spec.ts` on synthetic data: a stalled task seeded with `python -m app.cli review-seed-aged-task` → D-05 → decide → Undo; auto-park through `review-run-sweep` → While you were away → return; a quick review end-to-end; a run finished through the API as an iOS client would shows its summary on the `/review` entry (`020-SC-007`); the keyboard-only story E2E-A11Y-01; axe scans of D-01 (with the dialog), D-02, D-03, D-04, D-05 and D-06 at desktop and 390 px; no horizontal overflow at 390 × 851 for `/tasks/next`, the decision dialog, `/review` (Waiting step and summary), `/settings/account` and D-05; the flag-on drawer link at 390 px. *(020-FR-004, 020-FR-015, 020-FR-040, 020-FR-048, 020-FR-052, 020-SC-006, 020-SC-007)*
 
-**Checkpoint**: US4 runs end-to-end on iOS and web; US2's review-dependent scenarios (While you were away as the first review screen, restart mode) are now verifiable.
+**Checkpoint**: US4 (Quick and Full) runs end-to-end on iOS and web; US2's review-dependent scenarios (While you were away as the first review screen, restart mode) are now verifiable.
 
 ---
 
@@ -431,23 +438,23 @@ a contract):
 
 ### iOS app (slice PR-12)
 
-- [ ] T153 [US5] M-12 in the new `ios/BrainBuddy/Screens/Review/OnboardingScreen.swift`: three points, the grace date, Day/Time (default Friday 16:00 local) and threshold (7/14/21/28, default 14) saved with `onboarded: true` and the device zone; the notification permission prompt after Continue; "notifications not allowed"; the error with Ref; VoiceOver focus to the heading. *(020-FR-016, 020-FR-018, 020-FR-035, 020-FR-036)*
-- [ ] T154 [US5] M-25 in the new `ios/BrainBuddy/Review/ReviewReminderScheduler.swift`: registers what `ReviewReminderPlanner` returns (called with `TimeZone.current`, never the stored zone; contracts/ios-commands.md §6) as one `UNCalendarNotificationTrigger` with a stable identifier, rescheduled on a settings change, a recorded review, pull, background refresh and the system time-zone-change notification (`ios/BrainBuddy/App/BrainBuddyApp.swift`); `BrainBuddyApp.swift` also calls `Workspace.sendDeviceTimeZoneIfChanged()` on load, on foreground and on the system time-zone-change notification, so the slot follows a zone change of this device only (US5-5). *(020-FR-035, 020-FR-036)*
-- [ ] T155 [US5] M-24 in `ios/BrainBuddyWidgets/NextActionsWidget.swift`: `askCount` (the same aggregate); the "N ask ›" chip as a `Link` to `brainbuddy://review/decisions` with a 44 × 44 pt area in medium and large, display-only in small, none for a Today widget or before activation; the VoiceOver label "3 tasks ask for a decision. Open the review's decision step"; at accessibility text sizes the chip's label may wrap under the count while its link area stays at least 44 × 44 pt (design "Mobile viability"); the `review` host in `ios/BrainBuddy/App/AppRouter.swift` following `ReviewEntryPlanner`. *(020-FR-037, 020-FR-051)*
+- [ ] T153 [US5] M-12 in the new `ios/BrainBuddy/Screens/Review/OnboardingScreen.swift`: three points, the grace date, Day/Time (default Friday 16:00 local) and threshold (7/14/21/28, default 14) saved with `onboarded: true` and the device zone (no notification prompt: the scheduler is deferred, Notes); the error with Ref; VoiceOver focus to the heading. *(020-FR-016, 020-FR-018, 020-FR-035)*
+- DEFERRED T154 [US5] M-25 in the new `ios/BrainBuddy/Review/ReviewReminderScheduler.swift`: registers what `ReviewReminderPlanner` returns (called with `TimeZone.current`, never the stored zone; contracts/ios-commands.md §6) as one `UNCalendarNotificationTrigger` with a stable identifier, rescheduled on a settings change, a recorded review, pull, background refresh and the system time-zone-change notification (`ios/BrainBuddy/App/BrainBuddyApp.swift`); `BrainBuddyApp.swift` also calls `Workspace.sendDeviceTimeZoneIfChanged()` on load, on foreground and on the system time-zone-change notification, so the slot follows a zone change of this device only (US5-5). *(020-FR-035, 020-FR-036)*
+- DEFERRED T155 [US5] M-24 in `ios/BrainBuddyWidgets/NextActionsWidget.swift`: `askCount` (the same aggregate); the "N ask ›" chip as a `Link` to `brainbuddy://review/decisions` with a 44 × 44 pt area in medium and large, display-only in small, none for a Today widget or before activation; the VoiceOver label "3 tasks ask for a decision. Open the review's decision step"; at accessibility text sizes the chip's label may wrap under the count while its link area stays at least 44 × 44 pt (design "Mobile viability"); the `review` host in `ios/BrainBuddy/App/AppRouter.swift` following `ReviewEntryPlanner`. *(020-FR-037, 020-FR-051)*
 - [ ] T156 [US5] M-11 Lists row in `ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift`: it replaces `DeferredRow` when exposed; "Last review: N days ago" from counted reviews only, "Set up in a minute" when never reviewed. *(020-FR-038, 020-FR-042)*
-- [ ] T157 [US5] M-23 schedule rows (day, time, "Last review") in `ios/BrainBuddy/Screens/Settings/ReviewSettingsSection.swift`; the error with Ref and the offline note. *(020-FR-035, 020-FR-038, 020-FR-045)*
+- DEFERRED T157 [US5] M-23 schedule rows (day, time, "Last review") in `ios/BrainBuddy/Screens/Settings/ReviewSettingsSection.swift`; the error with Ref and the offline note. *(020-FR-035, 020-FR-038, 020-FR-045)*
 - [ ] T158 [US5] Update `docs/native-ios-app.md` (l.19 "Weekly review stays visibly deferred" → flag-gated; the "Ids" section noting that review records, follow-up tasks and formulations carry client-supplied ids) and `ios/README.md` (l.356) (found by `/speckit-checklist`; `ios/README.md` was not in the plan's paths).
-- [ ] T159 [US5] Record `specs/020-weekly-review/evidence/manual-ios-increment3.md` (labelled manual, synthetic data): the notification registration (`020-FR-036`), the widget `Link` (`020-FR-037`), one decision per screen in the Inbox, decision, Waiting and Someday steps (`020-FR-034`), the Lists row replacing `DeferredRow` (`020-FR-042`), 44 pt targets, VoiceOver focus on M-10, M-11 and M-12, every screen M-10 – M-25 at Dynamic Type AX5 (bodies scroll, the M-22 counts in one column, the step bar scrolling sideways, the widget chip's link area; design "Mobile viability"), and a travel check (change the device zone: one zone change sent, the review slot follows; a second device in another zone sends none, `020-FR-035`, and its notification is registered for the chosen time in its own zone, `020-FR-036`); plus the Xcode-lane build.
+- [ ] T159 [US5] Record `specs/020-weekly-review/evidence/manual-ios-increment3.md` (labelled manual, synthetic data): one decision per screen in the Inbox, decision, Waiting and Someday steps (`020-FR-034`), the Lists row replacing `DeferredRow` (`020-FR-042`), 44 pt targets, VoiceOver focus on M-10, M-11 and M-12, every shipped screen (M-10 – M-22) at Dynamic Type AX5 (bodies scroll, the M-22 counts in one column, the step bar scrolling sideways; design "Mobile viability"); plus the Xcode-lane build.
 
 ### Web (slice PR-13)
 
 - [ ] T160 [US5] Write and observe RED in `frontend/src/components/shell/__tests__/AppShell.test.tsx`: with the flag on, a working "Weekly review" link with "Last review: N days ago" (no line while loading or after a failure; "Set up in a minute" when never reviewed), also in the 390 px drawer; with the flag off, the existing "Weekly review — Coming soon" assertions unchanged; then GREEN `frontend/src/components/shell/AppShell.tsx`. *(020-FR-036, 020-FR-038, 020-FR-042)*
 - [ ] T161 [US5] Write and observe RED `frontend/src/features/review/__tests__/OnboardingDialog.test.tsx` (focus on "A weekly reset"; Esc saves nothing; defaults Friday 16:00 and 14; "The web doesn't send reminders; the sidebar shows when your last review was."; the grace date); then GREEN `frontend/src/features/review/OnboardingDialog.tsx`, opened from `frontend/src/features/review/ReviewEntry.tsx`. *(020-FR-016, 020-FR-035, 020-FR-036)*
-- [ ] T162 [US5] Write and observe RED in `frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx`: review day and time, "Last review", a failed save keeps the old value with Ref, offline, one column at 390 px; then GREEN `frontend/src/features/review/ReviewSettingsSection.tsx`. *(020-FR-035, 020-FR-038, 020-FR-045)*
-- [ ] T163 [US5] Write and observe RED `frontend/src/features/review/__tests__/deviceZone.test.ts` (owner decision 2026-10-06, contracts/http.md §5, data-model E11; names carry `020-FR-035`): with no `bb.reviewLastZone.v1.<origin>.<account>` key the browser's zone is recorded and nothing is sent; when the browser's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, injected) differs from the recorded one, exactly one `PUT /review/settings` with `time_zone` and the current `expected_revision` is sent, a 409 refetches the state and resends only the zone, and the key is updated after success; when only the pulled `time_zone` differs (another device set it), nothing is sent; checked at web open and on window focus; the key is removed on sign-out or account switch and holds no content; then GREEN `frontend/src/features/review/deviceZone.ts`, started from `frontend/src/features/review/ReviewStartupDialogs.tsx` while the flag is effective and the owner is activated. *(020-FR-035, 020-FR-046)*
-- [ ] T172 [US5] Write and observe RED `frontend/src/features/review/__tests__/reviewSlot.test.ts` (targeted re-review 2026-10-06, contracts/http.md §5; names carry `020-FR-033` and `020-FR-036`): `nextReviewSlot(settings, lastCountedReviewAt, now, zone)` returns the next `review_weekday` at `review_time` in the injected browser zone, skips a slot with a counted review in the preceding 6 days (not after a `completed_empty` run), and with the stored `time_zone` `Europe/Berlin` and the browser in `America/New_York` returns Friday 16:00 New York time (it ignores `settings.time_zone`; it equals `next_review_at` only when the browser sits in the stored zone); then GREEN `frontend/src/features/review/reviewSlot.ts` and show its result as "Next review" in `frontend/src/features/review/steps/SummaryStep.tsx` (D-03 summary) instead of `next_review_at`. *(020-FR-033, 020-FR-036)*
+- DEFERRED T162 [US5] Write and observe RED in `frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx`: review day and time, "Last review", a failed save keeps the old value with Ref, offline, one column at 390 px; then GREEN `frontend/src/features/review/ReviewSettingsSection.tsx`. *(020-FR-035, 020-FR-038, 020-FR-045)*
+- DEFERRED T163 [US5] Write and observe RED `frontend/src/features/review/__tests__/deviceZone.test.ts` (owner decision 2026-10-06, contracts/http.md §5, data-model E11; names carry `020-FR-035`): with no `bb.reviewLastZone.v1.<origin>.<account>` key the browser's zone is recorded and nothing is sent; when the browser's zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`, injected) differs from the recorded one, exactly one `PUT /review/settings` with `time_zone` and the current `expected_revision` is sent, a 409 refetches the state and resends only the zone, and the key is updated after success; when only the pulled `time_zone` differs (another device set it), nothing is sent; checked at web open and on window focus; the key is removed on sign-out or account switch and holds no content; then GREEN `frontend/src/features/review/deviceZone.ts`, started from `frontend/src/features/review/ReviewStartupDialogs.tsx` while the flag is effective and the owner is activated. *(020-FR-035, 020-FR-046)*
+- DEFERRED T172 [US5] Write and observe RED `frontend/src/features/review/__tests__/reviewSlot.test.ts` (targeted re-review 2026-10-06, contracts/http.md §5; names carry `020-FR-033` and `020-FR-036`): `nextReviewSlot(settings, lastCountedReviewAt, now, zone)` returns the next `review_weekday` at `review_time` in the injected browser zone, skips a slot with a counted review in the preceding 6 days (not after a `completed_empty` run), and with the stored `time_zone` `Europe/Berlin` and the browser in `America/New_York` returns Friday 16:00 New York time (it ignores `settings.time_zone`; it equals `next_review_at` only when the browser sits in the stored zone); then GREEN `frontend/src/features/review/reviewSlot.ts` and show its result as "Next review" in `frontend/src/features/review/steps/SummaryStep.tsx` (D-03 summary) instead of `next_review_at`. *(020-FR-033, 020-FR-036)*
 
-**Checkpoint**: Increment 3 (US4 + US5) is complete on iOS and web.
+**Checkpoint**: Increment 3 (US4 Quick and Full review + the US5 onboarding and "Last review") is complete on iOS and web; the notification, widget count, schedule settings and device-zone follow are deferred.
 
 ---
 
@@ -484,12 +491,12 @@ accepted on the pre-sync row and its recorded macOS-host run.
 
 **Purpose**: Turn on the full-feature gates and record the release decisions.
 
-- [ ] T166 Add `python3 scripts/check_requirement_coverage.py specs/020-weekly-review` beside the 019 line, and a byte comparison (`cmp`) of every vector, wire-fixture and trace copy against its canonical file, to the `check-specs` recipe in `Makefile`, plus a file-exists check (`test -f specs/020-weekly-review/evidence/macos-host-run.md`) for the FR-041 macOS-host run that the name-matching gate cannot see (plan "Test strategy": for FR-041 the recorded run file is required in addition to the name match; PR-06 writes it, and PR-14 depends on PR-06); re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit (`Makefile` is guarded); `python3 scripts/check_gate_integrity.py` and `make check-specs` pass.
+- [ ] T166 Add `python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements <every id except 020-FR-022, 020-FR-023 and 020-FR-049, as listed in PR-14's `tests`>` beside the 019 line (the three deferred ids have no remaining task, Notes; the follow-up feature drops the filter), and a byte comparison (`cmp`) of every vector, wire-fixture and trace copy against its canonical file, to the `check-specs` recipe in `Makefile`, plus a file-exists check (`test -f specs/020-weekly-review/evidence/macos-host-run.md`) for the FR-041 macOS-host run that the name-matching gate cannot see (plan "Test strategy": for FR-041 the recorded run file is required in addition to the name match; PR-06 writes it, and PR-14 depends on PR-06); re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit (`Makefile` is guarded); `python3 scripts/check_gate_integrity.py` and `make check-specs` pass.
 - [ ] T167 Raise `backend/coverage-floor.json` and `frontend/coverage-floor.json` to the measured values (ratchet only; no coverage suppression in `frontend/src`).
-- [ ] T168 [P] Write `specs/020-weekly-review/evidence/README.md` (the evidence rule: seeded synthetic accounts and the design's example data only; real use as numbers only) and `specs/020-weekly-review/evidence/real-use-readout.md` (weekly `review-metrics` numbers with sample sizes; minimum samples as the owner confirmed them on 2026-10-06: SC-001 all 8 weeks, SC-003 ≥ 6 answered reviews, SC-004 ≥ 4 reviews per mode, SC-005 ≥ 20 shown cloud requests). *(020-SC-001, 020-SC-003, 020-SC-004, 020-SC-005)*
-- [ ] T169 [P] Record the owner's rollout decisions in `specs/020-weekly-review/evidence/rollout-decisions.md`: the stages (backend with the flag OFF → iOS and web builds → SELECTED_USERS (owner) → wider after the 8-week read-out); the cloud navigator opened only for sources whose SC-005 cell passed, recorded in `specs/020-weekly-review/evidence/navigator-eval-cloud.md` (owner-run, approval-gated); and the `BBWeeklyReviewLocal` Release decision — the switch itself flips later, after one clean threshold cycle, in its own change. "Clean" is measured, not judged: over one full cycle of the synced path for the owner (from the flag reaching SELECTED_USERS, at least the owner's `threshold_days` + 7 days, so at least one formulation can pass its ask and park points), the read-out in `specs/020-weekly-review/evidence/real-use-readout.md` records **0 early parks** (no park without a preceding ≥ 24 h `moves_tomorrow` window, none before its `park_due_at` or any floor; checked against the `review_park_acks` rows and the `review_auto_park` log lines), **0 park-related sync issues** (no `SyncIssue` for `autoParkTask`, a yielding `decideTask` or a park acknowledgement on any of the owner's devices), **0 yield failures** (no card decision made before the park instant that lost to the park) and **0 duplicate parks** (one `review_park_acks` row per parked formulation); any non-zero count restarts the cycle after its fix. The decision file names the cycle's dates and these four counts. *(020-FR-042, 020-SC-005)*
-- [ ] T170 Promote `app/modules/tasks/formulation.py` to `backend/mutation-enforced-scope.txt` only if two clean nightly mutation runs exist (deploy-and-ci rules), re-recording `.specify/gate-integrity.json`; otherwise note it as pending in `specs/020-weekly-review/evidence/rollout-decisions.md` (research R20).
-- [ ] T171 Run the full verification on the frozen candidate: `make check-specs`, `make test-backend`, `make test-frontend`, `sh ios/scripts/swift-linux.sh test`, `make test-e2e`, `make verify-all`, the unfiltered requirement-coverage gate and the quickstart.md scenarios; the Allure quality gate (`maxFailures: 0`) stays unchanged.
+- [ ] T168 [P] Write `specs/020-weekly-review/evidence/README.md` (the evidence rule: seeded synthetic accounts and the design's example data only; real use as numbers only) and `specs/020-weekly-review/evidence/real-use-readout.md` (weekly `review-metrics` numbers with sample sizes; minimum samples as the owner confirmed them on 2026-10-06: SC-001 all 8 weeks, SC-003 ≥ 6 answered reviews, SC-004 ≥ 4 reviews per mode; SC-005 is not read out while the navigator clients are deferred, Notes). *(020-SC-001, 020-SC-003, 020-SC-004)*
+- [ ] T169 [P] Record the owner's rollout decisions in `specs/020-weekly-review/evidence/rollout-decisions.md`: the stages (backend with the flag OFF → iOS and web builds → SELECTED_USERS (owner) → wider after the 8-week read-out); and the `BBWeeklyReviewLocal` Release decision — the switch itself flips later, after one clean threshold cycle, in its own change. "Clean" is measured, not judged: over one full cycle of the synced path for the owner (from the flag reaching SELECTED_USERS, at least the owner's `threshold_days` + 7 days, so at least one formulation can pass its ask and park points), the read-out in `specs/020-weekly-review/evidence/real-use-readout.md` records **0 early parks** (no park without a preceding ≥ 24 h `moves_tomorrow` window, none before its `park_due_at` or any floor; checked against the `review_park_acks` rows and the `review_auto_park` log lines), **0 park-related sync issues** (no `SyncIssue` for `autoParkTask`, a yielding `decideTask` or a park acknowledgement on any of the owner's devices), **0 yield failures** (no card decision made before the park instant that lost to the park) and **0 duplicate parks** (one `review_park_acks` row per parked formulation); any non-zero count restarts the cycle after its fix. The decision file names the cycle's dates and these four counts. *(020-FR-042)*
+- DEFERRED T170 Promote `app/modules/tasks/formulation.py` to `backend/mutation-enforced-scope.txt` only if two clean nightly mutation runs exist (deploy-and-ci rules), re-recording `.specify/gate-integrity.json`; otherwise note it as pending in `specs/020-weekly-review/evidence/rollout-decisions.md` (research R20).
+- [ ] T171 Run the full verification on the frozen candidate: `make check-specs`, `make test-backend`, `make test-frontend`, `sh ios/scripts/swift-linux.sh test`, `make test-e2e`, `make verify-all`, the requirement-coverage gate over every id except the deferred 020-FR-022, 020-FR-023 and 020-FR-049, and the quickstart.md scenarios that the kept slices implement (Scenario 4, the navigator, is deferred); the Allure quality gate (`maxFailures: 0`) stays unchanged.
 
 ---
 
@@ -500,10 +507,10 @@ accepted on the pre-sync row and its recorded macOS-host run.
 - **Setup (Phase 1, PR-01)**: no dependencies; first.
 - **Foundational (Phase 2)**: PR-02 depends on PR-01; PR-15 depends on PR-02. The iOS core (PR-03) and web (PR-05) lanes need only PR-02; the backend story work needs PR-15, and so does the iOS app slice PR-04 (it replays PR-15's decision and park traces, T173).
 - **US1 and US2 (Phases 3–4, P1)**: one increment. Activation (US2's explainer) is what makes US1's markers appear (FR-004 "Before activation"), so they ship together.
-- **US3 (Phase 5, P2)**: backend PR-07 after PR-15; iOS PR-08 after PR-04 and PR-07; PR-09 after PR-08 (late); web PR-10 after PR-05 and PR-07.
-- **US4 and US5 (Phases 6–7)**: backend PR-11 after PR-15 (a sibling of PR-07); iOS PR-12 after PR-08 and PR-11, and after PR-05 because T174 changes the formulation vectors that PR-05 consumes (formulation-clock §6); web PR-13 after PR-10 and PR-11.
+- **US3 (Phase 5, P2)**: backend PR-07 after PR-15; the client slices (former PR-08, PR-09, PR-10) are deferred (Notes).
+- **US4 and US5 (Phases 6–7)**: backend PR-11 after PR-15 (a sibling of PR-07); iOS PR-12 after PR-04, PR-05 and PR-11 (PR-05 because T174 changes the formulation vectors that PR-05 consumes, formulation-clock §6); web PR-13 after PR-05 and PR-11.
 - **US6 (Phase 8)**: PR-06 after PR-01 only; the full Mac review is blocked on the Mac-sync spec.
-- **Polish (Phase 9, PR-14)**: after PR-06, PR-12 and PR-13 (and therefore every lane except the late PR-09; approved by the owner on 2026-10-06: FR-023 (a) and FR-049's remaining clauses are accepted when PR-09 lands).
+- **Polish (Phase 9, PR-14)**: after PR-06, PR-12 and PR-13 (and therefore every kept lane; with the navigator clients deferred, FR-022, FR-023 and FR-049 are accepted as deferred by scope, owner decision 2026-10-07).
 
 ### User Story Dependencies
 
@@ -521,12 +528,10 @@ PR-01                  → PR-02, PR-06
 PR-02                  → PR-15 (backend), PR-03 (iOS core), PR-05 (web)
 PR-15                  → PR-07 (navigator backend), PR-11 (review-flow backend)   # siblings
 PR-03 + PR-15          → PR-04   # PR-15's decision/park traces replayed in Swift (T173)
-PR-04 + PR-07          → PR-08
-PR-08                  → PR-09 (late; may slip)
-PR-05 + PR-08 + PR-11  → PR-12   # PR-05: T174 changes the formulation vectors (formulation-clock §6)
-PR-05 + PR-07          → PR-10
-PR-10 + PR-11          → PR-13
+PR-04 + PR-05 + PR-11  → PR-12   # PR-05: T174 changes the formulation vectors (formulation-clock §6)
+PR-05 + PR-11          → PR-13
 PR-06 + PR-12 + PR-13  → PR-14
+# deferred 2026-10-07: PR-08 (iOS navigator), PR-09 (downloadable model), PR-10 (web navigator)
 ```
 
 ### Within Each User Story
@@ -583,13 +588,13 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
 ### Incremental Delivery
 
 1. Increment 1: US1 + US2 (rule, card, markers, explainer, auto-park, While you were away) → owner on TestFlight and web.
-2. Increment 2: US3 (navigator: on-device, cloud under consent; the downloadable model when PR-09 lands).
-3. Increment 3: US4 + US5 (guided review, onboarding, schedule, notification, widget) → PR-14 turns on the full-feature gates.
+2. Increment 2: US3 is deferred beyond the PR-07 backend (Notes).
+3. Increment 3: US4 (Quick and Full review) + the US5 onboarding and "Last review" → PR-14 turns on the full-feature gates.
 4. Increment 4: US6 after the Mac-sync spec (outside this task list).
 
 ### Parallel Team Strategy
 
-1. One worker per lane after PR-02: backend (PR-15 → PR-07 ‖ PR-11), iOS (PR-03 → PR-04, which also waits for PR-15, → PR-08 → PR-12, PR-09 off PR-08), web (PR-05 → PR-10 → PR-13), Mac (PR-06).
+1. One worker per lane after PR-02: backend (PR-15 → PR-07 ‖ PR-11), iOS (PR-03 → PR-04, which also waits for PR-15, → PR-12), web (PR-05 → PR-13), Mac (PR-06).
 2. A dependent slice starts from an accepted base, never from a speculative parallel branch.
 
 ---
@@ -626,9 +631,34 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     unknown state with Retry, not "Now in Someday / maybe";
   - backend (#278): replay repair in `_complete_session` keeps the recorded activity
     time for `last_activity_at` instead of the retry time;
+  - backend (#272): reject a blank `BRAIN_BUDDY_REVIEW_NAVIGATOR_MODEL` at startup so
+    the navigator fails fast instead of reporting itself available;
   - carried over: the iOS visible-content staleness check, the design.md M-02 copy
     amendment, a PR-04 deviations line, the TR-005 message, and the
     `/review/decisions/{id}/undo` path parameter taking the reference shape.
+- **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
+  (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
+  review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and
+  Full review (US4; the owner kept Full the same day) and the onboarding. PR-05, PR-06
+  and PR-07 are in flight and unchanged. Deferred
+  tasks keep their text in the phases above as input for the follow-up feature, are marked
+  `DEFERRED`, belong to no slice, and no open checkbox waits on them (the rule of the Mac
+  section). `/speckit-accept` records them as deferred by scope, not as failures.
+  - Navigator clients (US3), former slices PR-08, PR-09, PR-10: T109 – T125. Only the
+    PR-07 backend and the merged consent commands (T108) remain; the endpoints stay
+    behind the flag with no caller.
+  - The navigator block of the projects step (US3-8, M-08): the Full review's Projects
+    step (T142, T149) only lists the projects without a next action.
+  - Cues and schedule (US5): T154 (iOS notification scheduler and device time-zone
+    hook), T155 (widget chip), T157 and T162 (day and time settings), T163 (web device
+    zone), T172 (web next-review slot). The summary shows the server's `next_review_at`.
+    Onboarding (T153, T161), the Lists and sidebar "Last review" (T156, T160) stay.
+  - T145 (web active time) and T170 (mutation-scope promotion).
+  - Requirements left without a task: FR-022, FR-023, FR-049. T166 and PR-14 gate the
+    other 56 ids with an explicit `--requirements` list instead of the unfiltered form;
+    the follow-up feature restores the unfiltered gate. The client halves of FR-019 –
+    FR-021, FR-024 – FR-026 and FR-035 – FR-037, and SC-005's real-use bar, are
+    deferred too; their ids stay covered by the backend and core tests.
 
 ## Disposition traceability
 
@@ -1158,110 +1188,6 @@ last `acceptance` entry.
       ]
     },
     {
-      "id": "PR-08",
-      "outcome": "iOS navigator: Core input builder, validator, project-wide duplicate filter and router (never silent cloud fallback), cloud client, Apple on-device model, M-05, M-06 (cloud choice; download shown unavailable), M-07 (with the line that notes go as written), M-08, M-23 Suggestions, Suggest with its route caption; manual evidence.",
-      "tasks": ["T109", "T110", "T111", "T112", "T113", "T114", "T115", "T116"],
-      "requirements": ["020-FR-019", "020-FR-020", "020-FR-021", "020-FR-022", "020-FR-023", "020-FR-024", "020-FR-025", "020-FR-026", "020-FR-045", "020-FR-049", "020-FR-052"],
-      "paths": [
-        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NavigatorValidatorTests.swift",
-        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift",
-        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/StubNavigatorModel.swift",
-        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/NavigatorAPITests.swift",
-        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NavigatorAPI.swift",
-        "ios/BrainBuddy/Navigator/AppleNavigatorModel.swift",
-        "ios/BrainBuddy/Navigator/NavigatorPanel.swift",
-        "ios/BrainBuddy/Navigator/ModelChoiceSheet.swift",
-        "ios/BrainBuddy/Navigator/CloudConsentSheet.swift",
-        "ios/BrainBuddy/Navigator/ProjectNextActionBlock.swift",
-        "ios/BrainBuddy/Screens/Review/DecisionForms.swift",
-        "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift",
-        "ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift",
-        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
-        "specs/020-weekly-review/evidence/manual-ios-navigator.md"
-      ],
-      "depends_on": ["PR-04", "PR-07"],
-      "tests": [
-        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
-        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyAPITests",
-        "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-019,020-FR-020,020-FR-021,020-FR-022,020-FR-023,020-FR-024,020-FR-025,020-FR-026,020-FR-045,020-FR-049,020-FR-052"
-      ],
-      "acceptance": [
-        "NavigatorValidatorTests: shared reduce_notes vectors, rules 1-4, 21st-sibling duplicate dropped, router never routes to cloud without consent/account",
-        "quickstart Scenario 4 step 6 passes as a package test",
-        "NavigatorAPITests (020-FR-026): the encoded decision body carries ai_use as_is / edited / not_used for an unedited, edited and own-text confirmation, the cloud request_id as navigator_request_id (null on device), and no proposal text",
-        "specs/020-weekly-review/evidence/manual-ios-navigator.md (labelled manual) incl. the on-device first-token timing against the 2 s goal, VoiceOver focus after M-06/M-07, the M-07 consent line and M-05 - M-08 at Dynamic Type AX5",
-        "landing class SHOW (scripts/classify_path_risk.py: SHIP)"
-      ]
-    },
-    {
-      "id": "PR-09",
-      "outcome": "Late, may slip: downloadable on-device model — dependency-exception ADR and ios/AGENTS.md amendment, ModelDownloadMachine with its tests, DownloadedNavigatorModel (iOS/macOS 27+), M-06 download states, M-23 downloading/interrupted/delete, entitlement and privacy manifest, privacy-policy and data-retention rows, the downloaded-model SC-005 evaluation cell. Not a prerequisite of PR-14 (owner decision 2026-10-06): the FR-023 (a) and remaining FR-049 clauses are accepted when this slice lands.",
-      "tasks": ["T117", "T118", "T119", "T120", "T121", "T122"],
-      "requirements": ["020-FR-023", "020-FR-043", "020-FR-049", "020-SC-005"],
-      "paths": [
-        "docs/decisions/0028-ios-downloadable-navigator-model-dependency.md",
-        "ios/AGENTS.md",
-        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ModelDownloadMachineTests.swift",
-        "ios/BrainBuddyKit/Sources/BrainBuddyCore/ModelDownloadMachine.swift",
-        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Navigator.swift",
-        "ios/BrainBuddy/Navigator/DownloadedNavigatorModel.swift",
-        "ios/BrainBuddy/Navigator/ModelChoiceSheet.swift",
-        "ios/BrainBuddy/Screens/Settings/SuggestionsSettingsSection.swift",
-        "ios/project.yml",
-        "ios/Shared/PrivacyInfo.xcprivacy",
-        "frontend/src/pages/PrivacyPolicyPage.tsx",
-        "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
-        "docs/data-retention.md",
-        "specs/020-weekly-review/evidence/navigator-eval-downloaded.md",
-        "specs/020-weekly-review/evidence/manual-ios-downloaded-model.md"
-      ],
-      "depends_on": ["PR-08"],
-      "tests": [
-        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
-        "cd frontend && npx vitest run src/pages/__tests__/PrivacyPolicyPage.test.tsx",
-        "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-023,020-FR-043,020-FR-049,020-SC-005"
-      ],
-      "acceptance": [
-        "ModelDownloadMachineTests cover request-only start, interruption/resume after kill, cancel, storage, retry, delete, no silent cloud fallback",
-        "SC-005 downloaded-model cell recorded as aggregates only (owner-run, blind-graded, gate >= 50% and RU subset, 0 invented facts)",
-        "owner's recorded ASK approval (third-party dependency exception, external model download, new entitlement)",
-        "landing class ASK (scripts/classify_path_risk.py: SHIP; semantic ASK for the dependency exception)"
-      ]
-    },
-    {
-      "id": "PR-10",
-      "outcome": "Web navigator: navigatorInput.ts (shared reduce_notes, project-wide duplicate filter), D-02 navigator states incl. the consent dialog (with the line that notes go as written) and the cloud clarifying question, D-04 cloud consent switch (pending until DELETE; shown when the flag is off and a consent exists).",
-      "tasks": ["T123", "T124", "T125"],
-      "requirements": ["020-FR-019", "020-FR-020", "020-FR-021", "020-FR-024", "020-FR-025", "020-FR-026", "020-FR-045", "020-FR-052"],
-      "paths": [
-        "frontend/src/features/review/__tests__/navigatorInput.test.ts",
-        "frontend/src/features/review/navigatorInput.ts",
-        "frontend/src/features/review/__tests__/NavigatorPanel.test.tsx",
-        "frontend/src/features/review/NavigatorPanel.tsx",
-        "frontend/src/features/review/CloudConsentDialog.tsx",
-        "frontend/src/features/review/DecisionDialog.tsx",
-        "frontend/src/api/review.ts",
-        "frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx",
-        "frontend/src/features/account/__tests__/AccountSettingsPage.test.tsx",
-        "frontend/src/features/review/ReviewSettingsSection.tsx",
-        "frontend/src/features/account/AccountSettingsPage.tsx"
-      ],
-      "depends_on": ["PR-05", "PR-07"],
-      "tests": [
-        "cd frontend && npx vitest run src/features/review src/features/account",
-        "make test-frontend",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-019,020-FR-020,020-FR-021,020-FR-024,020-FR-025,020-FR-026,020-FR-045,020-FR-052"
-      ],
-      "acceptance": [
-        "Vitest proves every D-02 navigator state and D-04 consent state in design.md, incl. the two-stage clarifying-question failures and the consent line about notes",
-        "quickstart Scenario 4 steps 1-3, 10 pass in Vitest against the deterministic-provider wire fixtures",
-        "NavigatorPanel test: Stop aborts the fetch and leaves the card unchanged with 'Suggestion stopped.' and 'Suggest again'; the decision body carries ai_use as_is / edited / not_used and echoes navigator_request_id (020-FR-026)",
-        "landing class SHOW (scripts/classify_path_risk.py: SHIP)"
-      ]
-    },
-    {
       "id": "PR-11",
       "outcome": "Backend review flow: runs (client ids, replace_open, merged progress, Done-only finish with completed_empty, idle close, active time), queues incl. capacity mirror and Waiting/Someday eligibility, bulk release with server-side eligibility and clock-exact undo, success on a matching retry after the 24 h retention for runs and bulk releases, replay-safe progress (progress_id), idempotent bulk-release undo, restart anchor, SC-002 rule, run traces with their iOS copy, the review-metrics read-out.",
       "tasks": ["T126", "T127", "T128", "T129", "T130", "T131", "T132"],
@@ -1295,16 +1221,14 @@ last `acceptance` entry.
     },
     {
       "id": "PR-12",
-      "outcome": "iOS app increment 3: run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, M-13 - M-22 steps, M-23 schedule, M-24 widget chip with deep link, M-25 notification scheduler and the device time-zone hook, Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence; and the follow-up from PR-15: the device decision Undo keeps the server's clock bookkeeping (floor kept, clamp on restore) through a shared pure restore with new vectors.",
-      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T142", "T143", "T153", "T154", "T155", "T156", "T157", "T158", "T159", "T174", "T175", "T176"],
-      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-043", "020-FR-018", "020-FR-019", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-037", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-051", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
+      "outcome": "iOS app increment 3 (rescoped 2026-10-07: no navigator block, notification, widget chip or day/time settings): run-trace replay against the fake server (the decision and park traces replay in PR-04), review cover and step chrome, M-10 restart, M-11 entry/resume, M-12 onboarding, M-13 - M-22 steps, Lists entry replacing DeferredRow, Dynamic Type up to AX5, iOS docs; manual evidence; and the follow-up from PR-15: the device decision Undo keeps the server's clock bookkeeping (floor kept, clamp on restore) through a shared pure restore with new vectors.",
+      "tasks": ["T136", "T137", "T138", "T139", "T140", "T141", "T142", "T143", "T153", "T156", "T158", "T159", "T174", "T175", "T176"],
+      "requirements": ["020-FR-002", "020-FR-006", "020-FR-016", "020-FR-017", "020-FR-043", "020-FR-018", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-038", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-003", "020-SC-007"],
       "paths": [
         "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Review.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewCopy.swift",
         "ios/BrainBuddy/App/AppRouteView.swift",
-        "ios/BrainBuddy/App/AppRouter.swift",
-        "ios/BrainBuddy/App/BrainBuddyApp.swift",
         "ios/BrainBuddy/Screens/Review/ReviewCover.swift",
         "ios/BrainBuddy/Screens/Review/ReviewEntryScreen.swift",
         "ios/BrainBuddy/Screens/Review/RestartScreen.swift",
@@ -1320,10 +1244,7 @@ last `acceptance` entry.
         "ios/BrainBuddy/Screens/Review/DatesStep.swift",
         "ios/BrainBuddy/Screens/Review/SummaryStep.swift",
         "ios/BrainBuddy/Screens/Review/OnboardingScreen.swift",
-        "ios/BrainBuddy/Review/ReviewReminderScheduler.swift",
-        "ios/BrainBuddyWidgets/NextActionsWidget.swift",
         "ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift",
-        "ios/BrainBuddy/Screens/Settings/ReviewSettingsSection.swift",
         "docs/native-ios-app.md",
         "ios/README.md",
         "specs/020-weekly-review/evidence/manual-ios-increment3.md",
@@ -1341,19 +1262,19 @@ last `acceptance` entry.
         "specs/020-weekly-review/contracts/ios-commands.md",
         "specs/020-weekly-review/contracts/formulation-clock.md"
       ],
-      "depends_on": ["PR-05", "PR-08", "PR-11"],
+      "depends_on": ["PR-04", "PR-05", "PR-11"],
       "tests": [
         "sh ios/scripts/swift-linux.sh test",
         "sh ios/scripts/swift-linux.sh test --filter ReviewTraceReplayTests",
         "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_decisions_api.py -q --no-cov",
         "make test-backend",
         "(cd ios && xcodegen generate) && xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-019,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-051,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-006,020-FR-016,020-FR-017,020-FR-018,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-038,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-003,020-SC-007"
       ],
       "acceptance": [
         "ReviewTraceReplayTests: review_traces_runs.json (PR-11) replays against BrainBuddyFakeServer with the recorded responses, incl. a progress change retried after the retention merged once",
-        "previews for every M-10 - M-25 state, incl. M-22 'accessibility text size'; ios-app lane green on the exact SHA",
-        "specs/020-weekly-review/evidence/manual-ios-increment3.md (labelled manual): notification registration, widget Link, one decision per screen, Lists row, VoiceOver focus M-10/M-11/M-12, every screen at Dynamic Type AX5, the travel check for the device time zone",
+        "previews for every shipped M-10 - M-22 state, incl. M-22 'accessibility text size'; ios-app lane green on the exact SHA",
+        "specs/020-weekly-review/evidence/manual-ios-increment3.md (labelled manual): one decision per screen, Lists row, VoiceOver focus M-10/M-11/M-12, every shipped screen at Dynamic Type AX5",
         "T175: an undone bulk release never leaves a Next task without a clock on the device, and no released item keeps its pre-release clock after the undo",
         "T176: the reducer refuses a progress step or active-seconds code outside the session's mode, so the server's out-of-mode 422 is never produced by a queued command",
         "T174: the floor-kept and clamp-on-restore vectors pass in Python and Swift, the three vector copies stay byte-identical, and a decision Undo gives the same clock on the server, a signed-in device and an account-less device",
@@ -1362,13 +1283,11 @@ last `acceptance` entry.
     },
     {
       "id": "PR-13",
-      "outcome": "Web increment 3: /review route (ReviewGate, ReviewShell, entry with resume and last-review summary), every step incl. the new web Inbox step and restart states, onboarding dialog, sidebar and drawer link with 'Last review', D-04 schedule, activeTime.ts, deviceZone.ts (a zone change only when the browser's own zone changed), reviewSlot.ts (the next review in the browser's own zone), session progress with a replay-safe progress_id, the Playwright suite with the keyboard-only story and axe scans.",
-      "tasks": ["T144", "T145", "T146", "T147", "T148", "T149", "T150", "T160", "T161", "T162", "T163", "T172"],
-      "requirements": ["020-FR-002", "020-FR-004", "020-FR-015", "020-FR-016", "020-FR-017", "020-FR-019", "020-FR-024", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-038", "020-FR-040", "020-FR-042", "020-FR-045", "020-FR-046", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-004", "020-SC-006", "020-SC-007"],
+      "outcome": "Web increment 3 (rescoped 2026-10-07: no navigator, day/time settings, device zone, next-review slot or active time): /review route (ReviewGate, ReviewShell, entry with resume and last-review summary), every step incl. the new web Inbox step and restart states, onboarding dialog, sidebar and drawer link with 'Last review', session progress with a replay-safe progress_id, the Playwright suite with the keyboard-only story and axe scans.",
+      "tasks": ["T144", "T146", "T147", "T148", "T149", "T150", "T160", "T161"],
+      "requirements": ["020-FR-002", "020-FR-004", "020-FR-015", "020-FR-016", "020-FR-017", "020-FR-027", "020-FR-028", "020-FR-029", "020-FR-030", "020-FR-031", "020-FR-032", "020-FR-033", "020-FR-034", "020-FR-035", "020-FR-036", "020-FR-038", "020-FR-040", "020-FR-042", "020-FR-045", "020-FR-048", "020-FR-050", "020-FR-052", "020-SC-002", "020-SC-006", "020-SC-007"],
       "paths": [
         "frontend/tests/allure.fixtures.ts",
-        "frontend/src/features/review/__tests__/activeTime.test.ts",
-        "frontend/src/features/review/activeTime.ts",
         "frontend/src/features/review/__tests__/ReviewShell.test.tsx",
         "frontend/src/app/AppRoutes.test.tsx",
         "frontend/src/features/review/ReviewGate.tsx",
@@ -1396,36 +1315,28 @@ last `acceptance` entry.
         "frontend/src/components/shell/__tests__/AppShell.test.tsx",
         "frontend/src/components/shell/AppShell.tsx",
         "frontend/src/features/review/__tests__/OnboardingDialog.test.tsx",
-        "frontend/src/features/review/OnboardingDialog.tsx",
-        "frontend/src/features/review/__tests__/ReviewSettingsSection.test.tsx",
-        "frontend/src/features/review/ReviewSettingsSection.tsx",
-        "frontend/src/features/review/__tests__/deviceZone.test.ts",
-        "frontend/src/features/review/deviceZone.ts",
-        "frontend/src/features/review/ReviewStartupDialogs.tsx",
-        "frontend/src/features/review/__tests__/reviewSlot.test.ts",
-        "frontend/src/features/review/reviewSlot.ts"
+        "frontend/src/features/review/OnboardingDialog.tsx"
       ],
-      "depends_on": ["PR-10", "PR-11"],
+      "depends_on": ["PR-05", "PR-11"],
       "tests": [
         "cd frontend && npx vitest run src/features/review src/components/shell src/app",
         "cd frontend && npx playwright test tests/e2e/weekly-review.spec.ts",
         "make test-frontend",
         "make test-e2e",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-004,020-FR-015,020-FR-016,020-FR-017,020-FR-019,020-FR-024,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-038,020-FR-040,020-FR-042,020-FR-045,020-FR-046,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-004,020-SC-006,020-SC-007"
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-002,020-FR-004,020-FR-015,020-FR-016,020-FR-017,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-038,020-FR-040,020-FR-042,020-FR-045,020-FR-048,020-FR-050,020-FR-052,020-SC-002,020-SC-006,020-SC-007"
       ],
       "acceptance": [
         "Playwright: quick review end-to-end, SC-007 summary on /review, keyboard-only story E2E-A11Y-01, axe scans with no violations at desktop and 390 px, no horizontal overflow at 390 x 851",
         "E2E-MOBILE-02 (flag off) still asserts the disabled 'Weekly review — Coming soon' entry",
-        "deviceZone test: one zone change after the browser's own zone changed, none when only the pulled zone differs; reviewSlot test: the next review is evaluated in the browser's zone, not the stored one",
         "Allure report for the run with every new test carrying epic/feature/story and a 020 id",
         "landing class SHOW (scripts/classify_path_risk.py: SHIP)"
       ]
     },
     {
       "id": "PR-14",
-      "outcome": "Release: the full-feature requirement-coverage gate and the copy byte check in make check-specs (gate integrity re-recorded), coverage floors raised, evidence README and the real-use read-out template with the owner-confirmed minimum samples, the owner's recorded rollout decisions (flag stages, widening beyond the owner only after the 8-week read-out, cloud navigator only after its SC-005 cell, BBWeeklyReviewLocal decision), optional mutation-scope promotion, full verification. Does not wait for the late PR-09.",
-      "tasks": ["T166", "T167", "T168", "T169", "T170", "T171"],
-      "requirements": ["020-FR-042", "020-SC-001", "020-SC-003", "020-SC-004", "020-SC-005"],
+      "outcome": "Release: the full-feature requirement-coverage gate and the copy byte check in make check-specs (gate integrity re-recorded), coverage floors raised, evidence README and the real-use read-out template with the owner-confirmed minimum samples, the owner's recorded rollout decisions (flag stages, widening beyond the owner only after the 8-week read-out, BBWeeklyReviewLocal decision), full verification. Rescoped 2026-10-07: the requirement-coverage gate lists every id except the deferred FR-022, FR-023 and FR-049; no mutation-scope promotion; no cloud navigator rollout.",
+      "tasks": ["T166", "T167", "T168", "T169", "T171"],
+      "requirements": ["020-FR-042", "020-SC-001", "020-SC-003", "020-SC-004"],
       "paths": [
         "Makefile",
         ".specify/gate-integrity.json",
@@ -1433,21 +1344,19 @@ last `acceptance` entry.
         "frontend/coverage-floor.json",
         "specs/020-weekly-review/evidence/README.md",
         "specs/020-weekly-review/evidence/real-use-readout.md",
-        "specs/020-weekly-review/evidence/rollout-decisions.md",
-        "specs/020-weekly-review/evidence/navigator-eval-cloud.md",
-        "backend/mutation-enforced-scope.txt"
+        "specs/020-weekly-review/evidence/rollout-decisions.md"
       ],
       "depends_on": ["PR-06", "PR-12", "PR-13"],
       "tests": [
         "make check-specs",
-        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review",
+        "python3 scripts/check_requirement_coverage.py specs/020-weekly-review --requirements 020-FR-001,020-FR-002,020-FR-003,020-FR-004,020-FR-005,020-FR-006,020-FR-007,020-FR-008,020-FR-009,020-FR-010,020-FR-011,020-FR-012,020-FR-013,020-FR-014,020-FR-015,020-FR-016,020-FR-017,020-FR-018,020-FR-019,020-FR-020,020-FR-021,020-FR-024,020-FR-025,020-FR-026,020-FR-027,020-FR-028,020-FR-029,020-FR-030,020-FR-031,020-FR-032,020-FR-033,020-FR-034,020-FR-035,020-FR-036,020-FR-037,020-FR-038,020-FR-039,020-FR-040,020-FR-041,020-FR-042,020-FR-043,020-FR-044,020-FR-045,020-FR-046,020-FR-047,020-FR-048,020-FR-050,020-FR-051,020-FR-052,020-SC-001,020-SC-002,020-SC-003,020-SC-004,020-SC-005,020-SC-006,020-SC-007",
         "python3 scripts/check_gate_integrity.py",
         "make test-backend && make test-frontend && make test-e2e",
         "sh ios/scripts/swift-linux.sh test",
         "make verify-all"
       ],
       "acceptance": [
-        "the unfiltered requirement-coverage gate passes for FR-001 ... FR-052 and SC-001 ... SC-007; FR-023 and FR-049 pass on their PR-08 tests, and their remaining clauses (FR-023 (a), the rest of FR-049) are accepted when PR-09 lands (owner decision 2026-10-06)",
+        "the requirement-coverage gate passes for FR-001 ... FR-052 and SC-001 ... SC-007 except FR-022, FR-023 and FR-049, which the owner deferred with the navigator clients (decision 2026-10-07; /speckit-accept records them as deferred by scope)",
         "gate-integrity manifest re-recorded in the same commit as the Makefile change; invariants intact",
         "owner's recorded ASK approval and rollout decisions in specs/020-weekly-review/evidence/rollout-decisions.md",
         "independent /speckit-accept verdict before any flag stage beyond the owner",
