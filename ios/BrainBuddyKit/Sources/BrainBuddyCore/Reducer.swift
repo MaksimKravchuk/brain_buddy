@@ -21,6 +21,18 @@ public enum GTDReducer {
     public static func apply(
         _ command: GTDCommand, at date: Date, to state: inout GTDState, mode: ApplyMode = .interactive
     ) throws(GTDValidationError) -> ApplyOutcome {
+        let outcome = try dispatch(command, at: date, to: &state, mode: mode)
+        // FR-011: a person's child edit on this device, where the caller tracks
+        // them (`GTDState.localChildEdits`); replay never counts.
+        if mode == .interactive, state.localChildEdits != nil, let taskID = command.childEditTaskID {
+            state.localChildEdits?[taskID, default: 0] += 1
+        }
+        return outcome
+    }
+
+    private static func dispatch(
+        _ command: GTDCommand, at date: Date, to state: inout GTDState, mode: ApplyMode
+    ) throws(GTDValidationError) -> ApplyOutcome {
         switch command {
         case .createProject(let create): try createProject(create, at: date, in: &state, mode: mode)
         case .updateProject(let update): try updateProject(update, in: &state, mode: mode)
@@ -204,5 +216,24 @@ public enum GTDReducer {
         task.completedAt = nil
         task.cancelledAt = nil
         task.lastOpenList = nil
+    }
+}
+
+extension GTDCommand {
+    /// The task whose children this command edits (FR-011's child-edit
+    /// count): subtask create, edit and complete/reopen/cancel; comment add
+    /// and edit. Nil for every other command.
+    public var childEditTaskID: TaskID? {
+        switch self {
+        case .createSubtask(let create): create.taskID
+        case .updateSubtask(let update): update.taskID
+        case .transitionSubtask(let transition): transition.taskID
+        case .createComment(let create): create.taskID
+        case .updateComment(let update): update.taskID
+        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .createTask,
+            .updateTask, .transitionTask, .decideTask, .undoDecision, .autoParkTask, .bulkRelease, .undoBulkRelease,
+            .review:
+            nil
+        }
     }
 }

@@ -1,5 +1,6 @@
 import BrainBuddyCore
 import SwiftUI
+import UIKit
 
 // MARK: - Tag pill
 
@@ -183,6 +184,99 @@ struct PriorityBadge: View {
     }
 }
 
+// MARK: - Review marker (spec 020, M-01, M-02)
+
+/// A formulation marker: words plus an SF Symbol, never colour alone. Indigo
+/// for "Asks for a decision", amber (the warning semantic) for "Moves to
+/// Someday tomorrow", slate for the detail-only states. Rose is reserved for
+/// real due dates and is never an age colour (FR-004, FR-038). The text,
+/// symbol and role come from Core (`MarkerStyle`, `ReviewCopy`); the label
+/// wraps instead of truncating at accessibility text sizes.
+struct ReviewMarkerChip: View {
+    let text: String
+    let symbol: String?
+    let role: MarkerRole
+
+    init(text: String, symbol: String?, role: MarkerRole) {
+        self.text = text
+        self.symbol = symbol
+        self.role = role
+    }
+
+    /// Nil for a style without text (fresh, none).
+    init?(_ style: MarkerStyle) {
+        guard let text = style.text else { return nil }
+        self.init(text: text, symbol: style.symbol, role: style.role)
+    }
+
+    var body: some View {
+        let colors = ReviewMarkerColors.colors(for: role)
+        HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s1) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .imageScale(.small)
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(BBFont.caption.weight(.medium))
+        .foregroundStyle(colors.text)
+        .padding(.horizontal, BBSpacing.s2)
+        .padding(.vertical, 2)
+        .background(colors.background, in: RoundedRectangle(cornerRadius: BBRadius.chip, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: BBRadius.chip, style: .continuous)
+                .strokeBorder(colors.border, lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text)
+    }
+}
+
+/// Marker colours from the design (indigo-50/200/700, amber-50/200/800,
+/// slate-100/600). Indigo is not a general app token, so it lives here, with
+/// dark values derived from the same scale (indigo-950/800/300).
+enum ReviewMarkerColors {
+    struct Colors {
+        let background: Color
+        let border: Color
+        let text: Color
+    }
+
+    static func colors(for role: MarkerRole) -> Colors {
+        switch role {
+        case .decision:
+            Colors(background: indigoBackground, border: indigoBorder, text: indigoText)
+        case .caution:
+            Colors(background: BBColor.warningBackground, border: BBColor.warningBorder, text: BBColor.warningText)
+        case .neutral, .none:
+            Colors(background: BBColor.tagBackground, border: BBColor.hairline, text: BBColor.tagText)
+        case .destructive:
+            // Never produced for an age class (Core's MarkerStyle test);
+            // drawn neutral rather than rose should that ever change.
+            Colors(background: BBColor.tagBackground, border: BBColor.hairline, text: BBColor.tagText)
+        }
+    }
+
+    static let indigoBackground = dynamic(light: 0xEEF2FF, dark: 0x1E1B4B)
+    static let indigoBorder = dynamic(light: 0xC7D2FE, dark: 0x3730A3)
+    static let indigoText = dynamic(light: 0x4338CA, dark: 0xA5B4FC)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(
+            uiColor: UIColor { traits in
+                let rgb = traits.userInterfaceStyle == .dark ? dark : light
+                return UIColor(
+                    red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+                    blue: CGFloat(rgb & 0xFF) / 255, alpha: 1
+                )
+            }
+        )
+    }
+}
+
 // MARK: - Count badge
 
 /// A list count. `prominent` is the Inbox's sky pill (sky-700, so the white
@@ -316,6 +410,18 @@ struct BBFlowLayout: Layout {
         HStack {
             CountBadge(count: 17, prominent: true)
             CountBadge(count: 6)
+        }
+    }
+    .padding()
+    .bbScreenBackground()
+}
+
+#Preview("Review markers (M-01, M-02)") {
+    VStack(alignment: .leading, spacing: 12) {
+        ForEach(FormulationClass.allCases, id: \.self) { kind in
+            if let chip = ReviewMarkerChip(MarkerStyle.for(kind)) {
+                chip
+            }
         }
     }
     .padding()
