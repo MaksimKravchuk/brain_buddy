@@ -120,6 +120,14 @@ PK `(owner_id, id)`; index `(owner_id, status, started_at)`.
 Step codes: `wins, mind_sweep, inbox, decisions, rest_of_next, waiting, projects,
 someday, dates, summary`. Quick = `wins, inbox, decisions, summary` (FR-028).
 
+A finished step has **nothing to decide** when its queue is empty at that moment
+(inbox: no Inbox task; decisions: no `asks_for_decision` task; waiting and someday: the
+queue rules of http §6; projects: no active project without a next action), as
+design.md states (FR-029). Wins, the mind sweep, the rest of Next and Dates always have
+nothing to decide; the summary never qualifies (FR-029, owner decision 2026-10-07, as
+the iOS kit's `ReviewRules.hasNothingToDecide` does, `Queries+Review.swift:116`). The
+server side of this rule arrives with PR-11.
+
 **Status transitions** (FR-029, owner decision 2026-10-06)
 
 ```
@@ -299,10 +307,19 @@ real-use acceptance rate (plan Test strategy, read-out). Content-free. Rows olde
 `linkedExtensionNotices` (task ids only: tasks whose unsent "Keep 7 more days" was
 dropped when an account-less install was linked, shown once on M-09; ios-commands §7).
 
-Device-local retention mirrors the server (contracts/ios-commands.md §5
+Device-local retention mirrors the server's snapshot bound (contracts/ios-commands.md §5
 `runLocalReviewMaintenance`): local decision undo snapshots and bulk-release clock
 snapshots are nulled after 7 days, idle local sessions are closed after 7 days, drafts
-expire after 7 days — signed in or account-less.
+expire after 7 days — signed in or account-less. The server only nulls snapshots; the
+rest is device cache eviction with no server counterpart: signed in, the device also
+drops decisions and bulk releases once their snapshots are nulled, and ended runs after
+35 days; ended runs keep no progress ids. Exception (device only): an unsent
+`decideTask` or `bulkRelease` that a queued Undo names keeps `undoRetained`, so replay
+still derives its snapshot; no snapshot is stored (the outbox holds the flag and the
+task fields). It lasts until the pair is sent or removed. After an undone bulk release
+the replayed record keeps `clockBefore` in memory only. Signed in, the record is
+dropped once it reaches `base` and the next maintenance run sees it is 7 days old or
+more.
 
 The downloaded model file lives in the app's Application Support (not the App Group,
 so the widget never maps it). Both are removed with the app and are **not** in the

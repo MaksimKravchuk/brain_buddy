@@ -54,7 +54,8 @@ never an authorization input. Concurrency uses `expected_revision` in the body.
 404 with `{"resource": "...", "id": "..."}` (existing `NotFoundError` mapping). Never
 403. The same holds for an id in a **query parameter** (`session_id` on
 `GET /review/queues/{step}`): unknown and foreign give the same 404
-`{"resource": "review_session", "id": …}` body. **Task ids inside a request body**
+`{"resource": "Review session", "id": …}` body (the backend's resource-name
+convention, as `"Review decision"` in §3). **Task ids inside a request body**
 (bulk-release `items`, `set_aside_task_id`, park acknowledgements) never produce a
 404: an id that does not exist and an id of another owner are treated identically
 (reported as `not_eligible`, or ignored), so the response is byte-identical for both
@@ -330,9 +331,14 @@ cascade-delete them), or when the undo snapshot was already purged (7 days). A
 restored task keeps clock bookkeeping written since the decision (formulation-clock §3
 "decision undo"). Clients show "Couldn't undo: "<title>" changed on another device. It's in
 <list> now." + Ref (design "Undo didn't apply" states). 404 when not owned or already
-undone; a retried undo whose first delivery was applied therefore gets 404, which the
-device treats as success (the undo's goal, the decision being absent, holds;
-ios-commands §4).
+undone, with `detail` `{"resource": "Review decision", "id": "<decision id>"}`. Within
+the 24 h idempotency window, a retry with the same Idempotency-Key replays the stored
+200; a retried undo whose first delivery was applied gets 404 only when it carries a new
+key or arrives after that retention, and the device treats that 404 as success (the
+undo's goal, the decision being absent, holds; ios-commands §4). The device counts a 404
+as that success when its `resource` names a decision (case-insensitive "decision") and
+its `id` is the decision's or absent. A decision whose task was deleted gets 404 with
+`resource` `"Task"`, which the device does not treat as success.
 
 ## 4. Auto-park
 
@@ -406,6 +412,8 @@ iOS becomes visible on the web (SC-007). `restart_mode` is
 `onboarded_at != null and now - coalesce(last_counted_review_at, onboarded_at) >= 21 d`
 (FR-017): a person who has not onboarded gets onboarding first and no restart mode, and
 one who onboarded but never had a counted review counts from onboarding.
+An `open_session` the client cannot read still marks that session id as open; iOS
+clients must not end their local copy of it.
 
 `next_review_at` is the next review slot (`review_weekday` at `review_time`, skipping a
 slot that has a counted review in the preceding 6 days, FR-036) evaluated in the stored
