@@ -338,9 +338,14 @@ export function DecisionDialog({
   };
 
   const openForm = (form: DraftForm) => {
+    // A draft for this wording and form comes back (FR-052): after a stale
+    // answer on the same wording, "decide again" keeps what was typed. A new
+    // wording has its own (empty) draft key, so old text never carries over.
+    const draft = loadReviewDraft(draftScope, draftTarget());
+    const reopened = draft !== null && draft.form === form;
     setView(form);
-    setText(form === "reformulate" ? currentTitle : "");
-    setRestored(false);
+    setText(reopened ? draft.text : form === "reformulate" ? currentTitle : "");
+    setRestored(reopened);
     setFailure(null);
     focusAfterViewChange.current = "field";
   };

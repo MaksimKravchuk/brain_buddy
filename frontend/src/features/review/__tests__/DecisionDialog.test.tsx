@@ -603,6 +603,47 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     expect(client.getQueryState(taskKeys.detail("task-1"))?.isInvalidated).toBe(true);
   });
 
+  it("020-FR-011 020-FR-052 a stale answer on the same wording keeps the typed text for when the form opens again", async () => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    // Only the notes changed elsewhere: same formulation, newer revision.
+    const now = asksTask({ details: "Plumber says Tuesday", revision: 9 });
+    decide
+      .mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"))
+      .mockResolvedValueOnce(decided(now, "first_step", { title: "Measure the walls" }));
+    getTask.mockResolvedValueOnce(now);
+    renderDialog(task);
+
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure the walls");
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    await screen.findByRole("heading", { name: "Task changed elsewhere" });
+
+    await user.click(decisionButton(/^Find a first step/));
+
+    expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("Measure the walls");
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(decide.mock.calls[1][1]).toMatchObject({ type: "first_step", title: "Measure the walls", expected_revision: 9 });
+  });
+
+  it("020-FR-011 a stale answer on a new wording does not carry the old text into the new wording's form", async () => {
+    const user = userEvent.setup();
+    const now = asksTask({ title: "Get 3 quotes for the bathroom", revision: 9 }, { id: "form_b" });
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"));
+    getTask.mockResolvedValueOnce(now);
+    renderDialog(asksTask());
+
+    await user.click(decisionButton(/^Find a first step/));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure the walls");
+    await user.click(screen.getByRole("button", { name: "Save first step" }));
+    await screen.findByRole("heading", { name: "Task changed elsewhere" });
+
+    await user.click(decisionButton(/^Find a first step/));
+
+    expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("");
+  });
+
   it("020-FR-011 after a stale answer the heading and the dialog's name show the current title", async () => {
     const user = userEvent.setup();
     const now = asksTask({ title: "Get 3 quotes for the bathroom", revision: 9 }, { id: "form_b" });
