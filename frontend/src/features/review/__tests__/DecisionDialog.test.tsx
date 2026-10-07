@@ -5,7 +5,7 @@ import { useState } from "react";
 import { BrowserRouter, Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, apiClient } from "../../../api/client";
+import { ApiError, apiClient, getApiBaseUrl } from "../../../api/client";
 import { reviewApi, type DecisionResponse } from "../../../api/review";
 import { taskKeys } from "../../../api/taskHooks";
 import type { TaskResponse } from "../../../api/taskTypes";
@@ -13,7 +13,7 @@ import { ShellToastContext, type ShellNotify, type ShellToastOptions } from "../
 import { useAuthStore } from "../../../stores/authStore";
 import { DecisionDialog, type DecisionOutcome } from "../DecisionDialog";
 import { formatReviewDate } from "../formulation";
-import { loadReviewDraft, reviewDraftKey, saveReviewDraft } from "../reviewFormDrafts";
+import { bindReviewLocalState, loadReviewDraft, reviewDraftKey, saveReviewDraft } from "../reviewFormDrafts";
 
 vi.mock("../../../api/review", async () => {
   const actual = await vi.importActual<typeof import("../../../api/review")>("../../../api/review");
@@ -113,6 +113,16 @@ function renderDialog(task: TaskResponse, { client = new QueryClient({ defaultOp
     </QueryClientProvider>
   );
   return { ...view, client };
+}
+
+/** From now on, every setItem/removeItem of a browser-local review key, in order. */
+function watchReviewStorageWrites(): () => Array<[string, string]> {
+  const setItem = vi.spyOn(Storage.prototype, "setItem");
+  const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+  return () => [
+    ...setItem.mock.calls.map(([key]) => ["set", key] as [string, string]),
+    ...removeItem.mock.calls.map(([key]) => ["remove", key] as [string, string])
+  ].filter(([, key]) => key.startsWith("bb.review"));
 }
 
 const dialog = () => screen.getByRole("dialog", { name: "Renovate the bathroom" });
@@ -738,16 +748,20 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     await user.click(screen.getByRole("button", { name: "Save first step" }));
     await waitFor(() => expect(decide).toHaveBeenCalledTimes(1));
 
+    // The production cleanup binding is not active here, so any storage write
+    // seen below is the dialog's own.
     act(() => {
       useAuthStore.setState({ user: { id: "user-2", email: "b@example.test" }, status: "authed" });
     });
+    const writes = watchReviewStorageWrites();
     await act(async () => release());
     await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
 
     expect(notify).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(loadReviewDraft(scope, { kind: "task", taskId: "task-1", formulationId: "form_a" })?.text).toBe("Measure");
+    expect(writes()).toEqual([]);
+    expect(Object.keys(window.localStorage).filter((key) => key.includes(".user-2"))).toEqual([]);
   });
 
   it("020-FR-045 a decision the task's list no longer allows says so with the Ref and no retry", async () => {
@@ -1119,7 +1133,10 @@ describe("020-FR-052 decision dialog: drafts and the leave guard", () => {
     expect(screen.getByRole("textbox", { name: "First step" })).toHaveValue("Measure");
   });
 
-  it("020-FR-052 020-FR-042 drafts stay under the account the dialog was opened for, even if the session changes under it", async () => {
+  // The production cleanup binding (bindReviewLocalState, started from
+  // queryClient.ts) is NOT active in this file unless a test starts it, so
+  // these two cases isolate the dialog's own writes; the third runs with it.
+  it("020-FR-052 020-FR-042 once the session switched account the dialog writes no draft at all, and nothing under the next account", async () => {
     const user = userEvent.setup();
     renderDialog(asksTask());
     await user.click(decisionButton(/^Find a first step/));
@@ -1128,11 +1145,37 @@ describe("020-FR-052 decision dialog: drafts and the leave guard", () => {
     act(() => {
       useAuthStore.setState({ user: { id: "user-2", email: "other@example.test" }, status: "authed" });
     });
+    const writes = watchReviewStorageWrites();
     await user.type(screen.getByRole("textbox", { name: "First step" }), "sure");
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
 
-    const target = { kind: "task", taskId: "task-1", formulationId: "form_a" } as const;
-    expect(loadReviewDraft({ ...scope, accountId: "user-2" }, target)).toBeNull();
-    expect(loadReviewDraft(scope, target)?.text).toBe("Measure");
+    expect(writes()).toEqual([]);
+    expect(Object.keys(window.localStorage).filter((key) => key.includes(".user-2"))).toEqual([]);
+  });
+
+  it("020-FR-052 020-FR-042 with the production binding active, a switch clears the departing account's draft and the dialog writes nothing after it", async () => {
+    const user = userEvent.setup();
+    const unbind = bindReviewLocalState(getApiBaseUrl());
+    try {
+      renderDialog(asksTask());
+      await user.click(decisionButton(/^Find a first step/));
+      await user.type(screen.getByRole("textbox", { name: "First step" }), "Mea");
+      const target = { kind: "task", taskId: "task-1", formulationId: "form_a" } as const;
+      expect(loadReviewDraft({ apiOrigin: getApiBaseUrl(), accountId: "user-1" }, target)?.text).toBe("Mea");
+
+      act(() => {
+        useAuthStore.setState({ user: { id: "user-2", email: "other@example.test" }, status: "authed" });
+      });
+      expect(Object.keys(window.localStorage).filter((key) => key.startsWith("bb.review"))).toEqual([]);
+
+      const writes = watchReviewStorageWrites();
+      await user.type(screen.getByRole("textbox", { name: "First step" }), "sure");
+      expect(writes()).toEqual([]);
+      expect(Object.keys(window.localStorage).filter((key) => key.startsWith("bb.review"))).toEqual([]);
+    } finally {
+      unbind();
+    }
   });
 
   it("020-FR-052 an in-app link with unsaved text asks first, and Discard follows it", async () => {

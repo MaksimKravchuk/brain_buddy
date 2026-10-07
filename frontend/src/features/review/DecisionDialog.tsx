@@ -206,6 +206,10 @@ export function DecisionDialog({
   // Pinned to the account the dialog was opened for: its text never lands under
   // another account's draft keys, even if the session changes under it.
   const [draftScope] = useState(() => ({ apiOrigin: getApiBaseUrl(), accountId: (user as AuthUser).id }));
+  // Once the session has switched account, the dialog writes no draft at all:
+  // the departing account's keys are being cleared (bindReviewLocalState), and
+  // the next account's must never receive this text.
+  const ownsDrafts = () => useAuthStore.getState().user?.id === draftScope.accountId;
 
   const [current, setCurrent] = useState<TaskResponse | null>(task);
   const [stale, setStale] = useState<{ was: TaskResponse; now: TaskResponse | null } | null>(null);
@@ -280,6 +284,9 @@ export function DecisionDialog({
       setFailure(null);
     }
     setText(value);
+    if (!ownsDrafts()) {
+      return;
+    }
     if (value === (form === "reformulate" ? currentTitle : "")) {
       removeReviewDraft(draftScope, draftTarget());
     } else {
@@ -287,7 +294,11 @@ export function DecisionDialog({
     }
   };
 
-  const discardDraft = () => removeReviewDraft(draftScope, draftTarget());
+  const discardDraft = () => {
+    if (ownsDrafts()) {
+      removeReviewDraft(draftScope, draftTarget());
+    }
+  };
 
   /** Every way out of a form goes through here (FR-052): ask first when dirty. */
   const guarded = (then: () => void, rearm = false) => {
