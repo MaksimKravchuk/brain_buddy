@@ -154,7 +154,7 @@ extension Workspace {
     public func decide(
         _ type: DecisionType, on taskID: TaskID, title: String? = nil, waitingFor: String? = nil, reason: String? = nil,
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
-        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: TaskStamp? = nil
+        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: ShownTask? = nil
     ) throws(GTDValidationError) -> DecisionID {
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())

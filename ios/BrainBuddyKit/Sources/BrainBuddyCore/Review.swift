@@ -353,6 +353,57 @@ public struct TaskStamp: Hashable, Sendable, Codable {
     }
 }
 
+/// FR-011: the task as a decision card or form showed it. A person's
+/// decision on a task that changed since is stale: the task itself (its
+/// revision and `updatedAt`) or its children. Child edits leave the parent
+/// untouched, on the device (`Reducer+Children`) and on the server (a
+/// subtask or comment has its own revision), so the children are compared
+/// by what a person sees: ids, subtask title, state and order, comment body.
+/// Server ids, revisions, authors and server-set times are left out, so an
+/// acknowledgement that changes nothing visible is not a change. Never
+/// encoded or stored.
+public struct ShownTask: Hashable, Sendable {
+    /// The task's own revision and `updatedAt`.
+    public var stamp: TaskStamp
+    public var subtasks: [SubtaskRecord]
+    public var comments: [CommentRecord]
+
+    public init(_ task: TaskRecord) {
+        stamp = TaskStamp(task)
+        subtasks = Self.visible(task.subtasks)
+        comments = Self.visible(task.comments)
+    }
+
+    public func matches(_ task: TaskRecord?) -> Bool {
+        guard let task, stamp.matches(task) else { return false }
+        return Self.visible(task.subtasks) == subtasks && Self.visible(task.comments) == comments
+    }
+
+    static func visible(_ subtasks: [SubtaskRecord]) -> [SubtaskRecord] {
+        subtasks.map { subtask in
+            var visible = subtask
+            visible.serverID = nil
+            visible.serverRevision = nil
+            return visible
+        }
+        .sorted { $0.id.rawValue < $1.id.rawValue }
+    }
+
+    static func visible(_ comments: [CommentRecord]) -> [CommentRecord] {
+        comments.map { comment in
+            var visible = comment
+            visible.serverID = nil
+            visible.serverRevision = nil
+            visible.authorID = nil
+            // The server sets these on acknowledgement; an edit changes the body.
+            visible.createdAt = .distantPast
+            visible.editedAt = nil
+            return visible
+        }
+        .sorted { $0.id.rawValue < $1.id.rawValue }
+    }
+}
+
 /// Content-bearing: nulled 7 days after the decision (R15).
 public struct DecisionUndo: Hashable, Sendable, Codable {
     public var taskBefore: TaskRecord

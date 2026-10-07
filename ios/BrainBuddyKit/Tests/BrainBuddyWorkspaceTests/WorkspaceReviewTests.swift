@@ -218,7 +218,7 @@ import Testing
 
         // The card opens and records the task as shown.
         let shown = try #require(workspace.task(task))
-        let opened = TaskStamp(shown)
+        let opened = ShownTask(shown)
         // Another device edits only the notes; this device syncs while the card is open.
         let tablet = await world.device()
         try await tablet.signIn()
@@ -241,7 +241,7 @@ import Testing
         #expect(workspace.document.outbox.count == queued, "nothing queued")
 
         // "Decide again": the card records the task as it is now, and the decision applies.
-        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: TaskStamp(current))
+        try workspace.decide(.someday, on: task, formulationID: current.formulation?.id, expectedTask: ShownTask(current))
         #expect(workspace.task(task)?.state == .someday)
     }
 
@@ -262,7 +262,7 @@ import Testing
         #expect(throws: GTDValidationError.reviewUnavailable) {
             try workspace.decide(
                 .reformulate, on: task, title: "Measure the bathroom wall", formulationID: shown.formulation?.id,
-                expectedTask: TaskStamp(shown)
+                expectedTask: ShownTask(shown)
             )
         }
         #expect(workspace.task(task) == shown, "nothing applied")

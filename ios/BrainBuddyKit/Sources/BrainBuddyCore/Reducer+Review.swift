@@ -79,8 +79,8 @@ extension GTDReducer {
         if state.review.decisions[command.decisionID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         guard var task = state.tasks[command.taskID] else { throw .taskNotFound }
         // FR-011: a person's decision on a task that changed in any way since
-        // the card showed it (revision or `updatedAt`: notes, dates, project,
-        // tags, subtasks, a cosmetic title edit) is stale. Replay leaves this
+        // the card showed it (`ShownTask`: notes, dates, project, tags, a cosmetic
+        // title edit, subtasks, comments) is stale. Replay leaves this
         // to the server's `expected_revision` and yield rule (http §3).
         if mode == .interactive, let shown = command.expectedTask, !shown.matches(task) { throw .formulationChanged }
         let settings = clockSettings(state)

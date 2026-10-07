@@ -58,7 +58,7 @@ struct DecisionFormView: View {
     let onStale: () -> Void
     let onCloseCard: () -> Void
     /// The task as the card showed it: any change since makes the save stale.
-    let expectedTask: TaskStamp?
+    let expectedTask: ShownTask?
     /// Previews only: starts the field with this text instead of a draft.
     private let seedText: String?
 
@@ -84,7 +84,7 @@ struct DecisionFormView: View {
     init(
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
         isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
-        onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: TaskStamp? = nil,
+        onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: ShownTask? = nil,
         seedText: String? = nil
     ) {
         self.expectedTask = expectedTask

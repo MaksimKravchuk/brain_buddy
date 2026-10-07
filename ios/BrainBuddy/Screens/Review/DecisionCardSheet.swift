@@ -129,12 +129,12 @@ struct DecisionCardSheet: View {
         var title: String
         var formulationID: FormulationID?
         /// The task as shown: any change since makes a decision stale (Core decides).
-        var stamp: TaskStamp
+        var stamp: ShownTask
     }
 
     private func recordOpenedWording() {
         guard opened == nil, let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: TaskStamp(task))
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: ShownTask(task))
     }
 
     private func showsStale(_ task: TaskRecord) -> Bool {
@@ -149,7 +149,7 @@ struct DecisionCardSheet: View {
 
     private func decideAgain() {
         guard let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: TaskStamp(task))
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: ShownTask(task))
         isStale = false
         problem = nil
     }

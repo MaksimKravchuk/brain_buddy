@@ -210,12 +210,12 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var followUpTaskID: TaskID?
         /// False once the undo snapshot was dropped by local retention (7 days).
         public var undoRetained: Bool
-        /// FR-011: the task as the card or form showed it (its revision and
-        /// `updatedAt`). A person's decision on a task that changed since is
+        /// FR-011: the task as the card or form showed it (`ShownTask`: its
+        /// revision, `updatedAt` and children). A decision on a task that changed since is
         /// stale. Checked only when the person decides (not on replay, where
         /// the server's `expected_revision` and yield rule decide) and never
         /// stored or sent, so it is not part of the encoded command.
-        public var expectedTask: TaskStamp? = nil
+        public var expectedTask: ShownTask? = nil
 
         enum CodingKeys: String, CodingKey {
             case decisionID, taskID, type, formulationID, newFormulationID, stallReason, title, waitingFor, reason
@@ -227,7 +227,7 @@ public enum GTDCommand: Hashable, Sendable, Codable {
             newFormulationID: FormulationID? = nil, stallReason: StallReason? = nil, title: String? = nil,
             waitingFor: String? = nil, reason: String? = nil, sessionID: ReviewSessionID? = nil, aiUse: AIUse = .none,
             navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true,
-            expectedTask: TaskStamp? = nil
+            expectedTask: ShownTask? = nil
         ) {
             self.expectedTask = expectedTask
             self.decisionID = decisionID

@@ -189,7 +189,7 @@ struct ReducerReviewTests {
         .decideTask(
             .init(
                 decisionID: Review.decision(decision), taskID: shown.id, type: type,
-                formulationID: shown.formulation?.id, expectedTask: TaskStamp(shown)
+                formulationID: shown.formulation?.id, expectedTask: ShownTask(shown)
             )
         )
     }
@@ -295,6 +295,58 @@ struct ReducerReviewTests {
         let data = try JSONEncoder().encode(review)
         #expect(!String(decoding: data, as: UTF8.self).contains("accountlessReleaseSwitch"))
         #expect(try JSONDecoder().decode(ReviewState.self, from: data).accountlessReleaseSwitch == nil)
+    }
+
+    @Test("020-FR-011 a subtask or comment added, edited or completed since the card showed the task makes the decision stale")
+    func childChangesMakeDecisionStale() throws {
+        var asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        asking.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        asking.comments = [CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)]
+        // Another window: the reducer's child commands leave the parent as it is.
+        let windowEdits: [(String, GTDCommand)] = [
+            ("subtask added", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
+            ("subtask edited", .updateSubtask(.init(taskID: "t1", subtaskID: "s1", title: "Measure both walls"))),
+            ("subtask completed", .transitionSubtask(.init(taskID: "t1", subtaskID: "s1", action: .complete))),
+            ("comment added", .createComment(.init(taskID: "t1", commentID: "c2", body: "Tiles are in"))),
+        ]
+        for (what, edit) in windowEdits {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            try Review.apply(edit, at: Review.now, to: &state)
+            #expect(TaskStamp(shown).matches(state.tasks["t1"]), "\(what): the parent's stamp alone misses it")
+            let before = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+            #expect(state == before, "\(what): nothing applied")
+        }
+
+        // By sync: the server changes a subtask without bumping the task's revision (http.md, data-model).
+        let synced: [(String, (inout TaskRecord) -> Void)] = [
+            ("subtask completed elsewhere", { $0.subtasks[0].state = .completed; $0.subtasks[0].serverRevision = 3 }),
+            ("subtask added elsewhere", {
+                $0.subtasks.append(SubtaskRecord(id: "s9", serverID: "subtask_9", serverRevision: 1, title: "Call the tiler", orderKey: 1))
+            }),
+            ("subtask deleted elsewhere", { $0.subtasks = [] }),
+            ("comment edited elsewhere", { $0.comments[0].body = "Ask Ann and Bo"; $0.comments[0].editedAt = Review.now }),
+        ]
+        for (what, change) in synced {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            change(&state.tasks["t1"]!)
+            #expect(Review.error { try Review.apply(decide(.complete, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+        }
+
+        // An acknowledgement that changes nothing visible (server ids and revisions) is not a change.
+        var acknowledged = Review.state([asking])
+        let shown = try #require(acknowledged.tasks["t1"])
+        acknowledged.tasks["t1"]?.subtasks[0].serverRevision = 5
+        acknowledged.tasks["t1"]?.comments[0].serverRevision = 2
+        try Review.apply(decide(.someday, shown: shown), to: &acknowledged)
+        #expect(acknowledged.tasks["t1"]?.state == .someday)
+
+        // No change at all: applied.
+        var unchanged = Review.state([asking])
+        try Review.apply(decide(.someday, shown: try #require(unchanged.tasks["t1"])), to: &unchanged)
+        #expect(unchanged.tasks["t1"]?.state == .someday)
     }
 
     @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
