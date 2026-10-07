@@ -4,11 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { modernAuthApi, type Methods, type Completion, type Challenge, type ClientProof } from "../../api/modernAuth";
 import { Button } from "../../components/ui/Button";
+import { ProviderSignInButton } from "../../components/ui/ProviderSignInButton";
 import { useAuthStore } from "../../stores/authStore";
 import { createClientProof, startBrowserProvider, acceptSignedIn, safeAuthDestination } from "./authFlow";
 import { AuthField, CodeStep, authButtonClass } from "./AuthControls";
 
-export function AuthEntry({ destination, initialCode, beforeSignIn }: { destination: string; initialCode?: { challenge: Challenge; verifier: string }; beforeSignIn?: () => Promise<void> }): React.JSX.Element {
+export function AuthEntry({ destination, initialCode, beforeSignIn, intent = "signin" }: { destination: string; initialCode?: { challenge: Challenge; verifier: string }; beforeSignIn?: () => Promise<void>; intent?: "signin" | "signup" }): React.JSX.Element {
   const navigate = useNavigate();
   const [methods, setMethods] = useState<Methods | null>(null);
   const [availabilityError, setAvailabilityError] = useState(false);
@@ -59,9 +60,10 @@ export function AuthEntry({ destination, initialCode, beforeSignIn }: { destinat
     {mode === "choice" ? <>
       {availabilityError ? <p role="alert">Couldn't load sign-in methods. Retry or use your password. <Button className={authButtonClass} onClick={loadMethods}>Retry</Button></p> : null}
       {!methods && !availabilityError ? <p className="text-sm text-slate-600">Loading sign-in methods…</p> : null}
-      {(["google", "apple"] as const).filter(provider => methods?.[provider]).map(provider => <Button key={provider} className={authButtonClass} disabled={op.busy} onClick={() => void op.run(() => startBrowserProvider(provider, { purpose: "login" }, destination, beforeSignIn))}>{op.busy ? "Please wait…" : `Sign in with ${provider === "google" ? "Google" : "Apple"}`}</Button>)}
+      {(["google", "apple"] as const).filter(provider => methods?.[provider]).map(provider => <ProviderSignInButton key={provider} provider={provider} intent={intent} busy={op.busy} onClick={() => void op.run(() => startBrowserProvider(provider, { purpose: "login" }, destination, beforeSignIn))} />)}
+      {methods?.email && (methods.google || methods.apple) ? <div className="flex items-center gap-3 text-xs text-slate-500"><span className="h-px flex-1 bg-slate-200" aria-hidden="true" /><span>or continue with email</span><span className="h-px flex-1 bg-slate-200" aria-hidden="true" /></div> : null}
       {methods?.email ? <form className="flex flex-col gap-4" onSubmit={requestCode} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="email" /><Button type="submit" variant="primary" className={authButtonClass} isLoading={op.busy}>{op.busy ? "Please wait…" : "Continue with email"}</Button></form> : null}
-      <Button className={authButtonClass} disabled={op.busy} onClick={() => { setMode("password"); op.setError(null); }}>Use your password</Button>
+      <Button variant="secondary" className={authButtonClass} disabled={op.busy} onClick={() => { setMode("password"); op.setError(null); }}>Use your password</Button>
     </> : mode === "password" ? <>
       <form className="flex flex-col gap-4" onSubmit={passwordLogin} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="username" /><AuthField label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" /><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>Sign in</Button></form>
       <Button className={authButtonClass} disabled={op.busy} onClick={() => { setPassword(""); setMode("recover"); op.setError(null); }}>Forgot password?</Button>
