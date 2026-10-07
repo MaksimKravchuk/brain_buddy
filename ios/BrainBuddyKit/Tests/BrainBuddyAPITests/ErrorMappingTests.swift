@@ -84,6 +84,21 @@ struct ErrorMappingTests {
         #expect(!error.isUncertainOutcome)
     }
 
+    @Test("020-FR-035 020-FR-039 the backend's review-settings 409 (no reason, its own wording) is a stale revision")
+    func reviewSettingsStale() async throws {
+        // `ReviewService.update_settings` raises `ConflictError("Review
+        // settings", owner_id, "Review settings have newer changes; reload
+        // before saving.")`; `errors.py` answers {message, detail: {resource, id}}.
+        let error = try await failure(
+            Fixture.error(
+                409, "Review settings have newer changes; reload before saving.",
+                detail: #"{"resource":"Review settings","id":"user_0a1b2c3d4e5f"}"#
+            )
+        )
+        #expect(error.kind == .staleRevision(resource: "Review settings", id: "user_0a1b2c3d4e5f"))
+        #expect(!error.isRetryable)
+    }
+
     @Test("409 Idempotency-Key reused for a different request (tasks module)")
     func idempotencyConflict() async throws {
         let error = try await failure(
