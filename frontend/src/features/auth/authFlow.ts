@@ -1,6 +1,7 @@
 import { modernAuthApi, type Provider, type ProviderStart, type ProviderComplete, type ClientProof, type AuthAction, type RecentProof } from "../../api/modernAuth";
 import { useAuthStore } from "../../stores/authStore";
 import type { Completion } from "../../api/modernAuth";
+import { authApi } from "../../api/auth";
 
 const PENDING_KEY = "brainbuddy.auth.provider-attempt";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -8,9 +9,9 @@ export interface PendingProvider { attemptId: string; state: string; verifier: s
 let recentConfirmation: { owner: string; action: AuthAction; proof: RecentProof } | null = null;
 
 export function safeAuthDestination(candidate: unknown): string {
-  if (typeof candidate !== "string" || !candidate.startsWith("/") || candidate.startsWith("//")) return "/";
+  if (typeof candidate !== "string" || !candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) return "/";
   const url = new URL(candidate, "https://brainbuddy.invalid");
-  const fixed = ["/", "/settings/account", "/settings/account/delete", "/settings/agents", "/admin"];
+  const fixed = ["/", "/settings/account", "/settings/account/delete", "/settings/agents", "/admin", "/cli/authorize"];
   const workspace = /^\/(tasks\/(inbox|next|waiting|someday|completed|cancelled)|projects\/[A-Za-z0-9_-]+|tags\/[A-Za-z0-9_-]+)(\/[A-Za-z0-9_-]+)?$/;
   if (!fixed.includes(url.pathname) && !workspace.test(url.pathname)) return "/";
   const owner = url.searchParams.get("expected_owner");
@@ -23,18 +24,27 @@ export async function createClientProof(): Promise<ClientProof> {
   return { verifier, challenge: base64url(new Uint8Array(digest)) };
 }
 export function saveProviderAttempt(attempt: PendingProvider): void { sessionStorage.setItem(PENDING_KEY, JSON.stringify(attempt)); }
-export function takeProviderCallback(): { request: ProviderComplete; pending: PendingProvider } {
+export function takeProviderCallback(): { request: ProviderComplete; pending: PendingProvider } | { cancelled: true; pending: PendingProvider } {
   const fragment = window.location.hash.slice(1);
   window.history.replaceState(window.history.state, "", "/auth/complete");
   const stored = sessionStorage.getItem(PENDING_KEY); sessionStorage.removeItem(PENDING_KEY);
   const params = new URLSearchParams(fragment);
-  if (params.size !== 3 || ["attempt", "state", "grant"].some(key => params.getAll(key).length !== 1 || !TOKEN.test(params.get(key) ?? "")) || !stored) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
+  const cancelled = params.get("error") === "cancelled";
+  const outcome = cancelled ? "error" : "grant";
+  if (params.size !== 3 || ["attempt", "state"].some(key => params.getAll(key).length !== 1 || !TOKEN.test(params.get(key) ?? "")) || params.getAll(outcome).length !== 1 || (!cancelled && !TOKEN.test(params.get("grant") ?? "")) || !stored) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
   const pending = JSON.parse(stored) as PendingProvider;
   if (!TOKEN.test(pending.verifier) || !Number.isFinite(pending.expiresAt) || pending.expiresAt <= Date.now() || pending.expiresAt > Date.now() + 600000 || pending.attemptId !== params.get("attempt") || pending.state !== params.get("state") || !["login", "link", "reauth"].includes(pending.purpose)) throw new Error("This sign-in attempt is invalid or has expired. Start again.");
+  if (cancelled) return { pending, cancelled: true };
   return { pending, request: { attempt_id: pending.attemptId, state: pending.state, handoff_code: params.get("grant") ?? "", client_verifier: pending.verifier } };
 }
-export async function startBrowserProvider(provider: Provider, options: Omit<ProviderStart, "client" | "client_challenge">, destination = "/"): Promise<void> {
+export async function ensureAnonymousSignIn(): Promise<void> {
+  const session = useAuthStore.getState();
+  const current = await authApi.me();
+  if (current !== null || session.status !== "anon" || useAuthStore.getState() !== session) throw new Error("Session changed before sign-in");
+}
+export async function startBrowserProvider(provider: Provider, options: Omit<ProviderStart, "client" | "client_challenge">, destination = "/", beforeSignIn?: () => Promise<void>): Promise<void> {
   const proof = await createClientProof();
+  await beforeSignIn?.();
   const started = await modernAuthApi.startProvider(provider, { ...options, client: "web", client_challenge: proof.challenge });
   if (!started.authorization_url || !TOKEN.test(started.attempt_id) || !TOKEN.test(started.state)) throw new Error("Provider is unavailable");
   const url = new URL(started.authorization_url);

@@ -1,0 +1,29 @@
+{
+  "document_type": "bounded-correction-context",
+  "campaign_history": [
+    {
+      "run_id": "cli-023-r1",
+      "status": "escalated",
+      "valid_lenses": 0,
+      "required_lenses": 6
+    },
+    {
+      "run_id": "cli-023-r2",
+      "status": "escalated",
+      "valid_native_lenses": 6,
+      "required_lenses": 6,
+      "original_reviewer_verdicts": "changes-required",
+      "oracle_provenance": "unknown by unchanged harness; native correlated/unverified execution separately recorded"
+    }
+  ],
+  "original_digest": "2c189ad0a6c54769e0f5c3904757a4a14a46add1a1e021e9327a9ff3ab733511",
+  "six_lens_corrective_snapshot": "c5778eef47ef975a22cdd239ad289973151f6a9b07d422ecbf3269bd4a9e8ddd",
+  "final_digest": "28073fd7e1991aa4c27141ba0c0ed9bbe8e0f7eb100b6104829ac0c8a80498d5",
+  "final_delta": "quickstart only: generic /auth/me to allowed /tags and explicit Linux/macOS15-both-architectures/Windows install sentence",
+  "final_delta_verified_by": "requirements-consistency",
+  "deterministic_defects": [],
+  "risk": "high",
+  "human_acceptance": "pending",
+  "third_campaign_started": false,
+  "implementation_started": false
+}

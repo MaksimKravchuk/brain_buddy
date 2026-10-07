@@ -1,0 +1,15 @@
+{
+  "source_sha": "485c721317714ab3ab5497fa9cad94c63cce38bb",
+  "server": "isolated Compose shared AuthStore integration",
+  "steps": [
+    "actual native headless login",
+    "explicit browser approval",
+    "independent-process status",
+    "idempotent create/read",
+    "revision-bound completion/readback",
+    "native session logout/local deletion"
+  ],
+  "passed": true,
+  "synthetic_volume_cleanup": "owned E2E runner tears down its volume",
+  "production": false
+}

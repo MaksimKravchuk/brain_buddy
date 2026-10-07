@@ -67,6 +67,7 @@ from app.services.auth_migration import AuthMigration
 from app.services.auth_provider_service import AuthProviderService
 from app.services.auth_secret_box import AuthSecretBox
 from app.services.auth_service import ACCOUNT_DELETION_GRACE
+from app.services.cli_auth import CliAuthService
 from app.services.modern_auth_service import ModernAuthService
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.adapters import (
@@ -121,6 +122,7 @@ class Container:
     task_title_autocomplete_service: TaskTitleAutocompleteService
     auth_migration: AuthMigration
     modern_auth_service: ModernAuthService
+    cli_auth_service: CliAuthService
     review_service: ReviewService
     review_flow_service: ReviewFlowService
 
@@ -652,6 +654,11 @@ def build_container(config: AppConfig) -> Container:
         task_title_autocomplete_service=task_title_autocomplete_service,
         auth_migration=auth_migration,
         modern_auth_service=modern_auth_service,
+        cli_auth_service=CliAuthService(
+            auth_service=auth_service,
+            feature_flags=feature_flag_service,
+            origin=config.cli_verification_origin,
+        ),
         review_service=review_service,
         review_flow_service=review_flow_service,
     )
