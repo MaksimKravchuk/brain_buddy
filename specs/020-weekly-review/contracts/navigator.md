@@ -27,7 +27,9 @@ language; the cloud prompt says to answer in the language of the task text.
 **One shared reduction** (owner decision NC-3, FR-019 "exactly the same reduced input"):
 `reduce_notes(notes) -> (notes', truncated)` is one deterministic function implemented
 in Core (`NavigatorInputBuilder`), in `navigatorInput.ts` and in `navigator.py`
-(backstop), covered by shared vectors in `NavigatorValidatorTests`, Vitest and pytest.
+(backstop), covered by the shared vector file
+`backend/tests/fixtures/navigator/reduce_notes_vectors.json`, run by pytest and by
+byte-identical copies in `NavigatorValidatorTests` and Vitest.
 With `NOTES_BUDGET_CHARS = 6 000` (a constant, not per model): if the notes have at
 most that many characters (Unicode scalars) they are unchanged; otherwise the first
 lines up to 2 000 characters and the most recent (last) lines up to 4 000 characters
@@ -35,7 +37,11 @@ are kept, whole lines only, joined by one line `…`, and `truncated = true`. Li
 are split on U+000A, and a preceding U+000D is dropped, so the joining separator is
 exactly U+000A U+2026 U+000A (3 scalars) and comes on top of the budget, so a reduced note
 is at most 6 003 scalars, and that is the request limit for `task.notes` (http §7,
-`NAVIGATOR_NOTES_MAX_CHARS`). Title,
+`NAVIGATOR_NOTES_MAX_CHARS`). If the kept first and last lines are all the lines,
+nothing is dropped: the lines are rejoined with U+000A (so the U+000D are gone) and
+`truncated = false`. Notes that already contain a `…` line get no special case, so
+client-reduced notes of 6 001–6 003 scalars come back from the server's backstop as
+the same text, usually with `truncated = true`. Title,
 stall reason, project name and sibling titles are never dropped. The budget is chosen so
 the reduced input, with instructions and siblings, fits the smallest supported window
 (Apple's 4,096 tokens on iOS 26.x, `research-on-device-model.md` §1) at the
@@ -70,9 +76,18 @@ rule 5 runs on every client after them:
    `open_task_titles` entry's (FR-019 no duplicates), and duplicates among themselves.
 3. Grounding check (FR-021): drop a proposal containing a **capitalised token
    (other than the first word), number, currency amount or date expression** that does not occur
-   (case-insensitively, after `formulation_key`) in the input fields. This is a cheap
+   (case-insensitively, after `formulation_key`) in the input fields. Date expressions
+   include, in any case, the relative dates `today`, `tonight`, `tomorrow`, `next week`,
+   `next month`, `this weekend`, `сегодня`, `завтра`, `послезавтра` and
+   `на следующей неделе` besides month and weekday names; a phrase must occur whole in
+   one input field. A duration of at most 30 minutes is exempt, because the prompt asks
+   for actions that "would take under 30 minutes" and for "a 2-minute starter step"
+   (§3): ASCII digits for 0–30 joined to or followed by a minute word (`min`, `mins`,
+   `minute`, `minutes`, `мин`, or a word starting `минут`), as in "2-minute",
+   "10 minute", "5 мин", "2 минуты". This is a cheap
    deterministic backstop; the prompt is the primary control and SC-005 is measured on
-   the evaluation set (§5).
+   the evaluation set (§5). Rules 1–4 share the vector file
+   `backend/tests/fixtures/navigator/validator_vectors.json`.
 4. If ≥ 1 proposal survives → return them (M-05 "partial failure": fewer than 3 shown,
    no message). If none survive and the model returned a clarifying question that
    passes rule 3 → return the question. Otherwise → `malformed` (M-05 error,
@@ -124,6 +139,9 @@ User content (data role, delimited, never interpolated into instructions):
 </open_tasks>
 <kind>first_step</kind>
 ```
+
+Inside a value, a `<` that would open or close one of these tags (any case or spacing)
+is sent as `&lt;`, so content cannot end its own field or start another.
 
 For `project_next_action` the instruction's first line is "Propose 1 to 3 first next
 actions for this project."

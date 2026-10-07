@@ -602,7 +602,7 @@ the import-linter contracts of PR-02 forbid `app.modules.tasks` from importing
 
 **Provider configuration** (research R13): the navigator differs from title completion
 on purpose. `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=openai` with the variable named by
-`…_API_KEY_ENV` unset or empty makes the container build **raise** at startup, naming
+`…_API_KEY_ENV` unset or empty makes the web app's container build **raise** at startup, naming
 the variable (never its value), so a misconfigured deploy fails its health check and
 never serves (constitution I: required configuration must fail visibly, not degrade
 silently). `deterministic` outside TEST and any unknown provider name raise the same
@@ -614,7 +614,9 @@ already-serving machine with the key missing also fails, which takes every route
 not only the navigator. The runbook line in plan "Migration, deploy order and
 rollback" and in `.env.example` therefore says: set
 `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled` before rotating or removing the key,
-and set it back after the new key is in place.
+and set it back after the new key is in place. Only the web app builds the provider:
+the operational CLI (`python -m app.cli`, `purge-due-accounts` included) builds with the
+navigator disabled and never reads the key, so account purge never depends on it.
 
 ### `POST /review/navigator/consent` → 200 / `DELETE /review/navigator/consent` → 204
 
@@ -673,8 +675,10 @@ it. The sequence is: (1) under `command_lock(owner_id)`, read the owner's
 `navigator_usage` row for today, reject on the per-call estimate or the daily cap
 (429 `navigator_cost_cap`), and write a reservation (`calls + 1`,
 `reserved_cost_usd += estimate`); release the lock; (2) call the provider with no lock
-held (8 s timeout); (3) under the lock again, settle: replace the reservation with the
-actual token cost, or release it on timeout or failure. A reservation never settled
+held (one overall 8 s deadline, `…_TIMEOUT_SECONDS`, not 8 s per httpx phase); (3) under
+the lock again, settle: replace the reservation with the actual token cost, or release
+it on timeout or failure; any other exception also releases it and then propagates
+(a bug, not `navigator_provider_error`). A reservation never settled
 (process crash) is released by the next day's row. Test: a provider stub that itself
 takes `command_lock` for another owner neither deadlocks nor waits (the
 `test_review_navigator.py` lock case).
