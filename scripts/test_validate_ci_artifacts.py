@@ -964,7 +964,10 @@ jobs:
       macos: ${{ steps.decide.outputs.macos }}
     steps:
       - id: decide
-        run: echo decide
+        run: |
+          macos=true
+          printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false
+          echo "macos=${macos}" >> "$GITHUB_OUTPUT"
   backend:
     env:
       RUN: ${{ needs.changes.outputs.backend }}
@@ -989,12 +992,17 @@ jobs:
         if: env.RUN == 'true'
         run: xcodebuild build
   macos-app:
+    runs-on: ${{ needs.changes.outputs.macos == 'true' && 'macos-26' || 'ubuntu-latest' }}
     needs: changes
     env:
       RUN: ${{ needs.changes.outputs.macos }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
       - name: Test the package
         if: env.RUN == 'true'
         working-directory: macos
@@ -2044,6 +2052,157 @@ class MacosAppLaneTests(unittest.TestCase):
             "macos-app step 'Test the package' is not gated on env.RUN",
             completed.stderr,
         )
+
+    VERIFY_STEP = (
+        "      - name: Verify exact candidate checkout\n"
+        '        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"\n'
+    )
+
+    def test_a_macos_lane_without_candidate_verification_is_rejected(self) -> None:
+        # Without the proof a pull request's Mac lane tests GitHub's merge
+        # commit, not the head the review approved.
+        unverified = self.edit_job("macos-app", self.VERIFY_STEP, "")
+
+        completed = self.validate(unverified)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app job never verifies the candidate checkout", completed.stderr
+        )
+
+    def test_the_ungated_candidate_verification_step_is_accepted(self) -> None:
+        # The proof is the one non-checkout step that must run ungated, so it
+        # holds on the Linux no-op path too; it is not an ungated-step error.
+        block = self.edit_job("macos-app", self.VERIFY_STEP, self.VERIFY_STEP)
+        self.assertIn(self.VERIFY_STEP + "\n      - name: Select", block)
+
+        completed = self.validate(self.workflow)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("Verify exact candidate checkout", completed.stderr)
+
+    def test_a_gated_candidate_verification_step_is_rejected(self) -> None:
+        # Gated, the proof is skipped on every run that builds nothing, and the
+        # lane still reports success for a commit it never looked at.
+        gated = self.edit_job(
+            "macos-app",
+            self.VERIFY_STEP,
+            self.VERIFY_STEP.replace(
+                "\n        run:", "\n        if: env.RUN == 'true'\n        run:"
+            ),
+        )
+
+        completed = self.validate(gated)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app step 'Verify exact candidate checkout' must run ungated",
+            completed.stderr,
+        )
+
+    def test_a_macos_checkout_of_the_merge_commit_is_rejected(self) -> None:
+        bare = self.edit_job(
+            "macos-app",
+            "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha || github.sha }}\n",
+            "",
+        )
+
+        completed = self.validate(bare)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app checkout does not check out the reviewed commit",
+            completed.stderr,
+        )
+
+    def test_a_decide_step_that_never_writes_the_macos_output_is_rejected(
+        self,
+    ) -> None:
+        # The declaration alone is not enough: an output the decide step never
+        # writes is empty, and the lane skips every step. A commented-out write
+        # must not pass for the real one.
+        unwritten = self.edit_job(
+            "changes",
+            '            echo "macos=${macos}"\n',
+            '            # echo "macos=${macos}"\n',
+        )
+
+        completed = self.validate(unwritten)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "changes decide step does not compute the macos output", completed.stderr
+        )
+        self.assertIn('echo "macos=${macos}"', completed.stderr)
+
+    def test_a_macos_filter_that_ignores_the_shared_kit_is_rejected(self) -> None:
+        # The Mac links ios/BrainBuddyKit/ and ios-app no longer builds the Mac,
+        # so a kit change that left this lane idle would land unbuilt.
+        narrowed = self.edit_job(
+            "changes",
+            r"""grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false""",
+            r"""grep -Eq '^macos/' || macos=false""",
+        )
+
+        completed = self.validate(narrowed)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "changes decide step does not compute the macos output", completed.stderr
+        )
+
+    def test_a_macos_runner_chosen_by_another_stack_is_rejected(self) -> None:
+        # Bound to the iOS decision, a Mac-only change would run its swift
+        # steps on the Linux runner and fail; an iOS-only change would queue a
+        # macOS runner to build nothing.
+        misrouted = self.edit_job(
+            "macos-app",
+            "    runs-on: ${{ needs.changes.outputs.macos == 'true'",
+            "    runs-on: ${{ needs.changes.outputs.ios == 'true'",
+        )
+
+        completed = self.validate(misrouted)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app job must choose its runner from needs.changes.outputs.macos",
+            completed.stderr,
+        )
+
+    def test_a_step_gate_that_only_contains_the_run_condition_is_rejected(
+        self,
+    ) -> None:
+        # `always() || env.RUN == 'true'` contains the gate and is always true.
+        loose = self.edit_job(
+            "macos-app",
+            "      - name: Test the package\n        if: env.RUN == 'true'\n",
+            "      - name: Test the package\n"
+            "        if: always() || env.RUN == 'true'\n",
+        )
+
+        completed = self.validate(loose)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn(
+            "macos-app step 'Test the package' is not gated on env.RUN",
+            completed.stderr,
+        )
+
+    def test_the_failure_only_upload_gate_is_accepted(self) -> None:
+        # The log upload is the one step allowed the failure() prefix; the
+        # repository workflow carries it and validates clean.
+        self.edit_job(
+            "macos-app",
+            "      - name: Upload build logs\n"
+            "        if: failure() && env.RUN == 'true'\n",
+            "      - name: Upload build logs\n"
+            "        if: failure() && env.RUN == 'true'\n",
+        )
+
+        completed = self.validate(self.workflow)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 class CoverageSuppressionTests(unittest.TestCase):

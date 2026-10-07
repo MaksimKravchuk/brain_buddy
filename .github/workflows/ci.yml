@@ -585,7 +585,9 @@ jobs:
   # The app lane: the XcodeGen project builds the app, the widget extension and
   # the package for the simulator (unsigned), and the package tests pass on
   # macOS too. With nothing iOS to check it runs its no-op on Linux instead of
-  # queueing for a macOS runner, and still reports success.
+  # queueing for a macOS runner, and still reports success. It does not build
+  # the Mac package: the Mac lane below owns macos/, and its filter includes
+  # ios/BrainBuddyKit/, so a kit change still rebuilds and retests the Mac there.
   ios-app:
     name: iOS app on macOS (Xcode 26)
     runs-on: ${{ needs.changes.outputs.ios == 'true' && 'macos-26' || 'ubuntu-latest' }}
@@ -661,12 +663,6 @@ jobs:
         working-directory: ios/BrainBuddyKit
         run: swift test --parallel
 
-      - name: Preserve the shared package's macOS app compatibility
-        if: env.RUN == 'true'
-        run: |
-          swift build --package-path macos --disable-sandbox
-          swift test --package-path macos --disable-sandbox
-
       - name: Upload build logs
         if: failure() && env.RUN == 'true'
         uses: actions/upload-artifact@v7
@@ -684,10 +680,10 @@ jobs:
   # advisory. Before this lane a change confined to macos/ turned every stack
   # off and landed on a green Full CI that never compiled it.
   #
-  # It builds and tests the Swift package in macos/ with the runner's Xcode 26
-  # toolchain. It does not run build_app.sh: the Whisper model assets that
-  # script bundles are not in the repository, and the tests do not need the
-  # .app. Its results are XCTest output, not Allure, so nothing here feeds the
+  # It is the one lane that builds and tests the Swift package in macos/, with
+  # the runner's Xcode 26 toolchain. It does not run build_app.sh: the Whisper
+  # model assets that script bundles are not in the repository, and the tests do
+  # not need the .app. Its results are XCTest output, not Allure, so nothing here feeds the
   # aggregate report; allure-report still waits for it so the report closes a
   # finished run. With nothing Mac-relevant to check it runs its no-op on Linux
   # instead of queueing for a macOS runner, and still reports success.
@@ -700,10 +696,17 @@ jobs:
       RUN: ${{ needs.changes.outputs.macos }}
     defaults:
       run:
+        # Load-bearing: an explicit `bash` runs with -eo pipefail, so a failing
+        # `swift build`/`swift test` piped into `| tee` below still fails its step.
         shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact candidate checkout
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
 
       - name: Select the newest Xcode 26
         if: env.RUN == 'true'
@@ -727,12 +730,27 @@ jobs:
           swift build --only-use-versions-from-resolved-file 2>&1 \
             | tee "${RUNNER_TEMP}/macos-swift-build.log"
 
+      # A run that executes no test is a failure, not a pass (021 contract
+      # mac-app-host §8, tasks T003). The floor reads XCTest's own summary,
+      # "Executed N tests, with ...", whose largest N is the whole-bundle total;
+      # Swift Testing prints a different line ("Test run with 0 tests ..."
+      # today), so it neither satisfies nor trips the floor. Serial on purpose:
+      # under --parallel SwiftPM prints only per-test progress and drops
+      # XCTest's summary for passing tests, so the floor would have nothing to
+      # read. It is also the run macos/README.md documents.
       - name: Test the package
         if: env.RUN == 'true'
         working-directory: macos
         run: |
-          swift test --only-use-versions-from-resolved-file --parallel 2>&1 \
-            | tee "${RUNNER_TEMP}/macos-swift-test.log"
+          log="${RUNNER_TEMP}/macos-swift-test.log"
+          swift test --only-use-versions-from-resolved-file 2>&1 | tee "${log}"
+          executed="$(grep -Eo 'Executed [0-9]+ tests?, with' "${log}" \
+            | grep -Eo '[0-9]+' | sort -n | tail -n 1 || true)"
+          if [ -z "${executed}" ] || [ "${executed}" -eq 0 ]; then
+            echo "::error::swift test executed no XCTest case; the Mac lane fails rather than skips"
+            exit 1
+          fi
+          echo "XCTest executed ${executed} tests"
 
       - name: Upload build logs
         if: failure() && env.RUN == 'true'

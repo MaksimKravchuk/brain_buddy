@@ -12,6 +12,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 REQUIRED_ARTIFACTS = {
     "backend-allure-results": "backend/allure-results",
@@ -253,9 +254,6 @@ E2E_CI_REQUIREMENTS = (
 PATH_FILTER_REQUIREMENTS = (
     ("changed-stacks job", "  changes:"),
     ("changed-stacks outputs", "backend: ${{ steps.decide.outputs.backend }}"),
-    # An undeclared job output reads as an empty string, so a lane bound to it
-    # would skip every step and still report success having built nothing.
-    ("changed-stacks macos output", "macos: ${{ steps.decide.outputs.macos }}"),
     ("step-level path guard", "if: env.RUN == 'true'"),
     ("full-CI gate covers the filter job", "      - changes\n"),
 )
@@ -640,44 +638,175 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
     return errors
 
 
-# Lanes whose RUN gate must read one named changed-stack output, and whose every
-# step but the checkout must carry that gate. Bound to the wrong output, a
-# change confined to the lane's own tree skips every step and the lane reports
-# success having built nothing; an ungated step runs on the Linux no-op path and
-# fails the lane for a change that never touched it. The Mac lane is listed
+# Lanes whose RUN gate and runner must read one named changed-stack output, and
+# whose every step but the candidate checkout and its verification must carry
+# that gate. Bound to the wrong output, a change confined to the lane's own tree
+# skips every step and the lane reports success having built nothing; an ungated
+# step runs on the Linux no-op path and fails the lane for a change that never
+# touched it. The Mac lane is listed
 # because both of those are one-word slips there: it sits beside two `ios`
 # lanes it was modelled on (021-mac-sync research R3).
 STEP_GATED_LANES = {"macos-app": "macos"}
 
+# The only conditions a gated step may carry, compared exactly. A condition that
+# merely contains the gate is not one: `always() || env.RUN == 'true'` runs the
+# step on the Linux no-op path as well.
+STEP_GATES = frozenset({"env.RUN == 'true'", "failure() && env.RUN == 'true'"})
 
-def _job_steps(block: str) -> list[tuple[str, str | None, str | None]]:
-    """Each step of one job as (label, its ``uses``, its ``if``), in order."""
+# Every required lane checks out the reviewed commit and proves it before doing
+# anything else (the candidate-checkout rule every lane on main follows). On a
+# pull request a bare checkout tests GitHub's merge commit, not the head the
+# review approved. Both steps run ungated: the proof must hold on the Linux
+# no-op path too, or a lane that built nothing could still vouch for a commit.
+CANDIDATE_CHECKOUT_REF = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
+CANDIDATE_VERIFY_STEP = "Verify exact candidate checkout"
+CANDIDATE_VERIFY_COMMAND = 'test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"'
+
+# Lines the `changes` job's decide step must hold for each stack output a
+# step-gated lane reads, matched as whole lines; each requirement lists the
+# spellings it accepts. A substring anywhere in the workflow is satisfied by a
+# comment; the output must actually be computed and written by the step the job
+# output reads. The Mac filter names the shared kit because the Mac links it
+# (021-mac-sync): a kit change must rebuild the Mac, and ios-app no longer
+# builds it on the kit's behalf.
+CHANGED_STACK_DECISION_LINES = {
+    "macos": (
+        ("macos=true",),
+        (
+            r"""printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' """
+            "|| macos=false",
+        ),
+        # Inside the step's `{ ... } >> "$GITHUB_OUTPUT"` group, or on its own.
+        ('echo "macos=${macos}"', 'echo "macos=${macos}" >> "$GITHUB_OUTPUT"'),
+    ),
+}
+
+
+class _Step(NamedTuple):
+    label: str
+    uses: str | None
+    condition: str | None
+    step_id: str | None
+    run: str | None
+    text: str
+
+
+def _job_steps(block: str) -> list[_Step]:
+    """Each step of one job, in order, with its single-line keys parsed."""
 
     steps = re.search(
         r"^    steps:\n(?P<body>.*)", block, flags=re.MULTILINE | re.DOTALL
     )
     if not steps:
         return []
-    parsed: list[tuple[str, str | None, str | None]] = []
+    parsed: list[_Step] = []
     chunks = re.split(r"^      - ", steps.group("body"), flags=re.MULTILINE)[1:]
     for chunk in chunks:
         # The split consumed the first key's indentation; restore it so every
         # key of the step is matched at the same column.
         text = "        " + chunk
         values: dict[str, str | None] = {}
-        for key in ("name", "uses", "if"):
+        for key in ("name", "uses", "if", "id", "run"):
             match = re.search(
                 rf"^        {key}:[ \t]*(.+?)[ \t]*$", text, flags=re.MULTILINE
             )
             values[key] = match.group(1) if match else None
         label = values["name"] or values["uses"] or "unnamed step"
-        parsed.append((label, values["uses"], values["if"]))
+        parsed.append(
+            _Step(
+                label, values["uses"], values["if"], values["id"], values["run"], text
+            )
+        )
     return parsed
+
+
+def _changed_stack_output_errors(workflow_text: str, output: str) -> list[str]:
+    block = _job_block(workflow_text, "changes")
+    if block is None:
+        return []  # Reported by the path-filter requirements.
+    errors: list[str] = []
+    declaration = f"{output}: ${{{{ steps.decide.outputs.{output} }}}}"
+    if not re.search(
+        rf"^      {re.escape(declaration)}[ \t]*$", block, flags=re.MULTILINE
+    ):
+        # An undeclared job output reads as an empty string, so a lane bound to
+        # it would skip every step and still report success having built nothing.
+        errors.append(
+            f"missing changed-stacks {output} output: the changes job must declare "
+            f"{declaration!r}"
+        )
+    decide = [step for step in _job_steps(block) if step.step_id == "decide"]
+    if not decide:
+        errors.append(f"changes job has no decide step to compute the {output} output")
+        return errors
+    lines = {line.strip() for line in decide[0].text.splitlines()}
+    for accepted in CHANGED_STACK_DECISION_LINES.get(output, ()):
+        if lines.isdisjoint(accepted):
+            errors.append(
+                f"changes decide step does not compute the {output} output: "
+                f"expected the line {accepted[0]!r}"
+            )
+    if '>> "$GITHUB_OUTPUT"' not in decide[0].text:
+        errors.append(
+            f'changes decide step never writes to "$GITHUB_OUTPUT", so the {output} '
+            "output is always empty"
+        )
+    return errors
+
+
+def _candidate_checkout_errors(job: str, steps: list[_Step]) -> list[str]:
+    errors: list[str] = []
+    checkout = next(
+        (
+            i
+            for i, step in enumerate(steps)
+            if (step.uses or "").startswith("actions/checkout@")
+        ),
+        None,
+    )
+    if checkout is None:
+        return [f"{job} job has no actions/checkout step"]
+    pinned = re.search(
+        rf"^          {re.escape(CANDIDATE_CHECKOUT_REF)}[ \t]*$",
+        steps[checkout].text,
+        flags=re.MULTILINE,
+    )
+    if not pinned:
+        errors.append(
+            f"{job} checkout does not check out the reviewed commit: expected "
+            f"'with: {CANDIDATE_CHECKOUT_REF}'"
+        )
+    if steps[checkout].condition is not None:
+        errors.append(f"{job} checkout must run ungated")
+    verify = [i for i, step in enumerate(steps) if step.label == CANDIDATE_VERIFY_STEP]
+    if not verify:
+        errors.append(
+            f"{job} job never verifies the candidate checkout: expected a step "
+            f"named {CANDIDATE_VERIFY_STEP!r} running {CANDIDATE_VERIFY_COMMAND!r}"
+        )
+        return errors
+    step = steps[verify[0]]
+    if verify[0] != checkout + 1:
+        errors.append(
+            f"{job} step {CANDIDATE_VERIFY_STEP!r} must directly follow the checkout"
+        )
+    if step.condition is not None:
+        errors.append(
+            f"{job} step {CANDIDATE_VERIFY_STEP!r} must run ungated, on the no-op "
+            f"path too; found 'if: {step.condition}'"
+        )
+    if step.run != CANDIDATE_VERIFY_COMMAND:
+        errors.append(
+            f"{job} step {CANDIDATE_VERIFY_STEP!r} must run "
+            f"{CANDIDATE_VERIFY_COMMAND!r}; found {step.run!r}"
+        )
+    return errors
 
 
 def _step_gate_errors(workflow_text: str) -> list[str]:
     errors: list[str] = []
     for job, output in STEP_GATED_LANES.items():
+        errors.extend(_changed_stack_output_errors(workflow_text, output))
         block = _job_block(workflow_text, job)
         if block is None:
             # Reported once, as a missing job, by the path-filter check.
@@ -691,14 +820,33 @@ def _step_gate_errors(workflow_text: str) -> list[str]:
                 f"{job} job must gate its steps on needs.changes.outputs.{output}: "
                 f"expected the job env to declare {binding}"
             )
-        for label, uses, condition in _job_steps(block):
-            if uses and uses.startswith("actions/checkout@"):
+        runner = re.compile(
+            r"^    runs-on: "
+            + re.escape(f"${{{{ needs.changes.outputs.{output} == 'true' && '")
+            + r"[A-Za-z0-9._-]+"
+            + re.escape("' || 'ubuntu-latest' }}")
+            + r"[ \t]*$",
+            flags=re.MULTILINE,
+        )
+        if not runner.search(block):
+            errors.append(
+                f"{job} job must choose its runner from needs.changes.outputs."
+                f"{output}: expected 'runs-on: ${{{{ needs.changes.outputs.{output} "
+                "== 'true' && '<macOS label>' || 'ubuntu-latest' }}'"
+            )
+        steps = _job_steps(block)
+        errors.extend(_candidate_checkout_errors(job, steps))
+        for step in steps:
+            if (step.uses or "").startswith("actions/checkout@"):
                 continue
-            if condition is None or "env.RUN == 'true'" not in condition:
+            if step.label == CANDIDATE_VERIFY_STEP:
+                continue
+            if step.condition not in STEP_GATES:
                 errors.append(
-                    f"{job} step {label!r} is not gated on env.RUN == 'true'; on a "
-                    "change that does not touch this lane it would run on the Linux "
-                    "no-op runner"
+                    f"{job} step {step.label!r} is not gated on env.RUN == 'true' "
+                    f"(found {step.condition!r}; allowed: "
+                    f"{', '.join(sorted(STEP_GATES))}); on a change that does not "
+                    "touch this lane it would run on the Linux no-op runner"
                 )
     return errors
 
