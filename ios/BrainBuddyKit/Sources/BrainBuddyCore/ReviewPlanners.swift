@@ -65,10 +65,12 @@ public enum StallReasonRecommendation {
         }
     }
 
-    /// The card's seven decisions for a task in Next, in fixed order; `extend`
-    /// only while the formulation was not extended yet.
+    /// The card's seven decisions for a task in Next, in the fixed order of
+    /// design M-03 (the web numbers them 1 – 7 in this order): Done first,
+    /// "Keep 7 more days" last and only while the formulation was not
+    /// extended yet.
     public static func cardDecisions(extensionUsed: Bool) -> [DecisionType] {
-        let all: [DecisionType] = [.reformulate, .firstStep, .waiting, .someday, .complete, .cancel, .extend]
+        let all: [DecisionType] = [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel, .extend]
         return extensionUsed ? all.filter { $0 != .extend } : all
     }
 }
@@ -108,6 +110,130 @@ public enum WhileAwayPresentation {
 
     public static func shouldShowAtAppOpen(lastShownDay: CalendarDay?, today: CalendarDay, hasUnseen: Bool) -> Bool {
         shouldShow(context: .appOpen, hasUnseen: hasUnseen, lastShownDay: lastShownDay, today: today)
+    }
+}
+
+/// One row of "While you were away" (M-09) and what it offers.
+public enum WhileAwayOutcome: Hashable, Sendable {
+    /// Still parked in Someday: "Return to Next" offered.
+    case waiting
+    case returned
+    /// Its project is archived: restore the project first, no button.
+    case archived(project: String)
+    /// Moved or returned elsewhere: no button.
+    case changedElsewhere
+    /// "Account linked: extension restarted", no button.
+    case notice
+
+    /// The row offers "Return to Next" and counts for "Return all".
+    public var offersReturn: Bool { self == .waiting }
+
+    /// A listed park's row before the person acts on it: only a park that
+    /// can return offers "Return to Next" (`GTDQueries.parkReturnProblem`).
+    public static func initial(for problem: ParkReturnProblem?) -> WhileAwayOutcome {
+        switch problem {
+        case nil: .waiting
+        case .changedElsewhere?: .changedElsewhere
+        case .projectArchived(let name)?: .archived(project: name)
+        }
+    }
+}
+
+/// A sheet the weekly review shows at app open (T092, T093), in this order.
+public enum ReviewStartupSheet: String, Hashable, Sendable, Identifiable {
+    /// M-26.
+    case explainer
+    /// M-09.
+    case whileAway
+
+    public var id: String { rawValue }
+}
+
+/// What the app shows at open, and when a capture asked for meanwhile (a
+/// `brainbuddy://capture` deep link, ⌘N, the capture bar) may show (design
+/// "Entry order", T092): the explainer (M-26) before anything else, a capture
+/// deep link that is not on screen yet included; then "While you were away"
+/// (M-09), which yields to a requested capture and follows it. Neither is
+/// presented over another sheet (one modal at a time), and a capture already
+/// on screen is never taken away.
+public enum ReviewStartupPlanner {
+    public struct Context: Hashable, Sendable {
+        public var reviewExposed: Bool
+        public var explainerNeeded: Bool
+        /// `WhileAwayPresentation.shouldShowAtAppOpen` for today.
+        public var whileAwayDue: Bool
+        /// A capture was asked for (shown or waiting).
+        public var captureRequested: Bool
+        /// Something is already presented (a sheet, a cover, a dialog).
+        public var screenBusy: Bool
+
+        public init(reviewExposed: Bool, explainerNeeded: Bool, whileAwayDue: Bool, captureRequested: Bool, screenBusy: Bool) {
+            self.reviewExposed = reviewExposed
+            self.explainerNeeded = explainerNeeded
+            self.whileAwayDue = whileAwayDue
+            self.captureRequested = captureRequested
+            self.screenBusy = screenBusy
+        }
+    }
+
+    /// The startup sheet to present now, or nil.
+    public static func sheetToPresent(_ context: Context) -> ReviewStartupSheet? {
+        guard context.reviewExposed, !context.screenBusy else { return nil }
+        if context.explainerNeeded { return .explainer }
+        if context.whileAwayDue, !context.captureRequested { return .whileAway }
+        return nil
+    }
+
+    /// The startup sheet that may stay up, or nil to take it away at once.
+    /// Taking a sheet away records nothing: the explainer is acknowledged
+    /// only by "Got it" or Close, and M-09 only by Continue.
+    ///
+    /// - The review stops being exposed (the flag turned off,
+    ///   `weekly_review_disabled`): either sheet goes, so nothing of the
+    ///   review stays actionable (ios/AGENTS.md "a non-interactive off
+    ///   state", FR-042).
+    /// - The explainer stays only while it is needed (FR-051): an
+    ///   activation another device recorded, arriving by sync, takes it away.
+    /// - "While you were away" not yet on screen goes once it has nothing to
+    ///   show (`whileAwayHasContent`: unseen parks or linking notices). Once
+    ///   on screen it lists the parks it appeared with and stays until
+    ///   Continue or Close, so returning its last park, or a sync marking its
+    ///   parks seen, does not pull it away mid-view.
+    public static func sheetToKeep(
+        _ sheet: ReviewStartupSheet?, reviewExposed: Bool, explainerNeeded: Bool, whileAwayOnScreen: Bool,
+        whileAwayHasContent: Bool
+    ) -> ReviewStartupSheet? {
+        guard let sheet, reviewExposed else { return nil }
+        switch sheet {
+        case .explainer: return explainerNeeded ? sheet : nil
+        case .whileAway: return whileAwayOnScreen || whileAwayHasContent ? sheet : nil
+        }
+    }
+
+    /// Whether a requested capture may be presented: one on screen stays;
+    /// otherwise not while a startup sheet is up or the explainer is due.
+    public static func captureMayPresent(
+        startupSheet: ReviewStartupSheet?, captureOnScreen: Bool, reviewExposed: Bool, explainerNeeded: Bool
+    ) -> Bool {
+        if captureOnScreen { return true }
+        return startupSheet == nil && !(reviewExposed && explainerNeeded)
+    }
+}
+
+/// M-01 "threshold just changed" (FR-039, design M-01 / M-23): after this
+/// device changed the threshold, one dismissible note on Next until it is
+/// dismissed for that change or the date before which nothing moves to
+/// Someday (`ownerParkFloorAt`) has passed. A dismissal is keyed by the
+/// change instant (`thresholdChangedAt`), which sync keeps while the
+/// server's threshold is the one this device set.
+public enum ThresholdChangeNote {
+    /// The change the note is about, or nil when no note shows.
+    /// `dismissedChange` is the dismissed change's `timeIntervalSince1970`.
+    public static func change(settings: ReviewSettings, dismissedChange: TimeInterval?, now: Date) -> Date? {
+        guard let changedAt = settings.thresholdChangedAt, changedAt.timeIntervalSince1970 != dismissedChange,
+            let floor = settings.ownerParkFloorAt, floor > now
+        else { return nil }
+        return changedAt
     }
 }
 

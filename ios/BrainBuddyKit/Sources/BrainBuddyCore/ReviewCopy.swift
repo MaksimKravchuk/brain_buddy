@@ -54,7 +54,24 @@ public enum ReviewCopy {
         "Its project \"\(project)\" is archived, so restore the project before moving this back to Next actions."
     }
 
+    /// A park whose clock this device does not hold (pulled from the server):
+    /// the facts without a guessed number of days.
+    public static func thisWordingParked(on day: String, at time: String) -> String {
+        "Moved here on \(day) at \(time) without a decision. Project, Tags, notes and due date were kept."
+    }
+
     public static func ageInDays(_ days: Int) -> String { days == 1 ? "1 day" : "\(days) days" }
+
+    /// "15 days in Next": whole days since the wording started, never negative.
+    public static func daysInNext(since start: Date, now: Date) -> String {
+        let days = max(0, Int((now.timeIntervalSince(start) / FormulationRule.day).rounded(.down)))
+        return "\(ageInDays(days)) in Next"
+    }
+
+    public static let thisWordingHeader = "This wording"
+    public static let markerParked = "Parked automatically"
+    public static let cannotExtendAgain = "This wording can't be extended again."
+    public static let decide = "Decide"
 
     // MARK: Decision card (M-03, M-04)
 
@@ -75,6 +92,99 @@ public enum ReviewCopy {
     public static let waitingPrompt = "Who or what are you waiting for?"
     public static let extendPrompt = "Why does this wording still fit?"
     public static let extendNeedsReason = "Add a reason to continue"
+
+    public static let cardReasonsHeading = "What got in the way? · optional"
+    public static let cardDecisionsHeading = "What now?"
+    public static let decideAgain = "Decide again"
+    public static let decideAgainHint = "Decide again if it still needs it."
+    public static let noLongerAsks = "This task no longer asks for a decision. You can close the card."
+    public static let staleWas = "Was"
+    public static let staleNow = "Now"
+    public static let noProject = "no project"
+
+    /// "kept 7 more days on Mon 5 Oct", in the card's meta line.
+    public static func keptMoreDays(on day: String) -> String { "kept 7 more days on \(day)" }
+
+    /// The stall reasons in the order of design M-03.
+    public static let stallReasonOrder: [StallReason] = [
+        .unclear, .tooBig, .missingInfo, .waitingOnSomeone, .noLongerMatters, .noEnergy,
+    ]
+
+    public static func stallReasonLabel(_ reason: StallReason) -> String {
+        switch reason {
+        case .unclear: "Unclear"
+        case .tooBig: "Too big"
+        case .missingInfo: "Missing information"
+        case .waitingOnSomeone: "Waiting on someone"
+        case .noLongerMatters: "No longer matters"
+        case .noEnergy: "Unpleasant / no energy"
+        }
+    }
+
+    /// A decision as the card (M-03) lists it.
+    public static func cardTitle(_ decision: DecisionType) -> String {
+        switch decision {
+        case .complete: "Done"
+        case .reformulate: "Reformulate"
+        case .firstStep: "Find a first step"
+        case .waiting: "Move to Waiting for…"
+        case .someday: "Release to Someday"
+        case .cancel: "Cancel task"
+        case .extend: "Keep 7 more days"
+        case .keepWaiting, .followUp, .returnToNext, .keepSomeday: name(of: decision)
+        }
+    }
+
+    public static func cardSubtitle(_ decision: DecisionType) -> String? {
+        switch decision {
+        case .reformulate: "Say what you'll actually do"
+        case .firstStep: "Something you could start in 10 minutes"
+        case .someday: "Not now. You can bring it back any time"
+        case .cancel: "Stays findable under Cancelled"
+        case .extend: "Once for this wording, with a reason"
+        case .complete, .waiting, .keepWaiting, .followUp, .returnToNext, .keepSomeday: nil
+        }
+    }
+
+    // MARK: Decision forms (M-04)
+
+    public static func formTitle(_ decision: DecisionType) -> String {
+        switch decision {
+        case .firstStep: "First step"
+        case .waiting: "Waiting for"
+        case .reformulate, .extend, .complete, .someday, .cancel, .keepWaiting, .followUp, .returnToNext, .keepSomeday:
+            name(of: decision)
+        }
+    }
+
+    public static func formPlaceholder(_ decision: DecisionType) -> String {
+        switch decision {
+        case .reformulate: "New wording"
+        case .firstStep: "Something you could start in 10 minutes"
+        case .waiting: "A person, an event or a reply"
+        case .extend: "One line is enough"
+        case .complete, .someday, .cancel, .keepWaiting, .followUp, .returnToNext, .keepSomeday: ""
+        }
+    }
+
+    public static let reformulateFooter = "Name a visible action. " + reformulateHint
+    public static let waitingFooter = "It moves to Waiting for. The review checks in on it after 7 days."
+    public static let saveNewWording = "Save new wording"
+    public static let saveFirstStep = "Save first step"
+    public static let moveToWaitingFor = "Move to Waiting for"
+    public static let clearDraft = "Clear"
+
+    public static func firstStepFooter(oldTitle: String) -> String {
+        "The old wording stays in this task's notes as \"" + was(oldTitle) + "\"."
+    }
+
+    public static func extendFooter(asksAgain: String, moves: String) -> String {
+        "Asks again on \(asksAgain). If still undecided, it moves to Someday on \(moves). "
+            + "You can do this once for this wording."
+    }
+
+    /// "reason: too big", after the title in the first-step form.
+    public static func reasonMeta(_ reason: StallReason) -> String { "reason: \(stallReasonLabel(reason).lowercased())" }
 
     public static func was(_ title: String) -> String { "Was: \(title)" }
     public static func keepUntil(_ day: String) -> String { "Keep until \(day)" }
@@ -164,7 +274,28 @@ public enum ReviewCopy {
     public static let returnToNext = "Return to Next"
     public static let returnedOne = "Back in Next with a fresh start"
 
-    public static func returnAll(_ count: Int) -> String { "Return all \(count)" }
+    /// "Return all 4 to Next"; once a row was returned, "Return the other 3 to Next".
+    public static func returnAll(_ count: Int, othersReturned: Bool = false) -> String {
+        othersReturned ? "Return the other \(count) to Next" : "Return all \(count) to Next"
+    }
+
+    /// The lead of a partial-failure summary.
+    public static func backInNext(_ count: Int) -> String {
+        count == 1 ? "1 task is back in Next." : "\(count) tasks are back in Next."
+    }
+
+    public static let restoreProjectFirst = "Restore the project first to bring it back."
+    public static let offlineWhileAway = "Offline. Changes are saved on this iPhone and sync later."
+    public static let rowReturned = "Returned"
+    public static let rowProjectArchived = "Project archived"
+    public static let rowChangedElsewhere = "Changed elsewhere"
+
+    public static func returnUnavailable(project: String) -> String { "Return unavailable: project \(project) is archived" }
+    public static func returnTask(title: String) -> String { "Return \(title) to Next" }
+    /// "Old flat (archived)".
+    public static func archivedPlace(_ project: String) -> String { "\(project) (archived)" }
+    /// "Parked Thu 8 Oct · Home".
+    public static func parkedRow(day: String, place: String) -> String { "Parked \(day) · \(place)" }
     public static func allReturned(_ count: Int) -> String { "All \(count) are back in Next with a fresh start." }
     public static let continueLabel = "Continue"
     public static let moreParksFollow = "More will follow after you continue."
@@ -331,11 +462,24 @@ public enum ReviewCopy {
             nextReview(day: "Fri 16 Oct", time: "16:00"), clearStartQuestion, clearStartThanks, nothingNeededChanging,
             notificationTitle, notificationBody, widgetChip(3), widgetChipVoiceOver(1), widgetChipVoiceOver(3),
         ]
+        entries += [
+            thisWordingParked(on: "Thu 8 Oct", at: "09:14"), daysInNext(since: .distantPast, now: .distantPast),
+            thisWordingHeader, markerParked, cannotExtendAgain, decide, cardReasonsHeading, cardDecisionsHeading,
+            decideAgain, decideAgainHint, noLongerAsks, staleWas, staleNow, noProject, keptMoreDays(on: "Mon 5 Oct"),
+            reformulateFooter, waitingFooter, saveNewWording, saveFirstStep, moveToWaitingFor, clearDraft,
+            firstStepFooter(oldTitle: title), extendFooter(asksAgain: "Fri 16 Oct", moves: "Fri 23 Oct"),
+            returnAll(3, othersReturned: true), backInNext(1), backInNext(3), restoreProjectFirst, offlineWhileAway,
+            rowReturned, rowProjectArchived, rowChangedElsewhere, returnUnavailable(project: "Old flat"),
+            returnTask(title: title), archivedPlace("Old flat"), parkedRow(day: "Thu 8 Oct", place: "Home"),
+        ]
+        entries += stallReasonOrder.map(stallReasonLabel) + stallReasonOrder.map(reasonMeta)
         for decision in DecisionType.allCases {
             entries += [
                 name(of: decision), decisionToast(decision, title: title), decisionAnnouncement(decision),
-                decisionNotSaved(decision, title: title, list: .next),
+                decisionNotSaved(decision, title: title, list: .next), cardTitle(decision), formTitle(decision),
             ]
+            entries += [cardSubtitle(decision)].compactMap { $0 }
+            if !formPlaceholder(decision).isEmpty { entries.append(formPlaceholder(decision)) }
         }
         entries += SessionCounter.allCases.map(counterLabel)
         entries += FormulationClass.allCases.compactMap { MarkerStyle.for($0).text }

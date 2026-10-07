@@ -13,12 +13,19 @@ import SwiftUI
 /// of metadata. Its actions (Complete, Move, Cancel task, Reopen into…) come
 /// from the `taskActions(_:)` modifier the lists apply, so they are offered
 /// once and reopening always asks for the list.
+///
+/// Weekly review (spec 020, M-01): while the review is exposed, a Next task
+/// that asks for a decision or moves to Someday tomorrow carries that marker
+/// (Core's `MarkerStyle`; never "Ageing" in a list), re-classified every
+/// minute. Tapping it opens the decision card where the screen offers one
+/// (`openDecisionCard`); VoiceOver gets the same as a named action.
 struct TaskRow: View {
     let task: TaskRecord
     var showsProject: Bool = true
     var showsList: Bool = false
 
     @Environment(Workspace.self) private var workspace
+    @Environment(\.openDecisionCard) private var openDecisionCard
     /// Read so due chips and "since" dates redraw on a new day.
     @Environment(\.dayChangeCount) private var dayChangeCount
     /// How far the circle's centre sits above the title's first baseline
@@ -33,11 +40,28 @@ struct TaskRow: View {
 
     var body: some View {
         let _ = dayChangeCount
+        Group {
+            if task.state == .next && workspace.reviewExposed {
+                // Markers follow the clock without waiting for another change.
+                TimelineView(.everyMinute) { _ in
+                    row
+                }
+            } else {
+                row
+            }
+        }
+        .contentShape(.rect)
+        .listRowBackground(BBColor.surfaceRaised)
+    }
+
+    private var row: some View {
+        let marker = ReviewRowMarker.style(for: task, in: workspace)
         let details = TaskRowDetails(
-            task: task, workspace: workspace, showsProject: showsProject, showsList: showsList
+            task: task, workspace: workspace, showsProject: showsProject, showsList: showsList, marker: marker
         )
         let lift = circleLift
-        HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s2) {
+        let opensCard = marker?.opensCard == true ? openDecisionCard : nil
+        return HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s2) {
             CompletionControl(task: task)
                 .alignmentGuide(.firstTextBaseline) { dimensions in
                     dimensions[VerticalAlignment.center] + lift
@@ -45,16 +69,69 @@ struct TaskRow: View {
             VStack(alignment: .leading, spacing: BBSpacing.s1) {
                 TaskRowTitle(task: task)
                 if details.hasMetadata {
-                    TaskRowMetadata(details: details)
+                    TaskRowMetadata(details: details, openDecisionCard: opensCard)
                 }
             }
             .padding(.vertical, BBSpacing.s2)
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
-        .listRowBackground(BBColor.surfaceRaised)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(details.accessibilityLabel)
+        .accessibilityActions {
+            if let marker, let opensCard {
+                Button(ReviewRowMarker.actionName(marker, title: task.title)) {
+                    opensCard.run(task.id)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Review marker (spec 020, M-01)
+
+@MainActor
+enum ReviewRowMarker {
+    /// The list marker for `task`, or nil: only while the review is exposed,
+    /// only in Next, and only the states lists show (asks, moves tomorrow).
+    /// Before activation Core classifies nothing, so nothing shows (FR-051).
+    static func style(for task: TaskRecord, in workspace: Workspace) -> MarkerStyle? {
+        guard workspace.reviewExposed, task.state == .next, let kind = workspace.formulationClass(of: task.id) else {
+            return nil
+        }
+        let style = MarkerStyle.for(kind)
+        return style.showsInLists ? style : nil
+    }
+
+    /// "Asks for a decision. Open decision for <title>" (design accessible names).
+    static func actionName(_ style: MarkerStyle, title: String) -> String {
+        "\(style.text ?? ReviewCopy.markerAsks). Open decision for \(title)"
+    }
+}
+
+/// The marker as a button with a 44 × 44 pt hit area around the chip, or the
+/// chip alone where no decision card can be opened.
+private struct ReviewMarkerButton: View {
+    let style: MarkerStyle
+    let taskID: TaskID
+    let openDecisionCard: OpenDecisionCardAction?
+
+    var body: some View {
+        if let chip = ReviewMarkerChip(style) {
+            if let openDecisionCard {
+                Button {
+                    openDecisionCard.run(taskID)
+                } label: {
+                    chip
+                }
+                .buttonStyle(.borderless)
+                // The chip is about 22 pt tall; its hit area reaches 44 × 44 pt
+                // without making the row taller (design "Tap targets").
+                .contentShape(.interaction, Rectangle().inset(by: -11))
+            } else {
+                chip
+            }
+        }
     }
 }
 
@@ -85,9 +162,13 @@ private struct TaskRowTitle: View {
 
 private struct TaskRowMetadata: View {
     let details: TaskRowDetails
+    let openDecisionCard: OpenDecisionCardAction?
 
     var body: some View {
         BBFlowLayout(spacing: 6, lineSpacing: BBSpacing.s1) {
+            if let marker = details.marker {
+                ReviewMarkerButton(style: marker, taskID: details.task.id, openDecisionCard: openDecisionCard)
+            }
             if let project = details.project {
                 ProjectLabel(name: project.name, color: project.color)
             }
@@ -125,9 +206,11 @@ private struct TaskRowDetails {
     let textParts: [String]
     /// "2/5" when the task has subtasks.
     let subtaskProgress: String?
+    /// The weekly review's list marker (M-01), if any.
+    let marker: MarkerStyle?
     private let spokenParts: [String]
 
-    init(task: TaskRecord, workspace: Workspace, showsProject: Bool, showsList: Bool) {
+    init(task: TaskRecord, workspace: Workspace, showsProject: Bool, showsList: Bool, marker: MarkerStyle? = nil) {
         let today = workspace.today
         let project = showsProject ? task.projectID.flatMap { workspace.project($0) } : nil
         let tagNames = task.tagIDs.compactMap { workspace.tag($0) }.filter { $0.state == .active }.map(\.name)
@@ -142,8 +225,10 @@ private struct TaskRowDetails {
         self.tagNames = tagNames
         self.textParts = [listName].compactMap { $0 } + waiting.visible
         self.subtaskProgress = counted.isEmpty ? nil : "\(done)/\(counted.count)"
+        self.marker = marker
 
         var spoken: [String] = [task.title]
+        if let markerText = marker?.text { spoken.append(markerText) }
         if task.state.isTerminal { spoken.append(Self.listName(for: task.state)) }
         if let listName { spoken.append(listName) }
         if let project { spoken.append("Project \(project.name)") }
@@ -166,7 +251,7 @@ private struct TaskRowDetails {
     }
 
     var hasMetadata: Bool {
-        project != nil || !textParts.isEmpty || subtaskProgress != nil || task.dueDate != nil
+        marker != nil || project != nil || !textParts.isEmpty || subtaskProgress != nil || task.dueDate != nil
             || task.priority != .none || !tagNames.isEmpty
     }
 

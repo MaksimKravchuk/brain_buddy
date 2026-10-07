@@ -75,8 +75,18 @@ extension GTDReducer {
     static func decideTask(
         _ command: GTDCommand.DecideTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        try requireReviewExposed(state, mode: mode)
         if state.review.decisions[command.decisionID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         guard var task = state.tasks[command.taskID] else { throw .taskNotFound }
+        // FR-011: a person's decision on a task that changed in any way since
+        // the card showed it (`ShownTask`: notes, dates, project, tags, a cosmetic
+        // title edit, subtasks, comments) is stale. Replay leaves this
+        // to the server's `expected_revision` and yield rule (http §3).
+        if mode == .interactive, let shown = command.expectedTask,
+            !shown.matches(task, localChildEdits: state.localChildEdits.map { $0[task.id] ?? 0 })
+        {
+            throw .formulationChanged
+        }
         let settings = clockSettings(state)
         var yielded = false
         /// The clock before the park is not on this device (another device or
@@ -323,6 +333,7 @@ extension GTDReducer {
     static func bulkRelease(
         _ command: GTDCommand.BulkRelease, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        try requireReviewExposed(state, mode: mode)
         if state.review.bulkReleases[command.bulkID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         guard command.taskIDs.count <= ReviewLimits.bulkReleaseItems else { throw .tooManyItems }
         let settings = clockSettings(state)
@@ -424,9 +435,28 @@ extension GTDReducer {
 
     // MARK: - Review commands
 
+    /// The non-interactive off state (FR-042, ios/AGENTS.md): while the
+    /// review is not exposed on this device (`ReviewState.isExposed`) a
+    /// person's review action is refused. It covers what only the review's
+    /// own surfaces offer (a decision, starting a review, a bulk release,
+    /// "While you were away" Continue, the explainer). Undo of the person's
+    /// own action, consent revocation, settings (also the device zone hook),
+    /// a running review's progress and finish, and device auto-parks are not
+    /// review entries and stay as they are. Replay is never refused: queued
+    /// commands follow the server (FR-040).
+    static func requireReviewExposed(_ state: GTDState, mode: ApplyMode) throws(GTDValidationError) {
+        if mode == .interactive, !state.review.isExposed { throw .reviewUnavailable }
+    }
+
     static func review(
         _ command: ReviewCommand, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        switch command {
+        case .acknowledgeExplainer, .acknowledgeParks, .startSession:
+            try requireReviewExposed(state, mode: mode)
+        case .updateSettings, .progressSession, .finishSession, .grantNavigatorConsent, .revokeNavigatorConsent:
+            break
+        }
         switch command {
         case .acknowledgeExplainer(let timeZone):
             // First acknowledgement wins; a duplicate is harmless (FR-051).
