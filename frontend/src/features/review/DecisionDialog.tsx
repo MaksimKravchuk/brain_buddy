@@ -333,6 +333,8 @@ export function DecisionDialog({
   };
 
   const send = async (attempt: Attempt) => {
+    // The account that sent the decision: a stale answer's refetch is published to its caches only.
+    const scope = captureReviewScope();
     lastAttempt.current = attempt;
     setPending(attempt.type);
     setFailure(null);
@@ -354,6 +356,13 @@ export function DecisionDialog({
       if (kind === "stale") {
         const was = current as TaskResponse;
         const fresh = await apiClient.getTask(task.id).catch(() => null);
+        // The lists and detail must not keep the obsolete version, or closing
+        // would let the person reopen a card for a wording that is gone.
+        if (fresh) {
+          applyReviewTask(queryClient, fresh, scope);
+        } else {
+          refreshAfterReviewWrite(queryClient, scope);
+        }
         setStale({ was, now: fresh });
         setCurrent(fresh);
         setView(null);

@@ -559,6 +559,40 @@ describe("020-FR-011 decision dialog: refusals and failures", () => {
     );
   });
 
+  it("020-FR-011 a stale answer puts the current task into the list and detail caches, so closing cannot reopen the obsolete card", async () => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    const now = asksTask({ title: "Get 3 quotes for the bathroom", revision: 9 }, { id: "form_b" });
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"));
+    getTask.mockResolvedValueOnce(now);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const list = [...taskKeys.lists(), { state: "next" }];
+    client.setQueryData(taskKeys.detail("task-1"), task);
+    client.setQueryData(list, { pages: [{ items: [task] }], pageParams: [null] });
+    renderDialog(task, { client });
+
+    await user.click(decisionButton(/^Release to Someday/));
+    await screen.findByRole("heading", { name: "Task changed elsewhere" });
+
+    expect(client.getQueryData(taskKeys.detail("task-1"))).toEqual(now);
+    expect(client.getQueryData(list)).toEqual({ pages: [{ items: [now] }], pageParams: [null] });
+  });
+
+  it("020-FR-011 a stale answer whose current task cannot be read marks the task caches for a refetch", async () => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "task-1" } }, "corr_stale"));
+    getTask.mockRejectedValueOnce(new Error("offline"));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(taskKeys.detail("task-1"), task);
+    renderDialog(task, { client });
+
+    await user.click(decisionButton(/^Release to Someday/));
+    await screen.findByRole("heading", { name: "Task changed elsewhere" });
+
+    expect(client.getQueryState(taskKeys.detail("task-1"))?.isInvalidated).toBe(true);
+  });
+
   it("020-FR-011 after a stale answer the heading and the dialog's name show the current title", async () => {
     const user = userEvent.setup();
     const now = asksTask({ title: "Get 3 quotes for the bathroom", revision: 9 }, { id: "form_b" });
