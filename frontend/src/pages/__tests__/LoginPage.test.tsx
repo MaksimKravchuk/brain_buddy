@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/client";
 import { authApi } from "../../api/auth";
+import { modernAuthApi } from "../../api/modernAuth";
 import { useAuthStore } from "../../stores/authStore";
 import LoginPage from "../LoginPage";
 
@@ -21,7 +22,8 @@ function renderLogin() {
 
 describe("LoginPage", () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: null, status: "anon" });
+    useAuthStore.setState({ user: null, status: "anon", deletionScheduledFor: null });
+    vi.spyOn(modernAuthApi, "methods").mockResolvedValue({ password: true, email: true, google: false, apple: false, web_account_origin: null });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -33,6 +35,7 @@ describe("LoginPage", () => {
 
     const user = userEvent.setup();
     await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Use your password" }));
       await user.type(screen.getByLabelText(/email/i), "a@b.c");
       await user.type(screen.getByLabelText(/password/i), "very-long-password");
       await user.click(screen.getByRole("button", { name: /sign in/i }));
@@ -52,6 +55,7 @@ describe("LoginPage", () => {
 
     const user = userEvent.setup();
     await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Use your password" }));
       await user.type(screen.getByLabelText(/email/i), "a@b.c");
       await user.type(screen.getByLabelText(/password/i), "wrong-password");
       await user.click(screen.getByRole("button", { name: /sign in/i }));
@@ -70,13 +74,14 @@ describe("LoginPage", () => {
 
     const user = userEvent.setup();
     await act(async () => {
+      await user.click(screen.getByRole("button", { name: "Use your password" }));
       await user.type(screen.getByLabelText(/email/i), "a@b.c");
       await user.type(screen.getByLabelText(/password/i), "password-here");
       await user.click(screen.getByRole("button", { name: /sign in/i }));
     });
 
     await waitFor(() =>
-      expect(screen.getByText(/too many login attempts/i)).toBeInTheDocument()
+      expect(screen.getByText(/too many attempts/i)).toBeInTheDocument()
     );
   });
 

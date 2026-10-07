@@ -366,13 +366,27 @@ jobs:
             exit 1
           fi
 
+          # Match the actually running backend to the captured image, and
+          # record its ability to read Identity's storage epoch. The probe
+          # reads coarse metadata only and imports no application settings.
+          python3 scripts/auth_migration_guard.py capture \
+            --app "${backend_app}" --image "${previous_backend_image}" \
+            --output "${RUNNER_TEMP}/brainbuddy-auth-rollback.json"
+
           {
             echo "PREVIOUS_BACKEND_IMAGE=${previous_backend_image}"
             echo "PREVIOUS_FRONTEND_IMAGE=${previous_frontend_image}"
             echo "BACKEND_APP=${backend_app}"
             echo "FRONTEND_APP=${frontend_app}"
+            echo "AUTH_MIGRATION_CAPTURE=${RUNNER_TEMP}/brainbuddy-auth-rollback.json"
           } >> "${GITHUB_ENV}"
           echo "Captured rollback images for ${backend_app} and ${frontend_app}."
+
+      - name: Verify Identity compatibility before deploy mutation
+        if: steps.classify.outputs.needed == 'true'
+        run: |
+          python3 scripts/auth_migration_guard.py forward \
+            --app "${BACKEND_APP}" --capture "${AUTH_MIGRATION_CAPTURE}"
 
       # Stage (no immediate restart) the smoke identity, the durable operator
       # allow-list, and the feature-flag rollout so the deploy release below
@@ -629,6 +643,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "Post-deploy verification failed; rolling back to captured images." >&2
+          # Re-read the authoritative volume: an import may have committed
+          # after capture. A JSON-only/unverified image must never resurrect
+          # old authority or discard later SQLite credential changes. Unknown
+          # probe state also stops here, before flags or either image change.
+          python3 scripts/auth_migration_guard.py restore \
+            --app "${BACKEND_APP}" --capture "${AUTH_MIGRATION_CAPTURE}"
           if [ -z "${PREVIOUS_FEATURE_FLAGS:-}" ]; then
             echo "No previous feature-flag rollout was captured, so restoring the old" >&2
             echo "image would boot it under this release's pending flags — the crash-loop" >&2

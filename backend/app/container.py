@@ -47,6 +47,7 @@ from app.repositories import (
     ValidationRepository,
     VersionRepository,
 )
+from app.repositories.auth_store import AuthStore
 from app.repositories.feature_flag import FlagMode
 from app.services import (
     AccountService,
@@ -60,7 +61,13 @@ from app.services import (
     ValidationService,
     VersionService,
 )
+from app.services.auth_apple_lifecycle import AuthAppleLifecycle
+from app.services.auth_mail_service import AuthMailService
+from app.services.auth_migration import AuthMigration
+from app.services.auth_provider_service import AuthProviderService
+from app.services.auth_secret_box import AuthSecretBox
 from app.services.auth_service import ACCOUNT_DELETION_GRACE
+from app.services.modern_auth_service import ModernAuthService
 from app.utils.time import utcnow
 from app.workflows.voice_brain_dump.adapters import (
     OpenAiAccurateStt,
@@ -112,6 +119,8 @@ class Container:
     agent_relay_service: AgentRelayService
     agent_observer: AgentObserver
     task_title_autocomplete_service: TaskTitleAutocompleteService
+    auth_migration: AuthMigration
+    modern_auth_service: ModernAuthService
     review_service: ReviewService
     review_flow_service: ReviewFlowService
 
@@ -308,13 +317,17 @@ def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
 
 def build_container(config: AppConfig) -> Container:
     data_root = config.data_dir
+    auth_migration = AuthMigration(data_root, None)
+    auth_migration.resume_cleanup()
+    auth_migration.cleanup_expired_backup()
     tree_repo = TreeRepository(data_root)
     index_repo = IndexRepository(data_root)
     version_repo = VersionRepository(data_root)
     validation_repo = ValidationRepository(data_root)
     provider_repo = ProviderRepository(data_root)
-    user_repo = UserRepository(data_root)
-    session_repo = SessionRepository(data_root)
+    auth_store = AuthStore(data_root)
+    user_repo = UserRepository(data_root, auth_store)
+    session_repo = SessionRepository(data_root, auth_store)
     invite_repo = InviteRepository(data_root)
     task_repo = TaskRepository(data_root)
     voice_operation_repo = OperationRepository(data_root)
@@ -562,11 +575,50 @@ def build_container(config: AppConfig) -> Container:
         feature_flag_repo=feature_flag_repo,
         crt_command_repo=crt_command_repo,
         auth_service=auth_service,
+        auth_migration=auth_migration,
         reserved_emails=config.admin.operator_emails,
         deletion_grace=deletion_grace,
     )
+    admin_service.available_auth_providers = frozenset(
+        provider
+        for provider, available in (
+            ("google", config.modern_auth.google_available),
+            (
+                "apple",
+                config.modern_auth.apple_web_available
+                or config.modern_auth.apple_native_available,
+            ),
+        )
+        if available
+    )
     admin_service.set_mutation_services(
         auth_service=auth_service, account_service=account_service
+    )
+
+    secret_box = (
+        AuthSecretBox.from_settings(config.modern_auth)
+        if config.modern_auth.crypto_ready
+        else None
+    )
+    provider_gateway = AuthProviderService(
+        config.modern_auth, api_prefix=config.api_prefix
+    )
+    apple_lifecycle = AuthAppleLifecycle(
+        auth_store, secret_box, provider_gateway, deletion_grace=deletion_grace
+    )
+    account_service.apple_lifecycle = apple_lifecycle
+    modern_auth_service = ModernAuthService(
+        auth_service=auth_service,
+        account_service=account_service,
+        settings=config.modern_auth,
+        apple_lifecycle=apple_lifecycle,
+        secret_box=secret_box,
+        provider_service=provider_gateway,
+        mail_service=(
+            AuthMailService(auth_store, secret_box, config.modern_auth)
+            if secret_box and config.modern_auth.email_available
+            else None
+        ),
     )
 
     return Container(
@@ -598,6 +650,8 @@ def build_container(config: AppConfig) -> Container:
         agent_relay_service=agent_relay_service,
         agent_observer=agent_observer,
         task_title_autocomplete_service=task_title_autocomplete_service,
+        auth_migration=auth_migration,
+        modern_auth_service=modern_auth_service,
         review_service=review_service,
         review_flow_service=review_flow_service,
     )

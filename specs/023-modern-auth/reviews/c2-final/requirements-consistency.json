@@ -1,0 +1,33 @@
+{
+  "findings": [],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    ".specify/workflows/runs/modern-auth-20261006-c2/requests/requirements-consistency.txt",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/022-modern-auth/spec.md",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/design.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/native-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md"
+  ],
+  "role": "requirements-consistency",
+  "summary": "Bounded correction verification for artifact digest 270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd confirms the recorded interrupted-link finding is resolved: D-06/M-06 distinguishes cancellation before submission from uncertain completion, and quickstart requires same-account metadata refresh without proof replay after a committed link's response is lost. Prior verified corrections remain consistent. No remaining findings or product decisions; this is planning review, not implementation or production acceptance.",
+  "verdict": "pass"
+}

@@ -1,0 +1,1241 @@
+{
+  "sourceSha256": "3effd3cab53f1cc60223657956b578972e0e7c3de3ac5f24a347d897bf6fcd91",
+  "checks": [
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "signin",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "code",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "recovery",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "security",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "reauth",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "collision",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "default",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "loading",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "error",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "offline",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "partial",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "unverified",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "completion-unknown",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "reset-success",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "unlink-confirmation",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 1440,
+      "screen": "settings",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 1440,
+      "viewWidth": 1440,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "signin",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "code",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "recovery",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "security",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "reauth",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "collision",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "default",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "loading",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "error",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "offline",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "partial",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "unverified",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "completion-unknown",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "reset-success",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "unlink-confirmation",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "apple-cleanup-pending",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    },
+    {
+      "width": 390,
+      "screen": "settings",
+      "state": "apple-cleanup-unconfirmed",
+      "documentWidth": 390,
+      "viewWidth": 390,
+      "targetsUnder44": []
+    }
+  ],
+  "violations": [],
+  "pageErrors": [],
+  "previewFlow": "email-request → code → account; email-change → recent confirmation → new-address code",
+  "productionEvidence": false
+}

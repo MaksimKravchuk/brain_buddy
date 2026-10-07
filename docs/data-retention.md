@@ -10,8 +10,16 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 
 | Data | Where | Retention | Enforced by |
 |---|---|---|---|
-| Account record (email, display name, Argon2id password hash) | `data/users/<user_id>.json` + `users/_by_email.json` index | Life of account + 14-day deletion grace | Account purge (below) |
-| Sessions | `data/sessions/<sha256>.json` | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
+| Account record (email, display name, Argon2id password hash, mailbox verification) | `data/auth.sqlite3` for new or explicitly migrated roots; legacy user JSON/index only before the stopped-writer migration | Life of account + 14-day deletion grace | Account purge (below) |
+| Sessions (opaque token hashes, never the raw cookie) | `data/auth.sqlite3`; legacy session JSON only before migration | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
+| Connected Google/Apple identities (stable provider identifier, minimal email/profile metadata and connection state) | Identity-owned `auth.sqlite3` tables | Active connection lifetime. Explicit Remove ends its authority and erases profile metadata; Google mapping is deleted immediately. Apple retains only minimal disconnected linkage while bounded revocation settles, at most 24 hours and never beyond account purge | Explicit unlink / Apple cleanup / metadata expiry sweep / account purge (spec 023) |
+| Sign-in attempts, email challenges and pending mailbox addresses | Identity-owned `auth.sqlite3` tables | At most 10 minutes; consumed records cannot grant authority | Single-use consume / expiry sweep / owner invalidation and purge |
+| Recent-confirmation, password-reset and callback proofs | Identity-owned `auth.sqlite3` tables | Recent confirmation 5 minutes; reset 10 minutes; handoff 60 seconds; single use and bound to owner/session/action or client proof | Atomic consume / expiry sweep / owner invalidation and purge |
+| Sealed email-delivery payload (recipient and code) | Identity-owned `auth.sqlite3` mail jobs, encrypted at rest | Pending only within the challenge's 10-minute lifetime; erased after confirmed delivery, terminal failure or expiry | Delivery worker / metadata expiry sweep |
+| Abuse-prevention fingerprints (keyed digests of address/source, counters; no raw address in the budget table) | Identity-owned `auth.sqlite3` budgets | At most 24 hours | Metadata expiry sweep |
+| Protected Apple revocation credential and cleanup linkage | Identity-owned `auth.sqlite3`, encrypted at rest | Minimum revocation credential while connected; after unlink/deletion, at most 5 attempts within 24 hours, capped by account purge. Explicitly unlinked personal mappings and associated receipts are erased when cleanup settles or expires | Apple cleanup lease/generation checks / metadata expiry sweep / account purge |
+| Verified Apple notification replay receipts (event ID digest, subject fingerprint and coarse event/time; no signed notification body) | Identity-owned `auth.sqlite3` receipts | At most 8 days; associated receipts also removed with explicit unlink cleanup or account purge | Replay expiry sweep / binding cleanup / account purge |
+| Encrypted legacy-auth migration backup | Identity migration artifacts, restricted file permissions | At most 24 hours; any account purge removes the entire backup, so it cannot restore erased accounts | Stopped-writer migration cleanup / startup expiry / account purge |
 | Trees, versions, AI validation history | `data/<tree_id>/…` + `data/index.json` | Life of account | Account purge |
 | Tasks, projects, tags, subtasks, comments | `data/tasks.sqlite3` + JSON mirrors (`tasks/`, `projects/`, `contexts/`, `task-subtasks/`, `task-comments/`) | Life of account | Account purge |
 | Task idempotency records | `tasks.sqlite3` + `task-commands/` mirrors | 24h rolling (`purge_expired_idempotency`), all on account purge | Maintenance sweep / purge |
@@ -190,6 +198,12 @@ candidate token could confirm a match, and none of the three is content you
 asked for. Runs are exported through the same expiry projection the app reads
 through (due content is already absent) and audit entries older than their
 90-day bound are left out.
+Modern auth also exports `connected-methods.json`: safe linked provider identifiers,
+email/verification state and connection dates. It excludes codes, proofs, raw session
+tokens, provider credentials, sealed mail/grant payloads, budget/replay fingerprints,
+cleanup internals and migration backups. Changes still pending on a native device
+are outside the server export.
+
 Deliberately excluded, and documented in the manifest: the password hash
 (secret, not portable personal data), session records (revoked secrets), and
 idempotency records (transient duplicates of exported data). Also excluded:

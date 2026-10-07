@@ -123,6 +123,8 @@ targets:
         # never need the session.
         com.apple.security.application-groups:
           - $(BB_APP_GROUP_ID)
+        com.apple.developer.applesignin:
+          - Default
 
   BrainBuddyWidgets:
     type: app-extension
