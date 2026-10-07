@@ -693,14 +693,15 @@ held (one overall 8 s deadline, `…_TIMEOUT_SECONDS`, not 8 s per httpx phase);
 the lock again, settle: replace the reservation with the actual token cost, or release
 it on timeout or failure. Any other exception also releases it and then propagates as
 a bug, not as `navigator_provider_error`. It propagates as `NavigatorInternalError`,
-whose message is the original class name only and whose original chain is suppressed,
-so the request middleware's `logger.exception` can never log input or model output
-echoed in an exception's text (FR-044). The request middleware also logs any failure on
-a `/review/navigator` route by class name only: no message, no traceback, no cause or
-context, even if a framework re-chains the original exception. After a timeout the
-abandoned call may still
-complete at the provider and be billed although its reservation was released, so the
-daily cap can be exceeded by such calls. A reservation never settled
+whose message is the original class name only and which carries no cause and no
+context. It is raised outside the handling `except` block, because `from None` only
+hides the original, and a framework that re-raises with
+`raise exc from exc.__cause__ or exc.__context__` would bring it back. So no logger can
+log input or model output echoed in an exception's text (FR-044). The request
+middleware also logs any failure on a `/review/navigator` route by class name only: no
+message, no traceback, no cause or context. After a timeout the abandoned call may
+still complete at the provider and be billed although its reservation was released, so
+the daily cap can be exceeded by such calls. A reservation never settled
 (process crash) is released by the next day's row. Test: a provider stub that itself
 takes `command_lock` for another owner neither deadlocks nor waits (the
 `test_review_navigator.py` lock case).
