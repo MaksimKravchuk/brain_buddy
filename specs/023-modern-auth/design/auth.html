@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brain Buddy · Authentication preview</title>
+<style>
+:root{color-scheme:light;--sky:#0ea5e9;--fill:#0369a1;--ink:#0f172a;--muted:#475569;--border:#e2e8f0;--bg:#f8fafc;--rose:#9f1239;--curve:cubic-bezier(.22,1,.36,1)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}button,input,select{font:inherit}button,a,input,select{touch-action:manipulation}button,a,select{cursor:pointer}button,input,select{min-height:44px}button{border:1px solid var(--border);border-radius:8px;background:white;padding:10px 14px;font-weight:600;color:var(--ink)}button:hover:not(:disabled){background:#f1f5f9}button:disabled{cursor:default;color:#64748b;background:#f1f5f9}button.primary{background:var(--fill);border-color:var(--fill);color:white}button.primary:hover:not(:disabled){background:#075985}button.primary:disabled{background:#cbd5e1;border-color:#cbd5e1;color:#334155}button.apple{background:#111;border-color:#111;color:white}button.apple:hover:not(:disabled){background:#334155}button.danger{background:#be123c;border-color:#be123c;color:white}.text-button{border:0;background:transparent;color:var(--fill);font-weight:500;padding:10px 0;text-decoration:underline;text-underline-offset:3px}.text-button:hover:not(:disabled){background:transparent}.quiet{color:var(--muted)}a{color:var(--fill);text-underline-offset:3px}input,select{width:100%;border:1px solid #cbd5e1;border-radius:6px;background:white;padding:10px 12px;color:var(--ink)}input:disabled{background:#f1f5f9}input[aria-invalid=true]{border-color:#be123c}label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}input[type=password]{font-size:16px}input.code{font-size:24px;letter-spacing:.28em;font-variant-numeric:tabular-nums;width:100%;height:56px}h1,h2,h3,p{margin:0}h1{font-size:24px;line-height:1.25;letter-spacing:-.02em;font-weight:600}h2{font-size:20px;line-height:1.3;font-weight:600}h3{font-size:14px;font-weight:600}.muted,.caption{color:var(--muted)}.caption{font-size:12px}.stack{display:flex;flex-direction:column;gap:16px}.small-gap{gap:8px}.full{width:100%}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.rule{height:1px;background:var(--border);margin:8px 0}.or{display:flex;align-items:center;gap:12px;color:#64748b;font-size:12px}.or:before,.or:after{content:"";height:1px;background:var(--border);flex:1}.brand{display:flex;align-items:center;justify-content:center;gap:8px;font-size:18px;font-weight:600;margin-bottom:28px}.brand svg{width:30px;height:30px}.intro{margin-bottom:24px;display:flex;flex-direction:column;gap:8px}.note{border:1px solid #bae6fd;background:#f0f9ff;color:#075985;border-radius:8px;padding:12px;font-size:13px}.notice{border:1px solid #fecdd3;background:#fff1f2;color:var(--rose);border-radius:8px;padding:12px;font-size:13px;display:none;margin-bottom:16px}.notice[data-show=true]{display:block}.notice .reference{display:block;margin-top:6px;font:11px/1.4 ui-monospace,monospace}.success{border:1px solid #a7f3d0;background:#ecfdf5;color:#065f46;border-radius:8px;padding:12px;font-size:13px}.chip{display:inline-block;font-size:11px;font-weight:500;border-radius:99px;padding:3px 8px;color:#065f46;background:#ecfdf5}.unverified{background:#fffbeb;color:#92400e}.method{padding:14px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}.method:last-child{border-bottom:0}.method button{flex-shrink:0}.footer{margin-top:24px;text-align:center;font-size:12px;color:var(--muted)}.editor{padding:16px;background:var(--bg);border-radius:8px;border:1px solid var(--border)}.card{width:440px;max-width:100%;padding:32px;background:white;border:1px solid var(--border);border-radius:16px;box-shadow:0 8px 24px -12px #0f172a20}.page{display:flex;justify-content:center;align-items:flex-start;padding:48px 20px;min-height:calc(100vh - 104px)}.account-card{width:620px}.native{width:390px;min-height:790px;padding:24px;border-radius:24px;border:1px solid #cbd5e1;font-family:-apple-system,system-ui,sans-serif}.native .brand{margin:22px 0 36px}.sheet-header{display:none}.native .sheet-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.sheet-header button{border:0;padding:10px 0;font-weight:400;color:var(--fill)}.native .intro h1{font-size:26px}.native .footer{margin-top:32px}.native .mobile-explainer{display:block}.mobile-explainer{display:none}.review{padding:16px 24px;border-bottom:1px solid var(--border);background:white}.review .controls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;max-width:1180px;margin:auto}.review .field{min-width:160px;flex:1}.review .field label{color:var(--muted);font-size:11px;font-weight:500}.review .hint{max-width:1180px;margin:8px auto 0;color:#64748b;font-size:12px}.badge{font-size:11px;letter-spacing:.04em;color:#475569;margin-bottom:12px}.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start;max-width:1500px;margin:24px auto;padding:0 24px}.overview section{min-width:0}.overview .card{width:100%;box-shadow:none;padding:24px;min-height:570px}.overview .brand{margin-bottom:20px}.overview .intro{margin-bottom:20px}.overview .card.account-card{min-height:0}.overview h1{font-size:22px}.overview .sheet-header{display:none}.privacy-copy{margin-top:16px;color:#475569;font-size:12px;text-align:center}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #0284c7;outline-offset:3px;box-shadow:0 0 0 2px white}.pending{display:none}.busy .pending{display:inline}.busy .primary{color:white;background:#475569;border-color:#475569}.editor[hidden],[hidden]{display:none!important}.password-policy{font-size:12px;color:#475569;margin-top:6px}.two-actions{display:flex;gap:10px}.two-actions>*{flex:1}.verify-label{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.account-header{margin-bottom:24px}.back{margin-bottom:20px}.view-content{min-width:0}.overview .back{display:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:700px){.review{padding:12px}.review .field{min-width:120px}.page{padding:20px 12px}.card{padding:24px;border-radius:12px}.native{min-height:790px}.overview{grid-template-columns:1fr;padding:0 12px}.overview .card{min-height:0}.two-actions{flex-direction:column}}@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+<style>
+input{font-size:16px}a{display:inline-flex;align-items:center;min-height:44px;padding:0 4px}.native-advanced{display:none}.native .native-advanced{display:block;margin-top:24px}.native-advanced summary{min-height:44px;cursor:pointer;color:#475569;display:flex;align-items:center}.native-advanced div{margin-top:12px}
+</style>
+</head>
+<body>
+<header class="review" aria-label="Preview controls">
+ <div class="controls">
+  <div class="field"><label for="screen">Screen</label><select id="screen"><option value="signin">D-01 / M-01 · Sign in</option><option value="code">D-02 / M-02 · Email code</option><option value="recovery">D-03 / M-03 · Password recovery</option><option value="security">D-04 / M-04 · Account security</option><option value="reauth">D-05 / M-05 · Confirm it's you</option><option value="collision">D-06 / M-06 · Connect existing account</option><option value="settings">M-07 · iOS account settings entry</option></select></div>
+  <div class="field"><label for="state">State</label><select id="state"><option value="default">Default</option><option value="loading">Loading</option><option value="error">Error / invalid proof</option><option value="offline">Offline / interrupted</option><option value="partial">One method unavailable</option><option value="availability-error">Methods unavailable</option><option value="cancelled">Provider cancelled</option><option value="rate-limited">Too many attempts</option><option value="resend-ready">Resend ready</option><option value="unverified">Email not verified / legacy account</option><option value="wrong-owner">Different linked account</option><option value="deletion-cancelled">Deletion cancelled on sign-in</option><option value="password">Password form</option><option value="new-password">New password</option><option value="email-change">Change email</option><option value="last-method">Last method removal</option><option value="delete">Delete confirmation</option><option value="unlink-confirmation">Remove method confirmation</option><option value="completion-unknown">Completion unknown</option><option value="reset-success">Password reset saved</option><option value="unlink-signed-out">Removed and signed out</option><option value="apple-cleanup-pending">Apple cleanup pending</option><option value="apple-cleanup-unconfirmed">Apple cleanup unconfirmed</option></select></div>
+  <div class="field"><label for="surface">Surface</label><select id="surface"><option value="desktop">Desktop web</option><option value="native">iPhone / mobile</option><option value="overview">Overview</option></select></div>
+ </div>
+ <p class="hint">Design preview · controls above are for review. Buttons demonstrate the journey; no email is sent and no account is changed.</p>
+</header>
+<main id="view" class="page"></main>
+<template id="brand">
+ <div class="brand"><span aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M7 20h10"></path><path d="M10 20c5.5-2.5.8-6.4 3-10"></path><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"></path><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9.1 3.3-.2 4.3-.9 1-.6 1.9-1.8 2.7-3.6-2.4-.5-4-.3-5-.1-.4.1-.7.3-.9.6z"></path>
+ </svg></span><span>Brain Buddy</span></div>
+</template>
+<template id="signin">
+ <div class="intro"><h1>Sign in or create an account</h1><p class="muted">Keep your tasks together, wherever you are.</p></div>
+ <p class="note mobile-explainer">Your local tasks are kept if sign-in fails. When you sign in, they'll merge with your account.</p>
+ <div class="stack" style="margin-top:16px">
+  <div class="stack small-gap" data-providers><button class="full" data-action="google">Sign in with Google</button><button class="full apple" data-action="apple">Sign in with Apple</button></div>
+  <div class="or">or</div>
+  <form class="stack" data-action="send-code"><div><label for="login-email">Email address</label><input id="login-email" type="email" value="" placeholder="you@example.com" autocomplete="email" required></div><button class="full primary" type="submit">Continue with email</button></form>
+  <button class="text-button full" data-action="password">Use your password</button>
+ </div>
+ <details class="native-advanced"><summary>Advanced</summary><div><label for="server-address">Server address</label><input id="server-address" type="url" value="https://brain-buddy-frontend.fly.dev/api" autocomplete="url"><p class="password-policy">Use the server your account belongs to.</p></div></details>
+ <p class="privacy-copy">We only ask Google or Apple for the details needed to sign in. <a href="#privacy" data-action="privacy">Privacy policy</a></p>
+ <div class="editor stack" data-password hidden><h2>Sign in with your password</h2><form class="stack" data-action="password-login"><div><label for="password-email">Email address</label><input id="password-email" type="email" placeholder="you@example.com" autocomplete="username" required></div><div><label for="current-password">Password</label><input id="current-password" type="password" autocomplete="current-password" required></div><button type="submit" class="primary full">Sign in</button></form><button class="text-button" data-action="recovery">Forgot password?</button><button class="text-button" data-action="back">Use another method</button></div>
+</template>
+<template id="code">
+ <button class="text-button back" data-action="back">Back</button>
+ <div class="intro"><h1>Check your email</h1><p class="muted">If this address can use email codes, you'll receive a six-digit code at <strong>alex@example.com</strong>.</p></div>
+ <form class="stack" data-action="verify-code"><div><label for="email-code">Email code</label><input id="email-code" class="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" aria-describedby="code-expiry" required><p id="code-expiry" class="password-policy">The code expires in 10 minutes. Use the most recent code.</p></div><button class="full primary" type="submit">Verify and continue</button></form>
+ <div class="stack small-gap" style="margin-top:16px"><button class="text-button full" disabled>Send another code in 00:42</button><button class="text-button full" data-action="back">Use another email or method</button></div>
+ <p class="footer">Your account and tasks stay unchanged until verification succeeds. For an older password account, sign in once with its password and verify your email in account settings.</p>
+</template>
+<template id="recovery">
+ <button class="text-button back" data-action="back">Back to sign in</button>
+ <div class="intro"><h1>Reset your password</h1><p class="muted">We'll send a code if this email has a verified account that can reset its password.</p></div>
+ <form class="stack" data-action="recover-code" data-recovery-request><div><label for="recovery-email">Email address</label><input id="recovery-email" type="email" placeholder="you@example.com" autocomplete="email" required></div><button class="full primary" type="submit">Send a recovery code</button></form>
+ <div class="stack" data-new-password hidden><form class="stack" data-action="save-password"><div><label for="new-password">New password</label><input id="new-password" type="password" autocomplete="new-password" minlength="12" required><p class="password-policy">At least 12 characters. Longer is better.</p></div><div><label for="repeat-password">Repeat password</label><input id="repeat-password" type="password" autocomplete="new-password" minlength="12" required></div><p class="note">Your other sessions will end after the reset. Your tasks stay in your account.</p><button class="primary full" type="submit">Save password</button></form></div>
+ <p class="footer">For an older account with an unverified email, sign in with its existing password and verify the address first.</p>
+</template>
+<template id="security">
+ <div class="account-header"><h1>Account security</h1><p class="muted" style="margin-top:8px">Choose how you sign in to your account.</p></div>
+ <div class="row"><div><label style="margin-bottom:4px">Email address</label><div class="verify-label"><span>alex@example.com</span><span class="chip" data-verified>Verified</span></div></div><button data-action="email-change">Change email</button></div>
+ <div class="editor stack" data-email-editor hidden><h2>Change your email</h2><form class="stack" data-action="change-email-code"><div><label for="new-email">New email address</label><input id="new-email" type="email" placeholder="you@example.com" autocomplete="email" required></div><p class="caption">Confirm it's you, then verify the new address. Your current email stays in use until both steps succeed.</p><button class="primary" type="submit">Continue</button></form></div>
+ <div class="rule" style="margin-top:24px"></div><h2 style="margin:20px 0 4px">Ways to sign in</h2>
+ <div data-methods>
+  <div class="method" data-email-method><div><h3>Email code</h3><p class="caption">Your verified email</p></div><span class="chip">Ready</span></div>
+  <div class="method"><div><h3>Google</h3><p class="caption">Connected to your account</p></div><button data-action="remove">Remove</button></div>
+  <div class="method" data-apple-method><div><h3>Apple</h3><p class="caption">Not connected</p></div><button data-action="connect">Connect</button></div>
+  <div class="method" data-password-method><div><h3>Password</h3><p class="caption">Not set · also used for Mac sign-in</p></div><button data-action="add-password">Add password</button></div>
+ </div>
+ <div class="editor stack" data-password-editor hidden><h2>Add a password</h2><form class="stack" data-action="add-password-save"><div><label for="account-new-password">New password</label><input id="account-new-password" type="password" autocomplete="new-password" minlength="12" required><p class="password-policy">At least 12 characters. Longer is better.</p></div><button class="primary" type="submit">Confirm and save</button></form></div>
+ <div class="rule" style="margin-top:20px"></div><h2 style="margin:20px 0 12px">Your data</h2>
+ <div class="stack"><div class="row"><div><h3>Export your data</h3><p class="caption">A copy of your tasks and account details.</p></div><button data-action="export">Export</button></div><div class="row"><div><h3>Delete your account</h3><p class="caption">Remove your account after 14 days.</p></div><button class="text-button" style="color:#9f1239" data-action="delete">Delete account</button></div></div>
+ <div class="editor stack" data-unlink-editor hidden><h2>Remove Google?</h2><p>You won't be able to sign in with Google. Sessions started with it will end, including this one if you used Google here.</p><p class="caption">Sign in again with a remaining method if this session ends.</p><div class="two-actions"><button data-action="cancel-edit">Keep method</button><button class="danger" data-action="confirm-remove">Remove Google</button></div></div>
+ <div class="editor stack" data-delete-editor hidden><h2>Delete your account?</h2><p>Your sessions will end now. Your account and data will be permanently removed after 14 days.</p><p class="caption">Signing in during those 14 days cancels deletion. Local unsent changes on your devices remain there until you sign out of each device.</p><div class="two-actions"><button data-action="cancel-edit">Keep account</button><button class="danger" data-action="confirm-delete">Confirm and delete</button></div></div>
+</template>
+<template id="reauth">
+ <button class="text-button back" data-action="security">Cancel</button>
+ <div class="intro"><h1>Confirm it's you</h1><p class="muted">Sign in again before changing your account. This confirmation lasts 5 minutes.</p></div>
+ <p class="note">Continue as <strong>alex@example.com</strong>. Only methods already connected to this account can confirm it.</p>
+ <div class="stack" style="margin-top:24px"><button class="full" data-action="confirmed">Confirm with Google</button><button class="full primary" data-action="reauth-code">Send an email code</button></div>
+ <form class="stack" data-action="confirmed" data-reauth-password hidden><div><label for="confirmation-password">Current password</label><input id="confirmation-password" type="password" autocomplete="current-password" required></div><button class="primary full" type="submit">Confirm</button></form>
+ <p class="footer">Your account and tasks stay unchanged if you cancel.</p>
+</template>
+<template id="collision">
+ <div class="intro"><h1>Connect to your existing account</h1><p class="muted">There's already an account for the email Google confirmed.</p></div>
+ <p class="note">Sign in to your existing account first, then choose <strong>Connect Google</strong> in account settings. Your tasks stay in that account.</p>
+ <div class="stack" style="margin-top:24px"><button class="primary full" data-action="password">Sign in to existing account</button><button class="full" data-action="google">Use another Google account</button><button class="text-button full" data-action="back">Cancel</button></div>
+ <p class="footer">Matching email addresses don't automatically connect accounts.</p>
+</template>
+<template id="settings">
+ <div class="intro"><h1>Settings</h1><p class="muted">Your Brain Buddy account.</p></div>
+ <div class="editor stack"><h2>Account</h2><div><span class="caption">Email</span><p>alex@example.com</p></div><div><span class="caption">Server</span><p>brain-buddy-frontend.fly.dev</p></div><div class="rule"></div><button class="full" data-action="security">Manage account</button><button class="full text-button" style="color:#9f1239" data-action="delete">Delete account</button><p class="caption">These open the account page for this account. You may need to confirm it's you.</p></div>
+ <p class="footer">Signing out is separate. Your unsent changes stay on this iPhone when you manage your account.</p>
+</template>
+<script>
+const controls={screen:document.querySelector('#screen'),state:document.querySelector('#state'),surface:document.querySelector('#surface')};
+const view=document.querySelector('#view');let purpose='login';let returnAction='security';let selectedProvider='Google';
+const ids={signin:'D-01 / M-01',code:'D-02 / M-02',recovery:'D-03 / M-03',security:'D-04 / M-04',reauth:'D-05 / M-05',collision:'D-06 / M-06'};
+function build(screen,state,native=false){
+ const nativeAuth=native&&!['security','reauth'].includes(screen);const card=document.createElement('article');card.className='card'+(screen==='security'?' account-card':'')+(nativeAuth?' native':'');
+ const headerTitle=screen==='settings'?'Settings':screen==='code'?'Email code':screen==='recovery'?'Reset password':'Sign in';card.innerHTML='<div class="sheet-header"><strong>'+headerTitle+'</strong><button data-action="back">Cancel</button></div>'+document.querySelector('#brand').innerHTML+'<div class="notice" role="status" aria-live="polite"></div><div class="view-content">'+document.querySelector('#'+screen).innerHTML+'</div>';
+ const notice=card.querySelector('.notice');let message='';
+ if(screen==='settings'){card.querySelector('.sheet-header').remove();card.querySelector('.brand').remove();}
+ if(state==='error')message=screen==='code'?"That code isn't valid or has expired. Check it or request another.":screen==='security'?"Couldn't update your account. Your existing sign-in methods are kept.":screen==='recovery'?"Couldn't request recovery. Try again in a moment.":"Couldn't sign in. Try again or use another connected method.";
+ if(state==='offline')message=native&&screen==='signin'?"You're offline. Your local tasks are kept. Connect to the internet to sign in.":"You're offline. Reconnect before starting another attempt. Your local tasks are kept.";
+ if(state==='partial')message=screen==='security'?"Couldn't load all your sign-in methods. Retry before changing them.":"Apple sign-in isn't available right now. You can use another method.";
+ if(state==='partial'&&screen==='collision')message="Your account is signed in. This method wasn't connected. Try again from your account.";
+ if(state==='error'&&screen==='collision')message="Couldn't connect this method. Try again from your account.";
+ if(state==='error'&&screen==='settings')message="Couldn't open account settings. Nothing changed. Try again.";
+ if(state==='cancelled')message="Sign-in was cancelled. Nothing changed. Choose a method to try again.";
+ if(state==='availability-error')message="Couldn't load sign-in methods. Retry or use your password.";
+ if(state==='rate-limited')message="Too many attempts. Try again in a few minutes, or use another method.";
+ if(state==='wrong-owner')message="Sign out first to use another account. Your waiting changes are kept.";
+ if(state==='last-method')message="Add another way to sign in before removing this one.";
+ if(state==='deletion-cancelled'){message='Your account deletion was cancelled. Your tasks are kept. Request deletion again in account settings if you still want to.';notice.className='success';}
+ if(state==='completion-unknown')message=screen==='recovery'?"We couldn't confirm the reset. Sign in again to check; request fresh recovery if needed.":screen==='security'?"We couldn't confirm whether this finished. Reconnect and check your account before trying again.":"We couldn't confirm whether this finished. Your local tasks are kept. Sign in again with a fresh proof if needed.";
+ if(state==='reset-success'){message='Password reset. Sign in with your new password.';notice.className='success';}
+ if(state==='unlink-signed-out'){message='Google was removed. Sign in again with a remaining method.';notice.className='success';}
+ if(state==='apple-cleanup-pending')message='BrainBuddy access was removed. Apple cleanup is being retried. Your account deletion date is unchanged.';
+ if(state==='apple-cleanup-unconfirmed')message="BrainBuddy access was removed. We couldn't confirm Apple cleanup. Your account deletion date is unchanged.";
+ if(message){notice.textContent=message;notice.dataset.show='true';if(state==='error'&&screen!=='code'){const reference=document.createElement('span');reference.className='reference';reference.textContent='Reference: example-7b12';notice.append(reference);}}
+ if(state==='loading'){card.classList.add('busy');card.setAttribute('aria-busy','true');card.querySelectorAll('button,input').forEach(c=>c.disabled=true);const b=card.querySelector('.primary');if(b)b.textContent=screen==='code'?'Checking…':screen==='security'?'Updating…':'Please wait…';}
+ if(state==='offline'){card.querySelectorAll('form button,.apple,[data-action=google],[data-action=confirmed],[data-action=reauth-code]').forEach(c=>c.disabled=true);}
+ if(state==='partial'){const apple=card.querySelector('.apple');if(apple)apple.hidden=true;if(screen==='security')card.querySelectorAll('.method button').forEach(c=>c.disabled=true);}
+ if(state==='availability-error'&&screen==='signin'){card.querySelector('[data-providers]').hidden=true;card.querySelector('[data-action=send-code]').hidden=true;card.querySelector('.or').hidden=true;const retry=document.createElement('button');retry.textContent='Retry';retry.dataset.action='back';notice.append(retry);}
+ if(state==='rate-limited'){card.querySelectorAll('form button,form input').forEach(c=>c.disabled=true);}
+ if(state==='resend-ready'&&screen==='code'){const resend=card.querySelector('.text-button[disabled]');resend.disabled=false;resend.textContent='Send another code';resend.dataset.action='send-code';}
+ if(state==='password'&&screen==='signin'){card.querySelector('[data-password]').hidden=false;card.querySelector('[data-providers]').hidden=true;card.querySelector('[data-action=send-code]').hidden=true;card.querySelector('.or').hidden=true;card.querySelector('[data-action=password]').hidden=true;card.querySelector('.intro h1').textContent='Welcome back';}
+ if(state==='new-password'&&screen==='recovery'){card.querySelector('[data-recovery-request]').hidden=true;card.querySelector('[data-new-password]').hidden=false;card.querySelector('.intro p').textContent='Your email is confirmed. Choose a new password for your account.';}
+ if(state==='unverified'&&screen==='security'){const v=card.querySelector('[data-verified]');v.textContent='Not verified';v.classList.add('unverified');const email=card.querySelector('[data-email-method]');email.innerHTML='<div><h3>Verify your email</h3><p class="caption">Enable email codes and password recovery.</p></div><button data-action="verify-email">Send code</button>';card.querySelector('[data-password-method] p').textContent='Set';card.querySelector('[data-password-method] button').textContent='Change';}
+ if(state==='unverified'&&screen==='code'){notice.textContent='For an older account, use its existing password, then verify your email in account settings.';notice.dataset.show='true';}
+ if(state==='unverified'&&screen==='reauth'){card.querySelector('.note').textContent='Confirm with your existing password. Verify your email in account settings to enable email codes.';card.querySelector('[data-action=confirmed]').parentElement.hidden=true;card.querySelector('[data-reauth-password]').hidden=false;}
+ if(state==='email-change'&&screen==='security')card.querySelector('[data-email-editor]').hidden=false;
+ if(state==='new-password'&&screen==='security')card.querySelector('[data-password-editor]').hidden=false;
+ if(state==='unlink-confirmation'&&screen==='security')card.querySelector('[data-unlink-editor]').hidden=false;
+ if(state==='delete'&&screen==='security')card.querySelector('[data-delete-editor]').hidden=false;
+ if(state==='last-method'&&screen==='security'){card.querySelector('[data-email-method]').hidden=true;const v=card.querySelector('[data-verified]');v.textContent='Not verified';v.classList.add('unverified');}
+ if(screen==='collision'&&selectedProvider==='Apple')card.querySelector('.view-content').innerHTML=card.querySelector('.view-content').innerHTML.replaceAll('Google','Apple');
+ if(screen==='code'&&purpose!=='login'){card.querySelector('.intro h1').textContent=purpose==='recover'?'Confirm your recovery code':purpose==='new-email'?'Verify your new email':'Confirm your email';card.querySelector('.intro p').innerHTML='Enter the six-digit code sent to <strong>alex@example.com</strong>.';card.querySelector('.primary').textContent='Verify code';}
+ return card;
+}
+function render(){const {screen,state,surface}=Object.fromEntries(Object.entries(controls).map(([k,c])=>[k,c.value]));view.replaceChildren();view.className=surface==='overview'?'overview':'page';if(surface==='overview'){Object.keys(ids).forEach(key=>{const section=document.createElement('section');section.innerHTML='<p class="badge">'+ids[key]+' · '+document.querySelector('#'+key).content.querySelector('h1').textContent+'</p>';section.append(build(key,'default'));view.append(section);});}else view.append(build(screen,state,surface==='native'));}
+function go(screen,state='default'){controls.screen.value=screen;controls.state.value=state;if(controls.surface.value==='overview')controls.surface.value='desktop';render();const candidates=[...view.querySelectorAll('input:not([disabled])'),...view.querySelectorAll('button:not([disabled])')];const focus=candidates.find(control=>control.getClientRects().length>0);if(focus)focus.focus();}
+function act(action){
+ if(action==='back'){purpose='login';go('signin');}
+ else if(action==='security'||action==='cancel-edit')go('security');
+ else if(action==='password'||action==='password-login'){purpose='login';go(action==='password'?'signin':'security',action==='password'?'password':'default');}
+ else if(action==='google'||action==='apple'){selectedProvider=action==='google'?'Google':'Apple';go('collision');}
+ else if(action==='send-code'){purpose='login';go('code');}
+ else if(action==='recovery')go('recovery');
+ else if(action==='recover-code'){purpose='recover';go('code');}
+ else if(action==='verify-code'){const intent=purpose;purpose='login';if(intent==='reauth')act('confirmed');else go(intent==='recover'?'recovery':'security',intent==='recover'?'new-password':'default');}
+ else if(action==='save-password')go('signin','reset-success');
+ else if(action==='add-password-save')go('security');
+ else if(action==='remove')go('security','unlink-confirmation');
+ else if(action==='confirm-remove'){returnAction='remove';go('reauth');}
+ else if(action==='email-change')go('security','email-change');
+ else if(action==='add-password')go('security','new-password');
+ else if(action==='verify-email'){purpose='verify-email';go('code');}
+ else if(action==='change-email-code'){returnAction='new-email';go('reauth');}
+ else if(action==='connect'||action==='export'||action==='delete'||action==='confirm-delete'){returnAction=action;go('reauth');}
+ else if(action==='reauth-code'){purpose='reauth';go('code');}
+ else if(action==='confirmed'){if(returnAction==='new-email'){purpose='new-email';go('code');}else if(returnAction==='remove')go('signin','unlink-signed-out');else go('security',returnAction==='delete'?'delete':'default');}
+ else if(action==='privacy'){alert('Privacy copy will disclose the identity and email providers, data use, retention and account rights. This preview does not navigate to a live service.');}
+}
+document.addEventListener('click',event=>{const target=event.target.closest('[data-action]');if(!target||target.tagName==='FORM'||(target.tagName==='BUTTON'&&target.form&&target.type==='submit'))return;event.preventDefault();act(target.dataset.action);});
+document.addEventListener('submit',event=>{event.preventDefault();act(event.target.dataset.action);});
+Object.values(controls).forEach(control=>control.addEventListener('change',render));
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&controls.surface.value!=='overview'&&controls.screen.value!=='signin'){event.preventDefault();go(['security','reauth'].includes(controls.screen.value)?'security':'signin');}});
+const params=new URLSearchParams(location.search);Object.entries(controls).forEach(([name,control])=>{if(params.has(name))control.value=params.get(name);});render();
+</script>
+</body>
+</html>

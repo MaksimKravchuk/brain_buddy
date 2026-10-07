@@ -610,6 +610,27 @@ test runs or a redacted evidence packet.
 
 ### Production rollback
 
+Identity storage adds a mandatory boundary to every image restore. The release
+workflow captures the actual running backend's storage capability with
+`scripts/auth_migration_guard.py capture`, checks the fresh volume before any
+deploy mutation, and checks it again before restoring either image or the old
+rollout. Schema epoch 1 already requires a SQLite-capable binary, including an
+empty database without a legacy import. A commit after capture, an unreachable
+probe or malformed evidence forbids the restore. Do not override the guard or
+restore JSON files to make an old image start.
+
+For the first transition without a compatible captured image, keep the volume
+and its migration checkpoint intact and leave the release failed. Under the
+incident's recorded exact-target authority, drain ingress, disable machine
+autostart and stop all backend writers; verify that none restarted before
+repair. Record only the schema/checkpoint and correlation ID. Repair forward
+from SQLite-capable code with green exact-SHA CI, the recorded ASK landing and
+the normal release workflow. Native clients keep their local documents/outbox.
+Redeploying the failed candidate is not evidence of recovery. Restoring an
+encrypted preimport backup is a separately approved data-recovery operation
+with a stated loss boundary. Rehearse this path against synthetic storage
+before the first production migration.
+
 1. Prefer a reviewed emergency revert PR against `main`. Run required CI, merge, and let the
    normal production workflow deploy the revert commit.
 2. If active impact cannot wait, the incident commander may authorize `flyctl release

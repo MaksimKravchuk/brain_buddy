@@ -1217,6 +1217,11 @@ class ReviewService:
     def _expose_owner(self, owner_id: str, now: datetime) -> tuple[int, int, int]:
         candidates = self.task_repo.list_next_tasks(owner_id)
         with self.task_repo.command_lock(owner_id):
+            current = self.task_repo.get_review_settings(owner_id)
+            if current is None or current.activated_at is None:
+                # Purge may finish after the preliminary exposure read. Never
+                # recreate its deleted settings from the default document.
+                return 0, 0, 0
             gap = self._note_effective_sweep(owner_id, now)
         clock_settings = self.settings_for(owner_id).clock_settings()
         due = [

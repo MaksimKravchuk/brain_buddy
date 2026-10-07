@@ -10,7 +10,7 @@ import SignupPage from "../SignupPage";
 
 function renderSignup() {
   return render(
-    <MemoryRouter initialEntries={["/signup"]}>
+    <MemoryRouter initialEntries={["/signup?invite=1"]}>
       <Routes>
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/" element={<div>workspace</div>} />

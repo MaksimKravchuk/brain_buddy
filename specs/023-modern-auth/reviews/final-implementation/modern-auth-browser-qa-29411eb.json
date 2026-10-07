@@ -1,0 +1,2502 @@
+{
+  "artifact_type": "independent bounded current browser QA evidence review",
+  "reviewer": "review_security_c2; no implementation authorship",
+  "actual_model": "unverifiable",
+  "model_provenance": "Agent/session role is known; independently attestable runtime model identity is unavailable. No model-family or independent executable provenance fabricated.",
+  "observed_at_utc": "2026-10-06T19:32:06.742300+00:00",
+  "input_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+  "input_tree": "f18354fc38044c040906134e48e2dc0461d5f2a2",
+  "input_manifest_sha256": "cbe512b4b4a021daf4a5cef14941c0ebbddd2940f416ddbf4663e9c163b96485",
+  "source_fingerprints": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "de61dbfdfc72f896298bd145428e30e9e876776118c92b658c909f538baf5d0e"
+    },
+    {
+      "path": ".github/workflows/deploy-fly-production.yml",
+      "sha256": "2ade8b626028972706c784089400c72854cc4bc295eefda293c1f2e768dd6d41"
+    },
+    {
+      "path": ".gitleaks.toml",
+      "sha256": "eb928c9061ee0bf455e3e2230581be17df4fa9bccff208b597eb2e83428fdad8"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "6be3de3f1864af184d2f601a3e5b1a3decd4388751fa280dd8f13218209e39f3"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "d78d0709afd081b51b58a6d97980ceabf8ec9893c0705221fe0a52256eabe9b9"
+    },
+    {
+      "path": "backend/app/api/account.py",
+      "sha256": "58f574823ad4d6aeae77b5664b179a83f618076d8abe986b93953dd53423b543"
+    },
+    {
+      "path": "backend/app/api/auth.py",
+      "sha256": "d2931ea41b2a6dc844bd25badfc12960b866e729dcb23430bc168b2229dd1d27"
+    },
+    {
+      "path": "backend/app/api/errors.py",
+      "sha256": "5699b6102b8737459843986b271a6118691224e798248fcd46b84da07c9ff176"
+    },
+    {
+      "path": "backend/app/api/mcp.py",
+      "sha256": "5f4fd37a70d065772bb55679204e2a6a14dbe9d765d25bd954a69ed7dca4d3e5"
+    },
+    {
+      "path": "backend/app/api/middleware.py",
+      "sha256": "5213ce33a1e5e2db38871b3a567d504873b18844907ff01d8e09e5c898fc3747"
+    },
+    {
+      "path": "backend/app/api/modern_auth.py",
+      "sha256": "aa1b2bac477b6dc20121a34a27ba56ddd2a7db8fcbd1cc23bdcda7d6b6134b83"
+    },
+    {
+      "path": "backend/app/container.py",
+      "sha256": "0b636a8e224f2dced326a94823f3d82c2a8233c6b6ce8a7458734dea1083bb12"
+    },
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "630b3d16e9534e3d8ce000cd7eb398b1711d864c5c45153e707e68675bd3480a"
+    },
+    {
+      "path": "backend/app/core/logging.py",
+      "sha256": "b39d279700ab90fa3ffce4c808653e3554ad010c7133d8402758dcd05f29304a"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "f92e10541218e55986a12a1fecca265369e039076b4b6a75e78be49928e7b2b6"
+    },
+    {
+      "path": "backend/app/modules/tasks/service.py",
+      "sha256": "55fb244eaea6d8b271df852c4f4acd510722733814f953bc3d8a2b185ab85350"
+    },
+    {
+      "path": "backend/app/repositories/auth_metadata.py",
+      "sha256": "b1e05197f0b90850bfae798e17b0a245eb84ca5e44dfb3a4109cfc3edd1ec6a0"
+    },
+    {
+      "path": "backend/app/repositories/auth_store.py",
+      "sha256": "7d67f329f2b6d3c64c0d1250db9ac4f2357ceef9dc3619e1314ea27c1909bc8a"
+    },
+    {
+      "path": "backend/app/repositories/feature_flag.py",
+      "sha256": "54931270c2599ee3995d6a36572611fb467f1643f96d63717b18c7317e15089f"
+    },
+    {
+      "path": "backend/app/repositories/session.py",
+      "sha256": "9fa2f077a167b1db81628fd5a9f3f8c18fc5d190c34c9f487c1712458d44d7d6"
+    },
+    {
+      "path": "backend/app/repositories/user.py",
+      "sha256": "dc0c4729cd5a442a55b61b7914381c60ce9b3ab05f340218853c71c7ff2fa10b"
+    },
+    {
+      "path": "backend/app/schemas/auth.py",
+      "sha256": "d23e56e1d389edcf0e7dd4f59bbcf85e67db0215f28253f74892db32ba691228"
+    },
+    {
+      "path": "backend/app/schemas/modern_auth.py",
+      "sha256": "57c9158a932ec2aa980e819867bea59d08bf15007cabf5264da394afb3165f90"
+    },
+    {
+      "path": "backend/app/services/account_service.py",
+      "sha256": "387dff67d1a181d0237e805a5400c399d6689afda061731c14ec8de024f5f723"
+    },
+    {
+      "path": "backend/app/services/admin_service.py",
+      "sha256": "f3825de385641ab9251ec3348c1134812bbd0ee655117826fff7479c8219faef"
+    },
+    {
+      "path": "backend/app/services/auth_apple_lifecycle.py",
+      "sha256": "3ca0aa43dc0851f4b83cd7486b2fc1e597727c5f59282e29ed40c2b1fd95e3cf"
+    },
+    {
+      "path": "backend/app/services/auth_mail_service.py",
+      "sha256": "8a71e049cb9279bef70913b0a1a2e641d906961204731e64599805948a0a4579"
+    },
+    {
+      "path": "backend/app/services/auth_migration.py",
+      "sha256": "7e6618b96106c33f98527d1963060a142fe6e7ae08a400ecfb44333604b82320"
+    },
+    {
+      "path": "backend/app/services/auth_provider_service.py",
+      "sha256": "6e6e969fe3e986fc064c18fd2b6e15881c6b9e5eaca3a36dc9c59110fa9b4e45"
+    },
+    {
+      "path": "backend/app/services/auth_secret_box.py",
+      "sha256": "ce9a8aa7ea94f94084b28d7299e407e6765f266edda192604dca485b5b5346c3"
+    },
+    {
+      "path": "backend/app/services/auth_service.py",
+      "sha256": "f1a464722698d99f9158b56e174af0802aaf190f5adcb95304d9f9adb55f8c65"
+    },
+    {
+      "path": "backend/app/services/feature_flag_service.py",
+      "sha256": "a802387db0da2e53697e008b3a01df697a60b9fa299d282b37c8f46c89da3f38"
+    },
+    {
+      "path": "backend/app/services/modern_auth_service.py",
+      "sha256": "0c706facb32ffc7570cc0c7831c92d2c047e5e3d82061c6793e7a9fd35b30332"
+    },
+    {
+      "path": "backend/tests/modern_auth_e2e_app.py",
+      "sha256": "5c2259a16444532b3e8846c3c9c54fae2dd24ef7862c4df82ab35a069b5de6ba"
+    },
+    {
+      "path": "backend/tests/test_account_api.py",
+      "sha256": "4a35cc46d7abca1bb545575264b941fc6d044b4f5d33fb028e64d474bca2b6d2"
+    },
+    {
+      "path": "backend/tests/test_api_contract.py",
+      "sha256": "fcb6d5061460ba5c0445f46589b885d66c1a76538f3f47508d8fab8a1854e335"
+    },
+    {
+      "path": "backend/tests/test_auth_apple_lifecycle.py",
+      "sha256": "c3b10713d80c99a0f2542e22360f043e77cb7b8b021b6aa0accd9eb19946bcc8"
+    },
+    {
+      "path": "backend/tests/test_auth_service.py",
+      "sha256": "9c84d8f44208ae8bfcafd74a34217dd31c2f100da49e16fef35c3038431548ea"
+    },
+    {
+      "path": "backend/tests/test_auth_store.py",
+      "sha256": "60b39a17e02eb694fb2501c2edf39b8404dc45eb4154b60f52ff21260e4336c8"
+    },
+    {
+      "path": "backend/tests/test_branch_invariants.py",
+      "sha256": "d5cf905b7a5261ac50b27a9adaf1699187d6b7475f443f3c275949eda1c095bf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api.py",
+      "sha256": "cb0bfebdc0dfbadba66e0d598b491027cc1599856cb036baed22b41380cc6cf4"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_api_journeys.py",
+      "sha256": "1f8f0c021d7ce4dec06f21bd3ade30332509294ef2c3fa20e2c0ce789e3822ca"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_apple_integration.py",
+      "sha256": "75c986a17fc77fcf65440932779cfe63a12b8de09bad72f8a01e2a5e66cd5f82"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_edges.py",
+      "sha256": "d6d841ae01b3ef4afbe56e6b549bb689cfe705497a0cc9d6b5d7a24ee54853de"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_authority_remaining.py",
+      "sha256": "7baf631fba22fad570164b7b58003f6b1d0b5c8e36882743f614567e26c449cf"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_storage_remaining.py",
+      "sha256": "56d3ba9e5a2dc989f42c0c19d1c18ae9e0bbac42a12075064dde8f66128b4bd1"
+    },
+    {
+      "path": "backend/tests/test_modern_auth_unlink_authority.py",
+      "sha256": "2c4714578bdb518621f13cb1beea7cf84b4233e7fde3a599a9a22c23cdb88b8a"
+    },
+    {
+      "path": "backend/tests/test_task_mcp.py",
+      "sha256": "525b80cd34db390c20ec940d6e84a830d97d05d2cd9f308c145e6368089bcd73"
+    },
+    {
+      "path": "deploy/nginx/default.conf",
+      "sha256": "f76f63879c055d05e366d2850bc0ad4aebd11d373e73cf62d5de68b64d1002f5"
+    },
+    {
+      "path": "docs/api-compatibility.md",
+      "sha256": "8771c02e67006095eaa61f17e538aef8b0747af88c9369ac4f631590685bb6e6"
+    },
+    {
+      "path": "docs/data-retention.md",
+      "sha256": "59e85b92f5cb633e7be159ca7ed231fa1194cc66de0d8b40e1a51bc8072aac90"
+    },
+    {
+      "path": "docs/decisions/0028-modern-identity-authority.md",
+      "sha256": "d92dc2299d7cfc249dd8d2addd477bc23a2e12cdc35385912b5eaad816931c4d"
+    },
+    {
+      "path": "docs/modern-auth-operations.md",
+      "sha256": "e2d1d2f6a27321fd88a9e0669c94293375e653531b922b98cbd781ebfb29914c"
+    },
+    {
+      "path": "frontend/package.json",
+      "sha256": "e2c1ff571b5439b8ad145d848b10ba318e97bee0aef05b7129dfb1820d76b6fb"
+    },
+    {
+      "path": "frontend/playwright.modern-auth.config.ts",
+      "sha256": "2d8712f77e1f609f2cdf74fdd536cfd86fa693af6337f5d56167536d1606c1ca"
+    },
+    {
+      "path": "frontend/src/api/__tests__/account.test.ts",
+      "sha256": "af34f15e8577dea12b20d187871a42f822e4c5ac3a9923d7e8c146ba7ffbb0a5"
+    },
+    {
+      "path": "frontend/src/api/__tests__/client.test.ts",
+      "sha256": "8d454c64c8850d3dec1d8e947518e5125e09692c863f0d119dd9bf4300b4be21"
+    },
+    {
+      "path": "frontend/src/api/__tests__/modernAuth.remaining.test.ts",
+      "sha256": "06a8f6d6853474f57dea1b639cb8482347a45c35bd9663757c2fa5891e171137"
+    },
+    {
+      "path": "frontend/src/api/account.ts",
+      "sha256": "493a69f402dd1bcf452243a18047159059ce73e6728bd85f10f928597d14644d"
+    },
+    {
+      "path": "frontend/src/api/accountHooks.ts",
+      "sha256": "64e3fb87a3bd9abbbd8639916dc9f8df2112f76011ba8ef3aa750fc89b9ec198"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "sha256": "dbbe423624d46316e4ff754a80efdf9762bde7383cd3a15e7e8f7b713ed90af4"
+    },
+    {
+      "path": "frontend/src/features/account/AccountSettingsPage.tsx",
+      "sha256": "a2db1df7808533ed7cae974a3eb8a5056084184ac41d82b73ae978025fca52f0"
+    },
+    {
+      "path": "frontend/src/features/account/LegacyAccountActions.tsx",
+      "sha256": "f1521132e60a8ad5a4e220415ecafd5012241dd6c0705bb5015289d1973fac7d"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/AuthMethods.test.tsx",
+      "sha256": "f0b554c5278af1f7ba380b31c50ff29a87c914074ace21a07d8a60533c71dcdb"
+    },
+    {
+      "path": "frontend/src/features/account/__tests__/LegacyAccountActions.test.tsx",
+      "sha256": "caf232ee45093fd5ceca75b79b1a17cccb2945eb05c4b0c09ad473db9865e39f"
+    },
+    {
+      "path": "frontend/src/features/auth/AccountSecurity.tsx",
+      "sha256": "44ad936d88416fa5b4f558aa1730f6944b442b145f6e2345b45673eec0bd6779"
+    },
+    {
+      "path": "frontend/src/features/auth/AuthControls.tsx",
+      "sha256": "81150da1ce0f9187de177f5192f2fbea4346165c039e61bf2fbf280dfd7657fe"
+    },
+    {
+      "path": "frontend/src/features/auth/ProviderCompletionPage.tsx",
+      "sha256": "b26587c0fd6ef5c5feaceae08bde2ede2a97c069661594d11e0cdd537514930a"
+    },
+    {
+      "path": "frontend/src/features/auth/__tests__/ModernAuth.test.tsx",
+      "sha256": "f5381e12d442fd665a144b151f13aea6ea8c1feefd6c82938ccda8a818e49c0d"
+    },
+    {
+      "path": "frontend/src/features/auth/authFlow.ts",
+      "sha256": "ebb657bca97a44ca5e7a59b3ecdccd92e45fc8f50354b02a135716ccaa1c50f9"
+    },
+    {
+      "path": "frontend/src/features/crt/CrtWorkspace.tsx",
+      "sha256": "117e6baa12724033157895ce0dee551520c89d90cc89bfd44ae142983b97bc41"
+    },
+    {
+      "path": "frontend/src/features/crt/__tests__/CrtWorkspace.test.tsx",
+      "sha256": "53b7dadf86a2ec456a64a326303d44487951d85c396f86bfdb6ed59654721547"
+    },
+    {
+      "path": "frontend/src/features/crt/crtAutosave.ts",
+      "sha256": "38ab8e6c8f4d43d57bf6ac95a78d586e8a60bb8811d199d27bcb4285696605d1"
+    },
+    {
+      "path": "frontend/src/pages/PrivacyPolicyPage.tsx",
+      "sha256": "f1ca90539a4f3bd5a8bd215142d34bf969a5a79086fb09809f96c4810a5308f3"
+    },
+    {
+      "path": "frontend/src/pages/__tests__/PrivacyPolicyPage.test.tsx",
+      "sha256": "05f4fca363787385ccf5bbc2f91e39a2ca0d9819ee52de41efe53945d2bd9cf6"
+    },
+    {
+      "path": "frontend/src/stores/authStore.ts",
+      "sha256": "b23b2ffc6a34f9e3fbefc1384a821ffcd79c8d94748f63fb0709c9338ec9c679"
+    },
+    {
+      "path": "frontend/tests/e2e/account.spec.ts",
+      "sha256": "bee205fb90c29cfa48a4efbc15db9618c9a47ff2d012c931b81cd64f6c66f2e0"
+    },
+    {
+      "path": "frontend/tests/e2e/admin-users.spec.ts",
+      "sha256": "e3646bfb2f743ddc05d513e99a1b76b30b1623513eb8df996f99cf7f348898eb"
+    },
+    {
+      "path": "frontend/tests/e2e/auth.spec.ts",
+      "sha256": "21c69aeea65bd61011a193caab1d9a3fcd2826ff157c4d714361d2c7cce6d749"
+    },
+    {
+      "path": "frontend/tests/e2e/crt.spec.ts",
+      "sha256": "6e0ed8042d36d0e70c6526333abc1238779b2849d4b288c651aba31397978d0d"
+    },
+    {
+      "path": "frontend/tests/e2e/gtdHelpers.ts",
+      "sha256": "af1e6c8da57a8cce2bbd2952e372a5409a8f3a533f6497f482f91ced7d752903"
+    },
+    {
+      "path": "frontend/tests/modern-auth.spec.ts",
+      "sha256": "586b577cc4edb198fe49d35b076ceac7a5d948b33d4cd8ac00cea642da4f5654"
+    },
+    {
+      "path": "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts",
+      "sha256": "798714a9308e09ceaf484ff760d95b5813d6de5a92f01a342249ffe980ec9873"
+    },
+    {
+      "path": "ios/AGENTS.md",
+      "sha256": "f31e158da8d2574f56c6233dbe490d1e2697edfd0165713b407a1148113d59fc"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+      "sha256": "bb7a1287b338ecf93adacf0d4a20773d8f5b27874310909de6b00ecae97bc552"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
+      "sha256": "ff093c2076ba8680c4c011324962bd4fc6e78ef5d16d8e66f816aefe5b503559"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+      "sha256": "15cb5b66f4bcbebcddb70a738420690b502f0431d0436d5056cf2b4f3468fd1e"
+    },
+    {
+      "path": "ios/BrainBuddy/Screens/Settings/SyncIssuesScreen.swift",
+      "sha256": "9bd951912505fb2dbb7614f40e9e83055b7c83ac071d7ca8b466554be4a77372"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Package.swift",
+      "sha256": "9e134990e6d61bf04dbf19cb048b22fd7db3fed04897dd3a01cdb8065147d364"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/APIError.swift",
+      "sha256": "935fcbbec08dd1fbb01c33f7292aa55a716f6a7f703b6fe67e32457cf11de05a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPI.swift",
+      "sha256": "46c1c9ff3a8e9df82942ce072365580583aae476e89add5caf50bdadc0bb184a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+      "sha256": "b05f17d4e031cc56e0e5d728526f38ef5c5b6e6d8712cdb041e90e9f492eb2ec"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/HTTPTransport.swift",
+      "sha256": "c17435bea7fd8095a426c5daddd2064274b04993c722f0f77b6945a27f6e1fbb"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/JSONValue.swift",
+      "sha256": "90b2afdfae857425669c68a78b7f0e991d522ecec11bb1ddb09e4a6a0a92385b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/LenientDecoding.swift",
+      "sha256": "a5752b9c2a7ea852a85522b21c3325570b51e2bfb46133ab01da9e846758a8fc"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthCallback.swift",
+      "sha256": "eb836632880fa0c7a8125177e5f932eed335f63ff3dc841c0e02778c07b40763"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+      "sha256": "0698b112eeb3ff9d6e94be1f56c6f8d49848144fb133b05321f7dbd25f2232c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/RequestBodies.swift",
+      "sha256": "bedc3863cb31d2e17e4c8a4226136339625dc87ccb3d6f6c5148aa32eca1bdd0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/ReviewAPI.swift",
+      "sha256": "67c579a90b286870f88b017a2fd6517e6d937c4abcedd9b192eab00fbd80b2a4"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+      "sha256": "962a4f169772b68dc00f17f58b7098f60343afc02b200ba5e5ff2b70bed1697d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SetCookieParser.swift",
+      "sha256": "ec297aa56c6ff8d3e6da179c8453c64c37d199f49588fb0586cc27f915826884"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/TaskListQuery.swift",
+      "sha256": "9231d5278ae7fa483c3df469b6c8824ff0691a7f21b986c8674f49cecc622e3a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/WireDate.swift",
+      "sha256": "1c0008bfc3a2287bc57ea899a876999dd1c9cd84b6c72c96a9f1a84de19a3883"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyAPI/WireModels.swift",
+      "sha256": "d188decd9c29ee53ea38b0793938b37268c82a9577dc9377341f16eb61e56a24"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/CalendarDay.swift",
+      "sha256": "7a90b10e75f04738a46b3dd1671dbbc61bd1896f0b3e1667526f0e698b06aaf7"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Commands.swift",
+      "sha256": "6fd161153b9c137556a85cb9ae7b3f8b988eaed6dccd3c42edaa8056ecd25c2a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Compaction.swift",
+      "sha256": "1d6aa137904cdfb6f74b256c6572bcb9e1af2f474a9ef9433664bd291483ef8f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Formulation.swift",
+      "sha256": "8bcb4e9cdabcff1027cd1fa0970d45710f7afde693f3eebbf8681350124dbd4b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Identifiers.swift",
+      "sha256": "760708f4b7c0ef1b02e6706359579efc4bb047226dbeccea684aaf58bb22270d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/NameNormalizer.swift",
+      "sha256": "07db5c52eb1c1ac8d4786ca16955251ea3c42712105e3f74a993296eebca7e70"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Outbox.swift",
+      "sha256": "e3e687cb411c4871d323c1ac37c18a1582f629111342767678a9c6baefceab44"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries+List.swift",
+      "sha256": "77d42cb9046a549bc69b96cf854ccb6d7fd4783130425575385e450c6973e75c"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries+Ordering.swift",
+      "sha256": "f4a7495896d1ba0787f7e8d166bff7e35420004eec79dacf32a1c27b1de1d301"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries+Review.swift",
+      "sha256": "ab7e6b46a54b2f2d9df30d30cb15f2e7e61d3c151586298c4196025564764a0e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries.swift",
+      "sha256": "47f32be0f8a4e1ec8bdc8a8e8f67e3651c89b5690c0ba7e45c8c273da14db009"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Records.swift",
+      "sha256": "d0bf517180bff8d352b03a7d64a59bc03ae0cb4882f91a38fe2e39d46e9d1f6d"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Children.swift",
+      "sha256": "88acc3a604978b09477a798834ccb040017530f2cc43f2883d2446d0c8610b6e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Organize.swift",
+      "sha256": "0df0ecf8bd1f4627a5cc5257291e2557acb0fa939d6a8ef21fbf9049e529fcd5"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Replay.swift",
+      "sha256": "11bd01a2c42b352c38642ac1ebb89028fd0f50cfc894a18b21bffec6b5a74c18"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Review.swift",
+      "sha256": "13b04fef9129c289a097326ee61202b5e86847966df85af8e3309c5e2470d9f2"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Validation.swift",
+      "sha256": "0ebec88cd7022199c3587a618d81a87cb7fae8c5c57846922bd52df27d3c1405"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer.swift",
+      "sha256": "ffe864ef4c83ebccf54844ae06664a417be199b753af92a1b5ad45481e0086c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Replay.swift",
+      "sha256": "131d49b214597f7927d99cfb5ec9dd15ad3ae7a2994b0380305c2073fc8d12b2"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Review.swift",
+      "sha256": "d8870508400f2d4474331fb8ac49a3bace352e05308f46f5c14630e433f30c85"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewAccountLinking.swift",
+      "sha256": "3b09bc87a55c5f822600fd7402d5b0bf68e4c601b70e712d5528ad8d91f22e8e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewCopy.swift",
+      "sha256": "ffd58c0f164549c2a82d20b44bde5f9a50efd5ee238cb0e206186d6eae27d2e8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/ReviewPlanners.swift",
+      "sha256": "d99280ba703f155db76e9a6d1abe134e95f86ea5c5388294d3ef9883c419dd74"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/SmartAdd+Resolution.swift",
+      "sha256": "41c45160e5e9b76fb2274811589a094098648bb12ca4bdc2ece93791eb2b4881"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/SmartAdd.swift",
+      "sha256": "4e9198fcfc3f5f0e0a0278c5e4ad9b2923eed7bef8d1e9bcb42be1b52f027cee"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/SmartAddParser.swift",
+      "sha256": "db20e093b688b2845d2b92f945c1f9b5ec4ca864c86aa6db751dad516afe01aa"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyCore/Vocabulary.swift",
+      "sha256": "4d1e52d4088c9715eb0cd2ddd4414d2fd193ebb6f6e837df1522b2dd1c32abf8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeBrainBuddyServer.swift",
+      "sha256": "75f13b298d684d6d82d4f4df199b56bd2f9ebee91ad54e84d6340bfba4cff8c3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeHTTPError.swift",
+      "sha256": "66515c027b0376684491ee96d02d156382f9c8787b1a7da85917e292dd3db4b4"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Children.swift",
+      "sha256": "edc66a1be218ef9a288580d958a64ef056d7631431299cd11e138757d0604af1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Listing.swift",
+      "sha256": "bc745a40e291187ce48bf5a8a17f6aa02d86832110694f08037b8401e8e2bebc"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Organize.swift",
+      "sha256": "d243cd53c3cb9ca6b60e615f0ce356c38e44d93e0355f35eefe54fc13a3c79c7"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Review.swift",
+      "sha256": "4a454a29860461574ee416b3ea577cd99e175f60aa28ca4845e535b48b82c2e2"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServer+Tasks.swift",
+      "sha256": "c03f4a23dd95e3725452dcabe32ea5934d7b9b45a69499c4fcfc4bd6673d089b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServerRecords.swift",
+      "sha256": "978aa345c1f77543f772c54aed0eb01b2da6b9ad571b701712cd397ccd0c602f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/FakeServerTransport.swift",
+      "sha256": "ce859ce2fcfd99b94375801d2e1d5e3dc6bbc6120f7a61f0e149bdfae9ed7f87"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/ManualClock.swift",
+      "sha256": "30fb41f30c8dba8010f5396499d3afcc235895354a4fc10753b98e816a0e81e5"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/PythonText.swift",
+      "sha256": "0d299b4bec97150e92e88b81178dce5da58b868c276fa8652c61548237f94629"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/RequestBody.swift",
+      "sha256": "5544277326a4b7ec1343260fb6e9e0f96d10836f08ccb38f41b43a4d3c2db773"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer/ServerState.swift",
+      "sha256": "cad0740e311f80631e9fa9aa42f5ce6850c4f6afdf6a4a01f5f35390589e512b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/DocumentFile.swift",
+      "sha256": "273fa2d37c0f318f2313bc5a3976317e70b282d8a8c3a73b5349c00b03b86030"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/DocumentStore.swift",
+      "sha256": "527110960136e1f33ce1e45b4dbe79ee3a0d0121823ba5d915611d93d08cf604"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/ExpiringActivity.swift",
+      "sha256": "be0b9322191e37cb336eb5feb905d692d9f829f13070d6a130761f38df5c0181"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/FileDocumentStore.swift",
+      "sha256": "00de7d00b3faa9ae8961ce0e3412ba1894423b7d7f2289908c06dca5b81ed14a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/InMemoryDocumentStore.swift",
+      "sha256": "29cb6066c6911f02cc5a87af42047054b5d18f70fad526b1f9c56103ea735b6f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/StoreDocumentCoding.swift",
+      "sha256": "50c4f1edc438c44f8c291cbc9c6a1b74f853b7c94cd89463226126eae3de1a3b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/BrainBuddySync.swift",
+      "sha256": "4dd0b1e27f7954db1a7b4ddb0246e5bf986c69ad792e13678360b55f3a7f27f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/GTDCommand+Sync.swift",
+      "sha256": "cd28e683937c8f1c972aeb4393e3365b91ad25376553a57d8ebab9f16357321f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/PushPlanner.swift",
+      "sha256": "3a6644b6977a1fa174ce17c13c1548a7233dd3f7a3a0e57ee3d4caa49e768b2a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/StoreDocument+Merge.swift",
+      "sha256": "78064a6e1f768a4ec928afdb737fca768e1eba748715a3c1bf1629fe8d97075f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncConfiguration.swift",
+      "sha256": "ee26127fbacf2209202819eb24ab3d890499fce4a221c1dbec79dd25fab61839"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Cycle.swift",
+      "sha256": "a1345f93df92f87095306653877a6c9a9387ba67ea5a5848e9093fd6a6e5db73"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+NativeAuthentication.swift",
+      "sha256": "535acf8d13deb2963caf4b1b67aafe30b8d6934f24774bc73376cb83365af552"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Pull.swift",
+      "sha256": "3b767787d2cfc10a03e25c3ca45452b6b86a8563836eff2845c41dac4b07648e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Push.swift",
+      "sha256": "7703fc27f50a13c235eb9312820ee3b94fcdbc329f4ddd876415e7b3dea3e751"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Session.swift",
+      "sha256": "74ed9bdd301c8363ae1707c05d4fd7bc4d6b076923895462617d35c64e3a7883"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+      "sha256": "399fae8019ff4ad1fa84e7bf39ff1282a82036faf525d5751097549ffbdd5895"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncScheduler.swift",
+      "sha256": "4550f1f3fd974106e7e631e229320282ef201b580288ac2d94b442cbe6a08c3a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/SampleData.swift",
+      "sha256": "13c10bdac389358e8f18053add870c4be6cb29dd3d8b740e07c4e590a113116b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift",
+      "sha256": "80c377befe9bbd2cac525bf473da5237ffa594673061f7d6888632acd3a1ddaa"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+      "sha256": "4497b9d6936d268012267d44b91f02d9e49704122c1b9bb6e3342fffe5a87995"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/EndpointRequestTests.swift",
+      "sha256": "041ed1550e34fab78d815d7bbebc9c287e9568874361278d45c4ecaad78c1a6a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ErrorMappingTests.swift",
+      "sha256": "81272a54e4d9bf2f4c55e57214fbf921b7a6d0c1abdd26f2a5d553c799de6890"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/LiveBackendTests.swift",
+      "sha256": "080cd79373677b06399438c63be019b053ceeff01d4de15e25b0dadeccbe9202"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ModernAuthTests.swift",
+      "sha256": "44f4b1ba049c1c7eb605e4b06e44d029b5de933a5aa23d221b05956e3871e90c"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/RequestBodyTests.swift",
+      "sha256": "295201ec9861c7c8b52fc3047817061ee1969fcc827a8ff8fef0ac738f36a645"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/Resources/review_wire_fixtures.json",
+      "sha256": "84b8d88ac000e1acb9c5025e0127030d1b356d5a77763bae45d09507da1360ff"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ReviewWireTests.swift",
+      "sha256": "107cecb45251708a779f0d2161efc3272232d8bf2d90e33c4279a08361f0108e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/SessionCookieTests.swift",
+      "sha256": "121cb5724dea85cae08b0e0db2dc5ab10235753475cc4828ff5d3313bb35d373"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/SessionTokenStoreTests.swift",
+      "sha256": "0e8dfabbfc32b92795866b010a6be0bab55f5f54d794a024091c82380360f064"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/TaskListQueryTests.swift",
+      "sha256": "53ad3484bd2719b3c16d982d25367fbf417c6aa39d82b65619e12e6ffbce8413"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/TestSupport.swift",
+      "sha256": "ea780e5e233755addf575a4eacc329d5f5dc9692ecff334ae91c88a99d1e2b9a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/URLSessionTransportTests.swift",
+      "sha256": "053e27eb2c9f3ff9eb7ff55847183b0adafbeb1c5be67ea5abcb018b57b0997f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/WireDecodingTests.swift",
+      "sha256": "374c8891302ca17130bf34b4247328310851dea34359b91db124f3e6532c3410"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CalendarDayTests.swift",
+      "sha256": "7094697d94d04ebe76cfc790956be64dcef6018f1b0ff8e77f3f858da0aa5b5f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CapturePlannerTests.swift",
+      "sha256": "54a75b76194da2ea0ede215610ee6fed22e2b851c4a6fd227f2eb807450dc5f4"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CompactionPropertyTests.swift",
+      "sha256": "657311a86a0e2a00ef517b53df24e894d5c1bc5023e4d117493406bef4f08e38"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CompactionTests.swift",
+      "sha256": "95923253d3ad5401192665670b799369b00107f6286eef7e09209e2672327d73"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/FormulationTests.swift",
+      "sha256": "1fd0aa6d6e52b511598eae5953f6bf77ba4cf2f27f67f82e85b78595e9c9f676"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ModuleTests.swift",
+      "sha256": "2fe396b5f5bf2c854fec0bef2ad82fa9b54bc04d88557ec4c6d048781d577e47"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift",
+      "sha256": "1e5ad770b01a6b3d6f4060984f85bd5cb598302e89cccd8f6e6dae807eac2db1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesDateViewTests.swift",
+      "sha256": "3ff29cdd4efc9096e54836cc6226c1379259a1eb6b6c799c3130c91334426b32"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesHistoryTests.swift",
+      "sha256": "a79d73ee7040878feac686b29eca72dfba6f900b21b4a80b70b77cab98117692"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesInvariantTests.swift",
+      "sha256": "c0c66521791c922a6b56cdd0a6e25b4f459a97720ca074680ac18da2d403386e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesListTests.swift",
+      "sha256": "ba98cd7dcce1883133810bb04bb7646ba0b593a25ce660c6b77a5b90511c19fa"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesProjectTagTests.swift",
+      "sha256": "9c35308d2c2e0d1fce091989e8edbe62119780722218a9631b258a997a9c9511"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesReviewTests.swift",
+      "sha256": "8cdbf942dc9273c69bf8b3ea321474d5a27718b535c2b0e0c541ed1f2853b4a8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesSearchTests.swift",
+      "sha256": "71a44cef68afc693d34b382db39c6462ee8ef4bb674f95bb3ea697127725c94a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueriesSummaryTests.swift",
+      "sha256": "2099e26e39bae73b6b814250e87e688f48bc90ee1c3d631287e6a286382e1cdb"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/QueryFixtures.swift",
+      "sha256": "ea8dd8bdaa7e490a849eb8eb65dcadeccda4d778a12c53de03571f65011c355a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerChildrenTests.swift",
+      "sha256": "afa34d2d8b6a271902947873dbe67c11efae4a5b8902874f87ed1636a820e7f0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerOrganizeTests.swift",
+      "sha256": "eebc7ea878f75c469e20266fe8edb87f9b83104a6d2dd5bccdeedb8cddcec3b7"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerReviewReplayTests.swift",
+      "sha256": "ac461c31d46f1a26877c1904689c79fee6c312d2bed16898fdeee701ea29b33f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerReviewTests.swift",
+      "sha256": "27021f35040d30f5fb8f6b00ca379d3dd3973552e551b964930dc4ec27e655d0"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerTaskTests.swift",
+      "sha256": "ed095a57dae3f8053374b568982d5238aa5c6a12803faa6cd71254e24f4bc613"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReplayTests.swift",
+      "sha256": "33bd10ac36026b0deb45bc3b16ee67cf673d44370a35fed1aa275efd5db391ac"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_flow_vectors.json",
+      "sha256": "d483f449c24e259e68c78743ef544ef886bf90abcb8c769e3b2a51c1aea08c58"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json",
+      "sha256": "c9cd7e8df8b5036845cf5b6ffe8c988d2db43b3d40d7bddbcff938ea5c4015dd"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReviewAccountLinkingTests.swift",
+      "sha256": "0130a85ceffd23ad3ce54d90bb41b6420a6f54c86db8f0747d88d8a077f9c8f8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReviewPlannersTests.swift",
+      "sha256": "00bb97dd8366a8547873458d5e7a56d54a0b4c1dc971130bf7757b58e0059c4e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddFixtures.swift",
+      "sha256": "f86ffe0142679d95724985bfaeecff2e5df00035e7501df10c5b0a608107ecdb"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddParserTests.swift",
+      "sha256": "a4c5e0623cfb13cd621bbdf1e5caee92a9b22d546f96fc6f0b71aac21d2f2179"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddWebParityTests.swift",
+      "sha256": "8db6223864a8d0d491ac4f23ba5a8139274057f141fdfc1d46653cd529a1b11e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/CoreFixtures.swift",
+      "sha256": "b0c2fd3fdc892788e91e249a8e14df3605aab9db53583158d8173d27821038b4"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/ReviewFixtures.swift",
+      "sha256": "2f61aee43e83ed994f52e374b431659863af2dcf8a1f46627f17c153a0220813"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/ReviewVectors.swift",
+      "sha256": "7ef970c24a095e3b87c3816794bb4f9ecb196b637097618e65fd2641b5839b0e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests/FileDocumentStoreTests.swift",
+      "sha256": "7145621ee6ef9a5527e6f372019080deca5c8ce51db9990630c7e710d3a9ea8b"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests/InMemoryDocumentStoreTests.swift",
+      "sha256": "e3b1dfc2b238246779df670362122642436758f46b077e375a9b66642f420fd1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests/StoreDocumentCodingTests.swift",
+      "sha256": "f347ef6501606245274adfbeb92ec5ceb049febb1b28fbe7a80d476683339ede"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests/Support.swift",
+      "sha256": "4b7c2288be8befbc82c96bd75d7ed2b08e09a5d28114884f15e3c8b78d4606c8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/FakeBrainBuddyServerTests.swift",
+      "sha256": "47eb142ced3fffcf41ca91a119ac6930c2b47bd22f002d0386d03cc1f11c44b1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/GTDCommandSyncTests.swift",
+      "sha256": "e8759ed0b3a39add600f2b7a2eb0eda03affa0c3b40ca86f233650b5e4ac8166"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ModernAuthSessionTests.swift",
+      "sha256": "7c67c09bc883a6bd586032456a79fe7c2089a00e0fd9ba01edcbae15a49769c1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ModuleTests.swift",
+      "sha256": "0a2c21a54730c6fec1b8c5cc646f865dbc36eddfa9ac225b69d1a94560ff87f5"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/README.md",
+      "sha256": "979c71e28e5b1a6d4d12050d9fd05a73ac4730646b595125dbc43895d73c3990"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewSyncTests.swift",
+      "sha256": "94c43d41a475f2cc97218acf7439d0477e06c63dc28fb0adf2cab02e7cd38fe8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/StoreDocumentMergeTests.swift",
+      "sha256": "f0740fd9e3ae3114527df91221c2aee47199d0f75b19f73d2246042fd246dad8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Support/CanonicalState.swift",
+      "sha256": "b0588d47d04526bcd5305aaca5a9979dd68dc62e67cb7673268659cac6c5b724"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Support/HoldingTransport.swift",
+      "sha256": "5547a04c75793f3f1137da6dc907c66d653f3073a14e7ae047ff1c5e210890d1"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Support/RandomCommands.swift",
+      "sha256": "001870268020d90cd98fd42d6a48c38439f0dae1b8eae44f2ce36c86b04ea161"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Support/SyncHarness.swift",
+      "sha256": "26b0d34c44f6643a86bdcb91c1c9eba5d2173b31b8f078976c09d61434441d8a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineConflictTests.swift",
+      "sha256": "25ca35ab603ea1a3ca12666e36b0d696fd146661f1b212d5e5a56f1967c7f6c8"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineConvergenceTests.swift",
+      "sha256": "599497d19ba894bca66be7a9dd6c4f3ea356161f72bb74c65f44a86934596e89"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEnginePullTests.swift",
+      "sha256": "b0c8332f23a53adc761de3f01853508facefd130ef14c20ce0d57fbea749d8ca"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEnginePushTests.swift",
+      "sha256": "5a03bb3dd9c03e9d4373c830f089b09dbdf7e147b7c83aa58d5f8ba8cea95555"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineRaceTests.swift",
+      "sha256": "498cd233d513688700d437d10551dfa88108a81b99cb3f79f782f7478bc99603"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSchedulingTests.swift",
+      "sha256": "0fa3a2a584792b4a879237fb6724a3545d801503697a1497b5e7daa1bca0a472"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift",
+      "sha256": "708a0fd19a072806778942ecabadcf4d16456fb3971be6402229e4739c559f2a"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/AccountData.swift",
+      "sha256": "5c3529d32448e197a43a0a2635520b8f879aa40090c57b628e28f67e310bf642"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/ControlledStore.swift",
+      "sha256": "f9eddfbd1af22efb7ec26448363719ac9bd1b8fe31eaec571b2227565b573281"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/EndToEndHarness.swift",
+      "sha256": "e2d107deecd64aa1d066728dc4545c58e6d587314794dc8642b4c07f5574b638"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/FakeSyncService.swift",
+      "sha256": "dd20cd04cdedfb654530ea2b7dd4485595fa4764c1433a03622d055b366c47c7"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/Fixtures.swift",
+      "sha256": "39956e309a7046d226b5068c08880b9a9b406f848f85f69bfb69cc52a14081aa"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Support/VisibleState.swift",
+      "sha256": "8c9f17145911212b865d7287509fe62d4c0334c642d2f70ef3020a68f49d7807"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceCommandTests.swift",
+      "sha256": "de7c1577cfe4ad3a2704047afb4ea27cc83fa93be1cfb72119e3214a51f8da74"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceEndToEndTests.swift",
+      "sha256": "3e2595bcbe30514d85195197f108bf96f2d6e9e26d02692616bf1e333f0036a9"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceLoadTests.swift",
+      "sha256": "9d5624c92cd1bac4cc4aad83db1317b18444da66eef4def0d0516484bbdbe38e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceModernAuthTests.swift",
+      "sha256": "0f696da2c0a16e807319ba1fb3be7653a78f4d9d54b51adede72965a3525141f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspacePersistenceTests.swift",
+      "sha256": "c1587e2daf2d2b544e199ea99b8b71bd69b2350b0dbdaafcfc51117d2e7af8cc"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspacePreviewTests.swift",
+      "sha256": "dafafcfb0a2513ab57a3f0b7d60aa1e536a0129cc8286492211f7b6e7645d04f"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceReviewTests.swift",
+      "sha256": "ec68cedb4ef119e700e6738ba6c120472e9607b05b61f8ac1b372d0f13886eb3"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceSessionEndToEndTests.swift",
+      "sha256": "a1a450d2162924a030ee3214f075806fae5cf9d3209ac2e0701644b8fd45fa8e"
+    },
+    {
+      "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceSyncTests.swift",
+      "sha256": "2e6af71749b54a5ebe186b1344ba82f902713fb5c20a58b9a32dd70a38bfdc50"
+    },
+    {
+      "path": "ios/scripts/swift-linux.sh",
+      "sha256": "ee55bfc0182c583801d0c0ef23f617589643543b103ea52c7c171f3d2dba49c4"
+    },
+    {
+      "path": "macos/Package.swift",
+      "sha256": "e3c577ae4f6fecff23a53ac1953e0d748a4c1ac7bd17bd2439b68e84039e0ab3"
+    },
+    {
+      "path": "macos/Sources/BrainBuddyMac/APIClient.swift",
+      "sha256": "a62408d96ded67fa1b09a0cbc0c351d017f81e7da2095adf21b1c995f487504e"
+    },
+    {
+      "path": "scripts/auth_migration_guard.py",
+      "sha256": "ea269288c35b7b8558c7e3ce32fb7d2064c37cf08fe1ab7feea84afd00d87ea9"
+    },
+    {
+      "path": "scripts/run_modern_auth_e2e.py",
+      "sha256": "fe685550cf76f8f971f230714daa4b4d518303e71318de772fc0b549df4d9d97"
+    },
+    {
+      "path": "specs/020-weekly-review/tasks.md",
+      "sha256": "be82ddaf2fc8cc351676a7c92c18125bda47c15e213c215550999e16277cb7be"
+    },
+    {
+      "path": "specs/021-mac-sync/checklists/offline-sync.md",
+      "sha256": "4835d17267cfd5fd186f3b6f709517e12193995b9685b376c2080966b7e30bc1"
+    },
+    {
+      "path": "specs/021-mac-sync/checklists/privacy.md",
+      "sha256": "0eaaa1f1cb2eb89fc91779844067a99ca7e95a743d838999bdb229a8e89b34d7"
+    },
+    {
+      "path": "specs/021-mac-sync/checklists/requirements.md",
+      "sha256": "a03b90d05ef68c8cac875070674c3b8b40e473d33dea90ce79056542b84595b6"
+    },
+    {
+      "path": "specs/021-mac-sync/checklists/ux-a11y.md",
+      "sha256": "7d7e24e045e70e514337a2da6a31cd85939bbbbe81a05b4bfbbf2c460bdac837"
+    },
+    {
+      "path": "specs/021-mac-sync/contracts/http.md",
+      "sha256": "9449ee09023990d89865f4092d796c71130cb7399f9539175903a43386a1f73f"
+    },
+    {
+      "path": "specs/021-mac-sync/contracts/kit-commands.md",
+      "sha256": "0f4898cbbdfc7de11cca1896971dbbc81625535adbfcb218324569d609c25010"
+    },
+    {
+      "path": "specs/021-mac-sync/contracts/mac-app-host.md",
+      "sha256": "99dc0348b698f586bb002c4dd9fd6349b4800564554ef10e9c65d9a31f974f0c"
+    },
+    {
+      "path": "specs/021-mac-sync/contracts/mac-legacy-import.md",
+      "sha256": "d0266295dbea521cb6210114b2b2b353725f3427d48227515febc8c64b3f10b1"
+    },
+    {
+      "path": "specs/021-mac-sync/contracts/sync-status.md",
+      "sha256": "de7e35e687891df0f570279da404148513323ad47bc74b257697c135cf715e53"
+    },
+    {
+      "path": "specs/021-mac-sync/data-model.md",
+      "sha256": "dd0da413d6c9fb00013ab7f68ee33634966b992a512e8307d7a1e975ec9f2aca"
+    },
+    {
+      "path": "specs/021-mac-sync/design.md",
+      "sha256": "88566f510cfd4a8764c621f48aad76ebbf264c5579140e56fe0d23f517a502aa"
+    },
+    {
+      "path": "specs/021-mac-sync/design/D-01-archived-projects-web.html",
+      "sha256": "da9a87984a3fb3b2a3489601909f1433144b9b2a999add2b724057b46ee1165e"
+    },
+    {
+      "path": "specs/021-mac-sync/design/M-01-list-sync-status.html",
+      "sha256": "838f6259a8e0b5334c80c14d59bac5ce71b8943002db51c38f46d634727780c9"
+    },
+    {
+      "path": "specs/021-mac-sync/design/M-02-archived-projects.html",
+      "sha256": "4d7245c4eb61f9c915a9e30917a9f061c583bb5267cef31739dd46a18ed38c17"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-01-sidebar-status-line.html",
+      "sha256": "da21f28163da88e146179b681dc3c84b81ea8afe41b7c8fb8586aa9d8acb7f10"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-02-status-popover.html",
+      "sha256": "06fceaf510e992bd91aeee3ed7b54364d4333e12aa493c491d01ea974c53cf7d"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-03-sign-in-sheet.html",
+      "sha256": "972ca70e64e9ce5ca5f8d4f3c425d37536d854f21e6ba006a01f435b97ca7d4f"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-04-sign-out-confirmation.html",
+      "sha256": "0d34b49a4c67673797988ed6fdc8bfc9a66bcb9ed734da0a2f2c234d2a5dbb6c"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-05-upgrade-notice.html",
+      "sha256": "f6464b84c57d216198a335988fde50f9cb9cb584c21aba7a78dc68855da1e0c5"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-06-archived-project.html",
+      "sha256": "ad2034202d3755973113c367edbb1e31d15c467775bf63b19134d3beb391caef"
+    },
+    {
+      "path": "specs/021-mac-sync/design/X-07-menu-bar-sync-now.html",
+      "sha256": "1ddbf33e1644e5fcf97c8ceb2bde5800120e2165494408532bb16b6cd257cd90"
+    },
+    {
+      "path": "specs/021-mac-sync/intake.md",
+      "sha256": "ade0a40cd7fccd8d6e4bd031527f5ebbc9e94515be20d7f9015b327449181f77"
+    },
+    {
+      "path": "specs/021-mac-sync/plan.md",
+      "sha256": "91c39d1cc0ebe1357e364499bbb62d7889a31971c2ed0b0bfca05ecd3767bcd5"
+    },
+    {
+      "path": "specs/021-mac-sync/planning-review.json",
+      "sha256": "79cf24ab78aa134b481a52449af051272ffaa9bbe1f91dcb7043f0b3ce4178cd"
+    },
+    {
+      "path": "specs/021-mac-sync/quickstart.md",
+      "sha256": "2491690327e3b3e8613a82f5ab9cc4ee64cc6bb6ca12b955863eff89a5574e2d"
+    },
+    {
+      "path": "specs/021-mac-sync/research.md",
+      "sha256": "16262295545b973dff7099a0b07976c6f86f38d068e26bbd87f95c204bba8d34"
+    },
+    {
+      "path": "specs/021-mac-sync/review-c1-disposition.md",
+      "sha256": "7d8ece3d91f1844b4c283dc927686c5794d67136fded722d95d606b7249f40dc"
+    },
+    {
+      "path": "specs/021-mac-sync/review-c2-disposition.md",
+      "sha256": "6e850bd9c975203cb403aaadf2e75495f2c0de50ca3a271f6abaf2d890836a15"
+    },
+    {
+      "path": "specs/021-mac-sync/spec.md",
+      "sha256": "4be9969727ca35169490106dd855426df94d87706fc9f2c67b9230b896719bf7"
+    },
+    {
+      "path": "specs/021-mac-sync/tasks.md",
+      "sha256": "ee01295cd54e6e4b13ee85e34a2a60d2e69e6a7d7a5ed312e2869e269b67a3a5"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/http-auth.md",
+      "sha256": "39af037349e69caafdc2b44e440e152eba3fdb24ef95be31e90494e4651d56cc"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/native-auth.md",
+      "sha256": "ad2de655ab54b28337d2ff87caa67d0cee083ca572136f975aa6956fbe1ff3ae"
+    },
+    {
+      "path": "specs/023-modern-auth/contracts/persistence-migration.md",
+      "sha256": "6e72632f5912aa3b92b09ff7142fd8edec6bfe1b80bb03b83cfbdf47a9847532"
+    },
+    {
+      "path": "specs/023-modern-auth/data-model.md",
+      "sha256": "a45df6e2cc359d2b9b106bbda8762d19e3e3c41bf96a050712ce9338403d91e7"
+    },
+    {
+      "path": "specs/023-modern-auth/design.md",
+      "sha256": "05933c2026d9a9055ca065d638fe6b4ff31f2f75fa05a06f5fcb81b30749ddc6"
+    },
+    {
+      "path": "specs/023-modern-auth/plan.md",
+      "sha256": "16b4cc29821a5e67d66f8cedf5494d1c9c5c195aecfbbbac167b29bacace6fe5"
+    },
+    {
+      "path": "specs/023-modern-auth/quickstart.md",
+      "sha256": "cc596afa2580c9702222af5cacfffb0d118bb779ec4e74c0d1a6638e4353a30d"
+    },
+    {
+      "path": "specs/023-modern-auth/renumbering-review.json",
+      "sha256": "293fb2ba44e72d6cf635f8c1e911ee2bb8500bffdcc93f10c868bb20c2e79d0f"
+    },
+    {
+      "path": "specs/023-modern-auth/report.md",
+      "sha256": "2d0cf1909a1cfdab01423f6bf31849405ec6bd2d7622caeb8fa9579e6deab6b6"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-5fc4a6a.json",
+      "sha256": "bd154d292129b7ee4bee55b120a12a63f471505e9ed9861eec96b5dd4e0865d7"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-8f3adb83.json",
+      "sha256": "8e9cb4ad6e70f4174f6f2d43c0bd9bec0cf2971bd0eb4912561d90c44bcdf42c"
+    },
+    {
+      "path": "specs/023-modern-auth/reviews/implementation-security-e4e4eab3.json",
+      "sha256": "515f6276498a441015b65fd309332725f772afb539491931a0b4a24ee875b068"
+    },
+    {
+      "path": "specs/023-modern-auth/spec.md",
+      "sha256": "92cda091adb146f2f15aed6722da6074a5fc0373af3961878f24390c8c871b02"
+    },
+    {
+      "path": "specs/023-modern-auth/tasks.md",
+      "sha256": "7943a9eeb305b8fec169e40fbb4bded98ab0e13f26cca694c53eb4e7ee1c0121"
+    },
+    {
+      "path": "specs/023-modern-auth/verification.md",
+      "sha256": "b213fe83b21085dd0c9c864314fcd9aeb083575bb25f04941ed571e0a70912dd"
+    }
+  ],
+  "fingerprint_serialization": "Canonical compact sorted-key JSON SHA256 of path-sorted array[{path,sha256}]. All 298 current committed/local source hashes independently rechecked; original manifests unchanged.",
+  "verdict": "approve",
+  "verdict_scope": "Bounded browser evidence/visual QA for the inspected modern-auth and preservation journeys at 294; executed by root, independently inspected by this reviewer. No independent browser rerun, formal speckit-accept, physical/native, live provider, exact publicCI, aggregate or production certification.",
+  "feature_acceptance": "not_graded",
+  "production_acceptance": "not_granted",
+  "full_acceptance": false,
+  "findings": [],
+  "actual_execution": {
+    "executor": "root",
+    "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+    "provider_scope": "Real app/SQLite/session/signature checks with signed synthetic Google/Apple upstreams and SMTP capture; not live configured providers or physical iOS.",
+    "headed": true,
+    "modern": {
+      "passed": 14,
+      "failed": 0,
+      "flaky": 0,
+      "retries": 0,
+      "duration_display": "2.2m"
+    },
+    "legacy": {
+      "passed": 65,
+      "failed": 0,
+      "flaky": 0,
+      "retries": 0,
+      "optional_model_skip": 1,
+      "duration_display": "10.1m"
+    },
+    "allure": {
+      "total": 80,
+      "passed": 79,
+      "skipped": 1,
+      "distinct_history_ids": 80,
+      "modern_cases": [
+        {
+          "name": "023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "fullName": "modern-auth.spec.ts:705:5",
+          "status": "passed",
+          "historyId": "4223c7c76b6f99309e5886e0138da823:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-018 023-SC-003 a browser account switch cannot spend the previous owner's export proof",
+          "fullName": "modern-auth.spec.ts:620:1",
+          "status": "passed",
+          "historyId": "dde95a49dfe4fbb6ad8a023b89e5827f:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-011 023-SC-004 verified password recovery revokes existing sessions and requires a fresh login",
+          "fullName": "modern-auth.spec.ts:509:1",
+          "status": "passed",
+          "historyId": "151a7b33ec1d2a57b5d3bd24f70a30cd:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-001 023-FR-004 023-FR-006 023-FR-013 023-SC-001 Apple form-post signup returns to the same subject and never merges a matching email",
+          "fullName": "modern-auth.spec.ts:407:1",
+          "status": "passed",
+          "historyId": "e13e993c492b42cd59384c6a95b7b8f7:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-004 023-FR-008 023-SC-003 a stolen callback handoff without its initiating verifier grants no session",
+          "fullName": "modern-auth.spec.ts:535:1",
+          "status": "passed",
+          "historyId": "13ec8f0ea261ed2c36b7cad97bacfeb0:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-007 023-FR-018 023-SC-003 Remove Apple ends public provider authority until the same owner explicitly reconnects",
+          "fullName": "modern-auth.spec.ts:34:3",
+          "status": "passed",
+          "historyId": "e0fb6603befea479a047d4f600cb7e3f:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-006 023-FR-010 external Google email requires mailbox completion before any session",
+          "fullName": "modern-auth.spec.ts:457:1",
+          "status": "passed",
+          "historyId": "0080dc79dff03b2049f22bdd21477e89:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-018 023-FR-020 023-SC-005 a passwordless account confirms export and deletion with its connected Google identity",
+          "fullName": "modern-auth.spec.ts:562:1",
+          "status": "passed",
+          "historyId": "7798ae6d3634ead6399422ff898e9db4:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-SC-007 023-FR-016 023-FR-022 keyboard submission paints disabled busy feedback within 200ms and dispatches once",
+          "fullName": "modern-auth.spec.ts:642:1",
+          "status": "passed",
+          "historyId": "12ab62c99c8e0ac49e0078bcbdf69c12:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-007 023-FR-018 023-SC-003 Remove Google ends public provider authority until the same owner explicitly reconnects",
+          "fullName": "modern-auth.spec.ts:34:3",
+          "status": "passed",
+          "historyId": "4b4247a896576351fcd9f491f37928d1:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-001 023-FR-008 023-SC-001 email signup commits one session and survives reload",
+          "fullName": "modern-auth.spec.ts:370:1",
+          "status": "passed",
+          "historyId": "d08faa9151698b06241c83bd7b11c071:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-004 023-FR-005 023-SC-001 Google signup verifies a signed assertion and clears callback material",
+          "fullName": "modern-auth.spec.ts:391:1",
+          "status": "passed",
+          "historyId": "a234f2bc8715d33ddfa70d7c10abc092:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-FR-013 023-FR-014 023-SC-003 legacy collision requires password ownership and interrupted linking refreshes that owner",
+          "fullName": "modern-auth.spec.ts:476:1",
+          "status": "passed",
+          "historyId": "6815090f5281815724ab8b6762cf9ddf:d41d8cd98f00b204e9800998ecf8427e"
+        },
+        {
+          "name": "023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "fullName": "modern-auth.spec.ts:705:5",
+          "status": "passed",
+          "historyId": "5db42f431a1f65f1a27b056900ceba96:d41d8cd98f00b204e9800998ecf8427e"
+        }
+      ],
+      "optional_skip": [
+        {
+          "name": "E2E-VNEXT-01 confirmation gate keeps model-backed proposals provisional until explicit approval",
+          "fullName": "e2e/vnext.spec.ts:4:8",
+          "status": "skipped",
+          "historyId": "c88b0eda7182cf429f95cefefa036100:5bd835b0d6b1d4ada3b9f0db936e82c8"
+        }
+      ]
+    },
+    "gates_verified_from_log": {
+      "freshness_executed": 79,
+      "taxonomy_records": 80,
+      "required_product_stories": 6,
+      "status": "PASS"
+    },
+    "retry_provenance": "Parent reports zero flaky/retry. Archive has exactly80 distinct history IDs and no failed attempts; no independent claim of executing the browser runner."
+  },
+  "independent_inspection": {
+    "actual_actions": "Read archived results and measurement/Axe/PNG attachments; verify recorded hashes and PNG sizes; inspect two screenshots with view_image; count completed current frontend records and read relevant current raw-log gates. No product/source/shared output changed.",
+    "visual": {
+      "actual_viewed_screenshots": [
+        {
+          "name": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/af35d457-b2de-4ca5-8743-016442014b9b-attachment.png",
+          "sha256": "5af04f07df8dbd10be6e3e7427787e1044350e0a39bee154a3a9c1154a8f2e26",
+          "width": 390,
+          "height": 851,
+          "inputs_masked": true
+        },
+        {
+          "name": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access screen (inputs masked)",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/3a49dcc1-8f70-4c19-9c0c-1ace89349b60-attachment.png",
+          "sha256": "12df4a7f929b0c0198efe87310a583862338d20cd9a806349675ce8b16a1b46c",
+          "width": 1440,
+          "height": 1000,
+          "inputs_masked": true
+        }
+      ],
+      "observations": [
+        "Mobile390×851 and desktop1440×1000 pending-email card and controls fit with no visible horizontal clipping.",
+        "Email input is masked; pending submit shows visible spinner and Please wait text.",
+        "Invitation link has explicit visible focus rectangle; password alternative/privacy link remain fully in-frame."
+      ],
+      "limits": "Images show one pending state at two web viewports. They do not exercise interactions, native44pt/DynamicType, platform focus/autofill, screen-reader behavior or all uncertainty/error states."
+    },
+    "pending_action_measurements": {
+      "count": 10,
+      "maximum_elapsed_ms": 16.19999999552965,
+      "actions_per_viewport": 5,
+      "viewports": [
+        {
+          "width": 1440,
+          "height": 1000
+        },
+        {
+          "width": 390,
+          "height": 851
+        }
+      ],
+      "all_single_dispatch": true,
+      "all_busy_disabled_visible": true,
+      "all_focus_reachable_visible": true,
+      "all_control_height_css_pixels_at_least44": true,
+      "all_without_horizontal_overflow": true,
+      "measurements": [
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Email request",
+          "completion": "held real API response",
+          "real_status": 202,
+          "dispatches": 1,
+          "elapsed_ms": 11.5,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 300,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 390,
+            "height": 851
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Email request feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/fed09412-7c82-4b22-9e08-de70895529de-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Email verification",
+          "completion": "held real API response",
+          "real_status": 200,
+          "dispatches": 1,
+          "elapsed_ms": 10.100000001490116,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 300,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 390,
+            "height": 851
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Email verification feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/1763e309-396f-4628-8247-6dd2e7cc4edf-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Provider start",
+          "completion": "held real API response",
+          "real_status": 200,
+          "dispatches": 1,
+          "elapsed_ms": 7.799999997019768,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 300,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 390,
+            "height": 851
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Provider start feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ed96fe14-0969-4797-8c44-b15ec9941c40-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Account password mutation",
+          "completion": "held real API response",
+          "real_status": 204,
+          "dispatches": 1,
+          "elapsed_ms": 11.399999998509884,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 350,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 390,
+            "height": 851
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Account password mutation feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/20c0c72b-f013-4d09-979f-7a79d2ec6251-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Recovery password save",
+          "completion": "held real API response",
+          "real_status": 204,
+          "dispatches": 1,
+          "elapsed_ms": 5.899999998509884,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 300,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 390,
+            "height": 851
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Recovery password save feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/3caba9bc-09ab-4247-9b69-55fb7796c0db-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Email request",
+          "completion": "held real API response",
+          "real_status": 202,
+          "dispatches": 1,
+          "elapsed_ms": 16.19999999552965,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 326,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Email request feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/a4dbda88-04da-4852-9a09-befc6a85307c-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Email verification",
+          "completion": "held real API response",
+          "real_status": 200,
+          "dispatches": 1,
+          "elapsed_ms": 6.5,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 326,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Email verification feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/317f55b7-0872-4835-82a6-68ba38748fb8-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Provider start",
+          "completion": "held real API response",
+          "real_status": 200,
+          "dispatches": 1,
+          "elapsed_ms": 7.100000001490116,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 326,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Provider start feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/7aecb555-1d66-4c34-a35f-af10ffe31c8b-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Account password mutation",
+          "completion": "held real API response",
+          "real_status": 204,
+          "dispatches": 1,
+          "elapsed_ms": 9.800000004470348,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 430,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Account password mutation feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/eabac379-8fcd-4ebb-a477-e117933f26a0-attachment.json"
+        },
+        {
+          "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+          "browser": "151.0.7922.173",
+          "os": "linux 6.18.44 x64",
+          "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "cpu_throttle": "none",
+          "action": "Recovery password save",
+          "completion": "held real API response",
+          "real_status": 204,
+          "dispatches": 1,
+          "elapsed_ms": 4.399999998509884,
+          "busy": true,
+          "disabled": true,
+          "visible": true,
+          "width": 326,
+          "height": 44,
+          "headless": false,
+          "reduced_motion": false,
+          "visibility": "visible",
+          "focus_reachable": true,
+          "focus_outline_px": 3,
+          "focus_visible": true,
+          "device_pixel_ratio": 1,
+          "horizontal_overflow": false,
+          "viewport": {
+            "width": 1440,
+            "height": 1000
+          },
+          "reference": "1440x1000 and 390x851; physical iOS evidence remains separate",
+          "attachment_name": "Recovery password save feedback measurement",
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/70fbe9ee-ad84-419e-956d-3bd44e06cb6d-attachment.json"
+        }
+      ],
+      "measurement_limit": "Held real API responses measure web input-to-visible pending feedback; not a backend completion latency or native-device result."
+    },
+    "axe": {
+      "scans": 14,
+      "reported_violations": 0,
+      "scans_with_incomplete_checks": 3,
+      "incomplete_check_counts": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        1
+      ],
+      "summaries": [
+        {
+          "pathname": "/settings/account",
+          "surface": "Authentication",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 39,
+          "incomplete_rules": 1,
+          "inapplicable_rules": 50,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/39fc4e62-5ef3-4110-ab76-fd414f4ade5d-attachment.json",
+          "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 33,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 56,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ce42cba7-e9f8-4182-a9ec-175705a4450e-attachment.json",
+          "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 34,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 55,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/40546190-8817-4110-9c4c-ed1ddce6d041-attachment.json",
+          "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 33,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 56,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/63e565f7-bbc0-49e2-bb7e-4104527b8f5e-attachment.json",
+          "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+        },
+        {
+          "pathname": "/settings/account",
+          "surface": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 40,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 49,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/d2c7d7b1-43fa-4bc5-8273-1911c373e5d1-attachment.json",
+          "sha256": "a0c4e38224860dfe26aafe8ecd26770535d4174c51c33c0b4ad8c1fff858e1dc"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 34,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 55,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/40e6c646-5bf4-427a-941c-a678249adde0-attachment.json",
+          "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Authentication",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 29,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 60,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/dd0cffdb-ae6b-4700-86bf-988dc0505477-attachment.json",
+          "sha256": "14f817c961c179c2576ff387ef319ec320aee0951bed10f8e67e418b60cdd259"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Authentication",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 30,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 59,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/4fbd8de8-97f9-4c5d-9a00-701ab4ab7344-attachment.json",
+          "sha256": "6c3fcda74e626a7a35e789aec5dec9f52efa638c75b4b3c9da499ce9436ef246"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Email request pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 33,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 56,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/9554ae11-ec40-45f6-966c-15c3caab87d5-attachment.json",
+          "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Email verification pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 34,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 55,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/ff174eac-af94-4330-85a2-4f591220200c-attachment.json",
+          "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Provider start pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 33,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 56,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/161bcd96-108a-4e9f-ad24-896f6e3050fa-attachment.json",
+          "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+        },
+        {
+          "pathname": "/settings/account",
+          "surface": "Account password mutation pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 42,
+          "incomplete_rules": 1,
+          "inapplicable_rules": 47,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/d65d8188-73fe-45da-a5e6-9741dcdbfb1b-attachment.json",
+          "sha256": "f139830fc6c6d8e8795f77ecced85a6ab9ba4e0d0b5ce9b00a43dff119494bc3"
+        },
+        {
+          "pathname": "/login",
+          "surface": "Recovery password save pending 023-SC-007 023-FR-022 023-FR-008 023-FR-011 real pending auth actions retain visible feedback and keyboard access",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 34,
+          "incomplete_rules": 0,
+          "inapplicable_rules": 55,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/f5b957c5-ec38-4b32-96a7-696a31c2cf8a-attachment.json",
+          "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+        },
+        {
+          "pathname": "/settings/account",
+          "surface": "Authentication",
+          "engine": {
+            "name": "axe-core",
+            "version": "4.13.0"
+          },
+          "violations": [],
+          "passed_rules": 39,
+          "incomplete_rules": 1,
+          "inapplicable_rules": 50,
+          "artifact": "/tmp/modern-auth-v8-actual/playwright-allure/a29be58a-53c7-4217-8727-35c2b5522fd4-attachment.json",
+          "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+        }
+      ],
+      "limit": "Zero reported automated violations is not complete accessibility certification; three account-surface summaries report one incomplete rule each."
+    },
+    "screenshots": {
+      "masked_png_count": 14,
+      "all_recorded_hashes_verified": true,
+      "all_dimensions_verified": true
+    }
+  },
+  "crt_preservation_evidence": {
+    "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+    "candidate_identifier_present": true,
+    "previous630_null_identifier_limitation": "Historical V7 CRT JSON stays unchanged withnull; current294 generated CRT JSON now has explicit294.",
+    "t027_actual_aggregate": {
+      "sample_count": 120,
+      "p95_ms": 104.5,
+      "within_200ms": 119,
+      "required_within_200ms": 114
+    },
+    "limit": "Actual119/120 samples within200ms, aggregatep95=104.5ms satisfies unchanged95%/p95 gate; do not claim all samples<=200ms. No budgets, sample filters, production CRT code or timeouts changed by reviewer."
+  },
+  "delivery_state_at_observation": {
+    "current_frontend": {
+      "candidate_sha": "29411eba1fa0f6f13e54ec55b29635b1169100ff",
+      "independently_counted_passed_records": 1726,
+      "files": 74,
+      "floors": {
+        "branches": 97.83,
+        "functions": 98.76,
+        "lines": 99.51,
+        "statements": 98.99
+      },
+      "taxonomy": 1726,
+      "archive_limit": "Read completed current shared Vitest result records; compact V8 browser archive contains no frontend archive yet."
+    },
+    "current_backend": "RUNNING/pending; no completed aggregate inferred",
+    "aggregate": "RUNNING/pending",
+    "active_raw_log_path": "/tmp/modern-auth-023-verify-all-final-integrated-v8.log",
+    "active_log_fingerprint": "Not bound as immutable final log while backend continues; relevant completed browser/frontend lines inspected at observation."
+  },
+  "known_existing_issues": [
+    {
+      "id": "BASELINE-TASK-ACK-SYNC-001",
+      "priority": "P2",
+      "scope": "Existing task autosave correctness, outside accepted auth implementation scope",
+      "status": "unresolved_in_this_auth_branch",
+      "files": [
+        {
+          "path": "frontend/src/features/tasks/taskDetailAutosave.ts",
+          "lines": [
+            350,
+            352,
+            497,
+            507,
+            588
+          ]
+        }
+      ],
+      "actual_behavior": "sync() can advance mutable baseline while a mutation acknowledgement is pending. dispatch then validates that acknowledgement against the advanced baseline revision/state, rejecting the same valid current acknowledgement as non-monotonic/protocol-invalid.",
+      "impact": "The UI can report save unverified for an operation already validly committed and observed as canonical; no unauthorized account access or data disclosure was demonstrated.",
+      "cause_of_v6_failure": "not_proven_without_received_ack_and_query_order_evidence",
+      "owner_disposition": "Root explicitly keeps task production/guards/button timeout unchanged in this auth branch and requests known-baseline issue disclosure even if canonical retries pass. Do not call it resolved or merely timing.",
+      "correction_constraint": "Any separately scoped task fix must preserve receipt shape/identity/revision/state validation and account boundaries; relaxing guard or visibility timeout is not an evidenced repair."
+    }
+  ],
+  "preserved_history": "Original V6 aggregateFAIL, T027219.1ms failure and taskSaveUnverified failure remain retained; completed630 V7 and native614/65 retain630/historical provenance. BASELINE-TASK-ACK-SYNC-001 remains unresolved outside auth scope; passing current completion case does not repair or prove previous wire causation.",
+  "evidence_fingerprints": [
+    {
+      "path": "/tmp/modern-auth-v8-actual/browser-evidence-29411eb.json",
+      "sha256": "4aea9882174384956c0fa36315459da9958bc631a27335c6b370a4ee8f458b0f"
+    },
+    {
+      "path": "/tmp/modern-auth-final-code-review-29411eb-native-followup.json",
+      "sha256": "512953dee1f95360cf3fd815a32f7bc8cdfe16df8f1a686cc6cfbf54363a34fe"
+    },
+    {
+      "path": "/tmp/modern-auth-final-code-review-29411eb-static-scan-safe.json",
+      "sha256": "b5c0518d3df6ad6f27a3e54d7d08bddaa69b44c475778fd830afae92ecacdc57"
+    },
+    {
+      "path": "/tmp/modern-auth-frozen-29411eb-v8.json",
+      "sha256": "d1a131a5bb5b42259bf5eeb1139455e2c1099e1e7b52dc9c64c41d1607b5c821"
+    },
+    {
+      "path": "/tmp/modern-auth-completed-task-verification-630e812.json",
+      "sha256": "c3fcaacae964a426026e66150ab5c47e66f55ae566e4940e1bf90a9e99bdd76e"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/crt-runtime/t027-200-card-performance.json",
+      "sha256": "887daf5ea7eda1eda5ef242548a0bf130361512de4c6b6b9e6ab973932e01a33"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/crt-runtime/t024-compose-auth-isolation.json",
+      "sha256": "2ebe43770a068a1a00bf85abfe3a34564a3fe343fa9513453ed676a47ef65a20"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/fed09412-7c82-4b22-9e08-de70895529de-attachment.json",
+      "sha256": "150c0e735d660185943b4e2aaab32856be842ac8cac99b20609088c3b677a8d9"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/1763e309-396f-4628-8247-6dd2e7cc4edf-attachment.json",
+      "sha256": "ccb99d707a19f92f3a0066516050d705ef063d35790d7fd3ec1e2a0270fe7ff0"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/ed96fe14-0969-4797-8c44-b15ec9941c40-attachment.json",
+      "sha256": "052428c4b2a7ff77251d90ffed94ee751c7e655a3f48afde64080daf48530a47"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/20c0c72b-f013-4d09-979f-7a79d2ec6251-attachment.json",
+      "sha256": "5684402be0f480f963a90ace3091f0ce6c6e5c5064a5d7955468862c21586a5c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/3caba9bc-09ab-4247-9b69-55fb7796c0db-attachment.json",
+      "sha256": "655ac56212f27a825cabc94b53f6eda3325cf819f869ea98b150d2ee020f02ed"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a4dbda88-04da-4852-9a09-befc6a85307c-attachment.json",
+      "sha256": "1d21dcb5beb495b07ac5d8d1720b450d3895675dbec4ff5d5ec4c0bdf5f5dcf7"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/317f55b7-0872-4835-82a6-68ba38748fb8-attachment.json",
+      "sha256": "e1238bed09d5f28f007ef7798c7c468b2b6bc7cda08d93e680ebc172b5a62bd4"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/7aecb555-1d66-4c34-a35f-af10ffe31c8b-attachment.json",
+      "sha256": "b513b75f4e504ae7b2123f68dee712e40ae2325042940528645fcc86a8d4b51a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/eabac379-8fcd-4ebb-a477-e117933f26a0-attachment.json",
+      "sha256": "56c1501ad1f15d599f9b480d7bf44331fc61130444b3c217c6cd3746aa0fa830"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/70fbe9ee-ad84-419e-956d-3bd44e06cb6d-attachment.json",
+      "sha256": "803ab45919141bed38913c0be0c63d9bc91270325a14940e49e116a5ec76fd4a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/39fc4e62-5ef3-4110-ab76-fd414f4ade5d-attachment.json",
+      "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/ce42cba7-e9f8-4182-a9ec-175705a4450e-attachment.json",
+      "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/40546190-8817-4110-9c4c-ed1ddce6d041-attachment.json",
+      "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/63e565f7-bbc0-49e2-bb7e-4104527b8f5e-attachment.json",
+      "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/d2c7d7b1-43fa-4bc5-8273-1911c373e5d1-attachment.json",
+      "sha256": "a0c4e38224860dfe26aafe8ecd26770535d4174c51c33c0b4ad8c1fff858e1dc"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/40e6c646-5bf4-427a-941c-a678249adde0-attachment.json",
+      "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/dd0cffdb-ae6b-4700-86bf-988dc0505477-attachment.json",
+      "sha256": "14f817c961c179c2576ff387ef319ec320aee0951bed10f8e67e418b60cdd259"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/4fbd8de8-97f9-4c5d-9a00-701ab4ab7344-attachment.json",
+      "sha256": "6c3fcda74e626a7a35e789aec5dec9f52efa638c75b4b3c9da499ce9436ef246"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/9554ae11-ec40-45f6-966c-15c3caab87d5-attachment.json",
+      "sha256": "2e60ff77848822475310488609b9196f9b83eb77a05ac41ff77b33c4b75f8ba7"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/ff174eac-af94-4330-85a2-4f591220200c-attachment.json",
+      "sha256": "4ae47f287d940b8f18c801b5f53ec9a4daf317621a5a2641072a20e9d373f139"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/161bcd96-108a-4e9f-ad24-896f6e3050fa-attachment.json",
+      "sha256": "4c2431e35ee5b39f4694ff23b1c13d53d37900a58ae3b0b82de329672f60d24f"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/d65d8188-73fe-45da-a5e6-9741dcdbfb1b-attachment.json",
+      "sha256": "f139830fc6c6d8e8795f77ecced85a6ab9ba4e0d0b5ce9b00a43dff119494bc3"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/f5b957c5-ec38-4b32-96a7-696a31c2cf8a-attachment.json",
+      "sha256": "cf10c5e370596b406c33e355d8ca19e8b494131f24f8dabfb5feda095fa37c44"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a29be58a-53c7-4217-8727-35c2b5522fd4-attachment.json",
+      "sha256": "e10f1e2e25b9e40a4840a73921e00d12fc1192209633ac72186ed1342b7b3f11"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/78501875-ca85-4edf-a613-4393a344d3c5-attachment.png",
+      "sha256": "26dc518300b18c4284dd5260bea25432f59512c1e33b4237baefcacd740ee7be"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/af35d457-b2de-4ca5-8743-016442014b9b-attachment.png",
+      "sha256": "5af04f07df8dbd10be6e3e7427787e1044350e0a39bee154a3a9c1154a8f2e26"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/2f7f1c62-f81b-42e5-8b84-39fe53f1df92-attachment.png",
+      "sha256": "e01fa47888a882225658bb2c38d04f9d2d0d28a6a555f6cc4b14454c4973a318"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/77b0c056-d29f-4ae6-ab61-a967d77ead6c-attachment.png",
+      "sha256": "5bf73a6b1665a8eb7e16ed7a5c10d7c9fa921461823d0dcc0c764668e9508020"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/8ccf281e-0a73-4eba-ab9e-675d8cf68585-attachment.png",
+      "sha256": "ef448b4a79404ae32ecb989190d84aa0b0600c6c886d0fee2c7f75ad9ec81332"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/91137074-1cfd-41a8-8765-93020b5d7416-attachment.png",
+      "sha256": "2da691a2c2db587a518913467998aea1bca3bd238b8e3d5e00e86e7f2498d6d2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/4dc51ba9-3fc2-413d-9083-d37a86038e72-attachment.png",
+      "sha256": "9a270ab44411d8cbfa525ddc8f1c05c2b3c6369f05d69963fe77a5f9151edd0d"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/8218503f-5408-435e-b483-dd6da7d1090c-attachment.png",
+      "sha256": "53db49f108897dc64a18447d01d2dfbfb3c3e7b49e45b1b0041b2f086d4ba4bc"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/3a49dcc1-8f70-4c19-9c0c-1ace89349b60-attachment.png",
+      "sha256": "12df4a7f929b0c0198efe87310a583862338d20cd9a806349675ce8b16a1b46c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/23611930-b56d-40ca-a6e0-f9dcf5e7237c-attachment.png",
+      "sha256": "7ff889204aa95b0a1f22e5a8fafde5ccd9b8b4940982b9d30f6666dc315d2349"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/46948095-e01e-4633-ba0d-11112337e109-attachment.png",
+      "sha256": "8ac1dc0d87c4b037b9d0fe680830b19f3ff4014745d46a270826cb3ab47f524a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/0f9bf5fd-5f2c-424f-9de7-050a7b574adb-attachment.png",
+      "sha256": "f8b2e05e386fa76843544a6dacbd90ec34066e5e00b50d018d0a0c485501ece4"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/fcc3a78d-5142-4cb3-9a5c-fa1329d11112-attachment.png",
+      "sha256": "747d11a5f281c4a1579645c17142125d6d747dfe12f14f48949a687935bf40ba"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/feded282-c7c8-4b4d-8971-a1316544ee9b-attachment.png",
+      "sha256": "dc0924cb4445c96d4572f391ccf864e34d616ce94a93f656ee1ba269f353f15f"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/0b5e377e-d794-440a-a4a5-275db35f7167-result.json",
+      "sha256": "270f76032e129a045921a5957282697488ea5c8f3b45bc9808cacc2f3d3344cc"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/0ba6e8bc-a732-45b6-8078-5f0cd6d93bb3-result.json",
+      "sha256": "f99d633ed6d100fd7e8bbce5834bf7d32f21f554782f0036e22a30db926dc5fe"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/0da29662-f08e-4c30-aa38-1b76c1f1289d-result.json",
+      "sha256": "095b62ef14264e90f7d251ea48d93f70280b8f71d797e323db2e918d5af02580"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/1379b0ed-04f5-40ff-811d-b9dc986a2eec-result.json",
+      "sha256": "55de047d9a8b1f491b9aa7ae9b4f5c60c2af9eba9673a09f08d5c0f0d4db63b6"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/1477d0cd-fb72-476f-b9bd-e9ca99ca748b-result.json",
+      "sha256": "924d26dffdfbfe7e8c2e8b7ac3d04de21f39f68002c57f5dcd89c8034c7f3d06"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/188de59c-cf8c-43d7-92cd-5b69061db9da-result.json",
+      "sha256": "83f698fb2e263572116f1f90b135fe9687888c2662716d534728a623ec17fb72"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/1d9c75f2-f67c-49f7-a983-1d384d3fd670-result.json",
+      "sha256": "c4dffc270ad84f9d3547448a3f8a65dadfccd03e17d22cc96d95146d85799619"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/1e6a11dd-2cfb-45a4-ba48-f699c47404ad-result.json",
+      "sha256": "2e7db06da730a88a219758d5281cae9e8c644bf0bafe7dcf7889b17db8e2d028"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/2161c59e-3f68-409f-b6ae-18d270bb7d61-result.json",
+      "sha256": "84731422c36ac2957b3e4bb6b4250163b50d208136832533b08dfd454c38f275"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/21a23926-b8c8-475e-ad11-d4345b5c8874-result.json",
+      "sha256": "56eb72218d811eebec2b751171ade060d9930e0a9646ef25112638eb8f1320e5"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/225b9ce8-2288-4b54-ac83-3c475194c8ad-result.json",
+      "sha256": "4de5a87bb3f2c347e464f4120686bcb87df629304717172bba7929779d2c4113"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/255e2c71-714f-400d-8434-657ec2f4ad81-result.json",
+      "sha256": "8c3e60a6bd03ff6400526a9bf9cf31c3145578313192f06d41c8393056466061"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/25745322-3bf0-4d38-9ee1-243da76feb11-result.json",
+      "sha256": "28706a3dfeaa548c3dde20e21defaf109bb1bcb3ca546e74cb588232c591e354"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/2c01292d-1546-44ae-a2dc-5154d7e1dd21-result.json",
+      "sha256": "105212e8c66fd8099d658a2adad34095fce4596bb2e70b5e0614cc587df33514"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/2c6f9e6b-351c-4d0d-a3a9-363afe2f61de-result.json",
+      "sha256": "6441b5ba3aa23de9ae7dc714791f45e0d23240871288209daa34d2211bfe309f"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/2e9b5616-e9b5-44bd-a96f-e0dfc2631ff2-result.json",
+      "sha256": "6c4b2c6e48837e5ea38a593ae2b0fd7ad3b8d764b0795c3ace844e0abae4bce4"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/35b8249f-b494-4570-ac79-af45e5ef107e-result.json",
+      "sha256": "4d47d20bddf8d3fcb377b1552e7aecc0bef1a588ffdf9de25d62f152b11eb3fe"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/3ffb8f49-dfed-4873-9c11-b3b70fa90147-result.json",
+      "sha256": "7a2a9609f1a4778d26e31ebd9cf94d7a8079f25a55fdaf93db07bec2ff0cf758"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/4159c78b-fd13-4ece-bc91-51f5421ddca8-result.json",
+      "sha256": "a6ce4d8df8f520fa9eab300edf9c305b2a85faf82c7801dbfe5edfe123010535"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/47b09dad-fb47-48da-bb23-84f79788ebf8-result.json",
+      "sha256": "94a08892de40177f392be89dfa18dad71ddd332fdf7f6fab99d9310598c1888a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/4b3e92f3-8fe4-40d5-b254-a87d1ca6be80-result.json",
+      "sha256": "93ca6213a02b9632f3b24cb2189f7621faa6ab1dadea270bd4b27953047c4663"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/4cf94737-afa8-49b9-a802-794f5e9b2c4d-result.json",
+      "sha256": "ace786ff68e7f08391a41703ad27fb5a5b6728c8728056ab26709f9bea21f7b9"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/51e0542b-7365-49c3-aad5-c8e7305d4553-result.json",
+      "sha256": "d777fb03d82b370d7ae1ba0d403d0162517c73741f1ee1085620d51a449759e5"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/5dd5b6ff-427c-431f-83e8-5df5b5c066e5-result.json",
+      "sha256": "dd3bc8555b5dce43cf74abc5b4a40fed8589758a091c655261f5e463aba93841"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/60178f15-6533-4415-8ed1-79617aef0505-result.json",
+      "sha256": "5b6165eda9bf6a0f551142d2c34a80016c4a92fcf0a1b238bdc62745996199f2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/625edcc3-49e1-4156-8135-bfce1b424690-result.json",
+      "sha256": "de07723d09a70e3d3f023c507171215ae2640ed89f9529889e07680f453ef7a2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/62ac466f-2677-447b-8861-b59e785b8660-result.json",
+      "sha256": "7bd32dc7154a24409db5a8100712732ce30b23e2248dd30309a222d988ab27d2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/63c832ef-f87f-4159-81a2-10fdbe593df5-result.json",
+      "sha256": "c7ca4ecd978e721fb026c8517f950c670fe80b7c9c9aba3abbde4ae7867e9b00"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/65ba8dd7-319a-4ce6-a365-b3191509e7cf-result.json",
+      "sha256": "3711df571c4132bffd2d30c4fa5ddcd0e2056f102dcf44fa78cd464fd5b7b52e"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/6685c68d-e60f-4a86-8b86-060128c2ca09-result.json",
+      "sha256": "908131b321dedea433989854a1c8f8af44311fc76e7abdcd920429430f4e46b3"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/668e35b5-beb1-42d2-b5fc-0248782624f8-result.json",
+      "sha256": "7e448df4097df3ac7c0bbf33ed52cf12af324ac77797cf4cfcc648a0fb5f9106"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/6b292b67-02bd-4bdc-9fb2-ec5b8eb11292-result.json",
+      "sha256": "51bc5d6a284670929127a28922a004990886aabd32c76d5c48245e1b6c1a551c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/6cb096af-4c67-4af3-8993-305c65776748-result.json",
+      "sha256": "9c58362a37509012b215f045854779d6a25f5d9047151dbd3ed84138e97ec076"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/6ed5e948-2ef3-44d7-9fbc-0544627f65a0-result.json",
+      "sha256": "b31122a2fed3d7343a5387863ca1dda114b2e04b0ff4410441baf5b9464f4340"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/73e86b41-237f-4852-bffe-f1ccdbc88b26-result.json",
+      "sha256": "96d0dccce9022831e08e0af93c66b877535112cefd1d041bd33dfcd7789bd780"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/74b35b15-7cc8-40d6-bc72-95062b595e41-result.json",
+      "sha256": "f35538f6907b91867aca851c7d4b5f2dcad29655cb742b8aaa057af759a17ee7"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/75ab71e6-c567-444c-9a2e-5047a9e5012b-result.json",
+      "sha256": "e3e630bc104b7abeb9f2ff707a75680dbbae5074f618a1373f3d1f5ec5e27518"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/76860682-f894-4419-a8c5-c91bff8085a0-result.json",
+      "sha256": "8627e9f94fe26c05a108637509fae67d6df967b3bdd1de4b4962263b106409fd"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/7b036902-92ae-4e09-a0d2-63f98f1db60f-result.json",
+      "sha256": "1efa19e7c821befcde1c4fae73afe2f3a60a77624199c91782462e6ccac51979"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/80aea405-ff8d-4c11-baf3-97447ebaba2a-result.json",
+      "sha256": "2481cfb06e8b72e4ce96a312af2d6887b5f44cc3a61dc122a9e42317c58c641c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/841547aa-3858-4b37-8a02-a73a200a9b2d-result.json",
+      "sha256": "24404c9ab8dcde03c415ef0a8cf9fbb106cab07fa4df634af1cea8b5a0c99ac5"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/8465ece3-a087-44a3-969f-b6c3c5c7580c-result.json",
+      "sha256": "ccc06f23900457d03070ccc9bd74eaeca28d05dc6efde3f2f8b6fd71f73d19d3"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/8b1b4def-89c8-4775-9eb5-c15911b09618-result.json",
+      "sha256": "7e12cd31a9f7737f9851e9d1061b0821c52c4c93ff48c1864efb2205d80814ae"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/8eb1d8d0-10ef-4bcc-8d76-76eb34d089be-result.json",
+      "sha256": "020c5b3b3b15026bca4d37af7b88a4b0dbc3c71e30c4cf829f3775887b71813b"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/940b8473-c1f3-4af2-9982-d6d5fe348c4f-result.json",
+      "sha256": "ccf291c76ce771f23835e6cb6c9c3c94a0c5b3eeee5ab576796ea6368ec74e2f"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/9782c2f7-cf6a-49c7-aa04-8f16fa7ac867-result.json",
+      "sha256": "a1f4000b7c10582ab753ef4f0245dec5c30b692ac0b66968442570ed91ff332c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/97ea5ddb-1e31-43cd-8e8a-7c132c58a41d-result.json",
+      "sha256": "d53b2e19d84dae10f2f08d5e383947fc6947876b0740f7507d8b6ecc09b1706c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/9d14d087-d962-4c1a-b9d3-4af36ea2f692-result.json",
+      "sha256": "36a838ea69f782865c83894d3e7272b17beecd67cff9fd1f092bb1cac4f2322a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/9d5fb435-0971-4369-9db1-1b3591487a30-result.json",
+      "sha256": "61412cf592b1c42819e520f2ab3f8e4da6ff564b895e3064db20f47ae596f0a4"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/9d9360f8-d69d-4e85-a0db-de412e5ce86b-result.json",
+      "sha256": "0d7ef340d25bb8ed2a1ef0baee271867a367851a5c8debeaa64617336013b1a2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a5841fa6-cb23-431b-9484-260817b8d08f-result.json",
+      "sha256": "9b81d1ed35d1c4809a6500351c850106830a6a20925e4725ab34c2ce7019c6e2"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a5ad4956-d237-478d-a5e1-56c98630a19c-result.json",
+      "sha256": "5e5141cb893f4611c5267fd663319bb801c67eba729b9b960859ac7b598c5529"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a71cec69-2fe0-418e-bad1-d3e2c60fb46f-result.json",
+      "sha256": "c924a3a8543cb30743b7974b1d493ff99fb2bef421c385e2c83b56086de45a23"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/a9565140-a6c7-42ed-a93a-f9d17fb9eaab-result.json",
+      "sha256": "386d3adc7ee9d626f6bfca684d2f5d4722dee15e877485bcd7c58042586c6a4a"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/ab22a82a-0153-43e7-8ff2-43473421496c-result.json",
+      "sha256": "313cb12d91a97984cb056bb108b8c138ca6e37844a5d3fc2094068d19ab6eef0"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/adda1e3e-3e5c-4a16-9ed3-907fe6518a33-result.json",
+      "sha256": "68a02795558c5c1ef08f6af4290b22e884efb9685a2b6fd7c25ed51532477158"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/afc8a484-7012-4c21-828a-fc88f64dd851-result.json",
+      "sha256": "e25772b899292967963f8590c0d60808781450949f22ea65c1100a8ae8c1c888"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b0119079-f9ad-419f-850e-8ee84d31fec8-result.json",
+      "sha256": "ff88845d59739012892a9a8319e9627883189995616aa4574b56ff512363eea8"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b2c36b95-5e75-4fe9-89d0-4f0ab07c3167-result.json",
+      "sha256": "5c570c0f5cd1552d45156fd6fa59ffd65dc794d25e4bc9fb1e7ea66f079251eb"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b3d9080b-19db-4d23-9948-a51aab27f0a2-result.json",
+      "sha256": "f7f03517207bbad9e452ad393a13b393f24fbafb60b3f825af5dbe3eab86ab08"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b5b01056-f2c3-458f-a4be-cd9f8886f47b-result.json",
+      "sha256": "e8d6c3dc9275ed514b6fd946a794ae98bb841d047aa4165dd95986bd5b11ec4d"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b8ef0866-65b2-4361-ad45-90a1bf7e0319-result.json",
+      "sha256": "5be4e6007c357befd43c154dcd943254b4dabaf4751060215af253d26a203c72"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/b999e951-3ea8-4c2e-a3d5-2937603bd2eb-result.json",
+      "sha256": "23f2c2f95aad32a3553fceffa750e54899254bfa1e692361b6daf68420e750e1"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/bdc3e1b6-9be6-4e69-b9c3-858703293ddf-result.json",
+      "sha256": "1ae33c059da58913aabffd532166c756625faef9ea1329c1c3b2c6cd40a1a2ef"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/be9cdaa5-4ca4-411a-ae6c-14d725dd29ac-result.json",
+      "sha256": "d37fef9d6fc7bbd6986cf1e51ed289f9a4e85482fef6899694b2528702a69ac9"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/bfe618a3-5ff0-46ac-8475-ce209dcf77b9-result.json",
+      "sha256": "619c58417d9b3fa478f54c2a6c2e5b3de757eb109a2456e4c1bbf3a6d5d684c5"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/c27893bc-6ef6-4ce4-b25c-f36587391bd0-result.json",
+      "sha256": "5b4ef3980a768a8df59f652d244649083a193e50d6eaa1bfe1bedb8f1b5633d3"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/c6c5948f-6a35-42e0-8e53-070a2e50f46b-result.json",
+      "sha256": "2fea582aa966f0fa18caa39c6c001816b2c4413f7bbc7cf98a5eb510fcc93866"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/c7741d16-aa6e-4b90-8405-e86f113a100c-result.json",
+      "sha256": "ecd7dc6ea9c6617735ae670dfded2cd5d737a47d3e888ac153bb66ec56ad325c"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/caf07160-13b6-47d4-a7f7-39942a6c83a3-result.json",
+      "sha256": "771fd3fc1482992476948f88e6c1b30cf1ed6521c4427d7704b713a4416d9d4e"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/cbed33ed-1712-4b09-b887-f8b840726cc8-result.json",
+      "sha256": "49a1c68d19883f79578593ffc81b6dca40f6523e2370b90ef5d9fcba98073184"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/d24740b3-97b2-4ede-8162-2ae8b4643989-result.json",
+      "sha256": "1d4c1b58bb2ebd31e3aac1f4104e930a774d502ec562ca2b7a7c51da028e6122"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/dc4c101f-0f28-4083-b9b1-12bee59af273-result.json",
+      "sha256": "f366f9f6e23bfca7a41f903ffdfc0d857fc9a587a8f1fb02f41d6a07953192c7"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/e4342a1d-1965-49e7-b850-547ec192f6aa-result.json",
+      "sha256": "dae52c4f64a19ebdd2ad99977f144b328e0246f19eb72e9df940ce48ce0ae497"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/e9dab077-39ff-49c4-8f77-79e9285c77d8-result.json",
+      "sha256": "4c6cfd0858476c38a2c99567b9d5cd12f739d65f3328524680038d7dfafdb7f0"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/eb102c92-9409-4fb1-b5ff-94f6245a6417-result.json",
+      "sha256": "6c995e8af67f3c04a4349461533aa6607c762eaa3934bc488e7a0f4dd93637aa"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/ebc813c8-e2f8-4b7d-94fd-5e1092160662-result.json",
+      "sha256": "9eca543c054709ac53355c692953d7169adfcfbdb79a5862ed906d2fc442f956"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/f715523b-194a-4435-b851-5c0d807673a3-result.json",
+      "sha256": "daf63f074f21c7ce0c66b8779c3467f8846756d3af8750fc7b371d8dca683d61"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/fc2db8d1-271e-42cd-a7e2-07f024e278cc-result.json",
+      "sha256": "91dbbdc0a43622bc48dfcd5de86859d113238c5810ab7b2d20180bead90f3589"
+    },
+    {
+      "path": "/tmp/modern-auth-v8-actual/playwright-allure/fe777705-09fb-4378-9b8e-081cd8428a4a-result.json",
+      "sha256": "e70c873a1147ffa552a23b60bf214cf362b9c5d8ac8e6bdb3d597382e17c7cac"
+    }
+  ],
+  "inspection_parser_note": "Initial compact-evidence reader assumed the older wrapped measurement schema and hit KeyError. Current V8 direct measurement objects were then inspected and raw attachments verified; no product test failure or source mutation occurred.",
+  "limitations": [
+    "Current integrated V8 backend/aggregate completion remains pending; new33-criterion readiness will follow only the actual full result.",
+    "Physical iOS/current ios-app/ios-kit public exact-SHA CI, Mac/device integration, live configured Google/Apple/SMTP/private relay/revocation/notices remain unverified.",
+    "Only bounded web screenshot/automated feedback/Axe scope exercised; zero violations does not resolve incomplete checks or certify physical native usability.",
+    "Mandatory full delivery/typed receipt/formal grading/live/release/processor evidence remains unverified. No publication, merge, deployment or task checkoff performed."
+  ]
+}
