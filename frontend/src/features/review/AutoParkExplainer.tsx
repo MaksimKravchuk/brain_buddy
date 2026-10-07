@@ -8,12 +8,13 @@
  * all record it as seen with the browser's time zone; offline nothing can be
  * recorded, so Close leaves it for the next open. Never shown once seen.
  */
+import { useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import { describeReviewError, newIdempotencyKey, type ReviewState, type ThresholdDays } from "../../api/review";
-import { useAcknowledgeExplainer, useOnlineStatus, useReviewClock, useUpdateReviewSettings } from "../../api/reviewHooks";
+import { describeReviewError, newIdempotencyKey, type ReviewSettings, type ReviewState, type ThresholdDays } from "../../api/review";
+import { reviewKeys, useAcknowledgeExplainer, useOnlineStatus, useReviewClock, useUpdateReviewSettings } from "../../api/reviewHooks";
 import { formatReviewDate } from "./formulation";
 import { ThresholdControl } from "./ReviewSettingsSection";
 
@@ -34,6 +35,7 @@ export function AutoParkExplainer({
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  const queryClient = useQueryClient();
   const online = useOnlineStatus();
   const now = useReviewClock();
   const acknowledgeMutation = useAcknowledgeExplainer();
@@ -41,9 +43,13 @@ export function AutoParkExplainer({
   const [threshold, setThreshold] = useState<ThresholdDays>(state.settings.threshold_days);
   const [changing, setChanging] = useState(false);
   const [failure, setFailure] = useState<{ referenceId: string | undefined } | null>(null);
-  // Retries resend the same request under the same key (a safe replay).
-  const [keys] = useState(() => ({ settings: newIdempotencyKey(), acknowledge: newIdempotencyKey() }));
-  const settingsSaved = useRef(false);
+  // A retried acknowledgement resends the same request under the same key (a safe replay).
+  const [acknowledgeKey] = useState(newIdempotencyKey);
+  // A settings attempt is keyed by its threshold and the revision it was sent
+  // against, as in D-04: the same change replays its key, any other gets a new one.
+  const settingsAttempt = useRef<{ threshold: ThresholdDays; revision: number; key: string } | null>(null);
+  // What the last successful PUT returned, until the review state catches up.
+  const savedSettings = useRef<ReviewSettings | null>(null);
 
   useLayoutEffect(() => {
     headingRef.current?.focus();
@@ -55,17 +61,39 @@ export function AutoParkExplainer({
 
   const pending = acknowledgeMutation.isPending || settingsMutation.isPending;
 
+  /** The settings as the server last told us: a saved PUT wins until the state query has caught up. */
+  const serverSettings = (): ReviewSettings => {
+    const saved = savedSettings.current;
+    return saved !== null && saved.revision > state.settings.revision ? saved : state.settings;
+  };
+
+  const saveThreshold = async (): Promise<void> => {
+    const server = serverSettings();
+    if (threshold === server.threshold_days) {
+      return;
+    }
+    const previous = settingsAttempt.current;
+    const key = previous?.threshold === threshold && previous.revision === server.revision ? previous.key : newIdempotencyKey();
+    settingsAttempt.current = { threshold, revision: server.revision, key };
+    try {
+      savedSettings.current = await settingsMutation.mutateAsync({
+        body: { threshold_days: threshold, expected_revision: server.revision },
+        idempotencyKey: key
+      });
+      settingsAttempt.current = null;
+    } catch (error) {
+      // A refused change (changed elsewhere, or anything else) re-reads the
+      // state, so Retry is sent against the current revision.
+      void queryClient.invalidateQueries({ queryKey: reviewKeys.state() });
+      throw error;
+    }
+  };
+
   const record = async () => {
     setFailure(null);
     try {
-      if (threshold !== state.settings.threshold_days && !settingsSaved.current) {
-        await settingsMutation.mutateAsync({
-          body: { threshold_days: threshold, expected_revision: state.settings.revision },
-          idempotencyKey: keys.settings
-        });
-        settingsSaved.current = true;
-      }
-      await acknowledgeMutation.mutateAsync({ timeZone, idempotencyKey: keys.acknowledge });
+      await saveThreshold();
+      await acknowledgeMutation.mutateAsync({ timeZone, idempotencyKey: acknowledgeKey });
       onDone();
     } catch (error) {
       setFailure({ referenceId: describeReviewError(error).referenceId });
@@ -152,10 +180,7 @@ export function AutoParkExplainer({
               <ThresholdControl
                 value={threshold}
                 disabled={pending}
-                onChange={(days) => {
-                  setThreshold(days);
-                  settingsSaved.current = false;
-                }}
+                onChange={setThreshold}
               />
               {threshold !== state.settings.threshold_days ? (
                 <p className="m-0 text-xs text-slate-600">
@@ -168,7 +193,7 @@ export function AutoParkExplainer({
           {failure ? (
             <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
               <span>Couldn&apos;t save that you&apos;ve seen this. Try again.</span>
-              <span className="text-xs">Ref {failure.referenceId}</span>
+              {failure.referenceId ? <span className="text-xs">Ref {failure.referenceId}</span> : null}
               <button type="button" className="min-h-11 rounded-lg px-3 font-semibold hover:bg-amber-100" onClick={() => void record()}>
                 Retry
               </button>

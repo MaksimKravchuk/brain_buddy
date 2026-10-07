@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../../api/client";
 import { reviewApi, type ReviewState } from "../../../api/review";
-import { reviewKeys } from "../../../api/reviewHooks";
+import { reviewKeys, useReviewState } from "../../../api/reviewHooks";
 import { useAuthStore } from "../../../stores/authStore";
 import { AutoParkExplainer } from "../AutoParkExplainer";
 import { formatReviewDate } from "../formulation";
@@ -16,6 +16,7 @@ vi.mock("../../../api/review", async () => {
 });
 const acknowledge = vi.mocked(reviewApi.acknowledgeExplainer);
 const updateSettings = vi.mocked(reviewApi.updateSettings);
+const getState = vi.mocked(reviewApi.getState);
 
 const DAY = 86_400_000;
 const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
@@ -61,6 +62,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   acknowledge.mockReset();
   updateSettings.mockReset();
+  getState.mockReset();
   onDone.mockReset();
 });
 
@@ -164,6 +166,89 @@ describe("020-FR-051 D-05 auto-park explainer", () => {
     expect(updateSettings).toHaveBeenCalledTimes(2);
     expect(updateSettings.mock.calls[1]).toEqual(updateSettings.mock.calls[0]);
     expect(acknowledge).toHaveBeenCalledTimes(2);
+  });
+
+  /** The explainer as the shell mounts it: fed by the live review state query. */
+  function LiveExplainer(): React.JSX.Element | null {
+    const state = useReviewState().data;
+    return state ? <AutoParkExplainer state={state} onDone={onDone} /> : null;
+  }
+
+  function renderLive() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <LiveExplainer />
+      </QueryClientProvider>
+    );
+    return client;
+  }
+
+  it("020-FR-039 020-FR-045 a threshold changed after a saved one is sent under a new key against the saved revision, so Retry cannot loop on 409", async () => {
+    const user = userEvent.setup();
+    getState.mockResolvedValue(unseen);
+    const usedKeys = new Map<string, string>();
+    updateSettings.mockImplementation(async (body, key) => {
+      const sent = JSON.stringify(body);
+      if (usedKeys.has(key) && usedKeys.get(key) !== sent) {
+        throw new ApiError("Idempotency key reused.", 409, { message: "x", detail: { reason: "idempotency_conflict" } }, "corr_reuse");
+      }
+      usedKeys.set(key, sent);
+      return { ...unseen.settings, threshold_days: body.threshold_days as 7 | 14 | 21 | 28, owner_park_floor_at: iso(7 * DAY), revision: body.expected_revision + 1 };
+    });
+    acknowledge.mockRejectedValueOnce(new ApiError("Server Error", 500, null, "corr_ack")).mockResolvedValueOnce(seen);
+    renderLive();
+
+    await user.click(await screen.findByRole("button", { name: "Change the number of days" }));
+    await user.click(screen.getByRole("radio", { name: "21 days" }));
+    await user.click(screen.getByRole("button", { name: "Got it" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_ack");
+
+    await user.click(screen.getByRole("radio", { name: "28 days" }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(updateSettings).toHaveBeenCalledTimes(2);
+    expect(updateSettings.mock.calls[0][0]).toEqual({ threshold_days: 21, expected_revision: 1 });
+    expect(updateSettings.mock.calls[1][0]).toEqual({ threshold_days: 28, expected_revision: 2 });
+    expect(updateSettings.mock.calls[1][1]).not.toBe(updateSettings.mock.calls[0][1]);
+    expect(acknowledge).toHaveBeenCalledTimes(2);
+  });
+
+  it("020-FR-045 a threshold save refused as changed elsewhere refetches the state, and Retry saves against the fresh revision", async () => {
+    const user = userEvent.setup();
+    const changedElsewhere: ReviewState = { ...unseen, settings: { ...unseen.settings, review_time: "09:00", revision: 3 } };
+    getState.mockResolvedValueOnce(unseen).mockResolvedValue(changedElsewhere);
+    updateSettings
+      .mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "x", detail: { resource: "review_settings", id: "user-1" } }, "corr_stale"))
+      .mockResolvedValueOnce({ ...changedElsewhere.settings, threshold_days: 21, owner_park_floor_at: iso(7 * DAY), revision: 4 });
+    acknowledge.mockResolvedValueOnce(seen);
+    renderLive();
+
+    await user.click(await screen.findByRole("button", { name: "Change the number of days" }));
+    await user.click(screen.getByRole("radio", { name: "21 days" }));
+    await user.click(screen.getByRole("button", { name: "Got it" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_stale");
+    await waitFor(() => expect(getState).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(updateSettings.mock.calls[1][0]).toEqual({ threshold_days: 21, expected_revision: 3 });
+    expect(updateSettings.mock.calls[1][1]).not.toBe(updateSettings.mock.calls[0][1]);
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-045 a failure without a reference shows no empty Ref line", async () => {
+    const user = userEvent.setup();
+    acknowledge.mockRejectedValueOnce(new Error("socket hang up"));
+    renderExplainer();
+
+    await user.click(screen.getByRole("button", { name: "Got it" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't save that you've seen this. Try again.");
+    expect(alert).not.toHaveTextContent(/Ref/);
   });
 
   it("020-FR-040 offline: Got it is disabled with the reason, and Close leaves it unseen for next time", async () => {
