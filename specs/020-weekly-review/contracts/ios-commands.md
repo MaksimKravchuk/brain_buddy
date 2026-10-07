@@ -170,7 +170,7 @@ early.
   formulation-clock §3 "undo of a bulk release", `undoBulkRelease`**: a restart item
   that the server's answer released but this device's replay did not has no
   pre-release clock on the device; its Undo restores it to Next without a local clock
-  until the next pull. Fix tracked for slice PR-12 together with T174.
+  until the next pull. Fix: tasks.md T175 (slice PR-12).
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
   re-evaluates the decision. When the refetched task is parked for the decision's
