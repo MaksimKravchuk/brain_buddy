@@ -13,6 +13,7 @@ Do not use this for anything else without thinking about the tradeoffs.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import OrderedDict, defaultdict, deque
 from threading import Lock
@@ -90,6 +91,17 @@ class InMemoryRateLimiter:
             if len(bucket) + len(self._reservations[key]) >= self._max:
                 return None
             return self._new_reservation(key, now)
+
+    def retry_after_seconds(self, key: str) -> int:
+        """Whole seconds until `key` may make another attempt (0 when it may now)."""
+
+        now = time.monotonic()
+        with self._lock:
+            bucket = self._prune(key, now - self._window)
+            held = [*bucket, *self._reservations[key].values()]
+            if len(held) < self._max:
+                return 0
+            return max(1, math.ceil(min(held) + self._window - now))
 
     def release(self, key: str, reservation: int) -> bool:
         """Release one admitted attempt without changing failed-attempt history."""
@@ -275,6 +287,16 @@ title_completion_rate_limiter = InMemoryRateLimiter(
     window_seconds=TITLE_COMPLETION_WINDOW_SECONDS,
 )
 
+# Spec 020 (research R13): the weekly-review navigator's cloud suggestions,
+# keyed by owner id. A separate bucket from title completion so the two
+# features never spend each other's allowance.
+NAVIGATOR_MAX_ATTEMPTS = 20
+NAVIGATOR_WINDOW_SECONDS = 10 * 60
+navigator_rate_limiter = InMemoryRateLimiter(
+    max_attempts=NAVIGATOR_MAX_ATTEMPTS,
+    window_seconds=NAVIGATOR_WINDOW_SECONDS,
+)
+
 
 __all__ = [
     "BoundedKeyRateLimiter",
@@ -282,9 +304,12 @@ __all__ = [
     "InMemoryRateLimiter",
     "LOGIN_MAX_ATTEMPTS",
     "LOGIN_WINDOW_SECONDS",
+    "NAVIGATOR_MAX_ATTEMPTS",
+    "NAVIGATOR_WINDOW_SECONDS",
     "SENSITIVE_ACTION_MAX_ATTEMPTS",
     "SENSITIVE_ACTION_WINDOW_SECONDS",
     "login_rate_limiter",
+    "navigator_rate_limiter",
     "sensitive_action_rate_limiter",
     "title_completion_rate_limiter",
 ]

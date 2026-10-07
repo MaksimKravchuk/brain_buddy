@@ -132,7 +132,9 @@ example a decision undone since) is not matched; the request is then processed a
 and its own preconditions (`expected_revision`, eligibility) decide the outcome.
 Within the 24 h the ordinary Idempotency-Key replay applies, as before. Other mutations
 of this feature need no such rule: `POST /tasks/{id}/auto-park`, the explainer and
-park acknowledgements, `finish` and consent are idempotent by state, and
+park acknowledgements and `finish` are idempotent by state, the navigator consent grant
+and revoke replay their Idempotency-Key for the 24 h (§7: a late retry must never
+reverse a newer consent choice, so state alone is not enough there), and
 `PUT /review/settings` is protected by `expected_revision` (a stale retry gets 409 and
 the device rule of ios-commands §4; the values are absolute, so re-applying them is
 harmless). A retried `POST /review/decisions/{id}/undo` whose first delivery was
@@ -619,7 +621,7 @@ the import-linter contracts of PR-02 forbid `app.modules.tasks` from importing
 
 **Provider configuration** (research R13): the navigator differs from title completion
 on purpose. `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=openai` with the variable named by
-`…_API_KEY_ENV` unset or empty makes the container build **raise** at startup, naming
+`…_API_KEY_ENV` unset or empty makes the web app's container build **raise** at startup, naming
 the variable (never its value), so a misconfigured deploy fails its health check and
 never serves (constitution I: required configuration must fail visibly, not degrade
 silently). `deterministic` outside TEST and any unknown provider name raise the same
@@ -631,7 +633,12 @@ already-serving machine with the key missing also fails, which takes every route
 not only the navigator. The runbook line in plan "Migration, deploy order and
 rollback" and in `.env.example` therefore says: set
 `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled` before rotating or removing the key,
-and set it back after the new key is in place.
+and set it back after the new key is in place. Only the web app builds the provider.
+The operational CLI (`python -m app.cli`) builds with the navigator disabled and never
+reads the key, so the manual purge (`python -m app.cli purge-due-accounts`) can always
+run. The scheduled purge (`_run_maintenance_sweep`) runs inside the web app, which does
+not start while the key is missing, so the disabled-first runbook step also keeps
+scheduled purges on time.
 
 ### `POST /review/navigator/consent` → 200 / `DELETE /review/navigator/consent` → 204
 
@@ -641,6 +648,21 @@ Grant body `{"provider": "openai", "consent_text_version": 1}`; 400
 takes effect for every subsequent request immediately. The current version is a
 constant in `navigator.py`, bumped whenever the FR-019 data list or the provider
 changes; a stored grant with a lower version counts as absent.
+
+Grant and revoke **replay their Idempotency-Key for 24 h** ("Mutations", prefixes
+`navigator_consent_grant:` and `navigator_consent_revoke:`, §9). Each runs as one
+owner-serialized write that stores its key record in the same transaction as the
+consent change. The same key (and, for a grant, the same body) returns the stored
+answer (the grant's 200 status, the revoke's 204) and writes nothing, so a delayed
+retry of an old grant arriving after a revoke on another device never grants again,
+and an old revoke retry never cancels a newer grant (FR-024). A grant whose key holds
+another body or another command's record is 409 `idempotency_conflict`. Revoke is never
+refused for its key: a key another command already stored still revokes (that record
+is kept, and the revoke records itself beside it, so its retry replays too), and
+revoke stays ungated while `weekly_review` is off. The records are never
+reconciled (re-applying an old consent choice is the reversal they prevent); they are
+purged by the 24 h retention and with the account (FR-043), like every other
+idempotency record.
 
 ### `POST /review/navigator/suggestions` → 200
 
@@ -669,6 +691,9 @@ backstop, which leaves reduced notes unchanged), project name ≤ 500, ≤ 20 ti
  "proposals": ["…", "…"], "clarifying_question": null}
 ```
 
+`notes_truncated` reports only what the server's backstop dropped; a client ORs it with
+its own reduction's flag before showing the hint (contracts/navigator.md §1).
+
 Exactly one of `proposals` (1..3, deduplicated against `open_task_titles` and each
 other by `formulation_key`) or `clarifying_question` is non-null. The server sees at
 most 20 sibling titles, so the full FR-019 "no duplicates" guarantee is completed by the
@@ -690,8 +715,19 @@ it. The sequence is: (1) under `command_lock(owner_id)`, read the owner's
 `navigator_usage` row for today, reject on the per-call estimate or the daily cap
 (429 `navigator_cost_cap`), and write a reservation (`calls + 1`,
 `reserved_cost_usd += estimate`); release the lock; (2) call the provider with no lock
-held (8 s timeout); (3) under the lock again, settle: replace the reservation with the
-actual token cost, or release it on timeout or failure. A reservation never settled
+held (one overall 8 s deadline, `…_TIMEOUT_SECONDS`, not 8 s per httpx phase); (3) under
+the lock again, settle: replace the reservation with the actual token cost, or release
+it on timeout or failure. Any other exception also releases it and then propagates as
+a bug, not as `navigator_provider_error`. It propagates as `NavigatorInternalError`,
+whose message is the original class name only and which carries no cause and no
+context. It is raised outside the handling `except` block, because `from None` only
+hides the original, and a framework that re-raises with
+`raise exc from exc.__cause__ or exc.__context__` would bring it back. So no logger can
+log input or model output echoed in an exception's text (FR-044). The request
+middleware also logs any failure on a `/review/navigator` route by class name only: no
+message, no traceback, no cause or context. After a timeout the abandoned call may
+still complete at the provider and be billed although its reservation was released, so
+the daily cap can be exceeded by such calls. A reservation never settled
 (process crash) is released by the next day's row. Test: a provider stub that itself
 takes `command_lock` for another owner neither deadlocks nor waits (the
 `test_review_navigator.py` lock case).
@@ -791,7 +827,10 @@ containing a sentinel string and asserts the sentinel is in no captured record.
 
 **Idempotency command prefixes** (one spelling everywhere, research R7):
 `decide_task:`, `undo_decision:`, `auto-park:`, `bulk_release:`, `undo_bulk_release:`,
-`review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`. They are
+`review_session:`, `review_settings:`, `explainer_ack:`, `park_ack:`, and the
+navigator's `navigator_consent_grant:` and `navigator_consent_revoke:` (§7; written by
+`NavigatorService` and never reconciled by any service, so they have no reconstructor;
+they are listed so `TaskService` skips them). The others are
 registered in
 `ReviewService`'s own `_apply_idempotent_record`, each with its own result
 reconstructor, not in `TaskService._apply_idempotent_record` (`service.py:1142`), whose

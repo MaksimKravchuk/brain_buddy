@@ -101,6 +101,49 @@ describe("PrivacyPolicyPage", () => {
     expect(collected).toHaveTextContent(/accepted from your devices even while the weekly review is switched off/i);
   });
 
+  it("020-FR-024: the navigator section says notes and titles go to the provider as written, names of other people included, only under the person's consent", () => {
+    renderPolicy();
+    const navigator = screen.getByRole("heading", { name: /weekly review suggestions/i }).closest("section");
+
+    // Owner decision 2026-10-06 (privacy checklist CHK011, contracts/navigator.md
+    // §6): nothing is redacted, so the policy says so in plain words.
+    expect(navigator).toHaveTextContent(
+      /notes and task titles are sent to the provider as written, including any names or other details of other people in them/i
+    );
+    expect(navigator).toHaveTextContent(/nothing is redacted/i);
+    expect(navigator).toHaveTextContent(/only under your own consent/i);
+  });
+
+  it("020-FR-024 020-FR-043: the navigator section states the purpose, the five items sent, consent and revocation, and the provider's copy beyond purge", () => {
+    renderPolicy();
+    const navigator = screen.getByRole("heading", { name: /weekly review suggestions/i }).closest("section");
+    const processors = screen.getByRole("heading", { name: /who else processes your data/i }).closest("section");
+    const lawful = screen.getByRole("heading", { name: /why we process it/i }).closest("section");
+
+    // Purpose, and nothing written without confirmation (FR-020).
+    expect(navigator).toHaveTextContent(/propose 1 to 3 next steps/i);
+    expect(navigator).toHaveTextContent(/nothing is written to your tasks until you confirm/i);
+    // The five data items of FR-019, and nothing else.
+    expect(navigator).toHaveTextContent(
+      /exactly five items: the task[’']s title, its notes.*the stall reason you picked, the project[’']s name, and the titles of up to 20 other open tasks in the same project/i
+    );
+    expect(navigator).toHaveTextContent(/nothing else is sent/i);
+    // Per-owner consent, versioned, revocable also while the feature is off.
+    expect(navigator).toHaveTextContent(/once, for the named provider and the current list of data sent/i);
+    expect(navigator).toHaveTextContent(/revoke it at any time in settings, also while the weekly review is switched off/i);
+    expect(navigator).toHaveTextContent(/revoked consent stops requests immediately/i);
+    // What we keep: consent record exported; content-free counters 35 days, not exported.
+    expect(navigator).toHaveTextContent(/consent record.*kept until you delete your account and is included in your data export/i);
+    expect(navigator).toHaveTextContent(/no content.*deleted after 35 days and excluded from your data export/i);
+    expect(navigator).toHaveTextContent(/we do not store the text sent or the suggestions returned/i);
+    // The provider's own copy outlives account purge (c2 PC-05).
+    expect(navigator).toHaveTextContent(/OpenAI keeps what it received under its own policy \(up to 30 days/i);
+    expect(navigator).toHaveTextContent(/deleting your Brain Buddy account cannot erase that copy/i);
+    // Listed with the other processors and the consent-based purposes.
+    expect(processors).toHaveTextContent(/weekly review suggestions/i);
+    expect(lawful).toHaveTextContent(/weekly review suggestions/i);
+  });
+
   it("012-FR-007: names OpenAI's title-suggestion processing purpose", () => {
     renderPolicy();
 

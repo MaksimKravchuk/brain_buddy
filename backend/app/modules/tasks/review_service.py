@@ -1438,6 +1438,11 @@ class ReviewService:
                 owner_id=owner_id,
             )
         else:
+            # ``navigator_consent_grant:`` and ``navigator_consent_revoke:``
+            # are not flow results, so they fall through untouched: each is
+            # committed in the same transaction as its consent change, and
+            # re-applying an old grant (or revoke) is exactly the reversal of
+            # a newer privacy choice its record exists to stop.
             self._apply_flow_record(record, owner_id=owner_id)
 
     def _apply_flow_record(self, record: IdempotencyRecord, *, owner_id: str) -> None:

@@ -1,0 +1,359 @@
+{
+  "schema": "brainbuddy-navigator-reduce-notes-vectors/v1",
+  "format": "Canonical file (contracts/navigator.md §1). Each string is a list of [text, count] pairs: the text repeated count times, the pairs concatenated. 'expected' null means the notes come back unchanged. Lengths are Unicode scalars. Every implementation of reduce_notes (navigator.py, NavigatorInputBuilder, navigatorInput.ts) runs this file; copies are byte-identical.",
+  "budget": {
+    "notes": 6000,
+    "head": 2000,
+    "tail": 4000,
+    "separator": "\n…\n"
+  },
+  "vectors": [
+    {
+      "id": "empty",
+      "note": "empty notes are unchanged",
+      "notes": [
+        [
+          "",
+          1
+        ]
+      ],
+      "expected": null,
+      "truncated": false
+    },
+    {
+      "id": "short",
+      "note": "short notes are unchanged",
+      "notes": [
+        [
+          "Tiles from the old shop\nAsk Anna",
+          1
+        ]
+      ],
+      "expected": null,
+      "truncated": false
+    },
+    {
+      "id": "exactly-budget",
+      "note": "6 000 scalars exactly: unchanged",
+      "notes": [
+        [
+          "a",
+          5000
+        ],
+        [
+          "\n",
+          1
+        ],
+        [
+          "b",
+          999
+        ]
+      ],
+      "expected": null,
+      "truncated": false
+    },
+    {
+      "id": "three-blocks",
+      "note": "90 lines of 99: the first 20 lines (1 999) and the last 40 (3 999)",
+      "notes": [
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          30
+        ],
+        [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+          30
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          29
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          1
+        ]
+      ],
+      "expected": [
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          19
+        ],
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          1
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+          10
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          29
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          1
+        ]
+      ],
+      "truncated": true
+    },
+    {
+      "id": "crlf-lines",
+      "note": "the same lines split on CR LF: each CR is dropped",
+      "notes": [
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n",
+          30
+        ],
+        [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r\n",
+          30
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\r\n",
+          29
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          1
+        ]
+      ],
+      "expected": [
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+          19
+        ],
+        [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          1
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+          10
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+          29
+        ],
+        [
+          "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          1
+        ]
+      ],
+      "truncated": true
+    },
+    {
+      "id": "crlf-no-line-dropped",
+      "note": "over 6 000 only because of CRs: every line fits, so the lines are rejoined with LF (CRs dropped) and nothing is truncated",
+      "notes": [
+        [
+          "a\r\n",
+          2001
+        ]
+      ],
+      "expected": [
+        [
+          "a\n",
+          2001
+        ]
+      ],
+      "truncated": false
+    },
+    {
+      "id": "one-huge-line",
+      "note": "one line over both budgets: only the separator",
+      "notes": [
+        [
+          "z",
+          7000
+        ]
+      ],
+      "expected": [
+        [
+          "\n…\n",
+          1
+        ]
+      ],
+      "truncated": true
+    },
+    {
+      "id": "astral-at-budget",
+      "note": "lengths are Unicode scalars, not UTF-16 units",
+      "notes": [
+        [
+          "😀",
+          6000
+        ]
+      ],
+      "expected": null,
+      "truncated": false
+    },
+    {
+      "id": "astral-over-budget",
+      "note": "astral scalars over the budget",
+      "notes": [
+        [
+          "😀",
+          1000
+        ],
+        [
+          "\n",
+          1
+        ],
+        [
+          "😀",
+          5001
+        ]
+      ],
+      "expected": [
+        [
+          "😀",
+          1000
+        ],
+        [
+          "\n…\n",
+          1
+        ]
+      ],
+      "truncated": true
+    },
+    {
+      "id": "separator-at-boundary",
+      "note": "an already reduced note (2 000 + separator + 4 000) is not special: the same text comes back and the middle line counts as dropped",
+      "notes": [
+        [
+          "h",
+          2000
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "t",
+          4000
+        ]
+      ],
+      "expected": null,
+      "truncated": true
+    },
+    {
+      "id": "separator-head-1999",
+      "note": "review edge case: head 1 999 + separator + tail 4 000",
+      "notes": [
+        [
+          "h",
+          1999
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "t",
+          4000
+        ]
+      ],
+      "expected": null,
+      "truncated": true
+    },
+    {
+      "id": "separator-after-crlf-head",
+      "note": "review edge case: a CR LF head before a separator at the boundary; the CRs are dropped, and the separator line fits the head budget, so no line is dropped",
+      "notes": [
+        [
+          "ab\r\n",
+          400
+        ],
+        [
+          "c",
+          399
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "t",
+          4000
+        ]
+      ],
+      "expected": [
+        [
+          "ab\n",
+          400
+        ],
+        [
+          "c",
+          399
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "t",
+          4000
+        ]
+      ],
+      "truncated": false
+    },
+    {
+      "id": "separator-out-of-place",
+      "note": "a separator line that is not at the head/tail boundary",
+      "notes": [
+        [
+          "x",
+          2500
+        ],
+        [
+          "\n…\n",
+          1
+        ],
+        [
+          "y",
+          3499
+        ]
+      ],
+      "expected": [
+        [
+          "\n…\n…\n",
+          1
+        ],
+        [
+          "y",
+          3499
+        ]
+      ],
+      "truncated": true
+    },
+    {
+      "id": "two-lines-no-drop",
+      "note": "6 001 scalars whose two lines both fit: unchanged",
+      "notes": [
+        [
+          "h",
+          2000
+        ],
+        [
+          "\n",
+          1
+        ],
+        [
+          "t",
+          4000
+        ]
+      ],
+      "expected": null,
+      "truncated": false
+    }
+  ]
+}

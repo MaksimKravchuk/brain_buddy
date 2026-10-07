@@ -1081,6 +1081,8 @@ def test_020_FR_011_a_lost_decision_write_is_repaired_by_its_replay(
         "review_settings:user_x",
         "explainer_ack:user_x",
         "park_ack:user_x",
+        "navigator_consent_grant:user_x",
+        "navigator_consent_revoke:user_x",
     ],
 )
 def test_020_FR_011_task_reconciliation_never_misreads_a_review_record(

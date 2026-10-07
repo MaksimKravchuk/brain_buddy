@@ -92,11 +92,14 @@ REVIEW_COMMAND_PREFIXES: tuple[str, ...] = (
     "review_settings:",
     "explainer_ack:",
     "park_ack:",
+    "navigator_consent_grant:",
+    "navigator_consent_revoke:",
 )
-"""Idempotency command prefixes owned by ``ReviewService`` (http §9, R7).
+"""Idempotency command prefixes of the review commands (http §9, R7).
 
 ``TaskService`` never reconciles these: their stored bodies are composite
-review results, not ``TaskDocument`` snapshots.
+review results, not ``TaskDocument`` snapshots. The two navigator consent
+prefixes are ``NavigatorService``'s and are never reconciled at all (§7).
 """
 
 REVIEW_TABLES: tuple[str, ...] = (
@@ -373,6 +376,31 @@ class NavigatorUsageDocument(StorageBaseModel):
     shown: int = Field(default=0, ge=0)
 
 
+class NavigatorGrantResultDocument(StorageBaseModel):
+    """One consent grant (http §7): the idempotency record body.
+
+    The 200 status the grant answered, replayed as-is for its key within the
+    24 h retention, so a late retry never grants again after a revoke.
+    """
+
+    provider: str | None
+    consent: NavigatorConsentDocument | None
+    consent_current: bool
+    consent_text_version: int
+    available: bool
+
+
+class NavigatorRevokeResultDocument(StorageBaseModel):
+    """One consent revoke (http §7): the idempotency record body.
+
+    A replay of its key answers 204 and changes nothing, so a late retry
+    never revokes a newer grant. Counts and an instant only.
+    """
+
+    revoked_at: datetime
+    revoked: int = Field(ge=0)
+
+
 # ----------------------------------------------------- clock <-> task document
 @dataclass(frozen=True, slots=True)
 class FormulationView:
@@ -501,6 +529,8 @@ __all__ = [
     "DecisionUndoDocument",
     "FormulationView",
     "NavigatorConsentDocument",
+    "NavigatorGrantResultDocument",
+    "NavigatorRevokeResultDocument",
     "NavigatorUsageDocument",
     "ParkAckKeyDocument",
     "ParkAcknowledgeResultDocument",
