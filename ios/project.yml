@@ -91,6 +91,8 @@ targets:
       path: BrainBuddy/Resources/Info.plist
       properties:
         CFBundleDisplayName: Brain Buddy
+        UIAppFonts:
+          - GoogleSans-Medium.ttf
         # Read by ReviewExposure.accountlessReleaseSwitch (App/RootView.swift).
         BBWeeklyReviewLocal: $(BB_WEEKLY_REVIEW_LOCAL)
         # XcodeGen's defaults are literal "1.0" / "1"; tie both to build settings.

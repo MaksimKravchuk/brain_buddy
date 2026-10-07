@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api/client";
 import { authApi } from "../../api/auth";
+import { modernAuthApi } from "../../api/modernAuth";
 import { useAuthStore } from "../../stores/authStore";
 import SignupPage from "../SignupPage";
 
-function renderSignup() {
+function renderSignup(path = "/signup?invite=1") {
   return render(
-    <MemoryRouter initialEntries={["/signup?invite=1"]}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/" element={<div>workspace</div>} />
@@ -24,6 +25,22 @@ describe("SignupPage", () => {
     useAuthStore.setState({ user: null, status: "anon" });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it("labels both configured providers for account creation and retains password access", async () => {
+    vi.spyOn(modernAuthApi, "methods").mockResolvedValue({ google: true, apple: true, email: true, password: true, web_account_origin: null });
+    renderSignup("/signup");
+
+    expect(await screen.findByRole("button", { name: "Sign up with Google" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Sign up with Apple" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continue with email" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Use your password" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Sign in with Google" })).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Use a password and invite code" }));
+    expect(screen.getByLabelText("Invite code")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign up with Google" })).not.toBeInTheDocument();
+  });
 
   it("shows an error when the invite code is rejected", async () => {
     vi.spyOn(authApi, "signup").mockRejectedValue(
