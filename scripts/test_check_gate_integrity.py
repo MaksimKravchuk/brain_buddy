@@ -249,6 +249,21 @@ class InvariantEnforcementTests(unittest.TestCase):
             )
             self.assertIn("no slice-filtered requirement coverage in the gates", report)
 
+    def test_cli_requirement_gate_cannot_be_removed_or_filtered(self) -> None:
+        line = "\tpython3 scripts/check_requirement_coverage.py specs/024-agent-cli\n"
+        for replacement in ("", line.rstrip() + " --requirements 024-FR-001\n"):
+            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as tmp:
+                report = self._assert_invariant_fires(
+                    tmp, "Makefile", lambda text: text.replace(line, replacement)
+                )
+                self.assertIn("check-specs runs CLI requirement coverage", report)
+
+    def test_full_ci_requires_native_cli_and_release_aggregation(self) -> None:
+        for job in ("cli-native", "cli-artifacts"):
+            with self.subTest(job=job), tempfile.TemporaryDirectory() as tmp:
+                report=self._assert_invariant_fires(tmp,".github/workflows/ci.yml",lambda text:text.replace(f"      - {job}\n",""))
+                self.assertIn(f"Full CI requires {job}",report)
+
     def test_slice_filter_on_a_continuation_line_is_caught(self) -> None:
         """A shell `\\` continuation or a folded YAML scalar moves the flag to the next line."""
         cases = (

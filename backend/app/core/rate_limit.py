@@ -179,6 +179,22 @@ class BoundedKeyRateLimiter:
         with self._lock:
             return self._hits.pop(key, None) is not None
 
+    def is_allowed(self, key: str) -> bool:
+        """Inspect failed-attempt budget without allocating a new key.
+
+        Callers admitting concurrent work must serialize inspection, work and
+        failure recording; this method alone does not reserve an attempt.
+        """
+
+        cutoff = time.monotonic() - self._window
+        with self._lock:
+            bucket = self._hits.get(key)
+            if bucket is None:
+                return True
+            while bucket and bucket[0] < cutoff:
+                bucket.popleft()
+            return len(bucket) < self._max
+
     def reset(self) -> None:
         """Drop every bucket (used by tests)."""
 

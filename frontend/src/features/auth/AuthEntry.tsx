@@ -8,7 +8,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { createClientProof, startBrowserProvider, acceptSignedIn, safeAuthDestination } from "./authFlow";
 import { AuthField, CodeStep, authButtonClass } from "./AuthControls";
 
-export function AuthEntry({ destination, initialCode }: { destination: string; initialCode?: { challenge: Challenge; verifier: string } }): React.JSX.Element {
+export function AuthEntry({ destination, initialCode, beforeSignIn }: { destination: string; initialCode?: { challenge: Challenge; verifier: string }; beforeSignIn?: () => Promise<void> }): React.JSX.Element {
   const navigate = useNavigate();
   const [methods, setMethods] = useState<Methods | null>(null);
   const [availabilityError, setAvailabilityError] = useState(false);
@@ -35,10 +35,12 @@ export function AuthEntry({ destination, initialCode }: { destination: string; i
   };
   const requestCode = (event: FormEvent) => { event.preventDefault(); void op.run(async () => {
     const client = await createClientProof();
+    await beforeSignIn?.();
     const result = await modernAuthApi.requestEmail({ email, purpose: mode === "recover" ? "recover" : "login", client: "web", client_challenge: client.challenge });
     setCodePurpose(mode === "recover" ? "recover" : "login"); setProof(client); setChallenge(result); setMode("code");
   }, "If the code doesn't arrive, wait and use another method."); };
   const passwordLogin = (event: FormEvent) => { event.preventDefault(); void op.run(async () => {
+    await beforeSignIn?.();
     try { await useAuthStore.getState().login({ email, password }); setPassword(""); navigate(safeAuthDestination(destination), { replace: true }); }
     catch (caught) { if (caught instanceof ApiError && caught.status === 429) throw caught; op.setError("Invalid email or password."); }
   }); };
@@ -49,7 +51,7 @@ export function AuthEntry({ destination, initialCode }: { destination: string; i
     try { await modernAuthApi.resetPassword({ reset_grant: saved.grant, client_verifier: proof.verifier, new_password: password }); back(); setNotice("Password reset. Sign in with your new password."); }
     catch (caught) { setPassword(""); setRepeat(""); setMode("password"); setProof(null); throw caught; }
   }, "We couldn't confirm the reset. Sign in again to check; request fresh recovery if needed."); };
-  if (mode === "code" && challenge && proof) return <CodeStep challenge={challenge} verifier={proof.verifier} email={email} onComplete={complete} onCancel={back} />;
+  if (mode === "code" && challenge && proof) return <CodeStep challenge={challenge} verifier={proof.verifier} email={email} onComplete={complete} onCancel={back} beforeSubmit={beforeSignIn} />;
   if (mode === "collision") return <div className="flex flex-col gap-4"><h2 className="text-subtitle font-semibold">Connect to your existing account</h2><p>Sign in to your existing account, then connect this method in Settings. Matching email addresses don't automatically connect accounts.</p><Button className={authButtonClass} onClick={() => { setMode("choice"); }}>Sign in to existing account</Button><Button className={authButtonClass} disabled={op.busy} onClick={back}>Cancel</Button></div>;
   return <div ref={fields} className="flex flex-col gap-4">
     {notice ? <p role="status" className="text-sm text-emerald-800">{notice}</p> : null}
@@ -57,7 +59,7 @@ export function AuthEntry({ destination, initialCode }: { destination: string; i
     {mode === "choice" ? <>
       {availabilityError ? <p role="alert">Couldn't load sign-in methods. Retry or use your password. <Button className={authButtonClass} onClick={loadMethods}>Retry</Button></p> : null}
       {!methods && !availabilityError ? <p className="text-sm text-slate-600">Loading sign-in methods…</p> : null}
-      {(["google", "apple"] as const).filter(provider => methods?.[provider]).map(provider => <Button key={provider} className={authButtonClass} disabled={op.busy} onClick={() => void op.run(() => startBrowserProvider(provider, { purpose: "login" }, destination))}>{op.busy ? "Please wait…" : `Sign in with ${provider === "google" ? "Google" : "Apple"}`}</Button>)}
+      {(["google", "apple"] as const).filter(provider => methods?.[provider]).map(provider => <Button key={provider} className={authButtonClass} disabled={op.busy} onClick={() => void op.run(() => startBrowserProvider(provider, { purpose: "login" }, destination, beforeSignIn))}>{op.busy ? "Please wait…" : `Sign in with ${provider === "google" ? "Google" : "Apple"}`}</Button>)}
       {methods?.email ? <form className="flex flex-col gap-4" onSubmit={requestCode} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="email" /><Button type="submit" variant="primary" className={authButtonClass} isLoading={op.busy}>{op.busy ? "Please wait…" : "Continue with email"}</Button></form> : null}
       <Button className={authButtonClass} disabled={op.busy} onClick={() => { setMode("password"); op.setError(null); }}>Use your password</Button>
     </> : mode === "password" ? <>

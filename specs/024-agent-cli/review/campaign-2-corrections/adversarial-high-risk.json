@@ -1,0 +1,32 @@
+{
+  "role": "adversarial-high-risk",
+  "verdict": "pass",
+  "summary": "Bounded verification of only the six previously recorded adversarial-high-risk corrections against current artifact digest c5778eef47ef975a22cdd239ad289973151f6a9b07d422ecbf3269bd4a9e8ddd found each correction represented consistently in the planning artifacts. Device grants now extend AuthStore/auth.sqlite3; source, owner, auth_version, provider generation, conditional consumption, and inherited-method/binding session issuance share one transaction, with joint rollback, committed-response-loss replay refusal, and pending/slow_down state committed before protocol errors. CLI release is gated on the previously completed modern-auth import/release and a verified SQLite-capable predecessor, while the additive CLI schema retains the established epoch and does not reimport legacy Identity. The browser captures and clears the fragment before authentication, retains only normalized user code plus a bounded deadline in tab storage, returns through exactly /cli/authorize for password, email, Google, and Apple, and falls back to manual entry. The flag contract now preserves six required rows including task_mcp plus absent-until-explicitly-created optional cli_auth as the seventh row across all writes and rollback stages. The CLI decision is uniquely numbered ADR-0029, extends accepted modern Identity ADR-0028 and ADR-0019, and its recorded SHA-256 matches the file. This closes only the original six findings; it does not rewrite the original changes-required report, start a third campaign, or claim implementation, landing, native execution, release, or product acceptance. Review execution was native and read-only with correlated/unverified provenance; no CLI adapter or oracle execution is claimed.",
+  "reviewed_files": [
+    "specs/023-agent-cli/spec.md",
+    "specs/023-agent-cli/plan.md",
+    "specs/023-agent-cli/design.md",
+    "specs/023-agent-cli/tasks.md",
+    "specs/023-agent-cli/research.md",
+    "specs/023-agent-cli/data-model.md",
+    "specs/023-agent-cli/quickstart.md",
+    "specs/023-agent-cli/checklists/requirements.md",
+    "specs/023-agent-cli/contracts/cli.md",
+    "specs/023-agent-cli/contracts/device-auth.md",
+    "specs/023-agent-cli/contracts/distribution.md",
+    "specs/023-agent-cli/contracts/rollout.md",
+    "specs/023-agent-cli/auth-integration.md",
+    "docs/decisions/0029-runtime-managed-cli-authentication.md",
+    "origin/feat/modern-auth@bc7fc72:docs/decisions/0028-modern-identity-authority.md",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/auth_store.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/repositories/session.py",
+    "origin/feat/modern-auth@bc7fc72:backend/app/services/auth_service.py",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/features/auth/authFlow.ts",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/components/auth/ProtectedRoute.tsx",
+    "origin/feat/modern-auth@bc7fc72:frontend/src/pages/LoginPage.tsx",
+    "origin/main@21f08d2:backend/app/core/config.py",
+    "origin/main@21f08d2:backend/app/repositories/feature_flag.py"
+  ],
+  "findings": [],
+  "product_decisions": []
+}

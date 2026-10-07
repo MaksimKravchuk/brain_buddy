@@ -54,6 +54,7 @@ interface VitestTask {
 
 /** Ordered path rules: the first matching source path wins. */
 const PATH_RULES: Array<{ match: RegExp; epic: string; feature: string }> = [
+  { match: /\/features\/cli-auth\//, epic: "Authentication UI", feature: "CLI authorization" },
   { match: /\/api\//, epic: "Frontend data layer", feature: "API client & hooks" },
   { match: /\/components\/canvas\//, epic: "Reality Tree canvas", feature: "Canvas rendering" },
   { match: /\/components\/panels\//, epic: "Reality Tree canvas", feature: "Inspector panels" },

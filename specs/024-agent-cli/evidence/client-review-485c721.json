@@ -1,0 +1,142 @@
+{
+  "source_sha": "485c721317714ab3ab5497fa9cad94c63cce38bb",
+  "reviewedSHA": "485c721317714ab3ab5497fa9cad94c63cce38bb",
+  "baseSHA": "21f08d26698a434f7b1d16b991b2b43d4e0ea0f2",
+  "previous_reviewedSHA": "664f1233c6d89df068bac8dd1aab32d85f639470",
+  "reviewer": "independent-agent-code-review",
+  "evidence": "/tmp/bb-cli-independent-code-review-485c721.json",
+  "review_kind": "independent exact-SHA code review",
+  "verdict": "approved",
+  "created_at": "2026-10-06T17:19:00.837803+00:00",
+  "findings": [],
+  "scope": {
+    "included": [
+      "Frozen cli/ Rust client, credential/config/storage/auth transactions, bounded request/error/output behavior, command compilation/discovery and CLI tests",
+      "Unix/PowerShell installer validation, safe destination/staging/replacement and failure behavior",
+      "Native artifact/package/aggregation/publication helpers and associated tests",
+      "Changed CI native matrix/read-only boundary, Full CI native/aggregate dependencies, Makefile, requirement coverage and gate-integrity protections",
+      "Accepted specs/024-agent-cli plan/contracts/tasks and ADR-0029 as applicable to the client/distribution; deliberate historical-023 namespace preservation"
+    ],
+    "excluded": [
+      "Mutable /workspace/brain_buddy-agent-cli-auth-integration tree and unlanded Modern Identity/server/browser code",
+      "Server rollout, production authentication/flag activation, landing/deployment authorization, actual publication and released-installer acceptance"
+    ]
+  },
+  "integrity": {
+    "initial_HEAD": "485c721317714ab3ab5497fa9cad94c63cce38bb",
+    "initial_worktree_status": "clean",
+    "final_HEAD": "485c721317714ab3ab5497fa9cad94c63cce38bb",
+    "final_worktree_status": "clean",
+    "source_edits_by_reviewer": false,
+    "new_sha_artifact_verified": false,
+    "note": "The initial review inspected the original full client/distribution change at 664f123. This re-review inspected every new frozen diff and confirmed 19 critical remaining source/install/CI/gate blobs are unchanged. The verdict is for 485c721 only; the rejected 664f123 verdict is not changed."
+  },
+  "resolved_findings": [
+    {
+      "id": "CR-01",
+      "status": "resolved",
+      "path": "cli/src/command.rs",
+      "line": 762,
+      "resolution": "Preview now emits revision metadata only when Value::as_u64 succeeds and the value is positive; other JSON shapes produce null. The regression covers generic writes and named creates for string/object/array/bool/negative values, and preserves a valid revision."
+    },
+    {
+      "id": "CR-02",
+      "status": "resolved",
+      "path": "cli/src/auth.rs",
+      "line": 331,
+      "resolution": "Login account projection screens both the issued session value and private device proof. Reflection in id/email/display_name is rejected before persistence and follows candidate cleanup/revocation. Status still screens its active credential."
+    },
+    {
+      "id": "CR-03",
+      "status": "resolved",
+      "path": "cli/src/auth.rs",
+      "line": 425,
+      "resolution": "Logout removes the selected secret before clearing locator metadata. Failed removal retains the locator for retry; missing-secret recovery retries idempotent removal and metadata cleanup without falsely claiming remote revocation. External environment credentials retain source-aware behavior. The existing configuration concurrency guard preserves concurrent new connections."
+    },
+    {
+      "id": "CR-04",
+      "status": "resolved",
+      "path": "scripts/publish_cli_release.py",
+      "line": 34,
+      "resolution": "The helper now resolves exact version refs to a commit, including bounded annotated-tag dereferencing/cycle rejection, and rejects mismatches. It creates only a missing tag through POST, validates before draft staging, uses --verify-tag, rechecks main plus tag immediately before draft publication, and leaves mismatched staging as an unpublished draft."
+    }
+  ],
+  "validation": [
+    {
+      "check": "Independent preview revision regression",
+      "command": "PATH=/home/agent/.cargo/bin:$PATH cargo test --locked --manifest-path cli/Cargo.toml --test contract preview_revision_metadata",
+      "result": "pass",
+      "passed": 1
+    },
+    {
+      "check": "Independent logout/recovery regressions and normal saved-session logout",
+      "command": "PATH=/home/agent/.cargo/bin:$PATH cargo test --locked --manifest-path cli/Cargo.toml --test auth logout_",
+      "result": "pass",
+      "passed": 3
+    },
+    {
+      "check": "Independent private proof reflection rejection/cleanup",
+      "command": "PATH=/home/agent/.cargo/bin:$PATH cargo test --locked --manifest-path cli/Cargo.toml --test auth reflected_device_proof",
+      "result": "pass",
+      "passed": 1,
+      "cases": "id, email, display_name"
+    },
+    {
+      "check": "Independent publication authority/existing-tag/annotated-tag/moved-tag/missing-tag checks",
+      "command": "python3 -m unittest discover -s cli/tests/installers -p test_publication.py -v",
+      "result": "pass",
+      "passed": 4
+    },
+    {
+      "check": "Original-scope unchanged blob identity",
+      "result": "pass",
+      "files": 19,
+      "components": [
+        "config",
+        "credential",
+        "storage",
+        "request",
+        "output",
+        "main",
+        "error",
+        "Unix/PowerShell installers",
+        "Cargo.toml/lockfile/toolchain",
+        "build_cli_release",
+        "check_cli_native",
+        "CI",
+        "Makefile",
+        "gate-integrity guard/manifest",
+        "requirement scanner"
+      ]
+    },
+    {
+      "check": "Writer make verify-cli/fmt/clippy result",
+      "result": "passing writer log inspected; not substituted for independent checks",
+      "evidence": "/tmp/bb-cli-review-fixed-verify.log"
+    },
+    {
+      "check": "Failure-before-fix regression evidence",
+      "result": "writer logs inspected and match prior review reproductions",
+      "evidence": [
+        "/tmp/bb-cli-preview-review-tdd.log",
+        "/tmp/bb-cli-auth-review-tdd.log",
+        "/tmp/bb-cli-release-review-tdd.log"
+      ]
+    },
+    {
+      "check": "New exact-SHA Full CI/native artifact evidence",
+      "result": "pending at review time; no new CI success or artifact identity claimed"
+    },
+    {
+      "check": "Read-only/local review boundary",
+      "result": "no source/branch/CI/PR/production changes, no real credentials, no external publication, no new Codex login"
+    }
+  ],
+  "assessment": "Approved for the frozen client/distribution independent code-review gate: all four previous findings are fixed and no additional actionable findings were identified within this bounded review. This approval is not production/release authority or a feature-completion verdict.",
+  "limitations": [
+    "New exact-SHA required CI and five-native-target artifact evidence must complete independently; old 664f123 artifacts/CI cannot certify 485c721.",
+    "Server/browser implementation, modern-auth landing/import/deployment prerequisites, runtime activation and production user-journey/released-installer acceptance remain outstanding separately.",
+    "Native-store and Windows/macOS execution on this new SHA were not independently rerun locally; native CI remains required.",
+    "Any source change after this freeze invalidates this exact-SHA gate for the changed candidate."
+  ]
+}

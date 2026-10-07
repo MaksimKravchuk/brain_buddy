@@ -234,6 +234,19 @@ def returned(request: Request, url: str) -> RedirectResponse:
     return response
 
 
+def valid_provider_callback(code: str, state: str, error: str) -> bool:
+    """Accept one bounded provider outcome with its original state."""
+    return bool(
+        re.fullmatch(r"[A-Za-z0-9_-]{43}", state)
+        and bool(code) != bool(error)
+        and (
+            1 <= len(code) <= 4096
+            if code
+            else re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", error)
+        )
+    )
+
+
 @router.get(
     "/auth/providers/google/callback",
     responses=error_responses(400, 403, 404, 409, 422, 429, 503),
@@ -243,12 +256,17 @@ def google_callback(
     request: Request,
     code: str = "",
     state: str = "",
+    error: str = "",
     auth: ModernAuthService = Depends(service),
 ) -> RedirectResponse:
-    if not 1 <= len(code) <= 4096 or not re.fullmatch(r"[A-Za-z0-9_-]{43}", state):
+    if not valid_provider_callback(code, state, error):
         raise ModernAuthError()
     result = auth.provider_callback(
-        "google", code=code, state=state, binder=request.cookies.get(_BINDER)
+        "google",
+        code=code,
+        state=state,
+        error=error,
+        binder=request.cookies.get(_BINDER),
     )
     return returned(request, result.url)
 
@@ -276,16 +294,20 @@ async def apple_callback(
         if any(len(value) != 1 for value in fields.values()):
             raise ValueError()
         code, state = fields.get("code", [""])[0], fields.get("state", [""])[0]
+        error = fields.get("error", [""])[0]
         if (
-            not 1 <= len(code) <= 4096
-            or not re.fullmatch(r"[A-Za-z0-9_-]{43}", state)
+            not valid_provider_callback(code, state, error)
             or len(fields.get("id_token", [""])[0]) > 16384
         ):
             raise ValueError()
     except (ValueError, UnicodeError):
         raise ModernAuthError() from None
     result = auth.provider_callback(
-        "apple", code=code, state=state, binder=request.cookies.get(_BINDER)
+        "apple",
+        code=code,
+        state=state,
+        error=error,
+        binder=request.cookies.get(_BINDER),
     )
     return returned(request, result.url)
 
