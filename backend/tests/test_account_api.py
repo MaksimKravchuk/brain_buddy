@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.container import Container
@@ -18,6 +19,85 @@ from .conftest import (
 
 def _container(client: TestClient) -> Container:
     return client.app.state.container  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("GET", "/api/account", None),
+        ("PATCH", "/api/account/profile", {"display_name": "foreign change"}),
+        (
+            "POST",
+            "/api/account/email",
+            {
+                "current_password": TEST_USER_PASSWORD,
+                "new_email": "foreign-change@example.com",
+            },
+        ),
+        (
+            "POST",
+            "/api/account/password",
+            {
+                "current_password": TEST_USER_PASSWORD,
+                "new_password": "replacement-password-123",
+            },
+        ),
+        ("GET", "/api/account/export", None),
+        ("POST", "/api/account/delete", {"current_password": TEST_USER_PASSWORD}),
+    ],
+)
+def test_023_FR_013_legacy_account_requests_reject_a_different_displayed_owner(
+    api_client: TestClient, method: str, path: str, payload: dict | None
+) -> None:
+    """A changed browser cookie cannot act for the owner still shown in another tab."""
+    before = api_client.get("/api/account").json()
+    response = api_client.request(
+        method,
+        path,
+        json=payload,
+        headers={"X-BrainBuddy-Expected-Owner": "different-owner"},
+    )
+    assert response.status_code == 404
+    assert "Content-Disposition" not in response.headers
+    assert api_client.get("/api/account").json() == before
+    assert api_client.get("/api/auth/me").status_code == 200
+
+
+def test_023_FR_002_legacy_password_account_rights_work_without_modern_keys(
+    api_client: TestClient,
+) -> None:
+    """Optional provider setup cannot remove an existing password account's rights."""
+    owner = api_client.get("/api/auth/me").json()["id"]
+    headers = {"X-BrainBuddy-Expected-Owner": owner}
+    discovery = api_client.get("/api/auth/methods?client=web").json()
+    assert discovery["web_account_origin"] is None
+    assert not any(discovery[key] for key in ("google", "apple", "email"))
+    response = api_client.post(
+        "/api/account/password",
+        json={
+            "current_password": TEST_USER_PASSWORD,
+            "new_password": "replacement-password-123",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 204
+    exported = api_client.get("/api/account/export", headers=headers)
+    assert exported.status_code == 200
+    assert exported.content.startswith(b"PK")
+    rejected = api_client.post(
+        "/api/account/delete",
+        json={"current_password": TEST_USER_PASSWORD},
+        headers=headers,
+    )
+    assert rejected.status_code == 403
+    assert api_client.get("/api/auth/me").json()["id"] == owner
+    deleted = api_client.post(
+        "/api/account/delete",
+        json={"current_password": "replacement-password-123"},
+        headers=headers,
+    )
+    assert deleted.status_code == 202
+    assert api_client.get("/api/auth/me").status_code == 401
 
 
 def _second_session(client: TestClient) -> TestClient:

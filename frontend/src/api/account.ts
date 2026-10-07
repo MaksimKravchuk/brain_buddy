@@ -34,9 +34,11 @@ function saveBlob(blob: Blob, filename: string): void {
  * Resolves with the served filename once the download has been handed to the
  * browser; throws `ApiError` (with the correlation id) on failure.
  */
-export async function downloadAccountExport(): Promise<string> {
+export async function downloadAccountExport(expectedOwner?: string, assertOwner?: () => void): Promise<string> {
+  assertOwner?.();
   const response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}/account/export`, {
-    credentials: "include"
+    credentials: "include",
+    ...(expectedOwner ? { headers: { "X-BrainBuddy-Expected-Owner": expectedOwner } } : {})
   });
 
   if (!response.ok) {
@@ -56,6 +58,8 @@ export async function downloadAccountExport(): Promise<string> {
   }
 
   const filename = parseAttachmentFilename(response.headers.get("Content-Disposition"));
-  saveBlob(await response.blob(), filename);
+  const blob = await response.blob();
+  assertOwner?.();
+  saveBlob(blob, filename);
   return filename;
 }

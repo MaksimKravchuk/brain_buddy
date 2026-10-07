@@ -41,7 +41,10 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
         <Section title="What we collect">
           <p>
             <strong>Account data:</strong> your email address, an optional display name, and a
-            salted Argon2id hash of your password (never the password itself).
+            salted Argon2id hash if you set a password (never the password itself). If you
+            connect Google or Apple, we also keep a stable provider identifier, the email
+            address supplied by the provider (which may be an Apple private relay address),
+            and any optional name you choose to use.
           </p>
           <p>
             <strong>Content you create:</strong> thinking trees with their version snapshots and
@@ -67,7 +70,8 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             transcripts derived from it, and a record of the consent you gave for each recording.
           </p>
           <p>
-            <strong>Technical data:</strong> a session cookie (below) and server logs keyed by
+            <strong>Technical data:</strong> necessary sign-in cookies (below), temporary
+            authentication proofs, abuse-prevention fingerprints, and server logs keyed by
             per-request correlation IDs, used for security and troubleshooting.
           </p>
         </Section>
@@ -76,6 +80,10 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           <p>
             <strong>To provide the service</strong> (contract, Art. 6(1)(b) GDPR): storing and
             showing your content, keeping you signed in.
+          </p>
+          <p>
+            Signing in does not give consent for AI or content processing. Those features
+            keep their separate consent controls.
           </p>
           <p>
             <strong>With your consent</strong> (Art. 6(1)(a)): sending voice recordings to an
@@ -99,6 +107,24 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
 
         <Section title="How long we keep it">
           <p>Sessions expire after 30 days (or immediately when you sign out).</p>
+          <p>
+            Sign-in attempts and email codes expire within 10 minutes. Recent-confirmation
+            proofs expire within 5 minutes, and callback handoffs within 60 seconds. We remove
+            their temporary records after completion, cancellation, or expiry. An encrypted
+            delivery payload is erased when the email is sent, delivery fails, or it expires.
+            Abuse-prevention fingerprints are retained for at most 24 hours.
+          </p>
+          <p>
+            Disconnecting a method ends its sign-in authority and removes its profile
+            metadata. For Apple, we retain only the connection identifier and protected
+            credential needed for revocation until cleanup finishes or expires. While the
+            connection is active, we keep the minimum revocation credential. Disconnection or deletion triggers at
+            most five revocation attempts within 24 hours, capped by the account purge deadline;
+            the credential is then erased even if Apple is unavailable. Verified Apple
+            notification replay records contain fingerprints, not the original notification,
+            and expire within 8 days. Notifications can end an affected sign-in method without
+            deleting your Brain Buddy content.
+          </p>
           <p>Raw voice audio is deleted within 24 hours of processing.</p>
           <p>Uncommitted voice working artifacts (draft transcripts) are deleted within 7 days.</p>
           <p>
@@ -199,27 +225,44 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             reconciliation, and AI validation; and, where configured, <strong>Deepgram</strong> —
             speech transcription. These purposes run only when you have consented. API data is
             not used to train their models and is retained by OpenAI for up to 30 days for abuse
-            monitoring. A data processing agreement is in place.
+            monitoring.
           </p>
           <p>
-            <strong>Fly.io</strong> — hosting. Servers are operated by Fly.io, a US company;
-            data transfers are covered by the EU–US Data Privacy Framework and Standard
-            Contractual Clauses.
+            <strong>Google</strong> and <strong>Apple</strong> — if you choose their sign-in
+            methods, they process the identity request and supply an identifier and email
+            address. Google requests only the openid and email scopes; Apple may also supply
+            an optional first-sign-in name. We do not request access to your contacts or mailbox,
+            or send your Brain Buddy task content to these identity providers.
           </p>
-          <p>We never sell your data or share it with anyone else.</p>
+          <p>
+            Our configured email delivery provider receives the recipient address and code
+            through SMTP to deliver sign-in, recovery, address-verification, or account-confirmation
+            messages. Brain Buddy sends these directly, with no separate authentication SaaS.
+            Availability depends on the sign-in and email methods configured for this deployment.
+          </p>
+          <p>
+            <strong>Fly.io</strong> — hosting. Servers are operated by Fly.io, a US company.
+          </p>
+          <p>We never sell your data.</p>
         </Section>
 
         <Section title="International transfers">
           <p>
-            Your data may be processed in the United States by the providers above. Transfers
-            rely on the EU–US Data Privacy Framework and/or Standard Contractual Clauses.
+            Your data may be processed outside your country, including in the United States,
+            by the providers above. Locations and processing terms depend on the configured
+            providers. Contact the maintainer for the applicable processing and transfer
+            arrangements for this deployment.
           </p>
         </Section>
 
         <Section title="Your rights">
           <p>
-            <strong>Access &amp; portability:</strong> download everything your account owns from
+            <strong>Access &amp; portability:</strong> download your account data and content from
             Account settings → &ldquo;Download my data&rdquo; (a ZIP of machine-readable JSON).
+            This includes safe linked-method and email-verification metadata, including stored
+            provider identifiers. It excludes password hashes, codes, proofs, session tokens,
+            provider credentials, and abuse-prevention fingerprints. A password is not required
+            for an account using another usable sign-in method.
           </p>
           <p>
             <strong>Rectification:</strong> change your display name, email, and password in
@@ -242,10 +285,11 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
 
         <Section title="Cookies">
           <p>
-            Brain Buddy sets exactly one cookie: <code>brainbuddy_session</code>, a strictly
+            Brain Buddy uses <code>brainbuddy_session</code>, a strictly
             necessary, HttpOnly session cookie that keeps you signed in for up to 30 days. It is
-            not used for tracking, analytics, or advertising — which is why there is no cookie
-            banner.
+            accompanied during web provider sign-in by a separate Secure, HttpOnly attempt
+            cookie, scoped to provider routes and lasting at most 10 minutes. These necessary
+            cookies are not used for tracking, analytics, or advertising.
           </p>
         </Section>
 

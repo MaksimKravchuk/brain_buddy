@@ -24,6 +24,8 @@ from app.exceptions import (
     ValidationFailure,
 )
 from app.schemas import ErrorResponse, StaleRevisionDetail
+from app.services.auth_apple_lifecycle import AuthAppleLifecycleError
+from app.services.modern_auth_service import ModernAuthError
 
 from .middleware import CORRELATION_HEADER
 
@@ -42,8 +44,25 @@ def _public_validation_errors(exc: RequestValidationError) -> list[dict[str, obj
     ]
 
 
+def _register_auth_handlers(app: FastAPI) -> None:
+    @app.exception_handler(AuthAppleLifecycleError)
+    @app.exception_handler(ModernAuthError)
+    async def handle_modern_auth_error(
+        request: Request, exc: ModernAuthError | AuthAppleLifecycleError
+    ) -> JSONResponse:
+        correlation_id = getattr(request.state, "correlation_id", None)
+        payload = ErrorResponse(
+            message=str(exc), detail={"code": exc.code}, reference_id=correlation_id
+        )
+        return JSONResponse(
+            status_code=exc.status_code, content=payload.model_dump(by_alias=True)
+        )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach exception handlers for known error types."""
+
+    _register_auth_handlers(app)
 
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation(

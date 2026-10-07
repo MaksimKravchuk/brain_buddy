@@ -1,3 +1,4 @@
+import BrainBuddyAPI
 import BrainBuddyCore
 import BrainBuddyWorkspace
 import SwiftUI
@@ -9,11 +10,14 @@ import UIKit
 struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
+    @Environment(\.openURL) private var openURL
 
     @State private var signInRequest: SignInRequest?
     @State private var isConfirmingSignOut = false
     @State private var unsyncedCount = 0
     @State private var isSigningOut = false
+    @State private var accountOrigin: String?
+    @State private var accountLinkFailed = false
 
     init() {}
 
@@ -30,6 +34,7 @@ struct SettingsScreen: View {
             aboutSection
         }
         .navigationTitle("Settings")
+        .task(id: workspace.account?.serverURL) { await loadAccountOrigin() }
         .sheet(item: $signInRequest) { request in
             SignInSheet(email: request.email, serverURL: request.serverURL)
         }
@@ -61,6 +66,15 @@ struct SettingsScreen: View {
                 }
                 LabeledContent("Email", value: account.email)
                 LabeledContent("Server", value: Self.hostDescription(account.serverURL))
+                Button("Manage account") { openAccount(account, deleting: false) }
+                    .frame(minHeight: 44)
+                Button("Delete account", role: .destructive) { openAccount(account, deleting: true) }
+                    .frame(minHeight: 44)
+                if accountLinkFailed {
+                    Text("Couldn't open account settings. Use the account linked to this iPhone.")
+                        .font(BBFont.secondary)
+                    Button("Retry account links") { Task { await loadAccountOrigin() } }.frame(minHeight: 44)
+                }
                 if workspace.syncStatus == .needsSignIn {
                     Button("Sign in again") {
                         signInRequest = SignInRequest(email: account.email, serverURL: account.serverURL)
@@ -214,6 +228,34 @@ struct SettingsScreen: View {
     }
 
     // MARK: Actions
+
+    private func loadAccountOrigin() async {
+        accountOrigin = nil
+        guard let account = workspace.account else { return }
+        let ownerID = account.id
+        let api = BrainBuddyAPIClient(baseURL: account.serverURL, tokenStore: InMemorySessionTokenStore())
+        do {
+            let methods = try await api.authMethods()
+            guard workspace.account?.id == ownerID, workspace.account?.serverURL == account.serverURL,
+                !Task.isCancelled else { return }
+            accountOrigin = methods.webAccountOrigin
+            accountLinkFailed = methods.webAccountOrigin.flatMap {
+                NativeAccountDestination.url(origin: $0, ownerID: ownerID, deleting: false)
+            } == nil
+        } catch {
+            if workspace.account?.id == ownerID, !Task.isCancelled { accountLinkFailed = true }
+        }
+    }
+
+    private func openAccount(_ account: LinkedAccount, deleting: Bool) {
+        guard workspace.account?.id == account.id, workspace.account?.serverURL == account.serverURL,
+            let origin = accountOrigin,
+            let url = NativeAccountDestination.url(origin: origin, ownerID: account.id, deleting: deleting)
+        else { accountLinkFailed = true; return }
+        // Browser authentication stays separate. No native session is copied,
+        // and opening/cancelling this destination changes no local records.
+        openURL(url) { accepted in accountLinkFailed = !accepted }
+    }
 
     /// Always asks first. Without unsynced changes a plain sign-out is
     /// confirmed; if changes arrive meanwhile, `signOut` asks again with the

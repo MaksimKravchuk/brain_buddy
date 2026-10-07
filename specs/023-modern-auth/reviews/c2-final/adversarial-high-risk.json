@@ -1,0 +1,30 @@
+{
+  "findings": [],
+  "oracle": {
+    "adapter": "external-stdin-v1",
+    "adapter_sha256": "fddafaf5f807d990b64f5521dab4f53fda526f90a38f0f1363f93fed9dfacfbf",
+    "artifacts_digest": "270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd",
+    "claimed_model": "inherited-model-unverified",
+    "claimed_provider": "openai-codex-collaboration",
+    "configured_integration": "codex",
+    "configured_model": "gpt-5.6-sol",
+    "degraded": true,
+    "executable": "/tmp/modern-auth-review-transport",
+    "integration": "external-unverified",
+    "model": "unverified",
+    "reason": "external reviewer model identity is not verified"
+  },
+  "product_decisions": [],
+  "reviewed_files": [
+    ".specify/workflows/runs/modern-auth-20261006-c2/planning-context.json",
+    "specs/022-modern-auth/plan.md",
+    "specs/022-modern-auth/data-model.md",
+    "specs/022-modern-auth/design.md",
+    "specs/022-modern-auth/quickstart.md",
+    "specs/022-modern-auth/contracts/http-auth.md",
+    "specs/022-modern-auth/contracts/persistence-migration.md"
+  ],
+  "role": "adversarial-high-risk",
+  "summary": "Bounded same-session correction verification closes the original passwordless-account timing finding. The amended plan, authority invariants and validation guide require comparable dummy Argon2 work for unset/invalid hashes, unconditional rejection, no persisted dummy credential and deterministic verification-call/session assertions. The HTTP callback and account-mutation status lists include the required foreign-resource 404. The final D-06/M-06 correction distinguishes cancellation before submission from an unknown link outcome, requires same-account metadata refresh and fresh proof when still needed, and adds interrupted-link-after-commit acceptance without consumed-proof replay. Artifact digest 270a94d7fb7b025144e6bdbc2292e78da3476e11fae8aaaf82e2df12c8652bdd was independently recomputed and matched. This continues the initial independent planning review; no remaining finding exists within the correction scope. No implementation, test execution, planning-risk sign-off or release readiness is claimed.",
+  "verdict": "pass"
+}

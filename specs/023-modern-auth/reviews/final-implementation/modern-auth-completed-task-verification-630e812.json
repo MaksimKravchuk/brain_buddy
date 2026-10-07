@@ -1,0 +1,194 @@
+{
+  "artifact_type": "independent_existing_task_autosave_failure_analysis",
+  "reviewer": "review_security_c2; no implementation authorship",
+  "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+  "integrated_main_sha": "21f08d26698a434f7b1d16b991b2b43d4e0ea0f2",
+  "observed_at_utc": "2026-10-06T18:04:23.812696+00:00",
+  "disposition": "reproduced_existing_P2_task_correctness_issue_outside_accepted_auth_scope; V6_wire_causation_not_proven",
+  "feature_acceptance": "not_graded",
+  "production_acceptance": "not_granted",
+  "full_acceptance": false,
+  "actual_v6_browser_failure": {
+    "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/f7fc9db4-4231-4adc-9a4b-5caefccf0181-result.json",
+    "sha256": "3890483342c9f6dc65717e186023b7005876ef25c14f1a085bae86c03b652849",
+    "name": "016-FR-001 016-FR-002 016-FR-003 016-SC-001 016-SC-003 016-SC-004 one task shares completion and reopening across project tag and search views",
+    "status": "failed",
+    "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Complete task', exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 5000ms\n  - waiting for getByRole('button', { name: 'Complete task', exact: true })\n",
+    "trace": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Complete task', exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 5000ms\n  - waiting for getByRole('button', { name: 'Complete task', exact: true })\n\n    at /workspace/brain_buddy-auth/frontend/tests/e2e/completed-tasks.spec.ts:241:84\n    at /workspace/brain_buddy-auth/frontend/tests/e2e/completed-tasks.spec.ts:216:3",
+    "actual_ui_context": "Signed-in expected completion-shared account, open detail with List=Reopen to Next actions; Save unverified and server response could not be verified state, disabled Reopen task. No auth redirect/anonymous state observed.",
+    "error_context": "/tmp/modern-auth-v6-actual/legacy-failed/allure/b112a62d-efdf-4ca7-bda7-fb36a6b9ed77-attachment.md",
+    "limitation": "No received ACK body and canonical-query ordering trace retained in this local zero-retry failure. Cannot identify the exact failed validation predicate or prove the independently reproduced race caused this browser attempt."
+  },
+  "independent_reproduction": {
+    "name": "independent_task_reopen_ack_after_canonical_sync_630e812",
+    "log": "/tmp/modern-auth-task-reopen-verification-630e812.log",
+    "exit_code": 0,
+    "result": {
+      "input_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+      "name": "independent_task_reopen_ack_after_canonical_sync_630e812",
+      "execution_scope": "Actual controller source transpiled in isolated VM with synthetic API/storage. No application source edit or network/browser operation.",
+      "results": [
+        {
+          "sync_before_ack": false,
+          "command": {
+            "action": "reopen",
+            "to_state": "next",
+            "expected_revision": 2
+          },
+          "canonical_revision": 3,
+          "canonical_state": "next",
+          "status": "saved",
+          "error": null
+        },
+        {
+          "sync_before_ack": true,
+          "command": {
+            "action": "reopen",
+            "to_state": "next",
+            "expected_revision": 2
+          },
+          "canonical_revision": 3,
+          "canonical_state": "next",
+          "status": "failed",
+          "error": {
+            "kind": "protocol",
+            "message": "Server returned an invalid task acknowledgement",
+            "retryAllowed": true,
+            "offline": false
+          }
+        }
+      ],
+      "v6_wire_causation_proven": false
+    },
+    "method": "Actual taskDetailAutosave.ts transpiled via existing TypeScript and loaded in isolated Node VM with synthetic API/storage. No source edits, HTTP/network/provider/browser operation.",
+    "steps": [
+      "Create controller with same-owner completed task revision2. Return a deferred API transition acknowledgement. Call transition(next),flush; assert sent action=reopen,to_state=next,expected_revision=2.",
+      "Positive control: resolve valid reopened task revision3 without a canonical sync. Controller reaches saved/error=null.",
+      "Race: before resolving same valid acknowledgement, call controller.sync(reopened canonical revision3), then resolve acknowledgement. Controller ends failed/error.kind=protocol although canonical task is already next/revision3.",
+      "Both scenarios use identical DTO shape and legitimate acknowledgement; only interleaving differs. Module source is byte-identical to integrated main."
+    ]
+  },
+  "finding": {
+    "id": "BASELINE-TASK-ACK-SYNC-001",
+    "priority": "P2",
+    "scope": "Existing task autosave correctness, outside accepted auth implementation scope",
+    "status": "unresolved_in_this_auth_branch",
+    "files": [
+      {
+        "path": "frontend/src/features/tasks/taskDetailAutosave.ts",
+        "lines": [
+          350,
+          352,
+          497,
+          507,
+          588
+        ]
+      }
+    ],
+    "actual_behavior": "sync() can advance mutable baseline while a mutation acknowledgement is pending. dispatch then validates that acknowledgement against the advanced baseline revision/state, rejecting the same valid current acknowledgement as non-monotonic/protocol-invalid.",
+    "impact": "The UI can report save unverified for an operation already validly committed and observed as canonical; no unauthorized account access or data disclosure was demonstrated.",
+    "cause_of_v6_failure": "not_proven_without_received_ack_and_query_order_evidence",
+    "owner_disposition": "Root explicitly keeps task production/guards/button timeout unchanged in this auth branch and requests known-baseline issue disclosure even if canonical retries pass. Do not call it resolved or merely timing.",
+    "correction_constraint": "Any separately scoped task fix must preserve receipt shape/identity/revision/state validation and account boundaries; relaxing guard or visibility timeout is not an evidenced repair."
+  },
+  "source_equivalence": {
+    "task_controller_panel_list_and_browser_test_equal_main": true,
+    "backend_task_api_equal_main": true,
+    "task_get_update_transition_client_functions_equal_main": true,
+    "createUserViaApi_equal_main": true,
+    "auth_entry_login_helper_not_used": true
+  },
+  "v6_aggregate": {
+    "raw_log": "/tmp/modern-auth-023-verify-all-final-frozen-v6.log",
+    "status": "FAIL",
+    "root_reported_exit_code": 2,
+    "legacy_counts": {
+      "passed": 63,
+      "failed": 2,
+      "skipped": 1
+    },
+    "actual_archived_failures": [
+      {
+        "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/49a7b43a-d78b-41c8-a004-83e4c27f8ee1-result.json",
+        "name": "T027 bounded 200-card Chromium evidence records 20 samples per operation and passes the supported desktop audit",
+        "message": "Error: zoom p95 must stay within 200ms\n\nexpect(received).toBeLessThanOrEqual(expected)\n\nExpected: <= 200\nReceived:    219.09999999403954"
+      },
+      {
+        "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/f7fc9db4-4231-4adc-9a4b-5caefccf0181-result.json",
+        "name": "016-FR-001 016-FR-002 016-FR-003 016-SC-001 016-SC-003 016-SC-004 one task shares completion and reopening across project tag and search views",
+        "message": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Complete task', exact: true })\nExpected: visible\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeVisible\" with timeout 5000ms\n  - waiting for getByRole('button', { name: 'Complete task', exact: true })\n"
+      }
+    ],
+    "actual_skips": [
+      {
+        "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/d45c51ad-b49a-4157-a494-3a65efc1c8b1-result.json",
+        "name": "E2E-VNEXT-01 confirmation gate keeps model-backed proposals provisional until explicit approval",
+        "message": null
+      }
+    ],
+    "result_manifest_sha256": "84a7f8d92a9157f6c9a408d8ff02866123b1fcbad2d5009e123bf7f3de8839c1",
+    "modern_browser": "not_run_after_legacy_failure",
+    "backend_and_frontend": "Their completed suites/floors do not substitute for failed required E2E."
+  },
+  "v7_observation": {
+    "metadata": "/tmp/modern-auth-frozen-630e812-v7.json",
+    "candidate_sha": "630e812cfb5713b9e1db026ddcf605ed724c351a",
+    "status": "running_not_verified",
+    "command": "CI=1 make -j2 --eval='test-backend test-frontend: test-e2e' verify-all (same pinned images/venv/display environment asV6)",
+    "policy": "Canonical CI=1 existing1 retry; every attempt retained, no source/sample/threshold changes. Backend/frontend full units wait for complete E2E under the new command-line ordering. No aggregatePASS claimed."
+  },
+  "source_fingerprints": [
+    {
+      "path": "backend/app/api/tasks.py",
+      "sha256": "4d7bbeaf8cbcfbb65f6f06dec539a66887a743bd121bda02fb69467237725ead"
+    },
+    {
+      "path": "frontend/src/api/client.ts",
+      "sha256": "dbbe423624d46316e4ff754a80efdf9762bde7383cd3a15e7e8f7b713ed90af4"
+    },
+    {
+      "path": "frontend/src/features/tasks/TaskDetailPanel.tsx",
+      "sha256": "0dadbb72e796785d6adcb6760b763e25a2834c44c6e56d44657d359dfef97fd1"
+    },
+    {
+      "path": "frontend/src/features/tasks/TaskListPage.tsx",
+      "sha256": "685a95bc0b62e594e9902c1d54be66bfaa98cbd4a96ba0c57fb6be605b37edb5"
+    },
+    {
+      "path": "frontend/src/features/tasks/taskDetailAutosave.ts",
+      "sha256": "b8d7747bd124af63035830f5107ee9716d861b77826532093240f1b0c0f0b84a"
+    },
+    {
+      "path": "frontend/tests/e2e/completed-tasks.spec.ts",
+      "sha256": "deec1c8c90c4c36febbed9da0fdf8698db49985a9e97041a54e08d709ce33689"
+    },
+    {
+      "path": "frontend/tests/e2e/gtdHelpers.ts",
+      "sha256": "af1e6c8da57a8cce2bbd2952e372a5409a8f3a533f6497f482f91ced7d752903"
+    }
+  ],
+  "input_manifest_sha256": "4da77e6fa1293d8ec0eb88632519bcab61931c2b9dd2a4f1e28f8abecd738878",
+  "evidence_fingerprints": [
+    {
+      "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/f7fc9db4-4231-4adc-9a4b-5caefccf0181-result.json",
+      "sha256": "3890483342c9f6dc65717e186023b7005876ef25c14f1a085bae86c03b652849"
+    },
+    {
+      "path": "/tmp/modern-auth-v6-actual/legacy-failed/allure/b112a62d-efdf-4ca7-bda7-fb36a6b9ed77-attachment.md",
+      "sha256": "94592084c3898a2e06b4ee0f5b5da73f1ce5c7a60954aa8138b938ab7133eadc"
+    },
+    {
+      "path": "/tmp/modern-auth-task-reopen-verification-630e812.log",
+      "sha256": "8da21d060055c92e4d7e12dbc020d7041b9079f3bf643bfb606beb87cb4ba42c"
+    },
+    {
+      "path": "/tmp/modern-auth-frozen-630e812-v7.json",
+      "sha256": "cc88afe255d50d736dce561da0bf45e5079e23a9ef60371a3220db60c00f2519"
+    }
+  ],
+  "limitations": [
+    "This preserves concrete existing-task issue and fail-closed UI evidence; it does not revise previous auth code-review inputs/verdicts.",
+    "No task production/test/guard/timeout edit or shared runner/output cleanup performed.",
+    "Eventual final readiness must include this known unresolved baseline race and failed V6 before considering actual completed V7 evidence; physical/native/live/public exact CI gaps remain."
+  ]
+}

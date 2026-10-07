@@ -197,6 +197,46 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     ),
     # Authentication & access
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
+    "auth_migration": (
+        EPIC_AUTH,
+        "Identity storage",
+        "Explicit encrypted legacy migration",
+    ),
+    "auth_migration_integration": (
+        EPIC_AUTH,
+        "Identity storage",
+        "Startup CLI and purge migration boundary",
+    ),
+    "auth_mail_service": (
+        EPIC_AUTH,
+        "Modern authentication",
+        "Bounded delivery and guess budgets",
+    ),
+    "modern_auth_schemas": (
+        EPIC_AUTH,
+        "Modern authentication",
+        "Typed purpose-bound wire contracts",
+    ),
+    "modern_auth_service": (
+        EPIC_AUTH,
+        "Modern authentication",
+        "Owner-bound proof and session authority",
+    ),
+    "modern_auth_apple_integration": (
+        EPIC_AUTH,
+        "Modern authentication",
+        "Native Apple consent and notice integration",
+    ),
+    "modern_auth_api": (
+        EPIC_AUTH,
+        "Modern authentication",
+        "Origins cookies and safe HTTP outcomes",
+    ),
+    "modern_auth_config": (EPIC_AUTH, "Modern authentication", "Method availability"),
+    "auth_secret_box": (EPIC_AUTH, "Modern authentication", "Authentication secrets"),
+    "auth_store": (EPIC_AUTH, "Identity storage", "Transactional authority"),
+    "auth_legacy_atomic": (EPIC_AUTH, "Auth service", "Atomic legacy credentials"),
+    "auth_provider_service": (EPIC_AUTH, "Modern authentication", "Provider proofs"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
     "ownership": (EPIC_AUTH, "Ownership", "Per-user data isolation"),
     "task_owner_isolation": (
