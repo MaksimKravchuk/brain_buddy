@@ -54,7 +54,7 @@ package final class SignOutFlow {
         /// "Sign out and remove" when changes would be removed, else "Sign out".
         package var confirmTitle: String
         /// The unsent changes it names, by identity: confirming removes these and no others.
-        package var changes: Set<PendingOperation.ID>
+        package var changes: Set<PendingChange>
         package var removesUnsent: Bool { unsent > 0 }
     }
 
@@ -106,7 +106,7 @@ package final class SignOutFlow {
         return Prompt(
             unsent: unsent, issues: issues, offline: !snapshot.isOnline, sessionEnded: snapshot.sessionEnded,
             backup: backup, text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut,
-            changes: workspace.pendingChangeIDs
+            changes: workspace.pendingChanges
         )
     }
 
@@ -127,8 +127,8 @@ package final class SignOutFlow {
 
     /// "Sign out" or "Sign out and remove". Removes only what the dialog named: when the count of
     /// unsent changes or open issues differs from it, or the kit finds a change it did not name (by
-    /// identity, so also one queued in place of an acknowledged one), nothing is signed out and X-04
-    /// opens again with the new count.
+    /// id and content, so also one queued in place of an acknowledged one or an edit folded into a
+    /// named one), nothing is signed out and X-04 opens again with the new count.
     @discardableResult
     package func confirm() async -> Outcome {
         guard !isSigningOut else { return .changed }

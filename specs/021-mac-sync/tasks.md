@@ -793,7 +793,10 @@ Earlier increments are each independently useful and safe:
     and `Workspace.signOut(removing:)` refuses with `unsyncedChanges` whenever a pending change,
     found up front or under the store's lock, is not among them; the count words are unchanged.
     `WorkspaceSyncTests` (red before the fix: the widget's change was removed): confirm {A}, A
-    acknowledged and B queued meanwhile, refused, B kept.
+    acknowledged and B queued meanwhile, refused, B kept. Follow-up: an edit folded into a named
+    unsent change (`OutboxCompactor`) keeps its id, so the identity is now `PendingChange` (id and
+    command; `Workspace.pendingChanges`) and such an edit is refused and kept the same way (test red
+    before: the folded edit was removed).
   - **X-03 is single-flight across entries** (review P1). The app menu's "Sign in…" while the
     sheet waited for its login replaced the flow without cancelling its request, so two logins
     could race. `MacSyncController.beginSignIn` now keeps an open flow (sheet shown or request on
