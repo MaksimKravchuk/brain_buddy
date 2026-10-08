@@ -1,6 +1,7 @@
 import BrainBuddyAPI
 import BrainBuddyCore
 import BrainBuddyFakeServer
+import BrainBuddyPersistence
 import Foundation
 import Testing
 
@@ -208,5 +209,52 @@ struct FirstSignInMergeTests {
         #expect(app.state.tasks.isEmpty)
         try await mac.signIn()
         #expect(try marks(app) == before, "after sign-out and sign-in to the same account")
+    }
+
+    // MARK: The real import
+
+    /// The Mac importer's output over its populated fixture (review c2, G21), kept byte-identical by
+    /// `macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift`.
+    private func goldenImport() throws -> StoreDocument {
+        let url = try #require(Bundle.module.url(forResource: "legacy-import-golden", withExtension: "json", subdirectory: "Resources"))
+        return try StoreDocumentCoding.decode(Data(contentsOf: url))
+    }
+
+    @Test("021-FR-003 021-SC-003 the imported Mac store signs in against an account with Old flat, garden and Calls: no duplicate, nothing missing")
+    func goldenImportSignsIn() async throws {
+        let document = try goldenImport()
+        let imported = document.replayed().state
+        #expect(imported.tasks.count == 18 && imported.projects.count == 6, "the importer's real output")
+
+        let world = World()
+        let phone = await world.device()
+        try await phone.signIn()
+        _ = try phone.workspace.createProject(name: "Old flat")
+        _ = try phone.workspace.createProject(name: "garden")
+        _ = try phone.workspace.createTag(name: "Calls")
+        await phone.workspace.syncNow()
+        await phone.settle()
+
+        let mac = await world.device(store: InMemoryDocumentStore(document: document))
+        #expect(mac.workspace.state.tasks.count == 18)
+        try await mac.signIn()
+
+        let server = world.snapshot
+        let activeProjects = server.projects.values.filter { $0.state == .active }.map { NameNormalizer.project($0.name) }
+        #expect(Set(activeProjects).count == activeProjects.count, "0 duplicate active projects")
+        let activeTags = server.tags.values.filter { $0.state == .active }.map { NameNormalizer.tag($0.name) }
+        #expect(Set(activeTags).count == activeTags.count, "0 duplicate active tags")
+        for task in imported.tasks.values {
+            #expect(server.task(titled: task.title) != nil, "“\(task.title)” reached the account")
+        }
+        #expect(server.tasks.count == imported.tasks.count, "0 missing, none doubled")
+        let flat = try #require(server.projects.values.first { $0.name == "Old flat" })
+        #expect(flat.state == .active, "the archived Mac project merged into the account's active one")
+        for title in ["Paint the hallway", "Return the keys", "Sell the old sofa"] {
+            #expect(server.task(titled: title)?.projectID == flat.id)
+        }
+        #expect(mac.workspace.issues.map(\.message) == [GTDValidationError.archiveNotMerged("Old flat").message])
+        #expect(mac.rejectedRequests.isEmpty)
+        try mac.expectInSyncWithServer()
     }
 }

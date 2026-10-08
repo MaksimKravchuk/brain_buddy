@@ -1,32 +1,17 @@
+import BrainBuddyMacCore
 import SwiftUI
 
-enum QuickOpenTarget {
-    case list(TaskList)
-    case history(HistoryState)
-    case project(String)
-    case tag(String)
-    case task(String)
-}
-
-struct QuickOpenResult: Identifiable {
-    let id: String
-    let title: String
-    let subtitle: String
-    let symbol: String
-    let target: QuickOpenTarget
-}
-
+/// Quick Open (⌘O) over the workspace on this Mac: lists, history, projects (archived ones say
+/// so), tags and matching tasks, found at once without the network (FR-010).
 @MainActor
 struct QuickOpenView: View {
-    @ObservedObject var model: BrainBuddyModel
+    let model: BrainBuddyModel
     let onOpen: (QuickOpenTarget) -> Void
     let onClose: () -> Void
 
     @State private var query = ""
     @State private var results: [QuickOpenResult] = []
     @State private var selectedIndex = 0
-    @State private var searching = false
-    @State private var searchError: String?
     @FocusState private var queryFocused: Bool
 
     var body: some View {
@@ -48,17 +33,11 @@ struct QuickOpenView: View {
                         selectedIndex = max(selectedIndex - 1, 0)
                         return .handled
                     }
-                if searching { ProgressView().controlSize(.small) }
             }
             .padding(12)
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
 
-            if let searchError {
-                HStack {
-                    Text(searchError).foregroundStyle(.red)
-                    Button("Retry") { Task { await search() } }
-                }
-            } else if results.isEmpty && !searching {
+            if results.isEmpty {
                 ContentUnavailableView("No matches", systemImage: "magnifyingglass")
             } else {
                 ScrollViewReader { proxy in
@@ -112,34 +91,14 @@ struct QuickOpenView: View {
         .padding(18)
         .frame(width: 620, height: 520)
         .task { queryFocused = true }
-        .task(id: query) {
-            if !query.isEmpty {
-                do { try await Task.sleep(nanoseconds: 120_000_000) }
-                catch { return }
-            }
-            await search()
+        .onChange(of: query, initial: true) { _, query in
+            results = model.quickOpenResults(query)
+            selectedIndex = 0
         }
     }
 
     private func openSelected() {
         guard results.indices.contains(selectedIndex) else { return }
         onOpen(results[selectedIndex].target)
-    }
-
-    private func search() async {
-        searching = true
-        searchError = nil
-        do {
-            let found = try await model.quickOpenResults(query)
-            guard !Task.isCancelled else { return }
-            results = found
-            selectedIndex = 0
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled else { return }
-            searchError = error.localizedDescription
-        }
-        searching = false
     }
 }

@@ -262,9 +262,26 @@ describe("PrivacyPolicyPage", () => {
     expect(rights).toHaveTextContent(/excludes password hashes.*codes.*proofs.*session tokens.*provider credentials/i);
   });
 
+  it("021-FR-021 021-FR-029: says the apps' device copies stay until sign-out there and erasure covers what our servers hold", () => {
+    renderPolicy();
+    const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
+    const rights = screen.getByRole("heading", { name: /your rights/i }).closest("section");
+    for (const sentence of [
+      "The Brain Buddy apps for Mac and iPhone keep a working copy of your tasks on the device until you sign out there, including after a session ends or your account is deleted.",
+      "On a Mac, deleting the app does not remove that copy.",
+      "The copy of your tasks from before the Mac update is kept for at least 30 days and until you sign out on that Mac.",
+      "We cannot erase copies on your devices or in their backups, such as Time Machine; signing out removes the app's copy from that device."
+    ]) {
+      expect(retention).toHaveTextContent(sentence);
+    }
+    expect(rights).toHaveTextContent(
+      "Erasure covers everything our servers hold. Copies on your devices are removed by signing out on each device."
+    );
+  });
+
   it("records the date the policy last changed", () => {
     renderPolicy();
-    expect(screen.getByText(/October 6, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/October 8, 2026/)).toBeInTheDocument();
   });
 
   it("links back to sign in", () => {

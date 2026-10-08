@@ -46,18 +46,23 @@ layer. Apply test-first ordering only where Principle II requires it.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story. Include consent enforcement, mobile/resilience handling, observability (correlation IDs, actionable errors/progress), release/smoke validation, and data-safety safeguards where relevant.
 
-**Multiple PRs for one spec (opt-in)**: After `spec.md` and `plan.md` are
-approved, and before implementation, propose PR-sized slices and obtain the
-human's agreement on boundaries. Add a `## PR-срезы` section to this very
-`tasks.md` containing one fenced `json` block with `schema_version` set to
-`brainbuddy-pr-slices/v1` and at least two ordered `slices`. Each slice has a
-unique `id` (`PR-01`, `PR-02`), a reviewable `outcome`, nonempty `tasks`
-(`T001`), `requirements` (`NNN-FR-001` or `NNN-SC-001`), repository-relative
-write `paths`, runnable `tests`, `acceptance` evidence, and `depends_on`
-(previous slice ids, or `[]`). Assign every checklist task **exactly once**;
-shared setup and polish tasks also need an owner. Do not split into a backend
-PR followed by a frontend PR unless the first has an independently testable
-contract. Do not claim the same write path in independent parallel slices.
+**Multiple PRs for one spec**: After `spec.md` and `plan.md` are approved, and
+before implementation, any feature larger than one reviewable PR gets
+PR-sized slices; obtain the human's agreement on boundaries. Add a
+`## PR-срезы` section to this very `tasks.md` containing one fenced `json`
+block with `schema_version` set to `brainbuddy-pr-slices/v2` and at least two
+ordered `slices`. Each slice has a unique `id` (`PR-01`, `PR-02`), a
+reviewable `outcome`, nonempty `tasks` (`T001`), `requirements` (`NNN-FR-001`
+or `NNN-SC-001`), repository-relative write `paths`, runnable `tests`,
+`acceptance` evidence, `depends_on` (previous slice ids, or `[]`), a
+`budget` of `{"product_loc": <=400, "files": <=12}` (tests, docs and specs do
+not count; exceed it only with an `oversize_reason`), and an `implementer`
+(`feature-implementer`, or `mechanical-implementer` for pattern-following
+work). Assign every checklist task **exactly once**; shared setup and polish
+tasks also need an owner. Start with a contract slice so backend, web and iOS
+slices can run in parallel against it. Do not split into a backend PR followed
+by a frontend PR unless the first has an independently testable contract. Do
+not claim the same write path in independent parallel slices.
 `python3 scripts/check_spec_kit_specs.py` validates the section; approve it
 before an implementation worker begins. It is a delivery boundary, not
 authorization to merge or deploy.

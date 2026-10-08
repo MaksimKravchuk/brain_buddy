@@ -64,6 +64,25 @@ struct ImportCanonicalizerTests {
         #expect(canonical(tags: [.init(id: "1", name: "@")]).snapshot.tags.map(\.name) == ["Untitled tag"])
     }
 
+    @Test("021-FR-020 a tag with several leading @ takes the name the kit stores, so the reducer keeps it as is")
+    func tagSigilsReachAFixedPoint() throws {
+        let result = canonical(tags: [.init(id: "1", name: "@@home"), .init(id: "2", name: "@@@ errands")])
+        #expect(result.snapshot.tags.map(\.name) == ["home", "errands"])
+        var state = GTDState()
+        for (index, tag) in result.snapshot.tags.enumerated() {
+            #expect(NameNormalizer.tagDisplay(tag.name) == tag.name)
+            try apply(.createTag(.init(tagID: TagID("t\(index)"), name: tag.name)), to: &state)
+            #expect(state.tags[TagID("t\(index)")]?.name == tag.name)
+        }
+    }
+
+    @Test("021-FR-020 a closed task that was in Waiting gets a passing note and no report entry: the old app had cleared it")
+    func closedWaitingTaskIsNotReported() throws {
+        let result = canonical(tasks: [task(state: "completed", lastOpenState: "waiting"), task(state: "waiting")])
+        #expect(result.snapshot.tasks.map(\.waitingFor) == ["(not recorded)", "(not recorded)"])
+        #expect(result.adjustments.filter { $0.kind == "task waiting-for" }.count == 1, "only the open Waiting task")
+    }
+
     @Test("021-FR-020 a name over 500 scalars is cut so the kit stores exactly what is reported, and it validates")
     func longNamesValidate() throws {
         let long = String(repeating: "™", count: 300) + " " + String(repeating: "x", count: 400)

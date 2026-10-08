@@ -89,20 +89,35 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Parallel execution examples per story
    - Implementation strategy section (MVP first, incremental delivery)
 
-5. **Set PR boundaries before coding (when the feature warrants multiple PRs or
-   the user requests them)**: Propose an ordered slice map covering every `T###`
-   exactly once, with FR/SC IDs, explicit write paths, dependencies, per-slice
-   runnable tests and acceptance evidence. Ask the human to approve the
-   boundaries; do not silently split or assign the entire task list to one
-   worker. On approval, append `## PR-срезы` to `FEATURE_DIR/tasks.md`
-   with a fenced JSON block using the `brainbuddy-pr-slices/v1` contract in
-   the tasks template, then run `python3 scripts/check_spec_kit_specs.py`.
-   Do not split by technical layer alone when the first PR cannot be tested
-   independently. An unapproved map is a draft, never an instruction to
-   implement. Independent slices may run in parallel
-   only with disjoint writers/resources; dependent slices start from an
-   accepted base, not a speculative parallel branch. A task's `[P]` marker
-   alone does not create a separate PR.
+5. **Set PR boundaries before coding**: any feature larger than one
+   reviewable PR gets a slice map; do not wait for the user to ask. Propose an
+   ordered map covering every `T###` exactly once, with FR/SC IDs, explicit
+   write paths, dependencies, a size `budget`, the `implementer` role,
+   per-slice runnable tests and acceptance evidence. Ask the human to approve
+   the boundaries; do not silently split or assign the entire task list to one
+   worker. On approval, append `## PR-срезы` to `FEATURE_DIR/tasks.md` with a
+   fenced JSON block using the `brainbuddy-pr-slices/v2` contract in the tasks
+   template, then run `python3 scripts/check_spec_kit_specs.py`.
+
+   Shape the map for parallel work:
+   - **Contract first.** The first slice freezes the shared contract (API
+     schema, types, fixtures, a feature flag defaulting off); later slices for
+     backend, web and iOS consume it independently and run in parallel.
+   - **Small.** Each slice stays within 400 product lines and 12 product files
+     (tests, docs and specs do not count). Prefer more, smaller slices; state
+     `oversize_reason` only when a slice genuinely cannot be split.
+   - **Dark until done.** Unfinished behavior ships behind its flag, so a slice
+     can merge before its siblings.
+   - **Cheapest capable agent.** Mark slices that only follow an existing
+     pattern `"implementer": "mechanical-implementer"` (Haiku); everything
+     else is `feature-implementer` (Sonnet).
+   - Do not split by technical layer alone when the first PR cannot be tested
+     independently.
+
+   An unapproved map is a draft, never an instruction to implement.
+   Independent slices run in parallel with disjoint write paths and resources;
+   dependent slices start from an accepted base, not a speculative parallel
+   branch. A task's `[P]` marker alone does not create a separate PR.
 
 ## Mandatory Post-Execution Hooks
 
