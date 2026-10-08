@@ -847,7 +847,7 @@ Earlier increments are each independently useful and safe:
     `evidence/manual-macos-status.md` (T133).
 
 - **PR-10 implementation notes (2026-10-08)**, read with the PR description:
-  - **Planning docs brought in line with PR-09 as delivered** (docs only): plan, research R17, data-model E9, contracts (mac-app-host §7/§8, kit-commands §4), design X-03/X-04, quickstart and `docs/native-macos-app.md` now describe the numbered Keychain items, Cancel decided once at the link, single-flight sign-in and sign-out by identity; the PR-09 notes above record the deviations.
+  - **Planning docs brought in line with PR-09 as delivered** (docs only): plan, research R17, data-model E9, contracts (mac-app-host §7/§8, kit-commands §4), design X-03/X-04, quickstart and `docs/native-macos-app.md` now describe the numbered Keychain items, Cancel decided once at the link, single-flight sign-in and sign-out by identity; the PR-09 notes above record the deviations. A second pass (same day) adds what PR-09 gained afterwards: sign-in and sign-out are mutually exclusive, password sign-ins take turns and a sign-in after Cancel waits for the cancelled one (`.cancelling`), the sign-out confirmation names open sync issues by identity as well as unsent changes (`PendingChange`, iPhone dialog included), and quit waits for a confirmed sign-out's local removal (`Workspace.waitForSignOutRemoval()`).
   - **T136 is not wired and stays unchecked.** The non-waivable invariant "no slice-filtered
     requirement coverage in the gates" in `scripts/check_gate_integrity.py` (a `MustNotMatch`
     for `--requirements\b` in `Makefile`, and a twin for `.github/workflows/ci.yml`) forbids the
@@ -856,11 +856,17 @@ Earlier increments are each independently useful and safe:
     either: the unfiltered `python3 scripts/check_requirement_coverage.py specs/021-mac-sync`
     (run on the base `3b76fb0`) reports 39 of 40 ids traced and fails on `021-SC-007` alone, the
     owner's week, which no test can name honestly. Tracing it with a placeholder test, editing
-    an invariant, or hiding the id would each defeat the gate. **Owner decision needed**: (a)
+    an invariant, or hiding the id would each defeat the gate. Options put to the owner: (a)
     skip the 021 gate for now, as for 020; (b) amend the invariant in an ASK change that allows
     `--requirements` with an exhaustive id list, with its own tests; or (c) land
     `scripts/check_manual_evidence.py` (T134, T135, deferred) so that the unfiltered gate can
     pass with SC-007 reported pending.
+  - **Owner decision (2026-10-08): option (a).** The owner took the same decision as for
+    feature 020 ("skip the gate for now"). The 021 requirement-coverage gate is therefore not
+    wired and **T136 stays unchecked** with that reason: `Makefile`, `.specify/gate-integrity.json`
+    and the invariants are untouched, and options (b) and (c) are not pursued. 39 of 40 ids are
+    traced; only `021-SC-007` (the owner's real week, Scenario 9, `evidence/owner-week.md`) is
+    untraced, by design, because no test can name it honestly. T136 and T139 are not ticked.
   - **T137 done.** `evidence/README.md` indexes the three manual plans
     (`manual-macos-upgrade.md`, `manual-macos-archive.md`, `manual-macos-status.md`) and
     `owner-week.md`, states the content-free rule and the header format, and records the owner's

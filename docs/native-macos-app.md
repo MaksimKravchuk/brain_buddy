@@ -72,7 +72,11 @@ until they reach the server. The token is never written to a file or logged.
   and Esc are disabled, the sheet keeps reading "Signing in…" while the first sync runs, and it
   closes signed in, so a sign-in that stuck is never reported as cancelled.
 - **One sign-in at a time.** While the sheet is shown or its request is on its way, a second
-  "Sign in…" does nothing and the app menu's "Sign in…" and "Sign in again…" are disabled.
+  "Sign in…" does nothing and the app menu's "Sign in…" and "Sign in again…" are disabled. After
+  Cancel the typed values are back, but "Sign in" stays disabled until the cancelled request has
+  ended.
+- **Sign-in and sign-out never overlap.** While the sheet is open "Sign out…" does nothing and is
+  disabled in the app menu; while a confirmed sign-out runs the sign-in items are disabled.
 
 ### "Sign in again" after a rebuild
 
@@ -103,7 +107,9 @@ The Mac syncs only while it runs (no login item, no agent). Triggers (contracts/
 - the kit's 15 s tick, for the life of the process: a cycle only when the last pull is 30 s old or
   changes wait, and never during a scheduled retry, so an idle tick sends nothing;
 - File › "Sync now" (⌘R), the popover's "Sync now" and the footer's "Retry": single-flight;
-- resigning and quitting: the workspace's last write is flushed before the app exits.
+- resigning and quitting: the workspace's last write is flushed before the app exits; quitting also
+  waits for a confirmed sign-out's removal of the account's data (not for the server logout, which
+  is sent at the next launch if not now).
 
 An open task's detail is read again on every 15 s tick, because subtasks and comments written
 elsewhere reach this Mac only that way.
@@ -134,7 +140,7 @@ accept client times, which is out of scope.
 "Sign out…" (popover or app menu) first runs the window's discard confirmation when a task edit is
 unsaved or the capture draft is not empty, then the confirmation with the count of changes that
 would be removed, the open sync issues and the pre-upgrade backup. "Sign out and remove" removes
-only the changes the confirmation named (each by operation id and content). If any other change is
+only the changes and sync issues the confirmation named (each by id and content). If any other change is
 pending when you confirm, whether one that arrived while it was open, one queued in place of a
 change that was just sent, or an edit folded into a named change, nothing is signed out or removed
 and it shows again with the real count. While the sign-out runs, edits are refused ("Brain Buddy is
