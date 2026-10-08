@@ -80,6 +80,12 @@ export function InboxStep(): React.JSX.Element {
   const limit = plan?.limit ?? items.length;
   const current = handled.size < limit ? items.find((item) => !handled.has(item.id)) : undefined;
 
+  // A processed count that did not save holds the run on this step until its Retry lands (FR-048,
+  // FR-033): leaving would unmount the only Retry and leave the run's Inbox count wrong for good.
+  const { beginWrite } = run;
+  const countFailed = countAction.failure !== null;
+  useEffect(() => (countFailed ? beginWrite() : undefined), [countFailed, beginWrite]);
+
   useEffect(() => {
     if (focusHeading.current) {
       focusHeading.current = false;
@@ -234,7 +240,7 @@ export function InboxStep(): React.JSX.Element {
     setProcessed((ids) => ids.filter((id) => id !== task.id));
     notify(`“${task.title}” is back in your Inbox`);
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: -1 });
-    void action.run(
+    void countAction.run(
       "undo-count",
       "Update the Inbox count",
       () => run.progress(count),

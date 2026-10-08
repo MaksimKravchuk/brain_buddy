@@ -142,7 +142,8 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
                       <b className="text-[15px] text-slate-900">{`${open.mode === "quick" ? "Quick" : "Full"} review · step ${stepCodes.indexOf(open.current_step as string) + 1} of ${stepCodes.length}`}</b>
                       <span className="text-sm text-slate-700">{`Started ${startedText(open)} on ${ORIGINS[open.origin]}. ${decisionCount(open.counts)} decisions made so far.`}</span>
                     </div>
-                    <button type="button" className={primaryButtonClass} onClick={() => onStart(open)}>
+                    {/* A replacement on its way would end this run: Continue waits for its answer. */}
+                    <button type="button" disabled={action.pending !== null} className={primaryButtonClass} onClick={() => onStart(open)}>
                       Continue
                     </button>
                   </div>

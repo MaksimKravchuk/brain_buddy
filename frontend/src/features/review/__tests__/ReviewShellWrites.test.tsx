@@ -232,7 +232,7 @@ describe("020-FR-048 the shell waits for the step's writes", () => {
     expect(progress.mock.calls[0][0].body).toMatchObject({ inbox_processed_delta: 1 });
   });
 
-  it("020-FR-048 a count that fails frees the bar and leaves its Retry on the step", async () => {
+  it("020-FR-048 020-FR-033 a count that fails keeps the run on the step until its Retry saves, so the Inbox count is never left short", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValue(queue([paper, dentist]));
     transitionTask.mockResolvedValueOnce({ ...paper, state: "next", revision: 4 });
@@ -243,8 +243,17 @@ describe("020-FR-048 the shell waits for the step's writes", () => {
     await user.click(within(screen.getByRole("group", { name: "Choices" })).getByRole("button", { name: "Next actions" }));
 
     expect(await screen.findByText(/Ref corr_count/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
-    expectFree();
+    expectHeld();
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    progress.mockResolvedValueOnce(sessionFixture({ current_step: "inbox", counts: { ...sessionFixture().counts, inbox_processed: 1 } }));
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expectFree());
+    expect(progress).toHaveBeenCalledTimes(2);
+    expect(progress.mock.calls[1][0].body).toEqual(progress.mock.calls[0][0].body);
+    expect(progress.mock.calls[1][0].body).toMatchObject({ inbox_processed_delta: 1 });
   });
 
   it("020-FR-048 Undo holds the bar from the moment it is pressed, even after the card is gone", async () => {

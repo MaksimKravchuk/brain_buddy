@@ -242,6 +242,24 @@ describe("020-FR-027 020-FR-029 the entry", () => {
     expect(await screen.findByText("Step 1 of 4")).toBeInTheDocument();
   });
 
+  it("020-FR-029 020-FR-048 Continue waits while a replacement is on its way, so the run it would end is never opened", async () => {
+    const user = userEvent.setup();
+    getState.mockResolvedValue(stateFixture({ open_session: quick({ origin: "web", started_at: iso(-1000) }) }));
+    renderReview();
+    await screen.findByRole("heading", { name: "Pick up where you left off?" });
+    let resolve: (session: ReviewSession) => void = () => undefined;
+    startSession.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+
+    await user.click(screen.getByRole("button", { name: /^Quick/ }));
+    const resume = screen.getByRole("button", { name: "Continue" });
+    expect(resume).toBeDisabled();
+    await user.click(resume);
+    expect(screen.queryByText("Step 1 of 4")).not.toBeInTheDocument();
+
+    await act(async () => resolve(quick({ id: "review_new" })));
+    expect(await screen.findByText("Step 1 of 4")).toBeInTheDocument();
+  });
+
   it("020-FR-027 starting a review sends the mode without replacing anything and opens its first step", async () => {
     const user = userEvent.setup();
     renderReview();
