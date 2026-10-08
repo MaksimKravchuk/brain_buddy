@@ -463,11 +463,11 @@ describe("020-FR-015 While you were away dialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Return Update the CV to Next" }));
 
-    await screen.findByText("“Update the CV” changed on another device, so it was left as it is there.");
+    await screen.findByText("We couldn't check where it is now.");
     expect(client.getQueryState(somedayList)?.isInvalidated).toBe(true);
   });
 
-  it("020-FR-011 a changed task whose current list cannot be read is still left alone", async () => {
+  it("020-FR-011 a changed task whose current list cannot be read shows an unknown state with Retry, never Someday", async () => {
     const user = userEvent.setup();
     transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, null, "corr_stale"));
     renderDialog([portuguese, cv]);
@@ -476,8 +476,14 @@ describe("020-FR-015 While you were away dialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Return Update the CV to Next" }));
 
-    expect(await screen.findByText("“Update the CV” changed on another device, so it was left as it is there.")).toBeInTheDocument();
-    expect(within(row("Update the CV")).getByText("Now in Someday / maybe")).toBeInTheDocument();
+    expect(await screen.findByText("We couldn't check where it is now.")).toBeInTheDocument();
+    expect(within(row("Update the CV")).queryByText("Now in Someday / maybe")).not.toBeInTheDocument();
+
+    getTask.mockImplementation(async (id) => (id === cv.id ? cv : portuguese));
+    await user.click(within(row("Update the CV")).getByRole("button", { name: "Retry" }));
+
+    expect(await within(row("Update the CV")).findByText("Back in Next with a fresh start")).toBeInTheDocument();
+    expect(transitionTask).toHaveBeenCalledTimes(2);
   });
 
   it("020-FR-015 Return all brings back every returnable task and names the one an archived project holds", async () => {

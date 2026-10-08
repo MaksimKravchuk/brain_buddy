@@ -95,6 +95,13 @@ const PATH_RULES: Array<{ match: RegExp } & EpicFeatureStory> = [
     feature: "vNext operations",
     story: "Confirmation-gated proposals",
   },
+  {
+    // Spec 020 (T144): the weekly review journeys.
+    match: /e2e\/weekly-review/,
+    epic: "End-to-end journeys",
+    feature: "Weekly review",
+    story: "Decide stalled tasks, run a review and keep it accessible",
+  },
 ];
 
 const FALLBACK: EpicFeatureStory = {

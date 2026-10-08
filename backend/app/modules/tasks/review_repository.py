@@ -310,6 +310,19 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             (owner_id, decision_id),
         )
 
+    def list_review_decisions_for_session(
+        self, owner_id: str, session_id: str
+    ) -> list[ReviewDecisionDocument]:
+        """The decisions linked to one run, oldest first (the session index)."""
+
+        return self._review_all(
+            ReviewDecisionDocument,
+            "Review decision",
+            "SELECT payload FROM review_decisions WHERE owner_id = ? "
+            "AND session_id = ? ORDER BY decided_at, id",
+            (owner_id, session_id),
+        )
+
     def list_review_decisions(
         self, owner_id: str, *, decided_before: datetime | None = None
     ) -> list[ReviewDecisionDocument]:

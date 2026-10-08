@@ -150,7 +150,9 @@ onboarding first), the notification skip (preceding 6 days, FR-036), "Last revie
 days ago" (FR-038) and the SC-001 weekly read-out.
 
 **Wire subset**: `SessionResponse` carries every field above except
-`set_aside_task_ids` (sent as `set_aside_count`), `decision_queue` (served through the
+`set_aside_task_ids` (sent as `set_aside_count`; the ids come back in the `decisions`
+queue's `meta`, with the tasks the run has decided, which are read from E4 by
+`session_id`, no new column), `decision_queue` (served through the
 `decisions` queue), the per-step `finished_empty` flags and `applied_progress`; the
 exact list is in contracts/http.md §6.
 
@@ -349,6 +351,10 @@ day, no content) for the once-per-day rule of the While-you-were-away dialog (FR
 removed on sign-out, and `bb.reviewLastZone.v1.<origin>.<account>` (the IANA zone this
 browser last observed; a zone change is sent only when the browser's current zone
 differs from it, http §5), removed on sign-out or account switch.
+The review run also keeps `bb.reviewRelease.v1.<origin>.<account>` (the id and count of the
+last restart or Inbox bulk release whose Undo is still offered, no content), so a tab reload
+reopens on the released state with Undo (FR-017, FR-030); removed on sign-out or account
+switch, and when the person moves on.
 
 ## Export and purge (FR-043)
 

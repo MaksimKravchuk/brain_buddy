@@ -9,7 +9,6 @@
  * (FR-052: drafts, the leave warning, the Back and link guard).
  */
 import { useQueryClient } from "@tanstack/react-query";
-import type { QueryClient } from "@tanstack/react-query";
 import { Archive, CircleHelp, X } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -17,8 +16,8 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { hasFeatureFlag, type AuthUser } from "../../api/auth";
 import { apiClient, getApiBaseUrl } from "../../api/client";
-import { describeReviewError, isDecisionAlreadyUndone, newIdempotencyKey, reviewApi, withReference } from "../../api/review";
-import type { DecisionRequest, DecisionResponse, DecisionType } from "../../api/review";
+import { describeReviewError, newIdempotencyKey } from "../../api/review";
+import type { DecisionRequest, DecisionType } from "../../api/review";
 import {
   applyReviewTask,
   beginReviewContinuation,
@@ -27,8 +26,8 @@ import {
   useOnlineStatus,
   useReviewClock
 } from "../../api/reviewHooks";
-import type { TaskFormulationResponse, TaskResponse, TaskState } from "../../api/taskTypes";
-import { useShellToast, type ShellNotify } from "../../components/shell/shellToast";
+import type { TaskFormulationResponse, TaskResponse } from "../../api/taskTypes";
+import { useShellToast } from "../../components/shell/shellToast";
 import { useAuthStore } from "../../stores/authStore";
 import {
   classifyFromInstants,
@@ -47,6 +46,8 @@ import {
   type DraftForm,
   type ReviewDraftTarget
 } from "./reviewFormDrafts";
+import { runUndo } from "./reviewUndo";
+import { useTrackedWrite } from "./steps/reviewRun";
 import { recommendedDecision, STALL_REASONS, type StallReason } from "./stallRecommendation";
 import { useLeaveGuard } from "./useLeaveGuard";
 
@@ -76,15 +77,6 @@ const UNDO_NAMES: Readonly<Record<CardDecision, string>> = {
   someday: "Released to Someday",
   cancel: "Cancelled",
   extend: "Kept 7 more days"
-};
-
-const LIST_NAMES: Readonly<Record<TaskState, string>> = {
-  inbox: "Inbox",
-  next: "Next actions",
-  waiting: "Waiting for",
-  someday: "Someday / maybe",
-  completed: "Completed",
-  cancelled: "Cancelled"
 };
 
 const FORMS: Readonly<Record<DraftForm, {
@@ -148,49 +140,41 @@ function toastMessage(attempt: Attempt, title: string, keptUntil: string): strin
   }
 }
 
-/** Undo after the dialog is gone: the server answers, and its task wins (formulation-clock §3). */
-async function runUndo(notify: ShellNotify, queryClient: QueryClient, response: DecisionResponse, title: string): Promise<void> {
-  // The account that pressed Undo: an answer that arrives after it signed out
-  // writes nothing and says nothing to whoever is signed in now.
-  const run = beginReviewContinuation();
-  try {
-    const undone = await reviewApi.undoDecision(response.decision.id, { expected_task_revision: response.task.revision }, newIdempotencyKey());
-    if (!run.stillCurrent()) {
-      return;
-    }
-    applyReviewTask(queryClient, undone.task, run.scope);
-    notify(`“${title}” is back as it was`);
-  } catch (error) {
-    if (!run.stillCurrent()) {
-      return;
-    }
-    refreshAfterReviewWrite(queryClient, run.scope);
-    const { kind, referenceId } = describeReviewError(error);
-    if (isDecisionAlreadyUndone(error, response.decision.id)) {
-      // Already undone (a retry whose first delivery applied, http §3). A 404
-      // for the task or anything else falls through to the failure below.
-      return;
-    }
-    if (kind === "undo_unavailable" || kind === "stale") {
-      const current = await apiClient.getTask(response.task.id).catch(() => response.task);
-      if (!run.stillCurrent()) {
-        return;
-      }
-      notify(withReference(`Couldn't undo: “${title}” changed on another device. It's in ${LIST_NAMES[current.state]} now.`, referenceId));
-      return;
-    }
-    notify(withReference("Couldn't undo. Nothing was changed.", referenceId));
-  }
+/** The overlay and scrim of the dialog; the inline card (D-03) has neither. */
+function Backdrop({ inline, onDismiss, children }: { inline: boolean; onDismiss: () => void; children: React.ReactNode }): React.JSX.Element {
+  return inline ? (
+    <>{children}</>
+  ) : (
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6">
+      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs motion-safe:animate-fade-in" onClick={onDismiss} />
+      {children}
+    </div>
+  );
 }
 
 export function DecisionDialog({
   task,
   projectName,
-  onClose
+  onClose,
+  inline = false,
+  sessionId,
+  onUndone,
+  onDirtyChange
 }: {
   task: TaskResponse;
   projectName: string | null;
   onClose: (outcome: DecisionOutcome) => void;
+  /**
+   * The card inside the review's decision step (D-03): no overlay or Close,
+   * Escape on the card itself does nothing, and the review shell owns the
+   * history guard, fed by `onDirtyChange`.
+   */
+  inline?: boolean;
+  /** The review run the decision belongs to (counted in its summary). */
+  sessionId?: string;
+  /** Undo restored this task: the step brings its card back. */
+  onUndone?: (task: TaskResponse) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }): React.JSX.Element {
   const titleId = useId();
   const hintId = useId();
@@ -198,6 +182,7 @@ export function DecisionDialog({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const decideMutation = useDecideTask();
+  const track = useTrackedWrite();
   const online = useOnlineStatus();
   const now = useReviewClock();
   const user = useAuthStore((state) => state.user);
@@ -243,6 +228,10 @@ export function DecisionDialog({
   const draftTarget = (): ReviewDraftTarget => ({ kind: "task", taskId: task.id, formulationId });
   const initialText = view === "reformulate" ? currentTitle : "";
   const dirty = view !== null && text !== initialText;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   const formulationClass = classifyFromInstants(now, formulationInstants(formulation));
   const marker = listMarkerFor(formulationClass);
   const asks = marker !== null;
@@ -276,6 +265,13 @@ export function DecisionDialog({
   }, [confirm]);
 
   const close = () => onClose({ kind: "closed" });
+  // A saving decision cannot be walked away from: its answer would land in a
+  // dialog that is gone (FR-011).
+  const dismiss = () => {
+    if (!busy) {
+      guarded(close);
+    }
+  };
 
   const persistText = (value: string, form: DraftForm) => {
     // A failure belongs to the text that was sent: once the text changes, its
@@ -321,7 +317,14 @@ export function DecisionDialog({
 
   const guard = useLeaveGuard({
     dirty,
-    onBack: () => guarded(close, true),
+    active: !inline,
+    onBack: () => {
+      if (busy) {
+        guard.rearm();
+        return;
+      }
+      guarded(close, true);
+    },
     onNavigate: (href) =>
       guarded(() => {
         guard.release();
@@ -350,7 +353,7 @@ export function DecisionDialog({
     focusAfterViewChange.current = "field";
   };
 
-  const send = async (attempt: Attempt) => {
+  const sendAttempt = async (attempt: Attempt) => {
     // The account that sent the decision. An answer that arrives after the
     // session switched account shows, closes and discards nothing, and a stale
     // answer's refetch is published to this account's caches only.
@@ -369,7 +372,7 @@ export function DecisionDialog({
         action: {
           label: "Undo",
           accessibleLabel: `Undo: ${UNDO_NAMES[attempt.type]} ${title}`,
-          onAction: () => void runUndo(notify, queryClient, response, title)
+          onAction: () => void track(() => runUndo(notify, queryClient, response, title, onUndone))
         }
       });
       onClose({ kind: "decided", task: response.task, leftNext: response.task.state !== "next" });
@@ -408,6 +411,9 @@ export function DecisionDialog({
     }
   };
 
+  /** Inside a running review the shell holds its navigation until the decision, or its Undo, has settled (FR-048). */
+  const send = (attempt: Attempt) => track(() => sendAttempt(attempt));
+
   const decide = (type: CardDecision, value = "") => {
     const live = current as TaskResponse;
     const trimmed = value.trim();
@@ -416,6 +422,7 @@ export function DecisionDialog({
       expected_revision: live.revision,
       ...(ON_FORMULATION.has(type) ? { formulation_id: formulationId as string } : {}),
       ...(reason ? { stall_reason: reason } : {}),
+      ...(sessionId ? { session_id: sessionId } : {}),
       ...(type === "reformulate" || type === "first_step" ? { title: trimmed } : {}),
       ...(type === "waiting" ? { waiting_for: trimmed } : {}),
       ...(type === "extend" ? { reason: trimmed } : {})
@@ -447,7 +454,9 @@ export function DecisionDialog({
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === "Tab") {
-      trap(event, (confirm ? confirmRef.current : sectionRef.current) as HTMLElement);
+      if (!inline) {
+        trap(event, (confirm ? confirmRef.current : sectionRef.current) as HTMLElement);
+      }
       return;
     }
     if (event.key === "Escape") {
@@ -457,8 +466,8 @@ export function DecisionDialog({
         keepEditing(confirm.rearm);
       } else if (view) {
         guarded(backToCard);
-      } else {
-        close();
+      } else if (!inline) {
+        dismiss();
       }
       return;
     }
@@ -490,17 +499,20 @@ export function DecisionDialog({
         : `Keep until ${keepUntil}`;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6">
-      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-slate-50/80 backdrop-blur-xs motion-safe:animate-fade-in" onClick={() => guarded(close)} />
+    <Backdrop inline={inline} onDismiss={dismiss}>
       <section
         ref={sectionRef}
-        role="dialog"
-        aria-modal="true"
+        role={inline ? undefined : "dialog"}
+        aria-modal={inline ? undefined : "true"}
         aria-labelledby={titleId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
+        className={
+          inline
+            ? "relative flex w-full flex-col rounded-[14px] border border-slate-200 bg-white shadow-soft"
+            : "relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
+        }
       >
-        <header className="flex items-start gap-3 border-b border-slate-100 px-5 pb-3 pt-4">
+        <div className="flex items-start gap-3 border-b border-slate-100 px-5 pb-3 pt-4">
           <div className="min-w-0 flex-1">
             {marker ? (
               <p className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-medium ${marker === "asks" ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
@@ -513,10 +525,12 @@ export function DecisionDialog({
             </h2>
             {meta ? <p className="mt-0.5 text-xs text-slate-500">{meta}</p> : null}
           </div>
-          <button type="button" aria-label="Close" className="-mr-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900" onClick={() => guarded(close)}>
-            <X className="h-4 w-4" aria-hidden />
-          </button>
-        </header>
+          {inline ? null : (
+            <button type="button" aria-label="Close" className="-mr-1.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-surface-sunken hover:text-slate-900" onClick={dismiss}>
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-col gap-4 px-5 py-4">
           {!online ? <p role="status" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{COPY.offline}</p> : null}
@@ -727,6 +741,6 @@ export function DecisionDialog({
           </div>
         ) : null}
       </section>
-    </div>
+    </Backdrop>
   );
 }

@@ -986,7 +986,7 @@ def test_020_FR_028_020_FR_034_the_decision_queue_is_a_stable_snapshot(
     flow.progress(sid, current_step="decisions", snapshot_decision_queue=True)
     queue = flow.queue("decisions", sid)
     assert flow.ids(queue) == [task.id for task in ordered]
-    assert queue["meta"] == {}
+    assert queue["meta"] == {"decided_task_ids": [], "set_aside_task_ids": []}
     assert flow.stored_session(sid).decision_queue == [task.id for task in ordered]
 
     with allure.step("The threshold changes to 28 days during the review"):
@@ -995,6 +995,46 @@ def test_020_FR_028_020_FR_034_the_decision_queue_is_a_stable_snapshot(
     assert flow.ids(flow.queue("decisions")) == []
     flow.progress(sid, snapshot_decision_queue=True)
     assert flow.stored_session(sid).decision_queue == [task.id for task in ordered]
+
+
+def test_020_FR_048_020_FR_050_the_decision_queue_names_the_cards_already_handled(
+    flow: FlowApi,
+) -> None:
+    """Any browser or device resuming the run learns which cards are done.
+
+    A decision of the run marks its task decided (an Undo deletes it again);
+    "Not now" marks it set aside unless it was decided afterwards; a read
+    without a run, or another run, names none.
+    """
+
+    first, second, third = _asking_seeds(flow)
+    sid = flow.start()["id"]
+    flow.progress(sid, current_step="decisions", snapshot_decision_queue=True)
+    flow.progress(sid, set_aside_task_id=first.id)
+    flow.progress(sid, set_aside_task_id=third.id)
+
+    with allure.step("A decision on the second card and on a set-aside card"):
+        decided = flow.decide(flow.task(second.id), "someday", session_id=sid)
+        flow.decide(flow.task(third.id), "cancel", session_id=sid)
+    meta = flow.queue("decisions", sid)["meta"]
+    assert meta == {
+        "decided_task_ids": [second.id, third.id],
+        "set_aside_task_ids": [first.id],
+    }
+
+    with allure.step("Undo takes the decision back, the card is not handled any more"):
+        undone = flow.undo_raw(decided["decision"]["id"], decided["task"]["revision"])
+        assert undone.status_code == 200, undone.text
+    meta = flow.queue("decisions", sid)["meta"]
+    assert meta["decided_task_ids"] == [third.id]
+    assert meta["set_aside_task_ids"] == [first.id]
+
+    with allure.step("Another run and a read without a run name nothing"):
+        other = flow.start(replace_open=True, origin="web")["id"]
+        flow.progress(other, snapshot_decision_queue=True)
+        empty = {"decided_task_ids": [], "set_aside_task_ids": []}
+        assert flow.queue("decisions", other)["meta"] == empty
+        assert flow.queue("decisions")["meta"] == empty
 
 
 def test_020_FR_028_without_a_snapshot_the_queue_is_the_live_aggregate(

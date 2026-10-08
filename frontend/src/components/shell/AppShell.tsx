@@ -27,6 +27,8 @@ import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchPa
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
 import { hasFeatureFlag } from "../../api/auth";
 import { useAuthStore } from "../../stores/authStore";
+import { useReviewState } from "../../api/reviewHooks";
+import { lastReviewText } from "../../features/review/lastReview";
 import { ReviewStartupDialogs } from "../../features/review/ReviewStartupDialogs";
 import {
   ACTION_TOAST_MS,
@@ -85,8 +87,8 @@ const popoverPrimaryClass =
 const popoverDangerClass =
   "rounded-md border border-rose-200 bg-white px-2 py-1.5 text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:border-rose-300 hover:bg-rose-50";
 
-const navRowClass = (active: boolean): string =>
-  `flex h-[34px] w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors duration-200 ease-smooth ${
+const navRowClass = (active: boolean, tall = false): string =>
+  `flex ${tall ? "min-h-[34px] py-1" : "h-[34px]"} w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium transition-colors duration-200 ease-smooth ${
     active ? "bg-white text-slate-900 shadow-soft" : "text-slate-600 hover:bg-surface-sunken hover:text-slate-900"
   }`;
 
@@ -102,11 +104,44 @@ export function SoonChip(): React.JSX.Element {
   );
 }
 
+/** The shell's toast host: `notify` for descendants, the toast itself on screen. */
+export function ShellToastProvider({ children }: { children: ReactNode }): React.JSX.Element {
+  const [toast, setToast] = useState<ShellToastState | null>(null);
+  const toastIdRef = useRef(0);
+  // Each toast gets its own id, so a newer one remounts the view with a fresh
+  // timer and an older one's Undo can never fire for the newer message.
+  const notify = useCallback<ShellNotify>((message, options) => {
+    toastIdRef.current += 1;
+    const id = toastIdRef.current;
+    setToast({ id, message, action: options?.action });
+    return () => setToast((showing) => (showing?.id === id ? null : showing));
+  }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
+  return (
+    <ShellToastContext.Provider value={notify}>
+      {children}
+      {toast ? <ShellToastView key={toast.id} toast={toast} onDismiss={dismissToast} /> : null}
+    </ShellToastContext.Provider>
+  );
+}
+
+/** The working "Weekly review" entry with its neutral recap (FR-038); no recap line until the state is known. */
+function WeeklyReviewLink(): React.JSX.Element {
+  const recap = lastReviewText(useReviewState().data);
+  return (
+    <NavLink to="/review" className={({ isActive }) => navRowClass(isActive, true)}>
+      <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">Weekly review</span>
+        {recap ? <span className="block truncate text-xs font-normal text-slate-500">{recap}</span> : null}
+      </span>
+    </NavLink>
+  );
+}
+
 export function AppShell(props: AppShellProps): React.JSX.Element {
   const { children, panel, panelModal } = props;
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [toast, setToast] = useState<ShellToastState | null>(null);
-  const toastIdRef = useRef(0);
   const navigationTriggerRef = useRef<HTMLButtonElement>(null);
   const location = useLocation();
   const weeklyReviewEnabled = useAuthStore((state) => hasFeatureFlag(state.user, "weekly_review"));
@@ -114,14 +149,6 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
     setIsDrawerOpen(false);
     navigationTriggerRef.current?.focus();
   }, []);
-
-  // Each toast gets its own id, so a newer one remounts the view with a fresh
-  // timer and an older one's Undo can never fire for the newer message.
-  const notify = useCallback<ShellNotify>((message, options) => {
-    toastIdRef.current += 1;
-    setToast({ id: toastIdRef.current, message, action: options?.action });
-  }, []);
-  const dismissToast = useCallback(() => setToast(null), []);
 
   // Browser history can select a task while navigation is open. Do not leave
   // that drawer active behind the sheet; typing a search (same path, new
@@ -134,7 +161,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
   }
 
   return (
-    <ShellToastContext.Provider value={notify}>
+    <ShellToastProvider>
       <div className="min-h-screen bg-surface-base text-slate-900">
         <div inert={panelModal}>
           <TopBar onOpenDrawer={() => setIsDrawerOpen(true)} navigationTriggerRef={navigationTriggerRef} />
@@ -152,9 +179,8 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         {panel}
         {/* Spec 020: the explainer, then While you were away, only while the flag is on. */}
         {weeklyReviewEnabled ? <ReviewStartupDialogs /> : null}
-        {toast ? <ShellToastView key={toast.id} toast={toast} onDismiss={dismissToast} /> : null}
       </div>
-    </ShellToastContext.Provider>
+    </ShellToastProvider>
   );
 }
 
@@ -580,6 +606,7 @@ function Sidebar({
   const [openPopover, setOpenPopover] = useState<string | null>(null);
   const user = useAuthStore((state) => state.user);
   const hasCrtCanvas = hasFeatureFlag(user, "crt_canvas");
+  const hasWeeklyReview = hasFeatureFlag(user, "weekly_review");
 
   const closePopover = () => setOpenPopover(null);
   const popoverKeyDown = (event: ReactKeyboardEvent) => {
@@ -613,16 +640,20 @@ function Sidebar({
           </li>
         ))}
         <li>
-          <button
-            type="button"
-            disabled
-            aria-label="Weekly review — Coming soon"
-            className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
-          >
-            <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">Weekly review</span>
-            <SoonChip />
-          </button>
+          {hasWeeklyReview ? (
+            <WeeklyReviewLink />
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-label="Weekly review — Coming soon"
+              className="flex h-[34px] w-full cursor-not-allowed items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-slate-400"
+            >
+              <RotateCcw className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">Weekly review</span>
+              <SoonChip />
+            </button>
+          )}
         </li>
         <li>
           {hasCrtCanvas ? (

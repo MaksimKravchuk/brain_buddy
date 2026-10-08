@@ -90,7 +90,7 @@ function decided(task: TaskResponse, type: string, after: Partial<TaskResponse>)
   };
 }
 
-const notify = vi.fn<ShellNotify>();
+const notify = vi.fn<ShellNotify>(() => () => undefined);
 const onClose = vi.fn<(outcome: DecisionOutcome) => void>();
 
 function LocationProbe(): React.JSX.Element {
@@ -463,6 +463,28 @@ describe("020-FR-006 decision dialog: keyboard", () => {
     fireEvent.click(screen.getByTestId("decision-dialog-scrim"));
     expect(onClose).toHaveBeenCalledTimes(3);
     expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-011 while a save is pending Close, the scrim, Escape and browser Back do not dismiss the dialog", async () => {
+    const user = userEvent.setup();
+    const task = asksTask();
+    let resolve: (value: DecisionResponse) => void = () => undefined;
+    decide.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    const pushState = vi.spyOn(window.history, "pushState");
+    renderDialog(task);
+    await user.click(decisionButton(/^Done/));
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByTestId("decision-dialog-scrim"));
+    await user.keyboard("{Escape}");
+    act(() => window.history.back());
+    await waitFor(() => expect(pushState).toHaveBeenCalledTimes(2));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(dialog()).toBeInTheDocument();
+
+    await act(async () => resolve(decided(task, "complete", { state: "completed" })));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ kind: "decided" }));
   });
 
   it("020-FR-052 Escape inside a clean form returns to the card; inside a dirty form it asks first, focus on Keep editing", async () => {

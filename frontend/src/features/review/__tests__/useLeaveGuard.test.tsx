@@ -1,4 +1,5 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useLeaveGuard, type LeaveGuardTarget } from "../useLeaveGuard";
@@ -40,6 +41,54 @@ afterEach(() => {
 });
 
 describe("020-FR-052 leave guard for the decision dialog", () => {
+  it("020-FR-052 under StrictMode's double effect the late pop of the first run is not read as Back, and a real Back still is", async () => {
+    const events = new EventTarget();
+    const entries: Array<{ state: unknown }> = [{ state: { idx: 1 } }];
+    let index = 0;
+    const history = {
+      get state() {
+        return entries[index].state;
+      },
+      pushState: (state: unknown) => {
+        entries.splice(index + 1);
+        entries.push({ state });
+        index += 1;
+      },
+      // The browser applies a back() after the current task, as it really does.
+      back: () => {
+        queueMicrotask(() => {
+          index -= 1;
+          events.dispatchEvent(new PopStateEvent("popstate", { state: entries[index].state }));
+        });
+      }
+    };
+    const target = Object.assign(events, { history, location: { href: "http://localhost:3000/review", origin: "http://localhost:3000" } }) as unknown as LeaveGuardTarget;
+    const onBack = vi.fn();
+    renderHook(() => useLeaveGuard({ dirty: false, onBack, target }), { wrapper: StrictMode });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onBack).not.toHaveBeenCalled();
+
+    act(() => history.back());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-052 an inactive guard pushes no history entry and does not warn on unload", () => {
+    const { target, history, entries } = fakeTarget();
+    renderHook(() => useLeaveGuard({ dirty: true, active: false, onBack: vi.fn(), target }));
+
+    expect(history.pushState).not.toHaveBeenCalled();
+    expect(entries()).toHaveLength(1);
+    const unload = new Event("beforeunload", { cancelable: true });
+    target.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
+  });
+
   it("020-FR-052 pushes one history entry on open, keeping the URL and the router's state", () => {
     const { target, history, entries } = fakeTarget();
     renderHook(() => useLeaveGuard({ dirty: false, onBack: vi.fn(), target }));

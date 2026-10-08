@@ -430,8 +430,20 @@ class DatesQueueMeta(StrictBaseModel):
     days: list[DatesQueueDay] = Field(max_length=14)
 
 
+class DecisionsQueueMeta(StrictBaseModel):
+    """Which cards of the run are handled already (http §6), in queue order.
+
+    ``decided_task_ids``: the run holds a decision for the task (an Undo deletes
+    it). ``set_aside_task_ids``: "Not now" (FR-050), and not decided since.
+    Both name only tasks the queue lists; empty without a ``session_id``.
+    """
+
+    decided_task_ids: list[str]
+    set_aside_task_ids: list[str]
+
+
 class EmptyQueueMeta(StrictBaseModel):
-    """Steps without meta: inbox, decisions, waiting, projects."""
+    """Steps without meta: inbox, waiting, projects."""
 
 
 class QueueResponse(StrictBaseModel):
@@ -443,6 +455,7 @@ class QueueResponse(StrictBaseModel):
         | RestOfNextQueueMeta
         | SomedayQueueMeta
         | DatesQueueMeta
+        | DecisionsQueueMeta
         | EmptyQueueMeta
     )
 

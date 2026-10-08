@@ -296,7 +296,7 @@ export function WhileYouWereAway({
         onKeyDown={onKeyDown}
         className="relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-[20px] sm:border sm:border-slate-200"
       >
-        <header className="flex items-start gap-3 px-5 pb-2 pt-5">
+        <div className="flex items-start gap-3 px-5 pb-2 pt-5">
           <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
             While you were away
           </h2>
@@ -308,7 +308,7 @@ export function WhileYouWereAway({
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
-        </header>
+        </div>
         <div className="flex flex-col gap-3 px-5 pb-5 text-sm text-slate-700">
           <p className="m-0 leading-relaxed">{intro(parks.length)}</p>
           {!online ? <p role="status" className="m-0 rounded-lg bg-slate-50 px-3 py-2">You&apos;re offline. Returning tasks needs a connection.</p> : null}
@@ -338,7 +338,9 @@ export function WhileYouWereAway({
                       {status?.kind === "returned" ? (
                         <p className="m-0 text-xs text-slate-600">Back in Next with a fresh start</p>
                       ) : status?.kind === "stale" ? (
-                        <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[status.current?.state ?? "someday"]}`}</p>
+                        <p className="m-0 text-xs text-slate-600">
+                          {status.current ? `Now in ${LIST_NAMES[status.current.state]}` : "We couldn't check where it is now."}
+                        </p>
                       ) : elsewhere ? (
                         <p className="m-0 text-xs text-slate-600">{`Now in ${LIST_NAMES[task.state]}`}</p>
                       ) : (
@@ -351,6 +353,15 @@ export function WhileYouWereAway({
                     </div>
                     {status?.kind === "returned" ? (
                       <span className="text-xs font-semibold text-slate-600">Returned</span>
+                    ) : status?.kind === "stale" && status.current === null ? (
+                      <button
+                        type="button"
+                        disabled={!online || returningAll}
+                        className="min-h-11 rounded-lg px-2 text-[13px] font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-60"
+                        onClick={() => void returnTask(task)}
+                      >
+                        Retry
+                      </button>
                     ) : status?.kind === "stale" || elsewhere ? null : archived(task) ? (
                       <button
                         type="button"

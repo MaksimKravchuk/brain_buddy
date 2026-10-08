@@ -331,6 +331,283 @@ def test_020_FR_002_cosmetic_save_anyway_is_a_reformulate_without_a_clock_change
     assert result["task"]["title"] == "call bob."
 
 
+def test_020_FR_002_020_FR_048_a_repeated_save_anyway_in_one_run_counts_once(
+    api: ReviewApi,
+) -> None:
+    """A second cosmetic save of the same wording in the run is the first one.
+
+    Another browser, a reload or a retry under a fresh key sends it again with
+    the task as it now is (fresh revision, same formulation): nothing is
+    written, the run's counter stays at one and the first decision answers.
+    """
+
+    task = _asking(api, "Call Bob")
+    session = api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=session.id)
+    now = api.task(task["id"])
+
+    with allure.step("The same wording class again, with a fresh key and revision"):
+        again = api.decide(now, "reformulate", title="CALL BOB", session_id=session.id)
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["task"]["title"] == "call bob."
+    assert again["task"]["revision"] == now["revision"]
+    assert again["session_counts"]["reformulated"] == 1
+    assert [d.id for d in api.decisions()] == [first["decision"]["id"]]
+    stored = api.container.task_repo.get_review_session(api.owner_id, session.id)
+    assert stored is not None and stored.counts.reformulated == 1
+
+    with allure.step(
+        "Undo takes the first one back; saving anyway is a decision again"
+    ):
+        undone = api.undo_raw(first["decision"]["id"], now["revision"])
+        assert undone.status_code == 200, undone.text
+        restored = api.task(task["id"])
+        third = api.decide(
+            restored, "reformulate", title="call bob.", session_id=session.id
+        )
+    assert third["decision"]["id"] != first["decision"]["id"]
+    assert third["session_counts"]["reformulated"] == 1
+
+
+def test_020_FR_002_020_FR_048_a_cosmetic_save_is_new_in_another_run_or_wording(
+    api: ReviewApi,
+) -> None:
+    """The guard is per run, per task and per formulation; a real edit is a decision."""
+
+    task = _asking(api, "Call Bob")
+    one, two = api.session(), api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=one.id)
+    now = api.task(task["id"])
+
+    with allure.step("Another run counts its own"):
+        other_run = api.decide(now, "reformulate", title="Call Bob", session_id=two.id)
+    assert other_run["decision"]["id"] != first["decision"]["id"]
+
+    with allure.step("Outside any run it is an ordinary recorded decision"):
+        now = api.task(task["id"])
+        outside = api.decide(now, "reformulate", title="CALL BOB!")
+    assert outside["decision"]["session_id"] is None
+
+    with allure.step("A substantive rewording in the first run is a decision"):
+        now = api.task(task["id"])
+        reworded = api.decide(
+            now, "reformulate", title="Call Bob about the quote", session_id=one.id
+        )
+    assert reworded["decision"]["id"] != first["decision"]["id"]
+    assert reworded["decision"]["substantive"] is True
+    assert len(api.decisions()) == 4
+
+
+def _tasks_in(api: ReviewApi) -> int:
+    return len(api.container.task_repo.list_for_owner(owner_id=api.owner_id))
+
+
+def test_020_FR_048_020_FR_033_a_second_keep_waiting_in_one_run_counts_once(
+    api: ReviewApi,
+) -> None:
+    """Keep leaves the task revision alone, so a second device can resend it.
+
+    The card is open on two devices; both press "Still waiting". The second
+    request still carries the revision it holds, which is still current, so
+    the revision check cannot tell it apart: the run's guard answers instead
+    (http §3): the original decision, nothing written, nothing counted.
+    """
+
+    task = _waiting(api)
+    session = api.session()
+    first = api.decide(task, "keep_waiting", session_id=session.id)
+    assert first["task"]["revision"] == task["revision"]
+
+    with allure.step("The second device sends it again with a fresh key"):
+        again = api.decide(task, "keep_waiting", session_id=session.id)
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["receipt"] == first["receipt"]
+    assert again["session_counts"]["kept"] == 1
+    assert [d.id for d in api.decisions()] == [first["decision"]["id"]]
+    stored = api.container.task_repo.get_review_session(api.owner_id, session.id)
+    assert stored is not None and stored.counts.kept == 1
+    receipts = api.container.task_repo.list_review_receipts(api.owner_id)
+    assert [r.decision_id for r in receipts] == [first["decision"]["id"]]
+
+
+def test_020_FR_048_020_FR_006_a_second_follow_up_in_one_run_creates_no_second_task(
+    api: ReviewApi,
+) -> None:
+    """A repeated follow_up answers the first one and creates nothing."""
+
+    task = _waiting(api)
+    session = api.session()
+    first = api.decide(
+        task,
+        "follow_up",
+        title="Call Ann about the quote",
+        follow_up_task_id=new_id("task"),
+        session_id=session.id,
+    )
+    before = _tasks_in(api)
+
+    with allure.step("The other device follows up too, with its own task id"):
+        again = api.decide(
+            task,
+            "follow_up",
+            title="Chase Ann for the quote",
+            follow_up_task_id=new_id("task"),
+            session_id=session.id,
+        )
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["created_task"]["id"] == first["created_task"]["id"]
+    assert again["created_task"]["title"] == "Call Ann about the quote"
+    assert again["session_counts"]["moved_to_next"] == 1
+    assert _tasks_in(api) == before
+    assert len(api.decisions()) == 1
+
+
+def test_020_FR_048_020_FR_033_a_second_keep_someday_in_one_run_counts_once(
+    api: ReviewApi,
+) -> None:
+    task = _someday(api)
+    session = api.session()
+    first = api.decide(task, "keep_someday", session_id=session.id)
+
+    with allure.step("The same Someday card again, from another browser"):
+        again = api.decide(task, "keep_someday", session_id=session.id)
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["session_counts"]["kept"] == 1
+    assert len(api.decisions()) == 1
+
+
+def test_020_FR_048_one_card_one_kept_decision_whichever_no_revision_type(
+    api: ReviewApi,
+) -> None:
+    """Keep then follow-up on an unchanged task: the card was already handled."""
+
+    task = _waiting(api)
+    session = api.session()
+    first = api.decide(task, "keep_waiting", session_id=session.id)
+
+    with allure.step("A follow-up of the already handled card is the first answer"):
+        again = api.decide(task, "follow_up", title="Call Ann", session_id=session.id)
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["created_task"] is None
+    assert again["session_counts"]["moved_to_next"] == 0
+    assert len(api.decisions()) == 1
+
+
+def test_020_FR_048_a_deduplicated_decision_replays_under_its_own_key_after_undo(
+    api: ReviewApi,
+) -> None:
+    """The second device's key is recorded, so its lost-response retry is stable.
+
+    Device B's follow_up was answered with device A's keep_waiting (nothing
+    created). A's decision is then undone. B retries with the same key: the
+    answer is replayed, not applied as a fresh follow_up.
+    """
+
+    task = _waiting(api)
+    session = api.session()
+    first = api.decide(task, "keep_waiting", session_id=session.id)
+    headers = api.key()
+    follow_up_id = new_id("task")
+
+    with allure.step("Device B follows up the card A already kept, under key K"):
+        answered = api.decide_raw(
+            task,
+            "follow_up",
+            headers=headers,
+            title="Call Ann",
+            follow_up_task_id=follow_up_id,
+            session_id=session.id,
+        )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["decision"]["id"] == first["decision"]["id"]
+    assert answered.json()["created_task"] is None
+    before = _tasks_in(api)
+
+    with allure.step("A's decision is undone, then B retries with the same key K"):
+        undone = api.undo_raw(first["decision"]["id"], task["revision"])
+        assert undone.status_code == 200, undone.text
+        retried = api.decide_raw(
+            task,
+            "follow_up",
+            headers=headers,
+            title="Call Ann",
+            follow_up_task_id=follow_up_id,
+            session_id=session.id,
+        )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["decision"]["id"] == first["decision"]["id"]
+    assert retried.json()["created_task"] is None
+    assert _tasks_in(api) == before
+    assert api.decisions() == []
+
+
+def test_020_FR_002_020_FR_048_a_deduplicated_save_anyway_replays_after_undo(
+    api: ReviewApi,
+) -> None:
+    """A repeated cosmetic save records its key too; Undo does not lose the replay."""
+
+    task = _asking(api, "Call Bob")
+    session = api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=session.id)
+    now = api.task(task["id"])
+    headers = api.key()
+
+    with allure.step("The second device saves anyway under key K"):
+        answered = api.decide_raw(
+            now, "reformulate", headers=headers, title="CALL BOB", session_id=session.id
+        )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["decision"]["id"] == first["decision"]["id"]
+
+    with allure.step("The first is undone, then the second retries with key K"):
+        undone = api.undo_raw(first["decision"]["id"], now["revision"])
+        assert undone.status_code == 200, undone.text
+        retried = api.decide_raw(
+            now, "reformulate", headers=headers, title="CALL BOB", session_id=session.id
+        )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json() == answered.json()
+    assert api.task(task["id"])["title"] == "Call Bob"
+    assert api.decisions() == []
+
+
+def test_020_FR_048_a_no_revision_decision_is_new_after_undo_run_or_change(
+    api: ReviewApi,
+) -> None:
+    """Undo re-opens the card; another run, no run, or a changed task is new."""
+
+    task = _waiting(api)
+    one, two = api.session(), api.session()
+    first = api.decide(task, "keep_waiting", session_id=one.id)
+
+    with allure.step("Another run and a decision outside any run count their own"):
+        other = api.decide(task, "keep_waiting", session_id=two.id)
+        outside = api.decide(task, "keep_waiting")
+    assert len({first["decision"]["id"], other["decision"]["id"]}) == 2
+    assert outside["decision"]["session_id"] is None
+    assert other["session_counts"]["kept"] == 1
+
+    with allure.step("Undo of the first deletes it; the card is new again"):
+        undone = api.undo_raw(first["decision"]["id"], task["revision"])
+        assert undone.status_code == 200, undone.text
+        third = api.decide(api.task(task["id"]), "keep_waiting", session_id=one.id)
+    assert third["decision"]["id"] != first["decision"]["id"]
+    assert third["session_counts"]["kept"] == 1
+
+    with allure.step("A task changed since the decision is a new decision"):
+        edited = api.patch(api.task(task["id"]), details="Chased on Monday")
+        fourth = api.decide(edited, "keep_waiting", session_id=one.id)
+    assert fourth["decision"]["id"] != third["decision"]["id"]
+    assert fourth["session_counts"]["kept"] == 2
+
+
 def test_020_FR_002_substantive_reformulate_adopts_the_client_formulation_id(
     api: ReviewApi,
 ) -> None:

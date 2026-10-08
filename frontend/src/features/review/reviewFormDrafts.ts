@@ -6,7 +6,8 @@
  * project's next action under `project.<project id>`), so a draft never comes
  * back on a newer wording. They are removed on save or discard, when the
  * formulation changes, on sign-out or an account switch, and by a sweep after
- * 7 days. Drafts are never sent anywhere and never logged: nothing in this
+ * 7 days. The text fields of the review's own steps are kept the same way under
+ * `step.<session>.<step>.<item>.<field>` in place of `<task>.<formulation>`. Drafts are never sent anywhere and never logged: nothing in this
  * module touches the network or the console.
  */
 import { getApiBaseUrl } from "../../api/client";
@@ -18,7 +19,9 @@ export const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const REVIEW_KEY_PREFIX = "bb.review";
 
 export type DraftForm = "reformulate" | "first_step" | "waiting" | "extend";
-const DRAFT_FORMS: ReadonlySet<string> = new Set<DraftForm>(["reformulate", "first_step", "waiting", "extend"]);
+/** `step` marks the text of a review step's own field (mind sweep, Inbox, Waiting, Someday, Projects). */
+const STEP_FORM = "step";
+const DRAFT_FORMS: ReadonlySet<string> = new Set<string>(["reformulate", "first_step", "waiting", "extend", STEP_FORM]);
 
 export interface ReviewDraftScope {
   apiOrigin: string;
@@ -28,6 +31,14 @@ export interface ReviewDraftScope {
 export type ReviewDraftTarget =
   | { kind: "task"; taskId: string; formulationId: string }
   | { kind: "project"; projectId: string };
+
+/** One text field of a review step: the run, the step, the item (task or project) it is about, and which field. */
+export interface ReviewStepField {
+  sessionId: string;
+  step: string;
+  itemId: string;
+  field: string;
+}
 
 export interface ReviewFormDraft {
   form: DraftForm;
@@ -46,6 +57,15 @@ export function reviewDraftKey(scope: ReviewDraftScope, target: ReviewDraftTarge
     ? `${enc(target.taskId)}.${enc(target.formulationId)}`
     : `project.${enc(target.projectId)}`;
   return `${accountPrefix(scope)}${subject}`;
+}
+
+function stepPrefix(scope: ReviewDraftScope, sessionId: string, step: string): string {
+  return `${accountPrefix(scope)}step.${enc(sessionId)}.${enc(step)}.`;
+}
+
+/** `<account prefix>step.<session>.<step>.<item>.<field>`: it cannot meet a task or project key. */
+export function reviewStepDraftKey(scope: ReviewDraftScope, target: ReviewStepField): string {
+  return `${stepPrefix(scope, target.sessionId, target.step)}${enc(target.itemId)}.${enc(target.field)}`;
 }
 
 function defaultStorage(): Storage {
@@ -99,14 +119,7 @@ export function saveReviewDraft(
   attempt(() => storage.setItem(key, JSON.stringify(value)), undefined);
 }
 
-/** The draft for this form's task and wording, or `null`; an expired or corrupt one is removed. */
-export function loadReviewDraft(
-  scope: ReviewDraftScope,
-  target: ReviewDraftTarget,
-  now = new Date(),
-  storage = defaultStorage()
-): ReviewFormDraft | null {
-  const key = reviewDraftKey(scope, target);
+function readDraftAt(key: string, now: Date, storage: Storage): ReviewFormDraft | null {
   const raw = attempt(() => storage.getItem(key), null);
   if (raw === null) {
     return null;
@@ -119,8 +132,54 @@ export function loadReviewDraft(
   return draft;
 }
 
+/** The draft for this form's task and wording, or `null`; an expired or corrupt one is removed. */
+export function loadReviewDraft(
+  scope: ReviewDraftScope,
+  target: ReviewDraftTarget,
+  now = new Date(),
+  storage = defaultStorage()
+): ReviewFormDraft | null {
+  return readDraftAt(reviewDraftKey(scope, target), now, storage);
+}
+
 export function removeReviewDraft(scope: ReviewDraftScope, target: ReviewDraftTarget, storage = defaultStorage()): void {
   attempt(() => storage.removeItem(reviewDraftKey(scope, target)), undefined);
+}
+
+/** A review step's field text (FR-052): saving an empty text removes the draft. */
+export function saveStepDraft(
+  scope: ReviewDraftScope,
+  target: ReviewStepField,
+  text: string,
+  now = new Date(),
+  storage = defaultStorage()
+): void {
+  const key = reviewStepDraftKey(scope, target);
+  if (text === "") {
+    attempt(() => storage.removeItem(key), undefined);
+    return;
+  }
+  const value: ReviewFormDraft = { form: STEP_FORM as DraftForm, text, savedAt: now.toISOString() };
+  attempt(() => storage.setItem(key, JSON.stringify(value)), undefined);
+}
+
+/** The text of a step field's draft, or `null`; an expired or corrupt one is removed. */
+export function loadStepDraft(scope: ReviewDraftScope, target: ReviewStepField, now = new Date(), storage = defaultStorage()): string | null {
+  return readDraftAt(reviewStepDraftKey(scope, target), now, storage)?.text ?? null;
+}
+
+export function removeStepDraft(scope: ReviewDraftScope, target: ReviewStepField, storage = defaultStorage()): void {
+  attempt(() => storage.removeItem(reviewStepDraftKey(scope, target)), undefined);
+}
+
+/** Every field draft of one step of one run (the step's text was discarded). */
+export function removeStepDrafts(scope: ReviewDraftScope, sessionId: string, step: string, storage = defaultStorage()): void {
+  const prefix = stepPrefix(scope, sessionId, step);
+  for (const key of keysOf(storage)) {
+    if (key.startsWith(prefix)) {
+      attempt(() => storage.removeItem(key), undefined);
+    }
+  }
 }
 
 /** The task's wording changed: its drafts for any other formulation are stale. */

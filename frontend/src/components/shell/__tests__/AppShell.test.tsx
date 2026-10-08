@@ -50,11 +50,16 @@ function RoutedTaskListContent() {
       </button>
       <button
         type="button"
-        onClick={() => notify("“Renovate the bathroom” released to Someday", {
-          action: { label: "Undo", accessibleLabel: "Undo: Released to Someday Renovate the bathroom", onAction: undoSpy }
-        })}
+        onClick={() => {
+          dismissUndo = notify("“Renovate the bathroom” released to Someday", {
+            action: { label: "Undo", accessibleLabel: "Undo: Released to Someday Renovate the bathroom", onAction: undoSpy }
+          });
+        }}
       >
         Raise undo toast
+      </button>
+      <button type="button" onClick={() => dismissUndo()}>
+        Take the undo toast away
       </button>
       <label>
         Scratch field
@@ -65,6 +70,7 @@ function RoutedTaskListContent() {
 }
 
 const undoSpy = vi.fn();
+let dismissUndo: () => void = () => undefined;
 
 function renderShell(
   overrides: Partial<Parameters<typeof AppShell>[0]> = {},
@@ -607,6 +613,23 @@ describe("020-FR-048 AppShell action toast", () => {
     fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
     expect(undoSpy).not.toHaveBeenCalled();
   });
+
+  it("020-FR-048 takes an action toast away on request, but never the newer toast that replaced it", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Raise shell toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
+  });
 });
 
 describe("AppShell account menu", () => {
@@ -930,15 +953,55 @@ describe("020-FR-051 AppShell review dialogs at web open", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("020-FR-042 with the flag on the entry stays “Coming soon” in this slice", async () => {
-    signIn("user-coming-soon");
-    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [] });
+  it("020-FR-042 020-FR-038 with the flag on the sidebar link works and shows when the last review was", async () => {
+    signIn("user-link");
+    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [], last_counted_review_at: iso(-9 * DAY) });
     renderShell();
 
-    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalled());
+    const link = await screen.findByRole("link", { name: /Weekly review/ });
+    expect(link).toHaveAttribute("href", "/review");
+    await waitFor(() => expect(link).toHaveTextContent("Last review: 9 days ago"));
+    expect(screen.queryByRole("button", { name: "Weekly review — Coming soon" })).not.toBeInTheDocument();
+  });
+
+  it("020-FR-038 the link shows no recap line while the state loads or after it failed", async () => {
+    signIn("user-recap");
+    vi.mocked(reviewApi.getState).mockReturnValueOnce(new Promise(() => undefined));
+    const loading = renderWithHeading();
+
+    const link = await screen.findByRole("link", { name: "Weekly review" });
+    expect(link).toHaveAttribute("href", "/review");
+    expect(link).not.toHaveTextContent(/Last review|Set up/);
+    loading.unmount();
+
+    vi.mocked(reviewApi.getState).mockRejectedValueOnce(new Error("down"));
+    renderWithHeading();
+    await waitFor(() => expect(reviewApi.getState).toHaveBeenCalledTimes(2));
     await flush();
-    expect(screen.getByRole("button", { name: "Weekly review — Coming soon" })).toBeDisabled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Weekly review" })).not.toHaveTextContent(/Last review|Set up/);
+  });
+
+  it("020-FR-035 020-FR-038 someone who never reviewed is offered setup instead of a day count", async () => {
+    signIn("user-never");
+    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [], last_counted_review_at: null });
+    renderShell();
+
+    expect(await screen.findByRole("link", { name: /^Weekly review\s*Set up in a minute$/ })).toBeInTheDocument();
+  });
+
+  it("020-FR-042 the 390 px navigation drawer carries the same working link", async () => {
+    const user = userEvent.setup();
+    signIn("user-drawer");
+    vi.mocked(reviewApi.getState).mockResolvedValue({ ...seenWithParks, unseen_parks: [], last_counted_review_at: iso(-1 * DAY) });
+    renderShell();
+    await flush();
+
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    const drawer = screen.getByRole("dialog", { name: "Task navigation" });
+
+    const link = within(drawer).getByRole("link", { name: /Weekly review/ });
+    expect(link).toHaveAttribute("href", "/review");
+    expect(link).toHaveTextContent("Last review: 1 day ago");
   });
 
   it("020-FR-051 020-FR-015 shows the explainer first, then While you were away, and focus returns to the main heading", async () => {
