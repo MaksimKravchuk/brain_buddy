@@ -50,11 +50,16 @@ function RoutedTaskListContent() {
       </button>
       <button
         type="button"
-        onClick={() => notify("“Renovate the bathroom” released to Someday", {
-          action: { label: "Undo", accessibleLabel: "Undo: Released to Someday Renovate the bathroom", onAction: undoSpy }
-        })}
+        onClick={() => {
+          dismissUndo = notify("“Renovate the bathroom” released to Someday", {
+            action: { label: "Undo", accessibleLabel: "Undo: Released to Someday Renovate the bathroom", onAction: undoSpy }
+          });
+        }}
       >
         Raise undo toast
+      </button>
+      <button type="button" onClick={() => dismissUndo()}>
+        Take the undo toast away
       </button>
       <label>
         Scratch field
@@ -65,6 +70,7 @@ function RoutedTaskListContent() {
 }
 
 const undoSpy = vi.fn();
+let dismissUndo: () => void = () => undefined;
 
 function renderShell(
   overrides: Partial<Parameters<typeof AppShell>[0]> = {},
@@ -606,6 +612,23 @@ describe("020-FR-048 AppShell action toast", () => {
     expect(screen.getByRole("status")).not.toHaveAccessibleDescription();
     fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
     expect(undoSpy).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-048 takes an action toast away on request, but never the newer toast that replaced it", () => {
+    renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
+    expect(undoSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Raise undo toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Raise shell toast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Take the undo toast away" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Thinking canvas isn't built yet — placeholder");
   });
 });
 

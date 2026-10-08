@@ -96,6 +96,33 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("020-FR-048 a step's Undo toast belongs to the step", () => {
+  it("020-FR-048 moving on to the next step takes the decision's Undo toast away, so its Undo can never fire unseen", async () => {
+    const user = userEvent.setup();
+    const shown: Array<{ message: string; undo: boolean; dismiss: ReturnType<typeof vi.fn> }> = [];
+    notify.mockImplementation((message, options) => {
+      const dismiss = vi.fn();
+      shown.push({ message, undo: options?.action !== undefined, dismiss });
+      return dismiss;
+    });
+    getQueue.mockResolvedValue(queue([bathroom, cv]));
+    decide.mockResolvedValueOnce(released(bathroom));
+    progress.mockResolvedValueOnce(sessionFixture({ current_step: "rest_of_next", steps: { ...sessionFixture().steps, decisions: "finished" } }));
+    renderShell(inDecisions());
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Release to Someday/ }));
+    await screen.findByRole("region", { name: "Update the CV" });
+    const decided = shown.filter((toast) => toast.undo);
+    expect(decided).toHaveLength(1);
+    expect(decided[0].dismiss).not.toHaveBeenCalled();
+
+    await user.click(next());
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Update the CV" })).not.toBeInTheDocument());
+    expect(decided[0].dismiss).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("020-FR-048 the shell waits for the step's writes", () => {
   it("020-FR-048 Next, Skip step and Leave stay disabled while a decision saves, and come back when it lands", async () => {
     const user = userEvent.setup();

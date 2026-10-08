@@ -140,7 +140,7 @@ export function signIn(id = "user-1", flags: Record<string, boolean> = { weekly_
   });
 }
 
-export const notify = vi.fn<ShellNotify>();
+export const notify = vi.fn<ShellNotify>(() => () => undefined);
 export const lastToast = (): [string, ShellToastOptions | undefined] => notify.mock.calls[notify.mock.calls.length - 1] as [string, ShellToastOptions | undefined];
 
 export function renderInRun(

@@ -14,6 +14,8 @@ import { useNavigate } from "react-router-dom";
 import { newProgressAttempt, reviewApi } from "../../api/review";
 import type { ClearStart, ProgressAttempt, ReviewSession, ReviewState, SessionProgress, StepCode } from "../../api/review";
 import { captureReviewScope, refreshAfterReviewWrite, settleForAccount, useOnlineStatus } from "../../api/reviewHooks";
+import { ShellToastContext, useShellToast } from "../../components/shell/shellToast";
+import type { ShellNotify } from "../../components/shell/shellToast";
 import { decisionCount, lastReviewText } from "./lastReview";
 import { forgetRelease } from "./releaseMemory";
 import { useLeaveGuard } from "./useLeaveGuard";
@@ -114,6 +116,29 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const [blockedBy, setBlockedBy] = useState<string | null>(null);
   const setQueueBlocked = useCallback(
     (blocked: boolean) => setBlockedBy((held) => (blocked ? stepInstance : held === stepInstance ? null : held)),
+    [stepInstance]
+  );
+
+  // A step's Undo toast belongs to that step (FR-048): its Undo brings a card back and corrects the
+  // counts through the step, so leaving the step takes the toast away rather than leaving an Undo
+  // whose answer nothing would show.
+  const notify = useShellToast();
+  const stepUndos = useRef<Array<() => void>>([]);
+  const stepNotify = useCallback<ShellNotify>(
+    (message, options) => {
+      const dismiss = notify(message, options);
+      if (options?.action) {
+        stepUndos.current.push(dismiss);
+      }
+      return dismiss;
+    },
+    [notify]
+  );
+  useEffect(
+    () => () => {
+      stepUndos.current.forEach((dismiss) => dismiss());
+      stepUndos.current = [];
+    },
     [stepInstance]
   );
 
@@ -305,9 +330,11 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
                 {note ? <p role="status" className="m-0 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">{note}</p> : null}
                 {bar.failure ? <FailureBanner failure={bar.failure} online={bar.online} /> : null}
                 <ReviewRunContext.Provider value={run}>
-                  <div key={`${current}-${stepKey}`} className="flex flex-col gap-3.5">
-                    <View />
-                  </div>
+                  <ShellToastContext.Provider value={stepNotify}>
+                    <div key={`${current}-${stepKey}`} className="flex flex-col gap-3.5">
+                      <View />
+                    </div>
+                  </ShellToastContext.Provider>
                 </ReviewRunContext.Provider>
                 {current === "summary" ? null : (
                   <div className="mt-2 flex justify-end">

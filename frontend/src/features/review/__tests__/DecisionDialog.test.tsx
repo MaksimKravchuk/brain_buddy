@@ -90,7 +90,7 @@ function decided(task: TaskResponse, type: string, after: Partial<TaskResponse>)
   };
 }
 
-const notify = vi.fn<ShellNotify>();
+const notify = vi.fn<ShellNotify>(() => () => undefined);
 const onClose = vi.fn<(outcome: DecisionOutcome) => void>();
 
 function LocationProbe(): React.JSX.Element {

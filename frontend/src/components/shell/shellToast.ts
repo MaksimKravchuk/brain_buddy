@@ -20,12 +20,13 @@ export interface ShellToastOptions {
   action?: ShellToastAction;
 }
 
-export type ShellNotify = (message: string, options?: ShellToastOptions) => void;
+/** Shows the toast; the returned call takes it away again if it is still the one showing. */
+export type ShellNotify = (message: string, options?: ShellToastOptions) => () => void;
 
 export const TEXT_TOAST_MS = 2600;
 export const ACTION_TOAST_MS = 5000;
 
-export const ShellToastContext = createContext<ShellNotify>(() => undefined);
+export const ShellToastContext = createContext<ShellNotify>(() => () => undefined);
 
 export function useShellToast(): ShellNotify {
   return useContext(ShellToastContext);
