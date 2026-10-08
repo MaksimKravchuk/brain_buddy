@@ -135,17 +135,20 @@ export function InboxStep(): React.JSX.Element {
     });
   };
 
-  /** Back to the Inbox, and one off the run's count (FR-048). */
+  /**
+   * Back to the Inbox, and one off the run's count (FR-048). The two writes are
+   * separate: once the item is back in the Inbox it is shown again whatever
+   * happens to the count, and a count that did not go down is retried alone
+   * under the same progress id.
+   */
   const undoChoice = async (task: TaskResponse, moved: TaskResponse) => {
-    const settled = await settleForAccount(async () => {
-      const back = await apiClient.transitionTask(
+    const settled = await settleForAccount(() =>
+      apiClient.transitionTask(
         task.id,
         { action: moved.state === "completed" || moved.state === "cancelled" ? "reopen" : "move", to_state: "inbox", expected_revision: moved.revision },
         newIdempotencyKey()
-      );
-      await run.progress(newProgressAttempt(run.session.id, { inbox_processed_delta: -1 }));
-      return back;
-    });
+      )
+    );
     if (settled === null) {
       return;
     }
@@ -158,6 +161,13 @@ export function InboxStep(): React.JSX.Element {
     setLatest((tasks) => ({ ...tasks, [task.id]: settled.value }));
     setProcessed((ids) => ids.filter((id) => id !== task.id));
     notify(`“${task.title}” is back in your Inbox`);
+    const count = newProgressAttempt(run.session.id, { inbox_processed_delta: -1 });
+    void action.run(
+      "undo-count",
+      "Update the Inbox count",
+      () => run.progress(count),
+      `“${task.title}” is back in your Inbox, but the processed count didn't go down.`
+    );
   };
 
   const saveTitle = (event: FormEvent, task: TaskResponse, text: string) => {
@@ -268,7 +278,7 @@ export function InboxStep(): React.JSX.Element {
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={closeForm}>Back</button>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
                     <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending !== null ? "Saving…" : form.kind === "title" ? "Save title" : "Move to Waiting for"}
                     </button>

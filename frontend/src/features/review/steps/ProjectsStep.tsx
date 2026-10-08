@@ -96,7 +96,7 @@ export function ProjectsStep(): React.JSX.Element {
                         <button type="submit" disabled={text.trim() === "" || action.disabled} className={primaryButtonClass}>
                           {action.pending === "save" ? "Saving…" : "Save next action"}
                         </button>
-                        <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={close}>Cancel</button>
+                        <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(close)}>Cancel</button>
                       </form>
                     ) : null}
                   </li>
