@@ -557,6 +557,17 @@ def test_openapi_documents_precise_error_envelopes(api_client) -> None:
         ("/api/review/explainer/acknowledge", "post"): {"400", "401", "409", "422"},
         ("/api/review/parks/acknowledge", "post"): {"400", "401", "409", "422"},
         ("/api/review/state", "get"): {"401", "404"},
+        # Spec 020 slice PR-07 (navigator, contracts/http.md §7).
+        ("/api/review/navigator", "get"): {"401"},
+        ("/api/review/navigator/consent", "post"): {"400", "401", "404", "422"},
+        ("/api/review/navigator/consent", "delete"): {"400", "401", "422"},
+        ("/api/review/navigator/suggestions", "post"): {
+            "400",
+            "401",
+            "404",
+            "422",
+            "429",
+        },
         # Spec 020 slice PR-11 (review flow, contracts/http.md §6).
         ("/api/review/sessions", "post"): {"400", "401", "409", "422"},
         ("/api/review/sessions/{session_id}", "get"): {"401", "404", "422"},
