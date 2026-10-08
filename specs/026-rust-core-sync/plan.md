@@ -1,184 +1,184 @@
-# Implementation Plan: общее Rust-ядро и собственная синхронизация
+# Implementation Plan: Shared Rust Core and Native Sync
 
 **Branch**: `026-rust-core-sync` | **Date**: 2026-10-08 | **Spec**: [spec.md](spec.md)
 
-**Status**: техническое предложение к спецификации. Это не завершённый `/speckit-plan` и не допуск к реализации. [Design](design.md) предлагается для проверки; обязательные human design sign-off и formal planning review не подменены авторским решением. Очередность работ записана в [tasks.md](tasks.md).
+**Status**: Technical proposal for the specification. This is not a completed `/speckit-plan` and does not authorize implementation. [Design](design.md) is proposed for review; the required human design sign-off and formal planning review have not been replaced by the author's decision. Work order is recorded in [tasks.md](tasks.md).
 
 ## Summary
 
-Rust должен заменить повторяющиеся правила и механизм локальной работы, сохранив нативный интерфейс каждой платформы. Сервер принимает команды и публикует изменения; устройство сначала сохраняет действие у себя и обменивается с сервером, когда доступна сеть. Пользователь не ждёт сетевого round trip для обычной записи задачи.
+Rust should replace duplicated rules and local-work mechanisms while preserving each platform's native interface. The server accepts commands and publishes changes; the device first saves an action locally and exchanges it with the server when a network is available. The user does not wait for a network round trip to perform an ordinary task write.
 
-Общий код состоит из двух частей. **Domain core** решает, допустимо ли действие и как оно меняет доменные данные. **Client runtime** ведёт локальную базу, устойчивую очередь и синхронизацию. Сервер использует тот же domain core, но свой transaction adapter и актуальную авторизацию. Разделение не позволяет случайно унести HTTP, SQL, платформенный keychain или AI-engine внутрь правил задач.
+The shared code has two parts. **Domain core** decides whether an action is allowed and how it changes domain data. **Client runtime** manages the local database, durable queue, and synchronization. The server uses the same domain core, but its own transaction adapter and current authorization. This separation prevents HTTP, SQL, the platform keychain, or an AI engine from accidentally entering task rules.
 
-Начальный backend остаётся FastAPI: Python вызывает Rust через PyO3. Это даёт общие правила без одновременной переписи Identity, голосовых операций, CRT и A2A. PostgreSQL — целевое хранилище серверных task transactions; перенос в него проводится отдельным этапом после проверки protocol на текущем single-writer SQLite. Замена FastAPI на Rust/Axum не является prerequisite и пока не планируется.
+The initial backend remains FastAPI: Python calls Rust through PyO3. This provides shared rules without rewriting Identity, voice operations, CRT, and A2A at the same time. PostgreSQL is the target store for server-side task transactions; migration to it is a separate stage after validating the protocol on the current single-writer SQLite. Replacing FastAPI with Rust/Axum is not a prerequisite and is not currently planned.
 
 ## Technical Context
 
-| Область | Сейчас на базе `3b5967f` | Предлагается |
+| Area | Current, based on `3b5967f` | Proposed |
 | --- | --- | --- |
-| Apple-клиенты | SwiftUI, общий BrainBuddyKit, JSON store | Сохранить SwiftUI и workspace facade; под ним Rust core/runtime, SQLite |
-| Правила | Swift, Python, часть TypeScript | Одна реализация Rust; web получает серверные решения и capabilities |
-| Backend | FastAPI modular monolith, раздельные хранилища модулей | Тот же monolith; PyO3 domain bridge; отдельный worker process из того же кода |
-| Sync | Последовательные REST writes, full pull, detail hydration | Command receipts, commit-ordered delta feed и consistent snapshot |
-| CLI/MCP | HTTP-клиенты/серверные tools | Продолжают обычный серверный путь; новый local CLI store не добавляется |
-| AI | Существующие local/cloud adapters и consent | Общая policy/proposal validation, платформенные inference adapters |
+| Apple clients | SwiftUI, shared BrainBuddyKit, JSON store | Keep SwiftUI and workspace facade; add Rust core/runtime and SQLite underneath |
+| Rules | Swift, Python, some TypeScript | One Rust implementation; web receives server decisions and capabilities |
+| Backend | FastAPI modular monolith, separate module stores | Same monolith; PyO3 domain bridge; separate worker process from the same code |
+| Sync | Sequential REST writes, full pull, detail hydration | Command receipts, commit-ordered delta feed, and consistent snapshot |
+| CLI/MCP | HTTP clients/server tools | Continue on the ordinary server path; no new local CLI store |
+| AI | Existing local/cloud adapters and consent | Shared policy/proposal validation, platform inference adapters |
 
-Rust stable/MSRV и точные версии UniFFI, PyO3, rusqlite/SQLite выбираются в проверочном вертикальном срезе и фиксируются lockfile. Номер версии «на глаз» не является архитектурным требованием. Существующие Python/Swift версии сохраняются на первом шаге. Rust CLI в `cli/` не становится общей библиотекой просто потому, что уже написан на Rust.
+Rust stable/MSRV and exact UniFFI, PyO3, rusqlite/SQLite versions are selected in a validation vertical slice and pinned in the lockfile. A version number chosen by guesswork is not an architectural requirement. Existing Python/Swift versions remain in the first step. The Rust CLI in `cli/` does not become a shared library merely because it is already written in Rust.
 
-## Схема компонентов
+## Component Diagram
 
 ```mermaid
 flowchart TB
-  UI[Нативный интерфейс и системные адаптеры]
+  UI[Native UI and system adapters]
   RT[Rust client runtime]
-  CORE[Rust domain core на устройстве]
-  DB[(Локальная SQLite база и outbox)]
+  CORE[Rust domain core on device]
+  DB[(Local SQLite database and outbox)]
   API[FastAPI command handler]
-  SCore[Та же Rust библиотека на сервере]
+  SCore[Same Rust library on server]
   SDB[(Task store, receipts, change feed, jobs)]
-  Worker[Серверный worker]
+  Worker[Server worker]
   UI -->|execute, query, subscribe| RT
-  RT -->|проверка и replay| CORE
-  RT <-->|одна локальная transaction| DB
+  RT -->|validation and replay| CORE
+  RT <-->|one local transaction| DB
   RT <-->|commands, receipts, snapshots, deltas| API
-  API -->|актуальное состояние и права| SCore
-  API <-->|одна серверная transaction| SDB
-  Worker <-->|lease и результат| SDB
-  Worker -->|обычные доменные команды| API
+  API -->|current state and permissions| SCore
+  API <-->|one server transaction| SDB
+  Worker <-->|lease and result| SDB
+  Worker -->|ordinary domain commands| API
 ```
 
-Стрелка worker → command handler означает вызов application port внутри общего серверного кода, а не обязательный HTTP-запрос самому себе. Domain core компилируется отдельно в каждый процесс: ни клиентская запись, ни локальная проверка не вызывают удалённый «общий Rust-сервис».
+The worker → command-handler arrow means a call to an application port inside the shared server code, not a mandatory HTTP request to itself. The domain core is compiled separately into each process: neither client writes nor local validation call a remote “shared Rust service.”
 
-## 1. Границы общего кода
+## 1. Shared-Code Boundaries
 
-| Компонент | Владеет | Не владеет |
+| Component | Owns | Does not own |
 | --- | --- | --- |
-| `bb-domain` | GTD transitions, validation, normalization, Smart Add, archive, review/formulation rules, deterministic projections | I/O, SQLite, auth session, UI, модели AI |
-| `bb-client` | Локальные transactions, confirmed/pending/issues, replay, sync state machine, migrations | Серверная авторизация и внешние эффекты |
-| `bb-protocol` | Версионированные command/result/feed DTO, codecs и errors | Второй реализацией бизнес-правил |
-| Native bindings | Крупные вызовы runtime, lifecycle, cancellation, OS scheduling, keychain и inference adapter | Переписанными правилами допустимости действия |
-| Server transaction adapter | Identity/ACL, загрузка read set, блокировки, persistence, receipts/feed/job commit | Отдельной Python-копией GTD reducer |
+| `bb-domain` | GTD transitions, validation, normalization, Smart Add, archive, review/formulation rules, deterministic projections | I/O, SQLite, auth session, UI, AI models |
+| `bb-client` | Local transactions, confirmed/pending/issues, replay, sync state machine, migrations | Server authorization and external effects |
+| `bb-protocol` | Versioned command/result/feed DTOs, codecs, and errors | A second implementation of business rules |
+| Native bindings | Coarse-grained runtime calls, lifecycle, cancellation, OS scheduling, keychain, and inference adapter | Reimplemented rules for whether an action is allowed |
+| Server transaction adapter | Identity/ACL, read-set loading, locks, persistence, receipts/feed/job commit | A separate Python copy of the GTD reducer |
 
-Pure API имеет смысл `decide(state_subset, command, execution_inputs) → changes | domain_error`. Время, идентификаторы, разрешённые действия и versioned policy передаются явно. Сервер не доверяет policy flags из клиентского payload. Core возвращает намерение внутреннего эффекта; запуск сети происходит только после durable commit. Если проверка требует связанных проектов, уникальных имён или review settings, read set загружается и защищается в той же transaction.
+The pure API has the semantics `decide(state_subset, command, execution_inputs) → changes | domain_error`. Time, identifiers, permitted actions, and versioned policy are passed explicitly. The server does not trust policy flags from the client payload. The core returns an intent for an internal effect; network activity starts only after durable commit. If validation requires related projects, unique names, or review settings, the read set is loaded and protected in the same transaction.
 
-Сохраняются Python-compatible NFKC, whitespace, полное Unicode case folding и подсчёт Unicode scalar values. `str::len()`, простой lowercase или другая календарная библиотека без parity-проверки не являются корректной заменой. Нормативные golden vectors берутся из существующих тестов; расхождения разрешаются по accepted ADR и принятому поведению, а не выбором случайной текущей реализации.
+Python-compatible NFKC, whitespace handling, full Unicode case folding, and Unicode scalar-value counting are preserved. `str::len()`, simple lowercase, or another calendar library without a parity check is not a correct replacement. Normative golden vectors come from existing tests; discrepancies are resolved according to accepted ADRs and accepted behavior, not by choosing whichever implementation happens to be current.
 
-Общими становятся также команды widgets/intents и AI proposals. На платформе остаются доступность железа, доступ к микрофону, OS notifications, клавиатурные команды и отображение. Платформенные тесты остаются необходимы: общий reducer не проверяет Swift concurrency, JNI memory lifetime или suspend процесса.
+Widget/intent commands and AI proposals also become shared. Platform-specific responsibilities remain hardware availability, microphone access, OS notifications, keyboard commands, and rendering. Platform tests remain necessary: a shared reducer does not test Swift concurrency, JNI memory lifetime, or process suspension.
 
-## 2. Нативные платформы и FFI
+## 2. Native Platforms and FFI
 
-| Платформа | UI и bridge | Почему и ограничение |
+| Platform | UI and bridge | Rationale and limitation |
 | --- | --- | --- |
-| iOS и macOS | SwiftUI, UniFFI Swift, XCFramework | Два клиента уже имеют общий facade. Нужно доказать app/widget linking, signing, concurrency и Linux-testable часть kit |
-| Android | Kotlin, Jetpack Compose, UniFFI/JNI | Сохраняются Android lifecycle и OS services; проверяются ABI, cancellation и фоновые ограничения |
-| Windows | C# и WinUI 3, узкий стабильный C ABI/PInvoke | Предлагаемый baseline без зависимости от зрелости стороннего UniFFI C#; память освобождается через library API |
-| Linux | Rust и GTK4 | Прямое использование runtime, меньше FFI. GTK естественнее для GNOME; интеграция KDE и packaging требуют отдельной проверки |
-| Web | Существующий React-клиент и HTTP | Серверный core авторитетен; WASM нужен только при доказанной необходимости локальных правил, не добавляется в MVP |
+| iOS and macOS | SwiftUI, UniFFI Swift, XCFramework | The two clients already share a facade. App/widget linking, signing, concurrency, and the Linux-testable part of the kit must be proven |
+| Android | Kotlin, Jetpack Compose, UniFFI/JNI | Preserve Android lifecycle and OS services; validate ABI, cancellation, and background limits |
+| Windows | C# and WinUI 3, narrow stable C ABI/PInvoke | Proposed baseline avoids depending on the maturity of third-party UniFFI C#; memory is released through the library API |
+| Linux | Rust and GTK4 | Direct runtime use, less FFI. GTK is a more natural fit for GNOME; KDE integration and packaging need separate validation |
+| Web | Existing React client and HTTP | Server core is authoritative; WASM is needed only if local rules are demonstrably necessary and is not added to the MVP |
 
-Runtime предоставляет `execute(command)`, `query(query, page)`, `subscribe(changes)`, `sync_now()`, `cancel(operation)`, `close()`. DTO coarse-grained; UI не делает FFI-вызов на каждое поле. Calls, disk I/O и sync не блокируют main thread. Асинхронные completion доставляются в согласованный executor/dispatcher UI. Subscription имеет явный lifetime и coalescing: медленный экран получает invalidation и перечитывает query, а не бесконечную очередь full snapshots.
+The runtime exposes `execute(command)`, `query(query, page)`, `subscribe(changes)`, `sync_now()`, `cancel(operation)`, and `close()`. DTOs are coarse-grained; the UI does not make an FFI call for every field. Calls, disk I/O, and sync do not block the main thread. Async completions are delivered on the agreed UI executor/dispatcher. A subscription has an explicit lifetime and coalescing: a slow screen receives invalidation and rereads the query instead of accumulating an endless queue of full snapshots.
 
-Ожидаемые ошибки передаются типизированным Result. Panic не пересекает FFI; boundary переводит его в безопасную внутреннюю ошибку, отменяет transaction и закрывает повреждённый runtime при невозможности продолжать. Raw pointers не передаются через высокоуровневый UI. Для C ABI каждый buffer/handle имеет единственного владельца и соответствующий release; двойной close безопасен. Credential хранится у OS adapter и не входит в domain DTO.
+Expected errors are returned as typed Results. Panics do not cross FFI; the boundary converts them into a safe internal error, rolls back the transaction, and closes the damaged runtime if it cannot continue. Raw pointers are not passed through high-level UI. In the C ABI, each buffer/handle has a single owner and a matching release; double close is safe. Credentials stay in the OS adapter and are not included in domain DTOs.
 
-## 3. Локальная база и процессы
+## 3. Local Database and Processes
 
-SQLite принадлежит runtime. Account-less workspace и каждый account имеют отдельные пути/идентичность; база аккаунта открывается только для соответствующего session generation. Credentials хранятся в Keychain/Keystore/OS secure store. OS file protection и TLS сохраняют текущую модель защиты; E2EE не заявляется.
+The runtime owns SQLite. An account-less workspace and each account have separate paths/identities; an account database opens only for the corresponding session generation. Credentials are stored in Keychain/Keystore/OS secure storage. OS file protection and TLS preserve the current protection model; end-to-end encryption (E2EE) is not claimed.
 
-WAL и транзакции координируют app/widget/intents между процессами. Один process-local actor недостаточен. Каждый write перечитывает необходимые версии после получения DB write lock. Миграция schema получает межпроцессный exclusive migration lock; старые процессы не пишут в неподдерживаемый epoch. Busy timeout ограничен; истечение даёт повторяемую ошибку без «успешно сохранено». Widget может выполнить разрешённую локальную команду через runtime, но сетевой sync принадлежит приложению. DB change generation и OS invalidation обновляют проекции соседних процессов.
+WAL and transactions coordinate the app/widget/intents across processes. One process-local actor is not sufficient. Each write rereads the required versions after obtaining the DB write lock. A schema migration obtains an interprocess exclusive migration lock; old processes do not write to an unsupported epoch. Busy timeout is bounded; expiration returns a retryable error rather than reporting “saved successfully.” A widget may run an allowed local command through the runtime, but network sync belongs to the app. DB change generation and OS invalidation update projections in neighboring processes.
 
-`confirmed_records`, `outbox`, `command_receipts`, `sync_issues`, `drafts`, `sync_meta`, `identity_aliases` и необходимые local-only review records составляют модель хранения. `visible_state` можно материализовать для быстрых queries, но это восстановимая проекция, не вторая истина. Индексы owner/list/project/tag и pagination предотвращают передачу 10 000 задач при каждом нажатии. Загрузка AI weights не проходит через task DB.
+`confirmed_records`, `outbox`, `command_receipts`, `sync_issues`, `drafts`, `sync_meta`, `identity_aliases`, and required local-only review records form the storage model. `visible_state` may be materialized for fast queries, but it is a rebuildable projection, not a second source of truth. Owner/list/project/tag indexes and pagination prevent sending 10,000 tasks on every tap. AI weight loading does not go through the task DB.
 
-## 4. Протокол и конфликтная модель
+## 4. Protocol and Conflict Model
 
-Полный контракт находится в [contracts/sync-v1.md](contracts/sync-v1.md); он нормативен для proposed v1. Основной путь:
+The full contract is in [contracts/sync-v1.md](contracts/sync-v1.md); it is normative for the proposed v1. The main path is:
 
 ```mermaid
 sequenceDiagram
-  participant U as Пользователь
-  participant L as Локальный runtime
-  participant S as Сервер
-  participant M as Другое устройство
-  U->>L: Изменить задачу
-  L->>L: Атомарно сохранить state и command
-  L-->>U: Сохранено локально
-  L->>S: Command с устойчивым ID
-  S->>S: State + receipt + feed + jobs в одной transaction
-  S--xL: Ответ потерян
-  L->>S: Повтор того же ID и payload
-  S-->>L: Ранее сохранённый receipt
-  M->>S: Pull после своего cursor
-  S-->>M: Атомарные изменения
-  M->>M: Применить изменения и cursor
+  participant U as User
+  participant L as Local runtime
+  participant S as Server
+  participant M as Another device
+  U->>L: Edit task
+  L->>L: Atomically save state and command
+  L-->>U: Saved locally
+  L->>S: Command with durable ID
+  S->>S: State + receipt + feed + jobs in one transaction
+  S--xL: Response lost
+  L->>S: Retry with same ID and payload
+  S-->>L: Previously saved receipt
+  M->>S: Pull after its cursor
+  S-->>M: Atomic changes
+  M->>M: Apply changes and cursor
 ```
 
-MVP использует ожидаемую edit revision сущности и явно сохраняет конфликты. Это предсказуемее общего LWW и проще проверить, чем изобретать свой CRDT. Цена — конфликт возможен даже для независимых полей. Автоматическое field merge допустимо позже только с проверкой field base values и всего доменного инварианта. Особое auto-park yield существующего review применяется уже в v1.
+The MVP uses an expected entity edit revision and preserves conflicts explicitly. This is more predictable than general LWW and easier to verify than inventing a CRDT. The cost is that even independent fields can conflict. Automatic field merge may be added later only with field base-value checks and validation of the full domain invariant. The existing special auto-park yield for review applies in v1.
 
-UX реализует состояния [design.md](design.md): статус M-01/D-01, разрешение M-02/D-02, восстановление M-03/D-03. Предлагаемые экраны не добавляют режим управления инфраструктурой: человеку нужны сохранность, причина задержки и следующее действие.
+UX implements the states in [design.md](design.md): status M-01/D-01, resolution M-02/D-02, recovery M-03/D-03. The proposed screens do not add an infrastructure-management mode: users need to know their work is preserved, why it is delayed, and what to do next.
 
-## 5. Сервер и фоновые задания
+## 5. Server and Background Jobs
 
-API и worker запускаются отдельными процессами одного modular monolith. PostgreSQL target хранит task aggregate, receipts, per-scope feed и job/effect outbox в одной DB transaction. Identity, CRT и другие модули сохраняют собственное владение; упоминание PostgreSQL не означает автоматический перенос их данных. Для межмодульных и внешних операций остаётся operation/saga contract, нельзя объявить file + SQLite + network одной ACID transaction.
+The API and worker run as separate processes in one modular monolith. The PostgreSQL target stores task aggregates, receipts, the per-scope feed, and the job/effect outbox in one DB transaction. Identity, CRT, and other modules retain their ownership; mentioning PostgreSQL does not mean their data moves automatically. Cross-module and external operations retain the operation/saga contract; a file + SQLite + network operation cannot be declared one ACID transaction.
 
-Job содержит тип, scope, dedup key, payload reference, run_at, status, attempts, lease owner/until, fencing generation и last safe error. Worker берёт lease атомарно; heartbeat продлевает его. Результат принимается только с текущим generation. Повторы ограничены, backoff с jitter, исчерпанные попытки становятся видимым failed state. Отмена проверяется перед эффектом и при result commit; уже отправленный внешнему провайдеру эффект нельзя гарантированно отозвать.
+A job contains type, scope, dedup key, payload reference, run_at, status, attempts, lease owner/until, fencing generation, and last safe error. The worker acquires a lease atomically; heartbeat extends it. A result is accepted only with the current generation. Retries are bounded with jittered backoff; exhausted attempts become a visible failed state. Cancellation is checked before the effect and at result commit; an effect already sent to an external provider cannot be reliably recalled.
 
-Внутренний эффект вызывает обычную command с устойчивым effect ID; retry не создаёт вторую мутацию. Внешнему сервису передаётся его поддерживаемый idempotency key; при timeout используются lookup/reconciliation, как в существующем A2A. Если сервис не даёт ни дедупликации, ни lookup, неопределённый исход требует решения, а не бесконечных повторов. Lease fencing само по себе не отменяет уже ушедший HTTP-запрос.
+An internal effect calls an ordinary command with a durable effect ID; retry does not create a second mutation. An external service receives its supported idempotency key; timeout handling uses lookup/reconciliation, as in existing A2A. If a service supports neither deduplication nor lookup, an unknown outcome requires a decision, not endless retries. Lease fencing by itself does not cancel an HTTP request already sent.
 
-Переносятся существующие maintenance обязанности: auto-park, recovery операций, retention и agent observation. Список обязанностей и cadence фиксируются перед выключением старых threads. На переходе один механизм владеет конкретным заданием; два scheduler одновременно не запускаются без общей dedup/lease. Нативное локальное напоминание и серверная работа — разные механизмы. Для account-less auto-park сохраняется текущая локальная authority ADR-0027.
+Existing maintenance responsibilities move over: auto-park, operation recovery, retention, and agent observation. Their list and cadence are recorded before old threads are disabled. During transition, one mechanism owns each specific job; two schedulers do not run at once without shared dedup/lease. Native local reminders and server jobs are separate mechanisms. Existing local authority for account-less auto-park is preserved under ADR-0027.
 
-Время различает date-only, UTC instant и wall-clock с IANA timezone. Для существующего Weekly Review сохраняются floors, acknowledgement и DST правила. Будущая recurrence потребует отдельного product contract: due-based/completion-based, DST ambiguity, catch-up и occurrence identity; spec 026 не создаёт её молча.
+Time distinguishes date-only values, UTC instants, and wall-clock values with an IANA timezone. Existing Weekly Review floors, acknowledgement, and DST rules are preserved. Future recurrence requires a separate product contract: due-based/completion-based behavior, DST ambiguity, catch-up, and occurrence identity; spec 026 does not add it silently.
 
-## 6. AI и агенты
+## 6. AI and Agents
 
-Общий слой принимает capability request и privacy policy. Сначала используется детерминированный код, если задача уже решается правилами; затем подходящий локальный engine; затем только разрешённый сервер/внешний provider. Доступность означает подходящий язык, формат ответа, память и условия запуска, а не только установленный пакет. Локальная модель не обязана быть одна на всех платформах.
+The shared layer accepts a capability request and privacy policy. Deterministic code is used first when rules already solve the task; then an appropriate local engine; then only an authorized server/external provider. Availability means suitable language, response format, memory, and runtime conditions, not merely an installed package. There need not be one local model across all platforms.
 
-Apple Foundation Models, Android OS models и собственный runtime наподобие llama.cpp — адаптеры, выбираемые после проверки конкретных устройств и языка. Архитектура не обещает поддержку русского языка или наличие системной модели на каждом телефоне. Вес модели, лицензия, RAM/KV cache, battery/thermal limits, download/checksum/version и очистка storage входят в выбор конкретного engine. Это отдельные оценки, не причины переписывать domain core.
+Apple Foundation Models, Android OS models, and a custom runtime such as llama.cpp are adapters, selected after checking specific devices and languages. The architecture does not promise Russian-language support or a system model on every phone. Model weights, license, RAM/KV cache, battery/thermal limits, download/checksum/version, and storage cleanup are part of selecting a specific engine. These are separate evaluations, not reasons to rewrite the domain core.
 
-Раздельные права: cloud task sync; обработка на собственном сервере; передача выбранному внешнему provider. «Только на устройстве» всегда запрещает remote inference, включая fallback при ошибке. Server credentials никогда не попадают в клиентскую DB. Общая policy задаёт budget, timeout, cancellation, output schema и разрешённый набор команд. Адаптер возвращает Proposal с provenance; подтверждение проходит обычный command pipeline и не обходит ACL/revisions. UX M-04/D-04 использует существующий consent contract, не выдаёт одно вечное согласие на всех провайдеров.
+Permissions remain separate: cloud task sync; processing on our server; transfer to a selected external provider. “On-device only” always prohibits remote inference, including fallback on error. Server credentials never enter the client DB. Shared policy sets budget, timeout, cancellation, output schema, and allowed commands. An adapter returns a Proposal with provenance; confirmation goes through the ordinary command pipeline and does not bypass ACLs/revisions. UX M-04/D-04 uses the existing consent contract and does not grant one perpetual consent for all providers.
 
-Task и AgentRun остаются разными сущностями. Existing A2A/MCP flows сохраняются, агент ограничен capability, scope, budget и deadline. Недоверенный документ не может выдать себе права. Run success возвращает evidence/proposal, а завершение задачи остаётся отдельной Tasks command. Новый A2A marketplace, delegation и автономное перепоручение в этот этап не входят.
+Task and AgentRun remain separate entities. Existing A2A/MCP flows are preserved; an agent is limited by capability, scope, budget, and deadline. An untrusted document cannot grant itself permissions. A successful run returns evidence/proposal, and task completion remains a separate Tasks command. A new A2A marketplace, delegation, and autonomous reassignment are out of scope for this stage.
 
-## 7. Миграция без параллельных источников истины
+## 7. Migration Without Parallel Sources of Truth
 
-1. **Нормативная база.** Инвентаризировать команды и все writers, реальную схему и accepted правила. Сопоставить golden vectors Swift/Python/TS; исправление противоречия требует отдельного решения, не скрытого «рефакторинга».
-2. **Вертикальный срез.** Создание/переход/validation через один Rust core на Apple и Python; доказать bridge, Linux package boundary, error/lifetime и release packaging. Сравнение старого и нового reducer идёт в shadow без двойной записи. После parity у правила остаётся один writer.
-3. **Общее доменное поведение.** Перенести normalization, Smart Add, queries, archive, children, review и clocks. Пока runtime может использовать старые transport/store adapters. Веб перестаёт быть независимым authority: derived отображение либо серверная projection, либо явно versioned shared vectors до удаления дублирования.
-4. **Серверный sync contract.** Сначала расширить durable receipts и подключить все writers к feed; добавить capabilities/snapshot/delta. Legacy adapter сохраняет response shapes и deterministic mapping старого `(owner, method, route, key digest)` к command receipt. Поздние legacy повторы не должны обходить новую дедупликацию.
-5. **Локальное хранение и новый sync.** Под migration lock сделать backup исходного JSON и schema manifest, импортировать в staging DB, проверить ID/связи/counts/replay, затем атомарно переключить marker. Сохранить локальные IDs и mapping к server IDs: сегодняшнее API не принимает ordinary client IDs. Для новых команд новый endpoint принимает заранее созданный ID, для старых работает alias table. Existing `everSent`, issuedAt, attempts, key/body, uncertain status, review marks и drafts не теряются.
-6. **Разбор старой uncertainty.** До переключения получить доступные receipts старых отправок. Старые записи за 24-часовым окном без доказуемого исхода не перевыпускаются с новым ID. Они остаются issue с текстом и явной сверкой; эвристика title/list/time не считается доказательством. Новый протокол не может задним числом восстановить уже удалённый receipt. Пока есть такие записи, миграция не заявляет «всё синхронизировано».
-7. **PostgreSQL отдельно.** После protocol acceptance выполнить остановку task writers, согласованный перенос aggregate+receipts+feed+jobs, сверку и переключение единого authority. Identity/CRT не переносятся в этом шаге. Нет rolling overlap двух task DB writers. Записать новый storage epoch, permitted rollback image и план forward repair.
-8. **Новые платформы.** Android первым как проверка переносимости вне Apple; затем Windows и Linux. Каждая получает capture/offline/conflict/recovery и device-specific checks, а не копию reducer. Это последовательность предложения, срок всего проекта пока не оценён.
+1. **Normative baseline.** Inventory commands, all writers, the actual schema, and accepted rules. Compare Swift/Python/TS golden vectors; correcting a contradiction requires a separate decision, not a hidden “refactor.”
+2. **Vertical slice.** Run creation/transition/validation through one Rust core on Apple and Python; prove the bridge, Linux package boundary, errors/lifetime, and release packaging. Compare old and new reducers in shadow mode without double writes. After parity, each rule has one writer.
+3. **Shared domain behavior.** Move normalization, Smart Add, queries, archive, children, review, and clocks. The runtime may still use old transport/store adapters. Web ceases to be an independent authority: derived display or a server projection is used, or explicitly versioned shared vectors remain until duplication is removed.
+4. **Server sync contract.** First extend durable receipts and connect all writers to the feed; add capabilities/snapshot/delta. The legacy adapter preserves response shapes and deterministically maps the old `(owner, method, route, key digest)` to a command receipt. Late legacy retries must not bypass new deduplication.
+5. **Local storage and new sync.** Under a migration lock, back up the source JSON and schema manifest, import into a staging DB, verify IDs/relations/counts/replay, then atomically switch the marker. Preserve local IDs and their mapping to server IDs: today's API does not accept ordinary client IDs. For new commands, the new endpoint accepts a pre-created ID; old commands use an alias table. Existing `everSent`, issuedAt, attempts, key/body, uncertain status, review marks, and drafts are retained.
+6. **Resolve old uncertainty.** Before switching, retrieve available receipts for old sends. Old records outside the 24-hour window without a provable outcome are not reissued under a new ID. They remain issues with their text and explicit reconciliation; heuristics based on title/list/time are not proof. The new protocol cannot retroactively restore an already-deleted receipt. While such records exist, migration does not claim “fully synced.”
+7. **PostgreSQL separately.** After protocol acceptance, stop task writers, move aggregate+receipts+feed+jobs consistently, reconcile, and switch the single authority. Identity/CRT do not move in this step. There is no rolling overlap of two task DB writers. Record the new storage epoch, permitted rollback image, and forward-repair plan.
+8. **New platforms.** Android first as a portability check outside Apple, then Windows and Linux. Each gets capture/offline/conflict/recovery and device-specific checks, not a copy of the reducer. This is a proposed sequence; the total project duration has not been estimated.
 
-Backup содержит базу, receipts, feed watermark/generation и job ledger согласованно. После restore новая server/feed generation заставляет клиентов rebootstrap с сохранением pending и отбрасыванием старых ответов; реестр внешних эффектов сверяется отдельно. До открытия доступа применяются последующие purge/revocation решения из control ledger вне откатываемого task backup. Нельзя воскресить удалённый аккаунт или отозванную сессию; если полнота сверки не доказана, сервис остаётся закрытым. RPO/RTO и backup/WAL policy проверяются до cutover; потерянные подтверждённые commits нельзя скрыть обычным reset. Старый binary нельзя просто направить в новую DB. Feature flag OFF прекращает exposure, но не откатывает irreversible schema. Существующие sign-out, account deletion grace/purge/export должны знать новые категории данных и backup retention; прежние pre-upgrade backup обязательства spec 021 сохраняются.
+The backup consistently contains the database, receipts, feed watermark/generation, and job ledger. After restore, a new server/feed generation forces clients to rebootstrap while preserving pending work and discarding stale responses; external effects are reconciled separately. Before access is reopened, subsequent purge/revocation decisions from the control ledger outside the rollback-prone task backup are applied. A deleted account or revoked session must not be resurrected; if reconciliation completeness cannot be proven, the service remains closed. RPO/RTO and backup/WAL policy are validated before cutover; lost confirmed commits cannot be hidden by an ordinary reset. An old binary cannot simply be pointed at the new DB. Feature flag OFF stops exposure but does not roll back an irreversible schema. Existing sign-out, account deletion grace/purge/export must account for new data categories and backup retention; the previous pre-upgrade backup obligations in spec 021 remain.
 
-## 8. Проверка и эксплуатация
+## 8. Validation and Operations
 
-Повторно используются formulation vectors, project archive traces, reducer/replay/sync tests BrainBuddyKit, backend task/review/idempotency suites и compatibility tests. Они становятся parity oracle для Rust. Не нужно переписывать каждый тест на каждом языке: общие rules проверяются в Rust; binding smoke проверяет сериализацию, ошибки и вызов на платформе.
+Reuse formulation vectors, project archive traces, BrainBuddyKit reducer/replay/sync tests, backend task/review/idempotency suites, and compatibility tests. These become the parity oracle for Rust. Every test need not be rewritten in every language: shared rules are checked in Rust; binding smoke tests check serialization, errors, and calls on each platform.
 
-Новая необходимая проверка — protocol fault harness с управляемыми crash boundaries, потерей/повтором/перестановкой сообщений, concurrency, snapshot expiry и restore. Обязательные случаи перечислены в contract §10. До реализации критических durability/dedup/owner invariants тест должен показать отказ. FFI/storage/schema/platform integration проверяются отдельно там, где shared unit test не может обнаружить ошибку. AI evaluation остаётся per capability/language/runtime/device, поскольку модели разные.
+The new required check is a protocol fault harness with controlled crash boundaries, message loss/retry/reordering, concurrency, snapshot expiry, and restore. Required cases are listed in contract §10. Before implementation, tests must demonstrate failure for critical durability/dedup/owner invariants. FFI/storage/schema/platform integration is checked separately where a shared unit test cannot detect a fault. AI evaluation remains per capability/language/runtime/device because the models differ.
 
-Метрики без содержимого: command latency, oldest pending age, sync lag от server commit, retry rate, conflict rate, lease age, failed jobs, reset count. Correlation ID проходит API→receipt→job; текст и fingerprints отсутствуют в logs. Runtime telemetry передаётся только в рамках принятой политики диагностик.
+Metrics contain no content: command latency, oldest pending age, sync lag from server commit, retry rate, conflict rate, lease age, failed jobs, and reset count. Correlation ID passes through API→receipt→job; text and fingerprints are absent from logs. Runtime telemetry is transmitted only under the accepted diagnostics policy.
 
-| Сигнал | Предлагаемый порог | Владелец и действие |
+| Signal | Proposed threshold | Owner and action |
 | --- | --- | --- |
-| Нарушение dedup/owner invariant | Любой подтверждённый случай | Maintainer релиза останавливает rollout/writes затронутого scope и расследует по безопасным IDs |
-| Foreground sync latency | p95 > 2 с 15 минут при SC-004 условиях | Maintainer проверяет API/DB/hint, оставляет fallback pull; не сбрасывает очереди |
-| Worker backlog | Просрочка > 5 минут 10 минут подряд, кроме явно отложенных jobs | Maintainer проверяет leases, нагрузку, dead letters; повторяет только безопасные jobs |
-| Повторные local migration failures | Любой необъяснённый failure в pilot | Остановить расширение cohort, сохранить исходные данные, выпускать forward fix |
+| Dedup/owner invariant violation | Any confirmed case | Release maintainer stops rollout/writes for the affected scope and investigates using safe IDs |
+| Foreground sync latency | p95 > 2 s for 15 minutes under SC-004 conditions | Maintainer checks API/DB/hint and keeps fallback pull; does not clear queues |
+| Worker backlog | Delay > 5 minutes for 10 consecutive minutes, except explicitly deferred jobs | Maintainer checks leases, load, and dead letters; retries only safe jobs |
+| Repeated local migration failures | Any unexplained failure in pilot | Stop cohort expansion, preserve source data, and ship a forward fix |
 
-Сначала pilot на существующих Apple-клиентах. Новый sync выключен по умолчанию для неготового scope; старый путь остаётся единственным writer до cutover. Гейт выпуска: frozen acceptance, formal review, согласованный PR-slice map, relevant native/backend/web CI, exact-SHA gates и migration/recovery drill. Эта документационная работа не выполняет продуктовый release и не притворяется evidence этих гейтов.
+Start with a pilot on existing Apple clients. New sync is off by default for an unready scope; the old path remains the sole writer until cutover. Release gate: frozen acceptance, formal review, agreed PR-slice map, relevant native/backend/web CI, exact-SHA gates, and migration/recovery drill. This documentation work does not perform a product release or claim evidence for these gates.
 
 ## Constitution Check
 
-- Consent/local-first: FR-001/018–022, отдельные разрешения sync и AI, сохранение ADR-0002.
-- Contract ownership: module boundaries ADR-0001 и Tasks review ADR-0027 сохранены; storage/FFI изменения требуют [adr-draft.md](adr-draft.md).
-- Tests: существующие parity tests + только отсутствующие protocol/FFI/migration invariants; стратегия выше следует Principle II.
-- Observability: FR-023 и таблица сигналов, no-content diagnostics, current correlation IDs.
-- Mobile/CRT: UI не ждёт сеть; ограниченный background; CRT storage/protocol остаются прежними, perf regression проверяется существующим сценарием.
-- Design: [design.md](design.md), M-01…M-04/D-01…D-04; human sign-off pending. Это причина статуса proposal, не выдуманное approval.
-- Delivery: isolated worktree; документы не разрешают продуктовые миграции. Formal five-lens review и agreed PR slices остаются до implementation.
+- Consent/local-first: FR-001/018–022, separate sync and AI permissions, ADR-0002 preserved.
+- Contract ownership: module boundaries in ADR-0001 and Tasks review in ADR-0027 preserved; storage/FFI changes require [adr-draft.md](adr-draft.md).
+- Tests: existing parity tests plus only missing protocol/FFI/migration invariants; the strategy above follows Principle II.
+- Observability: FR-023 and signal table, no-content diagnostics, current correlation IDs.
+- Mobile/CRT: UI does not wait for network; background work is bounded; CRT storage/protocol remain unchanged, and performance regression is checked by the existing scenario.
+- Design: [design.md](design.md), M-01…M-04/D-01…D-04; human sign-off pending. This is why the status is proposal, not invented approval.
+- Delivery: isolated worktree; documents do not authorize product migrations. Formal five-lens review and agreed PR slices remain required before implementation.
 
 ## Project Structure
 
-Предлагаемые новые пути, которых пока нет в продукте:
+Proposed new paths that do not yet exist in the product:
 
 ```text
 rust/Cargo.toml
@@ -193,8 +193,8 @@ backend/app/modules/tasks/rust_adapter.py
 backend/app/modules/tasks/sync/
 ```
 
-Existing integration points: `ios/BrainBuddyKit/Sources/BrainBuddy{Core,Persistence,Sync,Workspace}`, `macos/Package.swift`, `backend/app/modules/tasks/{service.py,repository.py}`, `backend/app/container.py`, `backend/app/main.py`. Названия новых crates — предложение ownership, не требование создавать пустые abstractions заранее. Kotlin/C bridges добавляются при платформенном этапе.
+Existing integration points: `ios/BrainBuddyKit/Sources/BrainBuddy{Core,Persistence,Sync,Workspace}`, `macos/Package.swift`, `backend/app/modules/tasks/{service.py,repository.py}`, `backend/app/container.py`, `backend/app/main.py`. New crate names propose ownership; they are not a requirement to create empty abstractions in advance. Kotlin/C bridges are added during their platform stages.
 
-## Решения, которые ещё не приняты за пользователя
+## Decisions Not Yet Made on the User's Behalf
 
-Нужно принять новые conflict/recovery UX и узкое изменение accepted ADR перед реализацией. E2EE, shared spaces/assignee и порядок выпуска после Apple остаются отдельными продуктовыми решениями; предложенный baseline позволяет разрабатывать приватный trusted-server sync без выдумывания их семантики. Целевые устройства/нагрузка и retention/compatibility defaults фиксируются в первом contract slice по результатам измерений и проверки существующих ограничений.
+The new conflict/recovery UX and a narrow change to accepted ADRs must be accepted before implementation. E2EE, shared spaces/assignees, and release order after Apple remain separate product decisions; the proposed baseline allows development of private trusted-server sync without inventing their semantics. Target devices/load and retention/compatibility defaults are fixed in the first contract slice based on measurements and validation of existing constraints.

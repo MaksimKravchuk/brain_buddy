@@ -1,24 +1,24 @@
-# Предлагаемый контракт sync v1
+# Proposed Sync v1 Contract
 
-Статус: Draft. Это новый протокол только Tasks aggregate и native-task Review. «v1» означает первую версию нового протокола, не текущего REST API. Ни CRT, ни Identity, ни сырое аудио не помещаются в task change feed. Имена будущих endpoint ниже — проектируемые, не существующие маршруты.
+Status: Draft. This is a new protocol for the Tasks aggregate and native-task Review only. “v1” means the first version of the new protocol, not the current REST API. Neither CRT nor Identity nor raw audio is placed in the task change feed. The endpoint names below are proposed; these routes do not yet exist.
 
-## 1. Основные гарантии
+## 1. Core Guarantees
 
-Устройство немедленно сохраняет допустимое локальное намерение. Сервер определяет окончательно принятый порядок и проверяет действующие права. Доставка команд и изменений допускает повтор. Однократность внутренней мутации обеспечивают устойчивый command receipt и одна серверная транзакция, а не обещание сети доставить пакет ровно один раз.
+The device immediately saves an allowed local intent. The server determines the final accepted order and checks current permissions. Command and change delivery may be retried. Exactly-once internal mutation is provided by a durable command receipt and one server transaction, not by a promise that the network delivers a packet exactly once.
 
-Клиент хранит `confirmed_base`, `outbox`, `sync_issues`, `drafts` и производную `visible_state`. Последняя равна повторному применению допустимых pending-команд к подтверждённой базе. Отклонённая команда перестаёт выглядеть как подтверждённое состояние, но её payload и локальный текст сохраняются в issue. Неотправленный редактор не заменяется пришедшей серверной версией.
+The client stores `confirmed_base`, `outbox`, `sync_issues`, `drafts`, and derived `visible_state`. The latter is the result of replaying allowed pending commands over the confirmed base. A rejected command no longer appears as confirmed state, but its payload and local text are retained in an issue. An unsent editor is not replaced by an incoming server version.
 
-## 2. Идентичность и версии
+## 2. Identity and Versions
 
-`owner_id` остаётся существующим immutable account ID. `scope_id` — серверный идентификатор приватного task scope этого owner. Его наличие не создаёт sharing. Любой scope в запросе проверяется против действующей сессии; actor сервер выводит из Identity, тело запроса его не назначает.
+`owner_id` remains the existing immutable account ID. `scope_id` is the server identifier for that owner's private task scope. Its existence does not create sharing. Every scope in a request is checked against the current session; the server derives the actor from Identity, and the request body does not set it.
 
-Новые сущности и команды получают случайные UUID на клиенте до первой записи. Старые ID не перенумеровываются. UUID не используется как время или порядок. `device_id` зарегистрирован на аккаунт; `device_epoch` создаётся для поколения установки/очереди и закрывается при принудительном reset. Это дополнительный барьер, не credential.
+New entities and commands receive random UUIDs on the client before their first write. Old IDs are not renumbered. A UUID is not used as time or order. `device_id` is registered to the account; `device_epoch` is created for an installation/queue generation and closed during a forced reset. It is an additional barrier, not a credential.
 
-У сущности есть два разных счётчика: `edit_revision` — принятой доменной конкурентности, и `record_version` — любого сериализованного изменения записи. Clock bookkeeping из ADR-0027 может увеличивать `record_version`, не меняя `edit_revision`. Они не взаимозаменяемы. Каждый accepted write также получает `commit_seq` внутри scope. Все счётчики передаются JSON-строками, чтобы не зависеть от ограничения JavaScript 2^53.
+An entity has two different counters: `edit_revision` for accepted domain concurrency, and `record_version` for any serialized record change. Clock bookkeeping under ADR-0027 may increment `record_version` without changing `edit_revision`. They are not interchangeable. Each accepted write also receives a `commit_seq` within its scope. All counters are sent as JSON strings to avoid JavaScript's 2^53 limit.
 
-## 3. Локальная команда и зависимости
+## 3. Local Commands and Dependencies
 
-Пример wire envelope:
+Example wire envelope:
 
 ```json
 {
@@ -36,35 +36,35 @@
   ],
   "depends_on": [],
   "issued_at": "2026-10-08T10:00:00Z",
-  "payload": {"title": "Подготовить расчёт"}
+  "payload": {"title": "Prepare the estimate"}
 }
 ```
 
-`issued_at` сохраняет исходное время намерения и нужен существующим временным правилам, но не даёт прав, не определяет порядок commit и не является общим правилом победы в конфликте. Ограничения доверия ко времени auto-park сохраняются из ADR-0027.
+`issued_at` preserves the original intent time and is needed by existing time-based rules, but it grants no permissions, does not determine commit order, and is not a general conflict-resolution rule. Trust constraints on time for auto-park remain as specified in ADR-0027.
 
-В одной SQLite transaction runtime читает актуальное локальное состояние, проверяет команду через core, присваивает local sequence, добавляет envelope и обновляет проекцию. Ошибка диска откатывает всё. Повтор жеста после неизвестного результата локального API тоже сверяет command ID, а не создаёт второй ID автоматически.
+In one SQLite transaction, the runtime reads current local state, validates the command through the core, assigns a local sequence, adds the envelope, and updates the projection. A disk error rolls back everything. A retry of a local API gesture with an unknown result also checks the command ID instead of automatically creating a second ID.
 
-Envelope неизменен после устойчивой постановки. Если следующая offline-команда зависит от создания/редактирования, её `depends_on` содержит предыдущий command ID. Вместо выдуманного будущего server revision допускается предусловие `after_command: {command_id, entity_type, entity_id}`: сервер подставляет **edit_revision из receipt той команды**, затем сравнивает с текущей. Если между ними вмешалась другая команда, получается конфликт. Все остальные затронутые сущности имеют собственные предусловия; не только главный task ID.
+An envelope is immutable after durable enqueue. If a later offline command depends on creation/editing, its `depends_on` contains the previous command ID. Instead of inventing a future server revision, `after_command: {command_id, entity_type, entity_id}` is allowed as a precondition: the server substitutes that command's **edit_revision from its receipt**, then compares it with the current revision. If another command intervened, the result is a conflict. Every other affected entity has its own precondition; it is not only the primary task ID.
 
-Runtime отправляет по одной команде на scope, сохраняя порядок зависимостей. Отклонение блокирует её descendants; независимые commands продолжаются. `local_sequence` — уникальный порядок локальной очереди, сервер не требует непрерывной числовой последовательности: отменённые и заблокированные записи не должны навечно остановить scope.
+The runtime sends one command at a time per scope, preserving dependency order. Rejection blocks its descendants; independent commands continue. `local_sequence` is a unique local-queue order; the server does not require a continuous numeric sequence, so cancelled and blocked records cannot stop a scope forever.
 
-Неотправленные изменения не компактизируются в MVP. После подтверждённого отказа или явного разрешения конфликта создаётся новая команда с новым ID и `supersedes_command_id`; descendants тоже явно перепланируются с новыми ID. На исход с uncertainty это правило не распространяется.
+Unsent changes are not compacted in the MVP. After a confirmed rejection or explicit conflict resolution, a new command is created with a new ID and `supersedes_command_id`; descendants are also explicitly rescheduled with new IDs. This rule does not apply to an uncertain outcome.
 
-## 4. Серверная транзакция
+## 4. Server Transaction
 
-Для небольшого приватного scope достаточно сериализации его writes. Все пути записи берут один owner/scope lock, включая REST-адаптер, MCP, auto-park и задания. В PostgreSQL это row lock scope, удерживаемый до commit; в переходном SQLite — transaction/writer policy одного экземпляра. Порядок нескольких блокировок фиксирован; произвольная работа с сетью под lock запрещена.
+Serialization of writes within a small private scope is sufficient. All write paths take one owner/scope lock, including the REST adapter, MCP, auto-park, and jobs. In PostgreSQL this is a scope row lock held through commit; in transitional SQLite it is the transaction/writer policy of one instance. The order of multiple locks is fixed; arbitrary network work under a lock is prohibited.
 
-1. Проверить сессию, ownership, account generation, активность device epoch, версию протокола, размер и форму запроса.
-2. Найти receipt по `(scope_id, command_id)`. Существующий ID с тем же нормализованным содержимым возвращает известный исход. С иным содержимым возвращает `IDEMPOTENCY_KEY_REUSED`, ничего не исполняя. Права проверяются заново перед выдачей любых данных receipt.
-3. Проверить зависимости, edit revisions и доменные ограничения общей Rust-функцией на текущих данных. Зависимость без terminal receipt даёт retryable `DEPENDENCY_PENDING`; rejected dependency — terminal `DEPENDENCY_REJECTED`.
-4. Для accepted command атомарно записать domain changes, новые версии, receipt, change transaction и необходимые внутренние job/effect records. Для terminal rejection записать receipt отказа без доменной мутации.
-5. Commit, затем ответ. Уведомление устройств — после commit, может теряться и дублироваться.
+1. Check session, ownership, account generation, active device epoch, protocol version, request size, and request shape.
+2. Find the receipt by `(scope_id, command_id)`. An existing ID with the same normalized content returns the known outcome. The same ID with different content returns `IDEMPOTENCY_KEY_REUSED` and executes nothing. Permissions are checked again before returning any receipt data.
+3. Check dependencies, edit revisions, and domain constraints using the shared Rust function on current data. A dependency without a terminal receipt returns retryable `DEPENDENCY_PENDING`; a rejected dependency returns terminal `DEPENDENCY_REJECTED`.
+4. For an accepted command, atomically write domain changes, new versions, the receipt, the change transaction, and any required internal job/effect records. For a terminal rejection, write the rejection receipt without a domain mutation.
+5. Commit, then respond. Device notification happens after commit and may be lost or duplicated.
 
-Fingerprint вычисляется на сервере по RFC 8785 canonical JSON всего envelope без транспортных observability headers. Дубли ключей JSON и нецелые числовые значения там, где ожидается строковый счётчик, отклоняются до исполнения. Одинаковый command ID нельзя повторить другим endpoint с изменённой семантикой. Fingerprint хранится как служебное защищённое значение и никогда не логируется.
+The fingerprint is computed on the server from the RFC 8785 canonical JSON of the entire envelope, excluding transport observability headers. Duplicate JSON keys and non-integer numeric values where a string counter is expected are rejected before execution. The same command ID cannot be reused through another endpoint with changed semantics. The fingerprint is stored as protected service data and is never logged.
 
-Обычная DB sequence не задаёт cursor: transaction A может получить номер раньше B и commit позже. Scope counter увеличивается **под тем же lock и в той же transaction**, поэтому выдаваемый commit order не имеет такого разрыва. Это намеренный предел write throughput одного scope; при доказанной нагрузке механизм можно заменить на commit-ordered log, сохранив контракт.
+An ordinary DB sequence does not define a cursor: transaction A may get a number before B and commit after B. The scope counter is incremented **under the same lock and in the same transaction**, so the issued commit order has no such gap. This intentionally limits write throughput within one scope; if measured load proves a need, the mechanism may be replaced with a commit-ordered log while preserving the contract.
 
-## 5. Receipt и неизвестный исход
+## 5. Receipts and Unknown Outcomes
 
 ```json
 {
@@ -79,76 +79,76 @@ Fingerprint вычисляется на сервере по RFC 8785 canonical J
 }
 ```
 
-Terminal outcomes: `accepted`, `rejected`. Accepted включает допустимый доменный no-op с результатом, но без лишнего эффекта. Rejected содержит код, безопасные детали и доступную актуальную версию. `pending` у чтения результата означает незавершённую обработку; `not_found` означает отсутствие **на момент lookup**, а не доказательство, что ранее отправленный запрос никогда не commit-ится.
+Terminal outcomes: `accepted`, `rejected`. Accepted includes an allowed domain no-op with a result but no extra effect. Rejected contains a code, safe details, and the latest available version. `pending` from a result lookup means processing is unfinished; `not_found` means no record was found **at lookup time**, not proof that a previously sent request will never commit.
 
-Timeout, разрыв соединения и 5xx оставляют `sending/unknown`. Клиент повторяет тот же envelope или читает receipt. Перед повтором применяет exponential backoff с jitter; 429 учитывает Retry-After. 401 приостанавливает до reauth; 403/закрытый epoch требуют отдельного восстановления. Эти transport/policy отказы не уничтожают outbox.
+Timeout, connection loss, and 5xx leave the command in `sending/unknown`. The client retries the same envelope or reads the receipt. Before retrying, it uses exponential backoff with jitter; 429 honors Retry-After. 401 pauses until reauthentication; 403/a closed epoch require separate recovery. These transport/policy failures do not destroy the outbox.
 
-Receipt нельзя просто удалить через 24 часа. Предлагается 30 дней хранить полный ответ, затем минимальную запись `(scope, command ID, fingerprint, outcome/code, commit_seq, result_versions)` до purge аккаунта. После redaction ответ сообщает `result_redacted` и требует прочитать текущее состояние, но никогда не повторяет мутацию. Удаление сущности досрочно убирает её текст из всех retained receipt payloads. Fingerprint/IDs остаются только в закрытом служебном хранилище и удаляются при purge; в безопасный export пользовательского содержимого они не выдаются.
+A receipt cannot simply be deleted after 24 hours. The proposed policy stores the full response for 30 days, then retains a minimal record `(scope, command ID, fingerprint, outcome/code, commit_seq, result_versions)` until account purge. After redaction, the response reports `result_redacted` and requires reading current state, but never repeats the mutation. Deleting an entity removes its text early from all retained receipt payloads. Fingerprints/IDs remain only in protected service storage and are removed at purge; they are not included in a safe export of user content.
 
-После закрытия device epoch неизвестные commands не принимаются как новые. Пользовательская сверка завершается до создания нового epoch/новых намерений. Новая установка сама по себе не стирает историю дедупликации. Восстановленный backup не получает возможность переиграть старые эффекты.
+After a device epoch is closed, unknown commands are not accepted as new. User reconciliation is completed before creating a new epoch/new intents. A new installation by itself does not erase deduplication history. A restored backup cannot replay old effects.
 
-## 6. Delta feed и снимок
+## 6. Delta Feed and Snapshot
 
-Проектируемый API:
+Proposed API:
 
-| Метод и путь | Назначение |
+| Method and path | Purpose |
 | --- | --- |
-| `POST /api/sync/v1/devices` | Регистрация device epoch для текущего owner |
-| `POST /api/sync/v1/commands` | Одна команда; terminal receipt либо retryable error |
-| `GET /api/sync/v1/commands/{id}` | Owner-scoped lookup результата |
-| `POST /api/sync/v1/snapshots` | Создать стабильный snapshot и watermark |
-| `GET /api/sync/v1/snapshots/{id}?page=...` | Следующая страница неизменного снимка |
-| `GET /api/sync/v1/changes?cursor=...&limit=...` | Полные change transactions после cursor |
-| `GET /api/sync/v1/capabilities` | Protocol/schema/command versions, limits и reset policy |
+| `POST /api/sync/v1/devices` | Register a device epoch for the current owner |
+| `POST /api/sync/v1/commands` | One command; terminal receipt or retryable error |
+| `GET /api/sync/v1/commands/{id}` | Owner-scoped result lookup |
+| `POST /api/sync/v1/snapshots` | Create a stable snapshot and watermark |
+| `GET /api/sync/v1/snapshots/{id}?page=...` | Next page of the immutable snapshot |
+| `GET /api/sync/v1/changes?cursor=...&limit=...` | Complete change transactions after the cursor |
+| `GET /api/sync/v1/capabilities` | Protocol/schema/command versions, limits, and reset policy |
 
-Cursor — opaque token, связанный со scope, access generation и feed generation. `has_more` и `next_cursor` обязательны. Ответ содержит transaction ID, commit sequence, source command ID и типизированные upsert/tombstone after-images с record versions. Внутри transaction — все записи изменения: task, project/tag membership, children, review clocks/settings/receipts. Secrets и raw media исключены.
+The cursor is an opaque token bound to scope, access generation, and feed generation. `has_more` and `next_cursor` are required. A response contains transaction ID, commit sequence, source command ID, and typed upsert/tombstone after-images with record versions. A transaction contains all changed records: task, project/tag membership, children, review clocks/settings/receipts. Secrets and raw media are excluded.
 
-Страница не разрезает logical transaction. Предлагаемые начальные limits: request ≤ 256 KiB, ≤ 500 изменённых записей в одном доменном command, page target ≤ 1 MiB и ≤ 100 transactions; одна целая transaction может увеличить страницу до hard limit 4 MiB. Oversize command отклоняется до записи; batch/archive/import с большим объёмом требует отдельного согласованного chunk/operation контракта, не тихого разделения атомарной команды. Эти limits должны быть сверены с существующими максимальными размерами до cutover.
+A page never splits a logical transaction. Proposed initial limits: request ≤ 256 KiB, ≤ 500 changed records in one domain command, page target ≤ 1 MiB and ≤ 100 transactions; one complete transaction may raise the page to the 4 MiB hard limit. An oversized command is rejected before writing; a large batch/archive/import requires a separately agreed chunk/operation contract, not silent splitting of an atomic command. These limits must be checked against existing maximum sizes before cutover.
 
-Snapshot строится из одного согласованного DB snapshot вместе с watermark H и материализуется в owner-scoped временный объект. Все страницы относятся к одной версии; TTL 30 минут, continuation token не заменяет авторизацию. Клиент пишет страницы в staging DB, сверяет полноту и checksum, затем атомарно активирует confirmed base и cursor H, сохраняя outbox/issue/draft. До активации приложение читает старую базу. Checksum используется для целостности, не для поиска похожих задач, и не логируется.
+A snapshot is built from one consistent DB snapshot with watermark H and materialized as a temporary owner-scoped object. All pages refer to one version; TTL is 30 minutes, and a continuation token does not replace authorization. The client writes pages to a staging DB, checks completeness and checksum, then atomically activates the confirmed base and cursor H while preserving outbox/issues/drafts. Until activation, the app reads the old database. The checksum is for integrity, not for finding similar tasks, and is not logged.
 
-После snapshot клиент читает delta строго после H. Снимок, истёкший до завершения, запускается заново, без удаления pending. Предлагаемое хранение delta — 90 дней. Cursor вне окна, смена feed generation или восстановление server backup дают `RESET_REQUIRED`. Клиент не считает пустой ответ восстановлением.
+After the snapshot, the client reads deltas strictly after H. If a snapshot expires before completion, it is started again without deleting pending work. Proposed delta retention is 90 days. A cursor outside the window, a feed-generation change, or a server backup restore returns `RESET_REQUIRED`. The client does not treat an empty response as recovery.
 
-Tombstones содержат ID, тип и final record version. Полные after-images в feed доступны только текущему owner. При удалении сущности предыдущие retained payloads с её удаляемым содержимым редактируются/удаляются согласно deletion policy, snapshot с этим содержимым инвалидируется; tombstone и minimal dedup остаются. Account purge удаляет feed, snapshots, receipts и jobs соответствующего scope. Cursor никогда не переносится на новый аккаунт.
+Tombstones contain ID, type, and final record version. Full after-images in the feed are available only to the current owner. When an entity is deleted, prior retained payloads containing its deleted content are redacted/removed under the deletion policy, and snapshots containing that content are invalidated; the tombstone and minimal deduplication data remain. Account purge removes the feed, snapshots, receipts, and jobs for that scope. A cursor is never carried over to a new account.
 
-## 7. Применение изменений на устройстве
+## 7. Applying Changes on Device
 
-В одной локальной transaction runtime применяет **всю** change transaction к confirmed base, сопоставляет source command IDs с outbox, сохраняет receipt, затем replay оставшихся допустимых намерений и сохраняет cursor. Confirmed base меняется только последовательными feed transactions или полной активацией согласованного snapshot. ACK не записывает after-images в confirmed base: иначе поздний ACK через пропущенную transaction может разорвать согласованность нескольких записей, даже с record-version guard. Cursor не прыгает к commit_seq ACK через неизвестные промежуточные записи.
+In one local transaction, the runtime applies the **entire** change transaction to the confirmed base, matches source command IDs to the outbox, stores the receipt, replays the remaining allowed intents, and stores the cursor. The confirmed base changes only through sequential feed transactions or full activation of a consistent snapshot. An ACK does not write after-images into the confirmed base: a late ACK across a skipped transaction could otherwise break consistency among multiple records, even with a record-version guard. The cursor does not jump to an ACK's commit_seq across unknown intermediate records.
 
-ACK переводит команду в `accepted_awaiting_feed`: повтор отправки больше не нужен, но её устойчивое намерение и optimistic projection сохраняются. Оно удаляется из pending только в transaction, которая доказала включение результата в confirmed base: применён feed с source command ID, либо snapshot той же server generation с watermark ≥ receipt.commit_seq. No-op/rejected receipt, не имеющий domain changes, можно завершить непосредственно по receipt; принятую команду нельзя превратить в локальный конфликт только потому, что feed ещё не догнал ACK. Snapshot recovery отдельно сверяет **все** неизвестные command IDs через receipt lookup. ACK новее watermark snapshot остаётся ожидающим до последующего delta; отсутствие команды в delta само по себе не доказывает её исход.
+ACK moves a command to `accepted_awaiting_feed`: it no longer needs resending, but its durable intent and optimistic projection are preserved. It is removed from pending only in a transaction that proves the result is part of the confirmed base: either a feed with that source command ID is applied, or a snapshot from the same server generation has watermark ≥ `receipt.commit_seq`. A no-op/rejected receipt with no domain changes may be completed from the receipt itself; an accepted command cannot be turned into a local conflict just because the feed has not caught up with the ACK. Snapshot recovery separately checks **all** unknown command IDs through receipt lookup. An ACK newer than the snapshot watermark remains pending until a later delta; the absence of a command from a delta does not by itself prove its outcome.
 
-Каждый запрос захватывает `(workspace_generation, session_generation, local_sync_generation, server_generation)`. Все ACK, receipt, feed и snapshot responses содержат server generation. При reset/restore runtime **до** подготовки нового снимка увеличивает local sync generation и отменяет старые requests; поздние ответы с прежним набором поколений игнорируются, даже если account/session те же. Pending сохраняются и сверяются с текущей server generation. Результат из старого поколения не может убрать намерение или доказать его наличие после restore. Обычный restart клиента сам по себе не меняет server generation. Уже полученный ответ старого аккаунта не доставляется в новый workspace. Отзыв доступа останавливает sync и закрывает отображение account cache согласно существующей sign-out/security policy; unsent work не загружается новому owner. Физически отозвать данные с устройства, которое никогда больше не выйдет в сеть, сервер не может.
+Each request captures `(workspace_generation, session_generation, local_sync_generation, server_generation)`. All ACK, receipt, feed, and snapshot responses include the server generation. On reset/restore, before preparing a new snapshot, the runtime increments local sync generation and cancels old requests; late responses with the previous set of generations are ignored, even if the account/session is unchanged. Pending work is preserved and checked against the current server generation. A result from an old generation cannot remove an intent or prove it exists after restore. An ordinary client restart by itself does not change server generation. A response already received for an old account is not delivered to a new workspace. Revoking access stops sync and closes display of the account cache under the existing sign-out/security policy; unsent work is not uploaded to a new owner. The server cannot physically revoke data from a device that never reconnects.
 
-APNs, WebSocket/SSE и network callbacks только будят pull. Активный клиент делает fallback pull не реже 60 с, при foreground и network return. Мобильная ОС не обязана будить приложение точно по времени. «Synced» означает пустую очередь без issues и применённый текущий полученный watermark; подпись last synced показывает время последнего успешного прохода, а не гарантию вечной свежести.
+APNs, WebSocket/SSE, and network callbacks only wake a pull. An active client falls back to polling at least every 60 seconds, on foreground, and when the network returns. A mobile OS is not required to wake the app exactly on schedule. “Synced” means the queue is empty, there are no issues, and the latest received watermark has been applied; the last-synced label shows the time of the last successful pass, not a guarantee of perpetual freshness.
 
-## 8. Конфликты
+## 8. Conflicts
 
-| Случай | Обязательное поведение v1 |
+| Case | Required v1 behavior |
 | --- | --- |
-| Изменилась ожидаемая edit revision | Terminal `REVISION_CONFLICT`; сохранить локальное намерение и показать актуальную доступную запись |
-| Изменены разные поля одного task | В v1 допустим явный конфликт; автоматическое field merge — отдельное улучшение с проверкой всех инвариантов |
-| Повтор того же command ID | Receipt replay независимо от того, насколько состояние уже продвинулось |
-| Другой ID с «уже завершить» | No-op только если accepted доменное правило доказывает тот же результат; не маскировать intervening reopen/cancel |
-| Delete против Edit | `ENTITY_DELETED`, без upsert; копирование в новую сущность только явно |
-| Project archive против membership edit | Применить ADR-0020 под lock, при нарушении предусловия — issue |
-| Auto-park против своевременного review decision | Специализированный reducer ADR-0027; generic stale rejection не отменяет право на yield |
-| Tag membership | Явные add/remove операции над отношением; не перезапись всей коллекции чужим старым снимком |
-| Зависимая команда после отказа | `blocked_dependency`; никакого слепого replay поверх другого смысла |
+| Expected edit revision changed | Terminal `REVISION_CONFLICT`; preserve the local intent and show the latest available record |
+| Different fields of one task changed | An explicit conflict is allowed in v1; automatic field merge is a separate improvement requiring validation of all invariants |
+| Retry with the same command ID | Replay receipt regardless of how far state has since advanced |
+| Different ID for “complete again” | No-op only if the accepted domain rule proves the same result; do not mask an intervening reopen/cancel |
+| Delete versus Edit | `ENTITY_DELETED`, no upsert; copying into a new entity must be explicit |
+| Project archive versus membership edit | Apply ADR-0020 under lock; create an issue if its precondition fails |
+| Auto-park versus timely review decision | Specialized reducer under ADR-0027; generic stale rejection does not cancel the right to yield |
+| Tag membership | Explicit add/remove operations on the relation; do not replace the whole collection with another device's stale snapshot |
+| Dependent command after rejection | `blocked_dependency`; never blindly replay over changed meaning |
 
-«Оставить мою версию» создаёт команду против **показанной** пользователю актуальной версии. Если её снова изменили, требуется новое разрешение, а не force overwrite. «Использовать серверную» явно отбрасывает локальное намерение и спрашивает о dependent actions. Bulk «всегда последняя запись побеждает» в первой версии отсутствует. Существующий Mac last-push-wins изменяется только при отдельном принятии нового conflict UX и ADR.
+“Keep my version” creates a command against the current version **shown** to the user. If it changes again, new approval is required; no force overwrite. “Use server version” explicitly drops the local intent and asks about dependent actions. Bulk “last write always wins” is absent from the first version. Existing Mac last-push-wins changes only after separate acceptance of new conflict UX and an ADR.
 
-## 9. Совместимость
+## 9. Compatibility
 
-Protocol, command schema, доменные правила, локальная DB schema и server storage epoch версионируются отдельно. Сервер принимает текущую и предыдущую опубликованную major command версию минимум 180 дней с момента замены; capabilities возвращает точные поддерживаемые версии и deadline. Старше — `UPGRADE_REQUIRED`, данные/очередь сохраняются. Правило не позволяет старому клиенту потерять неизвестные поля при full-object PUT.
+Protocol, command schema, domain rules, local DB schema, and server storage epoch are versioned separately. The server accepts the current and previous published major command versions for at least 180 days from replacement; capabilities returns the exact supported versions and deadline. Older clients receive `UPGRADE_REQUIRED`, and their data/queue are preserved. This rule prevents an old client from losing unknown fields through full-object PUT.
 
-REST-адаптер переводит legacy запросы в общий command handler и feed в той же transaction, сохраняя прежние preconditions и response shapes. Это не даёт старому клиенту новый conflict UI: legacy writes остаются сериализованными событиями, а новый клиент может конфликтовать с ними. Гарантия новых explicit conflicts относится к новым клиентам; её нельзя обещать для старых last-writer клиентов. Окно совместимости заканчивается управляемым minimum-version gate перед изменением несовместимых инвариантов.
+The REST adapter translates legacy requests into the shared command handler and feed in the same transaction, preserving prior preconditions and response shapes. This does not give old clients the new conflict UI: legacy writes remain serialized events, and a new client can conflict with them. The new explicit-conflict guarantee applies to new clients; it cannot be promised for old last-writer clients. The compatibility window ends with a managed minimum-version gate before incompatible invariants change.
 
-Фича включается по scope capabilities, не только локальным UI flag. После активации нового хранения flag OFF останавливает rollout и новые подключения, но не возвращает старый writer к новой DB. У каждого storage epoch есть старейший совместимый образ. Восстановление сервера меняет server/feed generation, закрывает опасные epochs и сверяет внешние эффекты; rollback DB отдельно от receipts/effects запрещён.
+The feature is enabled by scope capabilities, not only a local UI flag. After new storage is activated, flag OFF stops rollout and new connections but does not return an old writer to the new DB. Each storage epoch has an oldest compatible image. Server restore changes server/feed generation, closes unsafe epochs, and reconciles external effects; rolling back the DB separately from receipts/effects is prohibited.
 
-Restore выполняется при закрытом доступе. До разрешения чтений и writes необходимо повторно применить **все** последующие purge/deletion и credential/session revocation решения из durable control ledger, который не откатывается вместе с task backup. Иначе старый backup мог бы воскресить удалённые данные или ранее отозванный доступ. При восстановлении Identity сомнительные сессии отзываются и требуется свежая аутентификация; одного закрытия device epochs недостаточно. Если completeness ledger нельзя доказать, сервис остаётся закрытым до сверки. Control ledger сам содержит только минимальные IDs/generations и имеет собственную защищённую backup/retention policy.
+Restore runs with access closed. Before reads and writes are allowed, **all** later purge/deletion and credential/session revocation decisions from the durable control ledger, which is not rolled back with the task backup, must be reapplied. Otherwise an old backup could resurrect deleted data or previously revoked access. On restore, uncertain Identity sessions are revoked and fresh authentication is required; closing device epochs alone is insufficient. If ledger completeness cannot be proven, the service remains closed until reconciliation. The control ledger itself contains only minimal IDs/generations and has its own protected backup/retention policy.
 
-Backup/WAL policy должна задавать проверенный RPO/RTO до production cutover. Потерю подтверждённых commits при disaster restore нельзя объявлять «успешной синхронизацией»: восстановление до более старой точки требует явного incident/reconciliation, закрытых epochs и сверки сохранившихся клиентских намерений/receipts. Из уже утраченного receipt невозможно получить exactly-once задним числом; новый ID не является восстановлением доказательства.
+Backup/WAL policy must define a verified RPO/RTO before production cutover. Lost confirmed commits after disaster restore cannot be declared “successful sync”: restoring to an older point requires an explicit incident/reconciliation, closed epochs, and reconciliation of surviving client intents/receipts. An already-lost receipt cannot provide exactly-once retroactively; a new ID does not restore that proof.
 
-## 10. Обязательные сценарии проверки
+## 10. Required Validation Scenarios
 
-Проверить crash до/после каждой transaction boundary; duplicate и reordered delivery; ACK после более нового delta; ACK до пропущенного промежуточного multi-record delta; ACK за watermark snapshot; две offline-команды после create; вмешательство другого устройства между зависимостями; independent queue progress после rejection; snapshot pagination при конкурентных writes; delete/redaction во время snapshot; 90-дневный offline; receipt после 30 дней; purge/revocation после даты восстановленного backup; поздний pre-restore ACK при той же сессии; stale session response; неподдерживаемый command; lock/commit race; app/widget concurrent writes; auto-park yield и bookkeeping без edit revision. Инвариант: `visible = confirmed + replay(допустимые pending)` и terminal receipt никогда не разрешает повторный внутренний эффект.
+Check crashes before/after every transaction boundary; duplicate and reordered delivery; ACK after a newer delta; ACK before a skipped intermediate multi-record delta; ACK beyond snapshot watermark; two offline commands after create; another device intervening between dependent commands; independent queue progress after rejection; snapshot pagination during concurrent writes; delete/redaction during snapshot; 90 days offline; receipt after 30 days; purge/revocation after the date of a restored backup; late pre-restore ACK in the same session; stale session response; unsupported command; lock/commit race; concurrent app/widget writes; auto-park yield and bookkeeping without edit revision. Invariant: `visible = confirmed + replay(allowed pending)` and a terminal receipt never permits repeating an internal effect.

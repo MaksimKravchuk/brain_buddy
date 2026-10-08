@@ -1,29 +1,29 @@
-# Proposed ADR: общее Rust-ядро и task sync
+# Proposed ADR: shared Rust core and task sync
 
-Статус: Proposed, 2026-10-08. Номер accepted ADR пока не резервируется. Выбор направления Rust + own sync подтверждён пользователем; конкретный протокол, UX и миграционные границы здесь предлагаются для принятия.
+Status: Proposed, 2026-10-08. An accepted ADR number is not reserved yet. The user confirmed the Rust + custom sync direction; the concrete protocol, UX, and migration boundaries below are proposed for acceptance.
 
-## Решение
+## Decision
 
-Нормативные правила Tasks и native-task Review реализуются в одной чистой Rust-библиотеке. Нативные клиенты используют Rust client runtime с SQLite и устойчивой очередью; backend вызывает domain core через PyO3 и сохраняет действующую Identity authority. Новый task sync передаёт команды, receipts и атомарные изменения. Целевой task store — PostgreSQL, с отдельной управляемой миграцией. Modular monolith сохраняется.
+The normative Tasks and native-task Review rules are implemented in one pure Rust library. Native clients use a Rust client runtime with SQLite and a durable queue; the backend calls the domain core through PyO3 and preserves the current Identity authority. New task sync transports commands, receipts, and atomic changes. PostgreSQL is the target task store, introduced through a separate controlled migration. The modular monolith remains.
 
-## Какие решения изменяются
+## Decisions being amended
 
-ADR-0001 меняется только в выборе реализации Tasks rules и его server persistence. Владение данными, application ports и границы Capture/Organize/Tasks/Thinking/Execution/Identity остаются. ADR-0027 меняется только в технологии хранения и реализации shared rules; его auto-park/yield/review семантика и атомарность task+review остаются обязательными.
+ADR-0001 changes only in the implementation of Tasks rules and its server persistence. Data ownership, application ports, and Capture/Organize/Tasks/Thinking/Execution/Identity boundaries remain. ADR-0027 changes only in storage technology and shared-rule implementation; its auto-park, yield, and review semantics and task+review atomicity remain mandatory.
 
-Текущая инструкция `ios/AGENTS.md` «No third-party dependencies» должна получить узкое разрешение на audited/pinned Rust bindings и нужный runtime. Только после принятия этого изменения можно менять продуктовую dependency policy; произвольные Apple packages не разрешаются.
+The current `ios/AGENTS.md` instruction, “No third-party dependencies,” needs a narrow allowance for audited, pinned Rust bindings and their required runtime. The product dependency policy can change only after that amendment is accepted; arbitrary Apple packages are not permitted.
 
-Spec 021 last-push-wins для текущего sync заменяется explicit conflict при новом protocol cohort. Legacy clients сохраняют свой задокументированный контракт в compatibility window; их writes не становятся невидимыми для новых клиентов. Новый UX должен быть явно принят, а не представлен как бесшовная внутренняя оптимизация.
+Spec 021's last-push-wins behavior for current sync is replaced by explicit conflicts for the new protocol cohort. Legacy clients retain their documented contract during the compatibility window; their writes remain visible to new clients. The new UX must be accepted explicitly rather than presented as an invisible internal optimization.
 
-ADR-0026 CRT protocol и ADR-0028 Identity authority не отменяются. Их базы, receipts, exports и recovery остаются в их модулях. Переезд Tasks не даёт оснований объединять все системы хранения в одну транзакцию.
+ADR-0026's CRT protocol and ADR-0028's Identity authority are not superseded. Their databases, receipts, exports, and recovery remain in their respective modules. Moving Tasks does not justify treating every storage system as one transaction.
 
-## Почему не другие варианты
+## Why not the alternatives
 
-Серверные правила без общего client runtime не обеспечат одинаковые offline-действия. Managed sync сократил бы часть транспорта, но пользователь выбрал собственный, поэтому мы берём на себя snapshot, ordering, retention, dedup и recovery. Универсальный CRDT не решает авторизацию, подтверждение AI и внешние эффекты; для текущих задач достаточно command protocol и явных конфликтов. Перепись всего backend на Rust увеличит миграционную поверхность без обязательной выгоды для единых правил.
+Server rules without a shared client runtime cannot provide identical offline behavior. Managed sync would reduce some transport work, but the user selected custom sync, so we own snapshots, ordering, retention, deduplication, and recovery. A universal CRDT does not solve authorization, AI confirmation, or external effects; a command protocol and explicit conflicts are sufficient for current tasks. Rewriting the whole backend in Rust would enlarge the migration surface without being necessary to share rules.
 
-## Цена решения
+## Consequences
 
-Команда поддерживает FFI/build matrix и собственный sync protocol. Общие rules тестируются однажды, но платформенные границы, БД, сеть и разные модели AI всё равно требуют своих проверок. Консервативные конфликты иногда требуют лишнего пользовательского выбора. Защита от дублей и восстановление старой uncertainty важнее гладкого happy-path demo.
+The team maintains an FFI/build matrix and its own sync protocol. Shared rules are tested once, but platform boundaries, databases, networking, and different AI models still need their own checks. Conservative conflicts sometimes require an extra user choice. Duplicate prevention and recovery of legacy uncertainty matter more than a smooth happy-path demonstration.
 
-## Условия принятия
+## Acceptance conditions
 
-Нужны review конкретного [контракта](contracts/sync-v1.md), UX sign-off [design.md](design.md), подтверждённые limits и точный migration/rollback boundary. Этот draft не выдаёт approval на удаление данных, изменение production schema или автоматический выпуск.
+Acceptance requires review of the concrete [contract](contracts/sync-v1.md), UX sign-off for [design.md](design.md), validated limits, and an exact migration/rollback boundary. This draft does not authorize data deletion, production schema changes, or automatic release.

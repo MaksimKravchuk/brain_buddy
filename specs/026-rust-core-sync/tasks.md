@@ -1,40 +1,40 @@
-# Tasks: общее Rust-ядро и собственная синхронизация
+# Tasks: shared Rust core and custom synchronization
 
-Статус: draft последовательности, не разрешение исполнять продуктовые изменения. Пользователь запросил спецификацию. До реализации подробные PR-срезы должны получить отдельную согласованную карту `brainbuddy-pr-slices/v2`; ниже этапы, а не заявления, что весь этап поместится в один PR. У каждого будущего среза будут реальные пути, бюджет ≤ 400 product lines / 12 files и собственная проверка.
+Status: draft sequence, not authorization to execute product changes. The user requested a specification. Before implementation, detailed PR slices must receive a separately agreed `brainbuddy-pr-slices/v2` map. The items below are stages, not claims that each stage fits one PR. Every future slice will have real paths, a budget of ≤ 400 product lines / 12 files, and its own verification.
 
-## Phase 1 — Зафиксировать контракт
+## Phase 1 — Freeze the contract
 
-- [ ] T001 Уточнить и принять `specs/026-rust-core-sync/design.md`, `adr-draft.md` и proposed defaults контракта; записать реальные решения, не присваивать human sign-off автоматически.
-- [ ] T002 Провести mandatory planning review по ADR-0011 с актуальными `spec.md`, `design.md`, `plan.md`, `contracts/sync-v1.md`; исправить подтверждённые дефекты и получить допустимый verdict.
-- [ ] T003 Выпустить schema/OpenAPI, mapping всех текущих writers/команд и PR-slice map в `specs/026-rust-core-sync/contracts/` и этом файле; проверить полноту FR-001…FR-026 и провести analyze. До frozen contracts coding не начинается.
+- [ ] T001 Clarify and accept `specs/026-rust-core-sync/design.md`, `adr-draft.md`, and the proposed contract defaults; record actual decisions without assigning human sign-off automatically.
+- [ ] T002 Run the mandatory ADR-0011 planning review against current `spec.md`, `design.md`, `plan.md`, and `contracts/sync-v1.md`; fix confirmed defects and obtain an admissible verdict.
+- [ ] T003 Produce schemas/OpenAPI, a mapping of every current writer/command, and the PR-slice map in `specs/026-rust-core-sync/contracts/` and this file; verify FR-001…FR-026 coverage and run analyze. Coding does not begin before contracts are frozen.
 
-## Phase 2 — US1 и US4, один core на Apple и сервере
+## Phase 2 — US1 and US4, one core on Apple and the server
 
-- [ ] T004 Сверить существующие normalization, formulation и archive golden vectors в `ios/BrainBuddyKit/Tests/` и `backend/tests/`; зафиксировать parity oracle, целевые устройства и нагрузку для SC-001/003.
-- [ ] T005 Пройти вертикальный Rust/Swift/Python срез в будущих `rust/crates/bb-domain/`, `rust/bindings/swift/`, `rust/bindings/python/`, сохранив один writer; проверить FFI lifecycle/error/packaging и требования `ios/AGENTS.md`.
-- [ ] T006 По группам правил перенести reducer, Smart Add, normalization, queries и Review из `BrainBuddyCore` и `backend/app/modules/tasks/` в core; удалить заменённую domain authority после parity, не оставляя второй live implementation.
+- [ ] T004 Reconcile existing normalization, formulation, and archive golden vectors in `ios/BrainBuddyKit/Tests/` and `backend/tests/`; freeze the parity oracle, target devices, and workload for SC-001/003.
+- [ ] T005 Complete a Rust/Swift/Python vertical slice in the proposed `rust/crates/bb-domain/`, `rust/bindings/swift/`, and `rust/bindings/python/`, preserving one writer; verify FFI lifetime, errors, packaging, and `ios/AGENTS.md` requirements.
+- [ ] T006 Move the reducer, Smart Add, normalization, queries, and Review from `BrainBuddyCore` and `backend/app/modules/tasks/` into the core by rule group; remove the replaced domain authority after parity is established, leaving no second live implementation.
 
-## Phase 3 — US1, US2 и US3, надёжный sync
+## Phase 3 — US1, US2, and US3, reliable sync
 
-- [ ] T007 Добавить устойчивые receipt/feed transactions и compatibility adapter в `backend/app/modules/tasks/` вместе с недостающими тестами crash/dedup/ordering; включить все writers через `backend/app/container.py` и application ports.
-- [ ] T008 Реализовать snapshot/delta/capabilities и version/epoch handling в будущем `backend/app/modules/tasks/sync/`; доказать commit-order, expiry, account isolation и current auth recheck.
-- [ ] T009 Реализовать SQLite/outbox/replay runtime в `rust/crates/bb-client/` и JSON import через `BrainBuddyPersistence`; проверить multiprocess, full disk, old uncertain outbox, accountless и linked identity mapping.
-- [ ] T010 Подключить runtime через `BrainBuddyWorkspace` и существующие iOS/macOS sync surfaces; реализовать согласованные M-/D- состояния из `design.md` и проверить conflict/reset/sign-out на устройствах.
-- [ ] T011 Провести fault/convergence/compatibility suite и pilot rollout существующих Apple-клиентов с current backend, до отдельной server DB миграции; сохранить exact-SHA и recovery evidence.
+- [ ] T007 Add durable receipt/feed transactions and the compatibility adapter in `backend/app/modules/tasks/`, together with missing crash/deduplication/ordering tests; connect all writers through `backend/app/container.py` and application ports.
+- [ ] T008 Implement snapshot/delta/capabilities and version/epoch handling in the proposed `backend/app/modules/tasks/sync/`; prove commit order, expiry, account isolation, and current authorization rechecks.
+- [ ] T009 Implement the SQLite/outbox/replay runtime in `rust/crates/bb-client/` and JSON import through `BrainBuddyPersistence`; verify multiple processes, full disk, legacy uncertain outbox entries, account-less use, and linked identity mapping.
+- [ ] T010 Connect the runtime through `BrainBuddyWorkspace` and existing iOS/macOS sync surfaces; implement the agreed M-/D- states from `design.md` and verify conflict/reset/sign-out behavior on devices.
+- [ ] T011 Run the fault/convergence/compatibility suite and a pilot rollout for existing Apple clients with the current backend, before the separate server DB migration; retain exact-SHA and recovery evidence.
 
-## Phase 4 — US4 и US5, серверные обязанности и AI adapters
+## Phase 4 — US4 and US5, server responsibilities and AI adapters
 
-- [ ] T012 По inventory `backend/app/main.py` перенести существующие задания в durable job adapter с leases/fencing; отключать старого scheduler владельца только после проверки equivalence и safe retry.
-- [ ] T013 Подключить общую AI policy/proposal validation к существующим `backend/app/workflows/voice_brain_dump/` и нативным adapters; проверить consent denial, cancellation и недопустимые предложения, не меняя ADR-0002.
-- [ ] T014 Подготовить отдельный stopped-writer перенос Tasks aggregate/receipts/feed/jobs на PostgreSQL; добавить миграцию в `backend/app/modules/tasks/`, обновить backup/export/purge/recovery adapters; получить требуемый допуск этой миграции.
+- [ ] T012 Use the `backend/app/main.py` inventory to move existing jobs into a durable job adapter with leases/fencing; disable the old scheduler owner only after equivalence and safe retries are verified.
+- [ ] T013 Connect shared AI policy/proposal validation to existing `backend/app/workflows/voice_brain_dump/` and native adapters; verify consent denial, cancellation, and invalid proposals without changing ADR-0002.
+- [ ] T014 Prepare a separate stopped-writer migration of the Tasks aggregate/receipts/feed/jobs to PostgreSQL; add the migration in `backend/app/modules/tasks/`, update backup/export/purge/recovery adapters, and obtain the required migration authorization.
 
-## Phase 5 — Новые платформы
+## Phase 5 — New platforms
 
-- [ ] T015 Зафиксировать отдельные platform slices и реализовать Android consumer `rust/bindings/kotlin/` плюс нативный shell с US1–US3; переиспользовать shared rules, проверить реальное устройство и offline recovery.
-- [ ] T016 После Android portability gate согласовать и выполнить Windows C ABI consumer и Linux GTK shell; их новые product paths и packaging фиксируются в platform slice до coding.
+- [ ] T015 Freeze separate platform slices and implement the Android consumer in `rust/bindings/kotlin/` plus a native shell covering US1–US3; reuse shared rules and verify a real device and offline recovery.
+- [ ] T016 After the Android portability gate, agree and implement the Windows C ABI consumer and Linux GTK shell; freeze their new product paths and packaging in the platform slice before coding.
 
-## Зависимости и приёмка
+## Dependencies and acceptance
 
-T001–T003 → T004–T006 → T007–T011. T012/T013 могут готовиться после frozen command contract, но не обходят изменения domain authority; T014 выполняется отдельным migration rollout. T015/T016 используют уже принятый protocol/runtime. Внутри этапов параллельная работа допустима только по disjoint approved slices.
+T001–T003 → T004–T006 → T007–T011. T012/T013 may be prepared after the command contract is frozen, but cannot bypass domain-authority changes; T014 is a separate migration rollout. T015/T016 consume the accepted protocol/runtime. Parallel work within stages is allowed only for disjoint approved slices.
 
-Критерии — US1–US5 и SC-001…SC-008 из `spec.md`; конкретные проверки указаны в plan §8 и contract §10. Product acceptance, traceability и report создаются по фактической реализации. Текущая spec-only проверка не закрывает ни один checkbox реализации.
+The criteria are US1–US5 and SC-001…SC-008 in `spec.md`; specific checks are listed in plan §8 and contract §10. Product acceptance, traceability, and the report are produced from actual implementation evidence. The current spec-only verification does not complete any implementation checkbox.

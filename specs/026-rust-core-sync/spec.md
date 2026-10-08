@@ -1,153 +1,153 @@
-# Feature Specification: общее Rust-ядро и собственная синхронизация
+# Feature Specification: shared Rust core and custom synchronization
 
 **Feature Branch**: `026-rust-core-sync`
 
 **Created**: 2026-10-08
 
-**Status**: Draft для обсуждения; направление выбрано, реализация и новые UX-решения не утверждены.
+**Status**: Draft for discussion; the direction has been selected, but implementation and new UX decisions have not been approved.
 
-**Input**: «Rust и свой синк выглядит перспективно. Нужно сделать спеку для этого решения». Основание: [intake.md](intake.md). Техническое устройство: [plan.md](plan.md), [sync-v1.md](contracts/sync-v1.md). Здесь зафиксированы поведение и граница результата.
+**Input** (translated): “Rust and custom sync look promising. We need a specification for this solution.” Basis: [intake.md](intake.md). Technical design: [plan.md](plan.md), [sync-v1.md](contracts/sync-v1.md). This document defines the behavior and outcome boundary.
 
 ## User Scenarios & Testing *(mandatory)*
 
-Первичный цикл capture → clarify/approve → organise → review → evidence сохраняется. Запись и организация задач становятся одинаковыми на нативных устройствах, а синхронизация перестаёт зависеть от отдельных реализаций клиента. Предложения AI и результаты агентов по-прежнему не меняют задачи без предусмотренного подтверждения. Первое внедрение — iOS, macOS и сервер; Android, Windows и Linux используют тот же контракт в следующих этапах.
+The primary capture → clarify/approve → organise → review → evidence cycle is preserved. Task capture and organization become consistent across native devices, and synchronization no longer depends on separate client implementations. AI proposals and agent results still do not change tasks without the required confirmation. The first rollout covers iOS, macOS, and the server; Android, Windows, and Linux use the same contract in later stages.
 
-### User Story 1 — Записать задачу без сети и продолжить на другом устройстве (Priority: P1)
+### User Story 1 — Capture a task offline and continue on another device (Priority: P1)
 
-Пользователь записывает задачу, меняет её список и добавляет заметку даже без подключения. Приложение сразу показывает результат и сохраняет его до завершения процесса. После возвращения сети второе устройство получает эти изменения без ручного экспорта.
+The user captures a task, changes its list, and adds a note even without a connection. The app immediately displays the result and saves it before the process exits. When connectivity returns, the second device receives these changes without manual export.
 
-**Why this priority**: потерянная запись разрушает доверие к системе задач; сетевой запрос не должен стоять на пути capture.
+**Why this priority**: a lost capture undermines trust in the task system; a network request must not stand in the way of capture.
 
-**Independent Test**: отключить сеть на iPhone, создать и изменить задачи, завершить процесс, открыть снова, затем подключить сеть и сверить Mac и сервер.
-
-**Acceptance Scenarios**:
-
-1. **Given** загруженные локальные данные, **When** нет сети, **Then** просмотр, создание, редактирование и существующие GTD-команды работают; подтверждённая локальная запись переживает перезапуск.
-2. **Given** сервер принял изменение, но ответ потерялся, **When** клиент повторяет отправку после перезапуска, **Then** задача и связанные эффекты в системе создаются один раз.
-3. **Given** несколько действий над новой задачей, **When** они доходят до сервера, **Then** зависимости сохраняются: редактирование не теряется и не исполняется до создания.
-4. **Given** пользователь не входил в аккаунт, **When** он работает локально, **Then** сеть и сервер не требуются; последующий вход предлагает видимое объединение с аккаунтом, не стирает локальные записи автоматически.
-
-### User Story 2 — Разрешить конфликт без потери своего текста (Priority: P1)
-
-Если iPhone и Mac независимо изменили одну задачу, система либо применяет безопасное правило, либо показывает пользователю обе версии и сохраняет его работу до выбора. Самое позднее время на часах устройства не определяет победителя.
-
-**Independent Test**: на двух отключённых устройствах изменить одно название, переподключить в обоих порядках, выбрать итоговую версию.
+**Independent Test**: disconnect an iPhone, create and edit tasks, terminate the process, reopen the app, then reconnect and compare the Mac and server state.
 
 **Acceptance Scenarios**:
 
-1. **Given** два разных названия от одной исходной версии, **When** первое изменение уже принято, **Then** второе становится явным конфликтом; исходный и локальный текст доступны до разрешения.
-2. **Given** задача завершена на одном устройстве и намеренно открыта снова на другом, **When** приходит старая offline-команда завершения, **Then** она не отменяет повторное открытие автоматически.
-3. **Given** запись удалена допустимой существующей командой на сервере, **When** приходит её offline-правка, **Then** запись не воскресает; локальный текст можно сохранить отдельной новой записью только явным действием.
-4. **Given** конфликт одной задачи, **When** пользователь работает с другой, **Then** приложение остаётся доступным, а независимые изменения могут синхронизироваться.
+1. **Given** loaded local data, **When** there is no network, **Then** viewing, creation, editing, and existing GTD commands work; a confirmed local write survives a restart.
+2. **Given** the server accepted a change but the response was lost, **When** the client retries submission after a restart, **Then** the task and related effects are created in the system once.
+3. **Given** several actions on a new task, **When** they reach the server, **Then** dependencies are preserved: edits are neither lost nor executed before creation.
+4. **Given** the user has not signed in, **When** they work locally, **Then** no network or server is required; subsequent sign-in offers an explicit merge with the account and does not automatically erase local records.
 
-### User Story 3 — Пережить обновление, долгий offline и окончание сессии (Priority: P1)
+### User Story 2 — Resolve a conflict without losing personal text (Priority: P1)
 
-Обновление клиента или восстановление полной копии с сервера не должны уничтожать ещё не отправленные изменения. Пользователь понимает, что сохранено локально, что подтверждено сервером и что требует его действия.
+If the iPhone and Mac independently change the same task, the system either applies a safe rule or shows the user both versions and preserves their work until they choose. The latest time on a device clock does not determine the winner.
 
-**Independent Test**: обновить клиент с заполненным хранилищем и очередью, включая изменение с неизвестным исходом; проверить восстановление после истёкшего курсора и вход под другим аккаунтом.
-
-**Acceptance Scenarios**:
-
-1. **Given** очень старый курсор, **When** необходима новая загрузка данных, **Then** очередь и черновики сохранены отдельно, подтверждённые команды не применяются повторно, спорные изменения видимы.
-2. **Given** сессия истекла, **When** отправка получает отказ, **Then** очередь сохраняется и доступен повторный вход; она не отправляется другому пользователю.
-3. **Given** недостаточно места или импорт повреждён, **When** выполняется миграция, **Then** старый файл остаётся целым, новое хранилище не становится активным, показана конкретная ошибка.
-4. **Given** старая отправленная команда не имеет доказуемого результата, **When** проводится миграция, **Then** система не создаёт новую копию по совпадению названия и времени.
-
-### User Story 4 — Получать одинаковые правила и фоновые результаты (Priority: P2)
-
-Доступность действий, поведение проекта и правила Weekly Review совпадают на устройствах. Сервер выполняет предназначенные ему задания независимо от того, открыт ли телефон, и возвращает результат через обычную синхронизацию.
-
-**Independent Test**: прогнать нормативные примеры GTD и review через сервер и оба Apple-клиента; остановить worker после принятия задания и проверить безопасный повтор.
+**Independent Test**: change the same title on two disconnected devices, reconnect in both orders, and choose the final version.
 
 **Acceptance Scenarios**:
 
-1. Одинаковые входные данные и одна версия правил дают одинаковое решение о допустимости команды и одинаковый доменный результат.
-2. Архивирование проекта сохраняет его состав и возвращает его согласно ADR-0020; изменение UI не переопределяет правило.
-3. Auto-park сохраняет все ограничения ADR-0027, включая приоритет допустимого offline-решения человека над автоматическим переносом.
-4. Повтор запуска задания после сбоя не создаёт вторую внутреннюю мутацию; неопределённый исход внешнего эффекта показывается как неопределённый, а не как успех.
+1. **Given** two different titles derived from the same base version, **When** the first change has already been accepted, **Then** the second becomes an explicit conflict; the original and local text remain available until resolution.
+2. **Given** a task was completed on one device and intentionally reopened on another, **When** an old offline completion command arrives, **Then** it does not automatically undo the reopening.
+3. **Given** a record was deleted on the server by a valid existing command, **When** an offline edit to that record arrives, **Then** the record is not resurrected; the local text can be saved as a separate new record only through an explicit action.
+4. **Given** a conflict on one task, **When** the user works on another, **Then** the app remains usable and independent changes can synchronize.
 
-### User Story 5 — Использовать AI с понятной границей данных (Priority: P2)
+### User Story 3 — Survive an update, extended offline use, and session expiry (Priority: P1)
 
-Приложение использует подходящую локальную модель, если она доступна и справляется с задачей. При отсутствии модели пользователь может разрешить конкретный удалённый путь или продолжить вручную.
+A client update or restoration of a full copy from the server must not destroy changes that have not yet been sent. The user understands what is saved locally, what the server has confirmed, and what requires their action.
 
-**Independent Test**: одна функция с доступной и недоступной локальной моделью, запрещённым и разрешённым удалённым исполнением, некорректным ответом и отменой.
+**Independent Test**: update a client with a populated store and queue, including a change with an unknown outcome; verify recovery after an expired cursor and sign-in to a different account.
 
 **Acceptance Scenarios**:
 
-1. В режиме «только на устройстве» отсутствие модели, нехватка памяти и ошибка не вызывают отправку содержимого на сервер или провайдеру.
-2. Для удалённого запроса показаны получатель и передаваемые данные; отзыв согласия останавливает ещё не начавшиеся запросы и дальнейшую передачу.
-3. Ответ модели остаётся предложением. Только явное подтверждение допустимых действий отправляет обычные команды; недопустимые действия отклоняются.
-4. Успех AgentRun сам по себе не завершает связанную задачу и не расширяет полномочия агента.
+1. **Given** a very old cursor, **When** a fresh data download is required, **Then** the queue and drafts are preserved separately, confirmed commands are not applied again, and disputed changes are visible.
+2. **Given** the session has expired, **When** submission is rejected, **Then** the queue is preserved and sign-in is available again; the queue is not sent as another user.
+3. **Given** insufficient space or a corrupted import, **When** migration runs, **Then** the old file remains intact, the new store does not become active, and a specific error is shown.
+4. **Given** an old submitted command has no provable outcome, **When** migration runs, **Then** the system does not create a new copy based on matching title and time.
+
+### User Story 4 — Receive consistent rules and background results (Priority: P2)
+
+Action availability, project behavior, and Weekly Review rules are consistent across devices. The server executes jobs assigned to it regardless of whether the phone app is open and returns the result through normal synchronization.
+
+**Independent Test**: run normative GTD and review examples through the server and both Apple clients; stop a worker after a job is accepted and verify a safe retry.
+
+**Acceptance Scenarios**:
+
+1. Identical inputs and the same rule version produce the same decision on command validity and the same domain result.
+2. Project archiving preserves membership and restores it according to ADR-0020; a UI change does not override the rule.
+3. Auto-park preserves all ADR-0027 constraints, including precedence of a valid offline human decision over an automatic move.
+4. Retrying a job after a failure does not create a second internal mutation; an uncertain external-effect outcome is shown as uncertain rather than successful.
+
+### User Story 5 — Use AI with a clear data boundary (Priority: P2)
+
+The app uses a suitable local model when it is available and capable of the task. If no model is available, the user can authorize a specific remote path or continue manually.
+
+**Independent Test**: exercise one feature with an available and unavailable local model, prohibited and authorized remote execution, an invalid response, and cancellation.
+
+**Acceptance Scenarios**:
+
+1. In “on-device only” mode, a missing model, insufficient memory, or an error does not cause content to be sent to the server or a provider.
+2. The recipient and transmitted data are shown for a remote request; revoking consent stops requests that have not yet started and further transmission.
+3. A model response remains a proposal. Only explicit confirmation of valid actions submits ordinary commands; invalid actions are rejected.
+4. AgentRun success alone does not complete the linked task or expand the agent's authority.
 
 ### Edge Cases
 
-Проверяются: повторная доставка; смена порядка ответов; crash между записью и ответом; создание и правки offline; зависимость от отклонённой команды; отзыв доступа; разные аккаунты; несовместимая версия клиента; изменение схемы во время offline; истёкший снимок; часы устройства впереди сервера; переход DST; заполненный диск; параллельные app/widget/intents; старая резервная копия устройства; удаление аккаунта с очередью; выключенный feature flag; отмена AI после начала удалённой обработки; неизвестный исход внешнего вызова. Нельзя называть «синхронизировано» состояние с нерешённой ошибкой или неполным bootstrap.
+Verify: duplicate delivery; reordered responses; a crash between a write and its response; offline creation and edits; dependency on a rejected command; access revocation; different accounts; an incompatible client version; a schema change while offline; an expired snapshot; a device clock ahead of the server; a DST transition; a full disk; concurrent app/widget/intents; an old device backup; account deletion with a queue; a disabled feature flag; AI cancellation after remote processing begins; an unknown external-call outcome. A state with an unresolved error or incomplete bootstrap must not be labeled “synchronized”.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: Существующие локальные команды задач MUST сохранять результат и намерение синхронизации атомарно; подтверждение локального успеха выдаётся после устойчивой записи.
-- **FR-002**: Все нативные клиенты и сервер MUST использовать одну нормативную реализацию правил задач, проектов, Tags и native-task review. Представление, разрешения сервера и интеграции остаются отдельными обязанностями.
-- **FR-003**: Account-less работа MUST сохраняться. Вход с локальными данными требует понятного выбора объединения; выход предупреждает о потере локальной копии и не переносит очередь между аккаунтами.
-- **FR-004**: Подключённые активные устройства MUST автоматически сходиться к принятому сервером состоянию, включая связанные записи и удаления, при отсутствии новых команд и разрешённых конфликтах.
-- **FR-005**: Повтор одной команды с тем же содержимым MUST возвращать известный исход без повторной мутации. Неизвестный исход не разрешает автоматически менять идентификатор команды.
-- **FR-006**: Все связанные изменения одной доменной операции MUST становиться видимыми атомарно на сервере и клиенте; отметка прогресса синхронизации сохраняется вместе с ними.
-- **FR-007**: Конкурентная несовместимая правка MUST сохраняться как разрешимый конфликт, с локальным намерением и актуальными доступными данными. Первая версия допускает консервативный конфликт всей редактируемой сущности.
-- **FR-008**: Удаление MUST исключать автоматическое воскрешение поздней правкой. Это требование защищает существующие удаляемые сущности; новый интерфейс удаления задач не входит в первую очередь.
-- **FR-009**: Порядок задач и существующие операции перемещения MUST сохранять принятую семантику. Новый API ручного reorder и изменение поведения completed placement не добавляются этой миграцией.
-- **FR-010**: Reset/bootstrap/restore MUST сохранять pending-команды и черновики до доказуемого разрешения, исключать откат к старым ответам и давать восстановиться после прерывания.
-- **FR-011**: Сервер MUST проверять текущие полномочия при чтении и записи; клиент MUST разделять данные по аккаунту и поколению сессии. Поздний ответ старой сессии не изменяет новый workspace.
-- **FR-012**: Несовместимая версия MUST приводить к явной необходимости обновления с сохранением данных. Команды неизвестного типа не исполняются частично и не исчезают из очереди.
-- **FR-013**: Миграция MUST учитывать все существующие поля, идентификаторы, связи, review-состояние, local-only данные и outbox. Неопределённые старые отправки требуют сверки, а не эвристического повторного создания.
-- **FR-014**: Старые поддерживаемые клиенты, web, CLI, MCP, workflows и фоновые writers MUST проходить через ту же точку записи и публиковать изменения для нового sync; скрытые параллельные writers запрещены.
-- **FR-015**: Серверные задания MUST иметь устойчивый статус, lease, ограниченные повторы и защиту от устаревшего исполнителя. Внешние эффекты имеют отдельную политику повторов и не получают ложную гарантию exactly-once.
-- **FR-016**: Формулировки, review-решения, receipts, auto-park, undo и clock bookkeeping MUST сохранять принятую семантику ADR-0027, включая особое разрешение offline-решений.
-- **FR-017**: Даты MUST различать календарный день и момент времени; правила, зависящие от локального времени, используют заданную зону. Миграция сохраняет текущую семантику, не вводя новый recurrence-продукт.
-- **FR-018**: AI-policy MUST предпочитать подходящий локальный исполнитель, учитывая язык, возможности, память и доступность. Базовые задачи MUST работать без AI.
-- **FR-019**: Удалённый AI MUST иметь актуальное согласие на выбранного получателя, минимальный набор данных и настроенные credentials. Сетевой sync задач не означает согласие на AI-обработку.
-- **FR-020**: AI-выход MUST проходить проверку формы и доменных правил и оставаться предложением до требуемого подтверждения. ADR-0002 confirmation/operation contract сохраняется.
-- **FR-021**: AgentRun MUST оставаться отдельно от Task. Существующие A2A/MCP authority, uncertainty и lookup-контракты сохраняются; права берутся из выданной capability, а не из модельного текста.
-- **FR-022**: Новые локальные и серверные записи MUST входить в политику экспорта, удаления, retention и восстановления. Пользовательский текст, аудио, credentials и fingerprints не попадают в диагностику.
-- **FR-023**: UI MUST различать локально сохранённое, ожидающее отправки, синхронизированное, конфликт, авторизацию, неподдерживаемую версию и восстановление; сообщения дают действие и безопасный reference ID.
-- **FR-024**: Веб MUST сохранять существующие сценарии через серверный контракт. Полноценный offline web и перенос CRT в этот sync не входят в первую очередь.
-- **FR-025**: Одновременные app/widget/intents MUST не повреждать хранилище и очередь. Widget не получает отдельный sync engine и свою копию правил.
-- **FR-026**: Локальные операции и фоновое применение изменений MUST укладываться в измеряемые бюджеты, не блокировать UI и сохранять текущую отзывчивость CRT на 200 узлах.
+- **FR-001**: Existing local task commands MUST save the result and synchronization intent atomically; local success is acknowledged after a durable write.
+- **FR-002**: All native clients and the server MUST use one normative implementation of task, project, Tag, and native-task review rules. Presentation, server permissions, and integrations remain separate responsibilities.
+- **FR-003**: Account-less operation MUST be preserved. Signing in with local data requires a clear merge choice; signing out warns about losing the local copy and does not transfer the queue between accounts.
+- **FR-004**: Connected active devices MUST automatically converge to the state accepted by the server, including related records and deletions, when there are no new commands and conflicts have been resolved.
+- **FR-005**: Retrying the same command with the same content MUST return the known outcome without repeating the mutation. An unknown outcome does not permit automatically changing the command identifier.
+- **FR-006**: All related changes from one domain operation MUST become visible atomically on the server and client; synchronization progress is saved together with them.
+- **FR-007**: A concurrent incompatible edit MUST be preserved as a resolvable conflict, with the local intent and current available data. The first version may conservatively conflict the entire edited entity.
+- **FR-008**: Deletion MUST prevent automatic resurrection by a late edit. This requirement protects existing deletable entities; a new task-deletion interface is outside the first phase.
+- **FR-009**: Task ordering and existing move operations MUST preserve accepted semantics. This migration does not add a new manual reorder API or change completed-placement behavior.
+- **FR-010**: Reset/bootstrap/restore MUST preserve pending commands and drafts until a provable resolution, prevent regression to old responses, and allow recovery after interruption.
+- **FR-011**: The server MUST check current authority on reads and writes; the client MUST separate data by account and session generation. A late response from an old session does not change the new workspace.
+- **FR-012**: An incompatible version MUST result in an explicit update requirement while preserving data. Commands of unknown types are neither partially executed nor removed from the queue.
+- **FR-013**: Migration MUST account for all existing fields, identifiers, relationships, review state, local-only data, and the outbox. Uncertain old submissions require reconciliation rather than heuristic recreation.
+- **FR-014**: Older supported clients, web, CLI, MCP, workflows, and background writers MUST pass through the same write boundary and publish changes for the new sync; hidden parallel writers are prohibited.
+- **FR-015**: Server jobs MUST have durable status, a lease, bounded retries, and protection against a stale executor. External effects have a separate retry policy and are not given a false exactly-once guarantee.
+- **FR-016**: Formulations, review decisions, receipts, auto-park, undo, and clock bookkeeping MUST preserve accepted ADR-0027 semantics, including the special resolution of offline decisions.
+- **FR-017**: Dates MUST distinguish a calendar day from an instant; rules dependent on local time use the specified time zone. Migration preserves current semantics without introducing a new recurrence product.
+- **FR-018**: AI policy MUST prefer a suitable local executor, considering language, capabilities, memory, and availability. Basic task functionality MUST work without AI.
+- **FR-019**: Remote AI MUST have current consent for the selected recipient, the minimum data set, and configured credentials. Network task synchronization does not imply consent to AI processing.
+- **FR-020**: AI output MUST pass structural and domain-rule validation and remain a proposal until the required confirmation. The ADR-0002 confirmation/operation contract is preserved.
+- **FR-021**: AgentRun MUST remain separate from Task. Existing A2A/MCP authority, uncertainty, and lookup contracts are preserved; permissions come from the granted capability rather than model text.
+- **FR-022**: New local and server records MUST be covered by export, deletion, retention, and recovery policies. User text, audio, credentials, and fingerprints must not appear in diagnostics.
+- **FR-023**: The UI MUST distinguish locally saved, pending submission, synchronized, conflict, authorization, unsupported version, and recovery states; messages provide an action and a safe reference ID.
+- **FR-024**: The web MUST preserve existing workflows through the server contract. Fully offline web support and moving CRT into this sync are outside the first phase.
+- **FR-025**: Concurrent app/widget/intents MUST not corrupt the store or queue. The widget does not receive a separate sync engine or its own copy of the rules.
+- **FR-026**: Local operations and background change application MUST meet measurable budgets, avoid blocking the UI, and preserve current CRT responsiveness at 200 nodes.
 
 ### Key Entities
 
-| Сущность | Назначение |
+| Entity | Purpose |
 | --- | --- |
-| Task, Project, Tag и дочерние записи | Существующие доменные данные; владелец и идентификаторы сохраняются |
-| Review state | Настройки, formulation clock, решения, acknowledgements и receipts существующего review |
-| Command | Неизменное намерение одного действия с зависимостями и предусловиями |
-| Command receipt | Устойчивый результат рассмотрения команды, независимо от доставки ответа |
-| Change transaction и cursor | Атомарный набор принятых изменений и место клиента в потоке |
-| Confirmed base, pending и draft | Последняя принятая копия, устойчивые локальные действия и ещё не сохранённый редактор |
-| Sync issue | Сохранённая проблема применения конкретного намерения и способ её разрешения |
-| Job, Proposal, AgentRun | Фоновая работа, предложение модели и исполнение агента; не состояния Task |
+| Task, Project, Tag, and child records | Existing domain data; the owner and identifiers are preserved |
+| Review state | Settings, formulation clock, decisions, acknowledgements, and receipts of the existing review |
+| Command | Immutable intent for one action, with dependencies and preconditions |
+| Command receipt | Durable outcome of command adjudication, independent of response delivery |
+| Change transaction and cursor | An atomic set of accepted changes and the client's position in the stream |
+| Confirmed base, pending, and draft | The last accepted copy, durable local actions, and the editor's unsaved content |
+| Sync issue | A persisted problem applying a specific intent and a way to resolve it |
+| Job, Proposal, AgentRun | Background work, a model proposal, and agent execution; not Task states |
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: Все нормативные примеры выбранных существующих правил дают одинаковый результат на сервере, iOS и macOS; покрытие включает четыре GTD-списка, lifecycle, archive, Smart Add и review.
-- **SC-002**: В сценариях offline, crash, duplicate и lost-response нет потерянных подтверждённых локальных изменений и повторных принятых мутаций; каждый отказ доступен пользователю.
-- **SC-003**: Для 10 000 задач и 100 pending-изменений локальная запись завершается p95 ≤ 50 мс, список остаётся отзывчивым. Устройство нижней границы поддержки фиксируется до реализации; критерий не считается пройденным по замеру только на мощном Mac.
-- **SC-004**: Для двух активных клиентов, RTT ≤ 100 мс, без throttling и ≤ 100 pending-команд сходимость после последней принятой команды составляет p95 ≤ 2 с с включённым каналом уведомления. При потере hint обновление приходит ≤ 60 с; фоновые ограничения мобильной ОС не входят в это обещание.
-- **SC-005**: Импорт и восстановление контрольного набора сохраняют все данные и связи либо останавливаются до переключения; неопределённые отправки не создают дубликатов.
-- **SC-006**: В сценариях отказа AI-consent нет запросов с пользовательским содержимым к запрещённому получателю; некорректный модельный ответ не изменяет задачи.
-- **SC-007**: Потеря worker lease, повтор задания и восстановление backup не приводят к повторному внутреннему эффекту или доступу другого аккаунта; неопределённые внешние эффекты остаются видимыми.
-- **SC-008**: Пользователь может понять причину задержки, разрешить конфликт и возобновить sync без редактирования файлов; существующие Mac-пороги ненавязчивого статуса и доступность сохраняются.
+- **SC-001**: All normative examples of the selected existing rules produce identical results on the server, iOS, and macOS; coverage includes the four GTD lists, lifecycle, archive, Smart Add, and review.
+- **SC-002**: Offline, crash, duplicate, and lost-response scenarios have no lost confirmed local changes or repeated accepted mutations; every rejection is accessible to the user.
+- **SC-003**: For 10,000 tasks and 100 pending changes, local writes complete at p95 ≤ 50 ms and the list remains responsive. The device at the lower bound of support is specified before implementation; measurements only on a powerful Mac do not satisfy the criterion.
+- **SC-004**: For two active clients, RTT ≤ 100 ms, no throttling, and ≤ 100 pending commands, convergence after the last accepted command takes p95 ≤ 2 s with the notification channel enabled. If a hint is lost, an update arrives within ≤ 60 s; mobile OS background restrictions are outside this promise.
+- **SC-005**: Import and restoration of the reference dataset preserve all data and relationships or stop before switching stores; uncertain submissions do not create duplicates.
+- **SC-006**: AI-consent refusal scenarios send no requests containing user content to a prohibited recipient; an invalid model response does not change tasks.
+- **SC-007**: Loss of a worker lease, job retries, and backup restoration do not result in repeated internal effects or access by another account; uncertain external effects remain visible.
+- **SC-008**: The user can understand a delay, resolve a conflict, and resume sync without editing files; existing Mac thresholds for unobtrusive status and accessibility are preserved.
 
 ## Assumptions
 
-Выбор Rust и собственного sync принят пользователем. Первая очередь iOS/macOS/backend — техническое предложение, которое использует уже общую Apple-базу. Новые платформы — обязательное направление архитектуры, но не скрытое условие одновременного запуска.
+The user has accepted the choice of Rust and custom sync. The iOS/macOS/backend first phase is a technical proposal that uses the already shared Apple foundation. New platforms are a required architectural direction, but not an implicit requirement for simultaneous launch.
 
-В первой версии scope равен приватному пространству существующего owner. Устройство не является владельцем. Sharing/assignee, отдельная биллинговая модель и E2EE не считаются согласованными требованиями. Текущая модель доверенного сервера сохраняется; если понадобится E2EE, до реализации пересматриваются sync validation и server AI.
+In the first version, the scope is the existing owner's private workspace. A device is not an owner. Sharing/assignee, a separate billing model, and E2EE are not considered agreed requirements. The current trusted-server model is preserved; if E2EE is needed, sync validation and server AI must be reconsidered before implementation.
 
-Бюджеты SC-003/004 и retention в техническом контракте — явные исходные предложения. Нет обещания точного фонового cron на телефоне. Нет обещания наличия локальной модели на любом поддерживаемом устройстве или языке.
+The SC-003/004 budgets and retention in the technical contract are explicit initial proposals. There is no promise of precise background cron on a phone. There is no promise that a local model is available on every supported device or for every language.
 
 ## Clarifications
 
-Требования восстановлены из обсуждения и актуальных accepted ADR. Новых ответов владельца не выдумано. Новые экраны, технические defaults и порядок платформ ещё не имеют human sign-off. Этот документ можно рецензировать целиком; начинать реализацию до обязательных design/review/PR-slice gates нельзя.
+The requirements were reconstructed from the discussion and current accepted ADRs. No new owner answers have been invented. New screens, technical defaults, and platform order do not yet have human sign-off. This document can be reviewed in full; implementation must not begin before the mandatory design/review/PR-slice gates.

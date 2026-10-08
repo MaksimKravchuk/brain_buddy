@@ -1,23 +1,23 @@
-# Rust-ядро и собственная синхронизация Brain Buddy
+# Brain Buddy Rust core and custom synchronization
 
-Спецификация от 8 октября 2026 года. Направление выбрано пользователем; конкретный протокол и UX предложены для обсуждения. Это описание будущей реализации, не выполненная миграция.
+Specification dated October 8, 2026. The user selected the architectural direction; the concrete protocol and UX are proposals for review. This describes a future implementation, not a completed migration.
 
-[Читать в ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966) — связный текст со схемами и сворачиваемым техническим протоколом, доступный с телефона.
+[Read in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966) for a mobile-accessible document with diagrams and a collapsible technical protocol.
 
-Rust содержит общие правила задач и клиентский механизм локальной работы. Нативные интерфейсы остаются на языках платформ. Сервер принимает команды, синхронизирует принятые изменения и выполняет фоновые задания. Первым шагом сохраняется FastAPI с вызовом Rust через PyO3; полная перепись сервера не нужна.
+Rust contains shared task rules and the client runtime for local work. Native interfaces remain in each platform's language. The server accepts commands, synchronizes accepted changes, and runs background jobs. The first stage retains FastAPI with Rust calls through PyO3; a complete server rewrite is unnecessary.
 
-Начать чтение стоит с требований и технического плана. Протокол выделен отдельно, поскольку потеря ответа, конфликты и восстановление требуют точных правил, которые нельзя уместить в одну схему.
+Start with the requirements and technical plan. The protocol is a separate document because lost responses, conflicts, and recovery need precise rules that cannot fit into one diagram.
 
-| Документ | Что в нём |
+| Document | Contents |
 | --- | --- |
-| [spec.md](spec.md) | 5 пользовательских сценариев, 26 требований, 8 критериев приёмки и границы первой очереди |
-| [plan.md](plan.md) | Схемы, Rust/FFI, нативные платформы, сервер, AI, jobs, миграция и проверка |
-| [contracts/sync-v1.md](contracts/sync-v1.md) | Команды, receipts, зависимости, конфликты, snapshot/delta, retention, restore и версии |
-| [design.md](design.md) | Состояния статуса, конфликтов, восстановления и AI consent |
-| [design/sync-states.html](design/sync-states.html) | Автономные макеты для просмотра на телефоне и desktop |
-| [tasks.md](tasks.md) | Последовательность будущих этапов; detailed PR-slices составляются до implementation |
-| [adr-draft.md](adr-draft.md) | Какие действующие архитектурные решения потребуют узкого изменения |
-| [research.md](research.md) | Фактическая исходная архитектура и ссылки на код |
-| [verification.md](verification.md) | Проверки документов и исправления по независимому review |
+| [spec.md](spec.md) | 5 user stories, 26 requirements, 8 acceptance criteria, and first-stage scope |
+| [plan.md](plan.md) | Diagrams, Rust/FFI, native platforms, server, AI, jobs, migration, and verification |
+| [contracts/sync-v1.md](contracts/sync-v1.md) | Commands, receipts, dependencies, conflicts, snapshot/delta, retention, restore, and versions |
+| [design.md](design.md) | Sync status, conflict, recovery, and AI consent states |
+| [design/sync-states.html](design/sync-states.html) | Self-contained mobile and desktop mockups |
+| [tasks.md](tasks.md) | Future stages; detailed PR slices must be defined before implementation |
+| [adr-draft.md](adr-draft.md) | Narrow amendments needed to existing architecture decisions |
+| [research.md](research.md) | Current architecture and code references |
+| [verification.md](verification.md) | Document checks and fixes from independent review |
 
-Новые Android/Windows/Linux приложения — следующие потребители того же runtime. Sharing, перепоручение, E2EE, новый recurrence-продукт и перенос CRT в task sync не добавляются в первую очередь. Текущий приватный account scope не мешает дальнейшему развитию, но не обещает заранее неизвестную семантику совместной работы.
+New Android, Windows, and Linux applications become consumers of the same runtime. Sharing, delegation, E2EE, a new recurrence feature, and moving CRT into task sync are outside the first stage. The private account scope supports future development without predefining collaboration semantics that have not yet been agreed.

@@ -1,35 +1,35 @@
-# Проверка спецификации
+# Specification verification
 
-Дата: 2026-10-08. Проверяется комплект документов, не реализация Rust или нового sync. Product code, данные, credentials, CI configuration и production не изменялись.
+Date: 2026-10-08. The subject is the documentation package, not a Rust or new-sync implementation. Product code, data, credentials, CI configuration, and production are unchanged. The owner's English-only documentation rule is recorded in `AGENTS.md`.
 
-## Результаты
+## Results
 
-| Проверка | Результат |
+| Check | Result |
 | --- | --- |
-| Baseline `python3 scripts/check_spec_kit_specs.py` перед изменениями | PASS |
-| Резервирование feature number | 026 свободен среди всех доступных локальных git refs; создана отдельная ветка/worktree |
-| `make check-specs` | PASS: 247 unit tests в существующих validator suites, 246 прошли и 1 штатно skipped; artifact/manifests/integrity и существующие requirement coverage checks прошли |
-| Shared design reference tests | PASS, 6 tests; не является runtime-проверкой новых экранов |
-| Design vocabulary и HTML structure | PASS после удаления лишнего reorder и согласования sign-out/import; 8 screen IDs, 90 enumerated states, no external resources |
-| Внутренние Markdown links и FR/SC IDs | Проверены в финальном комплекте |
+| Baseline `python3 scripts/check_spec_kit_specs.py` before changes | PASS |
+| Feature-number reservation | 026 was free across all available local git refs; a separate branch/worktree was created |
+| `make check-specs` on the initial specification | PASS: 247 unit tests in existing validator suites, 246 passed and 1 normally skipped; artifact/manifests/integrity and existing requirement coverage checks passed |
+| Shared design reference tests | PASS, 6 tests; this is not runtime verification of the new screens |
+| Design vocabulary and HTML structure | PASS after removing extra reorder UI and aligning sign-out/import; 8 screen IDs, 90 enumerated states, no external resources |
+| Internal Markdown links and FR/SC IDs | Checked in the completed package |
 | `git diff --check` | PASS |
-| Browser rendering | Попытка Chromium/Playwright не удалась: sandbox запретил `setsockopt` при запуске crashpad. Геометрия на iPhone, screenshot и runtime accessibility не объявлены проверенными |
-| Backend/native/new-sync product tests | N/A для spec-only результата; критерии будущей реализации записаны в plan и contract |
+| Browser rendering | The Chromium/Playwright attempt failed because the sandbox denied `setsockopt` during crashpad startup. iPhone geometry, screenshots, and runtime accessibility are not claimed as verified |
+| Backend/native/new-sync product tests | N/A for the spec-only outcome; criteria for the future implementation are recorded in the plan and contract |
 
-`make verify-all`, exact-SHA product CI, release/production smoke не запускались: эта работа не реализует и не выпускает описанный продукт. Формальный Spec Kit planning review, human design sign-off, ADR acceptance и PR-slice approval ещё не выполнены и не подменены зелёным validator.
+`make verify-all`, exact-SHA product CI, and release/production smoke were not run: this work does not implement or release the described product. Formal Spec Kit planning review, human design sign-off, ADR acceptance, and PR-slice approval are still outstanding and are not replaced by a passing validator.
 
-## Независимая проверка
+## Independent review
 
-Read-only аудит текущего кода выполнен отдельным агентом. Учтены: уже общий Mac/iPhone kit; JSON store и cross-process lock; local/server ID mapping; 24-hour legacy task receipts; Review clocks без revision bump; archive semantics; отдельные Identity/CRT authorities.
+A separate agent performed a read-only audit of current code. The package accounts for the already shared Mac/iPhone kit, JSON store and cross-process lock, local/server ID mapping, 24-hour legacy task receipts, Review clocks without revision bumps, archive semantics, and separate Identity/CRT authorities.
 
-Отдельный adversarial review протокола нашёл три существенных дефекта. Все исправлены; targeted reread подтвердил устранение:
+A separate adversarial protocol review found three consequential defects. All were fixed, and a targeted reread confirmed their resolution:
 
-1. ACK мог менять confirmed base через пропущенную multi-record transaction. Теперь базу изменяют только последовательный feed или согласованный snapshot; ACK оставляет `accepted_awaiting_feed` до доказанного включения.
-2. Поздний ответ до restore мог примениться после reset под той же сессией. Каждый ответ теперь ограничен workspace/session/local-sync/server generations.
-3. Старый backup мог вернуть удалённые данные или отозванную сессию. Restore закрыт до применения последующих purge/revocation решений из отдельного control ledger; недоказанная сверка не открывает доступ.
+1. An ACK could update the confirmed base across a missing multi-record transaction. Only a sequential feed or consistent snapshot now changes the base; ACK retains `accepted_awaiting_feed` until inclusion is proven.
+2. A delayed pre-restore response could apply after reset under the same session. Every response is now fenced by workspace/session/local-sync/server generations.
+3. An old backup could restore purged data or a revoked session. Restore remains closed until subsequent purge/revocation decisions from a separate control ledger are applied; unproven reconciliation cannot reopen access.
 
-Это содержательный review текста, не официальный пятиаспектный approval и не доказательство корректности ещё не написанного кода.
+This is substantive review of the text, not official five-lens approval or proof of correctness for code that has not been written.
 
-## Доставка для чтения
+## Reading copy
 
-Основная читательская версия: [спецификация в ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). Page создана приватной, без Space/parent; широкое sharing не включалось. Сохранённый текст прочитан обратно, проверены native headings, требования и схемы. Предпросмотр самой Page на iPhone недоступен; HTML mock отдельно также не имеет успешной runtime-проверки.
+The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.

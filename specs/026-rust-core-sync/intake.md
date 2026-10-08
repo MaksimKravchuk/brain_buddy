@@ -1,37 +1,37 @@
-# Intake: общее Rust-ядро и собственная синхронизация
+# Intake: shared Rust core and custom synchronization
 
-Дата: 2026-10-08. Источник требований — обсуждение архитектуры с владельцем и выбор: «Rust и свой синк выглядит перспективно. Нужно сделать спеку для этого решения».
+Date: 2026-10-08. Requirements come from the architecture discussion with the owner and this choice (translated): “Rust and custom sync look promising. We need a specification for this solution.” The owner subsequently required documentation to be in English and requested a PR.
 
-## Проблема
+## Problem
 
-Правила задач реализованы в нескольких языках, а локальная работа и обмен с сервером имеют собственные механизмы восстановления. Любое изменение приходится согласовывать между реализациями. Android, Windows и Linux увеличат эту стоимость, если получать ещё по одной копии правил. iOS и macOS уже используют BrainBuddyKit; утверждение, что сейчас это два независимых доменных движка, устарело.
+Task rules are implemented in several languages, while local operation and server communication have their own recovery mechanisms. Every change must be reconciled across implementations. Android, Windows, and Linux will increase this cost if each receives another copy of the rules. iOS and macOS already use BrainBuddyKit; describing them as two independent domain engines is outdated.
 
-## Пользователь и цель
+## User and objective
 
-Основной сценарий — один человек со своими устройствами. В дальнейшем возможны общие данные и перепоручение, но эти функции ещё не определены. Нативные iOS, Android, macOS, Windows и Linux — целевые платформы; веб сохраняет существующие функции и становится вторичным. Пользователь должен быстро записывать и разбирать задачи без сети, а после подключения получать согласованное состояние без потерь и дублей.
+The primary scenario is one person using their own devices. Shared data and delegation may follow, but those features are not yet defined. Native iOS, Android, macOS, Windows, and Linux are the target platforms; the web retains existing functionality and becomes secondary. Users must be able to capture and organize tasks quickly offline, then obtain consistent state after reconnecting without loss or duplicates.
 
-## Измеримый результат
+## Measurable outcome
 
-У правил задач одна нормативная реализация и один набор поведенческих примеров. На каждом подключённом клиенте одинаковые команды дают одинаковые решения. Для первой поставки проверяется полный путь iOS ↔ сервер ↔ macOS, включая потерю ответа и конкурентные изменения. Предлагаемые бюджеты: локальная запись p95 ≤ 50 мс; активные онлайн-клиенты сходятся p95 ≤ 2 с при оговорённых условиях. Это критерии будущей реализации, а не результаты замеров.
+Task rules have one normative implementation and one set of behavioral examples. Identical commands produce identical decisions on every connected client. The first delivery verifies the complete iOS ↔ server ↔ macOS path, including lost responses and concurrent edits. Proposed budgets: local writes at p95 ≤ 50 ms; active online clients converge at p95 ≤ 2 s under the stated conditions. These are criteria for the future implementation, not benchmark results.
 
-## Граница
+## Scope boundary
 
-Эта работа создаёт спецификацию и техническое предложение. Она не запускает миграцию, реализацию или релиз. Продуктовая первая очередь охватывает существующие задачи, проекты, Tags, дочерние записи и native-task Weekly Review. Существующие голосовые операции, Identity, CRT и A2A сохраняют свои границы и получают адаптеры к командам задач там, где это нужно.
+This work produces a specification and technical proposal. It does not start a migration, implementation, or release. The first product stage covers existing tasks, projects, Tags, child records, and native-task Weekly Review. Existing voice operations, Identity, CRT, and A2A retain their boundaries and gain adapters to task commands where needed.
 
-За пределами первой очереди: общие рабочие пространства, права назначенного исполнителя, CRDT-редактор, новый язык повторений, новая автоматизация, полная перепись backend, замена модели CRT, обязательная модель на каждом телефоне и одновременный выпуск пяти клиентов. Целевая архитектура описывает точки их подключения, не выдавая это за согласованную продуктовую функциональность.
+Outside the first stage: shared workspaces, assignee permissions, a CRDT editor, a new recurrence language, new automation, a complete backend rewrite, replacement of the CRT model, a required model on every phone, and simultaneous release of all five clients. The target architecture describes integration points without presenting them as agreed product functionality.
 
-## Ограничения и соответствие
+## Constraints and compliance
 
-Локальные AI-модели имеют приоритет; удалённая обработка допускается только по действующему согласию. Существующие удаление аккаунта, экспорт, отзыв сессий и подтверждение голосовых предложений сохраняются. Для обычного server sync предлагается текущая модель доверенного сервера; сквозное шифрование содержимого не добавляется молча. Требование E2EE изменило бы проверку команд и серверный AI и потребовало бы отдельного решения.
+Local AI models take priority; remote processing requires current consent. Existing account deletion, export, session revocation, and confirmation of voice proposals remain intact. Ordinary server sync retains the current trusted-server model; content E2EE is not added implicitly. Requiring E2EE would change command validation and server AI and would need a separate decision.
 
-Срок, бюджет команды и модель нагрузки пользователем не заданы. Числа производительности и порядок Android → Windows/Linux ниже — предложения для планирования. История подтверждения UX из предыдущих фич не считается одобрением новых экранов.
+The user has not specified a deadline, team budget, or workload model. Performance figures and the Android → Windows/Linux order below are planning proposals. Approval of UX in previous features does not approve the new screens.
 
-## Зависимости
+## Dependencies
 
-База аудита: `3b5967f5bc01abae43cb0fc143d8c038cd5c8b0d`. Важны ADR-0001/0002/0006/0007/0020/0026/0027/0028/0029, specs 020, 021, 022, 023, 024. Перенос хранения требует явного нового ADR, определения старейшего совместимого rollback build и отдельного допуска миграции. На Apple текущий запрет сторонних зависимостей должен быть узко пересмотрен для выбранных bindings; эта спека не редактирует его.
+Audit baseline: `3b5967f5bc01abae43cb0fc143d8c038cd5c8b0d`. Relevant decisions: ADR-0001/0002/0006/0007/0020/0026/0027/0028/0029 and specs 020, 021, 022, 023, 024. Moving storage requires an explicit new ADR, an identified oldest compatible rollback build, and separate migration authorization. Apple's current third-party dependency restriction needs a narrow amendment for the selected bindings; this specification does not edit that restriction.
 
-## Что считается готовой спецификацией
+## Definition of a complete specification
 
-Есть проверяемые требования, схема компонентов, алгоритм sync с конфликтами и crash recovery, границы общей логики, migration strategy, состояния UI и критерии приёмки. Допущения отделены от решений владельца. Артефакты проходят repository spec check и содержательный review; продуктовые тесты и sign-off не изображаются выполненными.
+The package contains testable requirements, a component diagram, a sync algorithm covering conflicts and crash recovery, shared-logic boundaries, a migration strategy, UI states, and acceptance criteria. Assumptions are separate from owner decisions. The artifacts pass the repository spec check and substantive review; product tests and sign-off are not represented as complete.
 
-Отдельный assessment не запускался: пользователь уже сравнил варианты и выбрал направление. Повторное интервью не требуется для записи известных требований. Формальные UX/review/PR-slice gates остаются перед реализацией; текущий комплект имеет статус Draft.
+A separate assessment was not started because the user had already compared alternatives and chosen a direction. Repeating the interview is unnecessary to record known requirements. Formal UX, review, and PR-slice gates remain prerequisites for implementation; this package has Draft status.
