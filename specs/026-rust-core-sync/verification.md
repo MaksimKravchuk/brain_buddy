@@ -49,6 +49,8 @@ The retention review found that a proposed 30-day full-response window contradic
 
 The independent retention/compatibility audit also applies source deadlines to every feed/snapshot/receipt copy, preserves legacy Review matching-record responses and Capture commit recovery, and retains Review progress merge and bulk per-item skip semantics instead of imposing universal revision conflicts. The ADR and T001 explicitly identify the proposed Constitution IV command-identity amendment and content-free metadata retention decision as prerequisites to implementation, without claiming acceptance.
 
+The reset/read-model review identified two further gaps. Ordinary snapshot resets now retain an active device epoch; explicit closure preserves the old queue while permitting fresh local work in a durable pending-registration epoch, with idempotent authenticated registration and generation fencing before transmission. Snapshot activation preserves edits made during download. The feed and snapshot now explicitly enumerate the complete public Review projections, including sessions, decision queues, decisions, bulk releases, park acknowledgments, and current consents, while keeping protected/server-only storage fields private.
+
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.
