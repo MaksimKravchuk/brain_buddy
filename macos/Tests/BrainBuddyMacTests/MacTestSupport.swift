@@ -164,10 +164,12 @@ final class StubServer: HTTPTransport {
         var offline = false
         var deletionScheduled: Set<String> = []
         var holdNextLogin = false
+        var holdNextSync = false
     }
 
     private let state = Mutex(State())
     let loginGate = ResponseGate()
+    let syncGate = ResponseGate()
 
     init(_ accounts: [Account] = [StubServer.ada]) {
         state.withLock { state in for account in accounts { state.accounts[account.email.lowercased()] = account } }
@@ -189,6 +191,8 @@ final class StubServer: HTTPTransport {
     func scheduleDeletion(_ email: String) { _ = state.withLock { $0.deletionScheduled.insert(email.lowercased()) } }
     /// The next login's reply waits for `loginGate` (the session is opened at once).
     func holdNextLogin() { state.withLock { $0.holdNextLogin = true } }
+    /// The next request a session sends (the first sync's first request) waits for `syncGate`.
+    func holdNextSync() { state.withLock { $0.holdNextSync = true } }
     /// The email now belongs to another account id (deleted and created again).
     func reassign(_ email: String, to id: String) { state.withLock { $0.accounts[email.lowercased()]?.id = id } }
 
@@ -215,6 +219,14 @@ final class StubServer: HTTPTransport {
         default:
             guard let token = Self.session(request), state.withLock({ $0.sessions[token] != nil }) else {
                 return Self.error(401, "Authentication required.", request)
+            }
+            let hold = state.withLock { state -> Bool in
+                defer { state.holdNextSync = false }
+                return state.holdNextSync
+            }
+            if hold {
+                await syncGate.arrive()
+                await syncGate.wait()
             }
             switch (request.method, route) {
             case (.get, "/tasks"): return Self.json(try BrainBuddyAPI.makeEncoder().encode(TaskPageDTO(items: [])))

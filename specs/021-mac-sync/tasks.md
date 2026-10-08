@@ -751,6 +751,23 @@ Earlier increments are each independently useful and safe:
     access prompt is ever raised, so the spec's "may ask once" assumption holds trivially. iOS is
     unchanged (one item per server). `MacKeychainTests` gains "the newest item decides", seven
     tests in all (manual plan K2 and its count updated).
+  - **Deviation: X-03 Cancel ends at the link** (design X-03 "loading" and mac-app-host §7 say
+    Cancel and Esc stay enabled while "Signing in…" runs). Review P1: the kit checked Cancel only
+    in the instant after the login reply, but "Signing in…" also covers the link's write and the
+    first sync; a Cancel there sent the sheet back to the form ("sign-in cancelled") while the
+    account stayed linked and the first sync uploaded the Mac's tasks. Now the kit's
+    `SignInCancellation` decides Cancel against the link exactly once, at the last moment before
+    the link's write: a Cancel that comes first links nothing and ends the session the server
+    opened (as before); once the link wins, `cancel()` is refused, the sheet stays in
+    "Signing in…" with Cancel and Esc disabled (`SignInFlow.Phase.finishing`), the first sync runs
+    as a normal signed-in sync, and the sheet closes signed in. So no task is uploaded for a sign-in
+    the sheet reports as cancelled, and the sheet never reports as cancelled a link that stuck.
+    `Workspace.signIn(serverURL:email:password:cancellation:)` and the new `SyncService`
+    requirement default to the previous behaviour; the iPhone's sign-in (the native attempt path)
+    is untouched. Tests: `MacSyncFlowTests` "once the account is linked, Cancel never says
+    cancelled" (red before the fix: the sheet went back to `.editing` and logged "sign-in
+    cancelled"), and in `SyncEngineSessionTests` the Cancel-before-the-link and
+    Cancel-during-the-link's-write cases.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

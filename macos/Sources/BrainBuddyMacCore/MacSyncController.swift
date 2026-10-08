@@ -144,7 +144,9 @@ package final class MacSyncController {
         signIn = SignInFlow(
             mode: mode, hasLocalTasks: account == nil && workspace.pendingChangeCount > 0, defaultServer: defaultServer(),
             isOnline: { workspace.syncSnapshot.isOnline },
-            signIn: { url, email, password in try await workspace.signIn(serverURL: url, email: email, password: password) },
+            signIn: { url, email, password, cancellation in
+                try await workspace.signIn(serverURL: url, email: email, password: password, cancellation: cancellation)
+            },
             deletionCancelled: { workspace.signInCancelledAccountDeletion },
             acknowledgeDeletion: { workspace.acknowledgeAccountDeletionNotice() }, log: log
         )
@@ -155,7 +157,8 @@ package final class MacSyncController {
     package func closeSignIn() {
         guard let flow = signIn else { return }
         if flow.phase == .signingIn { flow.cancel() }
-        let signedIn = flow.phase == .finished
+        // Linked, its first sync still running (a Cancel the kit refused): signed in all the same.
+        let signedIn = flow.phase == .finished || flow.phase == .finishing
         signIn = nil
         observeSnapshot()
         triggers?.accountLinkChanged()

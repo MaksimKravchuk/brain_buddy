@@ -387,7 +387,12 @@ public final class Workspace {
     /// - Throws: `WorkspaceError.invalidServerURL` for an address that is not
     ///   https (or http on localhost), `.signInFailed` with the server's
     ///   words otherwise (always, in a workspace without sync).
-    public func signIn(serverURL: URL, email: String, password: String) async throws {
+    ///
+    /// `cancellation` is the person's Cancel (the Mac's X-03): one that wins links nothing and
+    /// throws the kit's "cancelled" failure; once the link won, this returns as a normal sign-in.
+    public func signIn(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
+    ) async throws {
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
         }
@@ -401,7 +406,8 @@ public final class Workspace {
         isSigningIn = true
         let linked: LinkedAccount
         do {
-            let result = try await sync.signInWithResult(serverURL: url, email: email, password: password)
+            let result = try await sync.signInWithResult(
+                serverURL: url, email: email, password: password, cancellation: cancellation)
             linked = result.account
             if result.deletionCancelled { signInCancelledAccountDeletion = true }
         } catch {

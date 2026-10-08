@@ -55,6 +55,10 @@ package final class SignInFlow {
         case editing
         /// One request is on its way; the fields are read-only, Cancel and Esc stay enabled.
         case signingIn
+        /// The account is linked and its first sync runs: still "Signing in…", but Cancel and Esc no
+        /// longer apply (the kit refuses a Cancel once the link won), so the sheet never reports as
+        /// cancelled a sign-in that linked the account.
+        case finishing
         /// Signed in, and the sign-in cancelled a pending account deletion: the note, then close.
         case deletionCancelledNote
         /// Signed in: the sheet closes.
@@ -73,8 +77,8 @@ package final class SignInFlow {
         package var referenceID: String?
     }
 
-    /// Signs in through the workspace (`Workspace.signIn(serverURL:email:password:)`).
-    package typealias SignIn = @MainActor @Sendable (URL, String, String) async throws -> Void
+    /// Signs in through the workspace (`Workspace.signIn(serverURL:email:password:cancellation:)`).
+    package typealias SignIn = @MainActor @Sendable (URL, String, String, SignInCancellation) async throws -> Void
 
     package let mode: Mode
     /// "first sign-in with local tasks": the outbox holds account-less data.
@@ -98,6 +102,8 @@ package final class SignInFlow {
     @ObservationIgnored private let acknowledgeDeletion: @MainActor () -> Void
     @ObservationIgnored private let log: any MacLogSink
     @ObservationIgnored private var attempt: Task<Void, Never>?
+    /// The running attempt's Cancel against its link.
+    @ObservationIgnored private var cancellation: SignInCancellation?
     @ObservationIgnored private var attemptID = 0
 
     package init(
@@ -132,9 +138,19 @@ package final class SignInFlow {
     package var subtitle: String { isLocked ? SignInCopy.againSubtitle : SignInCopy.subtitle }
     package var footer: String? { isLocked ? SignInCopy.againFooter : nil }
     /// Read-only while signing in; the email and server always in "Sign in again".
-    package var credentialsReadOnly: Bool { phase == .signingIn }
-    package var accountFieldsReadOnly: Bool { isLocked || phase == .signingIn }
-    package var submitTitle: String { phase == .signingIn ? SignInCopy.signingIn : SignInCopy.signIn }
+    package var credentialsReadOnly: Bool { isSigningIn }
+    package var accountFieldsReadOnly: Bool { isLocked || isSigningIn }
+    package var submitTitle: String { isSigningIn ? SignInCopy.signingIn : SignInCopy.signIn }
+    /// "Signing in…", with or without Cancel.
+    package var isSigningIn: Bool { phase == .signingIn || phase == .finishing }
+    /// Cancel and Esc: enabled but while the linked account's first sync finishes.
+    package var canCancel: Bool {
+        switch phase {
+        case .finishing: false
+        case .signingIn: !(cancellation?.isCommitted ?? false)
+        case .editing, .deletionCancelledNote, .finished: true
+        }
+    }
 
     /// "Sign in" is the default and enabled once both fields are filled, and never twice at once.
     package var canSubmit: Bool {
@@ -162,10 +178,12 @@ package final class SignInFlow {
         let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = password
         let signIn = signIn
+        let cancellation = SignInCancellation(onCommit: { [weak self] in Task { @MainActor in self?.linked(id) } })
+        self.cancellation = cancellation
         log.log(.sync, "sign-in started")
         attempt = Task { @MainActor [weak self] in
             do {
-                try await signIn(url, email, password)
+                try await signIn(url, email, password, cancellation)
                 self?.succeeded(id)
             } catch {
                 self?.failed(id, error)
@@ -178,10 +196,17 @@ package final class SignInFlow {
 
     /// Cancel or Esc. While "Signing in…" it stops the request, keeps the typed values, puts focus in
     /// Password and changes nothing (if the server's reply arrives after this, the kit ends that
-    /// session at once and links nothing). Returns true when the sheet should close.
+    /// session at once and links nothing). Once the account is linked it does nothing: the sign-in
+    /// finishes and the sheet closes signed in. Returns true when the sheet should close.
     @discardableResult
     package func cancel() -> Bool {
+        if phase == .finishing { return false }
         guard phase == .signingIn else { return phase != .deletionCancelledNote || finishNote() }
+        guard cancellation?.cancel() ?? true else {
+            // The link won the race: saying "cancelled" now would be untrue.
+            phase = .finishing
+            return false
+        }
         attemptID += 1
         attempt?.cancel()
         phase = .editing
@@ -199,11 +224,17 @@ package final class SignInFlow {
         return true
     }
 
+    /// The kit is saving the link: from now on the attempt finishes as a normal sign-in.
+    private func linked(_ id: Int) {
+        guard id == attemptID, phase == .signingIn else { return }
+        phase = .finishing
+    }
+
     private func succeeded(_ id: Int) {
-        // A reply that won the race against Cancel linked the account all the same: the sheet closes
-        // on what is true. (One that arrives after Cancel never gets here: the kit refused it.)
-        if id != attemptID, phase != .editing { return }
+        // A Cancel that won links nothing, so its attempt never gets here.
+        guard id == attemptID else { return }
         attempt = nil
+        cancellation = nil
         log.log(.sync, "sign-in finished outcome=signedIn")
         if deletionCancelled() {
             phase = .deletionCancelledNote
@@ -216,6 +247,7 @@ package final class SignInFlow {
     private func failed(_ id: Int, _ error: any Error) {
         guard id == attemptID else { return }
         attempt = nil
+        cancellation = nil
         phase = .editing
         guard let message = Self.message(for: error, isOnline: isOnline()) else { return }
         fail(message)

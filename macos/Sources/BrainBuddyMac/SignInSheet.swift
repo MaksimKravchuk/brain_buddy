@@ -4,7 +4,8 @@ import SwiftUI
 /// Design X-03, the sign-in sheet (contracts/mac-app-host.md §7), over `SignInFlow`: the
 /// first-sign-in box when this Mac holds account-less tasks; the errors in this Mac's words with the
 /// reference id to quote; "Sign in again" with the email and server locked; the fields read-only
-/// while "Signing in…" runs, with Cancel and Esc still enabled; the "account deletion cancelled"
+/// while "Signing in…" runs, with Cancel and Esc still enabled until the account is linked (then
+/// its first sync finishes and the sheet closes signed in); the "account deletion cancelled"
 /// note before it closes. It is the only place macOS may ask for access to the saved sign-in: the
 /// kit writes the token interactively only for this person-started sign-in.
 struct SignInSheet: View {
@@ -95,16 +96,18 @@ struct SignInSheet: View {
             }
             HStack {
                 Spacer()
-                // Enabled while signing in too: it stops the request and keeps what was typed.
+                // Enabled while signing in too: it stops the request and keeps what was typed. Not
+                // once the account is linked: that sign-in finishes, so Cancel would be untrue.
                 Button(SignInCopy.cancel) {
                     if flow.cancel() { onClose() }
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(!flow.canCancel)
                 Button {
                     flow.submit()
                 } label: {
                     HStack(spacing: 6) {
-                        if flow.phase == .signingIn {
+                        if flow.isSigningIn {
                             ProgressView().controlSize(.small)
                         }
                         Text(flow.submitTitle)
