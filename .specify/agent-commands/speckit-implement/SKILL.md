@@ -1,7 +1,7 @@
 ---
 name: "speckit-implement"
 description: "Implement a feature directly from its approved tasks.md via an isolated worktree and Constitution Principle II's proportionate testing policy, preserving the repository's review, CI and landing gates."
-argument-hint: "Feature slug and explicit PR-NN slice when tasks.md has PR-срезы"
+argument-hint: "Feature slug and, when tasks.md has PR-срезы, one PR-NN slice or all (conductor mode)"
 compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
   author: "github-spec-kit + brainbuddy"
@@ -47,53 +47,74 @@ Stop and report instead of starting if any fails:
    stage. You never overrule the gate.
 3. `/speckit-analyze` reported zero CRITICAL findings.
 4. `plan.md` cites `design.md` when the feature has a user-visible surface.
-5. If `tasks.md` has a `## PR-срезы` section, the request names exactly one `PR-NN`
-   slice. Run `python3 scripts/check_spec_kit_specs.py`, read its task IDs,
-   dependencies, paths, tests and acceptance evidence, and stop if that slice
-   is absent, unapproved or blocked by an unfinished dependency. **Never**
-   interpret empty arguments as permission to implement all of `tasks.md`.
-   The user-approved slice map fixes the scope; do not edit it to make a
-   worker's changed files fit.
+5. If `tasks.md` has a `## PR-срезы` section, the request names either exactly
+   one `PR-NN` slice (**worker mode**) or `all` (**conductor mode**, below).
+   Run `python3 scripts/check_spec_kit_specs.py`, read the task IDs,
+   dependencies, paths, budgets, tests and acceptance evidence, and stop if a
+   named slice is absent, unapproved or blocked by an unfinished dependency.
+   **Never** interpret empty arguments as permission to
+   implement all of `tasks.md`, and never put more than one slice in one PR. The user-approved
+   slice map fixes the scope; do not edit it to make a worker's changed files
+   fit.
 
 ## Route
 
-Implement in an isolated git worktree and a dedicated task session. An agent
-may delegate to another implementation worker, but no named agent runtime or
-subagent facility is required. Keep long build/test transcripts out of the
-planning session; report verified results and file paths back to it.
+Implement in an isolated git worktree and a dedicated task session. Keep long
+build/test transcripts out of the planning session; report verified results
+and file paths back to it.
 
-For a multi-PR feature, give each slice its **own session, worktree, branch,
-and PR**. Pass only that slice's tasks and allowed write paths to the worker.
-Before opening the PR, compare the actual diff to its path scope and run the
-slice's tests; a cross-slice file or task requires a revised, reapproved plan.
-The PR body links the same feature spec, slice id, FR/SC IDs, dependency PRs,
-test evidence, and exact head SHA. Verify review and CI for that SHA. Never
-open one PR containing the whole spec in place of the agreed slices. Integrate
-dependent slices sequentially from the accepted base; independent slices can
-run concurrently only when code and test resources really are isolated.
-Keep only a short parent ledger: slice, owner, branch/worktree, PR URL, exact
-SHA, CI, review, next action. Do not paste each worker's build logs into the
-parent session. Dependent slices start from an updated `origin/main` after
-their prerequisite lands, as required by BrainBuddy's current-base landing
-rules. Full feature acceptance follows integration of **all** slices.
+Every slice gets its **own worker, worktree, branch and PR**. Pass a worker
+only its slice's tasks, write paths and budget. Before opening the PR, compare
+the actual diff to the slice's path scope, run
+`python3 scripts/check_slice_budget.py specs/NNN-<slug>/tasks.md PR-NN` and the
+slice's tests; a cross-slice file, a missed budget or a cross-slice task needs
+a revised, reapproved map, not a bigger PR. The PR body links the feature spec,
+slice id, FR/SC IDs, dependency PRs, test evidence and exact head SHA. Never
+open one PR containing the whole spec in place of the agreed slices.
+
+### Conductor mode: parallel by default
+
+Like upstream Spec Kit, which runs `[P]` tasks together, independent work runs
+**in parallel by default**. With `all`, the session that holds the slice map is
+the conductor:
+
+1. Compute the ready set: slices whose `depends_on` have all merged.
+2. Launch one worker per ready slice **at the same time**, each in its own
+   worktree, choosing the agent by the slice's `implementer` field:
+
+   | Work | Agent | Model |
+   |---|---|---|
+   | Slice that changes behavior or a contract | `feature-implementer` | Sonnet |
+   | Mechanical slice (rename, fixtures, pattern-following tests, docs) | `mechanical-implementer` | Haiku |
+   | Reading a long CI or test log | `ci-log-triage` | Haiku |
+   | Full-suite verification | `delivery-verifier` | Sonnet |
+   | Feature acceptance after all slices | `acceptance-auditor` | Opus |
+
+   The conductor itself plans, reviews diffs against the slice map and
+   resolves cross-slice questions; it does not write slice code. Runtimes
+   without named agents use the same split with whatever model choice they
+   offer.
+3. Push each finished slice and open its PR; route CI failures through
+   `ci-log-triage` and fix them in the slice's own branch.
+4. As slices merge, recompute the ready set and launch the next wave.
+   Dependent slices start from an updated `origin/main` after their
+   prerequisite merges, never from a speculative sibling branch.
+5. Keep only a short ledger: slice, agent, branch/worktree, PR URL, exact SHA,
+   CI, review, next action. Never paste a worker's logs into it.
+
+Parallel workers collide on what a worktree does not isolate. Give each a
+distinct `BRAIN_BUDDY_DATA_DIR`, backend port, frontend port and
+`BRAIN_BUDDY_E2E_PROJECT` (`scripts/run_playwright_e2e.sh` deletes the shared
+Playwright artifact directories otherwise). Independent slices already have
+disjoint write paths — `check_spec_kit_specs.py` rejects overlap — so parallel
+PRs merge one after another without conflicts in their own files.
+
+Full feature acceptance follows integration of **all** slices.
 
 Per ADR-0008, a PR is review evidence, not implicit merge/deploy authority:
 SHIP/SHOW still use verified candidate landing; ASK needs explicit approval
 and the audited landing procedure. Do not merge, push to `main`, or deploy
 merely because slice CI is green.
-
-For tasks marked `[P]`, prefer independent worktrees and short-lived sessions
-over unbounded in-process parallel subagents. Two constraints make fan-out
-counterproductive here:
-
-- Landing is serial by construction. `scripts/submit_to_trunk.sh` requires
-  exactly one non-merge commit whose parent equals current `origin/main`, so N
-  parallel lanes must funnel through a rebase-and-resubmit queue anyway.
-- `scripts/run_playwright_e2e.sh` deletes shared Playwright artifact
-  directories on start, destroying a concurrent agent's in-flight evidence.
-
-When lanes do run in parallel, each needs a distinct `BRAIN_BUDDY_DATA_DIR`,
-backend port, frontend port and `BRAIN_BUDDY_E2E_PROJECT`. A worktree isolates none of those.
 
 ## Gates that survive this change
 
@@ -128,8 +149,8 @@ installation, or `.hermes.md`. Absent explicit activation, implement directly.
 
 ```
 IMPLEMENTATION: complete | blocked
-feature:  specs/NNN-<slug>     branch: feat/<slug>
-slice:    PR-NN (or single-PR)   PR: <URL or not opened>
+feature:  specs/NNN-<slug>     mode: worker PR-NN | conductor all | single-PR
+slices:   <per slice: id, agent, branch, PR URL or not opened, budget used>
 tasks:    <n>/<n>              commits: <shas>
 test evidence: <reused checks and any necessary additions>
 

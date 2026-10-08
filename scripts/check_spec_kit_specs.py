@@ -121,8 +121,45 @@ GRANDFATHERED = {
     },
 }
 
+SLICE_SCHEMA_V1 = "brainbuddy-pr-slices/v1"
+SLICE_SCHEMA_V2 = "brainbuddy-pr-slices/v2"
+# v2 slices declare a size budget. Small slices are what make independent
+# slices worth running in parallel and cheap to review; a slice above either
+# ceiling must say why in `oversize_reason`.
+SLICE_MAX_PRODUCT_LOC = 400
+SLICE_MAX_FILES = 12
+# Agent roles a v2 slice may name (see .claude/agents/ and AGENTS.md).
+SLICE_IMPLEMENTERS = frozenset({"feature-implementer", "mechanical-implementer"})
+
 FEATURE_DIR_PATTERN = re.compile(r"^\d{3}-[a-z0-9][a-z0-9-]*$")
 TASK_ID_RE = re.compile(r"^\s*- \[[ xX]\] (T\d{3,})\b", re.MULTILINE)
+
+
+def _validate_slice_budget(
+    label: str, slice_id: str, item: dict[str, Any], failures: list[str]
+) -> None:
+    """A v2 slice states its size budget and the agent role that builds it."""
+    budget = item.get("budget")
+    limits = {"product_loc": SLICE_MAX_PRODUCT_LOC, "files": SLICE_MAX_FILES}
+    if not isinstance(budget, dict) or set(budget) != set(limits):
+        failures.append(f"{label}: {slice_id} needs budget {{product_loc, files}}")
+    else:
+        reason = item.get("oversize_reason")
+        has_reason = isinstance(reason, str) and bool(reason.strip())
+        for key, ceiling in limits.items():
+            value = budget[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                failures.append(f"{label}: {slice_id} budget.{key} must be a positive integer")
+            elif value > ceiling and not has_reason:
+                failures.append(
+                    f"{label}: {slice_id} budget.{key}={value} exceeds {ceiling}; "
+                    "split the slice or state oversize_reason"
+                )
+    implementer = item.get("implementer")
+    if implementer not in SLICE_IMPLEMENTERS:
+        failures.append(
+            f"{label}: {slice_id} implementer must be one of {sorted(SLICE_IMPLEMENTERS)}"
+        )
 
 
 def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
@@ -150,9 +187,15 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
     except ValueError as exc:
         failures.append(f"{label}: invalid JSON ({exc})")
         return
-    if not isinstance(payload, dict) or payload.get("schema_version") != "brainbuddy-pr-slices/v1":
-        failures.append(f"{label}: expected brainbuddy-pr-slices/v1 object")
+    if not isinstance(payload, dict) or payload.get("schema_version") not in (
+        SLICE_SCHEMA_V1,
+        SLICE_SCHEMA_V2,
+    ):
+        failures.append(
+            f"{label}: expected {SLICE_SCHEMA_V2} (or historical {SLICE_SCHEMA_V1}) object"
+        )
         return
+    budgeted = payload["schema_version"] == SLICE_SCHEMA_V2
     slices = payload.get("slices")
     if not isinstance(slices, list) or len(slices) < 2:
         failures.append(f"{label}: multiple PRs require at least two slices")
@@ -188,6 +231,8 @@ def _validate_delivery_slices(spec_dir: Path, failures: list[str]) -> None:
                 isinstance(value, str) and value.strip() for value in values
             ):
                 failures.append(f"{label}: {slice_id} needs nonempty {field}")
+        if budgeted:
+            _validate_slice_budget(label, slice_id, item, failures)
         deps = item.get("depends_on")
         if not isinstance(deps, list) or any(
             not isinstance(dep, str) or dep not in earlier for dep in deps
