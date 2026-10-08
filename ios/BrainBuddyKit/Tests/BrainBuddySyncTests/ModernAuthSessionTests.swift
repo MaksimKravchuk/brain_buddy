@@ -212,7 +212,7 @@ struct ModernAuthSessionTests {
         let attempt = try await device.engine.beginSignIn(serverURL: FakeBrainBuddyServer.baseURL)
         let pending = Task { try await device.engine.completeSignIn(attempt, credential: .password(email: SyncHarness.email, password: SyncHarness.password)) }
         await device.transport.gate.waitForArrival()
-        await device.engine.signOut()
+        try await device.engine.signOut(removingLocalDataWith: {})
         await device.transport.gate.open()
         await #expect(throws: SignInFailure.self) { try await pending.value }
         #expect(try device.tokens.token(for: FakeBrainBuddyServer.baseURL) == nil)

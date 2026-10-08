@@ -253,6 +253,14 @@ extension APIError {
         )
     }
 
+    /// What the person reads when the server opened a session this device could not keep.
+    public static let tokenNotSavedMessage = "Brain Buddy couldn't save your sign-in on this device. Try again."
+
+    /// A sign-in's session could not be stored. The request itself went through, so it has a reference id.
+    static func tokenNotSaved(_ error: any Error, referenceID: String) -> APIError {
+        APIError(kind: .tokenStorage(String(describing: error)), message: tokenNotSavedMessage, referenceID: referenceID)
+    }
+
     static func decoding(_ error: any Error, response: HTTPResponse, sentCorrelationID: String?) -> APIError {
         APIError(
             kind: .decoding(String(describing: error)),

@@ -113,10 +113,24 @@ public struct SyncMetadata: Hashable, Sendable, Codable {
     public var lastPullAt: Date?
     public var lastPushAt: Date?
     public var lastFailure: String?
-    public init(lastPullAt: Date? = nil, lastPushAt: Date? = nil, lastFailure: String? = nil) {
+    /// The first failure of the current run of server-blocked cycles; cleared by a completed cycle and
+    /// kept while the device is offline. Persisted, so a relaunch keeps the 60 s clock (spec 021, FR-014).
+    public var failingSince: Date?
+    /// The start of the latest server-blocked cycle of that run: the line says "Couldn't sync" once an
+    /// attempt that began 60 s or more after `failingSince` has failed.
+    public var lastFailedAttemptAt: Date?
+    /// The `X-Correlation-ID` of the last failed request (the server's `reference_id` when it answered).
+    public var lastFailureReferenceID: String?
+    public init(
+        lastPullAt: Date? = nil, lastPushAt: Date? = nil, lastFailure: String? = nil, failingSince: Date? = nil,
+        lastFailedAttemptAt: Date? = nil, lastFailureReferenceID: String? = nil
+    ) {
         self.lastPullAt = lastPullAt
         self.lastPushAt = lastPushAt
         self.lastFailure = lastFailure
+        self.failingSince = failingSince
+        self.lastFailedAttemptAt = lastFailedAttemptAt
+        self.lastFailureReferenceID = lastFailureReferenceID
     }
 }
 
