@@ -1,7 +1,8 @@
 # ADR-0023: Proportionate fast lane for test-stage SHIP/SHOW delivery
 
 Date: 2026-09-16
-Status: Accepted by the product owner
+Status: Accepted by the product owner; the ASK surfaces that leave the fast lane are
+narrowed by [ADR-0030](0030-pre-launch-narrow-ask-class.md) while there are no real users
 Amends: ADR-0005 (mandatory Spec Kit scope), ADR-0008 (SHIP/SHOW evidence),
 ADR-0011/0012/0014 (planning-review applicability)
 Related: ADR-0010 (opt-in managed outcomes), ADR-0022 (proportionate feature flags)
