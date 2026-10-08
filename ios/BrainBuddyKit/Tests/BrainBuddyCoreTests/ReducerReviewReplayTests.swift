@@ -211,6 +211,37 @@ struct ReducerReviewReplayTests {
 
     // MARK: - Bounded device copy
 
+    @Test("020-FR-043 020-FR-017 once a bulk release is undone no released item keeps its pre-release clock")
+    func undoneBulkReleaseKeepsNoClock() throws {
+        let extended = Review.nextTask(
+            "t1", started: Review.now.addingTimeInterval(-30 * Review.day), extendedAt: Review.now.addingTimeInterval(-15 * Review.day)
+        )
+        var state = Review.state([extended])
+        try Review.apply(.bulkRelease(.init(bulkID: Review.bulk(1), kind: .restart, taskIDs: ["t1"])), to: &state)
+        #expect(state.review.bulkReleases[Review.bulk(1)]?.released.first?.clockBefore?.clock.extensionReason != nil)
+        try Review.apply(.undoBulkRelease(Review.bulk(1)), at: Review.now.addingTimeInterval(30), to: &state)
+        let record = try #require(state.review.bulkReleases[Review.bulk(1)])
+        #expect(record.undoneAt != nil && record.released.allSatisfy { $0.clockBefore == nil }, "the reason text does not outlive the Undo")
+        #expect(state.tasks["t1"]?.formulation == extended.formulation, "the clock itself came back")
+    }
+
+    @Test("020-FR-017 a restart item whose clock only the server holds is never put back into Next without one")
+    func undoWithoutAKnownClockLeavesTheTaskForTheServer() throws {
+        var released = Review.nextTask("t1", started: Review.now.addingTimeInterval(-30 * Review.day), serverRevision: 5)
+        released.state = .someday
+        released.formulation = nil
+        var state = Review.state([released])
+        let item = BulkReleasedTask(
+            taskID: "t1", previousState: .next, clockBefore: nil, taskAfter: TaskStamp(released), clockKnown: false
+        )
+        state.review.bulkReleases[Review.bulk(1)] = BulkReleaseRecord(
+            id: Review.bulk(1), kind: .restart, sessionID: nil, createdAt: Review.now, released: [item], skipped: []
+        )
+        try Review.apply(.undoBulkRelease(Review.bulk(1)), at: Review.now.addingTimeInterval(30), to: &state)
+        #expect(state.tasks["t1"]?.state == .someday, "the server's answer brings it back with its clock")
+        #expect(state.review.bulkReleases[Review.bulk(1)]?.undoneAt != nil)
+    }
+
     @Test("020-FR-043 retention bounds the device copy: snapshots always, history only when the server keeps it")
     func retentionBounds() throws {
         let now = Review.now

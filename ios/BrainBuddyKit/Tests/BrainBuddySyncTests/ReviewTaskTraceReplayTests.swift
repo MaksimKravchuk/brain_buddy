@@ -39,21 +39,19 @@ struct ReviewTaskTraceReplayTests {
     static let password = "trace-secret"
     static let origin = "https://fake.brainbuddy.test"
 
-    /// The whole file; a missing or unreadable copy stops the suite instead of
+    /// A trace file; a missing or unreadable copy stops the suite instead of
     /// letting it pass with nothing replayed.
-    static let file: JSONValue = {
+    static func file(_ resource: String) -> JSONValue {
         guard
-            let url = Bundle.module.url(
-                forResource: "review_traces_tasks", withExtension: "json", subdirectory: "Resources"
-            ),
+            let url = Bundle.module.url(forResource: resource, withExtension: "json", subdirectory: "Resources"),
             let data = try? Data(contentsOf: url),
             let value = try? JSONDecoder().decode(JSONValue.self, from: data)
-        else { fatalError("Missing or unreadable test resource Resources/review_traces_tasks.json") }
+        else { fatalError("Missing or unreadable test resource Resources/\(resource).json") }
         return value
-    }()
+    }
 
-    static let traces: [Trace] = {
-        guard case .array(let items)? = file["traces"] else { fatalError("review_traces_tasks.json has no traces") }
+    static func traces(in file: JSONValue) -> [Trace] {
+        guard case .array(let items)? = file["traces"] else { fatalError("a trace file has no traces") }
         return items.map { item in
             guard let id = item["id"]?.stringValue, let title = item["title"]?.stringValue,
                 case .array(let requirements)? = item["requirements"],
@@ -65,13 +63,16 @@ struct ReviewTaskTraceReplayTests {
                 flagOn: flag == "on", steps: steps
             )
         }
-    }()
+    }
+
+    static let tasksFile = file("review_traces_tasks")
+    static let traces = traces(in: tasksFile)
 
     // MARK: - Tests
 
     @Test("020-SC-007: the trace file declares its schema and seven traces naming feature-qualified ids")
     func traceFileDeclaresItsSchema() {
-        #expect(Self.file["schema"]?.stringValue == "brainbuddy-review-traces/v1")
+        #expect(Self.tasksFile["schema"]?.stringValue == "brainbuddy-review-traces/v1")
         let ids = Self.traces.map(\.id)
         #expect(ids.count == 7)
         #expect(Set(ids).count == ids.count)
@@ -112,7 +113,7 @@ struct ReviewTaskTraceReplayTests {
 /// One trace against a fresh server with its own manual clock and one
 /// signed-in session, run step by step as `backend/tests/test_review_traces.py`
 /// runs it against the backend.
-private final class Replay {
+final class Replay {
     let trace: ReviewTaskTraceReplayTests.Trace
     let clock: ManualClock
     let server: FakeBrainBuddyServer

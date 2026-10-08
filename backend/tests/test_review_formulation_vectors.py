@@ -302,7 +302,9 @@ def apply_event(
     elif kind == "decide":
         result = _decide(clock, event, settings, now)
     elif kind == "undo_decision":
-        result = rules.restore(clock, clock_from(event["task_before"]))
+        result = rules.restore(
+            clock, clock_from(event["task_before"]), settings=settings
+        )
     elif kind == "auto_park":
         result = rules.auto_park(clock, settings=settings, now=now)
     elif kind == "yield_reversal":
