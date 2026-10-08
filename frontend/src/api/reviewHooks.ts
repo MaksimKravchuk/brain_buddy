@@ -15,7 +15,7 @@ import { create } from "zustand";
 import { hasFeatureFlag } from "./auth";
 import { getApiBaseUrl } from "./client";
 import { reviewApi } from "./review";
-import type { DecisionRequest, ParkAcknowledgement, ReviewSettingsUpdate, ReviewState, ThresholdDays } from "./review";
+import type { DecisionRequest, ParkAcknowledgement, ReviewSettingsUpdate, ReviewState, StepCode, ThresholdDays } from "./review";
 import { getTaskCacheScope, taskKeys } from "./taskHooks";
 import type { TaskResponse } from "./taskTypes";
 import { useAuthStore } from "../stores/authStore";
@@ -30,6 +30,23 @@ export const reviewKeys = {
   all: ["review"] as const,
   state: (scope = getReviewCacheScope()) => ["review", "state", scope] as const
 };
+
+/**
+ * A step's queue (http §6). It is read when the step opens and kept out of
+ * `reviewKeys.all`, so a decision's refetch never reshuffles the list the
+ * person is working through; leaving the step drops it (`gcTime: 0`).
+ */
+export function useReviewQueue(step: StepCode, sessionId: string) {
+  const accountId = useAuthStore((store) => store.user?.id ?? null);
+  return useQuery({
+    queryKey: ["review-queue", getReviewCacheScope(accountId), step, sessionId],
+    queryFn: ({ signal }) => reviewApi.getQueue(step, sessionId, signal),
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false
+  });
+}
 
 export function useWeeklyReviewEnabled(): boolean {
   const user = useAuthStore((store) => store.user);
@@ -83,6 +100,25 @@ export interface ReviewContinuation {
 export function beginReviewContinuation(): ReviewContinuation {
   const scope = captureReviewScope();
   return { scope, stillCurrent: () => isCurrentReviewScope(scope) };
+}
+
+export type Settled<T> = ({ ok: true; value: T } | { ok: false; error: unknown }) & { scope: ReviewWriteScope };
+
+/**
+ * Run one review request under the account that is signed in now. `null` when
+ * that account has gone by the time it answers: nothing may be shown, sent or
+ * cached then (the rule of `beginReviewContinuation`). An action with more
+ * than one request checks `run.stillCurrent()` between them.
+ */
+export async function settleForAccount<T>(action: (run: ReviewContinuation) => Promise<T>): Promise<Settled<T> | null> {
+  const run = beginReviewContinuation();
+  let settled: Settled<T>;
+  try {
+    settled = { ok: true, value: await action(run), scope: run.scope };
+  } catch (error) {
+    settled = { ok: false, error, scope: run.scope };
+  }
+  return run.stillCurrent() ? settled : null;
 }
 
 /**

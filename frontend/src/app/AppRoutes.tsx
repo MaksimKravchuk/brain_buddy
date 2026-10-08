@@ -7,6 +7,7 @@ import { AgentSettingsGate } from "../features/agents/AgentSettingsGate";
 import { BrainDumpGate } from "../features/brain-dump/BrainDumpGate";
 import type { BrainDumpLocationState } from "../features/brain-dump/brainDumpNavigation";
 import { CrtGate } from "../features/crt/CrtGate";
+import { ReviewGate } from "../features/review/ReviewGate";
 import { TaskListPage } from "../features/tasks/TaskListPage";
 import LoginPage from "../pages/LoginPage";
 import PrivacyPolicyPage from "../pages/PrivacyPolicyPage";
@@ -156,6 +157,14 @@ function workspaceRoutes(): React.JSX.Element {
         element={
           <ProtectedRoute>
             <CrtGate />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/review"
+        element={
+          <ProtectedRoute>
+            <ReviewGate />
           </ProtectedRoute>
         }
       />

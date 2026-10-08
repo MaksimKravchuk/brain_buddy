@@ -24,7 +24,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 from typing import Any, Literal
@@ -482,7 +482,42 @@ class ReviewFlowService:
         build = _QUEUES.get(step)
         if build is None:  # mind_sweep and summary show no tasks
             return QueueView(step, [])
-        return build(session, self._snapshot(owner_id, self.clock()))
+        view = build(session, self._snapshot(owner_id, self.clock()))
+        if step == "decisions":
+            return replace(view, meta=self._handled_decisions(owner_id, session, view))
+        return view
+
+    def _handled_decisions(
+        self,
+        owner_id: str,
+        session: ReviewSessionDocument | None,
+        view: QueueView,
+    ) -> dict[str, list[str]]:
+        """Which cards of the run are handled already, and how (http §6).
+
+        ``decided_task_ids``: a decision of this run exists for the task (an
+        Undo deletes it, so the card is not handled any more).
+        ``set_aside_task_ids``: "Not now" (FR-050), unless the task was decided
+        after. Both follow the queue's order and name only tasks it lists, so a
+        run resumed on any device, in any browser, shows only the cards left.
+        """
+
+        if session is None:
+            return {"decided_task_ids": [], "set_aside_task_ids": []}
+        decided = {
+            decision.task_id
+            for decision in self.task_repo.list_review_decisions_for_session(
+                owner_id, session.id
+            )
+        }
+        aside = set(session.set_aside_task_ids)
+        ids = [task.id for task in view.items]
+        return {
+            "decided_task_ids": [task_id for task_id in ids if task_id in decided],
+            "set_aside_task_ids": [
+                task_id for task_id in ids if task_id in aside - decided
+            ],
+        }
 
     def _snapshot(self, owner_id: str, now: datetime) -> _Snapshot:
         return _Snapshot(

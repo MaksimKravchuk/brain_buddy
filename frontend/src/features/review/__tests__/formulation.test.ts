@@ -11,10 +11,12 @@ import {
   isSubstantiveChange,
   isThirdStall,
   listMarkerFor,
+  sameWording,
   type FormulationClass,
   type FormulationInstants
 } from "../formulation";
 import vectors from "./review_formulation_vectors.json";
+import { askingTask, taskFixture } from "./reviewKit";
 
 type ClassificationVector = (typeof vectors.classification)[number];
 
@@ -250,5 +252,25 @@ describe("020-FR-004 display helpers for the wording facts", () => {
     expect(months).toEqual(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]);
     expect(formatReviewTime("2026-10-10T09:14:00Z", "UTC")).toBe("09:14");
     expect(formatReviewTime("2026-10-10T09:14:00Z", "Europe/Berlin")).toBe("11:14");
+  });
+});
+
+describe("020-FR-052 whether a task kept the wording typed text was written for", () => {
+  const next = askingTask("task_w", "Renovate the bathroom");
+
+  it("020-FR-052 a revision that only moved keeps the wording, by formulation id in Next and by title key elsewhere", () => {
+    expect(sameWording(next, { ...next, details: "notes", revision: 9 })).toBe(true);
+    expect(sameWording(next, { ...next, title: "Renovate the Bathroom!" })).toBe(true);
+    const waiting = taskFixture({ id: "task_x", title: "Pick up the drill", state: "waiting" });
+    expect(sameWording(waiting, { ...waiting, details: "notes", revision: 9 })).toBe(true);
+    expect(sameWording(waiting, { ...waiting, title: "Pick up the DRILL" })).toBe(true);
+  });
+
+  it("020-FR-052 another formulation, another list or another title key is not the same wording", () => {
+    expect(sameWording(next, { ...next, formulation: { ...(next.formulation as NonNullable<typeof next.formulation>), id: "form_other" } })).toBe(false);
+    expect(sameWording(next, { ...next, state: "someday", formulation: null })).toBe(false);
+    const waiting = taskFixture({ id: "task_x", title: "Pick up the drill", state: "waiting" });
+    expect(sameWording(waiting, { ...waiting, title: "Collect the saw" })).toBe(false);
+    expect(sameWording(next, { ...next, formulation: null, title: "Something else entirely" })).toBe(false);
   });
 });

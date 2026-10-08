@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import wireFixtures from "../features/review/__tests__/review_wire_fixtures.json";
 import { useAuthStore } from "../stores/authStore";
 import { resetTaskDetailAutosaveControllersForTests } from "../features/tasks/taskDetailAutosave";
 import { AppRoutes } from "./AppRoutes";
@@ -1107,5 +1108,66 @@ describe("AppRoutes /admin (009-FR-005, 009-FR-010)", () => {
       String(call[0])
     );
     expect(calls.some((url) => url.includes("/admin"))).toBe(false);
+  });
+});
+
+describe("AppRoutes /review (020-FR-042, 020-FR-027)", () => {
+  /** W-031 (a new owner), already onboarded and past the explainer so the entry shows. */
+  const reviewState = (() => {
+    const entry = wireFixtures.entries.find((candidate) => candidate.id === "W-031") as { body: Record<string, unknown> & { settings: Record<string, unknown> } };
+    return { ...entry.body, explainer_seen: true, settings: { ...entry.body.settings, onboarded_at: "2026-09-01T10:00:00Z", activated_at: "2026-09-01T10:00:00Z" } };
+  })();
+
+  function answerReviewState() {
+    const base = vi.mocked(fetch).getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    vi.mocked(fetch).mockImplementation((input, init) =>
+      String(input).includes("/review/state") ? Promise.resolve(jsonResponse(reviewState)) : base(input, init)
+    );
+  }
+
+  function signInWithReview(flags: Record<string, boolean>) {
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: flags }, status: "authed" });
+    });
+  }
+
+  it("020-FR-027 renders the review entry at the protected direct route when weekly_review is effective", async () => {
+    signInWithReview({ weekly_review: true });
+    answerReviewState();
+
+    renderRoutes("/review");
+
+    expect(await screen.findByRole("heading", { name: "How much time do you have?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Quick/ })).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/review/state"), expect.anything());
+  });
+
+  it("020-FR-042 with the flag off the direct route returns to the task list and asks the review nothing", async () => {
+    renderRoutes("/review");
+
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((call) => String(call[0]));
+    expect(calls.some((url) => url.includes("/review"))).toBe(false);
+  });
+
+  it("020-FR-042 a signed-out visitor is sent to sign-in", async () => {
+    act(() => useAuthStore.setState({ user: null, status: "anon" }));
+
+    renderRoutes("/review");
+
+    expect(await screen.findByRole("heading", { name: "Sign in or create an account" })).toBeInTheDocument();
+  });
+
+  it("020-FR-048 an account switched under the open route remounts it, so the earlier account's review is gone", async () => {
+    signInWithReview({ weekly_review: true });
+    answerReviewState();
+    renderRoutes("/review");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /^Quick/ }));
+
+    signInWithReview({});
+
+    expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Review steps" })).not.toBeInTheDocument();
   });
 });

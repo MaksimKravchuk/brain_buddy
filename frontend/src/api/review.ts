@@ -107,7 +107,118 @@ export interface ReviewSettings {
 
 export interface ReviewSettingsUpdate {
   threshold_days?: ThresholdDays;
+  review_weekday?: number;
+  review_time?: string;
+  time_zone?: string;
+  onboarded?: true;
   expected_revision: number;
+}
+
+export type StepCode =
+  | "wins"
+  | "mind_sweep"
+  | "inbox"
+  | "decisions"
+  | "rest_of_next"
+  | "waiting"
+  | "projects"
+  | "someday"
+  | "dates"
+  | "summary";
+export type StepStatus = "pending" | "finished" | "skipped";
+export type ReviewMode = "quick" | "full";
+export type SessionStatus = "open" | "completed" | "completed_empty" | "partial" | "abandoned";
+export type ClearStart = "yes" | "not_really";
+
+/** A review run (http §6 `SessionResponse`); `steps` holds exactly the mode's steps. */
+export interface ReviewSession {
+  id: string;
+  mode: ReviewMode;
+  entry: string;
+  origin: "ios" | "web" | "macos";
+  status: SessionStatus;
+  started_at: string;
+  last_activity_at: string;
+  ended_at: string | null;
+  current_step: StepCode | null;
+  steps: Partial<Record<StepCode, StepStatus>>;
+  counts: SessionCounts;
+  clear_start: ClearStart | null;
+  revision: number;
+}
+
+export interface LastCountedReview {
+  session_id: string;
+  status: "completed" | "partial";
+  origin: "ios" | "web" | "macos";
+  ended_at: string | null;
+  counts: SessionCounts;
+  clear_start: ClearStart | null;
+}
+
+export interface SessionStartRequest {
+  mode: ReviewMode;
+  entry: "sidebar" | "restart";
+  origin: "web";
+  skip_steps?: StepCode[];
+  replace_open: boolean;
+}
+
+/** One progress change (http §6): merged on the server, never version-checked. */
+export interface SessionProgress {
+  current_step?: StepCode;
+  step?: { code: StepCode; status: StepStatus };
+  set_aside_task_id?: string;
+  inbox_processed_delta?: number;
+  snapshot_decision_queue?: true;
+}
+
+/**
+ * A progress change with the ids it is sent under. They are minted once and a
+ * retry reuses the attempt, so the server counts the change once (http §6
+ * "Progress is replay-safe").
+ */
+export interface ProgressAttempt {
+  sessionId: string;
+  body: SessionProgress & { progress_id: string };
+  key: string;
+}
+
+export interface QueueMeta {
+  count?: number;
+  next_count?: number;
+  weekly_average_4w?: number | null;
+  weeks_of_history?: number;
+  implied_weeks?: number | null;
+  eligible_total?: number;
+  shown?: number;
+  days?: Array<{ day: string; task_ids: string[] }>;
+  /** `decisions` only: the cards of this run that already have a decision (an Undo takes it back). */
+  decided_task_ids?: string[];
+  /** `decisions` only: the cards of this run that were set aside with "Not now" and not decided since. */
+  set_aside_task_ids?: string[];
+}
+
+export interface ReviewQueue {
+  items: TaskResponse[];
+  meta: QueueMeta;
+}
+
+export interface BulkReleaseRequest {
+  kind: "restart" | "inbox_remainder";
+  session_id?: string;
+  items: Array<{ task_id: string; expected_revision: number }>;
+}
+
+export interface BulkReleaseResponse {
+  id: string;
+  released: Array<{ task_id: string; revision_after: number }>;
+  skipped: Array<{ task_id: string; reason: "stale" | "not_eligible" }>;
+}
+
+export interface BulkReleaseUndoResponse {
+  restored: string[];
+  skipped: Array<{ task_id: string; reason: "stale" }>;
 }
 
 export interface UnseenPark {
@@ -121,10 +232,10 @@ export interface ReviewState {
   explainer_seen: boolean;
   grace_until: string | null;
   last_counted_review_at: string | null;
-  last_counted_review: Record<string, unknown> | null;
+  last_counted_review: LastCountedReview | null;
   next_review_at: string | null;
   restart_mode: boolean;
-  open_session: Record<string, unknown> | null;
+  open_session: ReviewSession | null;
   unseen_parks: UnseenPark[];
   counts: { asks_for_decision: number; moves_tomorrow: number };
   receipts: ReviewReceipt[];
@@ -238,6 +349,34 @@ function checkCounts(value: unknown, path: string): void {
   nullable(value, path, (entry, at) => fields(entry, at, COUNTS_SHAPE));
 }
 
+const SESSION_STATUSES: ReadonlySet<string> = new Set<SessionStatus>(["open", "completed", "completed_empty", "partial", "abandoned"]);
+
+function checkSession(value: unknown, path: string): void {
+  const session = fields(value, path, {
+    id: "string",
+    mode: "string",
+    entry: "string",
+    origin: "string",
+    status: "string",
+    started_at: "string",
+    last_activity_at: "string",
+    ended_at: "string|null",
+    current_step: "string|null",
+    clear_start: "string|null",
+    revision: "number"
+  });
+  if (!SESSION_STATUSES.has(session.status as string)) {
+    throw new ReviewWireError(`${path}.status`);
+  }
+  record(session.steps, `${path}.steps`);
+  fields(session.counts, `${path}.counts`, COUNTS_SHAPE);
+}
+
+function checkLastCounted(value: unknown, path: string): void {
+  const last = fields(value, path, { session_id: "string", status: "string", origin: "string", ended_at: "string|null", clear_start: "string|null" });
+  fields(last.counts, `${path}.counts`, COUNTS_SHAPE);
+}
+
 export function parseTaskResponse(value: unknown): TaskResponse {
   checkTask(value, "task");
   return value as TaskResponse;
@@ -258,8 +397,8 @@ export function parseReviewState(value: unknown): ReviewState {
     server_now: "string"
   });
   checkSettings(state.settings, "state.settings");
-  nullable(state.last_counted_review, "state.last_counted_review", record);
-  nullable(state.open_session, "state.open_session", record);
+  nullable(state.last_counted_review, "state.last_counted_review", checkLastCounted);
+  nullable(state.open_session, "state.open_session", checkSession);
   list(state.unseen_parks, "state.unseen_parks", (entry, at) =>
     fields(entry, at, { task_id: "string", formulation_id: "string", parked_at: "string" })
   );
@@ -293,6 +432,46 @@ export function parseUndoDecisionResponse(value: unknown): UndoDecisionResponse 
   checkTask(response.task, "task");
   checkCounts(response.session_counts, "session_counts");
   return value as UndoDecisionResponse;
+}
+
+export function parseReviewSession(value: unknown): ReviewSession {
+  checkSession(value, "session");
+  return value as ReviewSession;
+}
+
+export function parseQueue(value: unknown): ReviewQueue {
+  const queue = record(value, "queue");
+  list(queue.items, "queue.items", checkTask);
+  const meta = record(queue.meta, "queue.meta");
+  // The decisions step's handled cards; a server that predates them sends neither.
+  for (const key of ["decided_task_ids", "set_aside_task_ids"] as const) {
+    if (meta[key] !== undefined) {
+      list(meta[key], `queue.meta.${key}`, (entry, at) => {
+        if (typeof entry !== "string") {
+          throw new ReviewWireError(at);
+        }
+      });
+    }
+  }
+  return value as ReviewQueue;
+}
+
+export function parseBulkRelease(value: unknown): BulkReleaseResponse {
+  const release = fields(value, "bulk_release", { id: "string" });
+  list(release.released, "bulk_release.released", (entry, at) => fields(entry, at, { task_id: "string", revision_after: "number" }));
+  list(release.skipped, "bulk_release.skipped", (entry, at) => fields(entry, at, { task_id: "string", reason: "string" }));
+  return value as BulkReleaseResponse;
+}
+
+export function parseBulkReleaseUndo(value: unknown): BulkReleaseUndoResponse {
+  const undo = record(value, "bulk_undo");
+  list(undo.restored, "bulk_undo.restored", (entry, at) => {
+    if (typeof entry !== "string") {
+      throw new ReviewWireError(at);
+    }
+  });
+  list(undo.skipped, "bulk_undo.skipped", (entry, at) => fields(entry, at, { task_id: "string", reason: "string" }));
+  return value as BulkReleaseUndoResponse;
 }
 
 /** The standard error envelope, read leniently: any missing part is `null`. */
@@ -404,7 +583,7 @@ function composeSignal(callerSignal: AbortSignal | undefined, timeoutMs: number)
 }
 
 interface RequestOptions<T> {
-  method: "GET" | "POST" | "PUT";
+  method: "GET" | "POST" | "PUT" | "PATCH";
   /** The path with its ids escaped. */
   path: string;
   /** The path template, which is all telemetry ever records. */
@@ -455,7 +634,15 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
     notifyUnauthorized();
   }
   const isJson = response.headers.get("Content-Type")?.includes("application/json") === true;
-  const data: unknown = response.status === 204 ? undefined : isJson ? await response.json() : await response.text();
+  let data: unknown;
+  try {
+    data = response.status === 204 ? undefined : isJson ? await response.json() : await response.text();
+  } catch {
+    // A body that is not JSON is still an answer with a Ref (FR-045).
+    const unreadableRef = response.headers.get("X-Correlation-ID") ?? correlationId;
+    log(options.method, options.route, startMs, false, { status: response.status, correlationId: unreadableRef });
+    throw new ApiError("Unexpected review response", response.status, null, unreadableRef);
+  }
   const referenceId = response.headers.get("X-Correlation-ID") ?? referenceOf(data) ?? correlationId;
   log(options.method, options.route, startMs, response.ok, { status: response.status, correlationId: referenceId });
   if (!response.ok) {
@@ -472,6 +659,11 @@ const enc = encodeURIComponent;
 
 export function newIdempotencyKey(): string {
   return globalThis.crypto.randomUUID();
+}
+
+/** Mint the ids of one progress change; keep the attempt to retry it (http §6). */
+export function newProgressAttempt(sessionId: string, change: SessionProgress): ProgressAttempt {
+  return { sessionId, body: { ...change, progress_id: `progress_${globalThis.crypto.randomUUID()}` }, key: newIdempotencyKey() };
 }
 
 export const reviewApi = {
@@ -543,6 +735,87 @@ export const reviewApi = {
       idempotencyKey,
       timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
       parse: () => undefined
+    });
+  },
+
+  startSession(body: SessionStartRequest, idempotencyKey: string): Promise<ReviewSession> {
+    return request({
+      method: "POST",
+      path: "/review/sessions",
+      route: "/review/sessions",
+      body,
+      idempotencyKey,
+      timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
+      parse: parseReviewSession
+    });
+  },
+
+  getSession(sessionId: string, signal?: AbortSignal): Promise<ReviewSession> {
+    return request({
+      method: "GET",
+      path: `/review/sessions/${enc(sessionId)}`,
+      route: "/review/sessions/{session_id}",
+      signal,
+      timeoutMs: REVIEW_READ_TIMEOUT_MS,
+      parse: parseReviewSession
+    });
+  },
+
+  progress({ sessionId, body, key }: ProgressAttempt): Promise<ReviewSession> {
+    return request({
+      method: "PATCH",
+      path: `/review/sessions/${enc(sessionId)}`,
+      route: "/review/sessions/{session_id}",
+      body,
+      idempotencyKey: key,
+      timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
+      parse: parseReviewSession
+    });
+  },
+
+  finish(sessionId: string, body: { clear_start?: ClearStart }, idempotencyKey: string): Promise<ReviewSession> {
+    return request({
+      method: "POST",
+      path: `/review/sessions/${enc(sessionId)}/finish`,
+      route: "/review/sessions/{session_id}/finish",
+      body,
+      idempotencyKey,
+      timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
+      parse: parseReviewSession
+    });
+  },
+
+  getQueue(step: StepCode, sessionId: string | undefined, signal?: AbortSignal): Promise<ReviewQueue> {
+    return request({
+      method: "GET",
+      path: `/review/queues/${enc(step)}${sessionId === undefined ? "" : `?session_id=${enc(sessionId)}`}`,
+      route: "/review/queues/{step}",
+      signal,
+      timeoutMs: REVIEW_READ_TIMEOUT_MS,
+      parse: parseQueue
+    });
+  },
+
+  bulkRelease(body: BulkReleaseRequest, idempotencyKey: string): Promise<BulkReleaseResponse> {
+    return request({
+      method: "POST",
+      path: "/review/bulk-releases",
+      route: "/review/bulk-releases",
+      body,
+      idempotencyKey,
+      timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
+      parse: parseBulkRelease
+    });
+  },
+
+  undoBulkRelease(bulkId: string, idempotencyKey: string): Promise<BulkReleaseUndoResponse> {
+    return request({
+      method: "POST",
+      path: `/review/bulk-releases/${enc(bulkId)}/undo`,
+      route: "/review/bulk-releases/{bulk_id}/undo",
+      idempotencyKey,
+      timeoutMs: REVIEW_MUTATION_TIMEOUT_MS,
+      parse: parseBulkReleaseUndo
     });
   }
 };

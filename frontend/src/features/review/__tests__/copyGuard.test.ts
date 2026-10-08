@@ -18,7 +18,7 @@ import { useAuthStore } from "../../../stores/authStore";
 import { DecisionDialog } from "../DecisionDialog";
 import { FormulationBlock } from "../FormulationBlock";
 
-const featureSources = import.meta.glob("../*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+const featureSources = import.meta.glob(["../*.{ts,tsx}", "../steps/*.{ts,tsx}"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const apiSources = import.meta.glob(["../../../api/review.ts", "../../../api/reviewHooks.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 const sources = { ...featureSources, ...apiSources };
 
@@ -86,7 +86,7 @@ function wrap(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     createElement(QueryClientProvider, { client },
-      createElement(ShellToastContext.Provider, { value: () => undefined },
+      createElement(ShellToastContext.Provider, { value: () => () => undefined },
         createElement(MemoryRouter, null, node)))
   );
 }
@@ -129,7 +129,7 @@ afterEach(async () => {
 describe("020-FR-004 020-FR-038 review copy stays calm", () => {
   it("020-FR-038 reads the review sources it guards", () => {
     const names = Object.keys(sources).map((path) => path.split("/").pop());
-    for (const expected of ["DecisionDialog.tsx", "FormulationBlock.tsx", "AutoParkExplainer.tsx", "WhileYouWereAway.tsx", "ReviewSettingsSection.tsx", "formulation.ts", "review.ts"]) {
+    for (const expected of ["DecisionDialog.tsx", "FormulationBlock.tsx", "AutoParkExplainer.tsx", "WhileYouWereAway.tsx", "ReviewSettingsSection.tsx", "formulation.ts", "review.ts", "ReviewShell.tsx", "InboxStep.tsx", "SummaryStep.tsx"]) {
       expect(names).toContain(expected);
     }
   });
