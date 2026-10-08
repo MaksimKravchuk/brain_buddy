@@ -154,9 +154,15 @@ public actor SyncEngine: SyncService {
     public func signInWithResult(
         serverURL: URL, email: String, password: String
     ) async throws(SignInFailure) -> SignInResult {
+        try await signInWithResult(serverURL: serverURL, email: email, password: password, cancellation: SignInCancellation())
+    }
+
+    public func signInWithResult(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
+    ) async throws(SignInFailure) -> SignInResult {
         let result: SignInResult
         do throws(SignInFailure) {
-            result = try await linkAccount(serverURL: serverURL, email: email, password: password)
+            result = try await linkAccount(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
         } catch {
             // Nothing was linked: the account that was (if any) carries on.
             if account != nil {
@@ -173,7 +179,7 @@ public actor SyncEngine: SyncService {
     /// Logs in and links the account in the document. Nothing of the linked
     /// account runs meanwhile, and a refused link leaves it as it was.
     private func linkAccount(
-        serverURL: URL, email: String, password: String
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
     ) async throws(SignInFailure) -> SignInResult {
         await waitForNativeCommit()
         invalidateNativeSignIn()
@@ -194,11 +200,14 @@ public actor SyncEngine: SyncService {
         } catch {
             throw Self.signInFailure(error)
         }
-        // The person cancelled while the reply was on its way (the Mac's X-03 Cancel): the session
-        // the server just opened is ended at once and nothing is linked (spec 021, FR-001, FR-005).
-        // The logout runs in a task of its own, which the cancellation does not reach (a request of
+        // The one point where Cancel and the link are decided (the Mac's X-03 Cancel): with no
+        // suspension between here and the link's write, a Cancel that came first ends the session
+        // the server just opened and links nothing (spec 021, FR-001, FR-005); otherwise the link
+        // wins, and a Cancel from now on is refused (`SignInCancellation.cancel()` returns false):
+        // the sign-in and its first sync finish as a normal one, never reported as cancelled. The
+        // logout runs in a task of its own, which a task cancellation does not reach (a request of
         // the cancelled task would never leave); offline it waits as a pending logout.
-        if Task.isCancelled {
+        if Task.isCancelled || !cancellation.commit() {
             await Task { await self.abandonSession(on: url, restoring: previousToken) }.value
             throw SignInFailure(message: Self.signInCancelledMessage)
         }

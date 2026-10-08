@@ -1,6 +1,7 @@
 import BrainBuddyAPI
 import BrainBuddyCore
 import Foundation
+import Synchronization
 
 /// Why a sync cycle is wanted. `localChange` is debounced (about 2 s after
 /// the last change); the others run as soon as the engine is free, except
@@ -38,6 +39,45 @@ public struct SignInResult: Hashable, Sendable {
     public init(account: LinkedAccount, deletionCancelled: Bool = false) {
         self.account = account
         self.deletionCancelled = deletionCancelled
+    }
+}
+
+/// One password sign-in's Cancel against its link (spec 021 FR-001, design X-03): whichever comes
+/// first wins, exactly once. Cancel before the link: nothing is linked, and the session the server
+/// opened is ended at once. Once the engine starts saving the link, the device is signed in and its
+/// first sync runs like any other: Cancel no longer applies, and `cancel()` says so, so the sheet
+/// never reports as cancelled a sign-in that linked the account (and may upload local tasks).
+public final class SignInCancellation: Sendable {
+    private enum State { case open, cancelled, committed }
+    private let state = Mutex(State.open)
+    private let onCommit: @Sendable () -> Void
+
+    /// `onCommit` runs once, on the engine, when the link wins.
+    public init(onCommit: @escaping @Sendable () -> Void = {}) {
+        self.onCommit = onCommit
+    }
+
+    /// True when the sign-in is cancelled (now or earlier) and will link nothing; false when the
+    /// account is already being linked.
+    @discardableResult
+    public func cancel() -> Bool {
+        state.withLock { state in
+            if state == .open { state = .cancelled }
+            return state == .cancelled
+        }
+    }
+
+    public var isCancelled: Bool { state.withLock { $0 == .cancelled } }
+    public var isCommitted: Bool { state.withLock { $0 == .committed } }
+
+    /// The engine, right before it saves the link: true to save it, false when Cancel came first.
+    func commit() -> Bool {
+        let won = state.withLock { state in
+            if state == .open { state = .committed }
+            return state == .committed
+        }
+        if won { onCommit() }
+        return won
     }
 }
 
@@ -80,6 +120,12 @@ public protocol SyncService: Sendable {
     func signIn(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> LinkedAccount
     /// `signIn`, also reporting what the server said about the account.
     func signInWithResult(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> SignInResult
+    /// `signInWithResult`, with the person's Cancel (`SignInCancellation`): a Cancel that wins links
+    /// nothing and throws `SyncEngine.signInCancelledMessage`; once the link won, the sign-in and its
+    /// first sync finish as a normal one.
+    func signInWithResult(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
+    ) async throws(SignInFailure) -> SignInResult
     /// Signs out. In order: stop syncing and wait for a running cycle; record the session as a
     /// pending logout (so a crash from here on still ends it); run `remove`, which removes the
     /// device's data; then forget the session and log out on the server now, or when the network
@@ -116,6 +162,14 @@ extension SyncService {
         serverURL: URL, email: String, password: String
     ) async throws(SignInFailure) -> SignInResult {
         SignInResult(account: try await signIn(serverURL: serverURL, email: email, password: password))
+    }
+
+    /// Services that link as they log in decide Cancel against the link before they start.
+    public func signInWithResult(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
+    ) async throws(SignInFailure) -> SignInResult {
+        guard cancellation.commit() else { throw SignInFailure(message: SyncEngine.signInCancelledMessage) }
+        return try await signInWithResult(serverURL: serverURL, email: email, password: password)
     }
 
     public func discardStaleSessions(loggingOut account: LinkedAccount?) async {}

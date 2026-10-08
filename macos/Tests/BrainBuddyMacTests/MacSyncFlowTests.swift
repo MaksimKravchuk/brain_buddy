@@ -268,6 +268,35 @@ struct MacSyncFlowTests {
         #expect(rig.controller.router.focus?.target == .statusWords, "the trailing action vanished: focus to the words")
     }
 
+    @Test("021-FR-001 Sign in… again while X-03 is signing in keeps that flow and its request; no second login starts")
+    func secondSignInWhileSigningInKeepsTheFirst() async throws {
+        let rig = await Rig()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .statusLineAction)
+        let flow = try #require(rig.controller.signIn)
+        flow.email = StubServer.ada.email
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        let presented = rig.controller.router.presented.count
+        #expect(rig.controller.isSignInOpen, "the app menu's Sign in… is disabled")
+
+        // The app menu's "Sign in…" (or any other entry) while the first sheet waits for its login.
+        rig.controller.beginSignIn(from: .menu)
+        #expect(rig.controller.signIn === flow, "the open flow stays")
+        #expect(rig.controller.router.presented.count == presented, "no second sheet")
+        #expect(flow.phase == .signingIn && flow.email == StubServer.ada.email)
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished && flow.requestsStarted == 1)
+        #expect(rig.server.routes.filter { $0 == "POST /auth/login" }.count == 1)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        rig.controller.closeSignIn()
+        #expect(!rig.controller.isSignInOpen)
+    }
+
     @Test("021-FR-001 021-FR-005 Cancel while signing in keeps the typed values; the reply after it has its session ended and links nothing")
     func cancelWhileSigningIn() async throws {
         let rig = await Rig()
@@ -279,6 +308,7 @@ struct MacSyncFlowTests {
         flow.submit()
         await rig.server.loginGate.waitForArrival()
 
+        #expect(flow.canCancel, "before the link, Cancel applies")
         #expect(flow.cancel() == false, "the sheet stays open")
         #expect(flow.phase == .editing && flow.email == StubServer.ada.email && flow.password == StubServer.ada.password)
         #expect(flow.preferredFocus == .signInPassword)
@@ -291,6 +321,35 @@ struct MacSyncFlowTests {
         #expect(rig.server.routes == ["POST /auth/login", "POST /auth/logout"])
         #expect(flow.phase == .editing && flow.message == nil, "nothing changed in the sheet")
         #expect(rig.tokens.storedTokens.isEmpty)
+    }
+
+    @Test("021-FR-001 021-FR-005 once the account is linked, Cancel never says cancelled: the first sync runs and the sheet closes signed in")
+    func cancelAfterTheLinkDoesNotClaimCancelled() async throws {
+        let rig = await Rig()
+        try await rig.captureWaiting("Order soil")
+        rig.server.holdNextSync()
+        rig.controller.beginSignIn(from: .statusLineAction)
+        let flow = try #require(rig.controller.signIn)
+        flow.email = StubServer.ada.email
+        flow.password = StubServer.ada.password
+        flow.submit()
+        // The link is saved and the first sync's first request is on its way.
+        await rig.server.syncGate.waitForArrival()
+        #expect(!flow.canCancel, "Cancel and Esc no longer apply")
+        #expect(flow.submitTitle == "Signing in…" && flow.credentialsReadOnly)
+
+        #expect(flow.cancel() == false, "the sheet stays open")
+        #expect(flow.phase == .finishing, "the sheet doesn't go back to the form as if nothing happened")
+        #expect(!rig.log.messages(.sync).contains("sign-in cancelled"))
+        await rig.server.syncGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+
+        #expect(flow.phase == .finished, "signed in: the sheet closes on what is true")
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        #expect(rig.server.routes.contains("POST /tasks"), "the first sync ran as a normal signed-in sync")
+        rig.controller.closeSignIn()
+        #expect(rig.controller.router.focus?.target == .statusWords, "closed as signed in, not as cancelled")
     }
 
     @Test("021-FR-001 021-FR-015 sign-in errors in this Mac's words, with the reference id where there is one")
@@ -399,7 +458,9 @@ struct MacSyncFlowTests {
         let workspace = rig.workspace
         let flow = SignInFlow(
             mode: .signIn, hasLocalTasks: false, defaultServer: StubServer.otherServer, isOnline: { true },
-            signIn: { url, email, password in try await workspace.signIn(serverURL: url, email: email, password: password) }
+            signIn: { url, email, password, cancellation in
+                try await workspace.signIn(serverURL: url, email: email, password: password, cancellation: cancellation)
+            }
         )
         flow.email = StubServer.ada.email
         flow.password = StubServer.ada.password
@@ -440,6 +501,37 @@ struct MacSyncFlowTests {
 
         #expect(await rig.controller.confirmSignOut() == .signedOut)
         #expect(rig.workspace.account == nil && rig.workspace.pendingChangeCount == 0)
+    }
+
+    @Test("021-FR-018 a Quick Capture while a confirmed sign-out commits is refused with words and never silently removed")
+    func quickCaptureWhileSigningOutIsNeverLost() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        rig.server.holdNextLogout()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOut.prompt?.unsent == 0)
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        // The data is removed; the logout is on its way.
+        await rig.server.logoutGate.waitForArrival()
+
+        var refusal: String?
+        do {
+            try rig.model.quickCaptureInbox("Water the tomatoes")
+        } catch {
+            refusal = error.message
+        }
+        await rig.server.logoutGate.open()
+        #expect(await confirming.value == .signedOut)
+        await rig.settle()
+
+        #expect(
+            refusal != nil || rig.workspace.state.tasks.values.contains { $0.title == "Water the tomatoes" },
+            "refused, so the panel keeps the text, or kept")
+        #expect(refusal == "Brain Buddy is signing out. This wasn't saved; try again in a moment.")
+        #expect(rig.workspace.account == nil)
+        try rig.model.quickCaptureInbox("Water the tomatoes")
+        #expect(rig.workspace.pendingChangeCount == 1, "saved again once signed out, on this Mac")
     }
 
     @Test("021-FR-018 a plain Sign out the kit refuses, because another process queued a change, shows X-04 again")

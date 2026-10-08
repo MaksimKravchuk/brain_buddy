@@ -47,7 +47,7 @@ The 021 transport is ephemeral: no cookie jar, no HTTP cache.
 
 Sign-in happens only in the sign-in sheet (design X-03). The kit stores the session token in the
 person's **login keychain**, a generic password with service `app.brainbuddy.mac.session` and the
-server's host as account; pending logouts are kept under `app.brainbuddy.mac.session.pending-logout`
+server's host as account (`<host>#1`, `#2`, … after a rebuild, below); pending logouts are kept under `app.brainbuddy.mac.session.pending-logout`
 until they reach the server. The token is never written to a file or logged.
 
 - **Not synchronizable.** The item is created with `kSecAttrSynchronizable = false`: it never goes
@@ -70,15 +70,20 @@ until they reach the server. The token is never written to a file or logged.
 ### "Sign in again" after a rebuild
 
 An ad-hoc signed build (`build_app.sh`) is a new client of the Keychain item each time it is
-rebuilt. The rebuilt app cannot read the saved token without asking, so routine sync stops and the
-footer reads **"Sign in again to sync"**; nothing is lost, and changes wait on the Mac. Choose
-"Sign in again" (the email and server are locked to the account): macOS may ask whether the app may
-use the saved sign-in. Allow it, or choose "Deny": the sheet then deletes the old item and adds a
-new one.
+rebuilt. On the login keychain only the app that created an item may read it without asking or
+delete it, so the rebuilt app can do neither: routine sync stops and the footer reads **"Sign in
+again to sync"**; nothing is lost, and changes wait on the Mac. Choose "Sign in again" (the email
+and server are locked to the account). The app never asks for access to the old item and never
+writes into it: it saves the new session as a new item next to it, account `<host>#1` (then
+`#2`, … after later rebuilds), and always uses the item with the highest number. No access prompt
+appears; macOS may still ask you to unlock the login keychain if it is locked.
 
-If macOS refuses that too, the sheet shows "couldn't save sign-in". Open **Keychain Access**,
-search for `app.brainbuddy.mac.session`, delete that item (and any
-`app.brainbuddy.mac.session.pending-logout` items you no longer need), and sign in again.
+The earlier build's item stays in the login keychain, unread and unused; the app cannot delete it,
+and the server session it holds ends when it expires (30 days). Signing out removes this build's
+items only. To tidy up, open **Keychain Access**, search for `app.brainbuddy.mac.session` and
+delete the items you no longer need (and any `app.brainbuddy.mac.session.pending-logout` items,
+which hold sessions an earlier build signed out of while offline). If the sheet ever shows
+"couldn't save sign-in", do the same, then sign in again.
 
 ## Sync in the background
 

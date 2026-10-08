@@ -135,16 +135,30 @@ package final class MacSyncController {
 
     // MARK: X-03
 
+    /// An X-03 flow is open: its sheet is shown, or its one request is on its way. The app menu's
+    /// "Sign in…" and "Sign in again…" are disabled meanwhile.
+    package var isSignInOpen: Bool {
+        guard let signIn else { return false }
+        return signIn.isSigningIn || router.signInRequest != nil
+    }
+
     /// "Sign in to sync", "Sign in…" or "Sign in again": the sheet, locked to the linked account when
-    /// one is linked (its session ended).
+    /// one is linked (its session ended). Single-flight: while a flow is open it stays, with what was
+    /// typed and the request on its way, and no second flow (or second login) starts.
     package func beginSignIn(from entry: SignInEntry) {
+        guard !isSignInOpen else {
+            log.log(.sync, "sign-in already open")
+            return
+        }
         let workspace = self.workspace
         let account = workspace.account
         let mode: SignInFlow.Mode = account.map { .signInAgain(email: $0.email, serverURL: $0.serverURL) } ?? .signIn
         signIn = SignInFlow(
             mode: mode, hasLocalTasks: account == nil && workspace.pendingChangeCount > 0, defaultServer: defaultServer(),
             isOnline: { workspace.syncSnapshot.isOnline },
-            signIn: { url, email, password in try await workspace.signIn(serverURL: url, email: email, password: password) },
+            signIn: { url, email, password, cancellation in
+                try await workspace.signIn(serverURL: url, email: email, password: password, cancellation: cancellation)
+            },
             deletionCancelled: { workspace.signInCancelledAccountDeletion },
             acknowledgeDeletion: { workspace.acknowledgeAccountDeletionNotice() }, log: log
         )
@@ -155,7 +169,8 @@ package final class MacSyncController {
     package func closeSignIn() {
         guard let flow = signIn else { return }
         if flow.phase == .signingIn { flow.cancel() }
-        let signedIn = flow.phase == .finished
+        // Linked, its first sync still running (a Cancel the kit refused): signed in all the same.
+        let signedIn = flow.phase == .finished || flow.phase == .finishing
         signIn = nil
         observeSnapshot()
         triggers?.accountLinkChanged()

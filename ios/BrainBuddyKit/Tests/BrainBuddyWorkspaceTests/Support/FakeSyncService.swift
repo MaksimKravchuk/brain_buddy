@@ -100,6 +100,13 @@ actor FakeSyncService: SyncService {
 
     private var duringSignOut: (@Sendable () async -> Void)?
 
+    /// Runs inside the next `signOut` after the local data was removed, as the engine's logout does.
+    func afterRemovingDataWhileSigningOut(_ work: @escaping @Sendable () async -> Void) {
+        afterRemoval = work
+    }
+
+    private var afterRemoval: (@Sendable () async -> Void)?
+
     func signOut(removingLocalDataWith remove: @Sendable () async throws -> Void) async throws {
         calls.append(.signOut)
         if let work = duringSignOut {
@@ -107,6 +114,10 @@ actor FakeSyncService: SyncService {
             await work()
         }
         try await remove()
+        if let work = afterRemoval {
+            afterRemoval = nil
+            await work()
+        }
     }
 
     func request(_ trigger: SyncTrigger) async {

@@ -353,6 +353,73 @@ struct SyncEngineSessionTests {
         #expect(await engine.status == .localOnly)
     }
 
+    @Test("021-FR-001 021-FR-005 a Cancel decided before the link wins: nothing is linked and the session the server opened is ended")
+    func cancelBeforeTheLinkWins() async throws {
+        let harness = SyncHarness()
+        let device = HeldDevice(harness: harness) { $0.route == "POST /auth/login" }
+        device.transport.arm()
+        let engine = device.engine
+        let cancellation = SignInCancellation()
+        let signIn = Task {
+            try await engine.signInWithResult(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password,
+                cancellation: cancellation)
+        }
+        await device.transport.gate.waitForArrival()
+
+        #expect(cancellation.cancel(), "the reply hasn't been linked: Cancel applies")
+        await device.transport.gate.open()
+        let result = await signIn.result
+        #expect(throws: SignInFailure(message: SyncEngine.signInCancelledMessage)) { try result.get() }
+        await engine.waitUntilIdle()
+
+        #expect(!cancellation.isCommitted && cancellation.cancel(), "and it stays cancelled")
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 0, "the late session is ended")
+        #expect(device.inner.requests.map(\.route) == ["POST /auth/login", "POST /auth/logout"], "no sync request")
+        #expect(try await device.store.load() == nil, "nothing is linked")
+    }
+
+    @Test("021-FR-001 021-FR-005 a Cancel while the link is being saved is refused: the account stays linked and its first sync runs")
+    func cancelDuringTheLinkIsRefused() async throws {
+        let harness = SyncHarness()
+        let store = HeldLinkStore()
+        let transport = harness.server.makeTransport()
+        let committed = Mutex(0)
+        let cancellation = SignInCancellation(onCommit: { committed.withLock { $0 += 1 } })
+        let engine = SyncEngine(
+            store: store, tokenStore: InMemorySessionTokenStore(), transport: transport, now: harness.clock.provider,
+            configuration: SyncConfiguration(scheduler: ManualSyncScheduler(), jitter: { 0.5 }, clientVersion: "test"))
+        let signIn = Task {
+            try await engine.signInWithResult(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password,
+                cancellation: cancellation)
+        }
+        await store.gate.waitForArrival()
+
+        #expect(committed.withLock { $0 } == 1, "the engine told the sheet the link won")
+        #expect(cancellation.cancel() == false, "the link won: Cancel no longer applies")
+        signIn.cancel()  // even a cancelled task finishes a sign-in whose link won
+        await store.gate.open()
+        let result = try await signIn.value
+        await engine.waitUntilIdle()
+
+        #expect(result.account.email == SyncHarness.email)
+        #expect(cancellation.isCommitted && !cancellation.isCancelled)
+        #expect(try await store.load()?.account?.email == SyncHarness.email, "the link stands")
+        #expect(transport.requests.contains { $0.route.hasPrefix("GET /tasks") }, "the first sync ran")
+        #expect(!transport.requests.contains { $0.route == "POST /auth/logout" }, "its session is kept")
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1)
+    }
+
+    @Test("021-FR-001 a sign-in with no Cancel to decide (every caller but the Mac sheet) links as before")
+    func signInWithoutACancelIsUnchanged() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device()
+        let account = try await device.signIn()
+        #expect(account.email == SyncHarness.email)
+        #expect(try await device.document().account?.email == SyncHarness.email)
+    }
+
     @Test("021-FR-001 021-FR-015 a sign-in that got no answer carries the reference id its request was sent with")
     func noAnswerCarriesTheSentReference() async throws {
         let harness = SyncHarness()
@@ -590,4 +657,26 @@ actor UnwritableStore: DocumentStore {
     func generation() async throws(DocumentStoreError) -> Int? { nil }
 
     func destroy() async throws(DocumentStoreError) {}
+}
+
+/// A store whose first write (a sign-in's link) waits at `gate` before it is made.
+actor HeldLinkStore: DocumentStore {
+    let base = InMemoryDocumentStore()
+    let gate = ResponseGate()
+    private var held = false
+
+    func load() async throws(DocumentStoreError) -> StoreDocument? { try await base.load() }
+
+    func update(_ transform: @Sendable (inout StoreDocument) throws -> Void) async throws -> StoreDocument {
+        if !held {
+            held = true
+            await gate.arrive()
+            await gate.wait()
+        }
+        return try await base.update(transform)
+    }
+
+    func generation() async throws(DocumentStoreError) -> Int? { try await base.generation() }
+
+    func destroy() async throws(DocumentStoreError) { try await base.destroy() }
 }

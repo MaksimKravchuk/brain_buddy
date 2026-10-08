@@ -38,7 +38,9 @@ CI is green, and this run is made on the landed build, or a candidate with ident
 Prerequisites: macOS 26 or later, Xcode 26 with its command-line tools selected, the Whisper model
 and tokenizer `macos/build_app.sh` needs (`macos/README.md`), a test account on a test server (or
 the production server with a scratch account), and the web app open in a browser on the same
-account. Turn on VoiceOver with ⌘F5 when a check asks for it.
+account. Turn on VoiceOver with ⌘F5 when a check asks for it. Before step 2, open Keychain Access ›
+login and delete any `app.brainbuddy.mac.session` items an earlier build left, so S10 and O4 start
+from none (a rebuilt app cannot delete them itself; K2).
 
 ### 1. CI lane and build on the exact SHA (T132)
 
@@ -62,7 +64,7 @@ grep -E "Keychain on macOS" /tmp/bb-021-pr09-test.log | tail -n 3
 sh build_app.sh
 ```
 
-Expect: build exit 0, test exit 0, the "Keychain on macOS" suite passed (six tests), and no
+Expect: build exit 0, test exit 0, the "Keychain on macOS" suite passed (seven tests), and no
 Keychain prompt during `swift test` (it uses a temporary keychain of its own).
 
 Use a scratch data folder for every step below, so the owner's real folder is never touched:
@@ -150,10 +152,10 @@ watch for any sheet, alert, notification, sound or focus change.
 | # | Check | Expected |
 |---|---|---|
 | K1 | Account switch refused (US4-5) | Only on a local test server where an account can be deleted and created again with the same email (a new account id). Signed in as that account with a change waiting offline: delete the account and create it again on the server, go online ("Sign in again to sync"), then "Sign in again" with the new password: "Sign out first to use another account." / "Changes from the other account are still waiting on this Mac."; the sheet stays open; nothing reaches the new account. Without such a server record "n/a (covered by `MacSyncFlowTests`)". |
-| K2 | Rebuild prompt | Signed in, quit, `sh build_app.sh` again (ad-hoc signature changes), launch: no Keychain prompt; footer "Sign in again to sync". "Sign in again": the prompt, if any, appears during the sheet only; choose "Deny": the sign-in still succeeds (the item is replaced) or shows "couldn't save sign-in" with a Reference ID; the docs' Keychain Access fix works. |
+| K2 | Rebuild | Signed in, quit, `sh build_app.sh` again (ad-hoc signature changes), launch: no Keychain prompt; footer "Sign in again to sync". "Sign in again": no access prompt (only an unlock prompt, during the sheet, if the login keychain is locked); the sign-in succeeds and syncs. Keychain Access › login now shows two items of `app.brainbuddy.mac.session`, accounts `<host>` (the earlier build's) and `<host>#1` (record "new item beside the old: yes/no"). Quit and relaunch: still synced, no prompt. Sign out: `<host>#1` is gone and `<host>` stays (the app cannot delete it; record yes/no); deleting it in Keychain Access as the docs say works. |
 | K3 | X-09 | Quit, write `garbage` into `$DIR/store.json`, relaunch: "We couldn't open your tasks"; no footer line, nothing sent; "Start fresh…" confirmation, then an empty workspace. |
 
-At the end, sign out (or remove the `app.brainbuddy.mac.session` item in Keychain Access) and
+At the end, sign out, remove any `app.brainbuddy.mac.session` item left in Keychain Access, and
 delete `$DIR`.
 
 ## Results (owner fills in; leave blank until the run is done)

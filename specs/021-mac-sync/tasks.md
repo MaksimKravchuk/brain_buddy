@@ -726,6 +726,83 @@ Earlier increments are each independently useful and safe:
   - **Sign-out keeps typed text until it happens**: the window's discard confirmation comes first
     (G28), but the drafts are cleared only once the sign-out succeeded
     (`BrainBuddyModel.didSignOut`), so Cancel in X-04 loses nothing.
+  - **Found by `MacKeychainTests` on the `macos-app` lane** (kit fixes, both production bugs on the
+    Mac's file-based login keychain): `pendingLogouts()` asked for `kSecReturnData` with
+    `kSecMatchLimitAll`, which that keychain refuses with `errSecParam` (-50), so no queued logout
+    (offline sign-out, crash recovery, the pre-021 cookie sessions) could ever be listed and sent;
+    it now lists the items' attributes and reads each item's data. And a sign-in after a rebuild
+    updated the earlier build's item in place (writing data is allowed to any app) but could not
+    read it back (its access list trusts the earlier build), so every routine read asked to sign in
+    again. The test models "an earlier build's item" as one `/usr/bin/security` created.
+  - **Deviation: no delete-and-re-add after a rebuild** (contracts/mac-app-host.md §7 "The Keychain
+    prompt" and §8, data-model E9 "Recovery after Deny", kit-commands §4, plan, research R17 still
+    describe it). The `macos-app` lane showed macOS refuses to let a build delete an item another
+    program created: `errSecInvalidOwnerEdit` (-25244), with no prompt. So on macOS the store
+    writes past the earlier build's item instead: a server's session items are accounts `<host>`,
+    `<host>#1`, `<host>#2`, …; the highest generation is the session. A routine read of a highest
+    item this build may not read is `accessDenied` ("Sign in again to sync", unchanged); a routine
+    write never goes past it (`accessDenied`); the person's sign-in adds the next generation (this
+    build created it, so it reads back without a prompt; checked, and a failure is "couldn't save
+    sign-in") and never writes into the earlier build's item. Removals delete every item this build
+    may delete and leave, without failing, an item it may neither read nor delete. The earlier
+    build's item stays, unread, until the person deletes it in Keychain Access; its server session
+    ends at expiry (FR-005 residual, recorded in `docs/native-macos-app.md` and the data-retention
+    row). Pending logouts already follow this: one item per logout, an unreadable one skipped. No
+    access prompt is ever raised, so the spec's "may ask once" assumption holds trivially. iOS is
+    unchanged (one item per server). `MacKeychainTests` gains "the newest item decides", seven
+    tests in all (manual plan K2 and its count updated).
+  - **Deviation: X-03 Cancel ends at the link** (design X-03 "loading" and mac-app-host §7 say
+    Cancel and Esc stay enabled while "Signing in…" runs). Review P1: the kit checked Cancel only
+    in the instant after the login reply, but "Signing in…" also covers the link's write and the
+    first sync; a Cancel there sent the sheet back to the form ("sign-in cancelled") while the
+    account stayed linked and the first sync uploaded the Mac's tasks. Now the kit's
+    `SignInCancellation` decides Cancel against the link exactly once, at the last moment before
+    the link's write: a Cancel that comes first links nothing and ends the session the server
+    opened (as before); once the link wins, `cancel()` is refused, the sheet stays in
+    "Signing in…" with Cancel and Esc disabled (`SignInFlow.Phase.finishing`), the first sync runs
+    as a normal signed-in sync, and the sheet closes signed in. So no task is uploaded for a sign-in
+    the sheet reports as cancelled, and the sheet never reports as cancelled a link that stuck.
+    `Workspace.signIn(serverURL:email:password:cancellation:)` and the new `SyncService`
+    requirement default to the previous behaviour; the iPhone's sign-in (the native attempt path)
+    is untouched. Tests: `MacSyncFlowTests` "once the account is linked, Cancel never says
+    cancelled" (red before the fix: the sheet went back to `.editing` and logged "sign-in
+    cancelled"), and in `SyncEngineSessionTests` the Cancel-before-the-link and
+    Cancel-during-the-link's-write cases.
+  - **Sign-out removes only what X-04 counted** (review P1; kit, so the iPhone too). After the
+    count check, `Workspace.signOut` suspends (writer, engine stop, removal, logout) while
+    `writesSuspended` blocked only persistence: a command made meanwhile (the Mac's global Quick
+    Capture) was accepted into `unpersisted`, never counted, and erased by
+    `resetToEmptyLocalWorkspace()`. Now `Workspace.isSigningOut` is set before the first suspension
+    and `perform` refuses every command until the sign-out returns, with
+    `GTDValidationError.signingOut` ("Brain Buddy is signing out. This wasn't saved; try again in a
+    moment."): Quick Capture and the main window show it and keep the typed text, and the same
+    capture is taken once signed out. And "Sign out and remove" removes no more than the count it
+    was called with: a change another process (an iPhone widget or App Intent) queues meanwhile
+    fails the removal check under the store's lock with `unsyncedChanges` and the real count, so
+    X-04 (and the iPhone's confirmation) asks again and nothing is removed. Chosen over "abort and
+    re-present on any in-process change" because a change after the removal can't re-present
+    anything; refusing it is the one way it can't be lost. Tests (`WorkspaceSyncTests`, red before
+    the fix): a capture before the removal (both choices) and after it is refused, never silently
+    removed; Sign out and remove keeps a change another process queued meanwhile; a failed
+    sign-out takes changes again. `MacSyncFlowTests`: a Quick Capture while a confirmed sign-out
+    commits (logout held) is refused with words (red before the fix: taken, then erased).
+  - **Sign-out removes only the changes X-04 named, by identity** (review P1; kit, so the iPhone
+    too). The count bound let a change another process queued pass when one of the counted changes
+    was acknowledged meanwhile (same count, different change). The confirmation now captures
+    `Workspace.pendingChangeIDs` (Mac `SignOutFlow.Prompt.changes`, the iPhone's Settings dialog)
+    and `Workspace.signOut(removing:)` refuses with `unsyncedChanges` whenever a pending change,
+    found up front or under the store's lock, is not among them; the count words are unchanged.
+    `WorkspaceSyncTests` (red before the fix: the widget's change was removed): confirm {A}, A
+    acknowledged and B queued meanwhile, refused, B kept. Follow-up: an edit folded into a named
+    unsent change (`OutboxCompactor`) keeps its id, so the identity is now `PendingChange` (id and
+    command; `Workspace.pendingChanges`) and such an edit is refused and kept the same way (test red
+    before: the folded edit was removed).
+  - **X-03 is single-flight across entries** (review P1). The app menu's "Sign in…" while the
+    sheet waited for its login replaced the flow without cancelling its request, so two logins
+    could race. `MacSyncController.beginSignIn` now keeps an open flow (sheet shown or request on
+    its way) and the menu items are disabled meanwhile (`isSignInOpen`). `MacSyncFlowTests` (red
+    before the fix: the flow was replaced and a second sheet presented): the first flow, its one
+    login, signed in.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

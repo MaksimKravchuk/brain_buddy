@@ -95,6 +95,11 @@ public final class Workspace {
     @ObservationIgnored private var deferredDocument: StoreDocument?
     /// Set during sign-out: nothing new is written for the old account.
     @ObservationIgnored private var writesSuspended = false
+    /// A sign-out is committing (spec 021, FR-018, X-04): from its last count check to the empty
+    /// workspace, every command is refused with `GTDValidationError.signingOut`, so a change made
+    /// meanwhile (the Mac's global Quick Capture, an in-process App Intent) is never accepted and
+    /// then removed unseen. The caller keeps what was typed and can try again once it is done.
+    @ObservationIgnored public private(set) var isSigningOut = false
     /// Bumped when the workspace is reset, so results of work started
     /// before (a load, a write) are discarded.
     @ObservationIgnored private var epoch = 0
@@ -387,7 +392,12 @@ public final class Workspace {
     /// - Throws: `WorkspaceError.invalidServerURL` for an address that is not
     ///   https (or http on localhost), `.signInFailed` with the server's
     ///   words otherwise (always, in a workspace without sync).
-    public func signIn(serverURL: URL, email: String, password: String) async throws {
+    ///
+    /// `cancellation` is the person's Cancel (the Mac's X-03): one that wins links nothing and
+    /// throws the kit's "cancelled" failure; once the link won, this returns as a normal sign-in.
+    public func signIn(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
+    ) async throws {
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
         }
@@ -401,7 +411,8 @@ public final class Workspace {
         isSigningIn = true
         let linked: LinkedAccount
         do {
-            let result = try await sync.signInWithResult(serverURL: url, email: email, password: password)
+            let result = try await sync.signInWithResult(
+                serverURL: url, email: email, password: password, cancellation: cancellation)
             linked = result.account
             if result.deletionCancelled { signInCancelledAccountDeletion = true }
         } catch {
@@ -474,38 +485,59 @@ public final class Workspace {
         if signInCancelledAccountDeletion { signInCancelledAccountDeletion = false }
     }
 
+    /// The pending changes, each by its id and what it holds, for a sign-out confirmation to name
+    /// (`signOut(removing:)`).
+    public var pendingChanges: Set<PendingChange> { Set((document.outbox + unpersisted).map(PendingChange.init)) }
+
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
     /// while changes are still pending, counting those a widget or App Intent
-    /// queued in the store that this workspace has not picked up yet.
+    /// queued in the store that this workspace has not picked up yet. With it
+    /// set, it removes the changes pending when called and no others
+    /// (`signOut(removing:)`).
     public func signOut(discardUnsyncedChanges: Bool) async throws {
-        if pendingChangeCount > 0, !discardUnsyncedChanges {
-            throw WorkspaceError.unsyncedChanges(count: pendingChangeCount)
-        }
+        try await signOut(removing: discardUnsyncedChanges ? pendingChanges : [])
+    }
+
+    /// Signs out and removes the account's data from this device, with no more of its unsent
+    /// changes than `confirmed`: the ones the confirmation named (`pendingChanges` when it was
+    /// shown; empty for a plain sign-out). Spec 021, FR-018, X-04.
+    ///
+    /// Any other pending change fails it with `WorkspaceError.unsyncedChanges` and the real count,
+    /// and nothing is removed: one already pending, one a widget or App Intent queues in the store
+    /// meanwhile (checked again under the store's lock), also when a named change was acknowledged
+    /// in between so the count still matches, or an edit was folded into a named change so its id
+    /// still matches. One made in this workspace meanwhile is refused (`GTDValidationError.signingOut`,
+    /// `isSigningOut`).
+    public func signOut(removing confirmed: Set<PendingChange>) async throws {
+        let pending = pendingChanges
+        if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
+        // Set before the first suspension: nothing performed from here on can slip past the changes
+        // the person confirmed and be removed with the account's data.
+        isSigningOut = true
+        defer { isSigningOut = false }
         nativeSignInID = nil
         isSigningIn = false
         // Let a write in flight finish, and write nothing new for this account.
         writesSuspended = true
         if let writer { await writer.value }
-        if !discardUnsyncedChanges {
-            // Another process may have queued changes since the last reload.
-            let unsynced = unpersisted.count + ((try? await store.load())?.outbox.count ?? 0)
-            if unsynced > 0 {
-                writesSuspended = false
-                await refreshFromStore()
-                schedulePersistence()
-                throw WorkspaceError.unsyncedChanges(count: unsynced)
-            }
+        // Another process may have queued changes since the last reload.
+        let unpersistedChanges = Set(unpersisted.map(PendingChange.init))
+        let unsynced = unpersistedChanges.union((try? await store.load())?.outbox.map(PendingChange.init) ?? [])
+        if !unsynced.isSubset(of: confirmed) {
+            writesSuspended = false
+            await refreshFromStore()
+            schedulePersistence()
+            throw WorkspaceError.unsyncedChanges(count: unsynced.count)
         }
-        let unpersistedCount = unpersisted.count
-        let discard = discardUnsyncedChanges
         let store = self.store
         // The engine runs this once it has recorded the session's logout; it is checked again under
-        // the store's lock, so nothing queued in between is lost.
+        // the store's lock, so nothing queued in between is lost: a change that was not confirmed
+        // (any, for a plain sign-out) and nothing is removed.
         let removeData: @Sendable () async throws -> Void = {
             try await store.destroy(after: { stored in
-                let unsynced = unpersistedCount + (stored?.outbox.count ?? 0)
-                if unsynced > 0, !discard { throw WorkspaceError.unsyncedChanges(count: unsynced) }
+                let unsynced = unpersistedChanges.union(stored?.outbox.map(PendingChange.init) ?? [])
+                if !unsynced.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: unsynced.count) }
             })
         }
         do {
@@ -611,6 +643,7 @@ extension Workspace {
     /// Before that the reducer derives one (no id is drawn, so nothing else
     /// changes while the feature is off).
     func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        guard !isSigningOut else { throw .signingOut }
         let issuedAt = Self.storedPrecision(now())
         let makeID = self.makeID
         let commands =
