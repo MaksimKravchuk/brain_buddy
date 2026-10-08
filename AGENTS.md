@@ -4,6 +4,7 @@
 - `backend/`: FastAPI app under `app/` with repositories, services, and `tests/` (pytest).
 - `frontend/`: Vite React client under `src/`; Vitest specs live in `src/**/__tests__/`.
 - `ios/`: the iPhone client — a native offline-first SwiftUI app (iOS 26) with an XcodeGen project and the Linux-testable `BrainBuddyKit` package; CI lanes `ios-kit`/`ios-app` in `ci.yml`, TestFlight in `.github/workflows/ios.yml`. See `ios/AGENTS.md` and `docs/native-ios-app.md`.
+- `macos/`: the Mac client — a SwiftUI app (macOS 26, Swift 6) that is a client of `ios/BrainBuddyKit` like the iPhone (GTD rules, the store file and sync come from the kit; `BrainBuddyMacCore` holds its Foundation-only logic); CI lane `macos-app` in `ci.yml`. See `macos/README.md` and `docs/native-macos-app.md`.
 - `docs/`: Architecture, API, troubleshooting, performance, and smoke runbooks.
 - `deploy/`: Container assets (nginx config).
 - `scripts/`: Utility scripts such as `smoke_test.sh`.

@@ -159,7 +159,8 @@ add one task (it writes a new `local-gtd.json`), quit it, then launch the 021 bu
 | L4 | Second launch | No notice. |
 | L5 | Without the sidecar (2.6) | Quit, delete `mac-local.json`, put the pre-021 file back if needed, relaunch: the same notice once, and no import. |
 
-(The X-02 quiet line and the sign-out steps 2.3 and 2.7 need sign-in, which arrives in PR-09.)
+(The X-02 quiet line and the sign-out steps 2.3 and 2.7 need sign-in: they are steps S8 and O5 of
+`manual-macos-status.md`, PR-09.)
 
 ### 7. Unreadable `store.json` (X-09)
 
