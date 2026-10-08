@@ -303,6 +303,16 @@ class ReviewService:
         self._check_decision(task, payload, owner_id=owner_id)
         repeated = self._repeated_decision(task, payload, owner_id=owner_id)
         if repeated is not None:
+            # The answer is recorded under this request's own key, so a retry
+            # replays it even after the winning decision is undone (FR-048).
+            self.tasks._store_idempotency(
+                owner_id=owner_id,
+                key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                resource_id=repeated.decision.id,
+                response=repeated,
+            )
             self._log_decision(repeated, outcome="already_applied", started=started)
             return repeated
         result = self._apply_decision(

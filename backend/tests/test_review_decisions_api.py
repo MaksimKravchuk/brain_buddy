@@ -498,6 +498,86 @@ def test_020_FR_048_one_card_one_kept_decision_whichever_no_revision_type(
     assert len(api.decisions()) == 1
 
 
+def test_020_FR_048_a_deduplicated_decision_replays_under_its_own_key_after_undo(
+    api: ReviewApi,
+) -> None:
+    """The second device's key is recorded, so its lost-response retry is stable.
+
+    Device B's follow_up was answered with device A's keep_waiting (nothing
+    created). A's decision is then undone. B retries with the same key: the
+    answer is replayed, not applied as a fresh follow_up.
+    """
+
+    task = _waiting(api)
+    session = api.session()
+    first = api.decide(task, "keep_waiting", session_id=session.id)
+    headers = api.key()
+    follow_up_id = new_id("task")
+
+    with allure.step("Device B follows up the card A already kept, under key K"):
+        answered = api.decide_raw(
+            task,
+            "follow_up",
+            headers=headers,
+            title="Call Ann",
+            follow_up_task_id=follow_up_id,
+            session_id=session.id,
+        )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["decision"]["id"] == first["decision"]["id"]
+    assert answered.json()["created_task"] is None
+    before = _tasks_in(api)
+
+    with allure.step("A's decision is undone, then B retries with the same key K"):
+        undone = api.undo_raw(first["decision"]["id"], task["revision"])
+        assert undone.status_code == 200, undone.text
+        retried = api.decide_raw(
+            task,
+            "follow_up",
+            headers=headers,
+            title="Call Ann",
+            follow_up_task_id=follow_up_id,
+            session_id=session.id,
+        )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["decision"]["id"] == first["decision"]["id"]
+    assert retried.json()["created_task"] is None
+    assert _tasks_in(api) == before
+    assert api.decisions() == []
+
+
+def test_020_FR_002_020_FR_048_a_deduplicated_save_anyway_replays_after_undo(
+    api: ReviewApi,
+) -> None:
+    """A repeated cosmetic save records its key too; Undo does not lose the replay."""
+
+    task = _asking(api, "Call Bob")
+    session = api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=session.id)
+    now = api.task(task["id"])
+    headers = api.key()
+
+    with allure.step("The second device saves anyway under key K"):
+        answered = api.decide_raw(
+            now, "reformulate", headers=headers, title="CALL BOB", session_id=session.id
+        )
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["decision"]["id"] == first["decision"]["id"]
+
+    with allure.step("The first is undone, then the second retries with key K"):
+        undone = api.undo_raw(first["decision"]["id"], now["revision"])
+        assert undone.status_code == 200, undone.text
+        retried = api.decide_raw(
+            now, "reformulate", headers=headers, title="CALL BOB", session_id=session.id
+        )
+
+    assert retried.status_code == 200, retried.text
+    assert retried.json() == answered.json()
+    assert api.task(task["id"])["title"] == "Call Bob"
+    assert api.decisions() == []
+
+
 def test_020_FR_048_a_no_revision_decision_is_new_after_undo_run_or_change(
     api: ReviewApi,
 ) -> None:
