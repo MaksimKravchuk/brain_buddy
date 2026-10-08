@@ -2,14 +2,17 @@ import AppKit
 import BrainBuddyMacCore
 import SwiftUI
 
-/// The launch order of contracts/mac-app-host.md §1, steps 1 – 5 (T110):
+/// The launch order of contracts/mac-app-host.md §1 (T110, T129):
 /// 1. `SingleInstanceGuard`, here, before any file is read;
 /// 2. – 5. `LegacyStoreImporter` (with its X-05 notices), `LegacyCookieCleanup`,
 ///    `WorkspaceHost`, `workspace.load()` (X-09 on `loadError`), run by `MacLaunch` from the
-///    window's first task while static placeholders show.
-/// Sync triggers start in PR-09.
+///    window's first task while static placeholders show;
+/// 6. `SyncTriggerSource.start()` (`MacSyncRuntime`), once the workspace is loaded and readable.
+/// The menus are X-06's `ProjectMenuCommands` and X-07's `SyncMenuCommands`; quitting waits for the
+/// workspace's last write.
 @main
 struct BrainBuddyMacApp: App {
+    @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     @State private var launch: MacLaunch
     /// Held for the life of the process; the kernel releases it when the process ends.
     private let instance: SingleInstanceGuard
@@ -43,7 +46,10 @@ struct BrainBuddyMacApp: App {
                 .frame(minWidth: 720, minHeight: 480)
         }
         .defaultSize(width: 960, height: 640)
-        .commands { ProjectMenuCommands() }
+        .commands {
+            SyncMenuCommands()
+            ProjectMenuCommands()
+        }
     }
 
     /// X-08 "default": the running copy comes to the front. The lock names its process; when that
@@ -60,6 +66,7 @@ struct BrainBuddyMacApp: App {
         return other.activate(from: .current, options: [])
     }
 
+    // presentation-region: X-08 already open
     /// X-08 "unreachable": one standard alert, "OK", then this copy quits.
     private static func presentAlreadyOpen() {
         let alert = NSAlert()
@@ -69,7 +76,9 @@ struct BrainBuddyMacApp: App {
         NSApp.activate()
         alert.runModal()
     }
+    // presentation-region-end
 
+    // presentation-region: launch stopped
     /// A launch that cannot go on says why and quits without touching any file.
     private static func stop(_ message: String) -> Never {
         let alert = NSAlert()
@@ -80,4 +89,5 @@ struct BrainBuddyMacApp: App {
         alert.runModal()
         exit(1)
     }
+    // presentation-region-end
 }

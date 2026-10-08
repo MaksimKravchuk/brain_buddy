@@ -397,23 +397,23 @@ Setup and polish (T001 – T005, T134 – T139) carry no story. T066 – T089, T
 
 Every task here is *(runtime: macOS lane)* except the docs tasks T130 – T131 and the host task T133.
 
-- [ ] T115 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/SyncStatusLineModelTests.swift` (new): `SyncStatusLineModel` re-describes after 30 s with no snapshot change; the indicator slot keeps its width whether the indicator shows or not; entering an attention state yields exactly one announcement and staying in it none; calm changes are never announced; the sidebar-hidden toolbar item appears only in attention states, carries the status words' accessible name and requests no focus. *(021-FR-012, 021-FR-013, 021-FR-017)*
-- [ ] T116 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationRouterTests.swift` (new), the positive control: each `UserIntent` presents exactly its own surface (X-02, X-03, X-04, the launch notices X-05, X-08, X-09); a sweep of every `SyncLineState` and transition through the status-line model leaves the router untouched. *(021-SC-004, 021-FR-017)*
-- [ ] T117 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationGuardTests.swift` (new): reads the Mac target's sources via `#filePath` and fails when `.sheet(`, `.alert(`, `.confirmationDialog(`, `.popover(isPresented`, `NSAlert`, `NSSound`, `UNUserNotificationCenter`, `NSApp.activate`, `makeFirstResponder` or a `@FocusState` assignment appears outside `MacPresentationRouter.swift` and the allow-list of mac-app-host §8, which the test spells out file by file and region by region (`SignInSheet.swift`, `SignOutConfirmation.swift`, `UpgradeNotice.swift`, the X-08 and X-09 views, `ProjectReviewView.swift`, `QuickCaptureView.swift`, `QuickOpenView.swift`, the marked regions of `ContentView.swift`), and when any allow-listed call's condition reads `SyncSnapshot` or `syncStatus`; a seeded violation in a scratch copy makes it fail. *(021-SC-004, 021-FR-017)*
-- [ ] T118 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/SyncTriggerSourceTests.swift` (new), with a fake clock and a fake path monitor, the mac-app-host §5 table: launch → `start()`; activation → `reloadIfChangedExternally()` then `setForegroundActive(true)`; occlusion to visible → `.foreground`; network back → `networkAvailabilityChanged(true)`; network gone → offline; the kit ticker active for the life of the process; File › "Sync now", popover "Sync now" and "Retry" → `syncNow()`; resign and terminate → `flush()`; the App Nap activity held exactly while an account is linked. *(021-FR-006)*
-- [ ] T119 [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift` (new), against a counting stub `HTTPTransport`: account-less, launch, foreground, 15 s ticks, network-restored and local-change triggers send **zero** requests; after a sign-out the only request is the queued logout; an upgraded account-less host with a seeded pre-021 cookie for `https://api.example.com` sends exactly one bodiless `POST /auth/logout` there and nothing else; sync-category `os.Logger` lines with sentinel titles hold no sentinel, email or host; sign-in; the account-switch refusal when "Sign in again" resolves to a different account id while changes wait, and when the same owner id is on another server, nothing sent (US4-5); sign-out with 3 unsent changes where a quick capture arrives before confirm signs nothing out and re-presents X-04 with 4, and a plain "Sign out" refused by the kit re-presents it; with an unsaved task edit, "Sign out…" first shows the existing discard confirmation; `WorkspaceHost` uses the service `app.brainbuddy.mac.session` and a spy store sees every token-store call off the main thread; with `BRAINBUDDY_MAC_DATA_DIR` set and the spy store seeded with a token and a pending logout, launch, foreground, 15 s ticks and network-restored triggers make no token-store call and send nothing, and a sign-in started in the dry run is the first call (mac-app-host §1); requests carry `X-Client: brainbuddy-macos/<version>`. *(021-FR-001, 021-FR-004, 021-FR-005, 021-FR-018, 021-FR-029, 021-FR-030, 021-FR-031)*
-- [ ] T120 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacKeychainTests.swift` (new): each test creates and unlocks a temporary keychain (`SecKeychainCreate` in the test's temporary folder, random password) and fails, never skips, if it cannot; via the macOS-only initializer: set, read, update, remove, add and remove a pending logout; the item is not synchronizable; a non-interactive read of an item whose access is refused is treated as no token with no prompt; delete-and-re-add after a refused interactive write; the login keychain is never touched. *(021-FR-005)*
-- [ ] T121 [P] [US2] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPrivacyGuardTests.swift` (new): the voice sources (`VoiceCapture.swift` and the `VoiceTranscriber` actor) contain no `URLSession`, `import Network` or `BrainBuddyAPI`. *(021-FR-029, 021-FR-010)*
-- [ ] T122 [US3] Make T115 GREEN in `macos/Sources/BrainBuddyMac/SyncStatusLine.swift` (new; `SyncStatusLineModel` over `SyncStatusDescriber` and `SyncActivityIndicator`; X-01 in every state: one line of 11 pt secondary text, the reserved indicator slot with a static glyph under Reduce Motion, at most one trailing action, wrapping after " · ", accessible name "Sync status: … Show details", the tooltip, one polite announcement on entering an attention state, the sidebar-hidden toolbar item in attention states only). *(021-FR-012, 021-FR-013, 021-FR-014, 021-FR-015)*
-- [ ] T123 [US3] Make the X-02 popover in `macos/Sources/BrainBuddyMac/SyncStatusPopover.swift` (new): non-modal, at most 480 pt tall with an internal scroll; last sync, waiting count and oldest age or the first-upload line; issues from `SyncIssueDescriber` with "Copy" and "Dismiss" (`Workspace.dismissIssue`), the kept outcome in full with "Copy outcome" and "Discard outcome" ("Discard your outcome for “<project>”") then "Outcome discarded · Undo" for 5 s; "Sync now" (shown disabled, never hidden, when the session ended or offline); the email and "Sign out…"; the backup, import-report and earlier-version lines with "Show in Finder"; the Tab order, focus on open, focus after Dismiss and Esc / click-outside of mac-app-host §6. *(021-FR-015, 021-FR-016, 021-FR-021, 021-FR-033)*
-- [ ] T124 [US3] Make T116 GREEN in `macos/Sources/BrainBuddyMac/MacPresentationRouter.swift` (new): the only presenter, taking `UserIntent` values only, with no `SyncSnapshot` input. *(021-SC-004, 021-FR-017)*
-- [ ] T125 [US1] Make the sign-in part of T119 GREEN in `macos/Sources/BrainBuddyMac/SignInSheet.swift` (new; X-03 in every state: the first-sign-in info box when the outbox holds account-less data, wrong password, 429 / 5xx, offline, "sign in again" with the email locked, account switch refused with `accountSwitchRefused` and `.mac`, "no answer", "couldn't save sign-in" with Ref; fields read-only while "Signing in…" with Cancel and Esc enabled, a late reply's session ended; the Keychain prompt allowed only here; focus on close to the opener or the X-01 words; the "account deletion cancelled" note before closing). *(021-FR-001, 021-FR-003, 021-FR-004, 021-FR-005, 021-FR-015, 021-FR-017)*
-- [ ] T126 [US1] Make the sign-out part of T119 GREEN in `macos/Sources/BrainBuddyMac/SignOutConfirmation.swift` (new; X-04 in every state: `signOutUnsent` or `signOutNothingUnsent`, then `signOutIssues(n)`, then `signOutBackup` (dated, or undated after the date while this sign-out keeps the backup) or `signOutBackupRemoved`; "Cancel" default; the unsaved-edit guard first; re-presented when the count changed; "Couldn't sign out" when the removal fails; afterwards selection to Inbox, the account-less footer, `signedOutSinceImport = true` and the backup retention check). *(021-FR-005, 021-FR-018, 021-FR-021)*
-- [ ] T127 [US1] Add `macos/Sources/BrainBuddyMac/SyncMenuCommands.swift` (new; X-07: File › "Sync now" ⌘R following `syncNowEnabled`, single-flight, also while typing; app menu "Sign in…", "Sign in again…", "Sign out…"). *(021-FR-006, 021-FR-001)*
-- [ ] T128 [US1] Make T118 GREEN in `macos/Sources/BrainBuddyMac/SyncTriggerSource.swift` (new; the §5 table, `NWPathMonitor`, the kit `PeriodicSyncTicker` active for the life of the process, `ProcessInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Keeping Brain Buddy in sync")` while an account is linked, ended at sign-out). *(021-FR-006)*
-- [ ] T129 [US1] Make T119 – T121 GREEN across `macos/Sources/BrainBuddyMac/WorkspaceHost.swift` (non-interactive background Keychain reads, every Keychain call off the main actor, the macOS client identity version), `macos/Sources/BrainBuddyMac/ContentView.swift` (the footer becomes `SyncStatusLine`, the sidebar-hidden toolbar item, an empty list reads "Your tasks are still arriving." while "Not synced yet" holds after a sign-in instead of its celebratory empty copy (`popoverFirstLoadEmpty`), the person-started presentations inside the marked regions the guard allows) and `macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift` (`SyncMenuCommands`, `ProjectMenuCommands`, launch step 6 `SyncTriggerSource.start()`). *(021-FR-001, 021-FR-005, 021-FR-006, 021-FR-012, 021-FR-017, 021-FR-031)*
-- [ ] T130 [P] [US1] Write `docs/native-macos-app.md` (new): the kit adoption, the files and their lifetimes, the login-keychain disposition (Time Machine and Migration Assistant carry it; removing `app.brainbuddy.mac.session` in Keychain Access after a refused prompt), "Sign in again" after an ad-hoc rebuild, the timestamp limit after the first sign-in, the App Nap activity, the dry run. *(021-FR-005)*
-- [ ] T131 [P] [US1] Update `AGENTS.md` (one line: the Mac app is a kit client; research R22), `macos/README.md` (signing in, the Keychain prompt) and `docs/data-retention.md` (the macOS session-token row of data-model E9 as written there). *(021-FR-005)*
+- [x] T115 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/SyncStatusLineModelTests.swift` (new): `SyncStatusLineModel` re-describes after 30 s with no snapshot change; the indicator slot keeps its width whether the indicator shows or not; entering an attention state yields exactly one announcement and staying in it none; calm changes are never announced; the sidebar-hidden toolbar item appears only in attention states, carries the status words' accessible name and requests no focus. *(021-FR-012, 021-FR-013, 021-FR-017)*
+- [x] T116 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationRouterTests.swift` (new), the positive control: each `UserIntent` presents exactly its own surface (X-02, X-03, X-04, the launch notices X-05, X-08, X-09); a sweep of every `SyncLineState` and transition through the status-line model leaves the router untouched. *(021-SC-004, 021-FR-017)*
+- [x] T117 [P] [US3] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPresentationGuardTests.swift` (new): reads the Mac target's sources via `#filePath` and fails when `.sheet(`, `.alert(`, `.confirmationDialog(`, `.popover(isPresented`, `NSAlert`, `NSSound`, `UNUserNotificationCenter`, `NSApp.activate`, `makeFirstResponder` or a `@FocusState` assignment appears outside `MacPresentationRouter.swift` and the allow-list of mac-app-host §8, which the test spells out file by file and region by region (`SignInSheet.swift`, `SignOutConfirmation.swift`, `UpgradeNotice.swift`, the X-08 and X-09 views, `ProjectReviewView.swift`, `QuickCaptureView.swift`, `QuickOpenView.swift`, the marked regions of `ContentView.swift`), and when any allow-listed call's condition reads `SyncSnapshot` or `syncStatus`; a seeded violation in a scratch copy makes it fail. *(021-SC-004, 021-FR-017)*
+- [x] T118 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/SyncTriggerSourceTests.swift` (new), with a fake clock and a fake path monitor, the mac-app-host §5 table: launch → `start()`; activation → `reloadIfChangedExternally()` then `setForegroundActive(true)`; occlusion to visible → `.foreground`; network back → `networkAvailabilityChanged(true)`; network gone → offline; the kit ticker active for the life of the process; File › "Sync now", popover "Sync now" and "Retry" → `syncNow()`; resign and terminate → `flush()`; the App Nap activity held exactly while an account is linked. *(021-FR-006)*
+- [x] T119 [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift` (new), against a counting stub `HTTPTransport`: account-less, launch, foreground, 15 s ticks, network-restored and local-change triggers send **zero** requests; after a sign-out the only request is the queued logout; an upgraded account-less host with a seeded pre-021 cookie for `https://api.example.com` sends exactly one bodiless `POST /auth/logout` there and nothing else; sync-category `os.Logger` lines with sentinel titles hold no sentinel, email or host; sign-in; the account-switch refusal when "Sign in again" resolves to a different account id while changes wait, and when the same owner id is on another server, nothing sent (US4-5); sign-out with 3 unsent changes where a quick capture arrives before confirm signs nothing out and re-presents X-04 with 4, and a plain "Sign out" refused by the kit re-presents it; with an unsaved task edit, "Sign out…" first shows the existing discard confirmation; `WorkspaceHost` uses the service `app.brainbuddy.mac.session` and a spy store sees every token-store call off the main thread; with `BRAINBUDDY_MAC_DATA_DIR` set and the spy store seeded with a token and a pending logout, launch, foreground, 15 s ticks and network-restored triggers make no token-store call and send nothing, and a sign-in started in the dry run is the first call (mac-app-host §1); requests carry `X-Client: brainbuddy-macos/<version>`. *(021-FR-001, 021-FR-004, 021-FR-005, 021-FR-018, 021-FR-029, 021-FR-030, 021-FR-031)*
+- [x] T120 [P] [US1] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacKeychainTests.swift` (new): each test creates and unlocks a temporary keychain (`SecKeychainCreate` in the test's temporary folder, random password) and fails, never skips, if it cannot; via the macOS-only initializer: set, read, update, remove, add and remove a pending logout; the item is not synchronizable; a non-interactive read of an item whose access is refused is treated as no token with no prompt; delete-and-re-add after a refused interactive write; the login keychain is never touched. *(021-FR-005)*
+- [x] T121 [P] [US2] Write and observe RED `macos/Tests/BrainBuddyMacTests/MacPrivacyGuardTests.swift` (new): the voice sources (`VoiceCapture.swift` and the `VoiceTranscriber` actor) contain no `URLSession`, `import Network` or `BrainBuddyAPI`. *(021-FR-029, 021-FR-010)*
+- [x] T122 [US3] Make T115 GREEN in `macos/Sources/BrainBuddyMac/SyncStatusLine.swift` (new; `SyncStatusLineModel` over `SyncStatusDescriber` and `SyncActivityIndicator`; X-01 in every state: one line of 11 pt secondary text, the reserved indicator slot with a static glyph under Reduce Motion, at most one trailing action, wrapping after " · ", accessible name "Sync status: … Show details", the tooltip, one polite announcement on entering an attention state, the sidebar-hidden toolbar item in attention states only). *(021-FR-012, 021-FR-013, 021-FR-014, 021-FR-015)*
+- [x] T123 [US3] Make the X-02 popover in `macos/Sources/BrainBuddyMac/SyncStatusPopover.swift` (new): non-modal, at most 480 pt tall with an internal scroll; last sync, waiting count and oldest age or the first-upload line; issues from `SyncIssueDescriber` with "Copy" and "Dismiss" (`Workspace.dismissIssue`), the kept outcome in full with "Copy outcome" and "Discard outcome" ("Discard your outcome for “<project>”") then "Outcome discarded · Undo" for 5 s; "Sync now" (shown disabled, never hidden, when the session ended or offline); the email and "Sign out…"; the backup, import-report and earlier-version lines with "Show in Finder"; the Tab order, focus on open, focus after Dismiss and Esc / click-outside of mac-app-host §6. *(021-FR-015, 021-FR-016, 021-FR-021, 021-FR-033)*
+- [x] T124 [US3] Make T116 GREEN in `macos/Sources/BrainBuddyMac/MacPresentationRouter.swift` (new): the only presenter, taking `UserIntent` values only, with no `SyncSnapshot` input. *(021-SC-004, 021-FR-017)*
+- [x] T125 [US1] Make the sign-in part of T119 GREEN in `macos/Sources/BrainBuddyMac/SignInSheet.swift` (new; X-03 in every state: the first-sign-in info box when the outbox holds account-less data, wrong password, 429 / 5xx, offline, "sign in again" with the email locked, account switch refused with `accountSwitchRefused` and `.mac`, "no answer", "couldn't save sign-in" with Ref; fields read-only while "Signing in…" with Cancel and Esc enabled, a late reply's session ended; the Keychain prompt allowed only here; focus on close to the opener or the X-01 words; the "account deletion cancelled" note before closing). *(021-FR-001, 021-FR-003, 021-FR-004, 021-FR-005, 021-FR-015, 021-FR-017)*
+- [x] T126 [US1] Make the sign-out part of T119 GREEN in `macos/Sources/BrainBuddyMac/SignOutConfirmation.swift` (new; X-04 in every state: `signOutUnsent` or `signOutNothingUnsent`, then `signOutIssues(n)`, then `signOutBackup` (dated, or undated after the date while this sign-out keeps the backup) or `signOutBackupRemoved`; "Cancel" default; the unsaved-edit guard first; re-presented when the count changed; "Couldn't sign out" when the removal fails; afterwards selection to Inbox, the account-less footer, `signedOutSinceImport = true` and the backup retention check). *(021-FR-005, 021-FR-018, 021-FR-021)*
+- [x] T127 [US1] Add `macos/Sources/BrainBuddyMac/SyncMenuCommands.swift` (new; X-07: File › "Sync now" ⌘R following `syncNowEnabled`, single-flight, also while typing; app menu "Sign in…", "Sign in again…", "Sign out…"). *(021-FR-006, 021-FR-001)*
+- [x] T128 [US1] Make T118 GREEN in `macos/Sources/BrainBuddyMac/SyncTriggerSource.swift` (new; the §5 table, `NWPathMonitor`, the kit `PeriodicSyncTicker` active for the life of the process, `ProcessInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Keeping Brain Buddy in sync")` while an account is linked, ended at sign-out). *(021-FR-006)*
+- [x] T129 [US1] Make T119 – T121 GREEN across `macos/Sources/BrainBuddyMac/WorkspaceHost.swift` (non-interactive background Keychain reads, every Keychain call off the main actor, the macOS client identity version), `macos/Sources/BrainBuddyMac/ContentView.swift` (the footer becomes `SyncStatusLine`, the sidebar-hidden toolbar item, an empty list reads "Your tasks are still arriving." while "Not synced yet" holds after a sign-in instead of its celebratory empty copy (`popoverFirstLoadEmpty`), the person-started presentations inside the marked regions the guard allows) and `macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift` (`SyncMenuCommands`, `ProjectMenuCommands`, launch step 6 `SyncTriggerSource.start()`). *(021-FR-001, 021-FR-005, 021-FR-006, 021-FR-012, 021-FR-017, 021-FR-031)*
+- [x] T130 [P] [US1] Write `docs/native-macos-app.md` (new): the kit adoption, the files and their lifetimes, the login-keychain disposition (Time Machine and Migration Assistant carry it; removing `app.brainbuddy.mac.session` in Keychain Access after a refused prompt), "Sign in again" after an ad-hoc rebuild, the timestamp limit after the first sign-in, the App Nap activity, the dry run. *(021-FR-005)*
+- [x] T131 [P] [US1] Update `AGENTS.md` (one line: the Mac app is a kit client; research R22), `macos/README.md` (signing in, the Keychain prompt) and `docs/data-retention.md` (the macOS session-token row of data-model E9 as written there). *(021-FR-005)*
 - [ ] T132 [US1] Verify the automated lane: `cd macos && swift test` on the `macos-app` lane on the exact SHA (`MacKeychainTests` must run, not skip); `sh ios/scripts/swift-linux.sh test`; the requirement scan.
 - [ ] T133 [US3] Host lane (the owner): quickstart Scenario 5 step 4 and Scenario 6 step 2.3 on the landed build, recorded in `specs/021-mac-sync/evidence/manual-macos-status.md` (the SC-004 sweep with no dialog and no focus change; VoiceOver for X-01 – X-05; keyboard order; Reduce Motion; large sidebar text; scroll, selection and focus kept during an incoming change; the row under the pointer; the covered-window cadence; the sidebar-hidden item; the Keychain item present and no token in files; the rebuild prompt only at sign-in; X-02 Tab order in three states; "Discard outcome" and Undo; X-09; the account switch refusal; sleep and wake), committed in a docs-only commit. *(runtime: host)* *(021-SC-004, 021-FR-009, 021-FR-006)*
 
@@ -698,6 +698,153 @@ Earlier increments are each independently useful and safe:
   - **XCTest ledger**: the rows whose successor is `MacSyncFlowTests` (T119) describe sign-in
     behaviour the account-less Mac no longer has; their kit successors exist and the Mac case
     arrives with sign-in in PR-09.
+
+- **PR-09 implementation notes (2026-10-08)**, read with the PR description:
+  - **Logic in the core, views in the app.** As in PR-08, everything the PR-09 tests need is
+    Foundation-only in `macos/Sources/BrainBuddyMacCore/`: `SyncStatusLineModel` (T122's model),
+    `SyncPopoverModel` (X-02's lines, Tab order, focus rules, the 5 s Undo of "Discard outcome"),
+    `SignInFlow` (X-03), `SignOutFlow` (X-04), `SyncTriggerSource` (T128's §5 table, with the
+    path monitor and the App Nap activity behind protocols), `MacPresentationRouter` (T124) and
+    `MacSyncController`, which the views bind to. The app target keeps the SwiftUI and AppKit
+    side: `SyncStatusLine.swift`, `SyncStatusPopover.swift`, `SignInSheet.swift`,
+    `SignOutConfirmation.swift`, `SyncMenuCommands.swift`, `MacPresentationRouter+SwiftUI.swift`
+    (where the router's state is attached as the popover, sheet and alert, and where routed focus
+    requests reach a `@FocusState`) and `SyncTriggerSource+Live.swift` (`NWPathMonitor`, the
+    `ProcessInfo` activity, the notifications, termination after `flush()`). The manifest lists
+    the paths; the guard's allow-list names the router's two files.
+  - **Kit changes** (PR-05's files, Linux-tested): `SyncEngine.linkAccount` ends a session whose
+    reply arrives after the sign-in was cancelled and links nothing (X-03 "a reply after cancel has
+    its session ended", which the kit did not do), and a sign-in with no answer now carries the
+    reference id its request was sent with (X-03 "no answer"); both in `SyncEngineSessionTests`,
+    observed RED on the base engine first. `KeychainSessionTokenStore.token(for:)` on macOS also
+    reads `errSecAuthFailed` as `accessDenied` ("Sign in again to sync"), as the interactive write
+    already did. `Workspace.waitForNetworkUpdates()` is public, for the Mac's trigger tests.
+  - **"Sync now" offline with rejected changes**: the kit's `syncNowEnabled` follows the line's
+    state, so with issues and no network it is true. X-02, X-07 and Retry also require a network
+    and a live session (`SyncPopoverModel.syncNowAvailable`), since X-02 shows every state that
+    holds.
+  - **Sign-out keeps typed text until it happens**: the window's discard confirmation comes first
+    (G28), but the drafts are cleared only once the sign-out succeeded
+    (`BrainBuddyModel.didSignOut`), so Cancel in X-04 loses nothing.
+  - **Found by `MacKeychainTests` on the `macos-app` lane** (kit fixes, both production bugs on the
+    Mac's file-based login keychain): `pendingLogouts()` asked for `kSecReturnData` with
+    `kSecMatchLimitAll`, which that keychain refuses with `errSecParam` (-50), so no queued logout
+    (offline sign-out, crash recovery, the pre-021 cookie sessions) could ever be listed and sent;
+    it now lists the items' attributes and reads each item's data. And a sign-in after a rebuild
+    updated the earlier build's item in place (writing data is allowed to any app) but could not
+    read it back (its access list trusts the earlier build), so every routine read asked to sign in
+    again. The test models "an earlier build's item" as one `/usr/bin/security` created.
+  - **Deviation: no delete-and-re-add after a rebuild** (contracts/mac-app-host.md §7 "The Keychain
+    prompt" and §8, data-model E9 "Recovery after Deny", kit-commands §4, plan, research R17 still
+    describe it). The `macos-app` lane showed macOS refuses to let a build delete an item another
+    program created: `errSecInvalidOwnerEdit` (-25244), with no prompt. So on macOS the store
+    writes past the earlier build's item instead: a server's session items are accounts `<host>`,
+    `<host>#1`, `<host>#2`, …; the highest generation is the session. A routine read of a highest
+    item this build may not read is `accessDenied` ("Sign in again to sync", unchanged); a routine
+    write never goes past it (`accessDenied`); the person's sign-in adds the next generation (this
+    build created it, so it reads back without a prompt; checked, and a failure is "couldn't save
+    sign-in") and never writes into the earlier build's item. Removals delete every item this build
+    may delete and leave, without failing, an item it may neither read nor delete. The earlier
+    build's item stays, unread, until the person deletes it in Keychain Access; its server session
+    ends at expiry (FR-005 residual, recorded in `docs/native-macos-app.md` and the data-retention
+    row). Pending logouts already follow this: one item per logout, an unreadable one skipped. No
+    access prompt is ever raised, so the spec's "may ask once" assumption holds trivially. iOS is
+    unchanged (one item per server). `MacKeychainTests` gains "the newest item decides", seven
+    tests in all (manual plan K2 and its count updated).
+  - **Deviation: X-03 Cancel ends at the link** (design X-03 "loading" and mac-app-host §7 say
+    Cancel and Esc stay enabled while "Signing in…" runs). Review P1: the kit checked Cancel only
+    in the instant after the login reply, but "Signing in…" also covers the link's write and the
+    first sync; a Cancel there sent the sheet back to the form ("sign-in cancelled") while the
+    account stayed linked and the first sync uploaded the Mac's tasks. Now the kit's
+    `SignInCancellation` decides Cancel against the link exactly once, at the last moment before
+    the link's write: a Cancel that comes first links nothing and ends the session the server
+    opened (as before); once the link wins, `cancel()` is refused, the sheet stays in
+    "Signing in…" with Cancel and Esc disabled (`SignInFlow.Phase.finishing`), the first sync runs
+    as a normal signed-in sync, and the sheet closes signed in. So no task is uploaded for a sign-in
+    the sheet reports as cancelled, and the sheet never reports as cancelled a link that stuck.
+    `Workspace.signIn(serverURL:email:password:cancellation:)` and the new `SyncService`
+    requirement default to the previous behaviour; the iPhone's sign-in (the native attempt path)
+    is untouched. Tests: `MacSyncFlowTests` "once the account is linked, Cancel never says
+    cancelled" (red before the fix: the sheet went back to `.editing` and logged "sign-in
+    cancelled"), and in `SyncEngineSessionTests` the Cancel-before-the-link and
+    Cancel-during-the-link's-write cases.
+  - **Sign-out removes only what X-04 counted** (review P1; kit, so the iPhone too). After the
+    count check, `Workspace.signOut` suspends (writer, engine stop, removal, logout) while
+    `writesSuspended` blocked only persistence: a command made meanwhile (the Mac's global Quick
+    Capture) was accepted into `unpersisted`, never counted, and erased by
+    `resetToEmptyLocalWorkspace()`. Now `Workspace.isSigningOut` is set before the first suspension
+    and `perform` refuses every command until the sign-out returns, with
+    `GTDValidationError.signingOut` ("Brain Buddy is signing out. This wasn't saved; try again in a
+    moment."): Quick Capture and the main window show it and keep the typed text, and the same
+    capture is taken once signed out. And "Sign out and remove" removes no more than the count it
+    was called with: a change another process (an iPhone widget or App Intent) queues meanwhile
+    fails the removal check under the store's lock with `unsyncedChanges` and the real count, so
+    X-04 (and the iPhone's confirmation) asks again and nothing is removed. Chosen over "abort and
+    re-present on any in-process change" because a change after the removal can't re-present
+    anything; refusing it is the one way it can't be lost. Tests (`WorkspaceSyncTests`, red before
+    the fix): a capture before the removal (both choices) and after it is refused, never silently
+    removed; Sign out and remove keeps a change another process queued meanwhile; a failed
+    sign-out takes changes again. `MacSyncFlowTests`: a Quick Capture while a confirmed sign-out
+    commits (logout held) is refused with words (red before the fix: taken, then erased).
+  - **Sign-out removes only the changes X-04 named, by identity** (review P1; kit, so the iPhone
+    too). The count bound let a change another process queued pass when one of the counted changes
+    was acknowledged meanwhile (same count, different change). The confirmation now captures
+    `Workspace.pendingChangeIDs` (Mac `SignOutFlow.Prompt.changes`, the iPhone's Settings dialog)
+    and `Workspace.signOut(removing:)` refuses with `unsyncedChanges` whenever a pending change,
+    found up front or under the store's lock, is not among them; the count words are unchanged.
+    `WorkspaceSyncTests` (red before the fix: the widget's change was removed): confirm {A}, A
+    acknowledged and B queued meanwhile, refused, B kept. Follow-up: an edit folded into a named
+    unsent change (`OutboxCompactor`) keeps its id, so the identity is now `PendingChange` (id and
+    command; `Workspace.pendingChanges`) and such an edit is refused and kept the same way (test red
+    before: the folded edit was removed).
+  - **X-03 is single-flight across entries** (review P1). The app menu's "Sign in…" while the
+    sheet waited for its login replaced the flow without cancelling its request, so two logins
+    could race. `MacSyncController.beginSignIn` now keeps an open flow (sheet shown or request on
+    its way) and the menu items are disabled meanwhile (`isSignInOpen`). `MacSyncFlowTests` (red
+    before the fix: the flow was replaced and a second sheet presented): the first flow, its one
+    login, signed in.
+  - **Account changes are one at a time** (review P1). During "Sign in again" the account stays
+    linked, so "Sign out…" could replace X-03 and start a sign-out while `Workspace.signIn` awaited
+    its first sync; once the sign-out removed the data, the sign-in's continuation set `account`
+    again, linked in the window only. Kit (so the iPhone too): `signOut` is refused while a sign-in
+    runs (`WorkspaceError.signingIn`, nothing removed) and `signIn` while a sign-out commits
+    (`signInFailed`, `Workspace.signingOutMessage`, no login sent). Mac: `requestSignOut` and
+    `presentSignOut` do nothing while X-03 is open, `beginSignIn` nothing while a sign-out commits
+    (`isSigningOut`), and the app menu disables the matching items. Tests, red before:
+    `WorkspaceSyncTests` (sign-out during a sign-in's first sync: was removed, then relinked in the
+    window with no account in the store; sign-in during a sign-out: was sent and wiped) and
+    `MacSyncFlowTests` (Sign out… while X-03 signs in; Sign in… while a sign-out's logout is held).
+  - **A sign-in after Cancel waits for the cancelled one** (review P1). Cancel put X-03 straight
+    back to `.editing`, so a retry could log in while the cancelled login's reply was still on its
+    way; that late reply then wrote its token over the retry's and its cleanup removed it, leaving
+    the retry linked with no session. Engine (so the iPhone too): password sign-ins take turns
+    (`SyncEngine.takeSignInTurn`), each finishing its login, link or cleanup before the next logs
+    in. Workspace: a second `signIn` while one runs is refused (`signInOnItsWayMessage`). Mac:
+    after Cancel the flow is `.cancelling` (typed values back, "Sign in" disabled, Cancel/Esc
+    close) until the cancelled request has ended. Tests, red before: `SyncEngineSessionTests`
+    (retry after Cancel keeps its session; only the cancelled one is logged out),
+    `WorkspaceSyncTests` (a second sign-in while one runs is refused, one login) and
+    `MacSyncFlowTests` (after Cancel, Sign in stays disabled until the cancelled request ended).
+  - **Sign-out names sync issues by identity too** (review P1). The removal checks looked at the
+    outbox only, so a named change the server rejected meanwhile (now an issue, with a new id) was
+    removed without X-04 naming it; and on the iPhone a plain "Sign out" with only open issues
+    removed them silently. `PendingChange` now covers unsent changes and sync issues
+    (`Workspace.pendingChanges`), every check, the locked one included, compares both, and the
+    iPhone's confirmation counts issues. Tests, red before: `WorkspaceSyncTests` (a named change
+    rejected during sign-out is refused and kept; a plain sign-out with only an issue is refused).
+  - **Quit waits for a confirmed sign-out's removal** (review P1). The quit path waited only for
+    `flush()`, which returns at once while a sign-out has suspended writes, so ⌘Q during X-04's
+    commit could end the process before the store was removed: the next launch still held the
+    account and its tasks while the recorded logout ended the session. `.willTerminate` now also
+    awaits `Workspace.waitForSignOutRemoval()` (the removal, not the network logout, which is
+    recorded and sent at the next launch). An in-flight sign-in is not waited for: interrupted, it
+    leaves either no link (a stale token the next launch discards) or a link the next launch syncs.
+    Tests: `MacSyncFlowTests` (quit during the commit waits for the removal; red before: it
+    returned with the store still there), `WorkspaceSyncTests`, `SyncTriggerSourceTests`.
+  - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
+    parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
+    T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
+    `evidence/manual-macos-status.md` (T133).
 
 ## Disposition traceability
 
@@ -1151,21 +1298,36 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
         "macos/Tests/BrainBuddyMacTests/MacSyncFlowTests.swift",
         "macos/Tests/BrainBuddyMacTests/MacKeychainTests.swift",
         "macos/Tests/BrainBuddyMacTests/MacPrivacyGuardTests.swift",
+        "macos/Tests/BrainBuddyMacTests/SyncStatusPopoverModelTests.swift",
+        "macos/Tests/BrainBuddyMacTests/MacTestSupport.swift",
         "macos/Sources/BrainBuddyMac/SyncStatusLine.swift",
         "macos/Sources/BrainBuddyMac/SyncStatusPopover.swift",
-        "macos/Sources/BrainBuddyMac/MacPresentationRouter.swift",
+        "macos/Sources/BrainBuddyMac/MacPresentationRouter+SwiftUI.swift",
         "macos/Sources/BrainBuddyMac/SignInSheet.swift",
         "macos/Sources/BrainBuddyMac/SignOutConfirmation.swift",
         "macos/Sources/BrainBuddyMac/SyncMenuCommands.swift",
-        "macos/Sources/BrainBuddyMac/SyncTriggerSource.swift",
+        "macos/Sources/BrainBuddyMac/SyncTriggerSource+Live.swift",
+        "macos/Sources/BrainBuddyMacCore/SyncStatusLineModel.swift",
+        "macos/Sources/BrainBuddyMacCore/SyncPopoverModel.swift",
+        "macos/Sources/BrainBuddyMacCore/MacPresentationRouter.swift",
+        "macos/Sources/BrainBuddyMacCore/SignInFlow.swift",
+        "macos/Sources/BrainBuddyMacCore/SignOutFlow.swift",
+        "macos/Sources/BrainBuddyMacCore/SyncTriggerSource.swift",
+        "macos/Sources/BrainBuddyMacCore/MacSyncController.swift",
+        "macos/Sources/BrainBuddyMacCore/BrainBuddyModel.swift",
         "macos/Sources/BrainBuddyMacCore/WorkspaceHost.swift",
         "macos/Sources/BrainBuddyMac/ContentView.swift",
         "macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/SessionTokenStore.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/SyncEngineSessionTests.swift",
         "docs/native-macos-app.md",
         "AGENTS.md",
         "macos/README.md",
         "docs/data-retention.md",
-        "specs/021-mac-sync/evidence/manual-macos-status.md"
+        "specs/021-mac-sync/evidence/manual-macos-status.md",
+        "specs/021-mac-sync/evidence/manual-macos-upgrade.md"
       ],
       "depends_on": ["PR-08"],
       "external_depends_on": [],

@@ -17,11 +17,18 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if let host = launch.host, let model = launch.model {
+            if let host = launch.host, let model = launch.model, let sync = launch.sync {
                 if host.workspace.loadError != nil {
+                    // X-09: nothing syncs until the file can be read (mac-app-host §9).
                     UnreadableWorkspaceView(host: host)
                 } else {
-                    WorkspaceView(model: model)
+                    WorkspaceView(model: model, sync: sync)
+                        .task {
+                            // Launch step 6, once per process.
+                            let runtime = MacSyncRuntime.current ?? MacSyncRuntime(host: host, controller: sync)
+                            MacSyncRuntime.current = runtime
+                            await runtime.start()
+                        }
                 }
             } else if launch.importFailed {
                 LegacyImportFailedView(launch: launch)
@@ -88,6 +95,9 @@ private enum PendingEditorNavigation {
     case showCancelled(Bool)
     case priorityFilter(PriorityFilter)
     case sort(TaskSort)
+    /// "Sign out…" (X-02, X-07): X-04 opens only after this guard (design X-04 "unsaved edit or
+    /// capture draft").
+    case signOut
 }
 
 /// Where keyboard focus goes after an X-06 change.
@@ -135,6 +145,9 @@ extension WorkspaceView {
 
 struct WorkspaceView: View {
     @Bindable var model: BrainBuddyModel
+    /// X-01 – X-04 and X-07 over this workspace; every sync surface presents through its router.
+    let sync: MacSyncController
+    @State private var columns: NavigationSplitViewVisibility = .all
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -187,7 +200,7 @@ struct WorkspaceView: View {
     }
 
     private var window: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 310, ideal: 340, max: 400)
         } detail: {
@@ -200,6 +213,7 @@ struct WorkspaceView: View {
             if value.isEmpty { requestNavigation(.reload) }
         }
         .onChange(of: editorDirty) { _, dirty in model.taskEditInProgress = dirty }
+        // presentation-region: X-06 focus after archive, unarchive or a failed write
         .onChange(of: model.projectStateChanges) { _, _ in
             if case .project = model.destination { canvasFocus = .title }
         }
@@ -208,13 +222,29 @@ struct WorkspaceView: View {
             canvasFocus = .retry
             AccessibilityNotification.Announcement(message).post()
         }
+        // presentation-region-end
+        // X-03 and X-04, attached through the router; "Sign out…" runs the unsaved-edit guard first.
+        .routedSignInSheet(sync.router, onDismiss: { sync.closeSignIn() }) { _ in
+            if let flow = sync.signIn {
+                SignInSheet(flow: flow, router: sync.router, onClose: { sync.closeSignIn() })
+            }
+        }
+        .routedSignOutConfirmation(sync.router, controller: sync)
+        .onChange(of: sync.signOutRequests) { _, _ in requestNavigation(.signOut) }
+        .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
+        .focusedSceneValue(\.macSyncController, sync)
         .onAppear { quickCapture.start(model: model) }
         .onDisappear { quickCapture.stop() }
     }
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // X-01 "sidebar hidden": in attention states only, the line's words and glyph; nothing
+        // about sync in the toolbar otherwise.
+        ToolbarItem(placement: .navigation) {
+            SyncToolbarStatusItem(controller: sync, sidebarHidden: columns == .detailOnly)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
                 requestNavigation(.newTask)
@@ -381,23 +411,9 @@ struct WorkspaceView: View {
         }
     }
 
-    /// The account-less footer line from the kit's describer (FR-002); its "Sign in to sync"
-    /// action arrives with X-03 in PR-09.
+    /// X-01: the sync status line, the last stops in the sidebar's Tab order.
     private var footer: some View {
-        let line = model.syncLine
-        return HStack(spacing: 6) {
-            Image(systemName: "internaldrive")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(line.text)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .help(line.tooltip)
-                .accessibilityLabel(line.accessibilityLabel)
-            Spacer(minLength: 0)
-        }
-        .padding(12)
+        SyncStatusLine(controller: sync)
     }
 
     @ViewBuilder
@@ -520,6 +536,12 @@ struct WorkspaceView: View {
         }
     }
 
+    fileprivate static func isSignOut(_ navigation: PendingEditorNavigation) -> Bool {
+        if case .signOut = navigation { return true }
+        return false
+    }
+
+    // presentation-region: rename sheet focus
     fileprivate func renameCollection(_ kind: CollectionToEdit) {
         let name = editedCollectionName
         let saved: Bool
@@ -537,6 +559,7 @@ struct WorkspaceView: View {
             canvasFocus = .unarchive
         }
     }
+    // presentation-region-end
 
     // MARK: Navigation
 
@@ -555,7 +578,7 @@ struct WorkspaceView: View {
     fileprivate func changesCaptureContext(_ next: PendingEditorNavigation) -> Bool {
         switch next {
         case .destination(let destination): destination != model.destination
-        case .quickOpen: true
+        case .quickOpen, .signOut: true
         case .newTask: isDateDestination || model.destination.isHistory || model.isArchivedProjectDestination
         default: false
         }
@@ -571,6 +594,12 @@ struct WorkspaceView: View {
 
     fileprivate func applyNavigation(_ navigation: PendingEditorNavigation) {
         pendingEditorNavigation = nil
+        if case .signOut = navigation {
+            // X-04 now; the editor and the drafts stay as they are until the sign-out happens, so a
+            // Cancel in X-04 loses nothing (`BrainBuddyModel.didSignOut` clears them after).
+            sync.presentSignOut()
+            return
+        }
         editorDirty = false
         editorCanSave = false
         switch navigation {
@@ -613,6 +642,7 @@ struct WorkspaceView: View {
             model.cancelTask(id)
         case .newTask:
             select(nil)
+            // presentation-region: new task focus
             if model.isArchivedProjectDestination {
                 model.choose(.list(.next))
                 addFocused = true
@@ -623,6 +653,7 @@ struct WorkspaceView: View {
             } else {
                 addFocused = true
             }
+            // presentation-region-end
         case .reload:
             select(nil)
             model.reload()
@@ -657,6 +688,8 @@ struct WorkspaceView: View {
         case .sort(let value):
             select(nil)
             model.sort = value
+        case .signOut:
+            break
         }
     }
 
@@ -809,7 +842,11 @@ struct WorkspaceView: View {
     @ViewBuilder
     private func emptyState(isEmpty: Bool) -> some View {
         if isEmpty {
-            if model.isArchivedProjectDestination || isPreLosslessProject {
+            if sync.tasksStillArriving, !model.hasAppliedTaskFilter {
+                // X-01 "first load, empty list": one static neutral line, no spinner over content.
+                Text(SyncCopy.popoverFirstLoadEmpty)
+                    .foregroundStyle(.secondary)
+            } else if model.isArchivedProjectDestination || isPreLosslessProject {
                 if model.hasAppliedTaskFilter {
                     filteredEmptyState
                 } else if model.isArchivedProjectDestination {
@@ -1442,6 +1479,7 @@ private enum CollectionToEdit: Identifiable {
 extension WorkspaceView {
     fileprivate func taskSheets<Content: View>(_ content: Content) -> some View {
         content
+            // presentation-region: task editor, rename, voice, move, reopen and discard sheets
             .sheet(
                 isPresented: $quickOpenPresented,
                 onDismiss: {
@@ -1479,7 +1517,8 @@ extension WorkspaceView {
                 }
                 Button("Discard changes", role: .destructive) {
                     if let pending = pendingEditorNavigation {
-                        if changesCaptureContext(pending) {
+                        // Sign-out removes the drafts only once it happens (X-04 can still be cancelled).
+                        if changesCaptureContext(pending), !Self.isSignOut(pending) {
                             model.draft = ""
                             model.waitingForDraft = ""
                         }
@@ -1521,6 +1560,7 @@ extension WorkspaceView {
             .sheet(item: $movingTask) { task in
                 moveToWaitingSheet(task)
             }
+            // presentation-region-end
     }
 
     private func quickRenameSheet(_ task: TaskRecord) -> some View {
@@ -1550,7 +1590,9 @@ extension WorkspaceView {
         }
         .padding(24)
         .frame(width: 420)
+        // presentation-region: task editor, rename, voice, move, reopen and discard sheets
         .onAppear { quickRenameFocused = true }
+        // presentation-region-end
     }
 
     private var captureListSheet: some View {
@@ -1647,6 +1689,7 @@ extension WorkspaceView {
 
     fileprivate func collectionSheets<Content: View>(_ content: Content) -> some View {
         content
+            // presentation-region: collection, tag and outcome sheets
             .confirmationDialog("Delete tag?", isPresented: $confirmingTagDeletion) {
                 Button("Delete tag", role: .destructive) {
                     guard let tag = tagToDelete, !editorDirty else { return }
@@ -1683,8 +1726,10 @@ extension WorkspaceView {
             .sheet(item: $editingOutcomeProject) { project in
                 outcomeSheet(project)
             }
+            // presentation-region-end
     }
 
+    // presentation-region: rename sheet focus
     /// The sidebar's rename sheet, also opened by "Rename…" in the X-06 refusal: the current name
     /// selected, the kit's duplicate-name error under the field with focus kept there; on success
     /// focus returns to "Unarchive" (no automatic unarchive).
@@ -1719,6 +1764,7 @@ extension WorkspaceView {
         .frame(width: 340)
         .onAppear { collectionNameFocused = true }
     }
+    // presentation-region-end
 
     private func outcomeSheet(_ project: ProjectRecord) -> some View {
         let outcome = outcomeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1756,6 +1802,7 @@ extension WorkspaceView {
 
     fileprivate func reviewSheets<Content: View>(_ content: Content) -> some View {
         content
+            // presentation-region: review and clarify sheets
             .sheet(isPresented: $reviewingWaiting) {
                 WaitingReviewView(model: model)
             }
@@ -1771,6 +1818,7 @@ extension WorkspaceView {
             .sheet(isPresented: $clarifyingInbox) {
                 InboxClarifyView(model: model)
             }
+            // presentation-region-end
     }
 }
 
@@ -1901,7 +1949,9 @@ private struct TaskInlineEditor<Extras: View>: View {
         }
         .textFieldStyle(.roundedBorder)
         .padding(.top, 12)
+        // presentation-region: project creator sheet
         .sheet(isPresented: $showingProjectCreator) { projectCreator }
+        // presentation-region-end
         .onAppear { onEditorStateChange(isDirty, !saveDisabled) }
         .onChange(of: isDirty) { _, _ in onEditorStateChange(isDirty, !saveDisabled) }
         .onChange(of: saveDisabled) { _, _ in onEditorStateChange(isDirty, !saveDisabled) }
@@ -2362,6 +2412,7 @@ private struct InboxClarifyView: View {
         .frame(width: 640, height: index < items.count && step == .decision ? 570 : 430)
         .onAppear(perform: load)
         .interactiveDismissDisabled(step != .decision)
+        // presentation-region: clarify confirmations
         .confirmationDialog("Cancel this Inbox item?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
@@ -2377,6 +2428,7 @@ private struct InboxClarifyView: View {
         } message: {
             Text("The Inbox item remains unchanged. Unsaved answers will be lost.")
         }
+        // presentation-region-end
     }
 
     private func capturedItem(_ item: TaskRecord) -> some View {
@@ -2630,6 +2682,7 @@ private struct WaitingReviewView: View {
         .padding(24)
         .frame(width: 640, height: 480)
         .onAppear(perform: load)
+        // presentation-region: cancel task confirmations
         .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
@@ -2639,6 +2692,7 @@ private struct WaitingReviewView: View {
         } message: {
             Text("The task will move to history. No message will be sent.")
         }
+        // presentation-region-end
     }
 
     private func card(_ item: TaskRecord) -> some View {
@@ -2812,6 +2866,7 @@ private struct SomedayReviewView: View {
         .padding(24)
         .frame(width: 640, height: 440)
         .onAppear(perform: load)
+        // presentation-region: cancel task confirmations
         .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
@@ -2821,6 +2876,7 @@ private struct SomedayReviewView: View {
         } message: {
             Text("The task will move to history. No message will be sent.")
         }
+        // presentation-region-end
     }
 
     private func card(_ item: TaskRecord) -> some View {

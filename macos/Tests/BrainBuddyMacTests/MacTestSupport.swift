@@ -116,6 +116,219 @@ final class CountingTransport: HTTPTransport {
     var requests: [HTTPRequest] { sent.withLock { $0 } }
 }
 
+/// Where a held response waits: the test learns that the request arrived, then lets it go.
+actor ResponseGate {
+    private var isOpen = false
+    private var arrived = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func arrive() {
+        arrived = true
+        arrivalWaiters.forEach { $0.resume() }
+        arrivalWaiters = []
+    }
+
+    func waitForArrival() async {
+        if arrived { return }
+        await withCheckedContinuation { arrivalWaiters.append($0) }
+    }
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiters.forEach { $0.resume() }
+        waiters = []
+    }
+}
+
+/// A Brain Buddy server in miniature for the Mac's sync-flow tests (the kit's fake server is not a
+/// product of the package): password sessions on any host, an empty account to pull, logouts, and a
+/// session that can end. Every request is recorded; nothing leaves the test.
+final class StubServer: HTTPTransport {
+    struct Account: Sendable {
+        var id: String
+        var email: String
+        var password: String
+    }
+
+    private struct State {
+        var accounts: [String: Account] = [:]
+        var sessions: [String: String] = [:]
+        var minted = 0
+        var requests: [HTTPRequest] = []
+        var offline = false
+        var deletionScheduled: Set<String> = []
+        var holdNextLogin = false
+        var holdNextSync = false
+        var holdNextLogout = false
+    }
+
+    private let state = Mutex(State())
+    let loginGate = ResponseGate()
+    let syncGate = ResponseGate()
+    let logoutGate = ResponseGate()
+
+    init(_ accounts: [Account] = [StubServer.ada]) {
+        state.withLock { state in for account in accounts { state.accounts[account.email.lowercased()] = account } }
+    }
+
+    static let ada = Account(id: "user_ada", email: "alex@example.com", password: "correct horse battery")
+    static let bob = Account(id: "user_bob", email: "bob@example.com", password: "hunter2 hunter2")
+    /// Alex's account id on another server: the same owner id, another address.
+    static let server = URL(string: "https://api.example.com/api")!
+    static let otherServer = URL(string: "https://other.example.org/api")!
+
+    var requests: [HTTPRequest] { state.withLock { $0.requests } }
+    var routes: [String] { requests.map { "\($0.method.rawValue.uppercased()) \(Self.route($0.url))" } }
+    func clearLog() { state.withLock { $0.requests.removeAll() } }
+    var liveSessions: Int { state.withLock { $0.sessions.count } }
+    func setOffline(_ offline: Bool) { state.withLock { $0.offline = offline } }
+    /// Every session ends, as an expiry would: the next authenticated request is a 401.
+    func endSessions() { state.withLock { $0.sessions.removeAll() } }
+    func scheduleDeletion(_ email: String) { _ = state.withLock { $0.deletionScheduled.insert(email.lowercased()) } }
+    /// The next login's reply waits for `loginGate` (the session is opened at once).
+    func holdNextLogin() { state.withLock { $0.holdNextLogin = true } }
+    /// The next request a session sends (the first sync's first request) waits for `syncGate`.
+    func holdNextSync() { state.withLock { $0.holdNextSync = true } }
+    /// The next logout waits for `logoutGate` (a sign-out's, after the local removal).
+    func holdNextLogout() { state.withLock { $0.holdNextLogout = true } }
+    /// The email now belongs to another account id (deleted and created again).
+    func reassign(_ email: String, to id: String) { state.withLock { $0.accounts[email.lowercased()]?.id = id } }
+
+    /// "/auth/login" for "https://api.example.com/api/auth/login".
+    static func route(_ url: URL) -> String {
+        let path = url.path
+        guard let range = path.range(of: "/api") else { return path }
+        return String(path[range.upperBound...])
+    }
+
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        let offline = state.withLock { state -> Bool in
+            state.requests.append(request)
+            return state.offline
+        }
+        if offline { throw TransportError(description: "Offline.", requestMayHaveBeenSent: false) }
+        let route = Self.route(request.url)
+        switch (request.method, route) {
+        case (.post, "/auth/login"):
+            return await login(request)
+        case (.post, "/auth/logout"):
+            let hold = state.withLock { state -> Bool in
+                defer { state.holdNextLogout = false }
+                return state.holdNextLogout
+            }
+            if hold {
+                await logoutGate.arrive()
+                await logoutGate.wait()
+            }
+            if let token = Self.session(request) { _ = state.withLock { $0.sessions.removeValue(forKey: token) } }
+            return HTTPResponse(statusCode: 204)
+        default:
+            guard let token = Self.session(request), state.withLock({ $0.sessions[token] != nil }) else {
+                return Self.error(401, "Authentication required.", request)
+            }
+            let hold = state.withLock { state -> Bool in
+                defer { state.holdNextSync = false }
+                return state.holdNextSync
+            }
+            if hold {
+                await syncGate.arrive()
+                await syncGate.wait()
+            }
+            switch (request.method, route) {
+            case (.get, "/tasks"): return Self.json(try BrainBuddyAPI.makeEncoder().encode(TaskPageDTO(items: [])))
+            case (.get, "/projects"), (.get, "/tags"): return Self.json(Data("[]".utf8))
+            case (.get, _): return Self.error(404, "Not found.", request)
+            default: return Self.error(503, "Storage is temporarily unavailable; please retry.", request)
+            }
+        }
+    }
+
+    private func login(_ request: HTTPRequest) async -> HTTPResponse {
+        struct Credentials: Decodable {
+            var email: String
+            var password: String
+        }
+        guard let body = request.body, let credentials = try? JSONDecoder().decode(Credentials.self, from: body) else {
+            return Self.error(422, "Request validation failed.", request)
+        }
+        let opened = state.withLock { state -> (Account, String, Bool, Bool)? in
+            guard let account = state.accounts[credentials.email.lowercased()], account.password == credentials.password else {
+                return nil
+            }
+            state.minted += 1
+            let token = "stub-session-\(state.minted)"
+            state.sessions[token] = account.id
+            let cancelled = state.deletionScheduled.remove(account.email.lowercased()) != nil
+            let hold = state.holdNextLogin
+            state.holdNextLogin = false
+            return (account, token, cancelled, hold)
+        }
+        guard let (account, token, cancelled, hold) = opened else {
+            return Self.error(401, "Check your email and password.", request)
+        }
+        if hold {
+            await loginGate.arrive()
+            await loginGate.wait()
+        }
+        let me = MeDTO(id: account.id, email: account.email, deletionCancelled: cancelled)
+        var response = Self.json((try? JSONEncoder().encode(me)) ?? Data())
+        response.headers["Set-Cookie"] = "brainbuddy_session=\(token); Path=/; HttpOnly; Secure; SameSite=Lax"
+        return response
+    }
+
+    private static func session(_ request: HTTPRequest) -> String? {
+        guard let cookie = request.header("Cookie"), cookie.hasPrefix("brainbuddy_session=") else { return nil }
+        return String(cookie.dropFirst("brainbuddy_session=".count))
+    }
+
+    private static func json(_ body: Data) -> HTTPResponse {
+        HTTPResponse(statusCode: 200, headers: ["Content-Type": "application/json"], body: body)
+    }
+
+    private static func error(_ status: Int, _ message: String, _ request: HTTPRequest) -> HTTPResponse {
+        let reference = request.header("X-Correlation-ID") ?? "stub"
+        let body = Data("{\"message\":\"\(message)\",\"detail\":null,\"reference_id\":\"\(reference)\"}".utf8)
+        return HTTPResponse(
+            statusCode: status, headers: ["Content-Type": "application/json", "X-Correlation-ID": reference], body: body
+        )
+    }
+}
+
+/// A path monitor a test drives.
+final class FakePathMonitor: NetworkPathMonitoring {
+    private let report = Mutex<(@Sendable (Bool) -> Void)?>(nil)
+    private let stopped = Mutex(false)
+
+    func start(_ report: @escaping @Sendable (Bool) -> Void) { self.report.withLock { $0 = report } }
+    func stop() { stopped.withLock { $0 = true } }
+    var isStopped: Bool { stopped.withLock { $0 } }
+    var isStarted: Bool { report.withLock { $0 != nil } }
+}
+
+/// Records the App Nap activity.
+@MainActor
+final class FakeActivity: SyncActivityHolding {
+    private(set) var held = false
+    private(set) var begins = 0
+    private(set) var ends = 0
+
+    func begin() {
+        held = true
+        begins += 1
+    }
+
+    func end() {
+        held = false
+        ends += 1
+    }
+}
+
 /// A token store that records each call, and whether it ran on the main thread.
 final class SpyTokenStore: SessionTokenStore {
     struct Call: Hashable, Sendable {

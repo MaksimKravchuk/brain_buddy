@@ -118,21 +118,34 @@ package final class DeferredSessionTokenStore: SessionTokenStore {
 /// folder, with a sync engine for the Mac (keychain service, client identity, 30 s pull age). The
 /// engine's launch-time token cleanup runs on the engine actor, off the main actor; in a dry run
 /// the token store makes no Keychain call until a sign-in the person starts.
+///
+/// Every token-store call is the engine's, on its actor: reads are non-interactive (no Keychain
+/// prompt during routine sync; an item this build may not read is "Sign in again to sync"), and
+/// only the person's sign-in in X-03 writes interactively (kit `SessionTokenStore`, PR-05).
 @MainActor
 package final class WorkspaceHost {
+    /// `X-Client: brainbuddy-macos/<version>` (FR-031): the app bundle's marketing version, or "dev".
+    package static var clientIdentity: ClientIdentity { .macOS(version: BrainBuddyAPI.bundleVersion) }
+
     package let configuration: MacHostConfiguration
     package let workspace: Workspace
+    /// The workspace's engine, for the one trigger the workspace has no call for (`.foreground`
+    /// when the window becomes visible again, contracts/mac-app-host.md §5).
+    package let engine: SyncEngine
     package let localState: MacLocalStateStore
     package let importer: LegacyImportCoordinator
     package let device: DeviceKind = .mac
     private let now: @Sendable () -> Date
     private var firstWriteRecorded = false
 
+    /// - Parameters:
+    ///   - syncScheduler: the engine's debounce and retry timers (tests pass a manual one).
+    ///   - tickScheduler: the kit's 15 s `.periodic` ticker.
     package init(
         configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil,
         transport: (any HTTPTransport)? = nil, now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() }, tickScheduler: (any SyncScheduler)? = nil,
-        log: any MacLogSink = SystemMacLog()
+        syncScheduler: (any SyncScheduler)? = nil, log: any MacLogSink = SystemMacLog()
     ) {
         self.configuration = configuration
         self.now = now
@@ -141,10 +154,14 @@ package final class WorkspaceHost {
         let store = FileDocumentStore(fileURL: configuration.storeURL)
         let base: @Sendable () -> any SessionTokenStore = { tokenStore ?? Self.systemTokenStore() }
         let tokens: any SessionTokenStore = configuration.isDryRun ? DeferredSessionTokenStore(opening: base) : base()
-        let engine = SyncEngine(
+        let identity = Self.clientIdentity
+        engine = SyncEngine(
             store: store, tokenStore: tokens, transport: transport ?? URLSessionTransport(), now: now,
-            configuration: SyncConfiguration(pullInterval: SyncTiming.pullAge),
-            identity: .macOS(version: BrainBuddyAPI.bundleVersion)
+            configuration: SyncConfiguration(
+                scheduler: syncScheduler ?? TaskSyncScheduler(), pullInterval: SyncTiming.pullAge,
+                clientVersion: identity.version
+            ),
+            identity: identity
         )
         workspace = Workspace(
             store: store, sync: engine, now: now, makeID: makeID, tickScheduler: tickScheduler ?? TaskSyncScheduler()
@@ -201,14 +218,20 @@ package struct MacLaunchEnvironment {
     package var log: any MacLogSink
     package var legacyLocking: any LegacyStoreLocking
     package var importHooks: LegacyImportTestHooks
+    /// The kit's 15 s ticker and the engine's timers; nil is real time (tests pass manual ones).
+    package var tickScheduler: (any SyncScheduler)?
+    package var syncScheduler: (any SyncScheduler)?
 
     package init(
         configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil, transport: (any HTTPTransport)? = nil,
         cookieJar: any LegacyCookieJar, responseCache: any LegacyResponseCache, cacheDirectory: URL? = nil,
         knownServers: [URL] = [], now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() }, log: any MacLogSink = SystemMacLog(),
-        legacyLocking: any LegacyStoreLocking = LockfLegacyStoreLocking(), importHooks: LegacyImportTestHooks = LegacyImportTestHooks()
+        legacyLocking: any LegacyStoreLocking = LockfLegacyStoreLocking(), importHooks: LegacyImportTestHooks = LegacyImportTestHooks(),
+        tickScheduler: (any SyncScheduler)? = nil, syncScheduler: (any SyncScheduler)? = nil
     ) {
+        self.tickScheduler = tickScheduler
+        self.syncScheduler = syncScheduler
         self.configuration = configuration
         self.tokenStore = tokenStore
         self.transport = transport
@@ -234,7 +257,8 @@ package struct MacLaunchEnvironment {
 
 /// Launch steps 2 – 5 (contracts/mac-app-host.md §1), after `SingleInstanceGuard`: the legacy
 /// import with its X-05 notices, the legacy cookie and cache cleanup, `WorkspaceHost`, and
-/// `workspace.load()`. Sync triggers start in PR-09. While it runs the window shows static
+/// `workspace.load()`. Step 6, `SyncTriggerSource.start()`, follows in the app once the window has
+/// the workspace (PR-09). While it runs the window shows static
 /// placeholders (X-05 "loading"); an unreadable `store.json` leaves `loadError` set (X-09).
 ///
 /// The workspace opens only once the import reached a terminal state (data-model E7.1 invariant
@@ -256,6 +280,8 @@ package final class MacLaunch {
     package private(set) var phase: Phase = .launching
     /// The window's model, once the workspace is loaded.
     package private(set) var model: BrainBuddyModel?
+    /// The window's sync UI (X-01 – X-04, X-07), once the workspace is loaded.
+    package private(set) var sync: MacSyncController?
     /// A launch or a retry is running ("Trying again…").
     package private(set) var isRunning = false
     @ObservationIgnored private let environment: MacLaunchEnvironment
@@ -337,10 +363,15 @@ package final class MacLaunch {
         // Steps 4 and 5. A `store.json` that cannot be read is X-09 (`loadError`), never replaced.
         let host = WorkspaceHost(
             configuration: environment.configuration, tokenStore: environment.tokenStore, transport: environment.transport,
-            now: environment.now, makeID: environment.makeID, log: environment.log
+            now: environment.now, makeID: environment.makeID, tickScheduler: environment.tickScheduler,
+            syncScheduler: environment.syncScheduler, log: environment.log
         )
         await host.workspace.load()
-        model = BrainBuddyModel(workspace: host.workspace, localStateStore: host.localState, now: environment.now)
+        let model = BrainBuddyModel(workspace: host.workspace, localStateStore: host.localState, now: environment.now)
+        let sync = MacSyncController(host: host, now: environment.now, log: environment.log)
+        sync.signOut.didSignOut = { [weak model] in model?.didSignOut() }
+        self.model = model
+        self.sync = sync
         phase = .ready(host)
     }
 }

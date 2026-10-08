@@ -515,6 +515,9 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case reviewUnavailable
     /// A progress change names a step the review's mode does not have (the server answers 422).
     case stepNotInReview
+    /// Spec 021 (FR-018, X-04): the device is signing out and its data is about to be removed, so
+    /// the workspace takes no change until that is done; the change is refused, never dropped.
+    case signingOut
 
     public var message: String {
         switch self {
@@ -567,6 +570,7 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .tooManyItems: "That's more than can be saved at once. Try fewer tasks."
         case .reviewUnavailable: "The weekly review is turned off for now. Nothing was changed."
         case .stepNotInReview: "That step isn't part of this review. Nothing was changed."
+        case .signingOut: "Brain Buddy is signing out. This wasn't saved; try again in a moment."
         }
     }
 }
