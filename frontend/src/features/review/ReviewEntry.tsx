@@ -22,6 +22,7 @@ import { ReviewFrame } from "./ReviewShell";
 import { RestartStep } from "./steps/RestartStep";
 import { buttonClass, CountsGrid, FailureBanner, primaryButtonClass } from "./steps/stepParts";
 import { useStepAction } from "./steps/useStepAction";
+import { useLeaveGuard } from "./useLeaveGuard";
 import { WhileYouWereAway } from "./WhileYouWereAway";
 import { localDay } from "./wywaPresentation";
 
@@ -96,6 +97,16 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
   };
 
   const showRestart = state.restart_mode && !restartDone;
+  const restartHolds = showRestart && restartSettling;
+
+  // While a restart release or its Undo is on its way, browser Back goes nowhere (the entry is put back),
+  // in-app links are not followed, and a tab close or reload gets the browser's warning (FR-048).
+  const guard = useLeaveGuard({
+    dirty: restartHolds,
+    active: restartHolds,
+    onBack: () => guard.rearm(),
+    onNavigate: () => undefined
+  });
   const stepCodes = open ? Object.keys(open.steps) : [];
 
   return (
@@ -106,7 +117,7 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
         <button
           ref={closeRef}
           type="button"
-          disabled={showRestart && restartSettling}
+          disabled={restartHolds}
           className={`${buttonClass} border-transparent bg-transparent text-sky-700`}
           onClick={() => navigate("/tasks/next")}
         >

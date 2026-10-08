@@ -458,6 +458,39 @@ describe("020-FR-016 020-FR-051 020-FR-015 020-FR-017 what comes before the pick
     expect(await screen.findByRole("button", { name: "Undo the 1" })).toBeInTheDocument();
     expect(within(bar()).getByRole("button", { name: "Close" })).toBeEnabled();
   });
+
+  it("020-FR-048 while a restart release is on its way browser Back stays put, links wait and a tab close is warned", async () => {
+    const user = userEvent.setup();
+    getState.mockResolvedValue(stateFixture({ restart_mode: true, last_counted_review_at: iso(-30 * DAY) }));
+    const asking = askingTask("n1", "Update the CV");
+    const aged = { ...asking, formulation: { ...(asking.formulation as NonNullable<TaskResponse["formulation"]>), started_at: iso(-40 * DAY) } };
+    vi.mocked(apiClient.listTasks).mockResolvedValue({ items: [aged], next_cursor: null, has_more: false, counts_by_state: { inbox: 0, next: 1, waiting: 0, someday: 0 } });
+    let resolve: (value: Awaited<ReturnType<typeof reviewApi.bulkRelease>>) => void = () => undefined;
+    vi.mocked(reviewApi.bulkRelease).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderReview();
+    const quiet = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(quiet);
+    expect(quiet.defaultPrevented).toBe(false);
+
+    await user.click(await screen.findByRole("button", { name: "Release 1 to Someday" }));
+    act(() => window.history.back());
+    await waitFor(() => expect(window.history.state).toMatchObject({ bbReviewDialog: expect.any(String) }));
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    const link = document.body.appendChild(Object.assign(document.createElement("a"), { href: "/tasks/next", textContent: "Next" }));
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    link.remove();
+
+    await act(async () => resolve({ id: "bulk_restart_1", released: [{ task_id: "n1", revision_after: 5 }], skipped: [] }));
+    expect(await screen.findByRole("button", { name: "Undo the 1" })).toBeInTheDocument();
+    const settled = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(settled);
+    expect(settled.defaultPrevented).toBe(false);
+  });
 });
 
 describe("020-FR-028 020-FR-052 the review shell", () => {
