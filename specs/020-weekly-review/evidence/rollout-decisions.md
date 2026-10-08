@@ -23,6 +23,19 @@ kept in this file. It lives in immutable records outside the candidate tree:
   moves);
 - the merge commit message, which repeats the approved SHA and the green CI run on it.
 
+### Landing record (after the merge)
+
+This is a pointer written after the merge. It is not the approval. The authoritative
+records are the approval comment on PR #293 and the merge commit message.
+
+| | value |
+|---|---|
+| PR | #293 |
+| approved head | `721a5b1081a9f7e9c2818706783bbce79f07ae5a` |
+| approver / date | the owner (MaksimKravchuk), 2026-10-08, in a PR comment posted before the merge |
+| required CI | Full CI green on that SHA, GitHub Actions run 37816685607 |
+| merge commit | `98b914ae2046f3fc1bc3415a18c5944e777214d8` |
+
 ## Flag stages
 
 `weekly_review` is a runtime-managed flag in the ADR-0019 store (ADR-0027 §6), default OFF.

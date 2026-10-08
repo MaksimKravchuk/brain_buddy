@@ -330,7 +330,7 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
   - sign-out and the launch cleanup delete every item this build may delete, and leave without failing an item it may neither read nor delete;
   - pending logouts are one item each, found by listing attributes and read one by one; an unreadable one is skipped.
   - **Known residual**: an orphaned older item stays in the login keychain, unread and unused, until its server session expires (30 days) or the person deletes it in Keychain Access. No access prompt is ever raised.
-- **Recovery after "Deny"**: at a person-started sign-in, an access-denied or interaction-not-allowed status on the existing item deletes that item and adds it again; if macOS refuses the deletion too, X-03 shows "couldn't save sign-in" and `docs/native-macos-app.md` tells the person how to remove the `app.brainbuddy.mac.session` item in Keychain Access.
+- **Recovery after "Deny"**, as delivered (2026-10-08, PR-09; replaces the earlier delete-and-re-add, which macOS refuses): an access-denied or interaction-not-allowed status on the existing item is never answered by deleting it. The person-started sign-in saves the new session as the next numbered item, as in the bullets above. If that new item cannot be written or does not read back, X-03 shows "couldn't save sign-in", and `docs/native-macos-app.md` tells the person how to remove the `app.brainbuddy.mac.session` items in Keychain Access.
 
 **Data-retention row** (PR-09):
 

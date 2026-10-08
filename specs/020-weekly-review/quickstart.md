@@ -43,8 +43,10 @@ make test-backend        # coverage floor + Allure taxonomy validator, before re
 ```
 
 The unfiltered `python3 scripts/check_requirement_coverage.py specs/020-weekly-review`
-fails until every requirement has a test, so it is the full-feature gate and joins
-`make check-specs` only in PR-14 (research R19).
+fails until every requirement has a test, so it is the full-feature gate. It was planned
+for `make check-specs` in PR-14 (research R19). It is not wired: FR-022, FR-023 and
+FR-049 are deferred, and a `--requirements` list in a gate is forbidden (owner decision
+2026-10-08, T166 stays open). The follow-up feature adds the unfiltered gate.
 
 ## Scenario 1 — the rule and the card (US1; M-01, M-02, M-03, M-04, D-01, D-02)
 

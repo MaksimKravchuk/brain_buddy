@@ -224,7 +224,7 @@ Facts this plan builds on (verified 2026-10-05).
 | `.claude/skills/brain-buddy-design/README.md` (l.42), `SKILL.md` (l.7), `preview/components-gtd-nav.html` (l.35) | "Weekly Review remains visibly deferred" | reworded in PR-01 |
 | `scripts/test_validate_brain_buddy_design_skill.py` (**ASK**) | asserts that string (l.29, l.32) and "coming later" (l.33) | updated with the skill in PR-01 |
 | `scripts/check_requirement_coverage.py` (**ASK**, guarded) | scans only backend/frontend trees, no `.swift` (l.53-64) | add Swift test trees (R19) |
-| `Makefile` (**ASK**, guarded) | `check-specs` runs requirement coverage for 019 only | add 020 (PR-14) |
+| `Makefile` (**ASK**, guarded) | `check-specs` runs requirement coverage for 019 only | PR-14 adds the copy byte checks and the FR-041 file check; the 020 requirement-coverage line is deferred (see "Requirement coverage") |
 
 ## Project Structure
 
@@ -849,11 +849,21 @@ Requirement coverage: once PR-01 extends the scanner to Swift test trees, every
 FR-001 … FR-052 and SC-001 … SC-007 is gate-enforced and must be named by at least one
 test (`020-FR-046`, `test_020_FR_046_…`) and listed in the `requirements` of its slices
 (research R19). The full-feature gate (`check_requirement_coverage.py
-specs/020-weekly-review` in `make check-specs`) lands in PR-14, because it fails while
-any requirement is still untested; before that, each slice runs the scanner with the
-`--requirements` filter PR-01 adds, limited to the slice's own `requirements`. For
+specs/020-weekly-review` in `make check-specs`) was planned for PR-14, because it fails
+while any requirement is still untested; before that, each slice runs the scanner with
+the `--requirements` filter PR-01 adds, limited to the slice's own `requirements`. For
 FR-041 the recorded macOS-host run file is required in addition to the name match. Live
 provider evaluation (SC-005) is approval-gated and never runs unattended.
+
+**Deferred (owner decision 2026-10-08).** PR-14 does not wire the 020 requirement-coverage
+gate. FR-022, FR-023 and FR-049 are deferred, so the unfiltered gate would fail. The only
+other form, a `--requirements` list in `make check-specs`, is forbidden by a non-waivable
+gate-integrity invariant (`scripts/check_gate_integrity.py`): in a gate it would report a
+pass for a feature whose other requirements are untraced. PR-14 keeps the copy byte checks
+and the FR-041 file check. T166 stays open, and the follow-up feature adds the full
+unfiltered gate. The per-slice `--requirements` runs stay a manual check. See "Decisions
+of record" in
+[evidence/rollout-decisions.md](evidence/rollout-decisions.md#decisions-of-record).
 
 ## Delivery slices
 
