@@ -659,6 +659,14 @@ Earlier increments are each independently useful and safe:
   and every requirement still has a kit test, so the coverage scan passes, but the web and
   iPhone halves of FR-019, FR-024 – FR-027, FR-032, SC-001 (Mac ↔ web) and SC-006 wait for the
   follow-up. Dispositions F05, F55, G09, G55, G58 and G65 were discharged only by deferred tasks.
+- **Deferred review finding recorded for the follow-up (owner P1-only rule, 2026-10-08;
+  sign-out names unsaved weekly-review drafts, #301, merged `89c7c28`)**: Codex's one P2 is
+  open. Revalidate the review-draft count at removal. The sign-out confirmation names the
+  count read when it opens (`signOutReviewDrafts`, contracts/sync-status.md;
+  `SignOutFlow.Prompt.reviewDrafts`, contracts/mac-app-host.md §7). A draft saved after
+  that, for example in the second window of an iPad app, would be removed without being
+  named. No code change was made; the Mac records that a changed count does not re-present
+  X-04 (FR-018).
 
 - **PR-08 implementation notes (2026-10-08)**, read with the PR description:
   - **Foundation-only target taken** (review c2, G48): the importer, `mac-local.json`, the
@@ -875,7 +883,11 @@ Earlier increments are each independently useful and safe:
     template of Scenario 9: seven dated rows, "needed Sync now", "saw Mac and iPhone disagree
     after a minute online" and the count of sync issues.
   - **T139 stays unchecked: the Linux part is green, the rest is pending.** Run on the PR-10
-    candidate (the tree of `3b76fb0` plus these docs), Linux worktree, no live provider:
+    candidate (the tree of `3b76fb0` plus these docs), Linux worktree, no live provider.
+    **This table is a pre-merge snapshot. It is not candidate evidence**: it ran against
+    `3b76fb0`, not the merged candidate. The authoritative Linux evidence is CI on the
+    candidate SHA (`iOS kit on Linux`, `Backend`, `Frontend`); PR-09's final fixes were
+    green there at `a3cbfcb`.
 
     | Command | Result |
     |---|---|
@@ -886,7 +898,7 @@ Earlier increments are each independently useful and safe:
     | `sh ios/scripts/swift-linux.sh test` | exit 0; `Test run with 994 tests in 95 suites passed after 82.048 seconds` (Swift 6.2 Linux image) |
     | `python3 scripts/check_requirement_coverage.py specs/021-mac-sync` | exit 1: `Requirement coverage FAILED: 1 of 40 requirements have no test naming them: 021-SC-007`; the other 39 ids ok (see T136) |
     | `make test-e2e` | not run: it builds a compose stack with Playwright browsers and the modern-auth server, which this worktree cannot start |
-    | `make verify-all` | not run: it includes `test-e2e` and the macOS lanes |
+    | `make verify-all` | not run: it chains `check-specs validate-ci verify-backend verify-frontend test-e2e verify-cli` and includes `test-e2e`. It does not include the macOS lanes; the next row is the macOS evidence |
     | `cd macos && swift test`, the `macos-app` job (including `MacKeychainTests`, which must run, not skip) | CI lane on the candidate SHA, pending |
     | Quickstart scenarios that need a Mac (5 step 4, 6, 8) and the iPhone | host plans `evidence/manual-macos-*.md`, PENDING; they follow the merge (owner's decision of 2026-10-08) |
     | Scenario 9, the owner's week (021-SC-007) | `evidence/owner-week.md`, PENDING |

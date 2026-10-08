@@ -38,7 +38,8 @@ A record never contains:
 
 - a path into a home folder (`/Users/…`, `~/Library…`) or into a keychain (`…Keychains/…`);
 - a session token, a password, an invite code, or a run of 32 or more hexadecimal characters
-  (a digest of user data, a token, a key) anywhere except the header's tree-hash fields;
+  (a digest of user data, a token, a key) anywhere except the places listed under "Where a
+  long hexadecimal string is allowed" below;
 - an email address other than one ending in `@example.com` (`alex@example.com`-style test
   addresses);
 - a task, project or tag title, a note, or any other text of a real account; use the design's
@@ -74,8 +75,19 @@ Then, one checklist line per state or check, each answered yes/no (or pass/fail)
 where a count is asked for. The status line at the top is one of `PENDING`, `PASS (owner run,
 <date>, <SHA>)` or `FAIL (<check>)`.
 
-The tree-hash fields are the only place a long hexadecimal string is allowed. If the evidenced
-trees change after a record was made, re-record it on the new build.
+### Where a long hexadecimal string is allowed
+
+A completed record has to name the build, so a hexadecimal string of 32 or more characters may
+appear in these places and nowhere else:
+
+- the header's **tree-hash** fields;
+- a **full commit SHA** in the header's **Build** field and in the status line
+  `PASS (owner run, <date>, <SHA>)`;
+- a **full commit SHA** in the owner-week read-out's "Build (candidate SHA) the Mac ran" field.
+
+Only a commit SHA or a tree hash fits there. A token, a key or a digest of user data stays
+forbidden even in these fields. If the evidenced trees change after a record was made,
+re-record it on the new build.
 
 ## Owner's week
 

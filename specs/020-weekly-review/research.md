@@ -547,7 +547,8 @@ document; not repeated here).
   `check-specs` recipe in `Makefile` (ASK, guarded) in **PR-14**, the one landing
   point of the full-feature gate (it exits non-zero while any requirement is untested,
   so it cannot be on before the last slice; campaign 2 aligned this with the plan and
-  quickstart). Per-slice tracing before that: PR-01 also adds a
+  quickstart). *Superseded 2026-10-08:* PR-14 does not wire this line (FR-022, FR-023
+  and FR-049 are deferred; see plan "Requirement coverage" and `tasks.md` T166). Per-slice tracing before that: PR-01 also adds a
   `--requirements 020-FR-001,020-SC-002,…` filter to the script, and each slice's
   verification runs it with that slice's `requirements` list from the PR-срезы
   manifest. For FR-041 (and any other requirement whose only lane is a recorded manual
