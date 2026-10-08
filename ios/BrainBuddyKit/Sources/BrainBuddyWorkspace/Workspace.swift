@@ -399,7 +399,8 @@ public final class Workspace {
     /// Account changes are one at a time (spec 021, FR-018): while a sign-out commits this is
     /// refused with `signInFailed` (`signingOutMessage`) and sends nothing, and while it runs a
     /// sign-out is refused (`WorkspaceError.signingIn`), so a sign-in never links an account a
-    /// sign-out removed meanwhile.
+    /// sign-out removed meanwhile. A second sign-in while one runs (a Cancel's request included,
+    /// until it has ended) is refused too (`signInOnItsWayMessage`).
     public func signIn(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
@@ -409,14 +410,13 @@ public final class Workspace {
         guard let sync else {
             throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil)
         }
-        let signingOut = WorkspaceError.signInFailed(message: Self.signingOutMessage, referenceID: nil)
-        guard !isSigningOut else { throw signingOut }
+        try refuseAnotherAccountChange()
         // The engine uploads what is in the store, so everything must be there.
         await flush()
         if account == nil { try await convertLocalAutoParksForLinking() }
         await installEventHandlerIfNeeded(sync)
         // Checked again after the suspensions above, in the same step that marks the sign-in.
-        guard !isSigningOut else { throw signingOut }
+        try refuseAnotherAccountChange()
         isSigningIn = true
         let linked: LinkedAccount
         do {
@@ -437,6 +437,12 @@ public final class Workspace {
         refreshDerivedState()
         if account != linked { account = linked }
         if syncStatus == .localOnly { syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt) }
+    }
+
+    /// A sign-in's refusal while a sign-out commits or another sign-in runs.
+    private func refuseAnotherAccountChange() throws(WorkspaceError) {
+        if isSigningOut { throw .signInFailed(message: Self.signingOutMessage, referenceID: nil) }
+        if isSigningIn { throw .signInFailed(message: Self.signInOnItsWayMessage, referenceID: nil) }
     }
 
     /// Additive iOS authentication; legacy password callers keep their contract.
@@ -1012,4 +1018,6 @@ public enum WorkspaceError: Error, Hashable, Sendable {
 extension Workspace {
     /// `signIn`'s refusal while a sign-out commits (`WorkspaceError.signInFailed`).
     public nonisolated static let signingOutMessage = "Brain Buddy is signing out. Try signing in again in a moment."
+    /// `signIn`'s refusal while another sign-in runs (`WorkspaceError.signInFailed`).
+    public nonisolated static let signInOnItsWayMessage = "Brain Buddy is still finishing the last sign-in. Try again in a moment."
 }

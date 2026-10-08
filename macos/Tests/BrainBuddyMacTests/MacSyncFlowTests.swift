@@ -364,7 +364,7 @@ struct MacSyncFlowTests {
 
         #expect(flow.canCancel, "before the link, Cancel applies")
         #expect(flow.cancel() == false, "the sheet stays open")
-        #expect(flow.phase == .editing && flow.email == StubServer.ada.email && flow.password == StubServer.ada.password)
+        #expect(flow.phase == .cancelling && flow.email == StubServer.ada.email && flow.password == StubServer.ada.password)
         #expect(flow.preferredFocus == .signInPassword)
         await rig.server.loginGate.open()
         await flow.waitForAttempt()
@@ -375,6 +375,37 @@ struct MacSyncFlowTests {
         #expect(rig.server.routes == ["POST /auth/login", "POST /auth/logout"])
         #expect(flow.phase == .editing && flow.message == nil, "nothing changed in the sheet")
         #expect(rig.tokens.storedTokens.isEmpty)
+    }
+
+    @Test("021-FR-001 021-FR-005 after Cancel, Sign in stays disabled until the cancelled request has ended; then the retry signs in")
+    func signInWaitsForTheCancelledRequest() async throws {
+        let rig = await Rig()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .menu)
+        let flow = try #require(rig.controller.signIn)
+        flow.email = StubServer.ada.email
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        flow.cancel()
+
+        // The cancelled login's reply hasn't come back: no second login may start.
+        #expect(!flow.canSubmit, "Sign in is disabled")
+        flow.submit()
+        #expect(flow.requestsStarted == 1)
+        #expect(!flow.credentialsReadOnly, "what was typed can still be changed")
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .editing && flow.canSubmit, "Sign in is back")
+        flow.submit()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished && flow.requestsStarted == 2)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        #expect(rig.server.liveSessions == 1, "the cancelled session ended, the retry's kept")
+        #expect(rig.tokens.storedTokens.count == 1)
     }
 
     @Test("021-FR-001 021-FR-005 once the account is linked, Cancel never says cancelled: the first sync runs and the sheet closes signed in")

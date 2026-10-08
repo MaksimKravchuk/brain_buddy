@@ -431,6 +431,28 @@ import Testing
         #expect(try await session.store.load()?.account == workspace.account, "never linked in the window only")
     }
 
+    @Test("021-FR-001 a second sign-in while one runs is refused with words and sends no login; the first links")
+    func secondSignInWhileOneRunsIsRefused() async throws {
+        let store = InMemoryDocumentStore()
+        let sync = FakeSyncService(store: store)
+        let workspace = await loadedWorkspace(store: store, sync: sync)
+        let refusal = Refusal()
+        await sync.whileSigningIn {
+            do {
+                try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+
+        #expect(refusal.message == Workspace.signInOnItsWayMessage, "the second sign-in was refused")
+        #expect(await sync.calls.filter { if case .signIn = $0 { true } else { false } }.count == 1, "one login")
+        #expect(workspace.account == Fixture.account)
+        #expect(try await store.load()?.account == Fixture.account)
+    }
+
     @Test("021-FR-001 a sign-in while a sign-out commits is refused with words; nothing is linked")
     func signInDuringASignOutIsRefused() async throws {
         let session = await signedIn()

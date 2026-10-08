@@ -814,6 +814,17 @@ Earlier increments are each independently useful and safe:
     `WorkspaceSyncTests` (sign-out during a sign-in's first sync: was removed, then relinked in the
     window with no account in the store; sign-in during a sign-out: was sent and wiped) and
     `MacSyncFlowTests` (Sign out… while X-03 signs in; Sign in… while a sign-out's logout is held).
+  - **A sign-in after Cancel waits for the cancelled one** (review P1). Cancel put X-03 straight
+    back to `.editing`, so a retry could log in while the cancelled login's reply was still on its
+    way; that late reply then wrote its token over the retry's and its cleanup removed it, leaving
+    the retry linked with no session. Engine (so the iPhone too): password sign-ins take turns
+    (`SyncEngine.takeSignInTurn`), each finishing its login, link or cleanup before the next logs
+    in. Workspace: a second `signIn` while one runs is refused (`signInOnItsWayMessage`). Mac:
+    after Cancel the flow is `.cancelling` (typed values back, "Sign in" disabled, Cancel/Esc
+    close) until the cancelled request has ended. Tests, red before: `SyncEngineSessionTests`
+    (retry after Cancel keeps its session; only the cancelled one is logged out),
+    `WorkspaceSyncTests` (a second sign-in while one runs is refused, one login) and
+    `MacSyncFlowTests` (after Cancel, Sign in stays disabled until the cancelled request ended).
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
