@@ -399,6 +399,15 @@ extension Workspace {
         edit { $0.local.formDrafts[key] = nil }
     }
 
+    /// The unsaved weekly-review drafts a sign-out would remove, for its confirmation to name (spec
+    /// 021, FR-018): the drafts still shown (`draft(for:)`), not expired or outdated ones. They live
+    /// in the store the sign-out destroys, and are never synced.
+    public var unsavedReviewDraftCount: Int {
+        let instant = now()
+        let current = state
+        return local.formDrafts.filter { Self.isLive($0.key, $0.value, in: current, now: instant) }.count
+    }
+
     nonisolated static func isLive(_ key: DraftKey, _ draft: FormDraft, in state: GTDState, now: Date) -> Bool {
         guard now.timeIntervalSince(draft.savedAt) < localRetention else { return false }
         guard let task = key.taskID else { return true }

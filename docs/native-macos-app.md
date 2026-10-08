@@ -149,6 +149,9 @@ what you typed, and it can be saved once you are signed out. The kit records the
 a pending logout, removes this Mac's copy of the account's data, and only then removes the token
 and ends the server session (now, or when the network is back); if the removal fails, nothing is
 removed and the person is still signed in ("Couldn't sign out"). Review marks are kept.
+As delivered 2026-10-08 (owner decision), the confirmation also names the weekly-review form text typed on
+this Mac and not saved, which sign-out removes with the rest ("1 unsaved weekly-review draft will also be
+removed from this Mac."); drafts alone change neither its title nor its "Sign out" button.
 
 ## The dry run
 

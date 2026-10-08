@@ -17,6 +17,9 @@ struct SettingsScreen: View {
     @State private var unsyncedCount = 0
     /// Open sync issues the confirmation names on their own (FR-018): they are removed too.
     @State private var unsyncedIssueCount = 0
+    /// Unsaved weekly-review drafts the confirmation names (FR-018): sign-out removes them too, but
+    /// they neither change the buttons nor count as unsent changes.
+    @State private var unsavedDraftCount = 0
     /// The unsent changes the confirmation names: "Sign out and remove" removes these and no others.
     @State private var unsyncedChanges: Set<PendingChange> = []
     @State private var isSigningOut = false
@@ -140,6 +143,10 @@ struct SettingsScreen: View {
         if unsyncedIssueCount > 0 {
             sentences.append(
                 "\(SyncCopy.changes(unsyncedIssueCount)) that couldn't sync will also be removed from this \(ThisDevice.name).")
+        }
+        if unsavedDraftCount > 0 {
+            sentences.append(
+                "\(SyncCopy.reviewDrafts(unsavedDraftCount)) will also be removed from this \(ThisDevice.name).")
         }
         return sentences.joined(separator: " ")
     }
@@ -282,6 +289,7 @@ struct SettingsScreen: View {
         unsyncedChanges = workspace.pendingChanges
         unsyncedCount = workspace.pendingChangeCount
         unsyncedIssueCount = workspace.issues.count
+        unsavedDraftCount = workspace.unsavedReviewDraftCount
     }
 
     private func signOut(removing changes: Set<PendingChange>) {
