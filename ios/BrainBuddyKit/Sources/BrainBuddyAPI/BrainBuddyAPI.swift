@@ -10,9 +10,6 @@ public enum BrainBuddyAPI {
     /// Name of the opaque session cookie set by `POST /auth/login` and `/auth/signup`.
     public static let sessionCookieName = "brainbuddy_session"
 
-    /// Product token sent as `X-Client: brainbuddy-ios/<version>`.
-    public static let clientName = "brainbuddy-ios"
-
     /// `GET /tasks` accepts `limit` in 1...200 (default 50).
     public static let maximumPageSize = 200
 
@@ -80,5 +77,24 @@ public enum BrainBuddyAPI {
             try container.encode(WireDate.format(date))
         }
         return encoder
+    }
+}
+
+/// The product and version a client reports as `X-Client: <name>/<version>`
+/// (spec 021, FR-031): a label for server logs, never a behaviour switch.
+public struct ClientIdentity: Sendable, Equatable {
+    public var name: String
+    /// The app's marketing version, or `"dev"`.
+    public var version: String
+
+    public init(name: String, version: String) {
+        self.name = name
+        self.version = version
+    }
+
+    public static let iOS = ClientIdentity(name: "brainbuddy-ios", version: BrainBuddyAPI.bundleVersion)
+
+    public static func macOS(version: String) -> ClientIdentity {
+        ClientIdentity(name: "brainbuddy-macos", version: version)
     }
 }

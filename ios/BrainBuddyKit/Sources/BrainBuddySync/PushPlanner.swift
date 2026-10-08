@@ -28,9 +28,10 @@ enum ServerRecord: Sendable {
 /// reducer stored rather than the raw input (titles trimmed, empty notes
 /// cleared), so the server ends up with what the device shows.
 enum PlannedRequest: Sendable {
-    case createProject(name: String, color: String?)
-    case updateProject(id: String, name: String?, color: FieldChange<String>, revision: Int)
+    case createProject(name: String, color: String?, desiredOutcome: String?)
+    case updateProject(id: String, name: String?, color: FieldChange<String>, desiredOutcome: FieldChange<String>, revision: Int)
     case archiveProject(id: String, revision: Int)
+    case unarchiveProject(id: String, revision: Int)
     case createTag(name: String)
     case renameTag(id: String, name: String, revision: Int)
     case deleteTag(id: String, revision: Int)
@@ -60,16 +61,23 @@ enum PlannedRequest: Sendable {
     /// Sends the request with `key` as its `Idempotency-Key`.
     func send(with client: BrainBuddyAPIClient, key: UUID) async throws(APIError) -> ServerRecord {
         switch self {
-        case .createProject(let name, let color):
-            return .project(try await client.createProject(name: name, color: color, idempotencyKey: key))
-        case .updateProject(let id, let name, let color, let revision):
+        case .createProject(let name, let color, let desiredOutcome):
+            return .project(
+                try await client.createProject(
+                    name: name, color: color, desiredOutcome: desiredOutcome, idempotencyKey: key
+                )
+            )
+        case .updateProject(let id, let name, let color, let desiredOutcome, let revision):
             return .project(
                 try await client.updateProject(
-                    id: id, name: name, color: color, expectedRevision: revision, idempotencyKey: key
+                    id: id, name: name, color: color, desiredOutcome: desiredOutcome, expectedRevision: revision,
+                    idempotencyKey: key
                 )
             )
         case .archiveProject(let id, let revision):
             return .project(try await client.archiveProject(id: id, expectedRevision: revision, idempotencyKey: key))
+        case .unarchiveProject(let id, let revision):
+            return .project(try await client.unarchiveProject(id: id, expectedRevision: revision, idempotencyKey: key))
         case .createTag(let name):
             return .tag(try await client.createTag(name: name, idempotencyKey: key))
         case .renameTag(let id, let name, let revision):
@@ -157,13 +165,27 @@ enum PushPlanner {
         let resolver = Resolver(base: base)
         switch command {
         case .createProject(let create):
-            return .createProject(name: create.name, color: create.color)
+            return .createProject(
+                name: create.name, color: create.color, desiredOutcome: outcome(create.desiredOutcome)
+            )
         case .updateProject(let update):
             let project = try resolver.project(update.projectID)
-            return .updateProject(id: project.id, name: update.name, color: update.color, revision: project.revision)
+            return .updateProject(
+                id: project.id, name: update.name, color: update.color, desiredOutcome: .unchanged,
+                revision: project.revision
+            )
+        case .setProjectOutcome(let id, let value):
+            let project = try resolver.project(id)
+            return .updateProject(
+                id: project.id, name: nil, color: .unchanged,
+                desiredOutcome: outcome(value).map { .set($0) } ?? .clear, revision: project.revision
+            )
         case .archiveProject(let id):
             let project = try resolver.project(id)
             return .archiveProject(id: project.id, revision: project.revision)
+        case .unarchiveProject(let id):
+            let project = try resolver.project(id)
+            return .unarchiveProject(id: project.id, revision: project.revision)
         case .createTag(let create):
             return .createTag(name: create.name)
         case .renameTag(let rename):
@@ -305,6 +327,12 @@ enum PushPlanner {
         default:
             return nil
         }
+    }
+
+    /// The outcome as the reducer stored it: trimmed, and nil when blank.
+    private static func outcome(_ raw: String?) -> String? {
+        let value = NameNormalizer.stripped(raw ?? "")
+        return value.isEmpty ? nil : value
     }
 
     /// Server id and revision of base records.

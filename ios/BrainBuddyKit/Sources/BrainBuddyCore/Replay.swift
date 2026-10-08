@@ -9,6 +9,21 @@ public struct RejectedOperation: Hashable, Sendable {
     }
 }
 
+/// What a merge by name leaves of the rest of the outbox.
+public struct MergeRewrite: Hashable, Sendable {
+    /// The operations still to send, rewritten to follow the survivor.
+    public var outbox: [PendingOperation]
+    /// What the merge did not apply and the person should hear about: an archive of
+    /// the local project (`.archiveNotMerged`) and a local outcome the account's
+    /// project kept instead of (`.outcomeKept`, whose command holds the full local text).
+    public var rejected: [RejectedOperation]
+
+    public init(outbox: [PendingOperation], rejected: [RejectedOperation]) {
+        self.outbox = outbox
+        self.rejected = rejected
+    }
+}
+
 public struct ReplayResult: Hashable, Sendable {
     /// What the UI shows.
     public var state: GTDState
@@ -39,7 +54,8 @@ public enum OutboxReplayer {
     /// - A project or tag creation whose name an active record already has is
     ///   dropped, and the operations after it are rewritten with
     ///   `rewritingAfterMerge`: references follow the existing record, but a
-    ///   rename, recolour, archive or delete of the local record does not.
+    ///   rename, recolour, archive or delete of the local record does not; the
+    ///   ones that matter to the person become rejected operations.
     /// - An operation the reducer rejects is dropped into `rejected`; later
     ///   operations that depend on it are rejected in turn (a subtask of a
     ///   task that was never created) or lose the reference (a task keeps its
@@ -113,9 +129,13 @@ public enum OutboxReplayer {
             case .alreadySatisfied:
                 break
             case .mergedProject(into: let survivor):
-                guard case .createProject(let create) = command else { break }
-                let rest = rewritingAfterMerge(Array(pending[index...]), project: create.projectID, into: survivor)
-                pending.replaceSubrange(index..., with: rest)
+                guard case .createProject(let create) = command, let record = state.projects[survivor] else { break }
+                let merge = rewritingAfterMerge(
+                    Array(pending[index...]), project: create.projectID, into: record, outcome: create.desiredOutcome,
+                    issuedAt: operation.issuedAt
+                )
+                pending.replaceSubrange(index..., with: merge.outbox)
+                rejected += merge.rejected
             case .mergedTag(into: let survivor):
                 guard case .createTag(let create) = command else { break }
                 let rest = rewritingAfterMerge(Array(pending[index...]), tag: create.tagID, into: survivor)
@@ -128,35 +148,87 @@ public enum OutboxReplayer {
     // MARK: - Merges
 
     /// `outbox` after the local project `old` was merged into the existing
-    /// project `new` because their names collide: by replay, or by sync when
-    /// the server answers `old`'s creation with 409 duplicate name.
+    /// project `survivor` because their names collide: by replay, or by sync
+    /// when the server answers `old`'s creation with 409 duplicate name.
     ///
     /// Only references follow the merge: a task created in or moved to `old`
-    /// is created in or moved to `new`. What the user did to their own record
-    /// does not, because `new` is the account's project, which other devices
-    /// use: a rename or recolour of `old` is dropped (`new` keeps its name and
-    /// colour), and so is an archive of `old`. When `outbox` archives `old`,
-    /// its tasks lose the reference instead of following it, as the local
-    /// archive left them (`withdrawing(project:from:)`).
+    /// is created in or moved to `survivor`, with or without an archive of
+    /// `old` (ADR-0020: the local archive left the tasks attached, so they
+    /// stay in the account's project and are never created without one). What
+    /// the user did to their own record does not follow, because `survivor`
+    /// is the account's project, which other devices use: a rename or recolour
+    /// of `old` is dropped, and so is its unarchive. Its archive is reported as
+    /// `.archiveNotMerged`.
+    ///
+    /// The desired outcome (`outcome` is the merged creation's, `issuedAt` its
+    /// time): the last of it and of every `setProjectOutcome(old)`, which are
+    /// dropped, is the local outcome. A survivor without an outcome gets it
+    /// as a `setProjectOutcome`, queued first; one with a different outcome
+    /// keeps its own, and the local text is reported as `.outcomeKept`.
     ///
     /// The merged creation itself is dropped too if it is still in `outbox`.
     /// Operation ids, keys and bookkeeping are kept.
     public static func rewritingAfterMerge(
-        _ outbox: [PendingOperation], project old: ProjectID, into new: ProjectID
-    ) -> [PendingOperation] {
-        if outbox.contains(where: { $0.command == .archiveProject(old) }) {
-            return withdrawing(project: old, from: outbox)
-        }
-        return outbox.compactMap { operation in
+        _ outbox: [PendingOperation], project old: ProjectID, into survivor: ProjectRecord, outcome: String? = nil,
+        issuedAt: Date
+    ) -> MergeRewrite {
+        var kept: [PendingOperation] = []
+        var rejected: [RejectedOperation] = []
+        var local = outcome
+        for operation in outbox {
             switch operation.command {
-            case .createProject(let create) where create.projectID == old: return nil
-            case .updateProject(let update) where update.projectID == old: return nil
+            case .createProject(let create) where create.projectID == old: continue
+            case .updateProject(let update) where update.projectID == old: continue
+            case .unarchiveProject(let id) where id == old: continue
+            case .setProjectOutcome(let id, let value) where id == old: local = value
+            case .archiveProject(let id) where id == old:
+                rejected.append(RejectedOperation(operation: operation, error: .archiveNotMerged(survivor.name)))
             default:
                 var rewritten = operation
-                rewritten.command = operation.command.replacing(project: old, with: new)
-                return rewritten
+                rewritten.command = operation.command.replacing(project: old, with: survivor.id)
+                kept.append(rewritten)
             }
         }
+        if let value = (try? FieldRules.outcome(local)) ?? nil, value != survivor.desiredOutcome {
+            let command = GTDCommand.setProjectOutcome(project: survivor.id, outcome: value)
+            let operation = PendingOperation(command: command, issuedAt: issuedAt)
+            if survivor.desiredOutcome == nil {
+                kept.insert(operation, at: 0)
+            } else {
+                rejected.append(RejectedOperation(operation: operation, error: .outcomeKept))
+            }
+        }
+        return MergeRewrite(outbox: kept, rejected: rejected)
+    }
+
+    /// `outbox` without the tasks it newly puts in `project`: a task created in it is
+    /// created without a project, and an edit that moves a task into it loses that
+    /// change (and goes if nothing else is left of it). For when the server refuses
+    /// to unarchive the project (`affected` is the number of tasks this kept out).
+    public static func withoutAssignments(
+        to project: ProjectID, in outbox: [PendingOperation]
+    ) -> (outbox: [PendingOperation], affected: Int) {
+        var affected = 0
+        let rewritten = outbox.compactMap { operation -> PendingOperation? in
+            var operation = operation
+            switch operation.command {
+            case .createTask(var create) where create.projectID == project:
+                create.projectID = nil
+                operation.command = .createTask(create)
+            case .updateTask(var update) where update.changes.projectID == .set(project):
+                update.changes.projectID = .unchanged
+                guard update.changes.hasChanges else {
+                    affected += 1
+                    return nil
+                }
+                operation.command = .updateTask(update)
+            default:
+                return operation
+            }
+            affected += 1
+            return operation
+        }
+        return (rewritten, affected)
     }
 
     /// `outbox` after the local tag `old` was merged into the existing tag
@@ -176,24 +248,6 @@ public enum OutboxReplayer {
             default:
                 var rewritten = operation
                 rewritten.command = operation.command.replacing(tag: old, with: new)
-                return rewritten
-            }
-        }
-    }
-
-    /// `outbox` as if the project `id` had been archived before any of it:
-    /// its creation, edits and archive are dropped, a task created in it is
-    /// created without a project, and an edit that moved a task to it
-    /// clears the task's project (which is where archiving left it).
-    static func withdrawing(project id: ProjectID, from outbox: [PendingOperation]) -> [PendingOperation] {
-        outbox.compactMap { operation in
-            switch operation.command {
-            case .createProject(let create) where create.projectID == id: return nil
-            case .updateProject(let update) where update.projectID == id: return nil
-            case .archiveProject(let archived) where archived == id: return nil
-            default:
-                var rewritten = operation
-                rewritten.command = operation.command.removing(project: id)
                 return rewritten
             }
         }
@@ -233,6 +287,10 @@ extension GTDCommand {
             return .updateProject(update)
         case .archiveProject(let id):
             return .archiveProject(swap(id))
+        case .setProjectOutcome(let id, let outcome):
+            return .setProjectOutcome(project: swap(id), outcome: outcome)
+        case .unarchiveProject(let id):
+            return .unarchiveProject(project: swap(id))
         case .createTask(var create):
             create.projectID = create.projectID.map(swap)
             return .createTask(create)
@@ -270,25 +328,9 @@ extension GTDCommand {
         case .updateTask(var update):
             if case .set(let ids) = update.changes.tagIDs { update.changes.tagIDs = .set(swap(ids)) }
             return .updateTask(update)
-        case .createProject, .updateProject, .archiveProject, .transitionTask, .createSubtask,
-            .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask, .undoDecision,
-            .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
-            return self
-        }
-    }
-
-    /// The same task command without project `id`: a creation without a
-    /// project, an edit that set it clears the project instead. Commands on
-    /// the project itself are the caller's to drop.
-    func removing(project id: ProjectID) -> GTDCommand {
-        switch self {
-        case .createTask(var create) where create.projectID == id:
-            create.projectID = nil
-            return .createTask(create)
-        case .updateTask(var update) where update.changes.projectID == .set(id):
-            update.changes.projectID = .clear
-            return .updateTask(update)
-        default:
+        case .createProject, .updateProject, .archiveProject, .setProjectOutcome, .unarchiveProject,
+            .transitionTask, .createSubtask, .updateSubtask, .transitionSubtask, .createComment, .updateComment,
+            .decideTask, .undoDecision, .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
             return self
         }
     }

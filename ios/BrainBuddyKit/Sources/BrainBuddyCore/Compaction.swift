@@ -13,10 +13,11 @@ import Foundation
 /// - complete / cancel then reopen of such a task cancels out, and the reopen
 ///   becomes the creation's list;
 /// - subtask and comment edits fold into their unsent creation or edit;
-/// - project and tag renames (and recolours) fold into their unsent creation or edit.
+/// - project and tag renames (and recolours) fold into their unsent creation or edit;
+/// - a project's desired outcome folds into its unsent creation (or earlier outcome).
 ///
 /// It never folds into or across an operation that may have reached the
-/// server, never across a project archive or tag delete, and never moves an
+/// server, never across a project archive or unarchive or a tag delete, and never moves an
 /// edit before the creation of a project or tag it references, before a
 /// transition that changes its waiting note, or a name before another name
 /// change of the same kind (uniqueness depends on that order).
@@ -61,6 +62,7 @@ public enum OutboxCompactor {
         case .updateSubtask(let update): return foldSubtaskEdit(update, into: &outbox)
         case .updateComment(let update): return foldCommentEdit(update, into: &outbox)
         case .updateProject(let update): return foldProjectEdit(update, into: &outbox)
+        case .setProjectOutcome(let id, let outcome): return foldProjectOutcome(outcome, of: id, into: &outbox)
         case .renameTag(let rename): return foldTagRename(rename, into: &outbox)
         case .undoDecision(let id): return cancelDecision(id, in: &outbox)
         case .undoBulkRelease(let id): return cancelBulkRelease(id, in: &outbox)
@@ -206,7 +208,7 @@ public enum OutboxCompactor {
             return true
         }
         switch command {
-        case .archiveProject, .deleteTag:
+        case .archiveProject, .unarchiveProject, .deleteTag:
             return false
         case .createProject(let create):
             return changes.projectID != .set(create.projectID)
@@ -233,7 +235,7 @@ public enum OutboxCompactor {
             }
         }
         switch command {
-        case .archiveProject, .deleteTag: return false
+        case .archiveProject, .unarchiveProject, .deleteTag: return false
         default: return true
         }
     }
@@ -304,7 +306,7 @@ public enum OutboxCompactor {
         if operation.command.isReviewCommand, operation.command.touchesAny(of: [task]) { return false }
         if operation.command.taskID == task { return !operation.hasBeenSent }
         switch operation.command {
-        case .archiveProject, .deleteTag: return false
+        case .archiveProject, .unarchiveProject, .deleteTag: return false
         default: return true
         }
     }
@@ -326,7 +328,7 @@ public enum OutboxCompactor {
                 },
                 canCross: { operation in
                     switch operation.command {
-                    case .createProject, .updateProject, .archiveProject, .deleteTag: false
+                    case .createProject, .updateProject, .archiveProject, .unarchiveProject, .deleteTag: false
                     default: true
                     }
                 }
@@ -345,6 +347,41 @@ public enum OutboxCompactor {
             earlier.name = update.name ?? earlier.name
             earlier.color = earlier.color.merged(with: update.color)
             outbox[index].command = .updateProject(earlier)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// The outcome is independent of a project's name and colour, so it crosses their edits; an
+    /// archive or unarchive in between keeps it where it is (it may be edited while archived).
+    private static func foldProjectOutcome(
+        _ outcome: String?, of id: ProjectID, into outbox: inout [PendingOperation]
+    ) -> Bool {
+        guard
+            let index = unsentTarget(
+                in: outbox,
+                isTarget: { command in
+                    switch command {
+                    case .createProject(let create): create.projectID == id
+                    case .setProjectOutcome(let earlier, _): earlier == id
+                    default: false
+                    }
+                },
+                canCross: { operation in
+                    switch operation.command {
+                    case .archiveProject, .unarchiveProject: false
+                    default: true
+                    }
+                }
+            )
+        else { return false }
+        switch outbox[index].command {
+        case .createProject(var create):
+            create.desiredOutcome = outcome
+            outbox[index].command = .createProject(create)
+        case .setProjectOutcome(let project, _):
+            outbox[index].command = .setProjectOutcome(project: project, outcome: outcome)
         default:
             return false
         }
@@ -398,8 +435,8 @@ extension GTDCommand {
         case .updateComment(let update): update.taskID
         case .decideTask(let decide): decide.taskID
         case .autoParkTask(let park): park.taskID
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
-            .bulkRelease, .undoBulkRelease, .review:
+        case .createProject, .updateProject, .archiveProject, .setProjectOutcome, .unarchiveProject, .createTag,
+            .renameTag, .deleteTag, .undoDecision, .bulkRelease, .undoBulkRelease, .review:
             nil
         }
     }

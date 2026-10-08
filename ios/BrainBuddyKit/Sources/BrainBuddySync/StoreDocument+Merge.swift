@@ -53,14 +53,7 @@ extension StoreDocument {
         if let known, known != id { rekey(project: known, to: id) }
         let existing = base.projects[id]
         if let existing, (existing.serverRevision ?? .min) > dto.revision { return id }
-        base.projects[id] = ProjectRecord(
-            id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color,
-            state: dto.state, createdAt: existing?.createdAt ?? now
-        )
-        if dto.state == .archived {
-            // The server removed the project from every task (and bumped them).
-            for task in base.tasks.values where task.projectID == id { base.tasks[task.id]?.projectID = nil }
-        }
+        base.projects[id] = ProjectRecord(dto, id: id, createdAt: existing?.createdAt ?? now)
         return id
     }
 
@@ -538,10 +531,7 @@ extension StoreDocument {
                 new.projects[id] = existing
                 continue
             }
-            new.projects[id] = ProjectRecord(
-                id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color,
-                state: dto.state, createdAt: existing?.createdAt ?? now
-            )
+            new.projects[id] = ProjectRecord(dto, id: id, createdAt: existing?.createdAt ?? now)
         }
         for dto in tags {
             let id = tagIDs[dto.id] ?? TagID.random()
@@ -604,5 +594,16 @@ extension StoreDocument {
         case (let pull?, let push?): max(pull, push)
         case (let pull, let push): pull ?? push
         }
+    }
+}
+
+extension ProjectRecord {
+    /// A base project from a server project, under the client id the device uses.
+    init(_ dto: ProjectDTO, id: ProjectID, createdAt: Date) {
+        self.init(
+            id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color, state: dto.state,
+            createdAt: createdAt, desiredOutcome: dto.desiredOutcome, archivedAt: dto.archivedAt,
+            archivedBeforeLossless: dto.archivedBeforeLossless
+        )
     }
 }

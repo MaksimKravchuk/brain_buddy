@@ -12,19 +12,21 @@ extension GTDReducer {
     /// even when the existing project has none, because it is the account's
     /// record and a colour change would be a separate `PATCH` the user never
     /// made to it (`OutboxReplayer.rewritingAfterMerge` drops later recolours
-    /// for the same reason).
+    /// for the same reason, and carries a local outcome over only where the
+    /// account's project has none).
     static func createProject(
         _ command: GTDCommand.CreateProject, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         if state.projects[command.projectID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         let name = try FieldRules.name(command.name, display: NameNormalizer.display)
         let color = try FieldRules.color(command.color)
+        let outcome = try FieldRules.outcome(command.desiredOutcome)
         if let existing = activeProject(named: name, other: command.projectID, in: state) {
             guard mode == .replay else { throw .duplicateProjectName(existing.name) }
             return .mergedProject(into: existing.id)
         }
         state.projects[command.projectID] = ProjectRecord(
-            id: command.projectID, name: name, color: color, state: .active, createdAt: date
+            id: command.projectID, name: name, color: color, state: .active, createdAt: date, desiredOutcome: outcome
         )
         return .applied
     }
@@ -53,19 +55,43 @@ extension GTDReducer {
         return .applied
     }
 
-    /// `POST /projects/{id}/archive`: irreversible, and it removes the project
-    /// from every task, open or terminal (current server behaviour).
+    /// `POST /projects/{id}/archive` (ADR-0020): every task keeps its project, so this
+    /// changes no task. A project that is archived already is satisfied, and its
+    /// `archivedAt` and `archivedBeforeLossless` stay as they are.
     static func archiveProject(
         _ id: ProjectID, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
         guard let project = state.projects[id] else { throw .projectNotFound }
         if project.state == .archived { return try satisfied(mode, else: .projectAlreadyArchived) }
         state.projects[id]?.state = .archived
-        let members = state.tasks.values.filter { $0.projectID == id }.map(\.id)
-        for taskID in members {
-            state.tasks[taskID]?.projectID = nil
-            state.tasks[taskID]?.updatedAt = date
+        state.projects[id]?.archivedAt = date
+        return .applied
+    }
+
+    /// `POST /projects/{id}/unarchive`: the project is active again, whatever the
+    /// marker says; no task changes. Another active project with the same name
+    /// refuses it, in replay too (the server would answer 409).
+    static func unarchiveProject(
+        _ id: ProjectID, in state: inout GTDState, mode: ApplyMode
+    ) throws(GTDValidationError) -> ApplyOutcome {
+        guard let project = state.projects[id] else { throw .projectNotFound }
+        if project.state == .active { return try satisfied(mode, else: .nothingToChange) }
+        if let existing = activeProject(named: project.name, other: id, in: state) {
+            throw .unarchiveNameInUse(existing.name)
         }
+        state.projects[id]?.state = .active
+        state.projects[id]?.archivedAt = nil
+        return .applied
+    }
+
+    /// `PATCH /projects/{id}` with `desired_outcome`, allowed on an archived project.
+    static func setProjectOutcome(
+        _ id: ProjectID, to outcome: String?, in state: inout GTDState, mode: ApplyMode
+    ) throws(GTDValidationError) -> ApplyOutcome {
+        guard let project = state.projects[id] else { throw .projectNotFound }
+        let value = try FieldRules.outcome(outcome)
+        if value == project.desiredOutcome { return try satisfied(mode, else: .nothingToChange) }
+        state.projects[id]?.desiredOutcome = value
         return .applied
     }
 

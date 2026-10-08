@@ -163,7 +163,7 @@ struct ReplayTests {
         #expect(result.outbox.map(\.id) == outbox[1...2].map(\.id), "rewritten operations keep their identity")
     }
 
-    @Test("Archiving a project that merged by name leaves the account's project alone; its tasks lose it")
+    @Test("021-FR-003 an archive of a project that merged by name is reported, and its tasks follow the survivor")
     func mergedProjectArchiveIsNotRetargeted() throws {
         let outbox = [
             Fixture.operation(.createProject(.init(projectID: "local", name: "work")), at: 1),
@@ -173,15 +173,13 @@ struct ReplayTests {
             Fixture.operation(.updateProject(.init(projectID: "local", name: "Archived work")), at: 5),
         ]
         let result = OutboxReplayer.replay(outbox, onto: Fixture.base)
-        #expect(result.rejected.isEmpty)
+        #expect(result.rejected == [RejectedOperation(operation: outbox[3], error: .archiveNotMerged("Work"))])
         #expect(result.state.projects == Fixture.base.projects, "Work is neither archived nor renamed")
         #expect(result.state.tasks["inbox"]?.projectID == "work", "the account's own tasks stay in Work")
-        #expect(result.state.tasks["t"]?.projectID == nil && result.state.tasks["done"]?.projectID == nil)
+        #expect(result.state.tasks["t"]?.projectID == "work" && result.state.tasks["done"]?.projectID == "work")
         #expect(
-            result.outbox.map(\.command) == [
-                .createTask(.init(taskID: "t", title: "T", list: .next)),
-                .updateTask(.init(taskID: "done", changes: .init(projectID: .clear))),
-            ]
+            result.outbox.map(\.command) == [.createTask(.init(taskID: "t", title: "T", list: .next, projectID: "work"))],
+            "the edit that moved a task into the survivor finds it there already"
         )
     }
 
@@ -239,7 +237,7 @@ struct ReplayTests {
             Fixture.operation(.deleteTag("mytag"), at: 4),
         ]
         let result = OutboxReplayer.replay(outbox, onto: account)
-        #expect(result == ReplayResult(state: account, outbox: [], rejected: []))
+        #expect(result == ReplayResult(state: account, outbox: [], rejected: [RejectedOperation(operation: outbox[1], error: .archiveNotMerged("Work"))]))
     }
 
     @Test("A rename to a name taken on the server is rejected, not merged")
@@ -325,6 +323,8 @@ struct RewritingAfterMergeTests {
         commands.enumerated().map { Fixture.operation($0.element, at: $0.offset) }
     }
 
+    private let survivor = Fixture.project("new", "New")
+
     private let unrelated: [GTDCommand] = [
         .createProject(.init(projectID: "other", name: "Other")),
         .updateProject(.init(projectID: "other", name: "Else")),
@@ -349,7 +349,7 @@ struct RewritingAfterMergeTests {
                 .updateProject(.init(projectID: "old", color: .set("#222222"))),
             ] + unrelated
         )
-        let rewritten = OutboxReplayer.rewritingAfterMerge(outbox, project: "old", into: "new")
+        let rewritten = OutboxReplayer.rewritingAfterMerge(outbox, project: "old", into: survivor, issuedAt: Fixture.at(0)).outbox
         #expect(
             rewritten.map(\.command) == [
                 .createTask(.init(taskID: "a", title: "A", list: .next, projectID: "new")),
@@ -359,32 +359,36 @@ struct RewritingAfterMergeTests {
         #expect(rewritten.map(\.id) == [outbox[1], outbox[3]].map(\.id) + outbox[5...].map(\.id))
     }
 
-    @Test("An archive of the merged project is dropped, and its tasks lose the project instead of following it")
-    func projectArchiveIsWithdrawn() {
+    @Test("021-FR-003 an archive of the merged project is reported, not sent, and its tasks follow the survivor")
+    func projectArchiveIsReported() {
         let outbox = operations(
             [
                 .createTask(.init(taskID: "a", title: "A", list: .next, projectID: "old")),
                 .updateTask(.init(taskID: "b", changes: .init(title: .set("B"), projectID: .set("old")))),
                 .archiveProject("old"),
+                .unarchiveProject(project: "old"),
                 .updateProject(.init(projectID: "old", name: "Old work")),
             ] + unrelated
         )
-        let rewritten = OutboxReplayer.rewritingAfterMerge(outbox, project: "old", into: "new")
+        let merge = OutboxReplayer.rewritingAfterMerge(outbox, project: "old", into: survivor, issuedAt: Fixture.at(0))
         #expect(
-            rewritten.map(\.command) == [
-                .createTask(.init(taskID: "a", title: "A", list: .next)),
-                .updateTask(.init(taskID: "b", changes: .init(title: .set("B"), projectID: .clear))),
+            merge.outbox.map(\.command) == [
+                .createTask(.init(taskID: "a", title: "A", list: .next, projectID: "new")),
+                .updateTask(.init(taskID: "b", changes: .init(title: .set("B"), projectID: .set("new")))),
             ] + unrelated
         )
-        #expect(!rewritten.contains { $0.command == .archiveProject("new") }, "the survivor is never archived")
+        #expect(merge.rejected == [RejectedOperation(operation: outbox[2], error: .archiveNotMerged("New"))])
+        #expect(!merge.outbox.contains { $0.command == .archiveProject("new") }, "the survivor is never archived")
     }
 
-    @Test("Sync's adoption: once the refused creation is gone, a queued archive of it goes too")
-    func adoptionDropsTheArchive() {
+    @Test("021-FR-003 sync's adoption: once the refused creation is gone, a queued archive of it is reported")
+    func adoptionReportsTheArchive() {
         let outbox = operations([
-            .archiveProject("mine"), .createTask(.init(taskID: "a", title: "A", list: .inbox)),
+            .archiveProject("mine"), .createTask(.init(taskID: "a", title: "A", list: .inbox, projectID: "mine")),
         ])
-        #expect(OutboxReplayer.rewritingAfterMerge(outbox, project: "mine", into: "work") == [outbox[1]])
+        let merge = OutboxReplayer.rewritingAfterMerge(outbox, project: "mine", into: survivor, issuedAt: Fixture.at(0))
+        #expect(merge.outbox.map(\.command) == [.createTask(.init(taskID: "a", title: "A", list: .inbox, projectID: "new"))])
+        #expect(merge.rejected.map(\.error) == [.archiveNotMerged("New")])
     }
 
     @Test("Tag references follow the merge without repeating a tag; the local tag's creation and rename are dropped")
@@ -424,5 +428,119 @@ struct RewritingAfterMergeTests {
             ] + unrelated
         )
         #expect(!rewritten.contains { $0.command == .deleteTag("new") }, "the survivor is never deleted")
+    }
+}
+
+@Suite("OutboxReplayer.withoutAssignments")
+struct WithoutAssignmentsTests {
+    @Test("021-FR-011 021-FR-026 a project that refused to unarchive keeps the tasks queued for it out of it")
+    func keepsQueuedTasksOut() {
+        let outbox = [
+            Fixture.operation(.createTask(.init(taskID: "a", title: "A", list: .inbox, projectID: "shed")), at: 1),
+            Fixture.operation(.updateTask(.init(taskID: "b", changes: .init(title: .set("B"), projectID: .set("shed")))), at: 2),
+            Fixture.operation(.updateTask(.init(taskID: "c", changes: .init(projectID: .set("shed")))), at: 3),
+            Fixture.operation(.createTask(.init(taskID: "d", title: "D", list: .inbox, projectID: "other")), at: 4),
+            Fixture.operation(.updateTask(.init(taskID: "e", changes: .init(projectID: .clear))), at: 5),
+        ]
+        let result = OutboxReplayer.withoutAssignments(to: "shed", in: outbox)
+        #expect(result.affected == 3)
+        #expect(
+            result.outbox.map(\.command) == [
+                .createTask(.init(taskID: "a", title: "A", list: .inbox)),
+                .updateTask(.init(taskID: "b", changes: .init(title: .set("B")))),
+                outbox[3].command, outbox[4].command,
+            ],
+            "a moved-in task keeps its other edits; an edit with nothing left goes"
+        )
+        #expect(result.outbox.map(\.id) == [outbox[0], outbox[1], outbox[3], outbox[4]].map(\.id))
+    }
+}
+
+/// The merge table of contracts/kit-commands.md §3 (ADR-0020): what happens to
+/// a local project, its tasks and its outcome when an account project has the same name.
+@Suite("OutboxReplayer: merging by name under lossless archive")
+struct ReplayLosslessMergeTests {
+    private static let outcome = String(repeating: "o", count: 1_000)
+
+    /// The legacy import's outbox shape for an archived "Old flat" with three tasks.
+    private func importedArchive(outcome: String? = nil, extra: [GTDCommand] = []) -> [PendingOperation] {
+        let commands: [GTDCommand] =
+            [.createProject(.init(projectID: "local", name: "Old flat", desiredOutcome: outcome))]
+            + ["a", "b", "c"].map { .createTask(.init(taskID: TaskID($0), title: "Task \($0)", list: .next, projectID: "local")) }
+            + [.archiveProject("local")] + extra
+        return commands.enumerated().map { Fixture.operation($0.element, at: $0.offset + 1) }
+    }
+
+    private func account(_ state: ProjectState, outcome: String? = nil) -> GTDState {
+        var project = Fixture.project("flat", "Old flat", state: state)
+        project.desiredOutcome = outcome
+        return Fixture.state(projects: [project])
+    }
+
+    @Test("021-FR-003 021-SC-003 an archived local project meets an active account project: membership follows, nothing is archived")
+    func archivedAgainstActive() throws {
+        let outbox = importedArchive()
+        let result = OutboxReplayer.replay(outbox, onto: account(.active))
+        #expect(result.state.projects.count == 1 && result.state.projects["flat"]?.state == .active)
+        for id: TaskID in ["a", "b", "c"] { #expect(result.state.tasks[id]?.projectID == "flat") }
+        #expect(result.outbox.map(\.id) == outbox[1...3].map(\.id), "the three creations stay, in the account's project")
+        #expect(result.outbox.allSatisfy { $0.command.taskID != nil })
+        #expect(result.rejected == [RejectedOperation(operation: outbox[4], error: .archiveNotMerged("Old flat"))])
+    }
+
+    @Test("021-FR-003 an active local project beside an archived-only account project stays a separate active project")
+    func activeAgainstArchivedOnly() {
+        let outbox = Array(importedArchive().dropLast())
+        let result = OutboxReplayer.replay(outbox, onto: account(.archived))
+        #expect(result.rejected.isEmpty && result.state.projects.count == 2)
+        #expect(result.state.projects["local"]?.state == .active && result.state.projects["flat"]?.state == .archived)
+    }
+
+    @Test("021-SC-003 an archived local project beside an archived-only account project gives two archived projects")
+    func archivedAgainstArchivedOnly() {
+        let result = OutboxReplayer.replay(importedArchive(), onto: account(.archived))
+        #expect(result.rejected.isEmpty && result.state.projects.count == 2)
+        #expect(result.state.projects.values.allSatisfy { $0.state == .archived })
+        #expect(result.state.tasks.values.allSatisfy { $0.projectID == "local" }, "membership kept: the tasks stay with the local one")
+        let activeNames = result.state.projects.values.filter { $0.state == .active }.map { NameNormalizer.project($0.name) }
+        #expect(Set(activeNames).count == activeNames.count, "duplicates are counted on active names only")
+    }
+
+    @Test("021-FR-003 021-FR-028 both sides have an outcome: the account's stays and the issue carries the full local text")
+    func bothHaveAnOutcome() throws {
+        let outbox = importedArchive(outcome: Self.outcome)
+        let result = OutboxReplayer.replay(outbox, onto: account(.active, outcome: "Theirs"))
+        #expect(result.state.projects["flat"]?.desiredOutcome == "Theirs")
+        #expect(!result.outbox.contains { if case .setProjectOutcome = $0.command { true } else { false } })
+        let kept = try #require(result.rejected.first { $0.error == .outcomeKept })
+        #expect(kept.operation.command == .setProjectOutcome(project: "flat", outcome: Self.outcome))
+        #expect(GTDValidationError.outcomeKept.message == "Kept the desired outcome already on your account. Yours is below, so you can copy it.")
+    }
+
+    @Test("021-FR-003 021-FR-028 a survivor without an outcome gets the local one, re-issued once")
+    func survivorWithoutAnOutcome() throws {
+        let result = OutboxReplayer.replay(importedArchive(outcome: "Mine"), onto: account(.active))
+        #expect(result.state.projects["flat"]?.desiredOutcome == "Mine")
+        let reissued = result.outbox.filter { if case .setProjectOutcome = $0.command { true } else { false } }
+        #expect(reissued.map(\.command) == [.setProjectOutcome(project: "flat", outcome: "Mine")])
+        #expect(!result.rejected.contains { $0.error == .outcomeKept })
+    }
+
+    @Test("021-FR-003 021-FR-028 an outcome set after the local archive never reaches the account's project")
+    func outcomeAfterTheArchive() throws {
+        let later = importedArchive(outcome: "First", extra: [.setProjectOutcome(project: "local", outcome: "Later")])
+        let kept = OutboxReplayer.replay(later, onto: account(.active, outcome: "Theirs"))
+        #expect(kept.state.projects["flat"]?.desiredOutcome == "Theirs")
+        #expect(!kept.outbox.contains { if case .setProjectOutcome = $0.command { true } else { false } }, "no PATCH carries it")
+        #expect(kept.rejected.first { $0.error == .outcomeKept }?.operation.command == .setProjectOutcome(project: "flat", outcome: "Later"))
+        let adopted = OutboxReplayer.replay(later, onto: account(.active))
+        #expect(adopted.state.projects["flat"]?.desiredOutcome == "Later")
+        #expect(adopted.outbox.filter { if case .setProjectOutcome = $0.command { true } else { false } }.count == 1)
+    }
+
+    @Test("021-FR-028 the same outcome on both sides is nothing to report")
+    func sameOutcome() {
+        let result = OutboxReplayer.replay(importedArchive(outcome: "Same"), onto: account(.active, outcome: "Same"))
+        #expect(result.rejected.map(\.error) == [.archiveNotMerged("Old flat")])
     }
 }

@@ -226,7 +226,8 @@ import Testing
         }
     }
 
-    @Test func archiveProjectRemovesItFromItsTasksOnce() async throws {
+    @Test("021-FR-024 archiving keeps the project on its tasks, and the project can be unarchived")
+    func archiveProjectKeepsItsTasksAndUnarchiveRestoresIt() async throws {
         let workspace = await loadedWorkspace()
         let taskID = try workspace.capture(CaptureDraft(text: "Clear the beds @Garden", list: .next))
         let projectID = try #require(workspace.task(taskID)?.projectID)
@@ -234,10 +235,75 @@ import Testing
         try workspace.archiveProject(projectID)
 
         #expect(workspace.project(projectID)?.state == .archived)
-        #expect(workspace.task(taskID)?.projectID == nil)
+        #expect(workspace.task(taskID)?.projectID == projectID)
         #expect(workspace.task(taskID)?.state == .next)
         #expect(workspace.projects(archived: true).map(\.id) == [projectID])
         expectRejected(.projectAlreadyArchived, in: workspace) { try workspace.archiveProject(projectID) }
+
+        try workspace.unarchiveProject(projectID)
+        #expect(workspace.project(projectID)?.state == .active && workspace.project(projectID)?.archivedAt == nil)
+        #expect(workspace.task(taskID)?.projectID == projectID)
+        expectRejected(.nothingToChange, in: workspace) { try workspace.unarchiveProject(projectID) }
+    }
+
+    @Test("021-FR-025 021-FR-026 an unarchive is refused while another active project has the name")
+    func unarchiveRefusedForATakenName() async throws {
+        let workspace = await loadedWorkspace()
+        let first = try workspace.createProject(name: "Shed")
+        try workspace.archiveProject(first)
+        _ = try workspace.createProject(name: "shed")
+        expectRejected(.unarchiveNameInUse("shed"), in: workspace) { try workspace.unarchiveProject(first) }
+    }
+
+    @Test("021-FR-028 a project's desired outcome is set, trimmed, cleared and limited, archived or not")
+    func setProjectOutcome() async throws {
+        let workspace = await loadedWorkspace()
+        let id = try workspace.createProject(name: "Trip")
+        try workspace.setProjectOutcome(id, outcome: "  Two weeks away ")
+        #expect(workspace.project(id)?.desiredOutcome == "Two weeks away")
+        try workspace.archiveProject(id)
+        try workspace.setProjectOutcome(id, outcome: nil)
+        #expect(workspace.project(id)?.desiredOutcome == nil)
+        expectRejected(.outcomeTooLong, in: workspace) {
+            try workspace.setProjectOutcome(id, outcome: String(repeating: "o", count: 1_001))
+        }
+        expectRejected(.projectNotFound, in: workspace) { try workspace.setProjectOutcome("missing", outcome: "x") }
+    }
+
+    @Test("021-FR-026 apply queues a whole sequence in one write, or none of it")
+    func applyIsAllOrNothing() async throws {
+        let store = InMemoryDocumentStore()
+        let workspace = await loadedWorkspace(store: store)
+        let item = try workspace.capture(CaptureDraft(text: "Plan the trip"))
+        let waiting = try workspace.capture(CaptureDraft(text: "Quote", list: .waiting, waitingFor: "Harbour Hall"))
+        await workspace.flush()
+        let generation = try #require(try await store.load()).generation
+
+        // Inbox "clarify as project", Waiting "follow up and keep waiting".
+        try workspace.apply([
+            .createProject(.init(projectID: "trip", name: "Trip")),
+            .updateTask(.init(taskID: item, changes: .init(projectID: .set("trip")))),
+            .transitionTask(.init(taskID: item, action: .move, toList: .next)),
+            .createTask(.init(taskID: "follow-up", title: "Chase the quote", list: .next)),
+            .updateTask(.init(taskID: waiting, changes: .init(waitingFor: .set("Harbour Hall (again)")))),
+        ])
+        #expect(workspace.task(item)?.projectID == "trip" && workspace.task(item)?.state == .next)
+        #expect(workspace.task("follow-up")?.title == "Chase the quote")
+        #expect(workspace.pendingChangeCount == 7)
+        await workspace.flush()
+        let stored = try #require(try await store.load())
+        #expect(stored.generation == generation + 1, "one document write")
+        #expect(stored == workspace.document && OutboxReplayer.replay(stored.outbox, onto: stored.base).state == workspace.state)
+
+        // Someday to Next with a new title, but the second command is invalid: nothing happens.
+        let before = workspace.state
+        expectRejected(.emptyTitle, in: workspace) {
+            try workspace.apply([
+                .updateTask(.init(taskID: item, changes: .init(title: .set("Plan the trip, day by day")))),
+                .updateTask(.init(taskID: item, changes: .init(title: .set("  ")))),
+            ])
+        }
+        #expect(workspace.state == before && workspace.unpersisted.isEmpty)
     }
 
     // MARK: Tags

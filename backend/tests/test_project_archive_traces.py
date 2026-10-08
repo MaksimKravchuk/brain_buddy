@@ -92,3 +92,16 @@ def test_021_FR_025_trace_file_names_its_requirements() -> None:
         "021-FR-027",
         "021-FR-028",
     }
+
+
+KIT_COPY_PATH = (
+    Path(__file__).parents[2]
+    / "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources"
+    / "project_archive_traces.json"
+)
+
+
+def test_021_FR_024_kit_trace_copy_is_byte_identical() -> None:
+    """The kit replays the very bytes the backend verifies (a drift fails here)."""
+
+    assert KIT_COPY_PATH.read_bytes() == TRACES_PATH.read_bytes()

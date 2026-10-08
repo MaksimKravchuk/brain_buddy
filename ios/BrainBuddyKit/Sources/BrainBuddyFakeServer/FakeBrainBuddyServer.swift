@@ -15,8 +15,8 @@ import Synchronization
 ///   result, the same key with another body is 409, and keys expire after 24
 ///   hours of the injected clock (purged on the owner's next write).
 /// - Unique active project and tag names (normalized) or 409; archiving a
-///   project clears it from every task and deleting a tag removes it from
-///   every task, both bumping those tasks' revisions; subtask and comment
+///   project keeps it on every task (ADR-0020) and deleting a tag removes it
+///   from every task, bumping those tasks' revisions; subtask and comment
 ///   writes leave the parent task alone.
 /// - `GET /tasks` pages with `limit` and an opaque cursor, items without
 ///   children; `GET /tasks/{id}` includes them.

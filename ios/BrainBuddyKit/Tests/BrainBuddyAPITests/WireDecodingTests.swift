@@ -125,8 +125,23 @@ struct ResponseDecodingTests {
         #expect(archived.state == .archived)
         #expect(archived.color == nil)
 
+        // Spec 021: a response without the three new fields (an older server) still decodes.
+        #expect(project.desiredOutcome == nil && project.archivedAt == nil && !project.archivedBeforeLossless)
+
         let tag = try decoder.decode(TagDTO.self, from: Data(Fixture.deletedTag.utf8))
         #expect(tag == TagDTO(id: "tag_0a1b2c3d4e5f", name: "errands", state: .deleted, revision: 5))
+    }
+
+    @Test("021-FR-027 021-FR-028 a project response with the outcome, the archive time and the marker")
+    func projectWithTheSpec021Fields() throws {
+        let json = ##"{"id":"project_0a1b2c3d4e5f","name":"Home","color":null,"state":"archived","revision":4,"open_task_count":2,"desired_outcome":"Shed built","archived_at":"2026-10-06T09:30:00.250000Z","archived_before_lossless":true}"##
+        let project = try decoder.decode(ProjectDTO.self, from: Data(json.utf8))
+        #expect(project.desiredOutcome == "Shed built" && project.archivedBeforeLossless)
+        #expect(project.archivedAt == Fixture.utc(2026, 10, 6, 9, 30).addingTimeInterval(0.25))
+        let cleared = try decoder.decode(
+            ProjectDTO.self,
+            from: Data(##"{"id":"p","name":"N","state":"active","revision":1,"desired_outcome":null,"archived_at":null,"archived_before_lossless":false}"##.utf8))
+        #expect(cleared.desiredOutcome == nil && cleared.archivedAt == nil && !cleared.archivedBeforeLossless)
     }
 
     @Test("MeResponse, including a login that cancelled a pending deletion")
