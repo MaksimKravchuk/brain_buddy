@@ -105,6 +105,9 @@ public final class Workspace {
     @ObservationIgnored private var isSigningIn = false
     @ObservationIgnored private var nativeSignInID: UUID?
     @ObservationIgnored private var networkUpdates: Task<Void, Never>?
+    /// Fires `.periodic` while the app is in the foreground (`setForegroundActive`).
+    @ObservationIgnored private let foregroundTicker: PeriodicSyncTicker?
+    @ObservationIgnored private var isForeground = false
     @ObservationIgnored private var todayCache: TodayCache?
     /// How many times `state` was rebuilt by a full replay (for tests).
     @ObservationIgnored private(set) var fullReplayCount = 0
@@ -114,21 +117,27 @@ public final class Workspace {
     /// A workspace over `store`. Pass `sync: nil` where nothing may talk to
     /// the server (widgets, App Intents, previews). `now` and `makeID` are the
     /// clock and the id source for new commands (ids, operation ids and
-    /// idempotency keys); tests inject deterministic ones.
+    /// idempotency keys); tests inject deterministic ones, and the scheduler
+    /// that runs the foreground tick.
     public init(
         store: any DocumentStore, sync: (any SyncService)?,
         now: @escaping @Sendable () -> Date = { Date() },
-        makeID: @escaping @Sendable () -> UUID = { UUID() }
+        makeID: @escaping @Sendable () -> UUID = { UUID() },
+        tickScheduler: any SyncScheduler = TaskSyncScheduler()
     ) {
         self.store = store
         self.sync = sync
         self.now = now
         self.makeID = makeID
+        foregroundTicker = sync.map { sync in
+            PeriodicSyncTicker(scheduler: tickScheduler) { await sync.request(.periodic) }
+        }
     }
 
     /// Production workspace backed by the shared App Group file. Extensions
-    /// pass `enableSync: false`; only the app talks to the server.
-    public static func live(appGroupID: String, enableSync: Bool = true) -> Workspace {
+    /// pass `enableSync: false`; only the app talks to the server. `identity` is what the
+    /// server's logs call this client (`X-Client`).
+    public static func live(appGroupID: String, enableSync: Bool = true, identity: ClientIdentity = .iOS) -> Workspace {
         #if canImport(Darwin)
             let fileURL =
                 FileDocumentStore.appGroupDocumentURL(appGroupID: appGroupID)
@@ -143,7 +152,7 @@ public final class Workspace {
         #else
             let tokenStore: any SessionTokenStore = InMemorySessionTokenStore()
         #endif
-        return Workspace(store: store, sync: SyncEngine(store: store, tokenStore: tokenStore))
+        return Workspace(store: store, sync: SyncEngine(store: store, tokenStore: tokenStore, identity: identity))
     }
 
     /// In-memory workspace with sample data for SwiftUI previews and UI tests.
@@ -488,29 +497,59 @@ public final class Workspace {
                 throw WorkspaceError.unsyncedChanges(count: unsynced)
             }
         }
-        await sync?.signOut()
-        do {
-            // Checked again under the store's lock, so nothing queued in between is lost.
-            let unpersistedCount = unpersisted.count
-            let discard = discardUnsyncedChanges
+        let unpersistedCount = unpersisted.count
+        let discard = discardUnsyncedChanges
+        let store = self.store
+        // The engine runs this once it has recorded the session's logout; it is checked again under
+        // the store's lock, so nothing queued in between is lost.
+        let removeData: @Sendable () async throws -> Void = {
             try await store.destroy(after: { stored in
                 let unsynced = unpersistedCount + (stored?.outbox.count ?? 0)
                 if unsynced > 0, !discard { throw WorkspaceError.unsyncedChanges(count: unsynced) }
             })
+        }
+        do {
+            if let sync { try await sync.signOut(removingLocalDataWith: removeData) } else { try await removeData() }
         } catch {
+            // Nothing was removed and the engine kept the session and resumed: still signed in.
             writesSuspended = false
             await refreshFromStore()
             schedulePersistence()
-            // The account stays linked but its session was ended: sync starts
-            // again and asks to sign in again.
-            syncStartedFor = nil
-            await startSyncIfNeeded()
             if let error = error as? WorkspaceError { throw error }
             throw WorkspaceError.storage(Self.storageMessage(for: error))
         }
         resetToEmptyLocalWorkspace()
         writesSuspended = false
         didPersist?()
+    }
+
+    /// The app came to the foreground (or went away). Active: starts the 15 s tick and asks for one
+    /// pull now; inactive: stops the tick. Asking for the state it is in changes nothing. The Mac
+    /// calls it with `true` and never `false`; the iPhone follows its scene phase.
+    public func setForegroundActive(_ active: Bool) async {
+        guard active != isForeground else { return }
+        isForeground = active
+        foregroundTicker?.setActive(active)
+        if active { await sync?.request(.foreground) }
+    }
+
+    /// Everything the sync status line is told (`SyncStatusDescriber.describe`). A change counts as
+    /// waiting from when it became sendable: the later of its issue time and the account's link time,
+    /// so a first sign-in with months-old local data does not read as days of failure; the ones
+    /// issued before the link are the first upload.
+    public var syncSnapshot: SyncSnapshot {
+        let operations = document.outbox + unpersisted
+        let linkedAt = account?.linkedAt
+        let sendable = operations.map { max($0.issuedAt, linkedAt ?? $0.issuedAt) }
+        let metadata = document.sync
+        return SyncSnapshot(
+            account: account.map { .linked(email: $0.email) } ?? .none,
+            sessionEnded: syncStatus == .needsSignIn, isOnline: networkIsAvailable, isSyncing: syncStatus == .syncing,
+            lastSyncedAt: [metadata.lastPullAt, metadata.lastPushAt].compactMap { $0 }.max(),
+            pendingCount: operations.count, oldestPendingAt: sendable.min(),
+            initialUploadRemaining: operations.filter { $0.issuedAt < (linkedAt ?? .distantPast) }.count,
+            issueCount: issues.count, failingSince: metadata.failingSince,
+            lastFailedAttemptAt: metadata.lastFailedAttemptAt, lastFailureReferenceID: metadata.lastFailureReferenceID)
     }
 
     /// Pushes pending changes and pulls the latest server state now.

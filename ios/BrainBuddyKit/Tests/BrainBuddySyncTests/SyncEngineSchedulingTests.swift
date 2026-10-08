@@ -235,7 +235,7 @@ struct SyncEngineSchedulingTests {
         let before = try await device.document()
         device.transport.clearLog()
 
-        await device.engine.signOut()
+        try await device.engine.signOut(removingLocalDataWith: {})
         #expect(device.transport.requests.map(\.route) == ["POST /auth/logout"])
         #expect(try device.tokens.token(for: FakeBrainBuddyServer.baseURL) == nil)
         #expect(try await device.document() == before)
@@ -243,5 +243,106 @@ struct SyncEngineSchedulingTests {
         await device.engine.request(.manual)
         #expect(await device.sync() == .localOnly)
         #expect(device.transport.requests.count == 1)
+    }
+
+    // MARK: Periodic ticks and Sync now
+
+    @Test("021-FR-006 021-FR-032 a tick inside the pull age runs no cycle, reports nothing and asks for no pull; at 30 s it pulls")
+    func quietTicksPullAtThirtySeconds() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device { $0.pullInterval = SyncTiming.pullAge }
+        try await device.signIn()
+        device.transport.clearLog()
+        device.events.clear()
+
+        for elapsed in [15.0, 14.0] {  // ticks at 15 s and, as it may drift, at 29 s
+            harness.clock.advance(by: elapsed)
+            await device.engine.request(.periodic)
+            await device.engine.waitUntilIdle()
+            #expect(device.transport.requests.isEmpty, "no request")
+            #expect(device.events.all.isEmpty, "no .status and no .documentChanged")
+            #expect(await device.engine.pullRequested == false)
+        }
+
+        harness.clock.advance(by: 1)
+        await device.engine.request(.periodic)
+        await device.engine.waitUntilIdle()
+        #expect(device.transport.requests.contains { $0.route == "GET /tasks" }, "the pull is due")
+        #expect(await device.status == .idle(lastSyncedAt: harness.clock.now()))
+    }
+
+    @Test("021-FR-006 a tick sends changes that wait, but not while a debounce is scheduled")
+    func tickSendsWaitingChanges() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device { $0.pullInterval = SyncTiming.pullAge }
+        try await device.signIn()
+        try await device.apply(.createTask(.init(taskID: "x", title: "Buy milk", list: .inbox)))
+        await device.engine.request(.localChange)
+        harness.clock.advance(by: 1)
+
+        await device.engine.request(.periodic)
+        await device.engine.waitUntilIdle()
+        #expect(device.mutations.isEmpty, "the debounce will send it")
+
+        await device.scheduler.runAll()
+        await device.engine.waitUntilIdle()
+        #expect(harness.snapshot.tasks.count == 1)
+        try await device.apply(.createTask(.init(taskID: "y", title: "Buy bread", list: .inbox)))
+        harness.clock.advance(by: 5)
+        await device.engine.request(.periodic)
+        await device.engine.waitUntilIdle()
+        #expect(harness.snapshot.tasks.count == 2, "no debounce was waiting for this one")
+    }
+
+    @Test("021-FR-006 a tick never shortens a backoff, while Retry runs at once")
+    func tickLeavesTheBackoffAlone() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device { $0.pullInterval = SyncTiming.pullAge }
+        try await device.signIn()
+        try await device.apply(.createTask(.init(taskID: "x", title: "Buy milk", list: .inbox)))
+        device.transport.inject(.status(503), matching: FakeServerTransport.isMutation)
+        await device.engine.request(.localChange)
+        await device.scheduler.runNext()
+        await device.engine.waitUntilIdle()
+        #expect(device.scheduler.pendingDelays.count == 1, "a retry is waiting")
+
+        device.transport.clearLog()
+        harness.clock.advance(by: 100)
+        await device.engine.request(.periodic)
+        await device.engine.waitUntilIdle()
+        #expect(device.transport.requests.isEmpty)
+        #expect(device.scheduler.pendingDelays.count == 1)
+
+        await device.engine.request(.manual)
+        await device.engine.waitUntilIdle()
+        #expect(harness.snapshot.tasks.count == 1, "Retry sent it at once")
+        #expect(device.scheduler.pendingDelays.isEmpty)
+    }
+
+    @Test("021-FR-019 Sync now pressed three times during a cycle queues exactly one follow-up and is never refused")
+    func syncNowIsSingleFlight() async throws {
+        let harness = SyncHarness()
+        let inner = harness.server.makeTransport()
+        let transport = GatedTransport(inner)
+        let engine = SyncEngine(
+            store: InMemoryDocumentStore(), tokenStore: InMemorySessionTokenStore(), transport: transport,
+            now: harness.clock.provider,
+            configuration: SyncConfiguration(scheduler: ManualSyncScheduler(), jitter: { 0.5 }, clientVersion: "test"))
+        _ = try await engine.signIn(
+            serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password)
+        inner.clearLog()
+        transport.hold { $0.url.path.hasSuffix("/tags") }  // inside the pull, after the cycle decided to pull
+
+        let first = Task { await engine.syncNow() }
+        await transport.arrived()
+        let second = Task { await engine.syncNow() }
+        let third = Task { await engine.syncNow() }
+        while await engine.joinedCycles < 2 { await Task.yield() }
+        transport.release()
+
+        let statuses = await [first.value, second.value, third.value]
+        await engine.waitUntilIdle()
+        #expect(statuses.allSatisfy { $0.isIdle }, "every press got an answer")
+        #expect(inner.requests.filter { $0.route == "GET /tasks" }.count == 2, "the running cycle and one follow-up")
     }
 }
