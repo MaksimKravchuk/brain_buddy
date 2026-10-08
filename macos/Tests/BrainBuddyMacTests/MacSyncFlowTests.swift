@@ -589,6 +589,40 @@ struct MacSyncFlowTests {
         #expect(rig.workspace.account == nil && rig.workspace.pendingChangeCount == 0)
     }
 
+    @Test("021-FR-018 X-04 names the unsaved weekly-review drafts it removes, and says nothing when there are none")
+    func prompt_namesUnsavedReviewDrafts() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+
+        rig.controller.presentSignOut()
+        let none = try #require(rig.controller.signOut.prompt)
+        #expect(none.reviewDrafts == 0)
+        #expect(none.text.detail?.contains("weekly-review") == false)
+        rig.controller.cancelSignOut()
+
+        let session = ReviewSessionID.make(UUID())
+        rig.workspace.saveDraft("Call the bank", for: .reviewStep(session: session, step: .mindSweep, item: "0"))
+        rig.controller.presentSignOut()
+        let one = try #require(rig.controller.signOut.prompt)
+        #expect(one.reviewDrafts == 1)
+        #expect(one.text.title == "Sign out?")
+        #expect(one.confirmTitle == "Sign out", "drafts alone don't change the button")
+        #expect(
+            one.text.detail
+                == "Your tasks are removed from this Mac. They stay in your account. 1 unsaved weekly-review draft will also be removed from this Mac."
+        )
+        rig.controller.cancelSignOut()
+
+        rig.workspace.saveDraft("Order tiles", for: .reviewStep(session: session, step: .mindSweep, item: "1"))
+        rig.controller.presentSignOut()
+        let two = try #require(rig.controller.signOut.prompt)
+        #expect(two.reviewDrafts == 2 && two.confirmTitle == "Sign out")
+        #expect(two.text.detail?.hasSuffix("2 unsaved weekly-review drafts will also be removed from this Mac.") == true)
+
+        #expect(await rig.controller.confirmSignOut() == .signedOut)
+        #expect(rig.workspace.unsavedReviewDraftCount == 0)
+    }
+
     @Test("021-FR-018 Quit while a confirmed sign-out is still removing the data waits for the removal; nothing is left behind")
     func quitWaitsForTheSignOutsRemoval() async throws {
         let rig = await Rig()

@@ -106,13 +106,14 @@ Numbers use the locale's grouping ("1,284 changes waiting", design X-01 long tex
 | `signOutUnsent(n, offline, sessionEnded)` | design X-04 rows, verbatim |
 | `signOutNothingUnsent` | "Sign out?" + "Your tasks are removed from this <device>. They stay in your account." |
 | `signOutIssues(n)` | appended to either sign-out text when sync issues are open (FR-018; review c1 F06, F54): "1 change that couldn't sync will also be removed from this <device>." / "N changes that couldn't sync will also be removed from this <device>." |
+| `signOutReviewDrafts(n)` | appended after `signOutIssues` and before the backup sentence when unsaved weekly-review drafts exist (FR-018; as delivered 2026-10-08, owner decision): "1 unsaved weekly-review draft will also be removed from this <device>." / "N unsaved weekly-review drafts will also be removed from this <device>." The iPhone builds the same sentence with its own device name |
 | `signOutBackup(until)` | Mac only, appended while the pre-upgrade backup exists and this sign-out does not delete it (FR-021; review c1 F27): "A copy of your tasks from before the update stays on this Mac until 5 Nov." while `until` (`importedAt + 30 days`) is still in the future; once that date has passed and the backup is still kept (data-model E8 conditions 3 or 4), "A copy of your tasks from before the update stays on this Mac." (no date; added after `/speckit-analyze`). When this sign-out deletes it, see the next row |
 | `signOutBackupRemoved` | Mac only, appended, last, when **this** sign-out will delete the backup (all four conditions of data-model E8 hold at confirm time): "The copy of your tasks from before the update will also be removed from this Mac." The irreversible deletion is never silent (review c2, G24, G39, G63) |
 | `outcomeKeptIssue` | see kit-commands §5: the account's outcome is kept and the full local outcome is shown, with "Copy outcome" and "Discard outcome"; after Discard, "Outcome discarded · Undo" for 5 s, announced politely (review c2, G32) |
 
 The age format of `oldest` is "N s" under a minute, "N min" under an hour, "N h" under a day, and "1 day" / "N days" otherwise ("oldest 3 days", X-02 "unreachable for days"). The age is measured from the sendable time (data-model E6), so the first sign-in with months-old local data does not read as days of failure.
 
-**Order of the sign-out sentences**: the base text (`signOutUnsent` or `signOutNothingUnsent`), then `signOutIssues`, then either `signOutBackup` or `signOutBackupRemoved` (never both). The iPhone uses the same catalogue for its sign-out confirmation (PR-07), so both devices name open issues the same way.
+**Order of the sign-out sentences**: the base text (`signOutUnsent` or `signOutNothingUnsent`), then `signOutIssues`, then `signOutReviewDrafts`, then either `signOutBackup` or `signOutBackupRemoved` (never both). The iPhone uses the same catalogue for its sign-out confirmation (PR-07), so both devices name open issues the same way.
 
 ## 4. Activity indicator (`SyncActivityIndicator`)
 
