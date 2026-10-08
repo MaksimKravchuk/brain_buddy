@@ -194,6 +194,14 @@ public actor SyncEngine: SyncService {
         } catch {
             throw Self.signInFailure(error)
         }
+        // The person cancelled while the reply was on its way (the Mac's X-03 Cancel): the session
+        // the server just opened is ended at once and nothing is linked (spec 021, FR-001, FR-005).
+        // The logout runs in a task of its own, which the cancellation does not reach (a request of
+        // the cancelled task would never leave); offline it waits as a pending logout.
+        if Task.isCancelled {
+            await Task { await self.abandonSession(on: url, restoring: previousToken) }.value
+            throw SignInFailure(message: Self.signInCancelledMessage)
+        }
         let linked = LinkedAccount(
             id: me.id, email: me.email, displayName: me.displayName, serverURL: url, linkedAt: now()
         )
@@ -540,12 +548,21 @@ public actor SyncEngine: SyncService {
             SignInFailure(message: "Check your email and password.", referenceID: error.referenceID)
         case .rateLimited:
             SignInFailure(message: "Too many attempts. Try again in a few minutes.", referenceID: error.referenceID)
-        case .network, .cancelled:
-            SignInFailure(message: "Can't reach the server. Check your connection.")
+        case .network:
+            // The id the request carried: online, a request with no answer is "Brain Buddy didn't
+            // answer" on the Mac, quoted with that id (spec 021, FR-015); offline the app shows none.
+            SignInFailure(message: networkFailureMessage, referenceID: error.referenceID)
+        case .cancelled:
+            SignInFailure(message: networkFailureMessage)
         default:
             SignInFailure(message: error.message, referenceID: error.referenceID)
         }
     }
+
+    /// A sign-in whose request got no answer (or never left).
+    public static let networkFailureMessage = "Can't reach the server. Check your connection."
+    /// A sign-in the person cancelled: its late reply was undone.
+    public static let signInCancelledMessage = "The sign-in was cancelled."
 }
 
 /// How one cycle ended.

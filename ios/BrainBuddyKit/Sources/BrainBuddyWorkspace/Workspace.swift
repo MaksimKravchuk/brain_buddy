@@ -589,8 +589,9 @@ public final class Workspace {
         }
     }
 
-    /// Waits until the connectivity updates sent so far reached the sync service.
-    func waitForNetworkUpdates() async {
+    /// Waits until the connectivity updates sent so far reached the sync service (tests, and the
+    /// Mac host's trigger tests, spec 021).
+    public func waitForNetworkUpdates() async {
         await networkUpdates?.value
     }
 }

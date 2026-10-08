@@ -325,6 +325,51 @@ struct SyncEngineSessionTests {
         #expect(harness.snapshot.task(titled: "Sent once the Keychain answers") != nil)
     }
 
+    // MARK: The Mac's sign-in sheet (X-03)
+
+    @Test("021-FR-001 021-FR-005 a sign-in reply that arrives after Cancel has its session ended at once, and nothing is linked")
+    func lateReplyAfterCancelIsUndone() async throws {
+        let harness = SyncHarness()
+        let device = HeldDevice(harness: harness) { $0.route == "POST /auth/login" }
+        device.transport.arm()
+        let engine = device.engine
+        let signIn = Task {
+            try await engine.signIn(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password)
+        }
+        await device.transport.gate.waitForArrival()
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1, "the server opened a session")
+
+        signIn.cancel()
+        await device.transport.gate.open()
+        let result = await signIn.result
+        #expect(throws: SignInFailure(message: "The sign-in was cancelled.")) { try result.get() }
+        await engine.waitUntilIdle()
+
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 0, "the late session is ended")
+        #expect(device.inner.requests.filter { $0.route == "POST /auth/logout" }.count == 1)
+        #expect(try device.tokens.token(for: FakeBrainBuddyServer.baseURL) == nil)
+        #expect(try await device.store.load() == nil, "nothing is linked")
+        #expect(await engine.status == .localOnly)
+    }
+
+    @Test("021-FR-001 021-FR-015 a sign-in that got no answer carries the reference id its request was sent with")
+    func noAnswerCarriesTheSentReference() async throws {
+        let harness = SyncHarness()
+        let device = await harness.device()
+        device.transport.inject(.timeout)
+        do {
+            _ = try await device.engine.signIn(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password)
+            Issue.record("Expected the sign-in to fail")
+        } catch {
+            #expect(error.message == "Can't reach the server. Check your connection.")
+            let sent = try #require(device.transport.requests.last?.header("X-Correlation-ID"))
+            #expect(error.referenceID == sent)
+        }
+        #expect(try await device.store.load() == nil)
+    }
+
     // MARK: Signing out
 
     @Test("021-FR-005 021-FR-018 sign-out records the logout first, removes the data, then the token, then logs out")

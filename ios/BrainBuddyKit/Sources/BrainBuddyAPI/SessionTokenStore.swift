@@ -229,8 +229,11 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             default:
                 #if os(macOS)
                     // The item is there, but this build may not read it without asking (a rebuilt
-                    // app is a new client of it): only the person's next sign-in can replace it.
-                    if status == errSecInteractionNotAllowed { throw TokenStoreError.accessDenied }
+                    // app is a new client of it): only the person's next sign-in can replace it. A
+                    // refused access reads as either status, as the interactive write below treats them.
+                    if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
+                        throw TokenStoreError.accessDenied
+                    }
                 #endif
                 throw KeychainError(status: status)
             }
