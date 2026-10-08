@@ -1,0 +1,9 @@
+# Keep routine workers cheap; AGENTS.md selects stronger models for decisions
+# and independent review. The parent session keeps the user's selected model.
+[agents]
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "medium"
+
+[features.multi_agent_v2]
+enabled = true
+expose_spawn_agent_model_overrides = true
