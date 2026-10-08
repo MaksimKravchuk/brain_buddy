@@ -100,12 +100,13 @@ actor FakeSyncService: SyncService {
 
     private var duringSignOut: (@Sendable () async -> Void)?
 
-    func signOut() async {
+    func signOut(removingLocalDataWith remove: @Sendable () async throws -> Void) async throws {
         calls.append(.signOut)
         if let work = duringSignOut {
             duringSignOut = nil
             await work()
         }
+        try await remove()
     }
 
     func request(_ trigger: SyncTrigger) async {

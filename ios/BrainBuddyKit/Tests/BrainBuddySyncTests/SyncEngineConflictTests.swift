@@ -193,7 +193,7 @@ struct SyncEngineConflictTests {
         #expect(try CanonicalState(await b.current(), children: true) == CanonicalState(harness.snapshot, children: true))
     }
 
-    @Test("A capture in a project archived elsewhere is resent without the project and keeps everything else")
+    @Test("021-FR-011 A capture in a project archived elsewhere is resent without the project, keeps everything else and says so")
     func resendsCaptureWithoutArchivedProject() async throws {
         let harness = SyncHarness()
         let a = await harness.device()
@@ -221,7 +221,10 @@ struct SyncEngineConflictTests {
         #expect(server.priority == .high)
         #expect(server.subtasks.map(\.title) == ["Buy bulbs"])
         let document = try await b.document()
-        #expect(document.issues.isEmpty)
+        #expect(
+            document.issues.map(\.message)
+                == ["Project “Garden” was archived on another device, so the task was added without a project."])
+        #expect(document.issues.first?.referenceID?.isEmpty == false)
         #expect(document.outbox.isEmpty)
         let onB = try #require(try await b.current().tasks["z"])
         #expect(onB.projectID == nil)

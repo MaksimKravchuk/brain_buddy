@@ -3,10 +3,11 @@
 
 The classifier is the mechanical Ship/Show/Ask gate (ADR-0008): a PR-less
 trunk candidate must fail closed before any push when its changed paths touch
-ASK-class surfaces (CI/workflows, delivery scripts, Fly/Docker/deploy config,
-auth/session/user/invite code, migrations/destructive persistence, or
-secrets/permissions surfaces). Ambiguity fails toward ASK; documentation-only
-paths are SHIP.
+ASK-class surfaces. ADR-0030 narrows ASK, while there are no real users, to
+persisted data and migrations, secrets, GDPR account deletion/export, the
+Allure gate rules, every GitHub workflow (they can read repository
+secrets) and the landing machinery itself. Ambiguity fails toward
+ASK; documentation-only paths are SHIP.
 """
 
 from __future__ import annotations
@@ -28,71 +29,63 @@ ASK = _MODULE.ASK
 SHIP = _MODULE.SHIP
 
 ASK_PATHS = (
-    # CI / workflow surface
-    ".github/workflows/ci.yml",
-    ".github/workflows/deploy-fly-production.yml",
-    ".github/actions/anything/action.yml",
-    # Delivery / CI scripts (the whole scripts/ tree is CI-executed tooling)
-    "scripts/submit_to_trunk.sh",
-    "scripts/production_smoke.sh",
-    "scripts/classify_path_risk.py",
-    "scripts/new_helper.py",
-    "Makefile",
-    # Fly / Docker / deploy configuration
-    "fly.backend.toml",
-    "fly.frontend.toml",
-    "backend/Dockerfile",
-    "frontend/Dockerfile",
-    "docker-compose.yml",
-    "compose.yaml",
-    ".dockerignore",
-    "deploy/nginx.conf",
-    ".env.example",
-    # Auth / session / user / invite code
-    "backend/app/api/auth.py",
-    "backend/app/schemas/auth.py",
-    "backend/app/services/session_service.py",
-    "backend/app/repositories/user_repository.py",
-    "backend/tests/test_auth.py",
-    "frontend/src/components/LoginForm.tsx",
-    "frontend/src/api/useSignup.ts",
-    # API modules that wire session auth and per-owner privacy enforcement:
-    # their names carry no auth token, so they are explicit ASK paths.
-    "backend/app/api/dependencies.py",
-    "backend/app/api/middleware.py",
-    "backend/app/api/routes.py",
-    "backend/app/api/tasks.py",
     # Migrations / destructive persistence
     "backend/migrations/0001_init.sql",
     "backend/alembic/env.py",
     "backend/data/tree_1.json",
-    # Secrets / permissions surfaces
+    # Secrets
+    ".env.example",
+    ".env",
     "backend/app/core/secrets.py",
-    "infra/permissions/policy.json",
+    "deploy/credentials.json",
+    # GDPR account deletion/export
+    "backend/app/services/account_service.py",
     # 008-FR-007. The aggregate Allure quality gate's rules: this file decides what
     # "passing" means for a whole CI run, yet its name carries no ASK token
-    # and it sits under no ASK prefix, so it classified SHIP.
+    # and it sits under no ASK prefix.
     "allurerc.mjs",
+    # The landing machinery that enforces this classification.
+    "scripts/classify_path_risk.py",
+    "scripts/check_gate_integrity.py",
+    ".specify/gate-integrity.json",
+    # Any workflow can read repository secrets.
+    ".github/workflows/deploy-fly-production.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/claude.yml",
+    ".github/actions/anything/action.yml",
 )
 
 SHIP_PATHS = (
     "backend/app/services/tree_service.py",
     "backend/app/modules/tasks/service.py",
     "backend/tests/test_tree_service.py",
-    # Sibling API modules stay SHIP: the privacy-enforcement ASK list is
-    # exact paths, not the whole backend/app/api/ tree.
-    "backend/app/api/errors.py",
-    "backend/app/api/contracts.py",
     "frontend/src/components/TreeCanvas.tsx",
     "frontend/src/stores/treeStore.ts",
     "feature.txt",
+    # ADR-0030: CI, delivery scripts, Docker/Fly configuration and auth code
+    # are SHIP while there are no real users; CI and review still guard them.
+    "scripts/submit_to_trunk.sh",
+    "scripts/production_smoke.sh",
+    "scripts/new_helper.py",
+    "Makefile",
+    "fly.backend.toml",
+    "backend/Dockerfile",
+    "compose.yaml",
+    "deploy/nginx.conf",
+    "backend/app/api/auth.py",
+    "backend/app/api/routes.py",
+    "backend/app/api/middleware.py",
+    "backend/app/services/session_service.py",
+    "backend/app/repositories/user_repository.py",
+    "frontend/src/components/LoginForm.tsx",
+    "infra/permissions/policy.json",
     # Documentation is SHIP even when it talks about risky topics: it cannot
     # change runtime or CI behavior.
     "README.md",
     "docs/auth.md",
+    "docs/secrets.md",
     "docs/decisions/0008-verified-trunk-serial-landing.md",
     "specs/004-verified-trunk-delivery/spec.md",
-    "docs/user-guide.md",
 )
 
 
@@ -135,36 +128,34 @@ class ClassifyPathTest(unittest.TestCase):
                 classification, reason = classify_path(path)
                 self.assertEqual(classification, SHIP, f"{path}: {reason}")
 
-    def test_api_privacy_enforcement_paths_are_exact_matches(self) -> None:
-        """The four wired auth/per-owner enforcement modules are ASK by exact
-        path; lookalike names elsewhere must not be swept in."""
+    def test_landing_gate_paths_are_exact_matches(self) -> None:
+        """The gate machinery is ASK by exact path so a candidate cannot widen
+        SHIP for itself; sibling scripts and workflows must not be swept in."""
 
         for path in (
-            "backend/app/api/dependencies.py",
-            "backend/app/api/middleware.py",
-            "backend/app/api/routes.py",
-            "backend/app/api/tasks.py",
-            "./backend/app/api/middleware.py",
+            "scripts/classify_path_risk.py",
+            "./scripts/check_gate_integrity.py",
+            ".specify/gate-integrity.json",
         ):
             with self.subTest(path=path):
                 classification, reason = classify_path(path)
                 self.assertEqual(classification, ASK, f"{path}: {reason}")
-                self.assertIn("privacy", reason)
+                self.assertIn("landing gate", reason)
         for path in (
-            "backend/app/api/tasks_helpers.py",
-            "frontend/src/api/routes.ts",
-            "docs/api/routes-py.md",
+            "scripts/test_classify_path_risk.py",
+            "scripts/check_gate_integrity_notes.py",
+            "backend/app/services/account_service_helpers.py",
         ):
             with self.subTest(path=path):
                 classification, _ = classify_path(path)
                 self.assertEqual(classification, SHIP)
 
     def test_token_matching_is_exact_not_substring(self) -> None:
-        """'useTreeStore' must not match 'user', 'usership' must not match, etc."""
+        """'secretary' must not match 'secret', 'immigration' not 'migration'."""
 
         for path in (
-            "frontend/src/stores/useTreeStore.ts",
-            "backend/app/services/authoring_notes.py",
+            "frontend/src/components/Secretary.tsx",
+            "backend/app/services/immigration_notes.py",
             "frontend/src/components/Tokenizer.tsx",
         ):
             with self.subTest(path=path):
@@ -184,9 +175,9 @@ class ClassifyMainTest(unittest.TestCase):
         self.assertNotIn("ASK\t", result.stdout)
 
     def test_any_ask_input_exits_nonzero_and_names_the_paths(self) -> None:
-        result = _run(["docs/x.md", ".github/workflows/ci.yml"])
+        result = _run(["docs/x.md", "backend/migrations/0002.sql"])
         self.assertEqual(result.returncode, 1)
-        self.assertIn(".github/workflows/ci.yml", result.stdout + result.stderr)
+        self.assertIn("backend/migrations/0002.sql", result.stdout + result.stderr)
         self.assertIn("reviewed PR", result.stderr)
 
     def test_empty_input_exits_zero(self) -> None:
@@ -221,19 +212,19 @@ class ClassifyNullModeTest(unittest.TestCase):
         result = _run_null([b"backend/app/services/tree_service.py", b"docs/x.md"])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_non_ascii_workflow_path_is_ask(self) -> None:
-        result = _run_null([".github/workflows/évil.yml".encode(), b"docs/x.md"])
+    def test_non_ascii_data_path_is_ask(self) -> None:
+        result = _run_null(["backend/data/évil.json".encode(), b"docs/x.md"])
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"ASK", result.stdout)
-        self.assertIn("évil.yml".encode(), result.stdout)
+        self.assertIn("évil.json".encode(), result.stdout)
 
     def test_rename_from_ask_path_lists_delete_and_add(self) -> None:
         """With --no-renames a rename appears as delete+add; the deleted ASK
         path must still fail the gate even when the new name is harmless."""
 
-        result = _run_null([b".github/workflows/deploy.yml", b"harmless.txt"])
+        result = _run_null([b"backend/data/tree_1.json", b"harmless.txt"])
         self.assertEqual(result.returncode, 1)
-        self.assertIn(b"ASK\t.github/workflows/deploy.yml", result.stdout)
+        self.assertIn(b"ASK\tbackend/data/tree_1.json", result.stdout)
         self.assertIn(b"SHIP\tharmless.txt", result.stdout)
 
     def test_empty_and_trailing_nul_input_exits_zero(self) -> None:
@@ -243,7 +234,7 @@ class ClassifyNullModeTest(unittest.TestCase):
     def test_undecodable_bytes_still_classify_by_prefix(self) -> None:
         """Invalid UTF-8 in an ASK-prefixed path must not crash or slip by."""
 
-        result = _run_null([b".github/workflows/\xff\xfe.yml"])
+        result = _run_null([b"backend/data/\xff\xfe.json"])
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"ASK", result.stdout)
 

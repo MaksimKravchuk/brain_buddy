@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Deterministic Ship/Show/Ask path risk classifier (ADR-0008).
+"""Deterministic Ship/Show/Ask path risk classifier (ADR-0008, ADR-0030).
 
 Reads repository-relative paths on stdin, prints one
 ``<CLASS>\\t<path>\\t<reason>`` line per path, and exits 1 when any path is
-ASK class. ASK-class surfaces — CI/workflow definitions, delivery/CI scripts,
-Fly/Docker/deploy configuration, auth/session/user/invite code,
-migrations and destructive persistence paths, and secrets/permissions
-surfaces — must land through a reviewed PR or an explicitly authorized manual
-high-risk landing, never automatic trunk promotion.
+ASK class. ASK-class surfaces must land through a reviewed PR or an explicitly
+authorized manual high-risk landing, never automatic trunk promotion.
+
+ADR-0030 narrows ASK, while the product has no real users, to what cannot be
+undone after a mistake: persisted data and migrations, secrets (including
+every GitHub workflow, since any of them can read repository secrets), GDPR
+account deletion/export, the Allure quality-gate rules, and the landing
+machinery that enforces this classification (this file and the
+gate-integrity checker and its manifest). Delivery scripts, Docker/Fly
+configuration and auth/session code are SHIP: CI, review and the verified
+deploy smoke still guard them.
 
 Two input modes:
 
@@ -25,18 +31,15 @@ Two input modes:
 
 Classification rules are ordered and fail closed toward ASK:
 
-1. ASK directory prefixes and CI entry points (``.github/``, ``scripts/``,
-   ``deploy/``, ``backend/data/``, ``Makefile``).
-2. ASK exact paths: the API modules that wire session auth and per-owner
-   privacy enforcement (``backend/app/api/dependencies.py``,
-   ``middleware.py``, ``routes.py``, ``tasks.py``) — their names carry no
-   auth token, so they are listed explicitly.
-3. ASK filenames (``fly*.toml``, ``Dockerfile*``, ``docker-compose*``,
-   ``compose.y*ml``, ``.dockerignore``, ``.env*``).
+1. ASK directory prefixes ``backend/data/`` (persisted data) and
+   ``.github/`` (workflows can read repository secrets).
+2. ASK exact paths: GDPR account deletion/export, the Allure quality-gate
+   rules, and the landing/gate machinery.
+3. ASK filenames: ``.env`` and ``.env.*`` (environment/secrets templates).
 4. Documentation (``docs/``, ``specs/``, ``*.md``) is SHIP: it cannot change
    runtime or CI behavior.
 5. Whole-token match (path segments split on ``.``, ``_``, ``-``) against the
-   auth/session/user/invite, secrets/permissions, and migration token sets.
+   secrets and migration token sets.
 6. Everything else is SHIP.
 
 Used by ``scripts/submit_to_trunk.sh`` (non-skippable preflight) and by the
@@ -56,60 +59,36 @@ ASK = "ASK"
 SHIP = "SHIP"
 
 ASK_PREFIXES: tuple[tuple[str, str], ...] = (
-    (".github/", "CI/workflow surface"),
-    ("scripts/", "delivery/CI script surface"),
-    ("deploy/", "deploy configuration surface"),
     ("backend/data/", "persisted data surface"),
+    # Any workflow can read repository secrets, and which ones a new or edited
+    # workflow reaches cannot be decided from its path.
+    (".github/", "CI/workflow surface (repository secrets)"),
 )
 
-ASK_TOP_LEVEL_FILES: frozenset[str] = frozenset({"Makefile"})
-
-# Auth surfaces whose names carry no risk token: API modules that wire session
-# auth and per-owner privacy enforcement. Exact paths only: sibling paths stay
-# SHIP.
+# Surfaces whose names carry no risk token. Exact paths only: sibling paths
+# stay SHIP.
 ASK_EXACT_PATHS: dict[str, str] = {
-    "backend/app/api/dependencies.py": (
-        "auth/per-owner privacy enforcement surface (session dependencies)"
-    ),
-    "backend/app/api/middleware.py": (
-        "auth/per-owner privacy enforcement surface (request middleware)"
-    ),
-    "backend/app/api/routes.py": (
-        "auth/per-owner privacy enforcement surface (owner-filtered routes)"
-    ),
-    "backend/app/api/tasks.py": (
-        "auth/per-owner privacy enforcement surface (owner-filtered task API)"
+    "backend/app/services/account_service.py": (
+        "GDPR account deletion/export surface"
     ),
     # Decides what "passing" means for a whole CI run, yet its name carries no
-    # ASK token and it sits under no ASK prefix, so it classified SHIP: a
-    # raised failure budget could have landed through automatic promotion.
+    # ASK token: a raised failure budget must not land through automatic
+    # promotion.
     "allurerc.mjs": "quality-gate configuration surface (Allure gate rules)",
+    # The machinery that enforces this classification. If any of these could
+    # land automatically, a candidate could widen SHIP for itself and every
+    # change after it.
+    "scripts/classify_path_risk.py": "landing gate surface (risk classifier)",
+    "scripts/check_gate_integrity.py": "landing gate surface (gate integrity)",
+    ".specify/gate-integrity.json": "landing gate surface (gate manifest)",
 }
 
-AUTH_TOKENS: frozenset[str] = frozenset(
-    {
-        "auth",
-        "session",
-        "sessions",
-        "user",
-        "users",
-        "invite",
-        "invites",
-        "login",
-        "logout",
-        "signup",
-        "password",
-        "passwords",
-    }
-)
 SECRET_TOKENS: frozenset[str] = frozenset(
     {
         "secret",
         "secrets",
         "credential",
         "credentials",
-        "permission",
-        "permissions",
     }
 )
 MIGRATION_TOKENS: frozenset[str] = frozenset(
@@ -132,17 +111,6 @@ def _tokens(path: str) -> frozenset[str]:
 
 def _is_ask_filename(filename: str) -> str | None:
     lowered = filename.lower()
-    if lowered.startswith("fly.") and lowered.endswith(".toml"):
-        return "Fly deploy configuration"
-    if lowered == "dockerfile" or lowered.startswith("dockerfile."):
-        return "Docker build configuration"
-    if lowered.startswith("docker-compose") or lowered in (
-        "compose.yml",
-        "compose.yaml",
-    ):
-        return "Docker Compose configuration"
-    if lowered == ".dockerignore":
-        return "Docker build configuration"
     if lowered == ".env" or lowered.startswith(".env."):
         return "environment/secrets template"
     return None
@@ -161,8 +129,6 @@ def classify_path(path: str) -> tuple[str, str]:
     for prefix, reason in ASK_PREFIXES:
         if normalized.startswith(prefix):
             return ASK, reason
-    if normalized in ASK_TOP_LEVEL_FILES:
-        return ASK, "CI entry point"
     exact_reason = ASK_EXACT_PATHS.get(normalized)
     if exact_reason is not None:
         return ASK, exact_reason
@@ -181,8 +147,7 @@ def classify_path(path: str) -> tuple[str, str]:
 
     tokens = _tokens(normalized)
     for token_set, reason in (
-        (AUTH_TOKENS, "auth/session/user/invite surface"),
-        (SECRET_TOKENS, "secrets/permissions surface"),
+        (SECRET_TOKENS, "secrets surface"),
         (MIGRATION_TOKENS, "migration/destructive persistence surface"),
     ):
         matched = sorted(tokens & token_set)

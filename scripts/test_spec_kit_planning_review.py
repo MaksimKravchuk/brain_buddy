@@ -1705,7 +1705,7 @@ class SummarizePreflightBoundaryTests(unittest.TestCase):
                 encoding="utf-8",
             )
             (feature_dir / "plan.md").write_text(
-                "# Plan\n\nChange scripts/spec_kit_planning_review.py.\n",
+                "# Plan\n\nChange scripts/classify_path_risk.py.\n",
                 encoding="utf-8",
             )
             (feature_dir / "checklists" / "requirements.md").write_text(
@@ -1835,7 +1835,7 @@ class DeterministicPreflightTests(unittest.TestCase):
             self.assertTrue(any("placeholder" in item for item in defects))
 
     def test_ask_class_surface_derives_high_risk(self) -> None:
-        spec = self.clean_spec() + "Touches backend/app/api/dependencies.py for auth.\n"
+        spec = self.clean_spec() + "Touches backend/app/services/account_service.py for deletion.\n"
         with tempfile.TemporaryDirectory() as tmp:
             feature_dir = self.write_feature(tmp, spec=spec)
             self.assertEqual(self.module.derive_risk(feature_dir), "high")

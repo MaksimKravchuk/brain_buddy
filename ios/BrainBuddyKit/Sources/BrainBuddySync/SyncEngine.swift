@@ -31,6 +31,8 @@ public actor SyncEngine: SyncService {
     let transport: any HTTPTransport
     let now: @Sendable () -> Date
     let configuration: SyncConfiguration
+    /// Sent as `X-Client`; also tells the account-switch refusal which device to name.
+    let identity: ClientIdentity
 
     var eventHandler: (@Sendable (SyncEvent) async -> Void)?
     var account: LinkedAccount?
@@ -43,6 +45,10 @@ public actor SyncEngine: SyncService {
     /// Bumped by `start`, `signIn` and `signOut`; work from an older epoch stops.
     var epoch = 0
     var lastSyncedAt: Date?
+    /// `SyncMetadata.failingSince` as last written, so the retry can land on the 60 s mark.
+    var failingSince: Date?
+    /// When the cycle whose outcome is being reported began (`lastFailedAttemptAt`).
+    var cycleStartedAt = Date()
 
     // Scheduling.
     var runningCycle: Task<SyncStatus, Never>?
@@ -79,6 +85,9 @@ public actor SyncEngine: SyncService {
     let nativeSignInGate = NativeSignInGate()
     var nativeCommitInProgress = false
     var nativeCommitWaiters: [CheckedContinuation<Void, Never>] = []
+    /// A sign-out is between recording its pending logout and finishing: nothing runs, and the
+    /// logout waits in the token store until the removal has succeeded.
+    var signingOut = false
     /// Sending logouts that waited for the network.
     var logoutWork: Task<Void, Never>?
     /// False once the token store had no pending logouts (saves Keychain reads).
@@ -89,23 +98,29 @@ public actor SyncEngine: SyncService {
     ///   - tokenStore: where the session cookie value lives (Keychain in the app).
     ///   - transport: HTTP; tests pass a fake server.
     ///   - now: the clock, injectable for tests.
+    ///   - identity: the client the server logs. Its name goes out as `X-Client`; the version sent
+    ///     is `SyncConfiguration.clientVersion`, which defaults to the app's own.
     public init(
         store: any DocumentStore, tokenStore: any SessionTokenStore,
-        transport: any HTTPTransport = URLSessionTransport(), now: @escaping @Sendable () -> Date = { Date() }
+        transport: any HTTPTransport = URLSessionTransport(), now: @escaping @Sendable () -> Date = { Date() },
+        identity: ClientIdentity = .iOS
     ) {
-        self.init(store: store, tokenStore: tokenStore, transport: transport, now: now, configuration: SyncConfiguration())
+        self.init(
+            store: store, tokenStore: tokenStore, transport: transport, now: now, configuration: SyncConfiguration(),
+            identity: identity)
     }
 
     /// The same, with explicit timers and tunables (tests pass a `ManualSyncScheduler`).
     public init(
         store: any DocumentStore, tokenStore: any SessionTokenStore, transport: any HTTPTransport,
-        now: @escaping @Sendable () -> Date, configuration: SyncConfiguration
+        now: @escaping @Sendable () -> Date, configuration: SyncConfiguration, identity: ClientIdentity = .iOS
     ) {
         self.store = store
         self.tokenStore = tokenStore
         self.transport = transport
         self.now = now
         self.configuration = configuration
+        self.identity = identity
     }
 
     // MARK: - SyncService
@@ -125,7 +140,9 @@ public actor SyncEngine: SyncService {
         pullRequested = true
         consecutiveFailures = 0
         consecutiveServerFailures = 0
-        lastSyncedAt = (try? await store.load())?.lastSyncedAt
+        let stored = try? await store.load()
+        lastSyncedAt = stored?.lastSyncedAt
+        failingSince = stored?.sync.failingSince
         await setStatus(networkAvailable ? .idle(lastSyncedAt: lastSyncedAt) : .offline(lastSyncedAt: lastSyncedAt))
         await request(.launch)
     }
@@ -198,10 +215,7 @@ public actor SyncEngine: SyncService {
         } catch {
             await abandonSession(on: url, restoring: previousToken)
             if error is AccountSwitchRefused {
-                throw SignInFailure(
-                    message:
-                        "Sign out first to use another account. Changes from the other account are still waiting on this iPhone."
-                )
+                throw SignInFailure(message: SyncCopy.accountSwitchRefused(device: device).sentence)
             }
             throw SignInFailure(message: "Brain Buddy couldn't save your sign-in on this device.")
         }
@@ -214,32 +228,13 @@ public actor SyncEngine: SyncService {
         consecutiveServerFailures = 0
         rejectionStreak = nil
         lastSyncedAt = document.lastSyncedAt
+        failingSince = document.sync.failingSince
         await emit(.documentChanged(document))
         if let previous = replaced.value {
             await retireSessions(of: previous, replacedOn: url, previousToken: previousToken)
         }
         if !networkAvailable { await setStatus(.offline(lastSyncedAt: lastSyncedAt)) }
         return SignInResult(account: linked, deletionCancelled: me.deletionCancelled)
-    }
-
-    public func signOut() async {
-        await waitForNativeCommit()
-        invalidateNativeSignIn()
-        let signedOut = account
-        await stopWork()
-        epoch += 1
-        account = nil
-        needsSignIn = false
-        pullFirst = false
-        if let signedOut {
-            // Signed out here at once; the server is told now, or when the
-            // network is back.
-            let url = signedOut.serverURL
-            let token = storedToken(for: url)
-            try? tokenStore.removeToken(for: url)
-            if let token { await endSession(token: token, on: url) }
-        }
-        await setStatus(.localOnly)
     }
 
     public func request(_ trigger: SyncTrigger) async {
@@ -257,6 +252,14 @@ public actor SyncEngine: SyncService {
         case .launch, .foreground, .networkRestored, .manual, .backgroundRefresh:
             pullRequested = true
             kick()
+        case .periodic:
+            // Never shortens a backoff, and never asks for a pull: the cycle pulls when the last one is
+            // old enough. A tick with nothing to do causes no cycle, no status and no document write.
+            guard canRun, retryWork == nil else { return }
+            let document = try? await loadDocument()
+            let pullIsDue = document?.sync.lastPullAt.map { now().timeIntervalSince($0) >= configuration.pullInterval } ?? true
+            let changesWait = !(document?.outbox.isEmpty ?? true) && debounceWork == nil
+            if pullIsDue || changesWait { kick() }
         }
     }
 
@@ -323,9 +326,12 @@ public actor SyncEngine: SyncService {
         }
     }
 
+    /// The device the copy that names one (the account-switch refusal) is about.
+    var device: DeviceKind { identity.name == ClientIdentity.macOS(version: "").name ? .mac : .iPhone }
+
     // MARK: - Scheduling
 
-    var canRun: Bool { account != nil && networkAvailable && !needsSignIn && signInsInProgress == 0 }
+    var canRun: Bool { account != nil && networkAvailable && !needsSignIn && signInsInProgress == 0 && !signingOut }
 
     func kick() {
         guard canRun else { return }
@@ -398,7 +404,13 @@ public actor SyncEngine: SyncService {
 
     private func scheduleRetry() {
         retryWork?.cancel()
-        let delay = configuration.retryDelay(afterFailures: max(1, consecutiveFailures))
+        var delay = configuration.retryDelay(afterFailures: max(1, consecutiveFailures))
+        // One attempt starts exactly when the failures have lasted `failureSurfacesAfter`: the line
+        // says "Couldn't sync" only if that one fails too, and a server back by then shows nothing.
+        if let failingSince {
+            let untilMark = failingSince.addingTimeInterval(SyncTiming.failureSurfacesAfter).timeIntervalSince(now())
+            if untilMark > 0, untilMark < delay { delay = untilMark }
+        }
         retryWork = configuration.scheduler.schedule(after: .seconds(delay)) { [weak self] in
             await self?.retryFired()
         }
@@ -429,13 +441,22 @@ public actor SyncEngine: SyncService {
         case .synced:
             consecutiveFailures = 0
             consecutiveServerFailures = 0
+            await clearFailingClock()
             await setStatus(.idle(lastSyncedAt: lastSyncedAt))
-        case .offline:
+        case .offline(let requestID):
             consecutiveFailures += 1
+            pullRequested = true  // the pull this cycle did not finish is still wanted
+            // A request that got no answer while the path monitor reports a network is the server's
+            // failure; with the network gone it is only "offline", which keeps a running clock.
+            if networkAvailable, let requestID { await recordFailingClock(referenceID: requestID) }
             await setStatus(.offline(lastSyncedAt: lastSyncedAt))
         case .serverFailure(let message, let referenceID):
             consecutiveFailures += 1
             consecutiveServerFailures += 1
+            pullRequested = true
+            // A failure that never reached the server (the store, the Keychain) has no request id, and
+            // is not what the 60 s clock is about.
+            if let referenceID { await recordFailingClock(referenceID: referenceID) }
             if consecutiveServerFailures >= configuration.failingThreshold {
                 await setStatus(.failing(message: message, referenceID: referenceID, lastSyncedAt: lastSyncedAt))
                 await recordFailure(message)
@@ -461,6 +482,35 @@ public actor SyncEngine: SyncService {
         await eventHandler?(event)
     }
 
+    /// A server-blocked cycle: starts the failing run if there is none, and notes this attempt.
+    private func recordFailingClock(referenceID: String) async {
+        guard let account else { return }
+        let accountID = account.id
+        let started = cycleStartedAt
+        guard let document = try? await store.update({ doc in
+            guard doc.account?.id == accountID else { throw SyncAborted() }
+            doc.sync.failingSince = doc.sync.failingSince ?? started
+            doc.sync.lastFailedAttemptAt = started
+            doc.sync.lastFailureReferenceID = referenceID
+        }) else { return }
+        failingSince = document.sync.failingSince
+        await emit(.documentChanged(document))
+    }
+
+    /// A completed cycle ends the run.
+    private func clearFailingClock() async {
+        guard failingSince != nil, let account else { return }
+        failingSince = nil
+        let accountID = account.id
+        guard let document = try? await store.update({ doc in
+            guard doc.account?.id == accountID else { throw SyncAborted() }
+            doc.sync.failingSince = nil
+            doc.sync.lastFailedAttemptAt = nil
+            doc.sync.lastFailureReferenceID = nil
+        }) else { return }
+        await emit(.documentChanged(document))
+    }
+
     /// Keeps the last failure in the document's sync metadata.
     private func recordFailure(_ message: String) async {
         guard let account else { return }
@@ -477,7 +527,8 @@ public actor SyncEngine: SyncService {
     func client(for url: URL) -> BrainBuddyAPIClient {
         if let cachedClient, cachedClient.url == url { return cachedClient.client }
         let client = BrainBuddyAPIClient(
-            baseURL: url, transport: transport, tokenStore: tokenStore, clientVersion: configuration.clientVersion
+            baseURL: url, transport: transport, tokenStore: tokenStore, clientVersion: configuration.clientVersion,
+            identity: identity
         )
         cachedClient = (url, client)
         return client
@@ -500,7 +551,8 @@ public actor SyncEngine: SyncService {
 /// How one cycle ended.
 enum CycleOutcome: Sendable {
     case synced
-    case offline
+    /// No answer. `requestID` is the id the failed request carried; nil when it was only cancelled.
+    case offline(requestID: String?)
     case serverFailure(message: String, referenceID: String?)
     case unauthorized
     case aborted

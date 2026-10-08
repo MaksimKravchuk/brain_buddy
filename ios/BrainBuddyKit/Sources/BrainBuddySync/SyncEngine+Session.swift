@@ -7,6 +7,54 @@ import Synchronization
 /// network is back), undoing a login the device won't link, and forgetting
 /// sessions no account on the device owns.
 extension SyncEngine {
+    public func signOut(removingLocalDataWith remove: @Sendable () async throws -> Void) async throws {
+        await waitForNativeCommit()
+        invalidateNativeSignIn()
+        guard let signedOut = account else { return try await remove() }
+        signingOut = true
+        await stopWork()
+        // Recorded first and kept in the token store, so a crash after the removal still ends the
+        // server session at the next launch. A session that can't be read or recorded removes
+        // nothing: the device would say "signed out" while the session stays valid on the server.
+        let url = signedOut.serverURL
+        let logout: PendingLogout?
+        do {
+            logout = try tokenStore.token(for: url).map { PendingLogout(serverURL: url, token: $0, signedOutAt: now()) }
+            if let logout {
+                try tokenStore.addPendingLogout(logout)
+                mayHavePendingLogouts = true
+            }
+        } catch {
+            await resumeAfterFailedSignOut()
+            throw error
+        }
+        do {
+            try await remove()
+        } catch {
+            if let logout { try? tokenStore.removePendingLogout(logout) }
+            await resumeAfterFailedSignOut()
+            throw error
+        }
+        epoch += 1
+        account = nil
+        needsSignIn = false
+        pullFirst = false
+        failingSince = nil
+        try? tokenStore.removeToken(for: url)
+        signingOut = false
+        // Signed out here at once; the server is told now, or when the network is back.
+        if let logout, networkAvailable, await send(logout) == .done { try? tokenStore.removePendingLogout(logout) }
+        await setStatus(.localOnly)
+    }
+
+    /// A sign-out that removed nothing: still signed in, so syncing picks up where it stopped.
+    private func resumeAfterFailedSignOut() async {
+        signingOut = false
+        if status == .syncing { await setStatus(.idle(lastSyncedAt: lastSyncedAt)) }
+        pullRequested = true
+        kick()
+    }
+
     public func discardStaleSessions(loggingOut previous: LinkedAccount?) async {
         guard account == nil, signInsInProgress == 0 else { return }
         if let previous, let token = storedToken(for: previous.serverURL) {
@@ -70,7 +118,8 @@ extension SyncEngine {
     /// Sends the logouts that waited for the network, in the background
     /// (`waitUntilIdle()` waits for them).
     func retryPendingLogouts() {
-        guard networkAvailable, mayHavePendingLogouts, logoutWork == nil else { return }
+        // A sign-out in progress has recorded its logout but not yet removed the data it protects.
+        guard networkAvailable, mayHavePendingLogouts, logoutWork == nil, !signingOut else { return }
         let pending: [PendingLogout]
         do {
             pending = try tokenStore.pendingLogouts()
@@ -105,7 +154,7 @@ extension SyncEngine {
         let client = BrainBuddyAPIClient(
             baseURL: logout.serverURL, transport: transport,
             tokenStore: InMemorySessionTokenStore(tokens: [logout.serverURL: logout.token]),
-            clientVersion: configuration.clientVersion
+            clientVersion: configuration.clientVersion, identity: identity
         )
         do throws(APIError) {
             try await client.logout()

@@ -168,9 +168,25 @@ struct SessionCookieTests {
         #expect(throws: APIError.self) { try client.hasStoredSession() }
     }
 
-    @Test("A session that can't be saved after login is reported")
+    @Test("021-FR-005 021-FR-017 a session this build may not read is an ended session, and nothing is sent")
+    func deniedStoreIsAnEndedSession() async throws {
+        let transport = ScriptedTransport()
+        let client = Fixture.client(transport, store: DeniedTokenStore())
+
+        let error = try #require(await expectAPIError { _ = try await client.listTasks() })
+
+        #expect(error.kind == .unauthorized, "only a sign-in the person starts can replace the item")
+        #expect(!error.requestMayHaveBeenSent)
+        #expect(!error.isUncertainOutcome)
+        #expect(transport.requests.isEmpty)
+    }
+
+    @Test("021-FR-005 021-FR-015 a session that can't be saved after login is ended at once and reported with a reference id")
     func unwritableStore() async throws {
-        let transport = ScriptedTransport([Fixture.json(200, Fixture.me, headers: ["set-cookie": Fixture.loginSetCookie])])
+        let transport = ScriptedTransport([
+            Fixture.json(200, Fixture.me, headers: ["set-cookie": Fixture.loginSetCookie]),
+            Fixture.noContent(headers: ["set-cookie": Fixture.logoutSetCookie]),
+        ])
         let client = Fixture.client(transport, store: ReadOnlyTokenStore())
 
         let error = try #require(await expectAPIError { _ = try await client.login(email: "a@b.c", password: "pw") })
@@ -179,6 +195,10 @@ struct SessionCookieTests {
             Issue.record("Expected .tokenStorage, got \(error.kind)")
             return
         }
+        #expect(error.message == "Brain Buddy couldn't save your sign-in on this device. Try again.")
+        #expect(error.referenceID == Fixture.correlationHeader, "the id of the login request")
+        #expect(transport.requests.map { "\($0.method.rawValue) \($0.url.path)" } == ["POST /api/auth/login", "POST /api/auth/logout"])
+        #expect(transport.requests.last?.header("Cookie") == "brainbuddy_session=\(Fixture.token)", "it carries the issued token")
     }
 }
 

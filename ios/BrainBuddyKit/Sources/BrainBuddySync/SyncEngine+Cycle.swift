@@ -13,6 +13,7 @@ extension SyncEngine {
     /// retry; only the network and a 401 stop the cycle at once.
     func runCycle(epoch cycleEpoch: Int) async -> CycleOutcome {
         guard let account, canRun, cycleEpoch == epoch else { return .aborted }
+        cycleStartedAt = now()
         await setStatus(.syncing)
         let context = CycleContext(account: account, client: client(for: account.serverURL), epoch: cycleEpoch)
         do {
@@ -31,7 +32,7 @@ extension SyncEngine {
                 blocked = error
             }
             let lastPull = try await loadDocument().sync.lastPullAt
-            let pullIsOld = lastPull.map { now().timeIntervalSince($0) > configuration.pullInterval } ?? true
+            let pullIsOld = lastPull.map { now().timeIntervalSince($0) >= configuration.pullInterval } ?? true
             var wantsPull =
                 firstCycle || pullRequested || push.changed || push.needsPull || pullIsOld || blocked != nil
             if pulled, !push.changed, !push.needsPull { wantsPull = false }
@@ -72,7 +73,8 @@ extension SyncEngine {
         if let error = error as? APIError {
             switch error.kind {
             case .unauthorized: return .unauthorized
-            case .network, .cancelled: return .offline
+            case .network: return .offline(requestID: error.referenceID)
+            case .cancelled: return .offline(requestID: nil)
             default: return .serverFailure(message: error.message, referenceID: error.referenceID)
             }
         }

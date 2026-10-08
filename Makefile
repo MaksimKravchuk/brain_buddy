@@ -151,6 +151,7 @@ validate-ci:
 check-specs:
 	python3 -m unittest scripts/test_validate_pre_freeze_receipt.py -v
 	python3 -m unittest scripts/test_check_spec_kit_specs.py -v
+	python3 -m unittest scripts/test_check_slice_budget.py -v
 	python3 -m unittest scripts/test_check_speckit_manifests.py -v
 	python3 -m unittest scripts/test_check_gate_integrity.py -v
 	python3 -m unittest scripts/test_auth_migration_guard.py -v

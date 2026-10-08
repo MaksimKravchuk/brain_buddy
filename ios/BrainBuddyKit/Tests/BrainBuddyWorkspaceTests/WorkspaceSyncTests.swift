@@ -1,7 +1,10 @@
+import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyFakeServer
 import BrainBuddyPersistence
 import BrainBuddySync
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BrainBuddyWorkspace
@@ -261,8 +264,8 @@ import Testing
         #expect(session.workspace.account == Fixture.account)
         #expect(session.workspace.pendingChangeCount == 1)
         #expect(
-            await session.sync.calls == [.start(Fixture.account), .signOut, .start(Fixture.account)],
-            "sync starts again for the account, which will ask to sign in again"
+            await session.sync.calls == [.start(Fixture.account), .signOut],
+            "the engine resumes by itself: the session was never ended"
         )
     }
 
@@ -520,4 +523,274 @@ import Testing
         #expect(try await session.store.load()?.issues == [kept])
         #expect(session.workspace.issues == [kept])
     }
+
+    // MARK: Foreground and the status snapshot
+
+    @Test("021-FR-032 021-FR-006 the foreground starts the tick and asks for one pull; leaving stops it; repeats change nothing")
+    func foregroundStartsAndStopsTheTick() async {
+        let store = ControlledStore(InMemoryDocumentStore(document: Self.linkedDocument()))
+        let sync = FakeSyncService(store: store.base)
+        let scheduler = ManualSyncScheduler()
+        let workspace = Workspace(store: store, sync: sync, tickScheduler: scheduler)
+        await workspace.load()
+
+        await workspace.setForegroundActive(true)
+        await workspace.setForegroundActive(true)
+        #expect(await sync.calls == [.start(Fixture.account), .request(.foreground)])
+        #expect(scheduler.pendingDelays == [.seconds(15)])
+
+        await scheduler.runNext()
+        await scheduler.runNext()
+        #expect(await sync.calls.suffix(2) == [.request(.periodic), .request(.periodic)])
+
+        await workspace.setForegroundActive(false)
+        await workspace.setForegroundActive(false)
+        let calls = await sync.calls
+        #expect(scheduler.pendingDelays.isEmpty)
+        #expect(await scheduler.runNext() == false)
+        #expect(await sync.calls == calls)
+
+        await workspace.setForegroundActive(true)
+        #expect(await sync.calls.last == .request(.foreground), "coming back asks for a pull again")
+        #expect(scheduler.pendingDelays == [.seconds(15)])
+    }
+
+    @Test("021-FR-012 021-FR-016 021-FR-018 the snapshot dates waiting changes from when they became sendable and counts the first upload")
+    func snapshotFromTheDocument() async throws {
+        func create(_ id: TaskID, issuedAt: Date) -> PendingOperation {
+            PendingOperation(command: .createTask(.init(taskID: id, title: "Task \(id)", list: .inbox)), issuedAt: issuedAt)
+        }
+        var document = Self.linkedDocument(
+            outbox: [
+                create("a", issuedAt: Fixture.epoch.addingTimeInterval(-213 * 86_400)),
+                create("b", issuedAt: Fixture.epoch.addingTimeInterval(-3_600)),
+                create("c", issuedAt: Fixture.epoch.addingTimeInterval(30)),
+            ], issues: [Fixture.issue("Refused")])
+        document.sync = SyncMetadata(
+            lastPullAt: Fixture.epoch, lastPushAt: Fixture.epoch.addingTimeInterval(10),
+            failingSince: Fixture.epoch.addingTimeInterval(100), lastFailedAttemptAt: Fixture.epoch.addingTimeInterval(170),
+            lastFailureReferenceID: "ref-1")
+        let session = await signedIn(document)
+        let workspace = session.workspace
+
+        var snapshot = workspace.syncSnapshot
+        #expect(snapshot.account == .linked(email: "ana@example.com"))
+        #expect(snapshot.pendingCount == 3)
+        #expect(snapshot.oldestPendingAt == Fixture.epoch, "months-old changes wait from when the account was linked")
+        #expect(snapshot.initialUploadRemaining == 2, "the two issued before the account was linked")
+        #expect(snapshot.issueCount == 1)
+        #expect(snapshot.lastSyncedAt == Fixture.epoch.addingTimeInterval(10))
+        #expect(snapshot.failingSince == Fixture.epoch.addingTimeInterval(100))
+        #expect(snapshot.lastFailedAttemptAt == Fixture.epoch.addingTimeInterval(170))
+        #expect(snapshot.lastFailureReferenceID == "ref-1")
+        #expect(snapshot.isOnline && !snapshot.isSyncing && !snapshot.sessionEnded)
+
+        try workspace.capture(CaptureDraft(text: "Not on disk yet"))
+        #expect(workspace.syncSnapshot.pendingCount == 4, "a change applied but not yet written counts")
+        await session.sync.emit(.status(.syncing))
+        #expect(workspace.syncSnapshot.isSyncing)
+        await session.sync.emit(.status(.needsSignIn))
+        #expect(workspace.syncSnapshot.sessionEnded)
+        workspace.networkAvailabilityChanged(isAvailable: false)
+        snapshot = workspace.syncSnapshot
+        #expect(!snapshot.isOnline)
+
+        let accountLess = await loadedWorkspace()
+        try accountLess.capture(CaptureDraft(text: "On this device"))
+        #expect(accountLess.syncSnapshot.account == .none)
+        #expect(accountLess.syncSnapshot.pendingCount == 0, "account-less, nothing waits")
+    }
+
+    // MARK: Signing out, in order
+
+    @Test("021-FR-018 021-FR-005 a sign-out whose removal fails keeps the token, sends no logout and leaves the person signed in")
+    func failedRemovalKeepsTheSession() async throws {
+        let world = World()
+        let phone = WiredDevice(world: world, identity: .iOS, namespace: 1, store: DestroyFailingStore(InMemoryDocumentStore()))
+        await phone.launch()
+        try await phone.signIn()
+        phone.fake.clearLog()
+
+        await #expect(throws: WorkspaceError.self) { try await phone.workspace.signOut(discardUnsyncedChanges: false) }
+        await phone.settle()
+
+        #expect(try phone.tokens.token(for: FakeBrainBuddyServer.baseURL) != nil)
+        #expect(try phone.tokens.pendingLogouts().isEmpty)
+        #expect(phone.fake.requests.allSatisfy { $0.url.path != "/api/auth/logout" })
+        #expect(phone.workspace.syncStatus != .needsSignIn)
+        #expect(phone.workspace.account?.email == World.email)
+        #expect(world.server.liveSessionCount(email: World.email) == 1)
+    }
+
+    @Test("021-FR-005 a sign-out that succeeds removes the data, the token and the server session")
+    func signOutEndsTheSession() async throws {
+        let world = World()
+        let phone = WiredDevice(world: world, identity: .macOS(version: "0.1.0"), namespace: 1)
+        await phone.launch()
+        try await phone.signIn()
+        phone.fake.clearLog()
+
+        try await phone.workspace.signOut(discardUnsyncedChanges: false)
+
+        #expect(try phone.tokens.token(for: FakeBrainBuddyServer.baseURL) == nil)
+        #expect(try phone.tokens.pendingLogouts().isEmpty)
+        #expect(phone.fake.requests.map { "\($0.method.rawValue) \($0.url.path)" } == ["POST /api/auth/logout"])
+        #expect(world.server.liveSessionCount(email: World.email) == 0)
+        #expect(try await phone.store.load() == nil)
+        #expect(phone.workspace.account == nil)
+    }
+
+    @Test("021-FR-005 a crash between the removal and the token's removal still ends the session, once, at the next launch")
+    func crashBetweenRemovalAndTokenRemoval() async throws {
+        let world = World()
+        let survivors = InMemorySessionTokenStore()
+        let tokens = SnapshottingTokenStore(survivors)
+        let first = WiredDevice(world: world, identity: .macOS(version: "0.1.0"), namespace: 1, tokens: tokens)
+        await first.launch()
+        try await first.signIn()
+        // Offline, so this run never tells the server itself: whatever ends the session is the relaunch.
+        await first.networkChanged(isAvailable: false)
+        try await first.workspace.signOut(discardUnsyncedChanges: false)
+        #expect(world.server.liveSessionCount(email: World.email) == 1)
+
+        // The process died when the token was about to go: what remains is the copy taken then,
+        // and the store, which the removal had already emptied.
+        let relaunched = WiredDevice(
+            world: world, identity: .macOS(version: "0.1.0"), namespace: 2, store: InMemoryDocumentStore(), tokens: survivors)
+        #expect(try survivors.token(for: FakeBrainBuddyServer.baseURL) != nil)
+        #expect(try survivors.pendingLogouts().count == 1)
+        await relaunched.launch()
+
+        #expect(relaunched.fake.requests.map { "\($0.method.rawValue) \($0.url.path)" } == ["POST /api/auth/logout"])
+        #expect(world.server.liveSessionCount(email: World.email) == 0)
+        #expect(try survivors.pendingLogouts().isEmpty)
+        #expect(try survivors.token(for: FakeBrainBuddyServer.baseURL) == nil)
+    }
+
+    // MARK: First load
+
+    @Test("021-FR-012 021-FR-032 with the first pull held open, local work answers at once and the line reads Not synced yet")
+    func firstLoadDoesNotBlock() async throws {
+        let world = World()
+        let mac = WiredDevice(
+            world: world, identity: .macOS(version: "0.1.0"), namespace: 1, wrapping: { HeldPullTransport($0) })
+        await mac.launch()
+        let transport = try #require(mac.transport as? HeldPullTransport)
+        let signIn = Task { try await mac.workspace.signIn(serverURL: FakeBrainBuddyServer.baseURL, email: World.email, password: World.password) }
+        await transport.arrived()
+
+        // The pull has not answered: commands and queries still do.
+        let id = try mac.workspace.capture(CaptureDraft(text: "Written while loading", list: .next))
+        #expect(mac.workspace.task(id)?.title == "Written while loading")
+        #expect(mac.workspace.list(.list(.next)).sections.flatMap(\.tasks).map(\.id) == [id])
+        let line = SyncStatusDescriber.describe(
+            mac.workspace.syncSnapshot, now: world.clock.now(), device: .mac, calendar: Calendar(identifier: .gregorian))
+        #expect(line.text == "Not synced yet")
+        #expect(line.state == .notSyncedYet)
+
+        await transport.release()
+        try await signIn.value
+        await mac.settle()
+        await mac.workspace.syncNow()
+        #expect(world.snapshot.task(titled: "Written while loading") != nil)
+        let synced = SyncStatusDescriber.describe(
+            mac.workspace.syncSnapshot, now: world.clock.now(), device: .mac, calendar: Calendar(identifier: .gregorian))
+        #expect(synced.text == "Synced just now")
+    }
+}
+
+/// Holds the first task pull until `release()`, so a test can act while a first load is in flight.
+final class HeldPullTransport: HTTPTransport {
+    private actor Gate {
+        var arrived = false
+        var isOpen = false
+        var arrivalWaiters: [CheckedContinuation<Void, Never>] = []
+        var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func arrive() {
+            arrived = true
+            arrivalWaiters.forEach { $0.resume() }
+            arrivalWaiters = []
+        }
+
+        func waitForArrival() async {
+            if arrived { return }
+            await withCheckedContinuation { arrivalWaiters.append($0) }
+        }
+
+        func waitUntilOpen() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func open() {
+            isOpen = true
+            waiters.forEach { $0.resume() }
+            waiters = []
+        }
+    }
+
+    private let inner: any HTTPTransport
+    private let gate = Gate()
+    private let holding = Mutex(true)
+
+    init(_ inner: any HTTPTransport) { self.inner = inner }
+
+    func arrived() async { await gate.waitForArrival() }
+    func release() async { await gate.open() }
+
+    func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        let isPull = request.method == .get && request.url.path.hasSuffix("/tasks")
+        let firstPull = isPull && holding.withLock { first in
+            defer { first = false }
+            return first
+        }
+        if firstPull {
+            await gate.arrive()
+            await gate.waitUntilOpen()
+        }
+        return try await inner.send(request)
+    }
+}
+
+/// A store whose removal fails like a full disk; everything else is its base.
+actor DestroyFailingStore: DocumentStore {
+    let base: any DocumentStore
+
+    init(_ base: any DocumentStore) { self.base = base }
+
+    func load() async throws(DocumentStoreError) -> StoreDocument? { try await base.load() }
+
+    func update(_ transform: @Sendable (inout StoreDocument) throws -> Void) async throws -> StoreDocument {
+        try await base.update(transform)
+    }
+
+    func generation() async throws(DocumentStoreError) -> Int? { try await base.generation() }
+    func destroy() async throws(DocumentStoreError) { throw DocumentStoreError.io("disk full") }
+    func destroy(after check: @Sendable (StoreDocument?) throws -> Void) async throws { throw DocumentStoreError.io("disk full") }
+    func storedAccount() async -> LinkedAccount? { await base.storedAccount() }
+    func quarantineUnreadableDocument() async throws(DocumentStoreError) -> URL? { try await base.quarantineUnreadableDocument() }
+}
+
+/// A token store that copies what it holds into `survivors` the moment a token is about to be removed:
+/// what a crash at that point would leave in the Keychain.
+final class SnapshottingTokenStore: SessionTokenStore {
+    private let inner = InMemorySessionTokenStore()
+    private let survivors: InMemorySessionTokenStore
+
+    init(_ survivors: InMemorySessionTokenStore) { self.survivors = survivors }
+
+    func token(for serverURL: URL) throws -> String? { try inner.token(for: serverURL) }
+    func setToken(_ token: String, for serverURL: URL) throws { try inner.setToken(token, for: serverURL) }
+
+    func removeToken(for serverURL: URL) throws {
+        if let token = try inner.token(for: serverURL) { try survivors.setToken(token, for: serverURL) }
+        for logout in try inner.pendingLogouts() { try survivors.addPendingLogout(logout) }
+        try inner.removeToken(for: serverURL)
+    }
+
+    func removeAllTokens() throws { try inner.removeAllTokens() }
+    func pendingLogouts() throws -> [PendingLogout] { try inner.pendingLogouts() }
+    func addPendingLogout(_ logout: PendingLogout) throws { try inner.addPendingLogout(logout) }
+    func removePendingLogout(_ logout: PendingLogout) throws { try inner.removePendingLogout(logout) }
 }

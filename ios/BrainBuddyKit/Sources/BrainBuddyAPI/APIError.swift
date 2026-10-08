@@ -246,11 +246,23 @@ extension APIError {
     }
 
     static func tokenStorage(_ error: any Error) -> APIError {
-        APIError(
+        if let error = error as? TokenStoreError, error == .accessDenied {
+            // Not a passing failure: no retry can read the item, only a sign-in can replace it.
+            return APIError(kind: .unauthorized, message: "Sign in again to continue.", requestMayHaveBeenSent: false)
+        }
+        return APIError(
             kind: .tokenStorage(String(describing: error)),
             message: "Brain Buddy couldn't read your sign-in from this device. Unlock the device and try again.",
             requestMayHaveBeenSent: false
         )
+    }
+
+    /// What the person reads when the server opened a session this device could not keep.
+    public static let tokenNotSavedMessage = "Brain Buddy couldn't save your sign-in on this device. Try again."
+
+    /// A sign-in's session could not be stored. The request itself went through, so it has a reference id.
+    static func tokenNotSaved(_ error: any Error, referenceID: String) -> APIError {
+        APIError(kind: .tokenStorage(String(describing: error)), message: tokenNotSavedMessage, referenceID: referenceID)
     }
 
     static func decoding(_ error: any Error, response: HTTPResponse, sentCorrelationID: String?) -> APIError {

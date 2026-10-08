@@ -1,8 +1,32 @@
 # Feature 020 — macOS host run for FR-041 (slice PR-06)
 
-**Status: PENDING (owner run).** Nobody has run this on a macOS host yet. This file
-is a template, not evidence. Do not treat it as a passing run, and do not accept
-020-FR-041 on it, until the **Results** section below is filled in from a real run.
+**Status: build and tests PASS on a CI macOS host. The manual checks V1–V11 are
+PENDING, and the PR is merged ahead of them (owner decision, 2026-10-08).**
+
+- **The owner's decision:** slices whose remaining checks are manual merge once CI is
+  green, carrying this file as their manual test plan.
+- **Who runs it:** the owner's agent runs steps 1 and 4 and V1–V11 later, on the
+  owner's Mac.
+- **If a check fails:** the fix lands in a separate PR.
+- **Acceptance:** 020-FR-041 is not accepted until the **Results** section below is
+  filled in from that run. The CI run below covers steps 2 and 3 only.
+
+## CI macOS host evidence (steps 2 and 3)
+
+The `macos-app` CI lane, added by feature 021 slice PR-01 after this file was first
+written, builds and tests `macos/` on a GitHub-hosted macOS 26 runner with Xcode 26.
+
+- **The run:** job 113222872385, workflow run 37750665785, on PR-06 head
+  `304ed6e038805a2126a7d764a763a3936339f3a4`, 2026-10-08.
+- **Step 2:** `swift build --only-use-versions-from-resolved-file` printed
+  `Build complete!`. This compiled `SidebarEntries.swift` and `ContentView.swift` with
+  the macOS SDK.
+- **Step 3:** `swift test` ran the suite, and `WeeklyReviewRowTests` printed
+  `Executed 8 tests, with 0 failures (0 unexpected)`. The whole package printed
+  `Executed 79 tests, with 0 failures (0 unexpected)`.
+
+This run was not sandbox-disabled and did not launch the app. Step 4 and V1–V11 still
+need a run that can see the screen.
 
 ## What this run proves
 
@@ -10,10 +34,12 @@ is a template, not evidence. Do not treat it as a passing run, and do not accept
   non-interactive "Weekly review · coming later" entry and ships no local-only review.
 - **Tasks**: T164 (RED `WeeklyReviewRowTests`) and T165 (GREEN `ContentView`, plus this
   recorded run), tasks.md slice PR-06; quickstart Scenario 6.
-- **Why a host run is needed**: no CI lane builds or tests `macos/`. A test file under
-  `macos/Tests` that names `020-FR-041` satisfies the name-matching coverage gate, but it
-  only proves that a test exists. The plan ("Test strategy") requires this recorded run
-  in addition to the name match.
+- **Why a host run is needed**: when this slice was planned, no CI lane built or tested
+  `macos/`. One does now (see above), and it covers the build and the XCTests. A
+  test file under `macos/Tests` that names `020-FR-041` satisfies the name-matching
+  coverage gate, but it only proves that a test exists. What the row looks like, and how
+  it behaves under the mouse, the keyboard and VoiceOver (V1–V11), still needs the app
+  running on a screen.
 
 ## What changed (the run is checking this)
 
