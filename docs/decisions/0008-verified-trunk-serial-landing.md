@@ -1,7 +1,8 @@
 # ADR-0008: Verified trunk serial landing replaces mandatory PRs for SHIP/SHOW changes
 
 Date: 2026-07-22
-Status: Accepted
+Status: Accepted; ASK path scope amended by [ADR-0030](0030-pre-launch-narrow-ask-class.md)
+while there are no real users
 Decision owner: BrainBuddy
 Supersedes: the PR-mandatory release path and PR-preview trigger surface of
 [ADR-0003](0003-autonomous-delivery-guardrails.md) (its identity, least-privilege,
