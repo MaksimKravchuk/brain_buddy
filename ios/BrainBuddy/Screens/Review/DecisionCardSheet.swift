@@ -33,6 +33,16 @@ struct DecisionCardTarget: Identifiable, Hashable {
     var id: TaskID { taskID }
 }
 
+/// The review step around a card (M-16): decisions count in this run, "Not
+/// now" replaces Close, and a decision hands over to the step, which shows
+/// the Undo status line and the next card, instead of closing the card.
+struct ReviewDecisionContext {
+    let sessionID: ReviewSessionID
+    let position: String
+    let onDecided: (DecisionID, DecisionType, String) -> Void
+    let onNotNow: () -> Void
+}
+
 // MARK: - The card
 
 /// M-03 (spec 020): one task, one decision, as a large sheet outside a review
@@ -47,6 +57,8 @@ struct DecisionCardTarget: Identifiable, Hashable {
 /// the decision. Two-step decisions push their form (M-04).
 struct DecisionCardSheet: View {
     let taskID: TaskID
+    /// Inside a review (M-16); nil for the large sheet outside one.
+    let review: ReviewDecisionContext?
 
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
@@ -61,8 +73,9 @@ struct DecisionCardSheet: View {
     @State private var isStale = false
     @State private var hasDecided = false
 
-    init(taskID: TaskID) {
+    init(taskID: TaskID, review: ReviewDecisionContext? = nil) {
         self.taskID = taskID
+        self.review = review
     }
 
     var body: some View {
@@ -70,15 +83,24 @@ struct DecisionCardSheet: View {
             root
                 .navigationTitle("Decide")
                 .navigationBarTitleDisplayMode(.inline)
+                .safeAreaInset(edge: .top) {
+                    if let review {
+                        Text(review.position)
+                            .font(BBFont.meta)
+                            .foregroundStyle(BBColor.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, BBSpacing.s4)
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
+                        Button(review == nil ? "Close" : ReviewCopy.notNow, action: closeCard)
                     }
                 }
                 .navigationDestination(for: DecisionForm.self) { form in
                     DecisionFormView(
                         form: form, taskID: taskID, formulationID: opened?.formulationID, stallReason: stallReason,
-                        isDirty: $formIsDirty,
+                        sessionID: review?.sessionID, isDirty: $formIsDirty,
                         onSaved: { decisionID, decision, title in
                             finish(decisionID, decision: decision, title: title)
                         },
@@ -86,7 +108,7 @@ struct DecisionCardSheet: View {
                             isStale = true
                             path = []
                         },
-                        onCloseCard: { dismiss() },
+                        onCloseCard: closeCard,
                         expectedTask: opened?.stamp
                     )
                 }
@@ -118,7 +140,7 @@ struct DecisionCardSheet: View {
         } else {
             DecisionCardStaleView(
                 was: opened?.title ?? "", now: workspace.task(taskID)?.title, stillAsks: currentlyAsks,
-                onClose: { dismiss() }, onDecideAgain: decideAgain
+                onClose: closeCard, onDecideAgain: decideAgain
             )
         }
     }
@@ -169,8 +191,8 @@ struct DecisionCardSheet: View {
         let title = task.title
         do {
             let decisionID = try workspace.decide(
-                decision, on: taskID, stallReason: stallReason, formulationID: opened?.formulationID,
-                expectedTask: opened?.stamp
+                decision, on: taskID, stallReason: stallReason, sessionID: review?.sessionID,
+                formulationID: opened?.formulationID, expectedTask: opened?.stamp
             )
             finish(decisionID, decision: decision, title: title)
         } catch {
@@ -185,10 +207,19 @@ struct DecisionCardSheet: View {
         }
     }
 
-    /// Closes the card and offers Undo (FR-048).
+    /// Close, or "Not now" inside a review (the step sets the task aside).
+    private func closeCard() {
+        if let review { review.onNotNow() } else { dismiss() }
+    }
+
+    /// Closes the card and offers Undo (FR-048); in a review the step does both.
     private func finish(_ decisionID: DecisionID, decision: DecisionType, title: String) {
         hasDecided = true
         formIsDirty = false
+        if let review {
+            review.onDecided(decisionID, decision, title)
+            return
+        }
         dismiss()
         DecisionUndoToast.show(
             decisionID, decision: decision, title: title, taskID: taskID, workspace: workspace, toasts: toasts

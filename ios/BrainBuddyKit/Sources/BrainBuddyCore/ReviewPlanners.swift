@@ -244,6 +244,32 @@ public enum ReviewLayout {
     public static func stepBarScrolls(isAccessibilitySize: Bool) -> Bool { isAccessibilitySize }
 }
 
+// MARK: - Inbox step (FR-030)
+
+/// M-15: with more than 15 items the step offers three choices.
+public enum InboxChoice: Hashable, Sendable, CaseIterable {
+    case processTen
+    case processAll
+    case processTenReleaseRest
+}
+
+public enum InboxStepPlan {
+    public static let choiceThreshold = 15
+    public static let batch = 10
+
+    public static func needsChoice(itemCount: Int) -> Bool { itemCount > choiceThreshold }
+
+    /// What to process one at a time and what to release to Someday after it
+    /// (owner default, FR-030). Without a choice, everything is processed.
+    public static func split(_ items: [TaskID], choice: InboxChoice?) -> (process: [TaskID], release: [TaskID]) {
+        switch choice {
+        case nil, .processAll?: (items, [])
+        case .processTen?: (Array(items.prefix(batch)), [])
+        case .processTenReleaseRest?: (Array(items.prefix(batch)), Array(items.dropFirst(batch)))
+        }
+    }
+}
+
 // MARK: - Active time (SC-004)
 
 /// The SC-004 active-time rule (data-model E3) with an injected clock: the

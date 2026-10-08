@@ -365,4 +365,114 @@ struct QueriesReviewTests {
         state.review.server = ReviewServerFacts(exposed: true, lastCountedReviewAt: Review.instant("2026-10-02T10:00:00Z"))
         #expect(GTDQueries.lastCountedReview(in: state) == Review.instant("2026-10-02T10:00:00Z"))
     }
+
+    // MARK: - The decision step, releases and entry notices (T137 – T143)
+
+    private func queueState(_ ids: [TaskID]) -> (GTDState, ReviewSession) {
+        let starts = ["2026-09-22T09:00:00Z", "2026-09-23T09:00:00Z", "2026-09-24T09:00:00Z"]
+        let tasks = zip(ids.indices, ids).map { index, id in
+            Review.nextTask(id, started: Review.instant(starts[index]), formulation: Review.form(index + 1))
+        }
+        var state = Review.state(tasks)
+        let session = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now, decisionQueue: ids
+        )
+        state.review.sessions[session.id] = session
+        return (state, session)
+    }
+
+    @Test("020-FR-034 020-FR-050 020-SC-002 the decision step walks the run's queue: card, Not now, kept wording, all decided")
+    func decisionStepOutcomes() throws {
+        var (state, session) = queueState(["a", "b", "c"])
+        func outcome() -> DecisionStepOutcome {
+            GTDQueries.decisionStep(in: state, session: state.review.sessions[session.id] ?? session, now: Review.now)
+        }
+        #expect(outcome() == .card("a", position: 1, total: 3))
+        try Review.apply(Review.decide(.someday, "a", decision: 1, formulation: Review.form(1), session: session.id), to: &state)
+        #expect(outcome() == .card("b", position: 2, total: 3))
+        state.review.sessions[session.id]?.setAsideTaskIDs = ["b"]
+        #expect(outcome() == .card("c", position: 3, total: 3), "Not now passes the card over")
+        // "Save anyway": a decision, yet the task still asks.
+        try Review.apply(
+            Review.decide(.reformulate, "c", decision: 3, formulation: Review.form(3), title: "call bob.", session: session.id),
+            to: &state
+        )
+        #expect(outcome() == .someLeft(decided: 2, total: 3, stillAsking: 2))
+        try Review.apply(Review.decide(.someday, "b", decision: 2, formulation: Review.form(2), session: session.id), to: &state)
+        #expect(outcome() == .allDecided(3, keptWording: 1))
+        // Undo brings the card back as current.
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(1), to: &state)
+        #expect(outcome() == .card("a", position: 1, total: 3))
+        let (empty, quiet) = queueState([])
+        #expect(GTDQueries.decisionStep(in: empty, session: quiet, now: Review.now) == .nothingAsks)
+    }
+
+    @Test("020-FR-017 020-FR-030 a release can be undone until the person moves on: a review started, or the Inbox step left")
+    func openReleases() {
+        var state = Review.state([])
+        let released = BulkReleasedTask(taskID: "t1", previousState: .next, clockBefore: nil, taskAfter: TaskStamp(updatedAt: nil, serverRevision: 2))
+        func record(_ n: Int, _ kind: BulkReleaseKindCode, session: ReviewSessionID? = nil, at date: Date = Review.now) -> BulkReleaseRecord {
+            BulkReleaseRecord(id: Review.bulk(n), kind: kind, sessionID: session, createdAt: date, released: [released], skipped: [])
+        }
+        state.review.bulkReleases[Review.bulk(1)] = record(1, .restart)
+        #expect(GTDQueries.openRestartReleases(in: state).map(\.id) == [Review.bulk(1)])
+        state.review.bulkReleases[Review.bulk(1)]?.undoneAt = Review.now
+        #expect(GTDQueries.openRestartReleases(in: state).isEmpty, "undone")
+        state.review.bulkReleases[Review.bulk(1)]?.undoneAt = nil
+        state.review.sessions[Review.session(1)] = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now.addingTimeInterval(60)
+        )
+        #expect(GTDQueries.openRestartReleases(in: state).isEmpty, "Start the review is moving on")
+
+        let session = ReviewSession(id: Review.session(2), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now)
+        state.review.bulkReleases[Review.bulk(2)] = record(2, .inboxRemainder, session: session.id)
+        state.review.bulkReleases[Review.bulk(3)] = record(3, .inboxRemainder, session: Review.session(9))
+        #expect(GTDQueries.openInboxReleases(in: state, session: session).map(\.id) == [Review.bulk(2)])
+        var left = session
+        left.steps[.inbox] = .finished
+        #expect(GTDQueries.openInboxReleases(in: state, session: left).isEmpty, "the step was left")
+    }
+
+    @Test("020-FR-038 days since the last counted review are whole local days; none before the first")
+    func daysSinceLastReview() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = CalendarDay(year: 2026, month: 10, day: 9)!
+        var state = Review.state([])
+        #expect(GTDQueries.daysSinceLastReview(in: state, today: today, calendar: calendar) == nil)
+        let ended = Review.instant("2026-09-30T15:40:00Z")
+        state.review.sessions[Review.session(1)] = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, status: .completed, startedAt: ended,
+            endedAt: ended, qualifyingActivity: true
+        )
+        #expect(GTDQueries.daysSinceLastReview(in: state, today: today, calendar: calendar) == 9)
+    }
+
+    @Test("020-FR-029 020-SC-007 the entry names a review another device ended or the idle rule closed, with its decisions kept")
+    func entryNotice() {
+        var state = Review.state([])
+        let started = Review.instant("2026-10-02T12:40:00Z")
+        var idle = ReviewSession(
+            id: Review.session(1), mode: .full, entry: .list, origin: .web, status: .partial, startedAt: started,
+            lastActivityAt: started, qualifyingActivity: true
+        )
+        idle.counts[.done] = 4
+        idle.counts[.inboxProcessed] = 3
+        idle.endedAt = started.addingTimeInterval(ReviewSession.idleCloseAfter)
+        state.review.sessions[idle.id] = idle
+        #expect(GTDQueries.entryNotice(in: state) == .closedAfterAWeek(startedAt: started, decisions: 4), "Inbox processed is not a decision")
+        var replaced = idle
+        replaced.id = Review.session(2)
+        replaced.endedAt = started.addingTimeInterval(ReviewSession.idleCloseAfter + 60)
+        replaced.endedElsewhere = true
+        state.review.sessions[replaced.id] = replaced
+        #expect(GTDQueries.entryNotice(in: state) == .replacedElsewhere(origin: .web, decisions: 4))
+        let done = ReviewSession(
+            id: Review.session(3), mode: .quick, entry: .list, origin: .ios, status: .completed,
+            startedAt: started.addingTimeInterval(9 * Review.day), endedAt: started.addingTimeInterval(9 * Review.day),
+            qualifyingActivity: true
+        )
+        state.review.sessions[done.id] = done
+        #expect(GTDQueries.entryNotice(in: state) == nil, "a later finished review leaves nothing to say")
+    }
 }

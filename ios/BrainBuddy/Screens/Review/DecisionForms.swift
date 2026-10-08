@@ -53,6 +53,8 @@ struct DecisionFormView: View {
     /// The wording the card was opened on; drafts and the decision name it.
     let formulationID: FormulationID?
     let stallReason: StallReason?
+    /// The review run the decision counts in (M-16), if any.
+    let sessionID: ReviewSessionID?
     @Binding var isDirty: Bool
     let onSaved: (DecisionID, DecisionType, String) -> Void
     let onStale: () -> Void
@@ -83,7 +85,7 @@ struct DecisionFormView: View {
 
     init(
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
-        isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
+        sessionID: ReviewSessionID? = nil, isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
         onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: ShownTask? = nil,
         seedText: String? = nil
     ) {
@@ -92,6 +94,7 @@ struct DecisionFormView: View {
         self.taskID = taskID
         self.formulationID = formulationID
         self.stallReason = stallReason
+        self.sessionID = sessionID
         _isDirty = isDirty
         self.onSaved = onSaved
         self.onStale = onStale
@@ -371,22 +374,22 @@ struct DecisionFormView: View {
             switch form {
             case .reformulate:
                 decisionID = try workspace.decide(
-                    .reformulate, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID,
+                    .reformulate, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask
                 )
             case .firstStep:
                 decisionID = try workspace.decide(
-                    .firstStep, on: taskID, title: value, stallReason: stallReason, formulationID: formulationID,
+                    .firstStep, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask
                 )
             case .waiting:
                 decisionID = try workspace.decide(
-                    .waiting, on: taskID, waitingFor: value, stallReason: stallReason, formulationID: formulationID,
+                    .waiting, on: taskID, waitingFor: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask
                 )
             case .extend:
                 decisionID = try workspace.decide(
-                    .extend, on: taskID, reason: value, stallReason: stallReason, formulationID: formulationID,
+                    .extend, on: taskID, reason: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask
                 )
             }

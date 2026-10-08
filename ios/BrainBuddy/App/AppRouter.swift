@@ -30,6 +30,8 @@ enum AppRoute: Hashable {
     case tags
     case settings
     case syncIssues
+    /// The weekly review's entry (M-11).
+    case review
 }
 
 /// Where a capture started, so the sheet can preselect the list and due date

@@ -421,9 +421,16 @@ extension StoreDocument {
                     known.taskAfter = stamp
                     return known
                 }
+                // This device's replay did not release it, so its Next clock is
+                // still in the base (the answer carries none): the Undo needs it.
+                let task = base.tasks[local]
+                let clock = release.undoRetained && previous == .next && task?.state == .next
+                    ? task?.formulation.map {
+                        ReleasedClock(clock: $0, stalledBefore: task?.consecutiveStalledFormulations ?? 0)
+                    } : nil
                 return BulkReleasedTask(
-                    taskID: local, previousState: previous, clockBefore: nil, taskAfter: stamp,
-                    clockKnown: previous != .next
+                    taskID: local, previousState: previous, clockBefore: clock, taskAfter: stamp,
+                    clockKnown: previous != .next || clock != nil
                 )
             }
             record.skipped = answer.skipped.map { item in

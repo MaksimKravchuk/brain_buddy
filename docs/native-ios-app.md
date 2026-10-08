@@ -16,9 +16,11 @@ permission from. This app is the iPhone client; the earlier Expo client in
 | 2 — Brain dump | Voice capture with on-device transcription (SpeechAnalyzer / WhisperKit), recorded offline, uploaded for proposals later | Proposal extraction (server AI) |
 | 3 — Everything else | Thinking canvas, agents, account management | Per feature |
 
-Weekly review stays visibly deferred, as in every other client (design
-system rule). Pass 1 adds **Process inbox** instead — the GTD *clarify* step,
-one inbox item at a time, fully offline.
+The weekly review is flag-gated (spec 020): while the `weekly_review` flag is
+off (account-less: the build's release switch) Lists keeps a non-interactive
+"coming later" row; once it is on, the row opens the Quick or Full review (full
+screen, offline too). Pass 1 adds **Process inbox** — the GTD *clarify* step,
+one inbox item at a time, fully offline — which the review's Inbox step reuses.
 
 ## What works offline
 
@@ -96,6 +98,13 @@ UI, commands and the outbox, plus `serverID` / `serverRevision` once the
 server has acknowledged the creation. The push planner resolves client ids
 to server ids at send time; the outbox is ordered, so a project's creation is
 always sent before a task that references it.
+
+The weekly review is the exception: its records (review sessions, decisions,
+bulk releases and progress changes), the follow-up tasks a decision creates
+and every formulation carry a **client-supplied id** of the shape
+`<prefix>_<lowercased UUID>` (`review_`, `decision_`, `bulk_`, `progress_`,
+`form_`, `task_`), minted in the command, so a retry or a replay names the
+same record and is applied once (`specs/020-weekly-review/contracts/http.md`).
 
 ### Commands and endpoints
 

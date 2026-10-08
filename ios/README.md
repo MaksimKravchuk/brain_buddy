@@ -380,4 +380,4 @@ data, or need a sign-in.
   Routine certificate revocation is not part of the upload workflow.
 - Background refresh is opportunistic (iOS decides when); widgets show the
   state of the last write to the shared store.
-- Weekly review stays deferred; the brain dump is pass 2.
+- The weekly review is flag-gated (`docs/native-ios-app.md`); its notification, widget chip, day and time settings and AI navigator are not built yet. The brain dump is pass 2.

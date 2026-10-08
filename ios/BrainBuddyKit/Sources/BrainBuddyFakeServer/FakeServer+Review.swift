@@ -371,8 +371,10 @@ extension FakeHTTPError {
         status: 404, message: "Not found", detail: .object(["reason": .string("weekly_review_disabled")])
     )
 
-    static func reason(_ status: Int, _ reason: String, _ message: String) -> FakeHTTPError {
-        FakeHTTPError(status: status, message: message, detail: .object(["reason": .string(reason)]))
+    static func reason(_ status: Int, _ reason: String, _ message: String, extra: [String: JSONValue] = [:]) -> FakeHTTPError {
+        FakeHTTPError(
+            status: status, message: message, detail: .object(extra.merging(["reason": .string(reason)]) { _, new in new })
+        )
     }
 
     static let idConflict = reason(409, "id_conflict", "This id is already used by another record.")
@@ -807,7 +809,11 @@ extension ServerState {
                 return .json(201, stored.dto)
             }
             if let open = data.review.sessions.values.first(where: { $0.status == .open }) {
-                guard replaceOpen else { throw .reason(409, "open_session_exists", "A review is already open.") }
+                guard replaceOpen else {
+                    throw .reason(
+                        409, "open_session_exists", "A review is already open.", extra: ["session_id": .string(open.id)]
+                    )
+                }
                 data.review.sessions[open.id]?.end(.replace, at: now)
             }
             var steps: [ReviewStep: StepStatus] = [:]
