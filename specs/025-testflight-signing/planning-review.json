@@ -1,0 +1,45 @@
+{
+  "feature": "025-testflight-signing",
+  "risk": "high",
+  "implementation_authorized": true,
+  "campaign_history": [
+    {
+      "run_id": "025-testflight-signing-20261007-1",
+      "status": "technical-changes-required",
+      "reviewers": 6
+    },
+    {
+      "run_id": "025-testflight-signing-20261007-2",
+      "status": "technical-changes-required",
+      "reviewers": 6
+    }
+  ],
+  "review_provenance": "Separate Codex CLI lenses, all configured gpt-5.6-sol; correlated single-provider panel, not independent multi-model agreement.",
+  "post_campaign_2_action": "Owner accepted the disclosed bounded plan on 2026-10-08; implement the documented technical fixes. No automatic approval or third campaign is claimed.",
+  "exception_expires_on": "2026-10-15",
+  "status": "founder-accepted",
+  "founder_acceptance": {
+    "accepted_by": "repository owner (interactive confirmation)",
+    "accepted_on": "2026-10-08",
+    "expires_on": "2026-10-15",
+    "campaign_history": [
+      {
+        "run_id": "025-testflight-signing-20261007-1",
+        "status": "technical-changes-required",
+        "reviewers": 6
+      },
+      {
+        "run_id": "025-testflight-signing-20261007-2",
+        "status": "technical-changes-required",
+        "reviewers": 6
+      }
+    ],
+    "rationale": "The owner explicitly accepted the bounded plan and Fly-smoke exception after both technical-change verdicts were disclosed. This repair changes TestFlight signing only, without Fly artifacts or product behavior; expanding backend release infrastructure would exceed that accepted scope. Technical plan fixes remain required; acceptance is compensated by exact-SHA full CI, independent review, per-target configured-certificate checks, two TestFlight runs and private certificate-inventory equality.",
+    "compensating_measures": [
+      "Required full CI and independent code review on the exact candidate SHA.",
+      "Two signed TestFlight builds, including automatic main, with app/widget leaf matching and verified credential cleanup.",
+      "Private before/after development certificate identity-set comparison and unchanged environment-secret metadata.",
+      "ASK landing remains separately approved and audited; restore all existing main ruleset protections."
+    ]
+  }
+}

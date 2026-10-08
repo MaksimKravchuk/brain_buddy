@@ -389,6 +389,30 @@ struct ReviewSyncTests {
         #expect(after.formulation?.id == before.formulation?.id && after.formulation?.startedAt == before.formulation?.startedAt)
     }
 
+    @Test("020-FR-017 020-FR-043 a restart item the server released but the device's replay did not is undone with its pre-release clock")
+    func bulkUndoOfAnItemOnlyTheServerReleased() async throws {
+        let (harness, phone) = try await activated()
+        harness.clock.advance(by: 60)
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        let before = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        // 20 days old when asked: not restart-eligible on the device; 29 days old when the server evaluates it.
+        harness.clock.advance(by: 20 * Self.day)
+        try await phone.review(.bulkRelease(.init(bulkID: Self.bulk(1), kind: .restart, taskIDs: ["t1"])))
+        harness.clock.advance(by: 9 * Self.day)
+        await phone.sync()
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .someday, "the server released it")
+
+        try await phone.review(.undoBulkRelease(Self.bulk(1)))
+        let shown = try #require(try await phone.current().task(titled: "Renovate the bathroom"))
+        #expect(shown.state == .next && shown.formulation == before.formulation?.clock, "never a Next task without its clock")
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        let after = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        #expect(after.state == .next && after.formulation?.startedAt == before.formulation?.startedAt)
+        #expect(document.base.review.bulkReleases[Self.bulk(1)]?.released.allSatisfy { $0.clockBefore == nil } == true)
+    }
+
     // MARK: - Pulls between a lost answer and its retry (review round on 3e0f799)
 
     /// The answer to the matching request is lost, the device stays offline
@@ -672,6 +696,10 @@ struct ReviewSyncTests {
 
     /// Sends `body` as the signed-in device, bypassing the client's own checks.
     private func raw(_ device: Device, _ method: HTTPMethod, _ path: [String], _ body: Data) async throws -> Int {
+        try await rawResponse(device, method, path, body).statusCode
+    }
+
+    private func rawResponse(_ device: Device, _ method: HTTPMethod, _ path: [String], _ body: Data) async throws -> HTTPResponse {
         let token = try #require(try device.tokens.token(for: FakeBrainBuddyServer.baseURL))
         var url = FakeBrainBuddyServer.baseURL
         for segment in path { url.appendPathComponent(segment) }
@@ -683,7 +711,47 @@ struct ReviewSyncTests {
             ],
             body: body
         )
-        return try await device.transport.send(request).statusCode
+        return try await device.transport.send(request)
+    }
+
+    @Test("020-FR-028 the fake server refuses progress naming a step outside a quick review's mode with 422, as the backend does")
+    func fakeServerRefusesStepsOutsideTheMode() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.startSession(StartSession(sessionID: Self.session(1), mode: .quick, entry: .list))))
+        await phone.sync()
+        let path = ["review", "sessions", Self.session(1).rawValue]
+        for (n, change) in [#""step":{"code":"dates","status":"finished"}"#, #""active_seconds":{"code":"rest_of_next","seconds":5}"#]
+            .enumerated()
+        {
+            let body = Data(#"{"progress_id":"\#(Self.progress(10 + n).rawValue)",\#(change)}"#.utf8)
+            let response = try await rawResponse(phone, .patch, path, body)
+            #expect(response.statusCode == 422, "\(change)")
+            let detail = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])["detail"] as? [[String: Any]]
+            #expect(detail?.first?["loc"] as? [String] == ["body", n == 0 ? "step" : "active_seconds", "code"])
+        }
+        let session = harness.server.reviewSnapshot(email: SyncHarness.email).sessions[Self.session(1).rawValue]
+        #expect(session?.qualifyingActivity == false)
+        let own = Data(#"{"progress_id":"\#(Self.progress(20).rawValue)","step":{"code":"wins","status":"finished"}}"#.utf8)
+        #expect(try await raw(phone, .patch, path, own) == 200)
+    }
+
+    @Test("020-FR-045 the fake server names an unknown review record in its 404 as the backend does")
+    func fakeServerNamesUnknownReviewRecords() async throws {
+        let (_, phone) = try await activated()
+        let session = Self.session(9).rawValue
+        let cases: [(HTTPMethod, [String], String, String)] = [
+            (.get, ["review", "sessions", session], "{}", "Review session"),
+            (.patch, ["review", "sessions", session], #"{"progress_id":"\#(Self.progress(9).rawValue)"}"#, "Review session"),
+            (.post, ["review", "sessions", session, "finish"], "{}", "Review session"),
+            (.post, ["review", "bulk-releases", Self.bulk(9).rawValue, "undo"], "{}", "Review bulk release"),
+            (.post, ["review", "decisions", Self.decision(9).rawValue, "undo"], #"{"expected_task_revision":1}"#, "Review decision"),
+        ]
+        for (method, path, body, resource) in cases {
+            let response = try await rawResponse(phone, method, path, Data(body.utf8))
+            #expect(response.statusCode == 404, "\(path)")
+            let detail = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])["detail"] as? [String: Any]
+            #expect(detail?["resource"] as? String == resource, "\(path)")
+        }
     }
 
     @Test("020-FR-029 finishing a step qualifies the review only when the step had nothing to decide (E3), on the server too")
@@ -768,6 +836,71 @@ struct ReviewSyncTests {
         #expect(puts.compactMap(\.statusCode) == [409, 200])
     }
 
+    /// The M-01 "threshold just changed" note's inputs on the device: the
+    /// change instant (which also keys its dismissal) and the floor date.
+    private func thresholdNote(on device: Device) async throws -> (changedAt: Date?, floor: Date?, days: Int) {
+        let settings = try await device.current().review.settings
+        return (settings.thresholdChangedAt, settings.ownerParkFloorAt, settings.thresholdDays)
+    }
+
+    @Test("020-FR-039 the threshold-changed note outlives the settings acknowledgement and later pulls")
+    func thresholdNoteSurvivesSync() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 7))))
+        let changedAt = try #require(try await thresholdNote(on: phone).changedAt, "the optimistic change sets it")
+
+        await phone.sync()
+        #expect(try await phone.document().outbox.isEmpty, "the PUT was acknowledged")
+        var note = try await thresholdNote(on: phone)
+        #expect(note.days == 7)
+        #expect(note.changedAt == changedAt, "the server settings do not carry it; the device keeps its own")
+        #expect(note.floor == changedAt.addingTimeInterval(7 * Self.day))
+
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        note = try await thresholdNote(on: phone)
+        #expect(note.changedAt == changedAt, "a later pull keeps it too, so a dismissal stays keyed to it")
+        let settings = try await phone.current().review.settings
+        let now = harness.clock.now()
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: now) == changedAt, "it shows")
+        let dismissed = changedAt.timeIntervalSince1970
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: dismissed, now: now) == nil, "until dismissed")
+    }
+
+    @Test("020-FR-039 the note survives a settings answer lost before a pull, and the resend")
+    func thresholdNoteSurvivesLostAnswer() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 21))))
+        let changedAt = try #require(try await thresholdNote(on: phone).changedAt)
+        try await loseResponse(on: phone, matching: FakeServerTransport.path("review/settings", method: .put))
+
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        #expect(try await phone.document().outbox.isEmpty)
+        let note = try await thresholdNote(on: phone)
+        #expect(note.days == 21)
+        #expect(note.changedAt == changedAt, "the pull found the threshold this device set")
+    }
+
+    @Test("020-FR-039 a threshold another device set replaces this device's note")
+    func thresholdNoteReplacedByOtherDevice() async throws {
+        let (harness, phone) = try await activated()
+        try await phone.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 7))))
+        await phone.sync()
+        #expect(try await thresholdNote(on: phone).changedAt != nil)
+
+        let tablet = await harness.device()
+        try await tablet.signIn()
+        harness.clock.advance(by: 3_600)
+        try await tablet.review(.review(.updateSettings(ReviewSettingsChange(thresholdDays: 28))))
+        await tablet.sync()
+        harness.clock.advance(by: 3_600)
+        await phone.sync()
+        let note = try await thresholdNote(on: phone)
+        #expect(note.days == 28)
+        #expect(note.changedAt == nil, "this device did not set 28 days")
+    }
+
     @Test("020-FR-024 consent grant and revoke are idempotent; a revoke blocks cloud use at once, offline")
     func consent() async throws {
         let (harness, phone) = try await activated()
@@ -796,6 +929,9 @@ extension Device {
         let date = clock.now()
         return try await store.update { doc in
             var state = OutboxReplayer.replay(doc.outbox, onto: doc.base, activatedAt: doc.local.activatedAt).state
+            // This helper stands for a workspace showing the review (tests turn
+            // the flag off on the server, which the next pull brings).
+            if !state.review.isExposed { state.review.accountlessReleaseSwitch = true }
             try GTDReducer.apply(command, at: date, to: &state)
             doc.outbox = OutboxCompactor.appending(
                 PendingOperation(command: command, issuedAt: date), to: doc.outbox, clockAware: true

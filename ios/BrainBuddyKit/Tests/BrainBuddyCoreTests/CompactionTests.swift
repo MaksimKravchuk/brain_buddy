@@ -195,4 +195,49 @@ struct CompactionTests {
         ]
         #expect(Fixture.compacted(commands).map(\.command) == commands)
     }
+
+    @Test("021-FR-028 an outcome folds into its project's unsent creation or outcome, never across an archive or unarchive")
+    func outcomeFolds() {
+        let folded = Fixture.compacted([
+            .createProject(.init(projectID: "p", name: "Plan", desiredOutcome: "First")),
+            .setProjectOutcome(project: "p", outcome: "Second"),
+            .createTag(.init(tagID: "g", name: "calls")),
+            .setProjectOutcome(project: "p", outcome: nil),
+            .setProjectOutcome(project: "work", outcome: "A"),
+            .setProjectOutcome(project: "work", outcome: "B"),
+        ])
+        #expect(
+            folded.map(\.command) == [
+                .createProject(.init(projectID: "p", name: "Plan")), .createTag(.init(tagID: "g", name: "calls")),
+                .setProjectOutcome(project: "work", outcome: "B"),
+            ]
+        )
+        let afterArchive: [GTDCommand] = [
+            .createProject(.init(projectID: "p", name: "Plan")), .archiveProject("p"),
+            .setProjectOutcome(project: "p", outcome: "Later"),
+        ]
+        #expect(Fixture.compacted(afterArchive).map(\.command) == afterArchive, "after an archive it does not fold")
+        let afterUnarchive: [GTDCommand] = [
+            .createProject(.init(projectID: "p", name: "Plan")), .unarchiveProject(project: "p"),
+            .setProjectOutcome(project: "p", outcome: "Later"),
+        ]
+        #expect(Fixture.compacted(afterUnarchive).map(\.command) == afterUnarchive)
+        let sent = [Fixture.operation(.createProject(.init(projectID: "p", name: "Plan")), at: 0, sent: true)]
+        let appended = OutboxCompactor.appending(
+            Fixture.operation(.setProjectOutcome(project: "p", outcome: "X"), at: 1), to: sent)
+        #expect(appended.count == 2, "nothing folds into a sent creation")
+    }
+
+    @Test("021-FR-026 nothing folds across an unarchive: the project must be active again before a task is edited into it")
+    func unarchiveIsABarrier() {
+        let commands: [GTDCommand] = [
+            create, .unarchiveProject(project: "old"), update(.init(projectID: .set("old"))), update(.init(title: .set("X"))),
+        ]
+        #expect(
+            Fixture.compacted(commands).map(\.command) == [
+                create, .unarchiveProject(project: "old"), update(.init(title: .set("X"), projectID: .set("old"))),
+            ],
+            "the project edit waits after the unarchive; the later edit merges with it"
+        )
+    }
 }

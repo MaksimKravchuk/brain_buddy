@@ -92,11 +92,14 @@ REVIEW_COMMAND_PREFIXES: tuple[str, ...] = (
     "review_settings:",
     "explainer_ack:",
     "park_ack:",
+    "navigator_consent_grant:",
+    "navigator_consent_revoke:",
 )
-"""Idempotency command prefixes owned by ``ReviewService`` (http §9, R7).
+"""Idempotency command prefixes of the review commands (http §9, R7).
 
 ``TaskService`` never reconciles these: their stored bodies are composite
-review results, not ``TaskDocument`` snapshots.
+review results, not ``TaskDocument`` snapshots. The two navigator consent
+prefixes are ``NavigatorService``'s and are never reconciled at all (§7).
 """
 
 REVIEW_TABLES: tuple[str, ...] = (
@@ -188,7 +191,9 @@ class ReviewSessionDocument(StorageBaseModel):
     current_step: str | None = None
     steps: dict[str, StepStateDocument] = Field(default_factory=dict)
     active_seconds_by_step: dict[str, int] = Field(default_factory=dict)
-    decision_queue: list[str] = Field(default_factory=list)
+    decision_queue: list[str] | None = None
+    """The decision-step snapshot: ``None`` until taken, then kept as taken,
+    an empty list included (http §6; the iOS ``decisionQueue`` likewise)."""
     set_aside_task_ids: list[str] = Field(default_factory=list)
     applied_progress: dict[str, str] = Field(default_factory=dict)
     counts: SessionCountsDocument = Field(default_factory=SessionCountsDocument)
@@ -371,6 +376,31 @@ class NavigatorUsageDocument(StorageBaseModel):
     shown: int = Field(default=0, ge=0)
 
 
+class NavigatorGrantResultDocument(StorageBaseModel):
+    """One consent grant (http §7): the idempotency record body.
+
+    The 200 status the grant answered, replayed as-is for its key within the
+    24 h retention, so a late retry never grants again after a revoke.
+    """
+
+    provider: str | None
+    consent: NavigatorConsentDocument | None
+    consent_current: bool
+    consent_text_version: int
+    available: bool
+
+
+class NavigatorRevokeResultDocument(StorageBaseModel):
+    """One consent revoke (http §7): the idempotency record body.
+
+    A replay of its key answers 204 and changes nothing, so a late retry
+    never revokes a newer grant. Counts and an instant only.
+    """
+
+    revoked_at: datetime
+    revoked: int = Field(ge=0)
+
+
 # ----------------------------------------------------- clock <-> task document
 @dataclass(frozen=True, slots=True)
 class FormulationView:
@@ -499,6 +529,8 @@ __all__ = [
     "DecisionUndoDocument",
     "FormulationView",
     "NavigatorConsentDocument",
+    "NavigatorGrantResultDocument",
+    "NavigatorRevokeResultDocument",
     "NavigatorUsageDocument",
     "ParkAckKeyDocument",
     "ParkAcknowledgeResultDocument",

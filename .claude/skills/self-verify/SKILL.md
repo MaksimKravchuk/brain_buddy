@@ -26,6 +26,12 @@ That target mirrors the CI job graph. Run it before reporting any change done.
 When you need to scope down, use the per-surface tables below — but say which
 surfaces you skipped and why.
 
+Apply [Constitution Principle II](../../../.specify/memory/constitution.md#ii-tested-delivery-across-stack):
+use affected checks during iteration and full applicable verification on the
+prepared candidate, not after each technical task. ADR-0023 permits a justified
+local `writer.verify_all` N/A when targeted checks pass and full required CI
+runs on that exact candidate; unrun checks must never be reported as passing.
+
 "Mirrors" is a property that has to be maintained, not a promise. A make target
 that omits a validator its CI job runs lets a locally-green agent still fail CI.
 When you add a validator to a CI job, add it to the matching make target in the

@@ -2,8 +2,8 @@
 
 ## Scope and source of truth
 
-Brain Buddy currently exposes one browser-facing HTTP API under `/api`. There is no
-mobile/iOS client contract yet. The live OpenAPI document at `/api/openapi.json` is
+Brain Buddy currently exposes one HTTP API under `/api`, used by the browser and,
+since the client note below, by the iPhone and Mac apps. The live OpenAPI document at `/api/openapi.json` is
 the machine-readable source of truth for future consumers; `/api/docs` is its human
 view. Consumers must generate or validate clients from a pinned OpenAPI snapshot,
 not from frontend implementation details or persisted JSON files.
@@ -13,6 +13,22 @@ visibility. It is **not yet an independently versioned mobile-client semantic ve
 Before adding a second client, add a separately owned API semantic-version setting and
 publish its compatibility window; do not infer client compatibility from a storage
 migration alone.
+
+## Client note: iPhone and Mac apps (spec 021, 2026-10-07)
+
+The iPhone and Mac apps call the same `/api` routes as the browser. Every spec 021
+change is additive (`desired_outcome`, `archived_at` and `archived_before_lossless` on
+projects, `GET /projects?state=`, `POST /projects/{id}/unarchive`, the `X-Client`
+header, which only labels log lines) except one: ADR-0020 makes archiving a project
+keep its tasks' project membership (PR-03), which older clients did not expect.
+
+**Rollback is forward-only.** Once a build of the shared kit that applies lossless
+archive locally exists (PR-04 onward), roll PR-03 forward, never back: a server that
+clears memberships again would have the next pull strip them from the apps for good.
+Rolling back below PR-02 after PR-03 has run is unsafe too: every task in a project
+archived meanwhile would reject edits with 400 until the roll-forward. The release
+workflow's automatic rollback goes back only one image, so do not rely on it for
+these slices. Details: `specs/021-mac-sync/contracts/http.md` sections 7 and 8.
 
 ## Compatibility rules for the current `/api` contract
 

@@ -207,6 +207,20 @@ public struct ReviewSettings: Hashable, Sendable, Codable {
     /// The grace date of FR-016: `activated_at + 14 d`.
     public var graceUntil: Date? { activatedAt?.addingTimeInterval(FormulationRule.activationGrace) }
 
+    /// Server settings as the device keeps them (FR-039, M-01): the wire
+    /// carries no `threshold_changed_at`, so the instant of this device's own
+    /// threshold change, which keys the dismissible "threshold just changed"
+    /// note and its dismissal, is kept while the server's threshold is the one
+    /// `held` (what the device shows, queued changes included) has. A
+    /// threshold this device did not set takes the server's value.
+    public func keepingThresholdChange(of held: ReviewSettings) -> ReviewSettings {
+        var merged = self
+        if merged.thresholdChangedAt == nil, held.thresholdDays == thresholdDays {
+            merged.thresholdChangedAt = held.thresholdChangedAt
+        }
+        return merged
+    }
+
     enum CodingKeys: String, CodingKey {
         case thresholdDays, reviewWeekday, reviewTime, timeZone, onboardedAt, activatedAt, ownerParkFloorAt
         case thresholdChangedAt, revision
@@ -291,6 +305,14 @@ public struct ReviewSession: Identifiable, Hashable, Sendable, Codable {
 
     public var isCounted: Bool { status.isCounted(qualifyingActivity: qualifyingActivity) }
 
+    /// Decisions made in the run: the summary's counts without Inbox processed.
+    public var decisionCount: Int { counts.total - counts[.inboxProcessed] }
+
+    /// Closed by the 7-day idle rule (FR-029), as `ReviewSessionUpkeep.closeIdle` ends it.
+    public var closedForIdleness: Bool {
+        (status == .partial || status == .abandoned) && endedAt == lastActivityAt.addingTimeInterval(Self.idleCloseAfter)
+    }
+
     /// The regularity instant this session contributes, if counted (data-model E3).
     public var countedAt: Date? {
         guard isCounted else { return nil }
@@ -336,6 +358,121 @@ public struct TaskStamp: Hashable, Sendable, Codable {
     public func matches(_ task: TaskRecord?) -> Bool {
         guard let task else { return false }
         return (updatedAt == nil || task.updatedAt == updatedAt) && task.serverRevision == serverRevision
+    }
+}
+
+/// FR-011: the task as a decision card or form showed it. A person's
+/// decision on a task that changed since is stale: the task itself or its
+/// children. The task is compared by what a person sees (`visible`): its
+/// revision, write instants and other server-set fields are left out, so an
+/// acknowledgement of an edit that was queued before the card opened is not a
+/// change. Child edits leave the parent untouched, on the device
+/// (`Reducer+Children`) and on the server (a
+/// subtask or comment has its own revision), so the children are compared
+/// by what a person sees: ids, subtask title, state and order, comment body.
+/// Server ids, revisions, authors and server-set times are left out, so an
+/// acknowledgement that changes nothing visible is not a change. Before the
+/// task's detail was read (a pulled task, `childrenSyncedAt == nil`) the
+/// device may hold only some children: then the children the card showed
+/// must be unchanged (present, same title, state and relative order, same
+/// comment body), and children it did not show (the ones hydration fills in)
+/// are not a change. Every child edit made on this device since the card
+/// opened is a change whatever its acknowledgement state: the device's
+/// child-edit count (`GTDState.localChildEdits`) must be what the card saw.
+/// A child another device created before this one hydrated the task cannot
+/// be told from one that already existed. Never encoded or stored.
+public struct ShownTask: Hashable, Sendable {
+    /// The task as a person sees it (`visible`).
+    public var content: TaskRecord
+    /// The device held every child when the card opened: the task's detail
+    /// was read (`childrenSyncedAt`), or the server has not seen the task
+    /// yet, so all of its children are on the device.
+    public var childrenKnown: Bool
+    public var subtasks: [SubtaskRecord]
+    public var comments: [CommentRecord]
+    /// This device's child edits on the task when the card opened
+    /// (`GTDState.localChildEdits`).
+    public var localChildEdits: Int
+
+    public init(_ task: TaskRecord, localChildEdits: Int = 0) {
+        self.localChildEdits = localChildEdits
+        content = Self.visible(task)
+        childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
+        subtasks = Self.visible(task.subtasks)
+        comments = Self.visible(task.comments)
+    }
+
+    /// `localChildEdits`: this device's child edits on the task now, nil when
+    /// not tracked.
+    public func matches(_ task: TaskRecord?, localChildEdits current: Int?) -> Bool {
+        if let current, current != localChildEdits { return false }
+        return matches(task)
+    }
+
+    public func matches(_ task: TaskRecord?) -> Bool {
+        guard let task, content == Self.visible(task) else { return false }
+        let currentSubtasks = Self.visible(task.subtasks)
+        let currentComments = Self.visible(task.comments)
+        if childrenKnown { return currentSubtasks == subtasks && currentComments == comments }
+        // Before full hydration: every child the card did show must still be
+        // there as shown (a missing one was deleted elsewhere: hydration
+        // drops a cached child only when the server no longer lists it).
+        // Children it did not show are what hydration or a sync brought in;
+        // this device's own child edits are caught by the child-edit count.
+        let byID = Dictionary(currentSubtasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for shown in subtasks {
+            guard let current = byID[shown.id], current.title == shown.title, current.state == shown.state else {
+                return false
+            }
+        }
+        let shownOrder = subtasks.sorted { ($0.orderKey, $0.id.rawValue) < ($1.orderKey, $1.id.rawValue) }.map(\.id)
+        let currentOrder = subtasks.compactMap { byID[$0.id] }
+            .sorted { ($0.orderKey, $0.id.rawValue) < ($1.orderKey, $1.id.rawValue) }.map(\.id)
+        guard shownOrder == currentOrder else { return false }
+        let commentsByID = Dictionary(currentComments.map { ($0.id, $0.body) }, uniquingKeysWith: { first, _ in first })
+        return comments.allSatisfy { commentsByID[$0.id] == $0.body }
+    }
+
+    /// The task without its ids, revision, server-set instants and order key,
+    /// and without the children (compared on their own).
+    static func visible(_ task: TaskRecord) -> TaskRecord {
+        var visible = task
+        visible.serverID = nil
+        visible.serverRevision = nil
+        visible.waitingSince = nil
+        visible.completedAt = nil
+        visible.cancelledAt = nil
+        visible.orderKey = 0
+        visible.createdAt = .distantPast
+        visible.updatedAt = .distantPast
+        visible.subtasks = []
+        visible.comments = []
+        visible.childrenSyncedAt = nil
+        return visible
+    }
+
+    static func visible(_ subtasks: [SubtaskRecord]) -> [SubtaskRecord] {
+        subtasks.map { subtask in
+            var visible = subtask
+            visible.serverID = nil
+            visible.serverRevision = nil
+            return visible
+        }
+        .sorted { $0.id.rawValue < $1.id.rawValue }
+    }
+
+    static func visible(_ comments: [CommentRecord]) -> [CommentRecord] {
+        comments.map { comment in
+            var visible = comment
+            visible.serverID = nil
+            visible.serverRevision = nil
+            visible.authorID = nil
+            // The server sets these on acknowledgement; an edit changes the body.
+            visible.createdAt = .distantPast
+            visible.editedAt = nil
+            return visible
+        }
+        .sorted { $0.id.rawValue < $1.id.rawValue }
     }
 }
 
@@ -707,6 +844,18 @@ public struct ReviewState: Hashable, Sendable, Codable {
     /// Set once `GET /review/state` was read: the server keeps the clocks, so
     /// a Next task it holds without one stays unclassified until it repairs it.
     public var server: ReviewServerFacts?
+    /// Account-less only: the build's weekly-review release switch
+    /// (`BBWeeklyReviewLocal`, ADR-0027), set by the workspace on every state
+    /// it builds; nil when signed in, where `server.exposed` (pulled,
+    /// persisted in the base, merged by every pull) decides. A device input,
+    /// never encoded: the build, not the store, decides it.
+    public var accountlessReleaseSwitch: Bool? = nil
+
+    /// Whether the weekly review is exposed on this device: signed in, the
+    /// account's `weekly_review` flag as the last gated read answered;
+    /// account-less, the release switch. While it is not, the reducer refuses
+    /// a person's review actions (`GTDReducer`, `.reviewUnavailable`).
+    public var isExposed: Bool { accountlessReleaseSwitch ?? (server?.exposed == true) }
 
     public init(
         settings: ReviewSettings = ReviewSettings(), sessions: [ReviewSessionID: ReviewSession] = [:],

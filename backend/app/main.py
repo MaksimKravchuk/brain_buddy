@@ -77,8 +77,9 @@ def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]
 def _run_review_maintenance_sweep(container: Container) -> ReviewSweepResult | None:
     """One weekly-review sweep run (spec 020, contracts/http.md §9).
 
-    Retention for every owner with review rows whatever the flag state, then
-    the exposure part (sweep-gap floor, clock repair, auto-park) for activated
+    Retention (idempotency records past 24 h, 7-day snapshots, idle runs,
+    35-day usage rows) for every owner with review rows or an expired
+    idempotency record, whatever the flag state, then the exposure part (sweep-gap floor, clock repair, auto-park) for activated
     owners whose ``weekly_review`` flag is effective. Runs from the privacy
     maintenance loop and, through it, from the startup sweep. A failure is
     logged as the exception type only: the message could carry task content.
@@ -258,7 +259,7 @@ def create_app() -> FastAPI:
         redoc_url=f"{config.api_prefix}/redoc",
     )
     app.state.config = config
-    app.state.container = build_container(config)
+    app.state.container = build_container(config, serve_navigator=True)
     _maybe_seed_admin(app.state.container)
     # Retry-safe startup scan: recover any provider lease that expired while
     # no process was running, then purge whatever raw audio/working

@@ -21,6 +21,7 @@
     "src/api/client.ts",
     "src/api/taskHooks.ts",
     "src/features/brain-dump/brainDumpNavigation.ts",
+    "src/features/review/formulation.ts",
     "src/features/tasks/smartAdd.ts",
     "src/stores/authStore.ts",
     "src/utils/error.ts",

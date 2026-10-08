@@ -63,10 +63,36 @@ struct SyncEnginePullTests {
         #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
         let base = try await device.document().base
         #expect(Set(base.tasks.keys) == ["x"])
-        #expect(base.projects["p"]?.state == .archived, "a known project missing from the active list is fetched")
-        #expect(base.tasks["x"]?.projectID == nil)
+        #expect(base.projects["p"]?.state == .archived, "a known archived project comes with the listing")
+        #expect(base.tasks["x"]?.projectID == "p", "an archive keeps the membership (ADR-0020)")
         #expect(base.tasks["x"]?.tagIDs == ["t"])
         #expect(base.tasks["x"]?.serverRevision == harness.snapshot.tasks.values.first?.revision)
+    }
+
+    @Test("021-FR-024 021-FR-026 the pull lists projects with ?state=all, not one request per archived project; deleted tags are still fetched by id")
+    func pullListsEveryProjectAtOnce() async throws {
+        let harness = SyncHarness()
+        let a = await harness.device()
+        try await a.signIn()
+        try await a.apply(.createProject(.init(projectID: "p", name: "Garden")))
+        try await a.apply(.createTag(.init(tagID: "t", name: "outside")))
+        try await a.apply(.createTask(.init(taskID: "x", title: "Plant tulips", list: .next, projectID: "p", tagIDs: ["t"])))
+        await a.sync()
+        let b = await harness.device()
+        try await b.signIn()
+        try await a.apply(.archiveProject("p"))
+        try await a.apply(.deleteTag("t"))
+        await a.sync()
+
+        harness.clock.advance(by: 120)
+        b.transport.clearLog()
+        await b.sync()
+        let routes = b.transport.requests.map(\.route)
+        #expect(routes.filter { $0.hasPrefix("GET /projects") } == ["GET /projects"], "one listing, no GET by id")
+        #expect(b.transport.requests.first { $0.route == "GET /projects" }?.url.query == "state=all")
+        #expect(routes.contains { $0.hasPrefix("GET /tags/tag_") }, "the tag endpoint has no filter")
+        let base = try await b.document().base
+        #expect(base.project(named: "Garden")?.state == .archived && base.tag(named: "outside")?.state == .deleted)
     }
 
     @Test("Signing in with local-only data pulls first, merges projects and tags by name, and uploads the rest")

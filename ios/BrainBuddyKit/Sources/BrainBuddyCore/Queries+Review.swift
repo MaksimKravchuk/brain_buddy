@@ -46,6 +46,34 @@ public struct DueDay: Hashable, Sendable {
     public var tasks: [TaskRecord]
 }
 
+/// Why a parked task cannot return to Next (M-09).
+public enum ParkReturnProblem: Hashable, Sendable {
+    /// No longer parked in Someday: it was moved or returned elsewhere.
+    case changedElsewhere
+    /// Its project is archived; restore the project first.
+    case projectArchived(name: String)
+}
+
+/// M-16 (FR-034, FR-050, SC-002): where the decision step stands.
+public enum DecisionStepOutcome: Hashable, Sendable {
+    /// The card to show: `position` of `total` in the run's queue.
+    case card(TaskID, position: Int, total: Int)
+    /// Nothing asked for a decision.
+    case nothingAsks
+    /// Every card is decided; `keptWording` of them ("Save anyway") still ask.
+    case allDecided(Int, keptWording: Int)
+    /// "Not now" was used: `stillAsking` of the queue wait for a decision.
+    case someLeft(decided: Int, total: Int, stillAsking: Int)
+}
+
+/// M-11: a neutral line about an earlier review above Quick and Full.
+public enum ReviewEntryNotice: Hashable, Sendable {
+    /// A review of `origin` was closed when a newer one synced (FR-029).
+    case replacedElsewhere(origin: ReviewOrigin, decisions: Int)
+    /// The 7-day idle rule closed the review started at `startedAt`.
+    case closedAfterAWeek(startedAt: Date, decisions: Int)
+}
+
 /// The pure review-flow rules, run against `review_flow_vectors.json` like
 /// `backend/app/modules/tasks/review_rules.py`.
 public enum ReviewRules {
@@ -184,6 +212,21 @@ extension GTDQueries {
         .sorted { ($0.parked!.at, $0.id) < ($1.parked!.at, $1.id) }
     }
 
+    /// The acknowledgement of each unseen park, in `unseenParks` order: what
+    /// "While you were away" lists and may later acknowledge.
+    public static func unseenParkAcks(in state: GTDState) -> [ParkAck] {
+        unseenParks(in: state).compactMap { task in
+            task.parked.map { ParkAck(taskID: task.id, formulationID: $0.formulationID, parkedAt: $0.at) }
+        }
+    }
+
+    /// FR-015: what Continue on "While you were away" acknowledges: of the
+    /// parks the sheet `shown`, those still unseen as the same park.
+    public static func whileAwayAcknowledgements(shown: [ParkAck], in state: GTDState) -> [ParkAck] {
+        let unseen = Set(unseenParkAcks(in: state))
+        return shown.filter { unseen.contains($0) }
+    }
+
     /// FR-017: Next tasks at least 28 days into their formulation, not paused.
     public static func restartCandidates(in state: GTDState, now: Date, timeZone: String? = nil) -> [TaskRecord] {
         let settings = clockSettings(state, timeZone: timeZone)
@@ -249,6 +292,112 @@ extension GTDQueries {
     public static func lastCountedReview(in state: GTDState) -> Date? {
         [ReviewSession.lastCountedReviewAt(state.review.sessions.values), state.review.server?.lastCountedReviewAt]
             .compactMap { $0 }.max()
+    }
+
+    /// FR-005: the card's third-stall offer, evaluated as the classification is.
+    public static func isThirdStall(_ task: TaskRecord, now: Date, settings: ReviewSettings, timeZone: String? = nil) -> Bool {
+        let clock = settings.clockSettings(timeZone: timeZone)
+        return FormulationRule.isThirdStall(GTDReducer.evaluationView(task, settings: clock), settings: clock, now: now)
+    }
+
+    /// FR-009: the instants "Keep 7 more days" would give if chosen at `now`
+    /// (M-04 "Asks again on …", "Keep until …"); nil when it is not allowed.
+    public static func extensionInstants(
+        of task: TaskRecord, now: Date, settings: ReviewSettings, timeZone: String? = nil
+    ) -> DerivedInstants? {
+        let clock = settings.clockSettings(timeZone: timeZone)
+        let view = GTDReducer.evaluationView(task, settings: clock)
+        guard let extended = try? FormulationRule.extend(view, reason: "", settings: clock, now: now) else { return nil }
+        return FormulationRule.derivedInstants(of: extended, settings: clock)
+    }
+
+    /// FR-012 (M-02 "after N days in Next"): whole days from the parked
+    /// wording's start to the park, from the clock the park stored. A park
+    /// pulled from the server carries no clock (http §3 `parked`): nil, so
+    /// the copy says no number rather than a guessed one.
+    public static func parkedAfterDays(_ task: TaskRecord) -> Int? {
+        guard let marker = task.parked, let started = marker.clockBefore?.startedAt else { return nil }
+        return max(0, Int((marker.at.timeIntervalSince(started) / FormulationRule.day).rounded(.down)))
+    }
+
+    /// FR-015 (M-09 "Return to Next"): why a park cannot go back to Next
+    /// now, or nil. A task no longer parked in Someday changed elsewhere; a
+    /// park in an archived project needs the project restored first (spec
+    /// edge case "Task in an archived project"; http.md `project_archived`).
+    /// With `shown` (the park M-09 listed), a later park of the same task (a
+    /// repeat park after an Undo, a park synced in) is not the one shown: it
+    /// changed elsewhere, so the row never acts on a park it did not show.
+    public static func parkReturnProblem(of id: TaskID, shown: ParkAck? = nil, in state: GTDState) -> ParkReturnProblem? {
+        guard let task = state.tasks[id], task.state == .someday, let marker = task.parked else { return .changedElsewhere }
+        if let shown, shown.taskID != id || shown.formulationID != marker.formulationID || shown.parkedAt != marker.at {
+            return .changedElsewhere
+        }
+        if let projectID = task.projectID, let project = state.projects[projectID], project.state != .active {
+            return .projectArchived(name: project.name)
+        }
+        return nil
+    }
+
+    /// The decision step (M-16) for `session`: its queue is the snapshot taken
+    /// when the step opened. The card is the first task not decided, not set
+    /// aside with "Not now" and still asking; a decision of this run counts
+    /// even when the task still asks afterwards (a cosmetic save, FR-002).
+    public static func decisionStep(
+        in state: GTDState, session: ReviewSession, now: Date, timeZone: String? = nil
+    ) -> DecisionStepOutcome {
+        let queue = session.decisionQueue ?? decisionQueue(in: state, now: now, timeZone: timeZone).map(\.id)
+        let decided = Set(state.review.decisions.values.filter { $0.sessionID == session.id }.map(\.taskID))
+        let aside = Set(session.setAsideTaskIDs)
+        func asks(_ id: TaskID) -> Bool {
+            guard let task = state.tasks[id] else { return false }
+            return formulationClass(of: task, now: now, settings: state.review.settings, timeZone: timeZone).asksForDecision
+        }
+        if let current = queue.first(where: { !decided.contains($0) && !aside.contains($0) && asks($0) }) {
+            return .card(current, position: (queue.firstIndex(of: current) ?? 0) + 1, total: queue.count)
+        }
+        let decidedCount = queue.filter(decided.contains).count
+        let kept = queue.filter { decided.contains($0) && asks($0) }.count
+        let left = queue.filter { aside.contains($0) && !decided.contains($0) && asks($0) }.count
+        if left > 0 { return .someLeft(decided: decidedCount, total: queue.count, stillAsking: left + kept) }
+        return decidedCount == 0 ? .nothingAsks : .allDecided(decidedCount, keptWording: kept)
+    }
+
+    /// FR-017: restart releases the person can still undo: not undone, and no
+    /// review started since ("Start the review" is moving on).
+    public static func openRestartReleases(in state: GTDState) -> [BulkReleaseRecord] {
+        let lastStart = state.review.sessions.values.map(\.startedAt).max()
+        return state.review.bulkReleases.values.filter { record in
+            record.kind == .restart && record.undoneAt == nil && !record.released.isEmpty
+                && (lastStart.map { $0 < record.createdAt } ?? true)
+        }
+        .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
+    }
+
+    /// FR-030: the Inbox-remainder releases of `session` the person can still
+    /// undo: not undone, and the Inbox step is not left yet.
+    public static func openInboxReleases(in state: GTDState, session: ReviewSession) -> [BulkReleaseRecord] {
+        guard (session.steps[.inbox] ?? .pending) == .pending else { return [] }
+        return state.review.bulkReleases.values.filter { record in
+            record.kind == .inboxRemainder && record.sessionID == session.id && record.undoneAt == nil
+                && !record.released.isEmpty
+        }
+        .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
+    }
+
+    /// Whole local days since the last counted review (FR-038), nil when there is none.
+    public static func daysSinceLastReview(in state: GTDState, today: CalendarDay, calendar: Calendar = .current) -> Int? {
+        lastCountedReview(in: state).map { max(0, CalendarDay(date: $0, calendar: calendar).days(to: today)) }
+    }
+
+    /// M-11: the latest ended review, when another device ended it or the
+    /// idle rule closed it.
+    public static func entryNotice(in state: GTDState) -> ReviewEntryNotice? {
+        let ended = state.review.sessions.values.filter { $0.status != .open }
+        guard let latest = ended.max(by: { ($0.endedAt ?? $0.startedAt, $0.id) < ($1.endedAt ?? $1.startedAt, $1.id) })
+        else { return nil }
+        if latest.endedElsewhere { return .replacedElsewhere(origin: latest.origin, decisions: latest.decisionCount) }
+        if latest.closedForIdleness { return .closedAfterAWeek(startedAt: latest.startedAt, decisions: latest.decisionCount) }
+        return nil
     }
 
     /// FR-051: the explainer is shown until an activation instant is known or

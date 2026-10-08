@@ -51,6 +51,14 @@ enum FieldRules {
         return value
     }
 
+    /// A project's desired outcome: at most 1,000 characters as sent, then trimmed; blank is nil.
+    static func outcome(_ raw: String?) throws(GTDValidationError) -> String? {
+        guard let raw else { return nil }
+        guard length(raw) <= GTDLimits.outcome else { throw .outcomeTooLong }
+        let value = NameNormalizer.stripped(raw)
+        return value.isEmpty ? nil : value
+    }
+
     static func color(_ raw: String?) throws(GTDValidationError) -> String? {
         if let raw, length(raw) > GTDLimits.color { throw .colorTooLong }
         return raw
@@ -75,10 +83,13 @@ extension GTDReducer {
     }
 
     /// `TaskService._assert_active_references` for the references a command sets.
-    static func checkReferences(project: ProjectID?, tags: [TagID]?, in state: GTDState) throws(GTDValidationError) {
+    /// `current` is the project the task is in: it may stay archived (ADR-0020).
+    static func checkReferences(
+        project: ProjectID?, tags: [TagID]?, in state: GTDState, current: ProjectID? = nil
+    ) throws(GTDValidationError) {
         if let project {
             guard let record = state.projects[project] else { throw .projectNotFound }
-            guard record.state == .active else { throw .projectNotActive }
+            guard record.state == .active || project == current else { throw .projectNotActive }
         }
         guard let tags else { return }
         guard Set(tags).count == tags.count else { throw .duplicateTag }

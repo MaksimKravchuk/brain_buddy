@@ -110,6 +110,18 @@ extension SyncEngine {
             }
             let old = doc.base
             doc.apply(record, answering: operation, now: date)
+            // An archive that answers like a server older than ADR-0020 (it cleared the tasks'
+            // project, or left no archive time): say so, before the next pull strips the memberships.
+            if case .archiveProject = operation.command, case .project(let project) = record,
+                project.archivedBeforeLossless || project.archivedAt == nil
+            {
+                doc.issues.append(
+                    SyncIssue(
+                        command: operation.command, message: SyncIssueDescriber.serverStillClears(project: project.name),
+                        occurredAt: date
+                    )
+                )
+            }
             doc.sync.lastPushAt = date
             doc.sync.lastFailure = nil
             doc.rotateKeys(comparedTo: old)
@@ -154,6 +166,12 @@ extension SyncEngine {
             summary.needsPull =
                 try await refetch(after: operation, referenceID: error.referenceID, context) || summary.needsPull
             summary.changed = true
+        case .duplicateName where operation.command.isUnarchive:
+            // The record exists; only its activation is refused. Revert it now and keep what was queued
+            // behind it out of the project, rather than one 400 issue per task.
+            try await revertUnarchive(operation, error, context)
+            summary.changed = true
+            summary.needsPull = true
         case .duplicateName where rounds <= 2 && operation.command.isNamedCreate:
             try await adoptExisting(for: operation, error, context)
             summary.changed = true
@@ -177,6 +195,10 @@ extension SyncEngine {
             let message =
                 if case .decideTask(let decide) = operation.command, let task = base.tasks[decide.taskID] {
                     ReviewCopy.decisionNotSaved(decide.type, title: task.title, list: task.state)
+                } else if case .notFound = error.kind, case .updateTask(let update) = operation.command,
+                    let task = base.tasks[update.taskID]
+                {
+                    SyncIssueDescriber.deletedElsewhere(task: task.title)
                 } else {
                     error.message
                 }
@@ -203,8 +225,6 @@ extension SyncEngine {
         }
     }
 
-    static let keptRejectingMessage = "The server kept rejecting this change."
-
     /// Counts a server-side failure of the operation at the front. After
     /// `rejectionLimit` in a row, or at least two in a row once it has been
     /// failing for `rejectionAge`, it is set aside as a sync issue so the
@@ -222,7 +242,10 @@ extension SyncEngine {
         guard streak.count >= configuration.rejectionLimit || (streak.count >= 2 && failingFor >= configuration.rejectionAge)
         else { return false }
         rejectionStreak = nil
-        try await setAside(operation, message: Self.keptRejectingMessage, referenceID: error.referenceID, context)
+        try await setAside(
+            operation, message: SyncIssueDescriber.keptRejecting(operation.command), referenceID: error.referenceID,
+            context
+        )
         return true
     }
 
@@ -399,10 +422,45 @@ extension SyncEngine {
         doc.outbox[index].rotateKey()
     }
 
+    /// 409 duplicate name on an unarchive: another active project has the name. The project stays
+    /// archived (the refused operation leaves the outbox, so the replay shows it at once), the tasks
+    /// queued behind it that would join it are kept without it, under their own keys when they
+    /// were sent, and one sync issue says how many.
+    private func revertUnarchive(_ operation: PendingOperation, _ error: APIError, _ context: CycleContext) async throws {
+        guard case .unarchiveProject(let id) = operation.command else { return }
+        let date = now()
+        try await update(context) { doc in
+            guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
+            let queued = Array(doc.outbox[(index + 1)...])
+            let (rewritten, affected) = OutboxReplayer.withoutAssignments(to: id, in: queued)
+            let rest = rewritten.map { queuedOperation -> PendingOperation in
+                var changed = queuedOperation
+                if changed.hasBeenSent, queued.first(where: { $0.id == changed.id })?.command != changed.command {
+                    changed.rotateKey()
+                }
+                return changed
+            }
+            doc.outbox.replaceSubrange(index..., with: rest)
+            let name = doc.base.projects[id]?.name ?? ""
+            doc.issues.append(
+                SyncIssue(
+                    command: operation.command, message: SyncIssueDescriber.unarchiveNameInUse(name, keptWithoutProject: affected),
+                    referenceID: error.referenceID, occurredAt: date
+                )
+            )
+            doc.replayOutbox(now: date)
+        }
+    }
+
     /// 409 duplicate name on a project or tag create: the server already has
     /// an active record with this name (made elsewhere since the last pull).
     /// Adopt it: it enters the base, the outbox is rewritten from the local
-    /// id to it, and the create is dropped.
+    /// id to it, and the create is dropped. The rewrite is the one a replay
+    /// merge makes (`OutboxReplayer.rewritingAfterMerge`): task references
+    /// follow the adopted record, but a rename, recolour, archive or delete of
+    /// the local record never reaches the account's record (none of those can
+    /// have been sent, because they queue behind the refused create); an
+    /// archive, and an outcome the adopted project keeps instead, become issues.
     private func adoptExisting(for operation: PendingOperation, _ error: APIError, _ context: CycleContext) async throws {
         let date = now()
         switch operation.command {
@@ -414,7 +472,16 @@ extension SyncEngine {
                     guard doc.outbox.contains(where: { $0.id == operation.id }) else { return }
                     let survivor = doc.upsert(project: match, now: date)
                     doc.outbox.removeAll { $0.id == operation.id }
-                    doc.outbox = Self.rewritingOutbox(doc.outbox, adopting: .project(create.projectID, into: survivor))
+                    if let record = doc.base.projects[survivor] {
+                        let merge = OutboxReplayer.rewritingAfterMerge(
+                            doc.outbox, project: create.projectID, into: record, outcome: create.desiredOutcome,
+                            issuedAt: operation.issuedAt
+                        )
+                        doc.outbox = merge.outbox
+                        doc.issues += merge.rejected.map {
+                            SyncIssue(command: $0.operation.command, message: $0.error.message, occurredAt: date)
+                        }
+                    }
                     doc.replayOutbox(now: date)
                 }
                 return
@@ -427,7 +494,7 @@ extension SyncEngine {
                     guard doc.outbox.contains(where: { $0.id == operation.id }) else { return }
                     let survivor = doc.upsert(tag: match, now: date)
                     doc.outbox.removeAll { $0.id == operation.id }
-                    doc.outbox = Self.rewritingOutbox(doc.outbox, adopting: .tag(create.tagID, into: survivor))
+                    doc.outbox = OutboxReplayer.rewritingAfterMerge(doc.outbox, tag: create.tagID, into: survivor)
                     doc.replayOutbox(now: date)
                 }
                 return
@@ -441,26 +508,6 @@ extension SyncEngine {
         try await update(context) { doc in
             guard let index = doc.outbox.firstIndex(where: { $0.id == operation.id }) else { return }
             doc.outbox[index].rotateKey()
-        }
-    }
-
-    /// A local project or tag create that a 409 merged into the server's record.
-    enum Adoption {
-        case project(ProjectID, into: ProjectID)
-        case tag(TagID, into: TagID)
-    }
-
-    /// The queued operations after an adoption, rewritten exactly as a replay
-    /// merge rewrites them (`OutboxReplayer.rewritingAfterMerge`): task
-    /// references follow the adopted record, but a rename, recolour, archive
-    /// or delete of the local record never reaches the account's record. None
-    /// of those can have been sent, because they queue behind the refused create.
-    private static func rewritingOutbox(_ outbox: [PendingOperation], adopting adoption: Adoption) -> [PendingOperation] {
-        switch adoption {
-        case .project(let local, let survivor):
-            OutboxReplayer.rewritingAfterMerge(outbox, project: local, into: survivor)
-        case .tag(let local, let survivor):
-            OutboxReplayer.rewritingAfterMerge(outbox, tag: local, into: survivor)
         }
     }
 }
@@ -490,6 +537,10 @@ extension GTDCommand {
         case .createProject, .createTag: true
         default: false
         }
+    }
+
+    var isUnarchive: Bool {
+        if case .unarchiveProject = self { true } else { false }
     }
 
     var isUndoDecision: Bool {

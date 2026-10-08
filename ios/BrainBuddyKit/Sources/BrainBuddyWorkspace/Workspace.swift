@@ -77,6 +77,10 @@ public final class Workspace {
     @ObservationIgnored var networkIsAvailable = true
     /// The account-less release switch (`BBWeeklyReviewLocal`, ios-commands §8).
     @ObservationIgnored public var accountlessReviewEnabled = false
+    /// This device's child edits per task since launch (`GTDState.localChildEdits`):
+    /// only grows, so acknowledgement, compaction and replay never move it.
+    /// In memory only: no decision card stays open across a relaunch.
+    @ObservationIgnored var localChildEdits: [TaskID: Int] = [:]
     /// The device's current zone (`TimeZone.current`; tests inject one).
     @ObservationIgnored public var deviceTimeZone: @Sendable () -> TimeZone = { TimeZone.current }
     /// Issues the user dismissed that are not removed on disk yet.
@@ -327,10 +331,27 @@ public final class Workspace {
         try perform(.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear)))
     }
 
-    /// Archives a project. Like the server today, this removes the project
-    /// from all of its tasks; the tasks stay in their lists. There is no unarchive.
+    /// Archives a project. Every task keeps it and stays in its list (ADR-0020).
     public func archiveProject(_ id: ProjectID) throws(GTDValidationError) {
         try perform(.archiveProject(id))
+    }
+
+    /// Makes an archived project active again; refused while another active project has its name.
+    public func unarchiveProject(_ id: ProjectID) throws(GTDValidationError) {
+        try perform(.unarchiveProject(project: id))
+    }
+
+    /// Sets (or, with nil or blank, clears) a project's desired outcome, archived or not.
+    public func setProjectOutcome(_ id: ProjectID, outcome: String?) throws(GTDValidationError) {
+        try perform(.setProjectOutcome(project: id, outcome: outcome))
+    }
+
+    /// Applies `commands` in order as one change: all of them are validated on a scratch state and
+    /// queued together, or none is and the reason is thrown. For flows that are several commands
+    /// to the person (clarify an Inbox item as a project, follow up a Waiting item). The server still
+    /// receives one request per command, in order.
+    public func apply(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        try perform(commands)
     }
 
     @discardableResult
@@ -555,9 +576,19 @@ extension Workspace {
         let commands =
             reviewExposed ? commands.map { Self.stampingFormulationID($0) { FormulationID.make(makeID()) } } : commands
         var next = state
+        // The device's exposure input for Core's review rules (the reducer
+        // refuses a person's review actions while it is hidden); never kept
+        // in `state` or stored.
+        next.review.accountlessReleaseSwitch = accountlessReleaseSwitch
+        // This device's child-edit counts (FR-011): Core counts and compares
+        // them during the apply; they live here, not in `state`.
+        next.localChildEdits = localChildEdits
         for command in commands {
             try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
         }
+        next.review.accountlessReleaseSwitch = nil
+        localChildEdits = next.localChildEdits ?? localChildEdits
+        next.localChildEdits = nil
         ReviewActivation.apply(
             to: &next, activatedAt: next.review.settings.activatedAt ?? local.activatedAt,
             startsMissingClocks: next.review.server == nil
@@ -820,6 +851,7 @@ extension Workspace {
         unpersisted = []
         pendingDismissals = []
         pendingEdits = []
+        localChildEdits = [:]
         deferredDocument = nil
         document = StoreDocument()
         syncStartedFor = nil

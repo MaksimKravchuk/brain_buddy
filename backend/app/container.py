@@ -10,12 +10,17 @@ from functools import partial
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
+from app.ai.review_navigator import (
+    DisabledNavigatorProvider,
+    build_review_navigator_provider,
+)
 from app.ai.title_completion import build_title_completion_provider
 from app.core.config import (
     AppConfig,
     AppEnvironment,
     VoiceProviderSettings,
 )
+from app.core.rate_limit import navigator_rate_limiter
 from app.modules.agents.a2a.card import fetch_card
 from app.modules.agents.a2a.client import A2AClient
 from app.modules.agents.observer import AgentObserver
@@ -33,6 +38,11 @@ from app.modules.agents.service import (
 )
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
+from app.modules.tasks.navigator import (
+    NavigatorLimits,
+    NavigatorProvider,
+    NavigatorService,
+)
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
 from app.repositories import (
@@ -125,6 +135,7 @@ class Container:
     cli_auth_service: CliAuthService
     review_service: ReviewService
     review_flow_service: ReviewFlowService
+    navigator_service: NavigatorService
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -288,6 +299,25 @@ def _build_text_reconciler(config: AppConfig) -> TextReconcilerPort:
     return DisabledTextReconciler()
 
 
+def _build_review_navigator_provider(config: AppConfig) -> NavigatorProvider:
+    """The weekly-review navigator provider, or raise (spec 020, research R13).
+
+    Deliberately unlike the title-completion, STT and reconciler builders
+    above, which degrade to a disabled provider: ``openai`` without the key
+    named by ``…_API_KEY_ENV``, ``deterministic`` outside TEST and an unknown
+    provider raise here, so a misconfigured deploy fails its health check
+    instead of serving a silently broken navigator. Only an explicit
+    ``disabled`` builds without one. Key rotation therefore follows the
+    ``.env.example`` runbook (provider ``disabled`` first).
+    """
+
+    return build_review_navigator_provider(
+        config.review_navigator,
+        environment=config.environment,
+        environ=os.environ,
+    )
+
+
 def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
     """The provider categories consent may name, per configuration.
 
@@ -317,7 +347,24 @@ def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
     return frozenset(allowed)
 
 
-def build_container(config: AppConfig) -> Container:
+def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Container:
+    """Wire every service for one process.
+
+    Only the web app (``app.main.create_app``) passes ``serve_navigator=True``:
+    it alone serves the navigator, so it alone builds the configured provider
+    and refuses to start when that is misconfigured. The operational CLI, the
+    GDPR purge included, builds with the navigator disabled and never reads
+    its key (account management must always run).
+    """
+
+    # First, before any store is opened: a misconfigured navigator must stop
+    # the web app's build (research R13), naming the key variable and never
+    # its value.
+    review_navigator_provider = (
+        _build_review_navigator_provider(config)
+        if serve_navigator
+        else DisabledNavigatorProvider()
+    )
     data_root = config.data_dir
     auth_migration = AuthMigration(data_root, None)
     auth_migration.resume_cleanup()
@@ -432,6 +479,21 @@ def build_container(config: AppConfig) -> Container:
     )
     review_flow_service = ReviewFlowService(review_service)
     review_service.idle_session_closer = review_flow_service.close_idle_sessions
+    navigator_settings = config.review_navigator
+    navigator_service = NavigatorService(
+        task_repo,
+        provider=review_navigator_provider,
+        limits=NavigatorLimits(
+            max_input_tokens=navigator_settings.max_input_tokens,
+            max_output_tokens=navigator_settings.max_output_tokens,
+            max_cost_usd=navigator_settings.max_cost_usd,
+            max_daily_cost_usd=navigator_settings.max_daily_cost_usd,
+        ),
+        # Read through the task service, so ``frozen_clock`` drives the
+        # navigator's usage day too (research R21).
+        clock=lambda: task_service.clock(),
+        rate_limiter=navigator_rate_limiter,
+    )
 
     def _voice_enabled_for_owner(owner_id: str) -> bool:
         """Whether ``voice_brain_dump`` is effective for the operation's owner.
@@ -661,4 +723,5 @@ def build_container(config: AppConfig) -> Container:
         ),
         review_service=review_service,
         review_flow_service=review_flow_service,
+        navigator_service=navigator_service,
     )

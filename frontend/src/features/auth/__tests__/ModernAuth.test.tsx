@@ -23,10 +23,10 @@ describe("023-FR-001/003/008/009/010/022 configured choice and neutral code flow
   });
   it("requests one code with immediate busy state, actual expiry and no automatic resend", async () => {
     show();
-    await screen.findByRole("button", { name: "Continue with email" });
+    const emailButton = await screen.findByRole("button", { name: "Continue with email" });
     fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "unknown@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue with email" }));
-    expect(screen.getByRole("button", { name: "Please wait…" })).toBeDisabled();
+    fireEvent.click(emailButton);
+    expect(emailButton).toBeDisabled();
     const codeInput = await screen.findByLabelText("Email code");
     await waitFor(() => expect(codeInput).toHaveFocus());
     expect(modernAuthApi.requestEmail).toHaveBeenCalledTimes(1);

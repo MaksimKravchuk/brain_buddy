@@ -43,6 +43,10 @@ class ProjectDocument(StorageBaseModel):
     updated_at: datetime
     schema_version: int = Field(default=1, ge=1)
     revision: int = Field(default=1, ge=1)
+    # Spec 021 (data-model E1). All default, so stored payloads load unchanged.
+    desired_outcome: str | None = Field(default=None, max_length=1000)
+    archived_at: datetime | None = None
+    archived_before_lossless: bool = False
 
 
 class TagDocument(StorageBaseModel):

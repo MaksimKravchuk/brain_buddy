@@ -22,6 +22,7 @@ import type {
 } from "../../api/taskTypes";
 import { Button } from "../../components/ui/Button";
 import { getErrorMessage } from "../../utils/error";
+import { FormulationBlock } from "../review/FormulationBlock";
 import { rememberTaskAgentPreference } from "./taskAgentPreference";
 import type { AutosaveSnapshot, EditableField, TaskDetailAutosaveController } from "./taskDetailAutosave";
 
@@ -185,6 +186,7 @@ export function TaskDetailPanel({
           projects={projects}
           tags={tags}
           isTerminal={isTerminal}
+          headingRef={headingRef}
           onSave={onSave}
           onTransition={onTransition}
           onCreateSubtask={onCreateSubtask}
@@ -286,6 +288,7 @@ function TaskDetailBody({
   projects,
   tags,
   isTerminal,
+  headingRef,
   onSave,
   onTransition,
   onCreateSubtask,
@@ -301,6 +304,7 @@ function TaskDetailBody({
   projects: ProjectResponse[];
   tags: TagResponse[];
   isTerminal: boolean;
+  headingRef: RefObject<HTMLHeadingElement | null>;
   onSave: (task: TaskResponse, payload: TaskDetailSavePayload) => void;
   onTransition: (task: TaskResponse, action: "move" | "complete" | "reopen" | "cancel", toState?: OpenTaskState, waitingFor?: string) => void;
   onCreateSubtask: (task: TaskResponse, title: string, key: string) => void | Promise<unknown>;
@@ -400,6 +404,9 @@ function TaskDetailBody({
           }}
         />
       </div>
+
+      {/* Spec 020 D-06: the wording's age facts and "Decide", under the title. */}
+      <FormulationBlock task={task} projects={projects} headingRef={headingRef} />
 
       <AutosaveRecovery snapshot={autosaveSnapshot} controller={autosave} />
       <span className="pointer-events-none absolute">

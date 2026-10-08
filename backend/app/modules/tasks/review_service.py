@@ -23,9 +23,10 @@ from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from app.exceptions import ConflictError, IdempotencyConflictError, NotFoundError
+from app.schemas.common import StorageBaseModel
 from app.schemas.review import (
     AutoParkRequest,
     DecisionRequest,
@@ -39,7 +40,7 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import FormulationSettingsDocument, IdempotencyRecord, TaskDocument
-from .repository import TaskRepository
+from .repository import IDEMPOTENCY_RETENTION, TaskRepository
 from .review_domain import (
     REVIEW_COMMAND_PREFIXES,
     REVIEW_COUNTS_AS,
@@ -49,12 +50,14 @@ from .review_domain import (
     FormulationView,
     ParkAckKeyDocument,
     ParkAcknowledgeResultDocument,
+    ReviewBulkReleaseDocument,
     ReviewDecisionDocument,
     ReviewParkAckDocument,
     ReviewReceiptDocument,
     ReviewRequestError,
     ReviewSessionDocument,
     ReviewSettingsDocument,
+    SessionCountsDocument,
     UndoResultDocument,
     task_clock,
     with_clock,
@@ -62,6 +65,39 @@ from .review_domain import (
 from .service import TaskService, serialized_write
 
 logger = logging.getLogger("app.modules.tasks.review")
+
+
+# ------------------------------------------------- review-flow result records
+# Slice PR-11: the bodies the ``review_session:``, ``bulk_release:`` and
+# ``undo_bulk_release:`` idempotency records keep. They live here, beside their
+# reconcilers, because ``review_flow`` sits above this module (import-linter).
+class SessionResultDocument(StorageBaseModel):
+    """One run command's outcome (http §6): the run, and any run it replaced."""
+
+    session: ReviewSessionDocument
+    replaced: list[ReviewSessionDocument] = Field(default_factory=list)
+
+
+class BulkReleaseResultDocument(StorageBaseModel):
+    """One bulk release (data-model E7) with the tasks and receipts it wrote."""
+
+    release: ReviewBulkReleaseDocument
+    tasks: list[TaskDocument] = Field(default_factory=list)
+    receipts: list[ReviewReceiptDocument] = Field(default_factory=list)
+
+
+class BulkUndoResultDocument(StorageBaseModel):
+    """One bulk-release Undo: the record as undone and the restored tasks."""
+
+    release: ReviewBulkReleaseDocument
+    tasks: list[TaskDocument] = Field(default_factory=list)
+
+
+_FLOW_RESULTS: dict[str, type[StorageBaseModel]] = {
+    "review_session:": SessionResultDocument,
+    "bulk_release:": BulkReleaseResultDocument,
+    "undo_bulk_release:": BulkUndoResultDocument,
+}
 
 ACTIVATION_GRACE = formulation.ACTIVATION_GRACE
 WAITING_RECEIPT = timedelta(days=7)
@@ -697,40 +733,15 @@ class ReviewService:
     def _restored_task(
         self, snapshot: TaskDocument, current: TaskDocument, *, owner_id: str
     ) -> TaskDocument:
-        """formulation-clock §3 "decision undo": the snapshot, floors kept.
+        """formulation-clock §3 "decision undo": the shared pure restore applied
+        to the stored snapshot, so the server keeps one rule."""
 
-        The time-zone floor and the activation clamp are clock bookkeeping
-        written without a revision bump, so they can land after the decision
-        and still leave its Undo available. A task restored into Next keeps
-        ``max(snapshot floor, current floor)``, and a restored formulation that
-        started before ``activated_at`` gets the activation clamp.
-        """
-
-        if snapshot.state != "next":
-            return snapshot
-        restored = snapshot
-        floors = [
-            floor
-            for floor in (
-                snapshot.formulation_park_floor_at,
-                current.formulation_park_floor_at if current.state == "next" else None,
-            )
-            if floor is not None
-        ]
-        if floors:
-            restored = restored.model_copy(
-                update={"formulation_park_floor_at": max(floors)}
-            )
-        activated_at = self.settings_for(owner_id).activated_at
-        started = restored.formulation_started_at
-        if activated_at is not None and started is not None and started < activated_at:
-            clock = formulation.activate_clock(
-                task_clock(restored),
-                activated_at=activated_at,
-                formulation_id=generate_id("form"),
-            )
-            restored = with_clock(restored, clock)
-        return restored
+        restored = formulation.restore(
+            task_clock(current),
+            task_clock(snapshot),
+            settings=self.settings_for(owner_id).clock_settings(),
+        )
+        return with_clock(snapshot, restored)
 
     def _set_park_returned(
         self,
@@ -753,8 +764,13 @@ class ReviewService:
         decision: ReviewDecisionDocument,
         *,
         owner_id: str,
+        task_written: bool = False,
     ) -> None:
-        self.task_repo.save(result.task)
+        """Write an Undo; with ``task_written`` (a replay that found the task
+        already restored) only the rows after the task write, idempotently."""
+
+        if not task_written:
+            self.task_repo.save(result.task)
         parked = result.task.parked
         if result.task.state == "someday" and parked is not None:
             # Back in its park (e.g. Undo of return_to_next): the row reads as
@@ -772,7 +788,10 @@ class ReviewService:
                     owner_id, decision.task_id, undo.receipt_kind
                 )
         self.task_repo.delete_review_decision(owner_id, decision.id)
-        self._update_session(owner_id, decision, result.session_counts)
+        if task_written:
+            self._complete_session(owner_id, decision, result.session_counts, delta=-1)
+        else:
+            self._update_session(owner_id, decision, result.session_counts)
 
     # ------------------------------------------------------------- settings
     @serialized_write
@@ -1109,14 +1128,21 @@ class ReviewService:
         return result
 
     def run_review_retention(self, now: datetime) -> tuple[int, int]:
-        """Null 7-day snapshots, drop 35-day usage rows, close idle runs.
+        """Null 7-day snapshots, drop 35-day usage rows, close idle runs, and
+        purge idempotency records past their 24 h.
 
-        Runs for every owner holding review rows whatever the flag state, so a
-        rollback never suspends the bound (FR-043, research R15).
+        Runs for every owner holding review rows, or an expired idempotency
+        record, whatever the flag state, so a rollback never suspends the
+        bound and an owner who stops writing still loses the copies (FR-043,
+        research R15, docs/data-retention.md).
         """
 
+        owners = self.task_repo.review_owner_ids()
+        owners |= self.task_repo.idempotency_owner_ids(
+            created_before=now - IDEMPOTENCY_RETENTION
+        )
         nulled = closed = 0
-        for owner_id in sorted(self.task_repo.review_owner_ids()):
+        for owner_id in sorted(owners):
             try:
                 nulled += self._retain(owner_id, now)
                 closed += self.idle_session_closer(owner_id, now)
@@ -1142,6 +1168,9 @@ class ReviewService:
         ]
         nulled = 0
         with self.task_repo.command_lock(owner_id):
+            # The records hold whole result documents (titles, notes, an
+            # extension reason in ``clock_before``): they go at 24 h, not 7 d.
+            self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
             for decision_id in decisions:
                 decision = self.task_repo.get_review_decision(owner_id, decision_id)
                 if decision is not None and decision.undo is not None:
@@ -1355,9 +1384,19 @@ class ReviewService:
                 return
             current = self.tasks.get_task(parked.task.id, owner_id=owner_id)
             # Re-apply only while the task is still in Next at the revision the
-            # park was applied from; never over a restored task (http §4).
+            # park was applied from; never over a restored task (http §4). A
+            # task already at the parked revision lost only its park row.
             if current.state == "next" and current.revision == parked.from_revision:
                 self._write_park(parked)
+            elif _holds(current, parked.task):
+                ack = parked.ack
+                if (
+                    self.task_repo.get_park_ack(
+                        owner_id, ack.task_id, ack.formulation_id
+                    )
+                    is None
+                ):
+                    self.task_repo.save_park_ack(ack)
         elif command.startswith("explainer_ack:"):
             stored = ReviewSettingsDocument.model_validate(record.response_body)
             if stored.activated_at is not None and (
@@ -1373,9 +1412,124 @@ class ReviewService:
                 ParkAcknowledgeResultDocument.model_validate(record.response_body),
                 owner_id=owner_id,
             )
-        # ``bulk_release:``, ``undo_bulk_release:`` and ``review_session:``
-        # belong to the review flow (slice PR-11); until it lands no such
-        # record is written, and a stray one is left alone.
+        else:
+            # ``navigator_consent_grant:`` and ``navigator_consent_revoke:``
+            # are not flow results, so they fall through untouched: each is
+            # committed in the same transaction as its consent change, and
+            # re-applying an old grant (or revoke) is exactly the reversal of
+            # a newer privacy choice its record exists to stop.
+            self._apply_flow_record(record, owner_id=owner_id)
+
+    def _apply_flow_record(self, record: IdempotencyRecord, *, owner_id: str) -> None:
+        """The review-flow reconcilers (slice PR-11): runs and bulk releases.
+
+        A body that does not read as its result document (a stray record) is
+        left alone and logged by type only, never by its text.
+        """
+
+        prefix = next((p for p in _FLOW_RESULTS if record.command.startswith(p)), None)
+        if prefix is None:
+            return
+        try:
+            result = _FLOW_RESULTS[prefix].model_validate(record.response_body)
+        except ValidationError as exc:
+            logger.warning(
+                "review_reconcile_skipped owner_id=%s command=%s error=%s",
+                owner_id,
+                prefix.rstrip(":"),
+                type(exc).__name__,
+            )
+            return
+        if isinstance(result, SessionResultDocument):
+            self.write_sessions(result, owner_id=owner_id)
+        elif isinstance(result, BulkReleaseResultDocument):
+            self.write_bulk_release(result, owner_id=owner_id)
+        elif isinstance(result, BulkUndoResultDocument):
+            self.write_bulk_undo(result, owner_id=owner_id)
+
+    # ------------------------------------------------------- review-flow writes
+    def write_sessions(self, result: SessionResultDocument, *, owner_id: str) -> None:
+        """Persist a run command's sessions; also the ``review_session:`` repair.
+
+        A stored session at the same or a later revision already holds this
+        write (or a later one), so it is never overwritten.
+        """
+
+        for session in (*result.replaced, result.session):
+            current = self.task_repo.get_review_session(owner_id, session.id)
+            if current is None or current.revision < session.revision:
+                self.task_repo.save_review_session(session)
+
+    def write_bulk_release(
+        self, result: BulkReleaseResultDocument, *, owner_id: str
+    ) -> None:
+        """Persist a bulk release; also the ``bulk_release:`` repair.
+
+        Applied only while its record row is absent, and per task only while
+        the task is still at the revision the release was applied from. A task
+        already at its released revision and list was written before a lost
+        receipt: it is not written again, but its receipt is made to exist.
+        """
+
+        release = result.release
+        if self.task_repo.get_bulk_release(owner_id, release.id) is not None:
+            return
+        written: set[str] = set()
+        held: set[str] = set()
+        for task in result.tasks:
+            current = self._task_or_none(owner_id, task.id)
+            if current is not None and current.revision == task.revision - 1:
+                self.task_repo.save(task)
+                written.add(task.id)
+            elif _holds(current, task):
+                held.add(task.id)
+        for receipt in result.receipts:
+            if receipt.task_id in written:
+                self.task_repo.save_review_receipt(receipt)
+            elif receipt.task_id in held:
+                self._ensure_receipt(receipt)
+        self.task_repo.save_bulk_release(release)
+
+    def _ensure_receipt(self, receipt: ReviewReceiptDocument) -> None:
+        """Save ``receipt`` unless the same or a later one is already stored."""
+
+        stored = self.task_repo.get_review_receipt(
+            receipt.owner_id, receipt.task_id, receipt.kind
+        )
+        if stored is None or (
+            stored != receipt and stored.reviewed_at <= receipt.reviewed_at
+        ):
+            self.task_repo.save_review_receipt(receipt)
+
+    def write_bulk_undo(self, result: BulkUndoResultDocument, *, owner_id: str) -> None:
+        """Persist a bulk-release Undo; also the ``undo_bulk_release:`` repair.
+
+        Applied only while the stored release is not yet undone; each task only
+        while it is still at the revision the Undo restored it from; a task
+        already restored keeps its write and only loses the receipt. The
+        release receipt is deleted only when this release wrote it (E5).
+        """
+
+        release = result.release
+        current_release = self.task_repo.get_bulk_release(owner_id, release.id)
+        if current_release is None or current_release.undone_at is not None:
+            return
+        for task in result.tasks:
+            current = self._task_or_none(owner_id, task.id)
+            if current is not None and current.revision == task.revision - 1:
+                self.task_repo.save(task)
+            elif not _holds(current, task):
+                continue
+            receipt = self.task_repo.get_review_receipt(owner_id, task.id, "someday")
+            if receipt is not None and receipt.bulk_id == release.id:
+                self.task_repo.delete_review_receipt(owner_id, task.id, "someday")
+        self.task_repo.save_bulk_release(release)
+
+    def _task_or_none(self, owner_id: str, task_id: str) -> TaskDocument | None:
+        try:
+            return self.tasks.get_task(task_id, owner_id=owner_id)
+        except NotFoundError:
+            return None
 
     def _repair_decision(
         self, result: DecisionResultDocument, *, owner_id: str
@@ -1384,17 +1538,53 @@ class ReviewService:
 
         A decision row that exists means the write landed; a task that moved
         past the stored revision (an Undo, a later edit) is never overwritten.
+        A task already at the decided revision and list holds the task write
+        of a decision whose other rows were lost: those are completed.
         """
 
         if self.task_repo.get_review_decision(owner_id, result.decision.id) is not None:
             return
-        try:
-            current = self.tasks.get_task(result.task.id, owner_id=owner_id)
-        except NotFoundError:
+        current = self._task_or_none(owner_id, result.task.id)
+        if current is None:
             return
-        if current.revision >= result.task.revision:
+        if current.revision < result.task.revision:
+            self._write_decision(result, owner_id=owner_id, previous=current)
+        elif _holds(current, result.task):
+            self._complete_decision(result, owner_id=owner_id)
+
+    def _complete_decision(
+        self, result: DecisionResultDocument, *, owner_id: str
+    ) -> None:
+        """The rows after a decision's task write, each only where missing."""
+
+        decision = result.decision
+        if decision.yielded_auto_park and decision.formulation_id is not None:
+            self._set_park_returned(owner_id, decision.task_id, decision.formulation_id)
+        created = result.created_task
+        if created is not None and self._task_or_none(owner_id, created.id) is None:
+            self.task_repo.create(created)
+        if result.receipt is not None:
+            self._ensure_receipt(result.receipt)
+        self.task_repo.save_review_decision(decision)
+        self._complete_session(owner_id, decision, result.session_counts, delta=1)
+
+    def _complete_session(
+        self,
+        owner_id: str,
+        decision: ReviewDecisionDocument,
+        counts: SessionCountsDocument | None,
+        *,
+        delta: int,
+    ) -> None:
+        """Apply a lost counter change only to the counts it was made from."""
+
+        if decision.session_id is None or counts is None:
             return
-        self._write_decision(result, owner_id=owner_id, previous=current)
+        session = self.task_repo.get_review_session(owner_id, decision.session_id)
+        bucket = decision.review_counts_as
+        before = counts.model_copy(update={bucket: getattr(counts, bucket) - delta})
+        if session is not None and session.counts == before:
+            self._update_session(owner_id, decision, counts)
 
     def _repair_undo(self, result: UndoResultDocument, *, owner_id: str) -> None:
         decision = self.task_repo.get_review_decision(
@@ -1402,10 +1592,13 @@ class ReviewService:
         )
         if decision is None:
             return
-        current = self.tasks.get_task(result.task.id, owner_id=owner_id)
-        if current.revision >= result.task.revision:
+        current = self._task_or_none(owner_id, result.task.id)
+        if current is None:
             return
-        self._write_undo(result, decision, owner_id=owner_id)
+        if current.revision < result.task.revision:
+            self._write_undo(result, decision, owner_id=owner_id)
+        elif _holds(current, result.task):
+            self._write_undo(result, decision, owner_id=owner_id, task_written=True)
 
     # ------------------------------------------------------------------ logs
     def _refuse(
@@ -1593,6 +1786,20 @@ def _log_owner_failure(owner_id: str, exc: Exception, reason: str) -> None:
         owner_id,
         type(exc).__name__,
         reason,
+    )
+
+
+def _holds(current: TaskDocument | None, recorded: TaskDocument) -> bool:
+    """The task is still exactly where a recorded write left it.
+
+    Revisions move on every task change, so the same revision and list mean
+    the recorded task write landed and nothing changed the task since.
+    """
+
+    return (
+        current is not None
+        and current.revision == recorded.revision
+        and current.state == recorded.state
     )
 
 

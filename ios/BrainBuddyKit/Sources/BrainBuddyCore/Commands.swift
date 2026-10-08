@@ -61,6 +61,10 @@ public enum GTDCommand: Hashable, Sendable, Codable {
     case createProject(CreateProject)
     case updateProject(UpdateProject)
     case archiveProject(ProjectID)
+    /// `PATCH /projects/{id}` with `desired_outcome` (spec 021); nil clears it.
+    case setProjectOutcome(project: ProjectID, outcome: String?)
+    /// `POST /projects/{id}/unarchive` (ADR-0020).
+    case unarchiveProject(project: ProjectID)
     case createTag(CreateTag)
     case renameTag(RenameTag)
     case deleteTag(TagID)
@@ -89,10 +93,12 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var projectID: ProjectID
         public var name: String
         public var color: String?
-        public init(projectID: ProjectID, name: String, color: String? = nil) {
+        public var desiredOutcome: String?
+        public init(projectID: ProjectID, name: String, color: String? = nil, desiredOutcome: String? = nil) {
             self.projectID = projectID
             self.name = name
             self.color = color
+            self.desiredOutcome = desiredOutcome
         }
     }
 
@@ -210,13 +216,26 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var followUpTaskID: TaskID?
         /// False once the undo snapshot was dropped by local retention (7 days).
         public var undoRetained: Bool
+        /// FR-011: the task as the card or form showed it (`ShownTask`: its
+        /// revision, `updatedAt` and children). A decision on a task that changed since is
+        /// stale. Checked only when the person decides (not on replay, where
+        /// the server's `expected_revision` and yield rule decide) and never
+        /// stored or sent, so it is not part of the encoded command.
+        public var expectedTask: ShownTask? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case decisionID, taskID, type, formulationID, newFormulationID, stallReason, title, waitingFor, reason
+            case sessionID, aiUse, navigatorRequestID, followUpTaskID, undoRetained
+        }
 
         public init(
             decisionID: DecisionID, taskID: TaskID, type: DecisionType, formulationID: FormulationID? = nil,
             newFormulationID: FormulationID? = nil, stallReason: StallReason? = nil, title: String? = nil,
             waitingFor: String? = nil, reason: String? = nil, sessionID: ReviewSessionID? = nil, aiUse: AIUse = .none,
-            navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true
+            navigatorRequestID: String? = nil, followUpTaskID: TaskID? = nil, undoRetained: Bool = true,
+            expectedTask: ShownTask? = nil
         ) {
+            self.expectedTask = expectedTask
             self.decisionID = decisionID
             self.taskID = taskID
             self.type = type
@@ -473,6 +492,13 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case priorityRequired
     case projectAlreadyArchived
     case tagAlreadyDeleted
+    // Spec 021 (contracts/kit-commands.md §2).
+    case outcomeTooLong
+    case unarchiveNameInUse(String)
+    /// A merge by name did not apply the local archive to the account's active project.
+    case archiveNotMerged(String)
+    /// A merge by name kept the account's desired outcome; the local one is in the issue's command.
+    case outcomeKept
     // Spec 020 (contracts/ios-commands.md §2).
     case decisionNotAllowed
     case extensionAlreadyUsed
@@ -485,6 +511,10 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case reviewNotFound
     /// More items than one request takes (bulk release 500, park acknowledgements 200).
     case tooManyItems
+    /// The weekly review is not exposed (the flag or release switch is off).
+    case reviewUnavailable
+    /// A progress change names a step the review's mode does not have (the server answers 422).
+    case stepNotInReview
 
     public var message: String {
         switch self {
@@ -520,6 +550,11 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .priorityRequired: "Choose a priority, or No priority."
         case .projectAlreadyArchived: "This project is already archived."
         case .tagAlreadyDeleted: "This tag was already deleted."
+        case .outcomeTooLong: "Keep the desired outcome under 1,000 characters."
+        case .unarchiveNameInUse(let name): "Another active project is already called “\(name)”. Rename one first."
+        case .outcomeKept: "Kept the desired outcome already on your account. Yours is below, so you can copy it."
+        case .archiveNotMerged(let name):
+            "Your account already has an active project called “\(name)”. This Mac's tasks were added to it, and it stays active."
         case .decisionNotAllowed: "This decision isn't available for this task's current list. Nothing was changed."
         case .extensionAlreadyUsed: "You've already kept this wording 7 more days once."
         case .extensionNotDue: "This wording can be kept 7 more days once it asks for a decision."
@@ -530,6 +565,8 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .extensionReasonTooLong: "Keep the reason under \(GTDLimits.title) characters."
         case .reviewNotFound: "This review is no longer on this device."
         case .tooManyItems: "That's more than can be saved at once. Try fewer tasks."
+        case .reviewUnavailable: "The weekly review is turned off for now. Nothing was changed."
+        case .stepNotInReview: "That step isn't part of this review. Nothing was changed."
         }
     }
 }

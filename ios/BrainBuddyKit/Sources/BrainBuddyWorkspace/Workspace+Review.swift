@@ -23,9 +23,23 @@ extension Workspace {
 
     /// Whether the weekly review is shown (§8): signed in, the `weekly_review`
     /// flag answered on `GET /review/state`; account-less, the release switch.
+    /// Core's `ReviewState.isExposed` with the same input the reducer gets.
     public var reviewExposed: Bool {
-        account != nil ? state.review.server?.exposed == true : accountlessReviewEnabled
+        var review = state.review
+        review.accountlessReleaseSwitch = accountlessReleaseSwitch
+        return review.isExposed
     }
+
+    /// The task as a decision card or form shows it now (FR-011), with this
+    /// device's child edits on it; pass it to `decide(expectedTask:)`.
+    public func shownTask(of task: TaskRecord) -> ShownTask {
+        ShownTask(task, localChildEdits: localChildEdits[task.id] ?? 0)
+    }
+
+    /// Core's exposure input (`ReviewState.accountlessReleaseSwitch`): the
+    /// account-less release switch, nil when signed in (the pulled
+    /// `review.server.exposed`, persisted in the base, decides).
+    var accountlessReleaseSwitch: Bool? { account == nil ? accountlessReviewEnabled : nil }
 
     /// The instant the rule is evaluated at: signed in, the device clock plus
     /// the last observed `server_now − device time` (http §5).
@@ -75,7 +89,38 @@ extension Workspace {
     public func projectsNeedingNextAction() -> [ProjectSummary] { GTDQueries.projectsNeedingNextAction(in: state) }
     public func datesAhead() -> [DueDay] { GTDQueries.datesAhead(in: state, today: today) }
     public func lastCountedReview() -> Date? { GTDQueries.lastCountedReview(in: state) }
+    public func daysSinceLastReview() -> Int? { GTDQueries.daysSinceLastReview(in: state, today: today) }
+    public func reviewEntryNotice() -> ReviewEntryNotice? { GTDQueries.entryNotice(in: state) }
+    public func openRestartReleases() -> [BulkReleaseRecord] { GTDQueries.openRestartReleases(in: state) }
+
+    public func openInboxReleases(in session: ReviewSession) -> [BulkReleaseRecord] {
+        GTDQueries.openInboxReleases(in: state, session: session)
+    }
+
+    public func decisionStep(in session: ReviewSession) -> DecisionStepOutcome {
+        GTDQueries.decisionStep(in: state, session: session, now: reviewNow, timeZone: classificationZone)
+    }
     public var explainerNeeded: Bool { GTDQueries.explainerNeeded(in: state, local: local) }
+
+    /// FR-005: whether the card shows the third-stall offer for `id`.
+    public func isThirdStall(_ id: TaskID) -> Bool {
+        guard let task = state.tasks[id] else { return false }
+        return GTDQueries.isThirdStall(task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone)
+    }
+
+    /// FR-009: what "Keep 7 more days" would give `id` now (M-04), in the
+    /// classification zone; nil when it is not allowed.
+    public func extensionInstants(of id: TaskID) -> DerivedInstants? {
+        guard let task = state.tasks[id] else { return nil }
+        return GTDQueries.extensionInstants(
+            of: task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone
+        )
+    }
+
+    /// FR-015: why `id` cannot return to Next from "While you were away".
+    public func parkReturnProblem(of id: TaskID, shown: ParkAck? = nil) -> ParkReturnProblem? {
+        GTDQueries.parkReturnProblem(of: id, shown: shown, in: state)
+    }
 
     /// Tasks listed once on "While you were away" because linking dropped
     /// their unsent "Keep 7 more days" (ios-commands §7).
@@ -112,24 +157,33 @@ extension Workspace {
     // MARK: - Decisions
 
     /// Records a decision on `taskID` (http §3) and returns its id. Next-only
-    /// decisions are made on the task's current formulation. Saving removes
-    /// the task's decision-form drafts (FR-052).
+    /// decisions are made on `formulationID`, the wording the card or form
+    /// was opened on, when given (FR-011): if the task was reformulated since
+    /// (a sync, another window), the reducer refuses it with
+    /// `.formulationChanged` and nothing is applied, so text written for the
+    /// old wording never lands on the new one. Without it, the task's current
+    /// formulation. `expectedTask` is the task as the card showed it: any
+    /// change since (notes, dates, project, tags, subtasks, a cosmetic title
+    /// edit) is refused the same way. While the review is not exposed the
+    /// reducer refuses it with `.reviewUnavailable`. Saving removes the
+    /// task's decision-form drafts (FR-052); a refusal keeps them.
     @discardableResult
     public func decide(
         _ type: DecisionType, on taskID: TaskID, title: String? = nil, waitingFor: String? = nil, reason: String? = nil,
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
-        sessionID: ReviewSessionID? = nil
+        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: ShownTask? = nil
     ) throws(GTDValidationError) -> DecisionID {
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())
         let startsFormulation: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
+        let current = task.formulation?.id ?? task.parked?.formulationID
         let command = GTDCommand.DecideTask(
             decisionID: decisionID, taskID: taskID, type: type,
-            formulationID: type.decidesOnFormulation ? (task.formulation?.id ?? task.parked?.formulationID) : nil,
+            formulationID: type.decidesOnFormulation ? (opened ?? current) : nil,
             newFormulationID: startsFormulation.contains(type) ? FormulationID.make(makeID()) : nil,
             stallReason: stallReason, title: title, waitingFor: waitingFor, reason: reason, sessionID: sessionID,
             aiUse: aiUse, navigatorRequestID: navigatorRequestID,
-            followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil
+            followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil, expectedTask: expectedTask
         )
         try perform(.decideTask(command))
         edit { document in
@@ -208,18 +262,24 @@ extension Workspace {
 
     // MARK: - While you were away
 
-    /// Marks "While you were away" as shown today (at app open).
+    /// Marks "While you were away" as shown today (at app open). Nothing is
+    /// recorded while the review is not exposed: a sheet the flag took away
+    /// was not shown.
     public func markWhileAwayShown() {
+        guard reviewExposed else { return }
         let day = today
         edit { $0.local.wywaLastShownDay = day }
     }
 
-    /// Continue or close on "While you were away" (M-09): the listed parks
-    /// are seen, linking notices go, and the next batch of due parks may apply.
-    public func dismissWhileAway() throws(GTDValidationError) {
-        let acks = unseenParks().compactMap { task in
-            task.parked.map { ParkAck(taskID: task.id, formulationID: $0.formulationID, parkedAt: $0.at) }
-        }
+    /// The unseen parks as M-09 lists them; pass the ones a sheet showed to
+    /// `dismissWhileAway(shown:)`.
+    public func unseenParkAcks() -> [ParkAck] { GTDQueries.unseenParkAcks(in: state) }
+
+    /// Continue on "While you were away" (M-09): the parks it `shown` are
+    /// seen (a park that arrived while it was open is not), linking notices
+    /// go, and the next batch of due parks may apply.
+    public func dismissWhileAway(shown: [ParkAck]) throws(GTDValidationError) {
+        let acks = GTDQueries.whileAwayAcknowledgements(shown: shown, in: state)
         // At most 200 items per request (http §5).
         let chunks = stride(from: 0, to: acks.count, by: ReviewLimits.parkAcknowledgements).map {
             Array(acks[$0..<min($0 + ReviewLimits.parkAcknowledgements, acks.count)])
@@ -229,6 +289,20 @@ extension Workspace {
         edit { document in
             document.local.linkedExtensionNotices = []
             document.local.parkBatchWaiting = false
+            document.local.wywaLastShownDay = day
+        }
+    }
+
+    /// Close or swipe-down on "While you were away" (M-09): the parks stay
+    /// unseen and come back another day (FR-015); the account-linking
+    /// notices are information, shown once, so they go (T093). A close
+    /// caused by the review no longer being exposed (the flag turned off
+    /// while the sheet was up) records nothing.
+    public func closeWhileAway() {
+        guard reviewExposed else { return }
+        let day = today
+        edit { document in
+            document.local.linkedExtensionNotices = []
             document.local.wywaLastShownDay = day
         }
     }

@@ -182,6 +182,12 @@ def test_purge_due_accounts_erases_everything(second_api_client) -> None:
         json={"title": "Alice secret task"},
     )
     assert task_a.status_code == 201
+    project_a = client_a.post(
+        "/api/projects",
+        headers={"Idempotency-Key": "purge-project-a"},
+        json={"name": "Alice outcome project", "desired_outcome": "Alice secret goal"},
+    )
+    assert project_a.status_code == 201
     operation = _start_operation(client_a, key="purge-voice-a")
     _upload_and_seal(client_a, operation, b"Pay VAT. Send invoice.", "purge-seal-a")
 
@@ -196,11 +202,20 @@ def test_purge_due_accounts_erases_everything(second_api_client) -> None:
     )
     assert task_b.status_code == 201
 
+    tasks_db = data_dir / "tasks.sqlite3"
+    assert _owner_rows(tasks_db, "projects", owner_a) == 1
+
     _request_deletion(client_a)
     _backdate_deletion(client_a, owner_a, days=15)
 
     purged = container.account_service.purge_due_accounts()
     assert purged == 1
+
+    # 021-FR-028: the desired outcome lives in the project row and goes with it.
+    assert "Alice secret goal" not in "".join(
+        path.read_text(encoding="utf-8")
+        for path in (data_dir / "projects").glob("**/*.json")
+    )
 
     # Account storage: user file, email index, and sessions are gone.
     assert container.user_repo.get_by_id(owner_a) is None
@@ -212,7 +227,6 @@ def test_purge_due_accounts_erases_everything(second_api_client) -> None:
     assert not (data_dir / tree_a_id).exists()
 
     # Tasks: SQLite rows and JSON mirrors gone.
-    tasks_db = data_dir / "tasks.sqlite3"
     for table in ("tasks", "projects", "tags", "idempotency_records"):
         assert _owner_rows(tasks_db, table, owner_a) == 0
     for dirname in ("tasks", "projects", "contexts", "task-commands"):

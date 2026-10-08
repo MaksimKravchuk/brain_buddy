@@ -54,7 +54,24 @@ public enum ReviewCopy {
         "Its project \"\(project)\" is archived, so restore the project before moving this back to Next actions."
     }
 
+    /// A park whose clock this device does not hold (pulled from the server):
+    /// the facts without a guessed number of days.
+    public static func thisWordingParked(on day: String, at time: String) -> String {
+        "Moved here on \(day) at \(time) without a decision. Project, Tags, notes and due date were kept."
+    }
+
     public static func ageInDays(_ days: Int) -> String { days == 1 ? "1 day" : "\(days) days" }
+
+    /// "15 days in Next": whole days since the wording started, never negative.
+    public static func daysInNext(since start: Date, now: Date) -> String {
+        let days = max(0, Int((now.timeIntervalSince(start) / FormulationRule.day).rounded(.down)))
+        return "\(ageInDays(days)) in Next"
+    }
+
+    public static let thisWordingHeader = "This wording"
+    public static let markerParked = "Parked automatically"
+    public static let cannotExtendAgain = "This wording can't be extended again."
+    public static let decide = "Decide"
 
     // MARK: Decision card (M-03, M-04)
 
@@ -75,6 +92,99 @@ public enum ReviewCopy {
     public static let waitingPrompt = "Who or what are you waiting for?"
     public static let extendPrompt = "Why does this wording still fit?"
     public static let extendNeedsReason = "Add a reason to continue"
+
+    public static let cardReasonsHeading = "What got in the way? · optional"
+    public static let cardDecisionsHeading = "What now?"
+    public static let decideAgain = "Decide again"
+    public static let decideAgainHint = "Decide again if it still needs it."
+    public static let noLongerAsks = "This task no longer asks for a decision. You can close the card."
+    public static let staleWas = "Was"
+    public static let staleNow = "Now"
+    public static let noProject = "no project"
+
+    /// "kept 7 more days on Mon 5 Oct", in the card's meta line.
+    public static func keptMoreDays(on day: String) -> String { "kept 7 more days on \(day)" }
+
+    /// The stall reasons in the order of design M-03.
+    public static let stallReasonOrder: [StallReason] = [
+        .unclear, .tooBig, .missingInfo, .waitingOnSomeone, .noLongerMatters, .noEnergy,
+    ]
+
+    public static func stallReasonLabel(_ reason: StallReason) -> String {
+        switch reason {
+        case .unclear: "Unclear"
+        case .tooBig: "Too big"
+        case .missingInfo: "Missing information"
+        case .waitingOnSomeone: "Waiting on someone"
+        case .noLongerMatters: "No longer matters"
+        case .noEnergy: "Unpleasant / no energy"
+        }
+    }
+
+    /// A decision as the card (M-03) lists it.
+    public static func cardTitle(_ decision: DecisionType) -> String {
+        switch decision {
+        case .complete: "Done"
+        case .reformulate: "Reformulate"
+        case .firstStep: "Find a first step"
+        case .waiting: "Move to Waiting for…"
+        case .someday: "Release to Someday"
+        case .cancel: "Cancel task"
+        case .extend: "Keep 7 more days"
+        case .keepWaiting, .followUp, .returnToNext, .keepSomeday: name(of: decision)
+        }
+    }
+
+    public static func cardSubtitle(_ decision: DecisionType) -> String? {
+        switch decision {
+        case .reformulate: "Say what you'll actually do"
+        case .firstStep: "Something you could start in 10 minutes"
+        case .someday: "Not now. You can bring it back any time"
+        case .cancel: "Stays findable under Cancelled"
+        case .extend: "Once for this wording, with a reason"
+        case .complete, .waiting, .keepWaiting, .followUp, .returnToNext, .keepSomeday: nil
+        }
+    }
+
+    // MARK: Decision forms (M-04)
+
+    public static func formTitle(_ decision: DecisionType) -> String {
+        switch decision {
+        case .firstStep: "First step"
+        case .waiting: "Waiting for"
+        case .reformulate, .extend, .complete, .someday, .cancel, .keepWaiting, .followUp, .returnToNext, .keepSomeday:
+            name(of: decision)
+        }
+    }
+
+    public static func formPlaceholder(_ decision: DecisionType) -> String {
+        switch decision {
+        case .reformulate: "New wording"
+        case .firstStep: "Something you could start in 10 minutes"
+        case .waiting: "A person, an event or a reply"
+        case .extend: "One line is enough"
+        case .complete, .someday, .cancel, .keepWaiting, .followUp, .returnToNext, .keepSomeday: ""
+        }
+    }
+
+    public static let reformulateFooter = "Name a visible action. " + reformulateHint
+    public static let waitingFooter = "It moves to Waiting for. The review checks in on it after 7 days."
+    public static let saveNewWording = "Save new wording"
+    public static let saveFirstStep = "Save first step"
+    public static let moveToWaitingFor = "Move to Waiting for"
+    public static let clearDraft = "Clear"
+
+    public static func firstStepFooter(oldTitle: String) -> String {
+        "The old wording stays in this task's notes as \"" + was(oldTitle) + "\"."
+    }
+
+    public static func extendFooter(asksAgain: String, moves: String) -> String {
+        "Asks again on \(asksAgain). If still undecided, it moves to Someday on \(moves). "
+            + "You can do this once for this wording."
+    }
+
+    /// "reason: too big", after the title in the first-step form.
+    public static func reasonMeta(_ reason: StallReason) -> String { "reason: \(stallReasonLabel(reason).lowercased())" }
 
     public static func was(_ title: String) -> String { "Was: \(title)" }
     public static func keepUntil(_ day: String) -> String { "Keep until \(day)" }
@@ -164,7 +274,28 @@ public enum ReviewCopy {
     public static let returnToNext = "Return to Next"
     public static let returnedOne = "Back in Next with a fresh start"
 
-    public static func returnAll(_ count: Int) -> String { "Return all \(count)" }
+    /// "Return all 4 to Next"; once a row was returned, "Return the other 3 to Next".
+    public static func returnAll(_ count: Int, othersReturned: Bool = false) -> String {
+        othersReturned ? "Return the other \(count) to Next" : "Return all \(count) to Next"
+    }
+
+    /// The lead of a partial-failure summary.
+    public static func backInNext(_ count: Int) -> String {
+        count == 1 ? "1 task is back in Next." : "\(count) tasks are back in Next."
+    }
+
+    public static let restoreProjectFirst = "Restore the project first to bring it back."
+    public static let offlineWhileAway = "Offline. Changes are saved on this iPhone and sync later."
+    public static let rowReturned = "Returned"
+    public static let rowProjectArchived = "Project archived"
+    public static let rowChangedElsewhere = "Changed elsewhere"
+
+    public static func returnUnavailable(project: String) -> String { "Return unavailable: project \(project) is archived" }
+    public static func returnTask(title: String) -> String { "Return \(title) to Next" }
+    /// "Old flat (archived)".
+    public static func archivedPlace(_ project: String) -> String { "\(project) (archived)" }
+    /// "Parked Thu 8 Oct · Home".
+    public static func parkedRow(day: String, place: String) -> String { "Parked \(day) · \(place)" }
     public static func allReturned(_ count: Int) -> String { "All \(count) are back in Next with a fresh start." }
     public static let continueLabel = "Continue"
     public static let moreParksFollow = "More will follow after you continue."
@@ -268,6 +399,230 @@ public enum ReviewCopy {
         }
     }
 
+    // MARK: Review chrome (M-13)
+
+    public static let leave = "Leave"
+    public static let skip = "Skip"
+    public static let next = "Next"
+    public static let done = "Done"
+    public static let optional = "optional"
+    public static let leaveTitle = "Take a break?"
+    public static let keepGoing = "Keep going"
+    public static let discardTypedTitle = "Discard what you typed? It hasn't been saved."
+    public static let openTheReview = "Open the review"
+
+    public static func stepPosition(_ number: Int, of total: Int) -> String { "\(number) of \(total)" }
+
+    public static func leaveMessage(step: Int) -> String {
+        "Everything you've done is kept. Continue from step \(step) any time, on any device."
+    }
+
+    /// A step's heading, which VoiceOver lands on at every step change.
+    public static func stepTitle(_ step: ReviewStep) -> String {
+        switch step {
+        case .wins: "Wins of the week"
+        case .mindSweep: "Mind sweep"
+        case .inbox: "Inbox to zero"
+        case .decisions: "Tasks that ask for a decision"
+        case .restOfNext: "The rest of Next"
+        case .waiting: "Waiting for"
+        case .projects: "Projects without a next action"
+        case .someday: "Someday pass"
+        case .dates: "The next 14 days"
+        case .summary: reviewDone
+        }
+    }
+
+    // MARK: Entry (M-11)
+
+    public static let quickReview = "Quick review"
+    public static let quickSummary = "About 5 minutes · Wins, Inbox, decisions and a summary"
+    public static let fullReview = "Full review"
+    public static let fullSummary = "About 20 minutes · Every step, from a mind sweep to the dates ahead"
+    public static let startNewReview = "Start a new review"
+    public static let entryOffline =
+        "Offline. You can review now and it syncs later. A review started on another device can be continued once you're back online."
+    public static let entryCheckFailed = "We couldn't check for a review in progress on your other devices."
+
+    public static func originName(_ origin: ReviewOrigin) -> String {
+        switch origin {
+        case .ios: "your iPhone"
+        case .web: "the web"
+        case .macos: "your Mac"
+        }
+    }
+
+    public static func resumeTitle(mode: ReviewMode, step: Int, of total: Int) -> String {
+        "\(mode == .quick ? quickReview : fullReview) · step \(step) of \(total)"
+    }
+
+    public static func resumeDetail(startedDay: String, time: String, origin: ReviewOrigin, decisions: Int) -> String {
+        "Started \(startedDay) at \(time) on \(originName(origin)). \(decisions) \(decisions == 1 ? "decision" : "decisions") made so far."
+    }
+
+    private static func decisionsKept(_ decisions: Int) -> String {
+        decisions == 1 ? "Its 1 decision is kept." : "Its \(decisions) decisions are kept."
+    }
+
+    public static func closedWhenSynced(origin: ReviewOrigin, decisions: Int) -> String {
+        "Your review on \(originName(origin)) was closed when a newer one synced. \(decisionsKept(decisions))"
+    }
+
+    public static func closedAfterAWeek(on day: String, decisions: Int) -> String {
+        "Your review from \(day) was closed after a week without activity. \(decisionsKept(decisions))"
+    }
+
+    // MARK: Onboarding (M-12)
+
+    public static let onboardingTitle = "A weekly reset"
+    public static let onboardingPoints = [
+        "Once a week, a short review keeps your lists honest. Quick takes about 5 minutes, Full about 20.",
+        "A next action whose wording hasn't moved asks for a decision. That's feedback on the wording, not on you.",
+    ]
+    public static let reviewDayLabel = "Review day"
+    public static let reviewTimeLabel = "Time"
+    public static let thresholdLabel = "Ask for a decision after"
+    public static let onboardingOffline = "Offline. Your choices are saved on this iPhone and sync later."
+    public static let onboardingSaveFailed = "Your review settings couldn't be saved to your account yet."
+    private static let weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    /// ISO weekday (Monday = 1).
+    public static func weekdayName(_ weekday: Int) -> String { weekdayNames[(weekday - 1 + 7) % 7] }
+
+    public static func onboardingGrace(until day: String) -> String {
+        "It's the only thing the app moves on its own. Tasks you had when you first saw this rule won't move before \(day)."
+    }
+
+    // MARK: Restart (M-10)
+
+    public static let seeWhichOnes = "See which ones"
+    public static let keepThem = "Keep them in Next"
+    public static let startTheReview = "Start the review"
+
+    public static func releaseOlder(_ count: Int) -> String { "Release \(count) to Someday / maybe" }
+    public static func undoTheRelease(count: Int) -> String { "Undo the \(count)" }
+    public static func restartResumed(_ count: Int) -> String { "\(count) tasks were released to Someday / maybe." }
+
+    public static func restartUndonePartial(restored: Int, skipped: Int) -> String {
+        "\(restored) are back in Next. \(skipped) changed on another device and stayed in Someday / maybe."
+    }
+
+    public static func restartReleasePartial(_ skipped: Int) -> String {
+        skipped == 1
+            ? "1 task changed on another device in the meantime, so it stayed in Next."
+            : "\(skipped) tasks changed on another device in the meantime, so they stayed in Next."
+    }
+
+    // MARK: Steps (M-14 – M-21)
+
+    public static let mindSweepPrompt = "What's on your mind? Get it out of your head. Don't sort it yet."
+    public static let addToInbox = "Add to Inbox"
+    public static let addedThisStep = "Added this step"
+    public static func notInInboxYet(_ line: String) -> String { "\"\(line)\" isn't in your Inbox yet." }
+
+    public static func inboxOver(_ count: Int) -> String { "Your Inbox has \(count) items. How do you want to go through it?" }
+    public static let inboxEmpty = "Inbox is empty"
+    public static let nothingToProcess = "Nothing to process."
+    public static let nothingIsDeleted = "Nothing is deleted."
+    public static let undoTheReleaseLabel = "Undo the release"
+
+    public static func inboxChoice(_ choice: InboxChoice, itemCount: Int) -> String {
+        switch choice {
+        case .processTen: "Process \(InboxStepPlan.batch) now"
+        case .processAll: "Process all \(itemCount)"
+        case .processTenReleaseRest: "Process \(InboxStepPlan.batch), release the rest to Someday"
+        }
+    }
+
+    public static func inboxProcessed(_ count: Int, released: Int) -> String {
+        let processed = count == 1 ? "1 item processed" : "\(count) items processed"
+        return released == 0 ? processed : "\(processed) · \(released) released to Someday / maybe"
+    }
+
+    public static func inboxReleasedResumed(_ count: Int) -> String { "\(count) items were released to Someday / maybe." }
+
+    public static let notNow = "Not now"
+    public static let nothingAsks = "Nothing asks for a decision"
+    public static let nothingWaitingForDecision = "Nothing in Next is waiting for a decision now."
+
+    public static func decisionPosition(_ position: Int, of total: Int) -> String {
+        "\(position) of \(total) · earliest-asking first"
+    }
+
+    public static func allDecided(_ count: Int) -> String { "All \(count) decided" }
+
+    public static func keptItsWording(_ count: Int) -> String {
+        count == 1
+            ? "1 kept its wording, so it still asks for a decision."
+            : "\(count) kept their wording, so they still ask for a decision."
+    }
+
+    public static func someDecided(_ decided: Int, of total: Int) -> String { "\(decided) of \(total) decided" }
+
+    public static func stillAsk(_ count: Int) -> String {
+        count == 1
+            ? "1 still asks for a decision. It stays in Next whenever you're ready, and moves to Someday on its usual date if nothing is decided."
+            : "\(count) still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided."
+    }
+
+    public static func thresholdChangedMidReview(days: Int) -> String {
+        "Your threshold changed to \(days) days. This list stays as it is for this review."
+    }
+
+    private static func nextActions(_ count: Int) -> String { count == 1 ? "1 next action" : "\(count) next actions" }
+
+    private static func weeksOfWork(_ weeks: Double) -> String {
+        let halves = Int((weeks * 2).rounded())
+        let whole = halves / 2
+        let amount = halves % 2 == 0 ? "\(whole)" : (whole == 0 ? "½" : "\(whole)½")
+        return "~\(amount) \(halves == 2 ? "week" : "weeks") of work at that pace"
+    }
+
+    /// M-17 (FR-031): the figures and the line under them; never a limit.
+    public static func capacity(_ mirror: CapacityMirror) -> (figures: [String], note: String) {
+        guard mirror.nextCount > 0 else { return ([], "Next is empty.") }
+        guard let average = mirror.weeklyAverage4w, let weeks = mirror.impliedWeeks else {
+            return (
+                [nextActions(mirror.nextCount)],
+                "After a few weeks of finished tasks, this will also show your weekly pace…"
+            )
+        }
+        return (
+            [
+                nextActions(mirror.nextCount), "\(Int(average.rounded())) done per week, last 4 weeks",
+                weeksOfWork(weeks),
+            ],
+            "No limit. Just a mirror of where things stand."
+        )
+    }
+
+    public static func waitingMeta(waitingFor: String, days: Int) -> String {
+        "\(waitingFor) · waiting \(ageInDays(days))"
+    }
+
+    public static let keepWaitingSubtitle = "Checks in again in 7 days"
+    public static let followUpPrompt = "What will you do to follow up?"
+    public static let returnPrompt = "What's the next action now?"
+    public static let nothingToChase = "Nothing to chase"
+    public static let archivedFollowUp = "Restore this archived project before creating a follow-up in it."
+    public static let projectsIntro = "A project moves only when it has something you can do next."
+    public static let projectsEmpty = "Every active project has a next action."
+    public static let addNextAction = "Add next action"
+    public static let nextActionPlaceholder = "What's the next action?"
+    public static let moveToNext = "Move to Next"
+    public static let somedayKeepSubtitle = "Looks again in 30 days"
+    public static let somedayMovePrompt = "What's the first concrete action?"
+    public static let nothingInSomeday = "Nothing in Someday needs a look this week."
+    public static let clearTwoWeeks = "A clear two weeks"
+    public static let nothingDue = "Nothing has a due date in the next 14 days."
+    public static let nextNeedsTitle = "Add a title to continue"
+
+    // MARK: Summary (M-22)
+
+    public static let clearYes = "Yes"
+    public static let clearNotReally = "Not really"
+    public static let summaryOffline = "Offline. This review is saved on this iPhone and syncs when you're back online."
+
     // MARK: Notification and widget (M-24, M-25)
 
     public static let notificationTitle = "Weekly review"
@@ -331,11 +686,55 @@ public enum ReviewCopy {
             nextReview(day: "Fri 16 Oct", time: "16:00"), clearStartQuestion, clearStartThanks, nothingNeededChanging,
             notificationTitle, notificationBody, widgetChip(3), widgetChipVoiceOver(1), widgetChipVoiceOver(3),
         ]
+        entries += [
+            thisWordingParked(on: "Thu 8 Oct", at: "09:14"), daysInNext(since: .distantPast, now: .distantPast),
+            thisWordingHeader, markerParked, cannotExtendAgain, decide, cardReasonsHeading, cardDecisionsHeading,
+            decideAgain, decideAgainHint, noLongerAsks, staleWas, staleNow, noProject, keptMoreDays(on: "Mon 5 Oct"),
+            reformulateFooter, waitingFooter, saveNewWording, saveFirstStep, moveToWaitingFor, clearDraft,
+            firstStepFooter(oldTitle: title), extendFooter(asksAgain: "Fri 16 Oct", moves: "Fri 23 Oct"),
+            returnAll(3, othersReturned: true), backInNext(1), backInNext(3), restoreProjectFirst, offlineWhileAway,
+            rowReturned, rowProjectArchived, rowChangedElsewhere, returnUnavailable(project: "Old flat"),
+            returnTask(title: title), archivedPlace("Old flat"), parkedRow(day: "Thu 8 Oct", place: "Home"),
+        ]
+        entries += stallReasonOrder.map(stallReasonLabel) + stallReasonOrder.map(reasonMeta)
         for decision in DecisionType.allCases {
             entries += [
                 name(of: decision), decisionToast(decision, title: title), decisionAnnouncement(decision),
-                decisionNotSaved(decision, title: title, list: .next),
+                decisionNotSaved(decision, title: title, list: .next), cardTitle(decision), formTitle(decision),
             ]
+            entries += [cardSubtitle(decision)].compactMap { $0 }
+            if !formPlaceholder(decision).isEmpty { entries.append(formPlaceholder(decision)) }
+        }
+        entries += [
+            leave, skip, next, done, optional, leaveTitle, keepGoing, discardTypedTitle, openTheReview,
+            stepPosition(4, of: 10), leaveMessage(step: 4), quickReview, quickSummary, fullReview, fullSummary,
+            startNewReview, entryOffline, entryCheckFailed, originName(.web), resumeTitle(mode: .full, step: 4, of: 10),
+            resumeDetail(startedDay: "today", time: "12:40", origin: .web, decisions: 6),
+            closedWhenSynced(origin: .web, decisions: 6), closedAfterAWeek(on: "Fri 2 Oct", decisions: 1),
+            onboardingTitle, reviewDayLabel, reviewTimeLabel, thresholdLabel, onboardingOffline, onboardingSaveFailed,
+            weekdayName(5), onboardingGrace(until: "Fri 23 Oct"), seeWhichOnes, keepThem, startTheReview,
+            releaseOlder(17), undoTheRelease(count: 17), restartResumed(17),
+            restartUndonePartial(restored: 15, skipped: 2), restartReleasePartial(1), restartReleasePartial(2),
+            mindSweepPrompt, addToInbox, addedThisStep, notInInboxYet("call the plumber"), inboxOver(23), inboxEmpty,
+            nothingToProcess, nothingIsDeleted, undoTheReleaseLabel, inboxProcessed(10, released: 12),
+            inboxProcessed(1, released: 0), inboxReleasedResumed(12), notNow, nothingAsks, nothingWaitingForDecision,
+            decisionPosition(1, of: 5), allDecided(5), keptItsWording(1), keptItsWording(2), someDecided(3, of: 5),
+            stillAsk(1), stillAsk(2), thresholdChangedMidReview(days: 21), waitingMeta(waitingFor: "Sam", days: 9),
+            keepWaitingSubtitle, followUpPrompt, returnPrompt, nothingToChase, archivedFollowUp, projectsIntro,
+            projectsEmpty, addNextAction, nextActionPlaceholder, somedayKeepSubtitle, somedayMovePrompt,
+            nothingInSomeday, clearTwoWeeks, nothingDue, nextNeedsTitle,
+            moveToNext, clearYes, clearNotReally, summaryOffline,
+        ]
+        entries += onboardingPoints + ReviewStep.allCases.map(stepTitle)
+        entries += InboxChoice.allCases.map { inboxChoice($0, itemCount: 23) }
+        for mirror in [
+            CapacityMirror(nextCount: 41, weeksOfHistory: 6, weeklyAverage4w: 9, impliedWeeks: 4.5),
+            CapacityMirror(nextCount: 8, weeksOfHistory: 6, weeklyAverage4w: 8, impliedWeeks: 1),
+            CapacityMirror(nextCount: 3, weeksOfHistory: 1, weeklyAverage4w: nil, impliedWeeks: nil),
+            CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil),
+        ] {
+            let capacity = capacity(mirror)
+            entries += capacity.figures + [capacity.note]
         }
         entries += SessionCounter.allCases.map(counterLabel)
         entries += FormulationClass.allCases.compactMap { MarkerStyle.for($0).text }

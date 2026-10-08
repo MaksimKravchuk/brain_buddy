@@ -184,6 +184,368 @@ struct ReducerReviewTests {
         }
     }
 
+    /// `decide` carrying the stamp of the task as the card showed it.
+    private func decide(_ type: DecisionType, shown: TaskRecord, decision: Int = 1) -> GTDCommand {
+        .decideTask(
+            .init(
+                decisionID: Review.decision(decision), taskID: shown.id, type: type,
+                formulationID: shown.formulation?.id, expectedTask: ShownTask(shown)
+            )
+        )
+    }
+
+    @Test("020-FR-011 a decision on a task that changed in any way since the card showed it is stale; unchanged applies")
+    func decisionOnChangedTaskIsStale() throws {
+        let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        let edits: [(String, TaskChanges)] = [
+            ("notes", TaskChanges(details: .set("Tiles first"))),
+            ("priority", TaskChanges(priority: .set(.high))),
+            ("due date", TaskChanges(dueDate: .set(CalendarDay(year: 2026, month: 10, day: 20)!))),
+            ("cosmetic title", TaskChanges(title: .set("call bob."))),
+        ]
+        for (what, changes) in edits {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            // Another window edits the task while the card is open.
+            try Review.apply(.updateTask(.init(taskID: "t1", changes: changes)), at: Review.now, to: &state)
+            #expect(state.tasks["t1"]?.formulation?.id == shown.formulation?.id, "\(what): same wording")
+            let before = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+            #expect(state == before, "\(what): nothing applied")
+        }
+
+        // A sync brings the server's newer revision with only the notes changed.
+        var state = Review.state([asking])
+        let shown = try #require(state.tasks["t1"])
+        state.tasks["t1"]?.details = "Measured the wall"
+        state.tasks["t1"]?.serverRevision = 5
+        state.tasks["t1"]?.updatedAt = Review.now
+        #expect(Review.error { try Review.apply(decide(.complete, shown: shown), to: &state) } == .formulationChanged)
+
+        // Unchanged since the card showed it: applied.
+        var unchanged = Review.state([asking])
+        try Review.apply(decide(.someday, shown: try #require(unchanged.tasks["t1"])), to: &unchanged)
+        #expect(unchanged.tasks["t1"]?.state == .someday)
+
+        // Replay never re-checks it: there the server's revision and yield rule decide (http §3).
+        var replayed = state
+        try Review.apply(decide(.complete, shown: shown), to: &replayed, mode: .replay)
+        #expect(replayed.tasks["t1"]?.state == .completed)
+    }
+
+    @Test("020-FR-011 an acknowledgement that moves only the revision and the server-set fields is not a change")
+    func acknowledgementIsNotAChange() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0, serverRevision: 4)])
+        let shown = try #require(state.tasks["t1"])
+        // The server acknowledges an edit queued before the card opened.
+        state.tasks["t1"]?.serverRevision = 5
+        state.tasks["t1"]?.updatedAt = Review.now
+        state.tasks["t1"]?.orderKey = 7
+        try Review.apply(decide(.someday, shown: shown), to: &state)
+        #expect(state.tasks["t1"]?.state == .someday)
+    }
+
+    @Test("020-FR-042 while the review is hidden a person's review actions are refused; replay still follows the server")
+    func hiddenReviewRefusesInteractiveActions() throws {
+        let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        var parked = Review.task("t2", title: "Update the CV", state: .someday)
+        parked.parked = ParkMarker(at: t0, formulationID: Review.form(2))
+        let refused: [(String, GTDCommand)] = [
+            ("decision", decide(.someday, shown: asking)),
+            ("review start", .review(.startSession(StartSession(sessionID: Review.session(1), mode: .quick, entry: .list)))),
+            ("bulk release", .bulkRelease(.init(bulkID: Review.bulk(1), kind: .restart, taskIDs: ["t1"]))),
+            ("park acknowledgement", .review(.acknowledgeParks([ParkAck(taskID: "t2", formulationID: Review.form(2), parkedAt: t0)]))),
+            ("explainer", .review(.acknowledgeExplainer(timeZone: "UTC"))),
+        ]
+        // Signed in, the last gated read said the flag is off; account-less, the release switch is off.
+        var signedIn = Review.state([asking, parked])
+        signedIn.review.accountlessReleaseSwitch = nil
+        signedIn.review.server = ReviewServerFacts(exposed: false)
+        var accountless = Review.state([asking, parked])
+        accountless.review.accountlessReleaseSwitch = false
+        for hidden in [signedIn, accountless] {
+            #expect(!hidden.review.isExposed)
+            for (what, command) in refused {
+                var state = hidden
+                #expect(Review.error { try Review.apply(command, to: &state) } == .reviewUnavailable, "\(what)")
+                #expect(state == hidden, "\(what): nothing applied")
+            }
+            // Replay of a command queued before the flag went off still applies (FR-040).
+            var replayed = hidden
+            try Review.apply(decide(.someday, shown: asking), to: &replayed, mode: .replay)
+            #expect(replayed.tasks["t1"]?.state == .someday)
+        }
+
+        // Not refused while hidden: Undo of the person's own action, consent revocation, settings.
+        var state = accountless
+        state.review.navigatorConsents["openai"] = NavigatorConsent(
+            provider: "openai", grantedAt: t0, revokedAt: nil, consentTextVersion: 1
+        )
+        try Review.apply(.review(.revokeNavigatorConsent(provider: "openai")), to: &state)
+        #expect(state.review.navigatorConsents["openai"]?.allowsCloud == false, "a revocation always works")
+        try Review.apply(.review(.updateSettings(ReviewSettingsChange(reviewWeekday: 2))), to: &state)
+        #expect(state.review.settings.reviewWeekday == 2)
+
+        // Exposed (either way): the decision applies.
+        var exposedSignedIn = Review.state([asking])
+        exposedSignedIn.review.accountlessReleaseSwitch = nil
+        exposedSignedIn.review.server = ReviewServerFacts(exposed: true)
+        var exposedAccountless = Review.state([asking])
+        exposedAccountless.review.accountlessReleaseSwitch = true
+        exposedAccountless.review.server = ReviewServerFacts(exposed: false)
+        for var exposed in [exposedSignedIn, exposedAccountless] {
+            #expect(exposed.review.isExposed, "account-less: the switch, not a stale server fact")
+            try Review.apply(decide(.someday, shown: asking), to: &exposed)
+            #expect(exposed.tasks["t1"]?.state == .someday)
+        }
+    }
+
+    @Test("020-FR-042 the release switch is a device input: it is never encoded with the review state")
+    func releaseSwitchIsNotEncoded() throws {
+        var review = ReviewState()
+        review.accountlessReleaseSwitch = true
+        let data = try JSONEncoder().encode(review)
+        #expect(!String(decoding: data, as: UTF8.self).contains("accountlessReleaseSwitch"))
+        #expect(try JSONDecoder().decode(ReviewState.self, from: data).accountlessReleaseSwitch == nil)
+    }
+
+    @Test("020-FR-011 a subtask or comment added, edited or completed since the card showed the task makes the decision stale")
+    func childChangesMakeDecisionStale() throws {
+        var asking = Review.nextTask("t1", started: t0, serverRevision: 4)
+        asking.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        asking.comments = [CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)]
+        asking.childrenSyncedAt = t0  // the card showed the task's children, hydrated
+        // Another window: the reducer's child commands leave the parent as it is.
+        let windowEdits: [(String, GTDCommand)] = [
+            ("subtask added", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
+            ("subtask edited", .updateSubtask(.init(taskID: "t1", subtaskID: "s1", title: "Measure both walls"))),
+            ("subtask completed", .transitionSubtask(.init(taskID: "t1", subtaskID: "s1", action: .complete))),
+            ("comment added", .createComment(.init(taskID: "t1", commentID: "c2", body: "Tiles are in"))),
+        ]
+        for (what, edit) in windowEdits {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            try Review.apply(edit, at: Review.now, to: &state)
+            #expect(TaskStamp(shown).matches(state.tasks["t1"]), "\(what): the parent's stamp alone misses it")
+            let before = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+            #expect(state == before, "\(what): nothing applied")
+        }
+
+        // By sync: the server changes a subtask without bumping the task's revision (http.md, data-model).
+        let synced: [(String, (inout TaskRecord) -> Void)] = [
+            ("subtask completed elsewhere", { $0.subtasks[0].state = .completed; $0.subtasks[0].serverRevision = 3 }),
+            ("subtask added elsewhere", {
+                $0.subtasks.append(SubtaskRecord(id: "s9", serverID: "subtask_9", serverRevision: 1, title: "Call the tiler", orderKey: 1))
+            }),
+            ("subtask deleted elsewhere", { $0.subtasks = [] }),
+            ("comment edited elsewhere", { $0.comments[0].body = "Ask Ann and Bo"; $0.comments[0].editedAt = Review.now }),
+        ]
+        for (what, change) in synced {
+            var state = Review.state([asking])
+            let shown = try #require(state.tasks["t1"])
+            change(&state.tasks["t1"]!)
+            #expect(Review.error { try Review.apply(decide(.complete, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+        }
+
+        // An acknowledgement that changes nothing visible (server ids and revisions) is not a change.
+        var acknowledged = Review.state([asking])
+        let shown = try #require(acknowledged.tasks["t1"])
+        acknowledged.tasks["t1"]?.subtasks[0].serverRevision = 5
+        acknowledged.tasks["t1"]?.comments[0].serverRevision = 2
+        try Review.apply(decide(.someday, shown: shown), to: &acknowledged)
+        #expect(acknowledged.tasks["t1"]?.state == .someday)
+
+        // No change at all: applied.
+        var unchanged = Review.state([asking])
+        try Review.apply(decide(.someday, shown: try #require(unchanged.tasks["t1"])), to: &unchanged)
+        #expect(unchanged.tasks["t1"]?.state == .someday)
+    }
+
+    @Test("020-FR-011 children hydrated after the card opened are not a change; a parent edit still is; local tasks know their children")
+    func hydrationIsNotAChange() throws {
+        // Pulled, not hydrated yet: the list endpoint carries no children.
+        let unhydrated = Review.nextTask("t1", started: t0, serverRevision: 4)
+        #expect(unhydrated.serverID != nil && unhydrated.childrenSyncedAt == nil)
+        let existing = SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)
+        let comment = CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)
+
+        // Hydration fills the children that already existed: the decision applies.
+        var hydrated = Review.state([unhydrated])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks = [existing]
+        hydrated.tasks["t1"]?.comments = [comment]
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday, "unknown children becoming known is not an edit")
+
+        // A parent edit after an unhydrated snapshot is still stale.
+        var edited = Review.state([unhydrated])
+        try Review.apply(.updateTask(.init(taskID: "t1", changes: TaskChanges(details: .set("Tiles first")))), at: Review.now, to: &edited)
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &edited) } == .formulationChanged)
+
+        // A task the server has not seen yet: every child is on the device, so a child edit counts.
+        var local = Review.nextTask("t2", started: t0)
+        local.subtasks = [SubtaskRecord(id: "s2", title: "Buy tiles", orderKey: 0)]
+        #expect(local.serverID == nil && local.childrenSyncedAt == nil)
+        var state = Review.state([local])
+        let shownLocal = try #require(state.tasks["t2"])
+        try Review.apply(.transitionSubtask(.init(taskID: "t2", subtaskID: "s2", action: .complete)), at: Review.now, to: &state)
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shownLocal), to: &state) } == .formulationChanged)
+    }
+
+    @Test("020-FR-011 before full hydration the children the card did show still count: changed or deleted is stale, added is not")
+    func shownChildrenCountBeforeHydration() throws {
+        // Pulled, not fully hydrated, but already holding a cached subtask and comment.
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [
+            SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0),
+            SubtaskRecord(id: "s2", serverID: "subtask_2", serverRevision: 1, title: "Buy tiles", orderKey: 1),
+        ]
+        cached.comments = [CommentRecord(id: "c1", serverID: "comment_1", serverRevision: 1, body: "Ask Ann", authorID: "u1", createdAt: t0)]
+        #expect(cached.childrenSyncedAt == nil)
+
+        let changes: [(String, GTDCommand?, (inout TaskRecord) -> Void)] = [
+            ("cached subtask completed in another window", .transitionSubtask(.init(taskID: "t1", subtaskID: "s1", action: .complete)), { _ in }),
+            ("cached subtask renamed in another window", .updateSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy blue tiles")), { _ in }),
+            ("cached subtask deleted elsewhere", nil, { $0.subtasks.removeAll { $0.id == "s1" } }),
+            ("cached comment edited elsewhere", nil, { $0.comments[0].body = "Ask Ann and Bo" }),
+            ("cached comment deleted elsewhere", nil, { $0.comments = [] }),
+            ("cached subtasks reordered elsewhere", nil, { $0.subtasks[0].orderKey = 5 }),
+        ]
+        for (what, command, change) in changes {
+            var state = Review.state([cached])
+            let shown = try #require(state.tasks["t1"])
+            if let command { try Review.apply(command, at: Review.now, to: &state) }
+            change(&state.tasks["t1"]!)
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &state) } == .formulationChanged, "\(what)")
+        }
+
+        // Hydration adds the other children that already existed (and server order keys): applies.
+        var hydrated = Review.state([cached])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 2)
+        )
+        hydrated.tasks["t1"]?.subtasks[0].orderKey = 10
+        hydrated.tasks["t1"]?.subtasks[1].orderKey = 20
+        hydrated.tasks["t1"]?.comments.append(
+            CommentRecord(id: "c2", serverID: "comment_2", serverRevision: 1, body: "Tiles are in", authorID: "u2", createdAt: t0)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday, "children the card did not show are not a change; relative order kept")
+    }
+
+    /// `decide` with the card's snapshot taken with this device's child-edit count.
+    private func decide(_ type: DecisionType, shown: ShownTask, taskID: TaskID = "t1") -> GTDCommand {
+        .decideTask(
+            .init(
+                decisionID: Review.decision(1), taskID: taskID, type: type, formulationID: Review.form(1),
+                expectedTask: shown
+            )
+        )
+    }
+
+    @Test("020-FR-011 a child this device creates or edits after the card opened makes the decision stale, acknowledged or not")
+    func localChildEditsAreCounted() throws {
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        #expect(cached.childrenSyncedAt == nil, "not fully hydrated")
+        let edits: [(String, GTDCommand)] = [
+            ("subtask created in another window", .createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles"))),
+            ("comment added in another window", .createComment(.init(taskID: "t1", commentID: "c2", body: "Tiles are in"))),
+        ]
+        for (what, edit) in edits {
+            // Tracked, as the workspace does: the card captures the count.
+            var state = Review.state([cached])
+            state.localChildEdits = [:]
+            let shown = ShownTask(try #require(state.tasks["t1"]), localChildEdits: 0)
+            try Review.apply(edit, at: Review.now, to: &state)
+            #expect(state.localChildEdits?["t1"] == 1, "\(what): counted")
+            var unsent = state
+            #expect(Review.error { try Review.apply(decide(.someday, shown: shown), to: &unsent) } == .formulationChanged, "\(what), not acknowledged")
+
+            // The server acknowledges it before the decision: it now carries a
+            // server id, like a child hydration brought in; the count still says.
+            var acknowledged = state
+            if let index = acknowledged.tasks["t1"]?.subtasks.firstIndex(where: { $0.id == "s2" }) {
+                acknowledged.tasks["t1"]?.subtasks[index].serverID = "subtask_2"
+                acknowledged.tasks["t1"]?.subtasks[index].serverRevision = 1
+            }
+            if let index = acknowledged.tasks["t1"]?.comments.firstIndex(where: { $0.id == "c2" }) {
+                acknowledged.tasks["t1"]?.comments[index].serverID = "comment_2"
+                acknowledged.tasks["t1"]?.comments[index].serverRevision = 1
+            }
+            #expect(
+                Review.error { try Review.apply(decide(.someday, shown: shown), to: &acknowledged) } == .formulationChanged,
+                "\(what), acknowledged"
+            )
+        }
+
+        // Replay never counts: acknowledgement and recompute keep the device's count.
+        var replayed = Review.state([cached])
+        replayed.localChildEdits = [:]
+        try Review.apply(.createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles")), to: &replayed, mode: .replay)
+        #expect(replayed.localChildEdits?["t1"] == nil)
+        // Untracked states (nil) are never counted.
+        var untracked = Review.state([cached])
+        try Review.apply(.createSubtask(.init(taskID: "t1", subtaskID: "s2", title: "Buy tiles")), to: &untracked)
+        #expect(untracked.localChildEdits == nil)
+
+        // No child edit since the card opened, hydration bringing existing children: applies.
+        var hydrated = Review.state([cached])
+        hydrated.localChildEdits = ["t1": 3]
+        let shownBefore = ShownTask(try #require(hydrated.tasks["t1"]), localChildEdits: 3)
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 1)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shownBefore), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday)
+
+        // The shown child edited by sync is still caught after hydration.
+        var synced = Review.state([cached])
+        synced.localChildEdits = [:]
+        let shownSynced = ShownTask(try #require(synced.tasks["t1"]), localChildEdits: 0)
+        synced.tasks["t1"]?.subtasks[0].state = .completed
+        synced.tasks["t1"]?.childrenSyncedAt = Review.now
+        #expect(Review.error { try Review.apply(decide(.someday, shown: shownSynced), to: &synced) } == .formulationChanged)
+    }
+
+    @Test("020-FR-011 before full hydration a child hydration brings is not a change")
+    func hydratedChildrenBeforeHydration() throws {
+        var cached = Review.nextTask("t1", started: t0, serverRevision: 4)
+        cached.subtasks = [SubtaskRecord(id: "s1", serverID: "subtask_1", serverRevision: 2, title: "Measure the wall", orderKey: 0)]
+        #expect(cached.childrenSyncedAt == nil)
+
+        // Hydration brings existing server children: applies.
+        var hydrated = Review.state([cached])
+        let shown = try #require(hydrated.tasks["t1"])
+        hydrated.tasks["t1"]?.subtasks.append(
+            SubtaskRecord(id: "s3", serverID: "subtask_3", serverRevision: 1, title: "Call the tiler", orderKey: 1)
+        )
+        hydrated.tasks["t1"]?.comments.append(
+            CommentRecord(id: "c3", serverID: "comment_3", serverRevision: 1, body: "Ask Ann", authorID: "u2", createdAt: t0)
+        )
+        hydrated.tasks["t1"]?.childrenSyncedAt = Review.now
+        try Review.apply(decide(.someday, shown: shown), to: &hydrated)
+        #expect(hydrated.tasks["t1"]?.state == .someday)
+    }
+
+    @Test("020-FR-011 the stamp a card showed is local: it is never encoded into the queued command")
+    func expectedTaskIsNotEncoded() throws {
+        let shown = Review.nextTask("t1", started: t0, serverRevision: 4)
+        let command = decide(.someday, shown: shown)
+        let data = try JSONEncoder().encode(command)
+        #expect(!String(decoding: data, as: UTF8.self).contains("expectedTask"))
+        guard case .decideTask(let decoded) = try JSONDecoder().decode(GTDCommand.self, from: data) else {
+            Issue.record("Expected a decision")
+            return
+        }
+        #expect(decoded.expectedTask == nil && decoded.taskID == "t1" && decoded.type == .someday)
+    }
+
     // MARK: - Undo (T051, FR-048)
 
     @Test("020-FR-048 undo restores the task field for field, clock included, and deletes an unchanged follow-up")
@@ -207,6 +569,32 @@ struct ReducerReviewTests {
         #expect(state.tasks["w1"]?.waitingFor == waiting.waitingFor)
         #expect(state.review.decisions.isEmpty)
         #expect(state.review.receipts.isEmpty, "the receipts the decisions wrote are gone")
+    }
+
+    @Test("020-FR-048 020-FR-046 undo into Next keeps a park floor written since the decision")
+    func undoKeepsFloorWrittenSince() throws {
+        let due = CalendarDay(year: 2026, month: 9, day: 20)
+        var state = Review.state([Review.nextTask("t1", started: t0, due: due)])
+        try Review.apply(Review.decide(.extend, "t1", decision: 1, formulation: Review.form(1), reason: "Waiting for the quote"), to: &state)
+        // A time-zone change floors due-dated Next tasks without touching the task's revision or `updatedAt`.
+        try Review.apply(.review(.updateSettings(.init(timeZone: "America/New_York"))), at: Review.now.addingTimeInterval(60), to: &state)
+        let floor = try #require(state.tasks["t1"]?.formulation?.parkFloorAt)
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(120), to: &state)
+        let clock = try #require(state.tasks["t1"]?.formulation)
+        #expect(clock.extendedAt == nil && clock.extensionReason == nil, "the extension is undone")
+        #expect(clock.parkFloorAt == floor, "the floor written after the decision survives")
+    }
+
+    @Test("020-FR-048 020-FR-016 a decision made before activation, undone after it, restores the clock with the activation clamp")
+    func undoClampsToActivation() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0)], settings: ReviewSettings())
+        try Review.apply(Review.decide(.someday, "t1", decision: 1, formulation: Review.form(1)), to: &state)
+        try Review.apply(.review(.acknowledgeExplainer(timeZone: "Europe/Berlin")), at: Review.now, to: &state)
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(60), to: &state)
+        let clock = try #require(state.tasks["t1"]?.formulation)
+        #expect(state.tasks["t1"]?.state == .next && clock.id == Review.form(1))
+        #expect(clock.startedAt == Review.now)
+        #expect(clock.parkFloorAt == Review.now.addingTimeInterval(14 * Review.day))
     }
 
     @Test("020-FR-048 undo is refused when the task or the follow-up changed since; an absent decision is already undone")
@@ -263,7 +651,7 @@ struct ReducerReviewTests {
         guard let scenario = try CompactionScenario(vector) else {
             // Owner-level events, the yield, the undos and refused events are
             // not a queued command of one task; FormulationTests runs every
-            // one of the 65 vectors through the rule itself.
+            // one of the 67 vectors through the rule itself.
             #expect(Self.notQueued.contains(vector["event"]?["type"]?.string ?? "") || vector["expect"]?["error"] != nil
                 || vector["expect"]?["applied"]?.bool == false, "\(vector.id) skipped without a reason")
             return
@@ -308,7 +696,7 @@ struct ReducerReviewTests {
                 && vector["expect"]?["applied"]?.bool != false
         }
         #expect(covered == queued.count)
-        #expect(vectors.count == 65)
+        #expect(vectors.count == 67)
     }
 
     struct ClockFields: Hashable {
@@ -544,6 +932,37 @@ struct ReducerReviewTests {
         try Review.apply(.review(.startSession(.init(sessionID: Review.session(3), mode: .quick, entry: .widgetDecisions, skipSteps: [.wins, .inbox]))), to: &state)
         #expect(state.review.sessions[Review.session(2)]?.status == .abandoned)
         #expect(state.review.sessions[Review.session(3)]?.currentStep == .decisions)
+    }
+
+    @Test("020-FR-028 progress naming a step outside the review's mode is refused and queues nothing, whatever the status")
+    func progressOutsideModeIsRefused() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0)])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(1), mode: .quick, entry: .list))), to: &state)
+        let outOfMode: [SessionProgress] = [
+            .init(sessionID: Review.session(1), progressID: Review.progress(1), step: .dates, stepStatus: .finished),
+            .init(sessionID: Review.session(1), progressID: Review.progress(2), activeStep: .restOfNext, activeSeconds: 30),
+        ]
+        func expectRefusals() {
+            for progress in outOfMode {
+                let before = state
+                #expect(Review.error { try Review.apply(.review(.progressSession(progress)), to: &state) } == .stepNotInReview)
+                #expect(state == before, "the session is unchanged")
+            }
+        }
+        expectRefusals()
+        try Review.apply(.review(.finishSession(.init(sessionID: Review.session(1)))), to: &state)
+        expectRefusals()
+        // A mode's own steps are still merged.
+        var full = Review.state([])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(2), mode: .full, entry: .list))), to: &full)
+        let inMode = SessionProgress(sessionID: Review.session(2), progressID: Review.progress(3), step: .dates, stepStatus: .skipped)
+        try Review.apply(.review(.progressSession(inMode)), to: &full)
+        #expect(full.review.sessions[Review.session(2)]?.steps[.dates] == .skipped)
+        var quick = Review.state([])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(3), mode: .quick, entry: .list))), to: &quick)
+        let inQuick = SessionProgress(sessionID: Review.session(3), progressID: Review.progress(4), step: .wins, stepStatus: .finished, activeStep: .inbox, activeSeconds: 5)
+        try Review.apply(.review(.progressSession(inQuick)), to: &quick)
+        #expect(quick.review.sessions[Review.session(3)]?.steps[.wins] == .finished)
     }
 
     @Test("020-FR-029 progressSession is never folded into another one")

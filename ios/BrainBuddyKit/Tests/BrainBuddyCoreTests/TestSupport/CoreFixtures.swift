@@ -278,6 +278,13 @@ struct CommandGenerator {
             return .transitionSubtask(.init(taskID: taskID, subtaskID: subtask.id, action: action))
         case 93..<97:
             return .createComment(.init(taskID: taskID, commentID: CommentID("comment-\(serial)"), body: pick(["Hi", " ", ""])))
+        case 98:
+            guard let id = projects.randomElement(using: &rng) else { break }
+            return .setProjectOutcome(project: id, outcome: pick([nil, "Garden done", "  ", "Ship it"]))
+        case 99:
+            guard let id = state.projects.values.filter({ $0.state == .archived }).map(\.id).sorted().randomElement(using: &rng)
+            else { break }
+            return .unarchiveProject(project: id)
         default:
             guard let comment = task.comments.randomElement(using: &rng) else { break }
             return .updateComment(.init(taskID: taskID, commentID: comment.id, body: pick(["Edited", "Hi", "Again"])))

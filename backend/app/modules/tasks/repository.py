@@ -76,6 +76,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         self.db_path = self.resolve("tasks.sqlite3")
         self._initialize_database()
         self._migrate_legacy_json_once()
+        self._mark_detached_archives()
 
     @contextmanager
     def command_lock(self, owner_id: str) -> Iterator[None]:
@@ -238,6 +239,37 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                         json.dumps(counts, sort_keys=True),
                     ),
                 )
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def _mark_detached_archives(self) -> None:
+        """Flag archives made before spec 021 (data-model E1, research R12).
+
+        An archived project without ``archived_at`` had its members cleared by
+        the archive. The step records that history, so it bumps neither
+        ``revision`` nor ``updated_at`` and never causes a stale-revision 409.
+        Running it again changes nothing.
+        """
+
+        with self._owned_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = conn.execute(
+                    "SELECT payload FROM projects WHERE state = 'archived'"
+                ).fetchall()
+                for row in rows:
+                    project = self._model(row, ProjectDocument)
+                    if project.archived_at is None and (
+                        not project.archived_before_lossless
+                    ):
+                        self._upsert_project(
+                            conn,
+                            project.model_copy(
+                                update={"archived_before_lossless": True}
+                            ),
+                        )
                 conn.commit()
             except BaseException:
                 conn.rollback()

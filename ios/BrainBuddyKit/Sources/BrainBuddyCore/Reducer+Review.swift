@@ -75,8 +75,18 @@ extension GTDReducer {
     static func decideTask(
         _ command: GTDCommand.DecideTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        try requireReviewExposed(state, mode: mode)
         if state.review.decisions[command.decisionID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         guard var task = state.tasks[command.taskID] else { throw .taskNotFound }
+        // FR-011: a person's decision on a task that changed in any way since
+        // the card showed it (`ShownTask`: notes, dates, project, tags, a cosmetic
+        // title edit, subtasks, comments) is stale. Replay leaves this
+        // to the server's `expected_revision` and yield rule (http §3).
+        if mode == .interactive, let shown = command.expectedTask,
+            !shown.matches(task, localChildEdits: state.localChildEdits.map { $0[task.id] ?? 0 })
+        {
+            throw .formulationChanged
+        }
         let settings = clockSettings(state)
         var yielded = false
         /// The clock before the park is not on this device (another device or
@@ -235,7 +245,8 @@ extension GTDReducer {
     }
 
     /// `POST /review/decisions/{id}/undo`: restores the snapshot field for
-    /// field (clock included), removes the decision, and deletes a follow-up
+    /// field (the clock keeps the floor and activation bookkeeping written
+    /// since, formulation-clock §3), removes the decision, and deletes a follow-up
     /// it created only while that is unchanged (FR-048). An absent decision
     /// is the replay goal: it was already undone.
     static func undoDecision(
@@ -258,6 +269,10 @@ extension GTDReducer {
             working.tasks[created] = nil
         }
         var restored = undo.taskBefore
+        // The clock keeps the bookkeeping written since the decision (FR-048).
+        restored.formulation = FormulationRule.restore(
+            task.clocked, from: undo.taskBefore.clocked, settings: clockSettings(state)
+        ).formulation
         restored.serverID = task.serverID
         restored.serverRevision = task.serverRevision
         restored.subtasks = task.subtasks
@@ -323,6 +338,7 @@ extension GTDReducer {
     static func bulkRelease(
         _ command: GTDCommand.BulkRelease, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        try requireReviewExposed(state, mode: mode)
         if state.review.bulkReleases[command.bulkID] != nil { return try satisfied(mode, else: .idAlreadyExists) }
         guard command.taskIDs.count <= ReviewLimits.bulkReleaseItems else { throw .tooManyItems }
         let settings = clockSettings(state)
@@ -398,9 +414,15 @@ extension GTDReducer {
                 skipped.append(item.taskID)
                 continue
             }
-            // A snapshot nulled by retention: the Undo is no longer available.
-            // A snapshot the device never had: the server restores the clock.
-            if item.previousState == .next, item.clockBefore == nil, item.clockKnown { throw .undoUnavailable }
+            if item.previousState == .next, item.clockBefore == nil {
+                // A snapshot nulled by retention: the Undo is no longer available.
+                if item.clockKnown { throw .undoUnavailable }
+                // A clock only the server holds: the task stays in Someday until
+                // the server's answer brings it back with that clock, never a
+                // Next task without one (FR-017).
+                restored.append(item.taskID)
+                continue
+            }
             task.state = item.previousState.taskState
             task.parked = nil
             if let clock = item.clockBefore {
@@ -416,6 +438,8 @@ extension GTDReducer {
             restored.append(item.taskID)
         }
         record.undoneAt = date
+        // No pre-release copy (it carries the extension reason) outlives the Undo (FR-043).
+        for index in record.released.indices { record.released[index].clockBefore = nil }
         record.undoResult = BulkUndoResult(restored: restored, skipped: skipped)
         working.review.bulkReleases[id] = record
         state = working
@@ -424,9 +448,28 @@ extension GTDReducer {
 
     // MARK: - Review commands
 
+    /// The non-interactive off state (FR-042, ios/AGENTS.md): while the
+    /// review is not exposed on this device (`ReviewState.isExposed`) a
+    /// person's review action is refused. It covers what only the review's
+    /// own surfaces offer (a decision, starting a review, a bulk release,
+    /// "While you were away" Continue, the explainer). Undo of the person's
+    /// own action, consent revocation, settings (also the device zone hook),
+    /// a running review's progress and finish, and device auto-parks are not
+    /// review entries and stay as they are. Replay is never refused: queued
+    /// commands follow the server (FR-040).
+    static func requireReviewExposed(_ state: GTDState, mode: ApplyMode) throws(GTDValidationError) {
+        if mode == .interactive, !state.review.isExposed { throw .reviewUnavailable }
+    }
+
     static func review(
         _ command: ReviewCommand, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {
+        switch command {
+        case .acknowledgeExplainer, .acknowledgeParks, .startSession:
+            try requireReviewExposed(state, mode: mode)
+        case .updateSettings, .progressSession, .finishSession, .grantNavigatorConsent, .revokeNavigatorConsent:
+            break
+        }
         switch command {
         case .acknowledgeExplainer(let timeZone):
             // First acknowledgement wins; a duplicate is harmless (FR-051).
@@ -531,6 +574,10 @@ extension GTDReducer {
         guard var session = state.review.sessions[progress.sessionID] else {
             return try satisfied(mode, else: .reviewNotFound)
         }
+        // http §6: a step the mode does not have is 422, whatever the status.
+        let steps = session.mode.steps
+        if let step = progress.step, !steps.contains(step) { throw .stepNotInReview }
+        if let step = progress.activeStep, !steps.contains(step) { throw .stepNotInReview }
         if session.appliedProgress.contains(progress.progressID) {
             return mode == .replay ? .alreadySatisfied : .applied
         }

@@ -97,6 +97,10 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             create or modify tasks.
           </p>
           <p>
+            With your consent, weekly review suggestions send the items listed under
+            &ldquo;Weekly review suggestions&rdquo; below to the configured cloud provider.
+          </p>
+          <p>
             <strong>Legitimate interest</strong> (Art. 6(1)(f)): security logging and rate
             limiting to protect accounts, and account administration — an authorised
             operator can look up one account (its id, email, display name and whether
@@ -218,10 +222,52 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
         </Section>
 
+        <Section title="Weekly review suggestions">
+          <p>
+            When you ask for a suggestion while deciding on a task in the weekly review (a first
+            step, a new wording, or a first next action for a project), Brain Buddy can ask a cloud
+            AI provider, OpenAI, to propose 1 to 3 next steps. Nothing is written to your tasks
+            until you confirm a suggestion, after editing it if you like.
+          </p>
+          <p>
+            What is sent is exactly five items: the task&rsquo;s title, its notes (very long notes
+            are shortened by leaving out the middle), the stall reason you picked, the
+            project&rsquo;s name, and the titles of up to 20 other open tasks in the same project.
+            Nothing else is sent: no dates, tags, other projects or account details.
+          </p>
+          <p>
+            Notes and task titles are sent to the provider as written, including any names or other
+            details of other people in them; nothing is redacted. This happens only under your own
+            consent.
+          </p>
+          <p>
+            You give that consent once, for the named provider and the current list of data sent;
+            if either changes, we ask again. You can revoke it at any time in settings, also while
+            the weekly review is switched off for you, and a revoked consent stops requests
+            immediately. On iPhone, suggestions from Apple&rsquo;s on-device model never leave the
+            device.
+          </p>
+          <p>
+            Your consent record (for which provider and text version, and when you gave or revoked
+            it) is kept until you delete your account and is included in your data export. To
+            enforce usage limits we count, per day, how many suggestions you asked for, their
+            estimated cost and how many showed a proposal, with no content; these counters are
+            deleted after 35 days and excluded from your data export. We do not store the text sent
+            or the suggestions returned: when you confirm a decision we record only whether you
+            used a suggestion as it was, edited it, or not, and the request&rsquo;s id.
+          </p>
+          <p>
+            OpenAI keeps what it received under its own policy (up to 30 days for API data, for
+            abuse monitoring, and not used to train its models). Deleting your Brain Buddy account
+            cannot erase that copy.
+          </p>
+        </Section>
+
         <Section title="Who else processes your data">
           <p>
             <strong>OpenAI</strong> — title suggestions processing the current task draft, selected
-            Project name, and up to 50 prior task titles, plus speech transcription, text
+            Project name, and up to 50 prior task titles; weekly review suggestions processing the
+            five items listed above; plus speech transcription, text
             reconciliation, and AI validation; and, where configured, <strong>Deepgram</strong> —
             speech transcription. These purposes run only when you have consented. API data is
             not used to train their models and is retained by OpenAI for up to 30 days for abuse

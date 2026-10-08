@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from time import perf_counter
 
@@ -20,6 +21,45 @@ from app.core.logging import (
 )
 
 CORRELATION_HEADER = "X-Correlation-ID"
+CLIENT_HEADER = "X-Client"
+
+_CLIENT_RE = re.compile(r"^brainbuddy-(ios|macos)/([0-9A-Za-z.+-]{1,32})$")
+_CORRELATION_ID_RE = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
+
+
+def parse_client(header: str | None) -> tuple[str, str]:
+    """``X-Client`` as the ``(client, client_version)`` the logs carry.
+
+    The raw value is never returned: it is client input and an observability
+    label only (spec 021, http section 6).
+    """
+
+    if header is None:
+        return "web", "-"
+    match = _CLIENT_RE.fullmatch(header)
+    return (match.group(1), match.group(2)) if match else ("other", "-")
+
+
+NAVIGATOR_ROUTES = "/review/navigator"
+"""Spec 020 FR-044: failures under this prefix are logged by class name only."""
+
+
+class RedactedError(Exception):
+    """Stands in, in a log record, for an exception whose text, cause or
+    context may hold a person's input or a model's output (FR-044)."""
+
+
+def _content_free(
+    error: BaseException,
+) -> tuple[type[RedactedError], RedactedError, None]:
+    """``exc_info`` naming only ``error``'s class: no message, no traceback
+    frames, no chain. The live exception's chain is cleared too, so no later
+    handler can print a re-chained original."""
+
+    error.__cause__ = None
+    error.__context__ = None
+    error.__suppress_context__ = True
+    return RedactedError, RedactedError(type(error).__name__), None
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
@@ -38,7 +78,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         incoming = request.headers.get(CORRELATION_HEADER) or request.headers.get(
             "X-Request-ID"
         )
-        correlation_id = incoming or str(uuid.uuid4())
+        # A client-minted id is the reference people copy, so it must be inert
+        # in a log line: anything outside the safe pattern is replaced.
+        correlation_id = (
+            incoming
+            if incoming is not None and _CORRELATION_ID_RE.fullmatch(incoming)
+            else str(uuid.uuid4())
+        )
         token = set_correlation_id(correlation_id)
         request.state.correlation_id = correlation_id
         start = perf_counter()
@@ -47,16 +93,24 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         # disclosure, and the exception line is the one most likely to be
         # forgotten and the one most likely to be pasted into a ticket.
         logged_path = sanitize_log_path(request.url.path, api_prefix=self.api_prefix)
+        client, client_version = parse_client(request.headers.get(CLIENT_HEADER))
 
         try:
             response = await call_next(request)
-        except Exception:
+        except Exception as error:
             duration_ms = (perf_counter() - start) * 1000
-            self.logger.exception(
-                "api_request_failed method=%s path=%s duration_ms=%.1f",
+            navigator = request.url.path.startswith(
+                f"{self.api_prefix}{NAVIGATOR_ROUTES}"
+            )
+            self.logger.error(
+                "api_request_failed method=%s path=%s "
+                "client=%s client_version=%s duration_ms=%.1f",
                 request.method,
                 logged_path,
+                client,
+                client_version,
                 duration_ms,
+                exc_info=_content_free(error) if navigator else True,
             )
             raise
         finally:
@@ -73,10 +127,13 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         duration_ms = (perf_counter() - start) * 1000
         log = self.logger.warning if response.status_code >= 400 else self.logger.info
         log(
-            "api_request method=%s path=%s status=%s duration_ms=%.1f",
+            "api_request method=%s path=%s status=%s "
+            "client=%s client_version=%s duration_ms=%.1f",
             request.method,
             logged_path,
             response.status_code,
+            client,
+            client_version,
             duration_ms,
         )
         return response

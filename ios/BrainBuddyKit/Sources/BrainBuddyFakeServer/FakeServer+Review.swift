@@ -371,8 +371,10 @@ extension FakeHTTPError {
         status: 404, message: "Not found", detail: .object(["reason": .string("weekly_review_disabled")])
     )
 
-    static func reason(_ status: Int, _ reason: String, _ message: String) -> FakeHTTPError {
-        FakeHTTPError(status: status, message: message, detail: .object(["reason": .string(reason)]))
+    static func reason(_ status: Int, _ reason: String, _ message: String, extra: [String: JSONValue] = [:]) -> FakeHTTPError {
+        FakeHTTPError(
+            status: status, message: message, detail: .object(extra.merging(["reason": .string(reason)]) { _, new in new })
+        )
     }
 
     static let idConflict = reason(409, "id_conflict", "This id is already used by another record.")
@@ -470,7 +472,7 @@ extension ServerState {
             return try startSession(request, owner: owner, now: now)
         case (.get, 2) where rest[0] == "sessions":
             guard weeklyReview(owner) else { throw .reviewDisabled }
-            guard let session = data(owner).review.sessions[rest[1]] else { throw .notFound("review_session", rest[1]) }
+            guard let session = data(owner).review.sessions[rest[1]] else { throw .notFound("Review session", rest[1]) }
             return .json(200, session.dto)
         case (.patch, 2) where rest[0] == "sessions":
             return try progressSession(rest[1], request, owner: owner, now: now)
@@ -641,7 +643,7 @@ extension ServerState {
         let body = try RequestBody(request.body, allowing: ["expected_task_revision"])
         let expected = try body.int("expected_task_revision", minimum: 1)
         return try idempotentReview(request, body: body, owner: owner, command: "undo_decision:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard let decision = data.review.decisions[id] else { throw .notFound("review_decision", id) }
+            guard let decision = data.review.decisions[id] else { throw .notFound("Review decision", id) }
             let unavailable = FakeHTTPError.reason(409, "undo_unavailable", "This decision can no longer be undone.")
             let task = try data.task(decision.taskID)
             guard task.revision == decision.revisionAfter, expected == task.revision else { throw unavailable }
@@ -697,9 +699,12 @@ extension ServerState {
         }
         return try idempotentReview(request, body: body, owner: owner, command: "explainer_ack", now: now) { data throws(FakeHTTPError) in
             // First acknowledgement wins; the activation clamp runs in the
-            // same step without bumping any task revision.
+            // same step without bumping any task revision. The settings
+            // revision does go up, as `_activated_settings` bumps it, so a
+            // settings change queued before activation is answered 409.
             if data.review.settings.activatedAt == nil {
                 data.review.settings.activatedAt = now
+                data.review.settings.revision = (data.review.settings.revision ?? 1) + 1
                 if let zone { data.review.settings.timeZone = zone }
                 for (taskID, task) in data.tasks where task.state == .next {
                     let id = task.formulation?.id ?? FormulationID(ClientID.derived("form", from: "activation|\(taskID)"))
@@ -733,7 +738,14 @@ extension ServerState {
         if let zone, TimeZone(identifier: zone) == nil { throw .reason(400, "invalid_time_zone", "Unknown time zone.") }
         return try idempotentReview(request, body: body, owner: owner, command: "review_settings", now: now) { data throws(FakeHTTPError) in
             var settings = data.review.settings
-            guard settings.revision == expected else { throw .stale("ReviewSettings", "settings") }
+            // `ReviewService.update_settings` raises `ConflictError("Review
+            // settings", owner_id, "Review settings have newer changes; reload
+            // before saving.")`: exactly that message, detail `{resource:
+            // "Review settings", id: <owner>}` and no `reason` (golden trace
+            // TR-005). `APIError.conflictKind` recognises it as stale.
+            guard settings.revision == expected else {
+                throw .conflict("Review settings", owner, "Review settings have newer changes; reload before saving.")
+            }
             var changed = false
             if let threshold, threshold != settings.thresholdDays {
                 settings.thresholdDays = threshold
@@ -797,7 +809,11 @@ extension ServerState {
                 return .json(201, stored.dto)
             }
             if let open = data.review.sessions.values.first(where: { $0.status == .open }) {
-                guard replaceOpen else { throw .reason(409, "open_session_exists", "A review is already open.") }
+                guard replaceOpen else {
+                    throw .reason(
+                        409, "open_session_exists", "A review is already open.", extra: ["session_id": .string(open.id)]
+                    )
+                }
                 data.review.sessions[open.id]?.end(.replace, at: now)
             }
             var steps: [ReviewStep: StepStatus] = [:]
@@ -829,7 +845,15 @@ extension ServerState {
         let delta = try body.optionalInt("inbox_processed_delta")
         let digest = body.progressDigest
         return try idempotentReview(request, body: body, owner: owner, command: "review_progress:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var session = data.review.sessions[id] else { throw .notFound("review_session", id) }
+            guard var session = data.review.sessions[id] else { throw .notFound("Review session", id) }
+            // A step code outside the run's mode is 422, whatever the status (http §6).
+            for (field, value) in [("step", step), ("active_seconds", active)] {
+                if let code = value?["code"]?.stringValue.flatMap(ReviewStep.init(rawValue:)), session.steps[code] == nil {
+                    throw .validation(
+                        ["body", field, "code"], "The step is not part of this review's mode.", type: "step_outside_run"
+                    )
+                }
+            }
             if let known = session.appliedProgress[progressID] {
                 // Replay-safe at any age: the same change is merged once.
                 guard known == digest else { throw .idConflict }
@@ -868,7 +892,7 @@ extension ServerState {
         let body = try RequestBody(request.body, allowing: ["clear_start"])
         let clearStart = try body.value("clear_start", as: ClearStart.self)
         return try idempotentReview(request, body: body, owner: owner, command: "review_finish:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var session = data.review.sessions[id] else { throw .notFound("review_session", id) }
+            guard var session = data.review.sessions[id] else { throw .notFound("Review session", id) }
             if session.status == .open {
                 session.end(.finish, at: now)
                 session.lastActivityAt = now
@@ -939,7 +963,7 @@ extension ServerState {
     mutating func undoBulkRelease(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError) -> Reply {
         let body = RequestBody(fields: [:])
         return try idempotentReview(request, body: body, owner: owner, command: "undo_bulk_release:\(id)", now: now) { data throws(FakeHTTPError) in
-            guard var record = data.review.bulkReleases[id] else { throw .notFound("review_bulk_release", id) }
+            guard var record = data.review.bulkReleases[id] else { throw .notFound("Review bulk release", id) }
             if let result = record.undoResult { return .json(200, result) }
             var restored: [String] = []
             var skipped: [BulkSkippedItemDTO] = []

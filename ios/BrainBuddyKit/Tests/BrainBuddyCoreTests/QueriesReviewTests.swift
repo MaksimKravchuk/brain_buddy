@@ -173,6 +173,139 @@ struct QueriesReviewTests {
         #expect(GTDQueries.formulationClass(of: task, now: justAfterBerlinMidnight, settings: settings, timeZone: "Europe/Berlin") == .fresh)
     }
 
+    @Test("020-FR-005 the third stalled wording: asking, with two stalled wordings before it")
+    func thirdStall() {
+        let settings = Review.settings()
+        let asking = Review.now.addingTimeInterval(-15 * Review.day)
+        let twice = Review.nextTask("t1", started: asking, stalled: 2)
+        #expect(GTDQueries.isThirdStall(twice, now: Review.now, settings: settings))
+        #expect(!GTDQueries.isThirdStall(Review.nextTask("t2", started: asking, stalled: 1), now: Review.now, settings: settings))
+        let fresh = Review.nextTask("t3", started: Review.now.addingTimeInterval(-2 * Review.day), stalled: 2)
+        #expect(!GTDQueries.isThirdStall(fresh, now: Review.now, settings: settings), "not asking yet")
+        // A clock that started before activation is clamped to it (FR-016):
+        // 40 days in Next but only 10 since activation does not ask yet.
+        let clamped = Review.nextTask("t4", started: Review.now.addingTimeInterval(-40 * Review.day), stalled: 2)
+        let late = Review.settings(activatedAt: Review.now.addingTimeInterval(-10 * Review.day))
+        #expect(!GTDQueries.isThirdStall(clamped, now: Review.now, settings: late))
+    }
+
+    @Test("020-FR-009 keep 7 more days previews its dates: asks again 7 days from now, moves 7 days after that")
+    func extensionPreview() throws {
+        let settings = Review.settings()
+        let task = Review.nextTask("t1", started: Review.now.addingTimeInterval(-15 * Review.day))
+        let instants = try #require(GTDQueries.extensionInstants(of: task, now: Review.now, settings: settings))
+        #expect(instants.askAt == Review.now.addingTimeInterval(7 * Review.day))
+        #expect(instants.parkDueAt == Review.now.addingTimeInterval(14 * Review.day))
+        let fresh = Review.nextTask("t2", started: Review.now.addingTimeInterval(-2 * Review.day))
+        #expect(GTDQueries.extensionInstants(of: fresh, now: Review.now, settings: settings) == nil, "not due yet")
+        let used = Review.nextTask("t3", started: Review.now.addingTimeInterval(-30 * Review.day), extendedAt: Review.now)
+        #expect(GTDQueries.extensionInstants(of: used, now: Review.now, settings: settings) == nil, "used once")
+        // The classification zone moves a due date's clock start (§6): the
+        // preview follows the zone it is asked with.
+        let due = CalendarDay(year: 2026, month: 9, day: 20)!
+        let dueTask = Review.nextTask("t4", started: Review.instant("2026-09-02T09:00:00Z"), due: due)
+        let berlin = try #require(GTDQueries.extensionInstants(of: dueTask, now: Review.now, settings: settings))
+        let honolulu = try #require(
+            GTDQueries.extensionInstants(of: dueTask, now: Review.now, settings: settings, timeZone: "Pacific/Honolulu")
+        )
+        #expect(berlin.start != honolulu.start)
+    }
+
+    @Test("020-FR-012 a park's age comes from its own clock: after the activation grace or an extension too; unknown without it")
+    func parkedAge() {
+        let started = Review.instant("2026-09-01T08:00:00Z")
+        var parked = Review.task("t1", title: "Call Bob", state: .someday)
+        // Kept 7 more days, then parked 28 days and 6 hours after the start.
+        let at = started.addingTimeInterval(28 * Review.day + 6 * 3_600)
+        parked.parked = ParkMarker(
+            at: at, formulationID: Review.form(1),
+            clockBefore: FormulationClock(id: Review.form(1), startedAt: started, extendedAt: started.addingTimeInterval(14 * Review.day))
+        )
+        #expect(GTDQueries.parkedAfterDays(parked) == 28)
+        // A park pulled from the server carries no clock (http §3): no guess.
+        parked.parked = ParkMarker(at: at, formulationID: Review.form(1))
+        #expect(GTDQueries.parkedAfterDays(parked) == nil)
+        #expect(GTDQueries.parkedAfterDays(Review.task("t2", title: "Plan", state: .someday)) == nil, "not parked")
+    }
+
+    @Test("020-FR-015 returning a park to Next: open unless its project is archived or it changed elsewhere")
+    func parkReturn() {
+        let now = Review.now
+        var parked = Review.task("t1", title: "Return the old router", state: .someday)
+        parked.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([parked, Review.task("t2", title: "Update the CV", state: .next)])
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil)
+        state.projects["p1"] = ProjectRecord(id: "p1", name: "Old flat", state: .archived, createdAt: now)
+        state.tasks["t1"]?.projectID = "p1"
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == .projectArchived(name: "Old flat"))
+        state.projects["p1"]?.state = .active
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil)
+        #expect(GTDQueries.parkReturnProblem(of: "t2", in: state) == .changedElsewhere, "back in Next already")
+        #expect(GTDQueries.parkReturnProblem(of: "gone", in: state) == .changedElsewhere)
+        state.tasks["t1"]?.parked = nil
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == .changedElsewhere, "no longer parked")
+    }
+
+    @Test("020-FR-015 Continue acknowledges only the parks While you were away showed, as the parks it showed")
+    func whileAwayAcknowledgesShownOnly() {
+        let now = Review.now
+        var first = Review.task("t1", title: "Return the old router", state: .someday)
+        first.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([first])
+        let shown = GTDQueries.unseenParkAcks(in: state)
+        #expect(shown == [ParkAck(taskID: "t1", formulationID: Review.form(1), parkedAt: now)])
+
+        // While the sheet is open, a sync brings another park.
+        var arrived = Review.task("t2", title: "Update the CV", state: .someday)
+        arrived.parked = ParkMarker(at: now.addingTimeInterval(60), formulationID: Review.form(2))
+        state.tasks["t2"] = arrived
+        #expect(GTDQueries.unseenParkAcks(in: state).count == 2)
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state) == shown, "the arrived park stays unseen")
+
+        // A shown park returned (in the sheet or elsewhere) or seen elsewhere needs no acknowledgement.
+        state.tasks["t1"]?.state = .next
+        state.tasks["t1"]?.parked = nil
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state).isEmpty)
+        // Parked again as a new park meanwhile: not the park that was shown.
+        state.tasks["t1"]?.state = .someday
+        state.tasks["t1"]?.parked = ParkMarker(at: now.addingTimeInterval(120), formulationID: Review.form(1))
+        #expect(GTDQueries.whileAwayAcknowledgements(shown: shown, in: state).isEmpty)
+    }
+
+    @Test("020-FR-015 a shown park replaced by a later park of the same task is changed elsewhere: no Return, not in Return all")
+    func shownParkReplacedByLaterPark() throws {
+        let now = Review.now
+        var parked = Review.task("t1", title: "Return the old router", state: .someday)
+        parked.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        var state = Review.state([parked])
+        let shown = try #require(GTDQueries.unseenParkAcks(in: state).first)
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == nil, "the park the sheet showed")
+        #expect(WhileAwayOutcome.initial(for: nil).offersReturn)
+
+        // Returned to Next (Undo), then the same formulation parked again later.
+        state.tasks["t1"]?.state = .next
+        state.tasks["t1"]?.parked = nil
+        state.tasks["t1"]?.state = .someday
+        state.tasks["t1"]?.parked = ParkMarker(at: now.addingTimeInterval(8 * Review.day), formulationID: Review.form(1))
+        #expect(GTDQueries.parkReturnProblem(of: "t1", in: state) == nil, "on its own the new park can return")
+        let problem = GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state)
+        #expect(problem == .changedElsewhere, "not the park that was shown")
+        let outcome = WhileAwayOutcome.initial(for: problem)
+        #expect(outcome == .changedElsewhere && !outcome.offersReturn, "no Return to Next, and Return all skips it")
+
+        // A different formulation at the shown instant is not the shown park either.
+        state.tasks["t1"]?.parked = ParkMarker(at: now, formulationID: Review.form(2))
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == .changedElsewhere)
+
+        // The archived-project problem still applies to the shown park.
+        state.tasks["t1"]?.parked = ParkMarker(at: now, formulationID: Review.form(1))
+        state.projects["p1"] = ProjectRecord(id: "p1", name: "Old flat", state: .archived, createdAt: now)
+        state.tasks["t1"]?.projectID = "p1"
+        #expect(GTDQueries.parkReturnProblem(of: "t1", shown: shown, in: state) == .projectArchived(name: "Old flat"))
+        #expect(!WhileAwayOutcome.archived(project: "Old flat").offersReturn)
+        #expect(!WhileAwayOutcome.returned.offersReturn && !WhileAwayOutcome.notice.offersReturn)
+    }
+
     @Test("020-FR-028 wins, capacity, Waiting and Someday due, projects without a next action and restart candidates over a state")
     func stateQueries() {
         let now = Review.now
@@ -231,5 +364,115 @@ struct QueriesReviewTests {
         #expect(GTDQueries.lastCountedReview(in: state) == ended, "completed_empty never counts")
         state.review.server = ReviewServerFacts(exposed: true, lastCountedReviewAt: Review.instant("2026-10-02T10:00:00Z"))
         #expect(GTDQueries.lastCountedReview(in: state) == Review.instant("2026-10-02T10:00:00Z"))
+    }
+
+    // MARK: - The decision step, releases and entry notices (T137 – T143)
+
+    private func queueState(_ ids: [TaskID]) -> (GTDState, ReviewSession) {
+        let starts = ["2026-09-22T09:00:00Z", "2026-09-23T09:00:00Z", "2026-09-24T09:00:00Z"]
+        let tasks = zip(ids.indices, ids).map { index, id in
+            Review.nextTask(id, started: Review.instant(starts[index]), formulation: Review.form(index + 1))
+        }
+        var state = Review.state(tasks)
+        let session = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now, decisionQueue: ids
+        )
+        state.review.sessions[session.id] = session
+        return (state, session)
+    }
+
+    @Test("020-FR-034 020-FR-050 020-SC-002 the decision step walks the run's queue: card, Not now, kept wording, all decided")
+    func decisionStepOutcomes() throws {
+        var (state, session) = queueState(["a", "b", "c"])
+        func outcome() -> DecisionStepOutcome {
+            GTDQueries.decisionStep(in: state, session: state.review.sessions[session.id] ?? session, now: Review.now)
+        }
+        #expect(outcome() == .card("a", position: 1, total: 3))
+        try Review.apply(Review.decide(.someday, "a", decision: 1, formulation: Review.form(1), session: session.id), to: &state)
+        #expect(outcome() == .card("b", position: 2, total: 3))
+        state.review.sessions[session.id]?.setAsideTaskIDs = ["b"]
+        #expect(outcome() == .card("c", position: 3, total: 3), "Not now passes the card over")
+        // "Save anyway": a decision, yet the task still asks.
+        try Review.apply(
+            Review.decide(.reformulate, "c", decision: 3, formulation: Review.form(3), title: "call bob.", session: session.id),
+            to: &state
+        )
+        #expect(outcome() == .someLeft(decided: 2, total: 3, stillAsking: 2))
+        try Review.apply(Review.decide(.someday, "b", decision: 2, formulation: Review.form(2), session: session.id), to: &state)
+        #expect(outcome() == .allDecided(3, keptWording: 1))
+        // Undo brings the card back as current.
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(1), to: &state)
+        #expect(outcome() == .card("a", position: 1, total: 3))
+        let (empty, quiet) = queueState([])
+        #expect(GTDQueries.decisionStep(in: empty, session: quiet, now: Review.now) == .nothingAsks)
+    }
+
+    @Test("020-FR-017 020-FR-030 a release can be undone until the person moves on: a review started, or the Inbox step left")
+    func openReleases() {
+        var state = Review.state([])
+        let released = BulkReleasedTask(taskID: "t1", previousState: .next, clockBefore: nil, taskAfter: TaskStamp(updatedAt: nil, serverRevision: 2))
+        func record(_ n: Int, _ kind: BulkReleaseKindCode, session: ReviewSessionID? = nil, at date: Date = Review.now) -> BulkReleaseRecord {
+            BulkReleaseRecord(id: Review.bulk(n), kind: kind, sessionID: session, createdAt: date, released: [released], skipped: [])
+        }
+        state.review.bulkReleases[Review.bulk(1)] = record(1, .restart)
+        #expect(GTDQueries.openRestartReleases(in: state).map(\.id) == [Review.bulk(1)])
+        state.review.bulkReleases[Review.bulk(1)]?.undoneAt = Review.now
+        #expect(GTDQueries.openRestartReleases(in: state).isEmpty, "undone")
+        state.review.bulkReleases[Review.bulk(1)]?.undoneAt = nil
+        state.review.sessions[Review.session(1)] = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now.addingTimeInterval(60)
+        )
+        #expect(GTDQueries.openRestartReleases(in: state).isEmpty, "Start the review is moving on")
+
+        let session = ReviewSession(id: Review.session(2), mode: .quick, entry: .list, origin: .ios, startedAt: Review.now)
+        state.review.bulkReleases[Review.bulk(2)] = record(2, .inboxRemainder, session: session.id)
+        state.review.bulkReleases[Review.bulk(3)] = record(3, .inboxRemainder, session: Review.session(9))
+        #expect(GTDQueries.openInboxReleases(in: state, session: session).map(\.id) == [Review.bulk(2)])
+        var left = session
+        left.steps[.inbox] = .finished
+        #expect(GTDQueries.openInboxReleases(in: state, session: left).isEmpty, "the step was left")
+    }
+
+    @Test("020-FR-038 days since the last counted review are whole local days; none before the first")
+    func daysSinceLastReview() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = CalendarDay(year: 2026, month: 10, day: 9)!
+        var state = Review.state([])
+        #expect(GTDQueries.daysSinceLastReview(in: state, today: today, calendar: calendar) == nil)
+        let ended = Review.instant("2026-09-30T15:40:00Z")
+        state.review.sessions[Review.session(1)] = ReviewSession(
+            id: Review.session(1), mode: .quick, entry: .list, origin: .ios, status: .completed, startedAt: ended,
+            endedAt: ended, qualifyingActivity: true
+        )
+        #expect(GTDQueries.daysSinceLastReview(in: state, today: today, calendar: calendar) == 9)
+    }
+
+    @Test("020-FR-029 020-SC-007 the entry names a review another device ended or the idle rule closed, with its decisions kept")
+    func entryNotice() {
+        var state = Review.state([])
+        let started = Review.instant("2026-10-02T12:40:00Z")
+        var idle = ReviewSession(
+            id: Review.session(1), mode: .full, entry: .list, origin: .web, status: .partial, startedAt: started,
+            lastActivityAt: started, qualifyingActivity: true
+        )
+        idle.counts[.done] = 4
+        idle.counts[.inboxProcessed] = 3
+        idle.endedAt = started.addingTimeInterval(ReviewSession.idleCloseAfter)
+        state.review.sessions[idle.id] = idle
+        #expect(GTDQueries.entryNotice(in: state) == .closedAfterAWeek(startedAt: started, decisions: 4), "Inbox processed is not a decision")
+        var replaced = idle
+        replaced.id = Review.session(2)
+        replaced.endedAt = started.addingTimeInterval(ReviewSession.idleCloseAfter + 60)
+        replaced.endedElsewhere = true
+        state.review.sessions[replaced.id] = replaced
+        #expect(GTDQueries.entryNotice(in: state) == .replacedElsewhere(origin: .web, decisions: 4))
+        let done = ReviewSession(
+            id: Review.session(3), mode: .quick, entry: .list, origin: .ios, status: .completed,
+            startedAt: started.addingTimeInterval(9 * Review.day), endedAt: started.addingTimeInterval(9 * Review.day),
+            qualifyingActivity: true
+        )
+        state.review.sessions[done.id] = done
+        #expect(GTDQueries.entryNotice(in: state) == nil, "a later finished review leaves nothing to say")
     }
 }

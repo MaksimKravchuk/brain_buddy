@@ -117,6 +117,60 @@
       },
       "resolution": "Fixed in b17c526: E10/§5/R15 state the device-only undoRetained exception honestly (no stored snapshot); E3 records the owner decision; the bulk-undo 'known limit' is relabelled a known deviation from FR-017 with the fix tracked for PR-12 (with T174); http §3 undo 404 cases completed, http.md:57 resource naming matches the backend, the compaction list and the device-only Undo sentence corrected, the open_session rule scoped to iOS clients. No behaviour change.",
       "artifacts_digest_after_fixes": "f06dd65d283ce9d0a66ebfa14e66d7bfa6af532fe2d9dd020064f73fd8bbdbf6"
+    },
+    "post_acceptance_review_6": {
+      "reason": "Compensating measure 5: contract and retention wording changed while fixing the PR-11 independent-review findings (54c1335: http.md Ownership, §6 PATCH, queue and bulk-Undo 404 rows, §9 Retention; docs/data-retention.md) was reviewed instead of relying on the acceptance.",
+      "reviewed_range": "f15fecb..7804d58 (contracts/http.md, docs/data-retention.md, the PR-11 backend fixes)",
+      "reviewer": "targeted re-reviewer run by the coordinating session, read-only",
+      "date": "2026-10-07",
+      "verdict": "pass",
+      "findings": {
+        "blocking": 0,
+        "important": 1,
+        "advisory": 7
+      },
+      "owner_decision": {
+        "by": "Max (product owner)",
+        "date": "2026-10-07",
+        "question": "May the secret scan exempt the one line of the synthetic weekly review run-trace fixtures whose idempotency key (\"trr05-finish-empty\") scores as a generic API key?",
+        "answer": "Yes, as a narrow line exemption in .gitleaks.toml (ef700a0); every other value on that line and in the fixtures is still scanned."
+      },
+      "resolution": "Re-review summary: Post-acceptance targeted re-review of PR-11 fixes at 7804d58 (against f15fecb): I1, I2, I3, A1 and A5 closed; each new test confirmed by local mutation. The retention purge never touches records younger than 24 h, keeps the create_native_inbox_task exemption, runs under the owner command lock in one transaction and only visits owners with purgeable records. The 404 resource names agree across the backend, the Swift fake server and http.md. The http.md amendments (Ownership; §6 PATCH, queue and bulk-Undo 404 rows; §9 Retention) and the data-retention.md row are consistent with spec.md and data-model.md. Follow-up T176 (PR-12): the iOS reducer refuses out-of-mode step codes. Verdict: code approve; contract approve with the PR-12 note. Important item C1 resolved in the commit that records this entry: follow-up task T176 added to slice PR-12 (tasks.md and the PR-12 manifest) and the ios-commands §4 progressSession row says the reducer never produces the out-of-mode 422. Advisories fixed in the same commit: http §6 puts the out-of-mode 422 first in the progress rules and the replay check order, whatever the status, and says current_step is accepted as sent; http §9 names the create_native_inbox_task exemption; the data-retention row keeps brain-dump commit records until account purge; the backend/app/main.py sweep docstring names owners with expired idempotency records; data-model E3 says the steps keys are exactly the mode's steps (FR-028); a test shows the out-of-mode 422 on an ended run.",
+      "artifacts_digest_after_fixes": "84364a3370116aa9b4457d7e98b28247c44794c0c27365b974527619122c52a3"
+    },
+    "post_acceptance_review_7": {
+      "reason": "Compensating measure 5: contract wording added while fixing the Codex review of PR #278 at 7804d58 (http.md Client-supplied ids path ids and Queues snapshot; data-model E3 decision_queue; plan.md SC-005 read-out window) was reviewed instead of relying on the acceptance.",
+      "reviewed_range": "7804d58 (PR #278: backend/app/modules/tasks/review_flow.py, backend/app/api/review_flow.py)",
+      "reviewer": "Codex pull-request review on #278",
+      "date": "2026-10-07",
+      "verdict": "changes-required",
+      "findings": {
+        "blocking": 0,
+        "important": 1,
+        "advisory": 2
+      },
+      "resolution": "All 3 fixed in the commit that records this entry, each with a failing test first: (P1) the SC-005 cloud share counts decisions and shown requests from the later of --since and the oldest retained navigator_usage day and prints that day when it is later (plan.md); (P2) the session path ids take the session reference shape and the bulk-release Undo id the bulk reference shape, any other shape 422 before any lookup (http Client-supplied ids); (P2) the decision snapshot is null until taken and an empty snapshot stays taken (http §6 Queues, data-model E3).",
+      "artifacts_digest_after_fixes": "31ca9d0c6f27b24211dda52c44bab3ae14472799fc2b0349799926e43d90ec2a"
+    },
+    "post_acceptance_review_8": {
+      "reason": "Compensating measure 5: the PR-07 navigator contract amendments (navigator.md §1/§2/§3/§5, http.md §7, plan.md, research.md R13, docs/data-retention.md) made while fixing the PR #272 review findings were reviewed instead of relying on the acceptance. Numbered 8 so it cannot collide with entries 6 and 7 of the PR-11 branch.",
+      "reviewed_range": "203f626..4718e85 (contracts/navigator.md, contracts/http.md, plan.md, research.md, docs/data-retention.md, .env.example), round-2 additions in the commit that records this entry",
+      "reviewer": "independent reviewer subagent (targeted contract review, two rounds), read-only",
+      "date": "2026-10-07",
+      "verdict": "pass",
+      "findings": {
+        "blocking": 0,
+        "important": 3,
+        "advisory": 4
+      },
+      "owner_decision": {
+        "by": "Coordinator under the owner's delegation",
+        "date": "2026-10-07",
+        "question": "(1) May rule 3 keep 'today' / 'сегодня', which the prompt itself asks for ('could be started today'), without grounding? (2) When reduce_notes keeps every line of an over-budget note (only CRs removed), is notes_truncated false?",
+        "answer": "(1) Yes: 'today' and 'сегодня' are exempt like a duration of at most 30 minutes; 'tonight', 'tomorrow', 'завтра' and the other relative dates still drop. (2) Yes: nothing was dropped, so truncated = false (§1); clients OR the server flag with their own."
+      },
+      "resolution": "Two-round post-acceptance review of the PR-07 navigator contract amendments (203f626 → 4718e85): approved after fixes. Round 1 found no Blocker and three Important issues: purge wording true only for the CLI, the propagate rule letting exception text reach the middleware's traceback log (FR-044), and rule 3 not tight enough for identical Swift/JS implementations. Round 2 verified every fix: purge wording separated across http.md/.env.example/plan/research/data-retention; undeclared provider exceptions re-raised content-free as NavigatorInternalError with an end-to-end log test, then hardened against framework re-chaining; rule 3 defined in text with a normative date_words table, a code-equals-table test and 102 vectors; every < escaped with shared prompt_vectors.json.",
+      "artifacts_digest_after_fixes": "590533b9846eb5af9e506e2277559ee3dcb325721a63318587167b3e94950803"
     }
   }
 }

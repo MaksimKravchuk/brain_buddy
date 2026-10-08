@@ -50,7 +50,7 @@ client id it creates.
 | case | payload | request | reducer effect |
 |---|---|---|---|
 | `decideTask(DecideTask)` | `decisionID, taskID, type, formulationID?, newFormulationID?, stallReason?, title?, waitingFor?, reason?, sessionID?, aiUse, navigatorRequestID?, followUpTaskID?` | `POST /tasks/{id}/decisions` (sends `decision_id`, `new_formulation_id`, `follow_up_task_id`) | applies the decision table (http §3) and records `ReviewDecision` with an undo snapshot (and the follow-up's revision) |
-| `undoDecision(DecisionID)` | — | `POST /review/decisions/{id}/undo` | restores the snapshot, removes the decision, deletes a created follow-up only if it is unchanged |
+| `undoDecision(DecisionID)` | — | `POST /review/decisions/{id}/undo` | restores the snapshot, keeping the clock bookkeeping written since the decision (`FormulationRule.restore`, formulation-clock §3), removes the decision, deletes a created follow-up only if it is unchanged |
 | `autoParkTask(AutoParkTask)` | `taskID, formulationID` | `POST /tasks/{id}/auto-park` | parks iff activated and the local evaluation is `park_due`; stores `clockBefore` |
 | `bulkRelease(BulkRelease)` | `bulkID, kind, sessionID?, taskIDs` | `POST /review/bulk-releases` (sends `id`) | moves each eligible task to Someday (no park marker) and keeps its previous list and clock in the local bulk-release record |
 | `undoBulkRelease(BulkID)` | — | `POST /review/bulk-releases/{id}/undo` | restores tasks whose state is unchanged, clock included |
@@ -166,11 +166,15 @@ early.
   undone, e.g. a retry of an undo whose response was lost; a 404 naming the task is
   not this case): acknowledged as success, because the replay goal
   (the decision is absent) holds; it is never set aside.
-- **Known deviation (device only, signed in, until the next pull) from FR-017 and
-  formulation-clock §3 "undo of a bulk release", `undoBulkRelease`**: a restart item
-  that the server's answer released but this device's replay did not has no
-  pre-release clock on the device; its Undo restores it to Next without a local clock
-  until the next pull. Fix: tasks.md T175 (slice PR-12).
+- **Resolved deviation (FR-017, FR-043; formulation-clock §3 "undo of a bulk release"),
+  `undoBulkRelease`**: a restart item that the server's answer released but this
+  device's replay did not takes its pre-release clock from the base task when the
+  answer lands (the answer carries none; `StoreDocument+Merge.swift`). When only the
+  server holds the clock (a pull showed the release before the answer), the device's
+  Undo leaves that task in Someday until the server's answer brings it back with its
+  clock, so no Next task is ever shown without one. Once `undoneAt` is set every
+  released item's `clockBefore` (which carries `extension_reason`) is nulled. Tasks.md
+  T175 (slice PR-12).
 - **409 stale on `decideTask`**: the existing refetch path (`SyncEngine+Push.swift`
   `handleFailure`/`refetch`) runs; after the refetched task is upserted, replay
   re-evaluates the decision. When the refetched task is parked for the decision's
@@ -202,7 +206,7 @@ early.
   | `updateSettings` | 409 on `expected_revision` mismatch | refetch state, re-apply only the fields this change set (field-level last writer wins), resend with the new revision |
   | `acknowledgeParks` | idempotent, unknown ids ignored | always succeeds |
   | `startSession` | client `id`, `replace_open: true`; within the 24 h retention, replay by the same Idempotency-Key; after it, a stored session with the same owner, `id`, `mode` and `origin` answers as already applied and replaces nothing (the one de-duplication use of a client id, http "Client-supplied ids"); the device keeps the key until success | never set aside (an `id_conflict` cannot happen with UUIDs); if another device's open session was replaced, that device shows "review ended elsewhere" |
-  | `progressSession` | merged, no version conflict; replay-safe by the command's `progressID` at any age (http §6 "Progress is replay-safe") | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere"; a retry answered as already applied is a success |
+  | `progressSession` | merged, no version conflict; replay-safe by the command's `progressID` at any age (http §6 "Progress is replay-safe"); a `step` or `active_seconds` code outside the session's mode is 422 (http §6), which the reducer never produces: it refuses such a command before it is queued (T176, slice PR-12) | adopt the merged session; if its `current_step` differs, show "review moved on elsewhere"; a retry answered as already applied is a success |
   | `finishSession` | idempotent | adopt the returned session |
   | `grant/revokeNavigatorConsent` | idempotent | revoke blocks locally at once |
 

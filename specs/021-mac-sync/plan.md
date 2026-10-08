@@ -656,6 +656,8 @@ These are the proposed PR-sized slices. `/speckit-tasks` turns this table into t
 
 Classes follow ADR-0008 and `scripts/classify_path_risk.py` ("mech." = the classifier result; the final class is the stricter of mechanical and semantic). ASK means a PR plus the owner's recorded approval (see [Migration, deploy order and rollback](#migration-deploy-order-and-rollback)).
 
+**Rescope, 2026-10-07 (owner decision, applied in `tasks.md`):** the minimal path to Mac sync is PR-02, PR-03, PR-04, PR-05, PR-08 and PR-09 (PR-01 is merged) plus PR-10 reduced to the minimum release gate. PR-06 (web) and PR-07 (iPhone) are deferred to a follow-up feature, and so are PR-10's manual-evidence checker and coverage-floor raise. The table, deploy order and lanes below stay as planned; read them with those slices removed. No contract changes.
+
 **Mechanical classification, re-run for review c2** (c1 blocking F01; c2 blocking G01): every slice's full path list below was fed as `printf '%s\0' <paths> | python3 scripts/classify_path_risk.py --null` on 2026-10-06 at `a2f4827` (first run for c1 at `0b9fffe`). Review c2 changed paths in PR-02, PR-04 to PR-09; no class changed.
 
 | slice | paths | mech. | ASK paths (classifier reason) | final class |

@@ -87,6 +87,8 @@ FRONTEND_MUTATION_SCOPE = (
     "src/api/taskHooks.ts",
     "src/features/tasks/smartAdd.ts",
     "src/features/brain-dump/brainDumpNavigation.ts",
+    # Spec 020 research R20: the formulation clock's pure web module, observed only.
+    "src/features/review/formulation.ts",
     "src/stores/authStore.ts",
     "src/utils/error.ts",
     "src/utils/telemetry.ts",

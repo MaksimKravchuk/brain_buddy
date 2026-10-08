@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import AwareDatetime, Field, StringConstraints, model_validator
+from pydantic import (
+    AwareDatetime,
+    BeforeValidator,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from pydantic_core import PydanticCustomError
 
 from .common import StrictBaseModel
@@ -25,6 +31,16 @@ TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancell
 OpenTaskState = Literal["inbox", "next", "waiting", "someday"]
 TaskPriority = Literal["none", "low", "medium", "high"]
 TaskSort = Literal["manual", "due", "priority", "title"]
+ProjectListState = Literal["active", "archived", "all"]
+
+
+def _trim_outcome(value: object) -> object:
+    """Spec 021: an outcome is trimmed, and blank means none."""
+
+    return (value.strip() or None) if isinstance(value, str) else value
+
+
+DesiredOutcomeInput = Annotated[str | None, BeforeValidator(_trim_outcome)]
 
 
 class TitleCompletionConsent(StrictBaseModel):
@@ -64,11 +80,13 @@ class TitleCompletionAcceptedRequest(StrictBaseModel):
 class ProjectCreateRequest(StrictBaseModel):
     name: str = Field(min_length=1, max_length=500)
     color: str | None = Field(default=None, max_length=64)
+    desired_outcome: DesiredOutcomeInput = Field(default=None, max_length=1000)
 
 
 class ProjectUpdateRequest(StrictBaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=500)
     color: str | None = Field(default=None, max_length=64)
+    desired_outcome: DesiredOutcomeInput = Field(default=None, max_length=1000)
     expected_revision: int = Field(ge=1)
 
 
@@ -97,6 +115,9 @@ class ProjectResponse(StrictBaseModel):
     state: Literal["active", "archived"]
     revision: int
     open_task_count: int = Field(default=0, ge=0)
+    desired_outcome: str | None = None
+    archived_at: datetime | None = None
+    archived_before_lossless: bool = False
 
 
 class TagResponse(StrictBaseModel):

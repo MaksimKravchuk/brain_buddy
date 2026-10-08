@@ -1,0 +1,517 @@
+{
+  "schema": "brainbuddy-review-traces/v1",
+  "description": "Golden operation traces of the weekly review's runs (spec 020 slice PR-11, tasks.md T131): start, replace, merged progress from two clients, a progress change retried after the 24 h idempotency retention merged once, and finish. Verified by backend/tests/test_review_traces.py against the real API and replayed against BrainBuddyFakeServer in Swift (slice PR-12), so the fake server cannot drift from the backend on the offline and two-device paths.",
+  "conventions": {
+    "clock": "Each trace starts at `start` (UTC). An `advance` step moves the server clock forward by its days/hours/minutes; nothing else moves it.",
+    "owner": "One signed-in account per trace; `flag` is the weekly_review state at the start.",
+    "request": "`path` is under the server origin; `key` is the Idempotency-Key header (omitted for reads); `{name}` in a path or body is replaced by a captured value.",
+    "expect": "`status` is exact. `body` is a subset match: every listed key must be present and equal, recursively; a list must have the same length and match element-wise; the string `$present` matches any non-null value.",
+    "capture": "Maps a variable name to a dotted path in the response body.",
+    "sweep": "One server maintenance sweep run, with the 60 s loop having kept running (no sweep-gap floor).",
+    "flag": "Turns weekly_review on or off for the account from that step on."
+  },
+  "traces": [
+    {
+      "id": "TR-R01",
+      "title": "start: a review started offline on iOS arrives with its client id",
+      "requirements": ["020-FR-011", "020-FR-027", "020-FR-028", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "the queued start is pushed with replace_open",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr01-start",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a1",
+              "mode": "quick",
+              "entry": "widget_decisions",
+              "origin": "ios",
+              "skip_steps": ["wins"],
+              "replace_open": true
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a1",
+              "mode": "quick",
+              "entry": "widget_decisions",
+              "origin": "ios",
+              "status": "open",
+              "started_at": "2026-10-09T14:02:00Z",
+              "last_activity_at": "2026-10-09T14:02:00Z",
+              "ended_at": null,
+              "current_step": "inbox",
+              "steps": {"wins": "skipped", "inbox": "pending", "decisions": "pending", "summary": "pending"},
+              "set_aside_count": 0,
+              "qualifying_activity": false,
+              "clear_start": null,
+              "revision": 1
+            }
+          }
+        },
+        {
+          "name": "the lost response is retried with the same key",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr01-start",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a1",
+              "mode": "quick",
+              "entry": "widget_decisions",
+              "origin": "ios",
+              "skip_steps": ["wins"],
+              "replace_open": true
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": {"id": "review_0b0e1f30-0000-4000-8000-0000000000a1", "status": "open", "revision": 1}
+          }
+        },
+        {
+          "name": "the same id under another key with the same mode and origin is already applied",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr01-start-again",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a1",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": true
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": {"id": "review_0b0e1f30-0000-4000-8000-0000000000a1", "entry": "widget_decisions", "revision": 1}
+          }
+        },
+        {
+          "name": "the run is read on another device",
+          "request": {"method": "GET", "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a1"},
+          "expect": {"status": 200, "body": {"status": "open", "current_step": "inbox"}}
+        }
+      ]
+    },
+    {
+      "id": "TR-R02",
+      "title": "replace: a review started while another is open",
+      "requirements": ["020-FR-029", "020-SC-001"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a full review starts on the web",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr02-start-a",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a2",
+              "mode": "full",
+              "entry": "sidebar",
+              "origin": "web",
+              "replace_open": false
+            }
+          },
+          "expect": {"status": 201, "body": {"status": "open", "current_step": "wins"}}
+        },
+        {
+          "name": "Wins is finished: qualifying activity",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a2",
+            "key": "trr02-progress",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b1",
+              "step": {"code": "wins", "status": "finished"},
+              "current_step": "mind_sweep"
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {"steps": {"wins": "finished"}, "current_step": "mind_sweep", "qualifying_activity": true, "revision": 2}
+          }
+        },
+        {"name": "five minutes pass", "advance": {"minutes": 5}},
+        {
+          "name": "the phone starts a review without replace_open",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr02-start-b1",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a3",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": false
+            }
+          },
+          "expect": {
+            "status": 409,
+            "body": {"detail": {"reason": "open_session_exists", "session_id": "review_0b0e1f30-0000-4000-8000-0000000000a2"}}
+          }
+        },
+        {
+          "name": "the phone replaces the open review",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr02-start-b2",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a3",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": true
+            }
+          },
+          "expect": {
+            "status": 201,
+            "body": {"id": "review_0b0e1f30-0000-4000-8000-0000000000a3", "status": "open", "started_at": "2026-10-09T14:07:00Z"}
+          }
+        },
+        {
+          "name": "the replaced review ended partial",
+          "request": {"method": "GET", "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a2"},
+          "expect": {
+            "status": 200,
+            "body": {"status": "partial", "ended_at": "2026-10-09T14:07:00Z", "qualifying_activity": true, "revision": 3}
+          }
+        },
+        {
+          "name": "the state shows the new run and the partial one as the last counted review",
+          "request": {"method": "GET", "path": "/api/review/state"},
+          "expect": {
+            "status": 200,
+            "body": {
+              "open_session": {"id": "review_0b0e1f30-0000-4000-8000-0000000000a3"},
+              "last_counted_review_at": "2026-10-09T14:02:00Z",
+              "last_counted_review": {"session_id": "review_0b0e1f30-0000-4000-8000-0000000000a2", "status": "partial", "origin": "web"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "TR-R03",
+      "title": "merged progress: two clients move the same review",
+      "requirements": ["020-FR-029", "020-SC-004"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a full review starts on the phone",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr03-start",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a4",
+              "mode": "full",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": true
+            }
+          },
+          "expect": {"status": 201, "body": {"revision": 1}}
+        },
+        {
+          "name": "the phone finishes Wins after 40 active seconds",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a4",
+            "key": "trr03-p1",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b2",
+              "step": {"code": "wins", "status": "finished"},
+              "current_step": "mind_sweep",
+              "active_seconds": {"code": "wins", "seconds": 40}
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {"steps": {"wins": "finished"}, "current_step": "mind_sweep", "active_seconds_by_step": {"wins": 40}, "revision": 2}
+          }
+        },
+        {"name": "a minute passes", "advance": {"minutes": 1}},
+        {
+          "name": "the web, a step behind, reports Wins pending and 20 more seconds",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a4",
+            "key": "trr03-p2",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b3",
+              "step": {"code": "wins", "status": "pending"},
+              "current_step": "inbox",
+              "active_seconds": {"code": "wins", "seconds": 20}
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "steps": {"wins": "finished"},
+              "current_step": "inbox",
+              "active_seconds_by_step": {"wins": 60},
+              "last_activity_at": "2026-10-09T14:03:00Z",
+              "revision": 3
+            }
+          }
+        },
+        {
+          "name": "the phone processes two Inbox items and skips the step",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a4",
+            "key": "trr03-p3",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b4",
+              "step": {"code": "inbox", "status": "skipped"},
+              "inbox_processed_delta": 2
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {"steps": {"inbox": "skipped"}, "counts": {"inbox_processed": 2}, "revision": 4}
+          }
+        },
+        {
+          "name": "the web undoes one Inbox item and finishes the step",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a4",
+            "key": "trr03-p4",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b5",
+              "step": {"code": "inbox", "status": "finished"},
+              "inbox_processed_delta": -1
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "open",
+              "steps": {"wins": "finished", "inbox": "finished", "decisions": "pending"},
+              "current_step": "inbox",
+              "active_seconds_by_step": {"wins": 60},
+              "counts": {"inbox_processed": 1},
+              "qualifying_activity": true,
+              "revision": 5
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "TR-R04",
+      "title": "a progress change retried after the 24 h retention is merged once",
+      "requirements": ["020-FR-011", "020-SC-004", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a quick review starts",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr04-start",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a5",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": true
+            }
+          },
+          "expect": {"status": 201, "body": {"revision": 1}}
+        },
+        {
+          "name": "a progress change lands but its response is lost",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a5",
+            "key": "trr04-p1",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b6",
+              "current_step": "decisions",
+              "active_seconds": {"code": "decisions", "seconds": 30},
+              "inbox_processed_delta": 1
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {"current_step": "decisions", "active_seconds_by_step": {"decisions": 30}, "counts": {"inbox_processed": 1}, "revision": 2}
+          }
+        },
+        {
+          "name": "the review moves on to the summary",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a5",
+            "key": "trr04-p2",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b7",
+              "current_step": "summary"
+            }
+          },
+          "expect": {"status": 200, "body": {"current_step": "summary", "revision": 3}}
+        },
+        {"name": "the phone stays offline for 25 hours", "advance": {"hours": 25}},
+        {
+          "name": "the lost change is retried with its key after the retention",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a5",
+            "key": "trr04-p1",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b6",
+              "current_step": "decisions",
+              "active_seconds": {"code": "decisions", "seconds": 30},
+              "inbox_processed_delta": 1
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "current_step": "summary",
+              "active_seconds_by_step": {"decisions": 30},
+              "counts": {"inbox_processed": 1},
+              "last_activity_at": "2026-10-09T14:02:00Z",
+              "revision": 3
+            }
+          }
+        },
+        {
+          "name": "the same progress id with another body is a conflict",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a5",
+            "key": "trr04-p3",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b6",
+              "inbox_processed_delta": 2
+            }
+          },
+          "expect": {"status": 409, "body": {"detail": {"reason": "id_conflict"}}}
+        }
+      ]
+    },
+    {
+      "id": "TR-R05",
+      "title": "finish: Done on the summary, idempotent, and an empty review",
+      "requirements": ["020-FR-029", "020-FR-033", "020-SC-007"],
+      "start": "2026-10-09T14:02:00Z",
+      "flag": "on",
+      "steps": [
+        {
+          "name": "a quick review starts",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr05-start",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a6",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "ios",
+              "replace_open": true
+            }
+          },
+          "expect": {"status": 201, "body": {"status": "open"}}
+        },
+        {
+          "name": "Wins is finished",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a6",
+            "key": "trr05-progress",
+            "body": {
+              "progress_id": "progress_0b0e1f30-0000-4000-8000-0000000000b8",
+              "step": {"code": "wins", "status": "finished"}
+            }
+          },
+          "expect": {"status": 200, "body": {"qualifying_activity": true}}
+        },
+        {"name": "three minutes pass", "advance": {"minutes": 3}},
+        {
+          "name": "Done on the summary with a clear start",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a6/finish",
+            "key": "trr05-finish",
+            "body": {"clear_start": "yes"}
+          },
+          "expect": {
+            "status": 200,
+            "body": {"status": "completed", "ended_at": "2026-10-09T14:05:00Z", "clear_start": "yes"}
+          }
+        },
+        {
+          "name": "finishing again changes nothing",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a6/finish",
+            "key": "trr05-finish-again",
+            "body": {"clear_start": "not_really"}
+          },
+          "expect": {
+            "status": 200,
+            "body": {"status": "completed", "ended_at": "2026-10-09T14:05:00Z", "clear_start": "yes"}
+          }
+        },
+        {
+          "name": "an empty review starts",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions",
+            "key": "trr05-start-empty",
+            "body": {
+              "id": "review_0b0e1f30-0000-4000-8000-0000000000a7",
+              "mode": "quick",
+              "entry": "list",
+              "origin": "web",
+              "replace_open": false
+            }
+          },
+          "expect": {"status": 201, "body": {"status": "open"}}
+        },
+        {
+          "name": "Done with no activity",
+          "request": {
+            "method": "POST",
+            "path": "/api/review/sessions/review_0b0e1f30-0000-4000-8000-0000000000a7/finish",
+            "key": "trr05-finish-empty",
+            "body": {}
+          },
+          "expect": {"status": 200, "body": {"status": "completed_empty", "qualifying_activity": false}}
+        },
+        {
+          "name": "the web shows the completed review as the last review",
+          "request": {"method": "GET", "path": "/api/review/state"},
+          "expect": {
+            "status": 200,
+            "body": {
+              "open_session": null,
+              "last_counted_review_at": "2026-10-09T14:05:00Z",
+              "last_counted_review": {
+                "session_id": "review_0b0e1f30-0000-4000-8000-0000000000a6",
+                "status": "completed",
+                "origin": "ios",
+                "ended_at": "2026-10-09T14:05:00Z",
+                "clear_start": "yes"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

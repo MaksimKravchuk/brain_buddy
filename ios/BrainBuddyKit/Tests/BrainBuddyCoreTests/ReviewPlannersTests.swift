@@ -66,6 +66,53 @@ struct ReviewPlannersTests {
         #expect(!StallReasonRecommendation.cardDecisions(extensionUsed: true).contains(.extend), "FR-009")
     }
 
+    @Test("020-FR-006 the card's decisions come in the M-03 order, Done first and Keep 7 more days last")
+    func cardDecisionOrder() {
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: false)
+                == [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel, .extend]
+        )
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: true)
+                == [.complete, .reformulate, .firstStep, .waiting, .someday, .cancel],
+            "the order holds without Keep 7 more days"
+        )
+    }
+
+    @Test("020-FR-006 the card's words: decision titles, subtitles, reasons and the days in Next")
+    func cardCopy() {
+        #expect(
+            StallReasonRecommendation.cardDecisions(extensionUsed: false).map(ReviewCopy.cardTitle)
+                == [
+                    "Done", "Reformulate", "Find a first step", "Move to Waiting for…", "Release to Someday",
+                    "Cancel task", "Keep 7 more days",
+                ]
+        )
+        #expect(ReviewCopy.cardSubtitle(.complete) == nil)
+        #expect(ReviewCopy.cardSubtitle(.extend) == "Once for this wording, with a reason")
+        #expect(ReviewCopy.stallReasonOrder == [.unclear, .tooBig, .missingInfo, .waitingOnSomeone, .noLongerMatters, .noEnergy])
+        #expect(Set(ReviewCopy.stallReasonOrder) == Set(StallReason.allCases), "every reason is offered")
+        #expect(
+            ReviewCopy.stallReasonOrder.map(ReviewCopy.stallReasonLabel)
+                == [
+                    "Unclear", "Too big", "Missing information", "Waiting on someone", "No longer matters",
+                    "Unpleasant / no energy",
+                ]
+        )
+        let start = Review.now
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(15 * Review.day + 3_600)) == "15 days in Next")
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(Review.day)) == "1 day in Next")
+        #expect(ReviewCopy.daysInNext(since: start, now: start.addingTimeInterval(-60)) == "0 days in Next", "never negative")
+    }
+
+    @Test("020-FR-015 M-09 counts the returns left: Return all 4 to Next, then Return the other 3 to Next")
+    func whileAwayReturnAllCopy() {
+        #expect(ReviewCopy.returnAll(4) == "Return all 4 to Next")
+        #expect(ReviewCopy.returnAll(3, othersReturned: true) == "Return the other 3 to Next")
+        #expect(ReviewCopy.backInNext(1) == "1 task is back in Next.")
+        #expect(ReviewCopy.backInNext(3) == "3 tasks are back in Next.")
+    }
+
     @Test("020-FR-048 the Undo window is about 5 s, at least 10 s with VoiceOver or Switch Control")
     func undoWindow() {
         #expect(UndoWindowPolicy.duration(voiceOver: false, switchControl: false) == 5)
@@ -101,6 +148,163 @@ struct ReviewPlannersTests {
         #expect(!WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today, hasUnseen: true))
         #expect(WhileAwayPresentation.shouldShowAtAppOpen(lastShownDay: today, today: today.adding(days: 1), hasUnseen: true))
         #expect(WhileAwayPresentation.shouldShow(context: .reviewStart, hasUnseen: true, lastShownDay: today, today: today))
+    }
+
+    // MARK: App-open sheets (M-26, M-09; T092, T093)
+
+    @Test("020-FR-051 the explainer comes before anything else, a capture deep link that is not on screen yet included")
+    func startupExplainerFirst() {
+        let coldCaptureLink = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: true, whileAwayDue: true, captureRequested: true, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(coldCaptureLink) == .explainer)
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: true, explainerNeeded: true
+            ),
+            "the capture waits for the explainer"
+        )
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: .explainer, captureOnScreen: false, reviewExposed: true, explainerNeeded: true
+            )
+        )
+        // Acknowledged: the explainer is gone and the waiting capture shows.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: true, explainerNeeded: false
+            )
+        )
+        // Not exposed: nothing of the review shows, the capture is not held.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: false, reviewExposed: false, explainerNeeded: true
+            )
+        )
+        var hidden = coldCaptureLink
+        hidden.reviewExposed = false
+        #expect(ReviewStartupPlanner.sheetToPresent(hidden) == nil)
+    }
+
+    @Test("020-FR-015 While you were away follows the explainer and yields to a requested capture")
+    func startupWhileAway() {
+        var context = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: false, whileAwayDue: true, captureRequested: false, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == .whileAway)
+        context.captureRequested = true
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == nil, "the capture first, M-09 after it closes")
+        context.captureRequested = false
+        context.whileAwayDue = false
+        #expect(ReviewStartupPlanner.sheetToPresent(context) == nil)
+    }
+
+    @Test("020-FR-051 020-FR-015 nothing is presented over another sheet; a capture already on screen is never taken away")
+    func startupNeverOverAnotherSheet() {
+        let busy = ReviewStartupPlanner.Context(
+            reviewExposed: true, explainerNeeded: true, whileAwayDue: true, captureRequested: false, screenBusy: true
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(busy) == nil, "UIKit presents one sheet at a time")
+        // The flag arrives while a capture is on screen: it stays.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: nil, captureOnScreen: true, reviewExposed: true, explainerNeeded: true
+            )
+        )
+        #expect(
+            !ReviewStartupPlanner.captureMayPresent(
+                startupSheet: .whileAway, captureOnScreen: false, reviewExposed: true, explainerNeeded: false
+            ),
+            "a capture asked for meanwhile waits until M-09 closes"
+        )
+    }
+
+    @Test("020-FR-042 020-FR-051 020-FR-015 an open startup sheet goes when the review stops being exposed")
+    func startupSheetGoesWhenHidden() {
+        for sheet in [ReviewStartupSheet.explainer, .whileAway] {
+            #expect(keep(sheet, exposed: true) == sheet, "exposed and due: it stays")
+            #expect(keep(sheet, exposed: false) == nil, "\(sheet) is taken away")
+            #expect(keep(sheet, exposed: false, onScreen: true) == nil, "\(sheet) on screen is taken away too")
+        }
+        #expect(keep(nil, exposed: false) == nil)
+        #expect(keep(nil, exposed: true) == nil)
+        // Taken away, the waiting capture is no longer held back, and nothing re-presents.
+        #expect(
+            ReviewStartupPlanner.captureMayPresent(
+                startupSheet: keep(.explainer, exposed: false), captureOnScreen: false, reviewExposed: false,
+                explainerNeeded: true
+            )
+        )
+        let hidden = ReviewStartupPlanner.Context(
+            reviewExposed: false, explainerNeeded: true, whileAwayDue: true, captureRequested: false, screenBusy: false
+        )
+        #expect(ReviewStartupPlanner.sheetToPresent(hidden) == nil)
+    }
+
+    /// `sheetToKeep` with the inputs a test does not vary set to "still due".
+    private func keep(
+        _ sheet: ReviewStartupSheet?, exposed: Bool = true, explainerNeeded: Bool = true, onScreen: Bool = false,
+        hasContent: Bool = true
+    ) -> ReviewStartupSheet? {
+        ReviewStartupPlanner.sheetToKeep(
+            sheet, reviewExposed: exposed, explainerNeeded: explainerNeeded, whileAwayOnScreen: onScreen,
+            whileAwayHasContent: hasContent
+        )
+    }
+
+    @Test("020-FR-051 an explainer acknowledged elsewhere goes at once, on screen or not")
+    func explainerGoesWhenNoLongerNeeded() {
+        #expect(keep(.explainer, explainerNeeded: true, onScreen: true) == .explainer)
+        #expect(keep(.explainer, explainerNeeded: false) == nil, "a pull brought another device's activation")
+        #expect(keep(.explainer, explainerNeeded: false, onScreen: true) == nil, "the one-time explainer is not left actionable")
+    }
+
+    @Test("020-FR-015 While you were away: dropped before it shows once nothing is left, kept on screen until closed")
+    func whileAwayKeptWhileOnScreen() {
+        #expect(keep(.whileAway, hasContent: true) == .whileAway)
+        #expect(
+            keep(.whileAway, onScreen: false, hasContent: false) == nil,
+            "its parks were seen elsewhere before it appeared: nothing to show"
+        )
+        #expect(
+            keep(.whileAway, onScreen: true, hasContent: false) == .whileAway,
+            "returning the last park inside it does not pull it away mid-view; Continue or Close ends it"
+        )
+        #expect(keep(.whileAway, explainerNeeded: false, onScreen: true) == .whileAway, "the explainer is not its business")
+    }
+
+    @Test("020-FR-015 a listed park that changed elsewhere is shown changed at once, without Return to Next")
+    func whileAwayInitialOutcome() {
+        #expect(WhileAwayOutcome.initial(for: nil) == .waiting)
+        #expect(WhileAwayOutcome.initial(for: .projectArchived(name: "Old flat")) == .archived(project: "Old flat"))
+        #expect(WhileAwayOutcome.initial(for: .changedElsewhere) == .changedElsewhere)
+        #expect(ReviewCopy.rowChangedElsewhere.isEmpty == false, "the row's existing copy")
+    }
+
+    @Test("020-FR-039 the threshold note shows after a change until dismissed for it or until its floor date passes")
+    func thresholdChangeNote() {
+        let changedAt = Date(timeIntervalSince1970: 1_791_000_000)
+        let floor = changedAt.addingTimeInterval(7 * 86_400)
+        let settings = ReviewSettings(thresholdDays: 7, ownerParkFloorAt: floor, thresholdChangedAt: changedAt)
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: changedAt) == changedAt)
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: 0, now: changedAt) == changedAt)
+        #expect(
+            ThresholdChangeNote.change(settings: settings, dismissedChange: changedAt.timeIntervalSince1970, now: changedAt)
+                == nil,
+            "dismissed for this change"
+        )
+        let earlier = changedAt.addingTimeInterval(-86_400).timeIntervalSince1970
+        #expect(
+            ThresholdChangeNote.change(settings: settings, dismissedChange: earlier, now: changedAt) == changedAt,
+            "a dismissal of an earlier change does not hide a new one"
+        )
+        #expect(ThresholdChangeNote.change(settings: settings, dismissedChange: nil, now: floor) == nil, "the date passed")
+        var unchanged = settings
+        unchanged.thresholdChangedAt = nil
+        #expect(ThresholdChangeNote.change(settings: unchanged, dismissedChange: nil, now: changedAt) == nil)
+        var noFloor = settings
+        noFloor.ownerParkFloorAt = nil
+        #expect(ThresholdChangeNote.change(settings: noFloor, dismissedChange: nil, now: changedAt) == nil)
     }
 
     // MARK: Active time (SC-004)
@@ -263,5 +467,37 @@ struct ReviewPlannersTests {
             ]
         )
         #expect(sections.allSatisfy { !ReviewVectors.section(Self.flow, $0).isEmpty })
+    }
+
+    @Test("020-FR-030 the Inbox step asks only over 15 items; Process 10 takes the first ten, and the third choice releases the rest")
+    func inboxStepPlan() {
+        let items = (1...23).map { TaskID("t\($0)") }
+        #expect(!InboxStepPlan.needsChoice(itemCount: 15) && InboxStepPlan.needsChoice(itemCount: 16))
+        #expect(InboxStepPlan.split(items, choice: nil) == (items, []))
+        #expect(InboxStepPlan.split(items, choice: .processAll) == (items, []))
+        let ten = Array(items.prefix(10))
+        #expect(InboxStepPlan.split(items, choice: .processTen) == (ten, []))
+        let released = InboxStepPlan.split(items, choice: .processTenReleaseRest)
+        #expect(released.process == ten && released.release == Array(items.dropFirst(10)))
+        #expect(InboxStepPlan.split(Array(items.prefix(4)), choice: .processTenReleaseRest) == (Array(items.prefix(4)), []))
+    }
+
+    @Test("020-FR-031 the capacity mirror says the figures and never a limit; before 4 weeks only the count and an honest line")
+    func capacityCopy() {
+        let full = ReviewCopy.capacity(CapacityMirror(nextCount: 41, weeksOfHistory: 6, weeklyAverage4w: 9, impliedWeeks: 4.5))
+        #expect(full.figures == ["41 next actions", "9 done per week, last 4 weeks", "~4½ weeks of work at that pace"])
+        #expect(full.note.hasPrefix("No limit."))
+        let one = ReviewCopy.capacity(CapacityMirror(nextCount: 1, weeksOfHistory: 5, weeklyAverage4w: 1, impliedWeeks: 1))
+        #expect(one.figures == ["1 next action", "1 done per week, last 4 weeks", "~1 week of work at that pace"])
+        let early = ReviewCopy.capacity(CapacityMirror(nextCount: 3, weeksOfHistory: 1, weeklyAverage4w: nil, impliedWeeks: nil))
+        #expect(early.figures == ["3 next actions"] && early.note.hasPrefix("After a few weeks"))
+        #expect(ReviewCopy.capacity(CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil)).note == "Next is empty.")
+    }
+
+    @Test("020-FR-028 020-FR-029 each step has a heading and the Quick review names its four")
+    func stepHeadings() {
+        #expect(Set(ReviewStep.allCases.map(ReviewCopy.stepTitle)).count == ReviewStep.allCases.count)
+        #expect(ReviewMode.quick.steps == [.wins, .inbox, .decisions, .summary])
+        #expect(ReviewCopy.stepPosition(4, of: 10) == "4 of 10")
     }
 }

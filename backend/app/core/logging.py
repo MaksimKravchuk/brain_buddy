@@ -159,9 +159,15 @@ class PushCallbackAccessFilter(logging.Filter):
 
     @staticmethod
     def _valid_middleware_record(record: logging.LogRecord) -> bool:
+        # Spec 021 added the ``client`` fields (before the duration); the
+        # shorter shapes stay accepted.
         expected = {
             "api_request method=%s path=%s status=%s duration_ms=%.1f": 4,
             "api_request_failed method=%s path=%s duration_ms=%.1f": 3,
+            "api_request method=%s path=%s status=%s "
+            "client=%s client_version=%s duration_ms=%.1f": 6,
+            "api_request_failed method=%s path=%s "
+            "client=%s client_version=%s duration_ms=%.1f": 5,
         }
         if not isinstance(record.msg, str):
             return False
@@ -177,7 +183,13 @@ class PushCallbackAccessFilter(logging.Filter):
             or isinstance(args[-1], bool)
         ):
             return False
-        return fields == 3 or (
+        if fields >= 5 and not (
+            args[-3] in {"web", "ios", "macos", "other"}
+            and isinstance(args[-2], str)
+            and re.fullmatch(r"[0-9A-Za-z.+-]{1,32}", args[-2])
+        ):
+            return False
+        return fields in (3, 5) or (
             isinstance(args[2], int)
             and not isinstance(args[2], bool)
             and 100 <= args[2] <= 599

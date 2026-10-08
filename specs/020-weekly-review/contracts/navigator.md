@@ -27,7 +27,9 @@ language; the cloud prompt says to answer in the language of the task text.
 **One shared reduction** (owner decision NC-3, FR-019 "exactly the same reduced input"):
 `reduce_notes(notes) -> (notes', truncated)` is one deterministic function implemented
 in Core (`NavigatorInputBuilder`), in `navigatorInput.ts` and in `navigator.py`
-(backstop), covered by shared vectors in `NavigatorValidatorTests`, Vitest and pytest.
+(backstop), covered by the shared vector file
+`backend/tests/fixtures/navigator/reduce_notes_vectors.json`, run by pytest and by
+byte-identical copies in `NavigatorValidatorTests` and Vitest.
 With `NOTES_BUDGET_CHARS = 6 000` (a constant, not per model): if the notes have at
 most that many characters (Unicode scalars) they are unchanged; otherwise the first
 lines up to 2 000 characters and the most recent (last) lines up to 4 000 characters
@@ -35,7 +37,13 @@ are kept, whole lines only, joined by one line `…`, and `truncated = true`. Li
 are split on U+000A, and a preceding U+000D is dropped, so the joining separator is
 exactly U+000A U+2026 U+000A (3 scalars) and comes on top of the budget, so a reduced note
 is at most 6 003 scalars, and that is the request limit for `task.notes` (http §7,
-`NAVIGATOR_NOTES_MAX_CHARS`). Title,
+`NAVIGATOR_NOTES_MAX_CHARS`). If the kept first and last lines are all the lines,
+nothing is dropped: the lines are rejoined with U+000A (so the U+000D are gone) and
+`truncated = false`. Notes that already contain a `…` line get no special case, so
+client-reduced notes of 6 001–6 003 scalars come back from the server's backstop as
+the same text, usually with `truncated = true`. The server reports only what its
+backstop dropped, so a client ORs the response's `notes_truncated` with its own
+reduction's `truncated` before showing the hint. Title,
 stall reason, project name and sibling titles are never dropped. The budget is chosen so
 the reduced input, with instructions and siblings, fits the smallest supported window
 (Apple's 4,096 tokens on iOS 26.x, `research-on-device-model.md` §1) at the
@@ -69,10 +77,56 @@ rule 5 runs on every client after them:
 2. Drop any proposal whose `formulation_key` equals the current title's or any
    `open_task_titles` entry's (FR-019 no duplicates), and duplicates among themselves.
 3. Grounding check (FR-021): drop a proposal containing a **capitalised token
-   (other than the first word), number, currency amount or date expression** that does not occur
-   (case-insensitively, after `formulation_key`) in the input fields. This is a cheap
-   deterministic backstop; the prompt is the primary control and SC-005 is measured on
-   the evaluation set (§5).
+   (other than the first word), number, currency amount or date expression** that does
+   not occur in the input fields. Matching is the same on every platform:
+   - **Tokens**: the text is split on whitespace, meaning the characters for which
+     Python's `str.isspace()` is true (Unicode White_Space plus U+001C–U+001F).
+     Implementations code this set explicitly, because platform defaults differ (JS
+     `\s` and Swift's `isWhitespace` omit U+001C–U+001F).
+   - **Triggers**: a token is a trigger when its first alphabetic character is
+     upper-case and it is not the first token, when it contains a decimal digit
+     (Unicode Nd) or a currency symbol (Sc), or when its `formulation_key` is a date
+     word. `formulation_key` uses full Unicode case folding (`str.casefold()`, so "ß"
+     becomes "ss"), not simple lowercasing (formulation-clock §1).
+   - **Finding a term**: the term is the trigger's `formulation_key`. It must occur as
+     whole words in the `formulation_key` of one single input field (the title, the
+     notes, the project name or one sibling title): ` term ` within ` field `. A part
+     of a word does not count ("Ann" is not in "Anna").
+   - **Date words**: the normative table is `date_words` in `validator_vectors.json`.
+     A key is a date word when it equals an English word or a Russian form there, or
+     when the whole key starts with a Russian stem. A hyphenated "в-марте" has the key
+     "в марте", which does not start with a stem, so it is not a date word. That covers month and weekday names in every
+     inflection, plus `tonight`, `tomorrow`, `завтра` and `послезавтра`. English `may`
+     is not in the table because it is the common verb; a capitalised "May" after the
+     first token is already a trigger. The forms of `среда` stay date words although
+     they also mean "environment": dropping such a proposal is the safe side of a
+     backstop, and a task about an environment usually names it in its input, which
+     grounds it.
+   - **Phrases**: `next week`, `next month`, `this weekend` and `на следующей неделе`
+     are terms when they occur as whole words in the `formulation_key` of the whole
+     text. Each must occur whole in one input field.
+   - **Durations are exempt**: a duration of at most 30 minutes is not a trigger,
+     because the prompt asks for actions that "would take under 30 minutes" and for "a
+     2-minute starter step" (§3). The bound is inclusive on purpose. The minute words
+     are `min`, `mins`, `minute`, `minutes`, `мин` and any word starting `минут`. A
+     duration is either:
+     - a token whose key is exactly an ASCII-digit number of at most 30 and one minute
+       word ("2-minute", "10-минутный"); or
+     - a token whose key is exactly such a number, immediately followed by a token
+       whose key's first word is a minute word ("10 minutes", "5 мин", "2 минуты").
+       The two tokens are exempt together.
+
+     Digits are tested after the NFKC step of `formulation_key`, so a fullwidth "２"
+     counts and an Arabic-Indic "٢" does not. "2minute" and "5мин" are one word, so
+     they are not exempt.
+   - **"today"**: `today` and `сегодня` are not date words. They are also exempt from
+     the capital-letter trigger, because the prompt asks for actions that "could be
+     started today" (§3), so the exemption only changes the result for a capitalised
+     "Today" or "Сегодня" after the first token.
+
+   This is a cheap deterministic backstop; the prompt is the primary control and
+   SC-005 is measured on the evaluation set (§5). Rules 1–4 share the vector file
+   `backend/tests/fixtures/navigator/validator_vectors.json`.
 4. If ≥ 1 proposal survives → return them (M-05 "partial failure": fewer than 3 shown,
    no message). If none survive and the model returned a clarifying question that
    passes rule 3 → return the question. Otherwise → `malformed` (M-05 error,
@@ -124,6 +178,12 @@ User content (data role, delimited, never interpolated into instructions):
 </open_tasks>
 <kind>first_step</kind>
 ```
+
+Inside a value (title, notes, project name, sibling titles), every `<` is sent as
+`&lt;`, so content cannot end its own field or start another. Escaping runs after
+`reduce_notes`. It does not count toward the 6 003-scalar notes limit, though it does
+count in the token estimate. Shared vectors:
+`backend/tests/fixtures/navigator/prompt_vectors.json`.
 
 For `project_next_action` the instruction's first line is "Propose 1 to 3 first next
 actions for this project."
@@ -213,7 +273,11 @@ whose cell has passed the gate. Fixtures:
 question; notes that name people/places/amounts vs none; 0/5/20 sibling titles), each with
 `expected_kind`, `allowed_entities` and `sibling_titles`. No real user data. A
 deterministic pytest runs the §2 validator and the automatic screens over recorded
-outputs. Generating outputs is manual: cloud runs spend provider money and are
+outputs. A recording is scored only when it is complete for its cell. Its `eval_set`
+and `prompt_version` must be the current ones (`eval_v1`, `navigator-prompt/v1`), and it
+must hold exactly one output for every case of the languages it declares (`languages`;
+all 48 cases when absent). A missing, duplicate or unknown case id is refused and named,
+never scored. Generating outputs is manual: cloud runs spend provider money and are
 approval-gated (never unattended or from a subagent); on-device runs use the same
 quantized artifact on a Mac plus ~10 spot checks on an iPhone. Owner blind grading
 (accept / edit / reject); gate ≥ 50 % accepted overall **and** in the Russian subset, 0

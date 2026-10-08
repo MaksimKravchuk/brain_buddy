@@ -53,14 +53,7 @@ extension StoreDocument {
         if let known, known != id { rekey(project: known, to: id) }
         let existing = base.projects[id]
         if let existing, (existing.serverRevision ?? .min) > dto.revision { return id }
-        base.projects[id] = ProjectRecord(
-            id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color,
-            state: dto.state, createdAt: existing?.createdAt ?? now
-        )
-        if dto.state == .archived {
-            // The server removed the project from every task (and bumped them).
-            for task in base.tasks.values where task.projectID == id { base.tasks[task.id]?.projectID = nil }
-        }
+        base.projects[id] = ProjectRecord(dto, id: id, createdAt: existing?.createdAt ?? now)
         return id
     }
 
@@ -387,7 +380,8 @@ extension StoreDocument {
         case (.review(.acknowledgeExplainer), .reviewState(let state)):
             mergeReviewState(state, now: now)
         case (.review(.updateSettings), .reviewSettings(let settings)):
-            base.review.settings = settings.settings
+            // The replayed change holds this device's `thresholdChangedAt`.
+            base.review.settings = settings.settings.keepingThresholdChange(of: scratch.review.settings)
         case (.review(.startSession(let start)), .session(let answer)):
             base.review = scratch.review
             base.review.sessions[start.sessionID] = answer.session(keeping: scratch.review.sessions[start.sessionID])
@@ -420,9 +414,16 @@ extension StoreDocument {
                     known.taskAfter = stamp
                     return known
                 }
+                // This device's replay did not release it, so its Next clock is
+                // still in the base (the answer carries none): the Undo needs it.
+                let task = base.tasks[local]
+                let clock = release.undoRetained && previous == .next && task?.state == .next
+                    ? task?.formulation.map {
+                        ReleasedClock(clock: $0, stalledBefore: task?.consecutiveStalledFormulations ?? 0)
+                    } : nil
                 return BulkReleasedTask(
-                    taskID: local, previousState: previous, clockBefore: nil, taskAfter: stamp,
-                    clockKnown: previous != .next
+                    taskID: local, previousState: previous, clockBefore: clock, taskAfter: stamp,
+                    clockKnown: previous != .next || clock != nil
                 )
             }
             record.skipped = answer.skipped.map { item in
@@ -446,7 +447,7 @@ extension StoreDocument {
     /// which parks were seen.
     mutating func mergeReviewState(_ state: ReviewStateDTO, now: Date) {
         var review = base.review
-        review.settings = state.settings.settings
+        review.settings = state.settings.settings.keepingThresholdChange(of: heldReviewSettings())
         // An open session this build cannot read is still open: only its id is used.
         let openID = (state.openSession?.id ?? state.unreadableOpenSessionID).map { ReviewSessionID($0) }
         for session in review.sessions.values where session.status == .open && session.id != openID {
@@ -489,6 +490,18 @@ extension StoreDocument {
         local.serverClockOffset = state.serverNow.timeIntervalSince(now)
     }
 
+    /// The review settings the device shows: the base's with the queued
+    /// settings changes applied (a change whose answer was lost may already
+    /// be on the server while it is still queued here).
+    func heldReviewSettings() -> ReviewSettings {
+        var scratch = GTDState(review: base.review)
+        for operation in outbox {
+            guard case .review(.updateSettings) = operation.command else { continue }
+            _ = try? GTDReducer.apply(operation.command, at: operation.issuedAt, to: &scratch, mode: .replay)
+        }
+        return scratch.review.settings
+    }
+
     /// A gated read answered `404 weekly_review_disabled` (or a server without
     /// the review): hide the review, keep its state.
     mutating func markReviewNotExposed(now: Date) {
@@ -525,10 +538,7 @@ extension StoreDocument {
                 new.projects[id] = existing
                 continue
             }
-            new.projects[id] = ProjectRecord(
-                id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color,
-                state: dto.state, createdAt: existing?.createdAt ?? now
-            )
+            new.projects[id] = ProjectRecord(dto, id: id, createdAt: existing?.createdAt ?? now)
         }
         for dto in tags {
             let id = tagIDs[dto.id] ?? TagID.random()
@@ -591,5 +601,16 @@ extension StoreDocument {
         case (let pull?, let push?): max(pull, push)
         case (let pull, let push): pull ?? push
         }
+    }
+}
+
+extension ProjectRecord {
+    /// A base project from a server project, under the client id the device uses.
+    init(_ dto: ProjectDTO, id: ProjectID, createdAt: Date) {
+        self.init(
+            id: id, serverID: dto.id, serverRevision: dto.revision, name: dto.name, color: dto.color, state: dto.state,
+            createdAt: createdAt, desiredOutcome: dto.desiredOutcome, archivedAt: dto.archivedAt,
+            archivedBeforeLossless: dto.archivedBeforeLossless
+        )
     }
 }

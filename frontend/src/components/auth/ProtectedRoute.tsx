@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
 import { useAuthStore } from "../../stores/authStore";
@@ -28,5 +28,9 @@ export function ProtectedRoute({ children }: Props): React.JSX.Element {
     return <Navigate to="/login" replace state={{ from: { pathname: parsed.pathname, search: parsed.search } }} />;
   }
 
-  return <>{children}</>;
+  // Keyed by the signed-in account: when a session refresh swaps the account
+  // without leaving the page, everything below remounts, so no local state
+  // (open cards, failures and their Retry, attempts, rows) outlives the
+  // account it belongs to. A profile refresh of the same account keeps it.
+  return <Fragment key={user?.id}>{children}</Fragment>;
 }

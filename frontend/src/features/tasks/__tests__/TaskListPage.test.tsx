@@ -1,10 +1,13 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient, getApiBaseUrl } from "../../../api/client";
+import { reviewApi, type DecisionResponse, type ReviewState } from "../../../api/review";
+import { announceThresholdChange, useThresholdNotice } from "../../../api/reviewHooks";
+import { formatReviewDate } from "../../review/formulation";
 import type { AgentRunResponse, AgentRunSummaryResponse } from "../../../api/agentTypes";
 import { taskKeys } from "../../../api/taskHooks";
 import type {
@@ -54,7 +57,23 @@ vi.mock("../../../api/client", async () => {
   };
 });
 
+vi.mock("../../../api/review", async () => {
+  const actual = await vi.importActual<typeof import("../../../api/review")>("../../../api/review");
+  return {
+    ...actual,
+    reviewApi: {
+      getState: vi.fn(),
+      decide: vi.fn(),
+      undoDecision: vi.fn(),
+      acknowledgeExplainer: vi.fn(),
+      updateSettings: vi.fn(),
+      acknowledgeParks: vi.fn()
+    }
+  };
+});
+
 const mocked = vi.mocked(apiClient, true);
+const reviewMocked = vi.mocked(reviewApi, true);
 
 const projects: ProjectResponse[] = [
   { id: "project-launch", name: "Launch v2", color: "#0ea5e9", state: "active", revision: 3, open_task_count: 2 },
@@ -2587,5 +2606,285 @@ describe("TaskListPage canonical Discard paths", () => {
 
     expect(mocked.updateTask).not.toHaveBeenCalled();
     expect(mocked.transitionTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("020-FR-004 D-01 Next actions age markers", () => {
+  const DAY = 86_400_000;
+  const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+  const seenState: ReviewState = {
+    settings: { threshold_days: 14, review_weekday: 5, review_time: "16:00", time_zone: "Europe/Berlin", onboarded_at: null, activated_at: iso(-60 * DAY), owner_park_floor_at: null, revision: 2 },
+    explainer_seen: true,
+    grace_until: iso(-46 * DAY),
+    last_counted_review_at: null,
+    last_counted_review: null,
+    next_review_at: null,
+    restart_mode: false,
+    open_session: null,
+    unseen_parks: [],
+    counts: { asks_for_decision: 3, moves_tomorrow: 2 },
+    receipts: [],
+    server_now: iso(0)
+  };
+
+  /** A Next task whose clock asks at `askIn`, with the usual T/2 ageing and T + 7 park. */
+  function clocked(id: string, title: string, askIn: number, extra: Partial<NonNullable<TaskResponse["formulation"]>> = {}, overrides: Partial<TaskResponse> = {}): TaskResponse {
+    return taskFixture({
+      id,
+      title,
+      project_id: null,
+      tag_ids: [],
+      formulation: {
+        id: `form_${id}`,
+        started_at: iso(askIn - 14 * DAY),
+        extended_at: null,
+        extension_reason: null,
+        park_floor_at: null,
+        consecutive_stalled: 0,
+        ageing_at: iso(askIn - 7 * DAY),
+        ask_at: iso(askIn),
+        park_due_at: iso(askIn + 7 * DAY),
+        paused_until: null,
+        ...extra
+      },
+      parked: null,
+      ...overrides
+    });
+  }
+
+  const asking = clocked("task-asks", "Renovate the bathroom", -1 * DAY);
+  const tomorrow = clocked("task-tomorrow", "Sort the paperwork drawer", -6.5 * DAY);
+  const parkDue = clocked("task-park-due", "Book a dentist appointment", -8 * DAY);
+  const ageing = clocked("task-ageing", "Draft the launch FAQ", 3 * DAY);
+  const fresh = clocked("task-fresh", "Call the plumber about the leak", 10 * DAY);
+  const paused = clocked("task-paused", "Send venue questions to Anna", -2 * DAY, { paused_until: iso(4 * DAY) }, { due_date: "2026-10-16" });
+  const notActivated = clocked("task-not-activated", "Water the plants", -5 * DAY, { ageing_at: null, ask_at: null, park_due_at: null });
+
+  function withFlag(flags: Record<string, boolean> = { weekly_review: true }) {
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: flags }, status: "authed" });
+    });
+  }
+
+  beforeEach(() => {
+    reviewMocked.getState.mockResolvedValue(seenState);
+    mocked.listTasks.mockImplementation(async () => listResponse([asking, tomorrow, parkDue, ageing, fresh, paused, notActivated]));
+    mocked.getTask.mockImplementation(async (id) => [asking, tomorrow].find((task) => task.id === id) ?? asking);
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    onlineManager.setOnline(true);
+    vi.useRealTimers();
+    // The file's own teardown only clears mocks; the offline spy must not leak.
+    vi.restoreAllMocks();
+    useThresholdNotice.setState({ notice: null });
+  });
+
+  it("020-FR-004 020-FR-051 marks only asks, moves tomorrow and an unapplied park, never Ageing, and nothing before activation", async () => {
+    withFlag();
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByRole("button", { name: "Asks for a decision. Open decision for Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moves to Someday tomorrow. Open decision for Sort the paperwork drawer" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Moves to Someday tomorrow. Open decision for Book a dentist appointment" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Open decision for/ })).toHaveLength(3);
+    const list = screen.getByRole("list", { name: "Tasks" });
+    expect(within(list).queryByText("Ageing")).not.toBeInTheDocument();
+    expect(within(list).queryByText(/overdue/i)).not.toBeInTheDocument();
+    expect(within(list).queryByText("Paused until the due date")).not.toBeInTheDocument();
+    const chip = screen.getByRole("button", { name: /Open decision for Renovate the bathroom/ });
+    expect(chip).toHaveTextContent("Asks for a decision");
+    expect(chip).toHaveClass("border-indigo-200", "bg-indigo-50", "text-indigo-700");
+    expect(screen.getByRole("button", { name: /Open decision for Sort the paperwork drawer/ })).toHaveClass("border-amber-200", "bg-amber-50", "text-amber-800");
+    // 390 px: the marker wraps under the title on its own line; the 44 px hit area stays.
+    expect(chip.parentElement).toHaveClass("max-sm:order-last", "max-sm:basis-full");
+    expect(chip.closest("[data-testid=task-row-header]")).toHaveClass("max-sm:flex-wrap", "max-sm:h-auto");
+    expect(screen.queryByText("You're offline. Decisions need a connection. Retry when you're back online.")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-039 after a threshold change Next shows a one-time note with the new count and floor", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    const note = await screen.findByText(`Your threshold is now 7 days. 3 tasks ask for a decision. Nothing moves to Someday before ${formatReviewDate(iso(7 * DAY))}.`);
+    await user.click(within(note.parentElement as HTMLElement).getByRole("button", { name: "OK" }));
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
+  });
+
+  it("020-FR-039 020-FR-004 the note counts every task that asks, from the review state, not just the loaded or filtered rows", async () => {
+    withFlag();
+    reviewMocked.getState.mockResolvedValue({ ...seenState, counts: { asks_for_decision: 9, moves_tomorrow: 2 } });
+    // Only one asking task is on this (first, or filtered) page of Next.
+    mocked.listTasks.mockImplementation(async () => listResponse([asking, fresh]));
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByText(`Your threshold is now 7 days. 9 tasks ask for a decision. Nothing moves to Someday before ${formatReviewDate(iso(7 * DAY))}.`)).toBeInTheDocument();
+  });
+
+  it("020-FR-039 the note waits for the review state rather than guessing a count", async () => {
+    withFlag();
+    reviewMocked.getState.mockReturnValue(new Promise(() => undefined));
+    act(() => announceThresholdChange("user-1", { threshold_days: 7, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByRole("link", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
+  });
+
+  it("020-FR-039 the note reads in the singular, and belongs to the account that made the change", async () => {
+    withFlag();
+    reviewMocked.getState.mockResolvedValue({ ...seenState, counts: { asks_for_decision: 1, moves_tomorrow: 0 } });
+    mocked.listTasks.mockImplementation(async () => listResponse([asking, fresh]));
+    act(() => announceThresholdChange("user-1", { threshold_days: 21, floor: iso(7 * DAY) }));
+    const { unmount } = renderPage("/tasks/next?group=off");
+    expect(await screen.findByText(/^Your threshold is now 21 days\. 1 task asks for a decision\./)).toBeInTheDocument();
+    unmount();
+
+    act(() => announceThresholdChange("someone-else", { threshold_days: 28, floor: iso(7 * DAY) }));
+    renderPage("/tasks/next?group=off");
+    expect(await screen.findByRole("link", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByText(/Your threshold is now/)).not.toBeInTheDocument();
+  });
+
+  it("020-FR-042 shows no marker while the weekly_review flag is off", async () => {
+    renderPage("/tasks/next?group=off");
+    expect(await screen.findByRole("link", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open decision for/ })).not.toBeInTheDocument();
+    expect(reviewMocked.getState).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-040 offline the markers stay, focusable, with aria-disabled and the reason; one opens the dialog offline", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    renderPage("/tasks/next?group=off");
+
+    const chip = await screen.findByRole("button", { name: "Asks for a decision. Open decision for Renovate the bathroom" });
+    expect(chip).toHaveAttribute("aria-disabled", "true");
+    expect(chip).toHaveAccessibleDescription("You're offline. Decisions need a connection. Retry when you're back online.");
+    expect(screen.getByText("You're offline. Decisions need a connection. Retry when you're back online.")).toBeVisible();
+    chip.focus();
+    expect(chip).toHaveFocus();
+    await user.click(chip);
+    expect(screen.getByText("You're offline. Decisions need a connection on the web.")).toBeInTheDocument();
+  });
+
+  it("020-FR-004 re-classifies every minute from the browser clock without a refetch", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], now: Date.now() });
+    withFlag();
+    const soon = clocked("task-soon", "Order the new kitchen tap", 30_000);
+    mocked.listTasks.mockImplementation(async () => listResponse([soon]));
+    renderPage("/tasks/next?group=off");
+
+    expect(await screen.findByRole("link", { name: "Order the new kitchen tap" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open decision for/ })).not.toBeInTheDocument();
+    const listCalls = mocked.listTasks.mock.calls.length;
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(screen.getByRole("button", { name: "Asks for a decision. Open decision for Order the new kitchen tap" })).toBeInTheDocument();
+    expect(mocked.listTasks.mock.calls.length).toBe(listCalls);
+  });
+
+  it("020-FR-010 a marker opens the decision dialog, and Escape returns focus to it", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    renderPage("/tasks/next?group=off");
+
+    const chip = await screen.findByRole("button", { name: /Open decision for Renovate the bathroom/ });
+    await user.click(chip);
+    const dialog = screen.getByRole("dialog", { name: "Renovate the bathroom" });
+    expect(within(dialog).getByRole("heading", { name: "Renovate the bathroom" })).toHaveFocus();
+    expect(within(dialog).getByText("15 days in Next · no project")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(chip).toHaveFocus();
+    expect(currentLocation()).toBe("/tasks/next?group=off");
+  });
+
+  it("020-FR-052 020-FR-042 an account switch closes the open decision card, so the next account never sees it or stores its text", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    renderPage("/tasks/next?group=off");
+    await user.click(await screen.findByRole("button", { name: /Open decision for Renovate the bathroom/ }));
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Find a first step/ }));
+    await user.type(screen.getByRole("textbox", { name: "First step" }), "Measure");
+
+    // A session refresh swaps the account while the page stays mounted.
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-2", email: "other@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Renovate the bathroom", { selector: "h2" })).not.toBeInTheDocument();
+    expect(Object.keys(window.localStorage).filter((key) => key.startsWith("bb.reviewFormDraft.v1.") && key.includes(".user-2."))).toEqual([]);
+
+    // Switching back does not resurrect the card either.
+    act(() => {
+      useAuthStore.setState({ user: { id: "user-1", email: "max@example.test", feature_flags: { weekly_review: true } }, status: "authed" });
+    });
+    expect(screen.queryByRole("dialog", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+  });
+
+  it("020-FR-048 after a decision the shell offers Undo and focus moves to the next row", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    const released: DecisionResponse = {
+      decision: { id: "decision_1", type: "someday", task_id: "task-asks", session_id: null, decided_at: iso(0), substantive: null, stall_reason: null, ai_use: "none", yielded_auto_park: false },
+      task: { ...asking, state: "someday", revision: asking.revision + 1, formulation: null },
+      created_task: null,
+      receipt: null,
+      session_counts: null
+    };
+    reviewMocked.decide.mockResolvedValueOnce(released);
+    renderPage("/tasks/next?group=off");
+
+    await user.click(await screen.findByRole("button", { name: /Open decision for Renovate the bathroom/ }));
+    mocked.listTasks.mockImplementation(async () => listResponse([tomorrow, parkDue, ageing, fresh, paused, notActivated]));
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Release to Someday/ }));
+
+    const message = await screen.findByText("“Renovate the bathroom” released to Someday");
+    const toast = message.closest("[role=status]") as HTMLElement;
+    expect(toast).toHaveAccessibleDescription("Undo: Released to Someday Renovate the bathroom (Ctrl+Z)");
+    expect(within(toast).getByRole("button", { name: "Undo: Released to Someday Renovate the bathroom" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("link", { name: "Sort the paperwork drawer" })).toHaveFocus());
+    expect(reviewMocked.decide).toHaveBeenCalledWith("task-asks", { type: "someday", expected_revision: asking.revision, formulation_id: "form_task-asks" }, expect.any(String));
+  });
+
+  it("020-FR-048 deciding the last task in the list moves focus to the list heading", async () => {
+    const user = userEvent.setup();
+    withFlag();
+    mocked.listTasks.mockImplementation(async () => listResponse([asking]));
+    reviewMocked.decide.mockResolvedValueOnce({
+      decision: { id: "decision_2", type: "complete", task_id: "task-asks", session_id: null, decided_at: iso(0), substantive: null, stall_reason: null, ai_use: "none", yielded_auto_park: false },
+      task: { ...asking, state: "completed", revision: asking.revision + 1, formulation: null },
+      created_task: null,
+      receipt: null,
+      session_counts: null
+    });
+    renderPage("/tasks/next?group=off");
+
+    await user.click(await screen.findByRole("button", { name: /Open decision for Renovate the bathroom/ }));
+    mocked.listTasks.mockImplementation(async () => listResponse([]));
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Done/ }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Next actions" })).toHaveFocus());
+  });
+
+  it("020-FR-010 the inline detail of an asking task carries This wording with Decide", async () => {
+    withFlag();
+    renderPage("/tasks/next/task-asks?group=off");
+
+    const block = await screen.findByRole("region", { name: "This wording" });
+    expect(within(block).getByText("Asks for a decision")).toBeInTheDocument();
+    expect(within(block).getByRole("button", { name: "Decide" })).toBeInTheDocument();
   });
 });

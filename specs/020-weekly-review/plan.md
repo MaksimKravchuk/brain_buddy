@@ -122,9 +122,10 @@ D-01 – D-06).
   logs/metrics/fixtures; navigator evaluation set is synthetic. New durable records are
   exported and purged (data-model "Export and purge"). New provider key is read from an
   env var named by `BRAIN_BUDDY_REVIEW_NAVIGATOR_API_KEY_ENV`. Unlike title completion
-  (which degrades to a disabled provider without its key, research R13), the
-  navigator's container build **raises** at startup when the provider is `openai` and
-  that variable is unset, so the deploy fails visibly (constitution I); the first
+  (which degrades to a disabled provider without its key, research R13), the web
+  app's container build **raises** at startup when the provider is `openai` and
+  that variable is unset, so the deploy fails visibly (constitution I). The CLI builds
+  with the navigator disabled and never reads the key. The first
   failing test of PR-07 asserts it. Auto-park never runs before the owner has seen the
   explainer (FR-051).
 - **Tests** — PASS with the strategy in [Test strategy](#test-strategy). Failing tests
@@ -520,8 +521,9 @@ widget targets; the web gets one feature folder. Router and module file names av
   beside the title-completion adapter, behind the `NavigatorProvider` port declared in
   `modules/tasks/navigator.py` (schema, `reduce_notes`, validation, consent rules; no
   HTTP client in the Tasks module, ADR-0001 rule 9), with
-  `_build_review_navigator_provider` raising at container build when `openai` lacks its
-  key (or `deterministic` outside TEST, or an unknown provider; research R13), consent
+  `_build_review_navigator_provider` raising at the web app's container build when
+  `openai` lacks its key (or `deterministic` outside TEST, or an unknown provider;
+  research R13; the CLI builds with the navigator disabled), consent
   table and endpoints with `consent_text_version` currency (`GET /review/navigator` and
   the revoke never gated by the flag), per-owner rate limit, per-call and daily cost
   caps admitted as reserve → call with no lock held → settle (contracts/http.md §7),
@@ -680,7 +682,7 @@ widget targets; the web gets one feature folder. Router and module file names av
 | Offline-started review while another device has one open | client session id + `replace_open: true`; the other session is closed by the E3 rule and shows "review ended elsewhere"; no decision lost | http §6, ios-commands §4 |
 | Decision naming an unknown session | recorded without a session (200) | http §3 |
 | Settings edited on two devices | 409 → refetch, re-apply only the changed fields, resend | ios-commands §4 |
-| Navigator configured `openai` without its key | container build raises at startup; the deploy fails its health check. A serving machine restarted with the key missing also stops, so key rotation follows the runbook (provider `disabled` first) | R13, rollback section |
+| Navigator configured `openai` without its key | the web app's container build raises at startup; the deploy fails its health check (the CLI, manual purge included, still runs). A serving machine restarted with the key missing also stops, so key rotation follows the runbook (provider `disabled` first) | R13, rollback section |
 | Navigator call slow or hanging | the cost reservation is written and the lock released before the provider call; the call runs with no lock held, so other owners' task writes never wait on it | http §7 |
 | Flag turned off then on again, or sweep outage ≥ 24 h | owner park floor = now + 7 d, so every park is preceded by a visible marker | formulation-clock §3 |
 | Account-less clock defect | Release ships the account-less switch off until the synced path is clean; ≤ 10 device parks per call, then M-09 | ios-commands §5, §8 |
@@ -730,8 +732,9 @@ widget targets; the web gets one feature folder. Router and module file names av
   but the task no longer appears on While you were away). Nothing is irreversible
   except an auto-park that already happened, which the person can undo in one tap
   (M-09).
-- **Navigator key rotation (runbook)**: because a missing key makes the backend refuse
-  to start (R13), set `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled` before rotating
+- **Navigator key rotation (runbook)**: because a missing key makes the web app refuse
+  to start (R13; the CLI, including the manual purge, does not need the key, but the
+  scheduled purge runs in the web app), set `BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER=disabled` before rotating
   or removing the key and set it back after the new key is in place; PR-07 writes this
   next to the variables in `.env.example`. The owner accepted keeping the startup
   failure with this runbook on 2026-10-06.
@@ -761,7 +764,9 @@ widget targets; the web gets one feature folder. Router and module file names av
   `review_due_date_moved` log event (no persisted counter); median formulation age from
   task clocks; median active review time from `active_seconds_by_step`; SC-005
   real-use acceptance from decisions' `ai_use` over `navigator_usage.shown`
-  (contracts/navigator.md §5; on-device use reported separately as an upper bound). The
+  (contracts/navigator.md §5; on-device use reported separately as an upper bound),
+  both counted from the later of `--since` and the oldest retained usage day (usage rows
+  live 35 days), which the read-out prints when it is later than `--since`. The
   read-out is `python -m app.cli review-metrics` (content-free aggregates; Test
   strategy and "Post-release acceptance").
 
