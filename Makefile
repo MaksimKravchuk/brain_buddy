@@ -162,6 +162,15 @@ check-specs:
 	python3 scripts/check_gate_integrity.py
 	python3 scripts/check_requirement_coverage.py specs/019-miro-like-crt-canvas
 	python3 scripts/check_requirement_coverage.py specs/024-agent-cli
+	test -f specs/020-weekly-review/evidence/macos-host-run.md
+	cmp backend/tests/fixtures/review_formulation_vectors.json ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json
+	cmp backend/tests/fixtures/review_formulation_vectors.json frontend/src/features/review/__tests__/review_formulation_vectors.json
+	cmp backend/tests/fixtures/review_flow_vectors.json ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_flow_vectors.json
+	cmp backend/tests/fixtures/review_flow_vectors.json frontend/src/features/review/__tests__/review_flow_vectors.json
+	cmp backend/tests/fixtures/review_wire_fixtures.json ios/BrainBuddyKit/Tests/BrainBuddyAPITests/Resources/review_wire_fixtures.json
+	cmp backend/tests/fixtures/review_wire_fixtures.json frontend/src/features/review/__tests__/review_wire_fixtures.json
+	cmp backend/tests/fixtures/review_traces_tasks.json ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_tasks.json
+	cmp backend/tests/fixtures/review_traces_runs.json ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_runs.json
 
 # --- Aggregate verification (mirrors the CI job graph) ---
 
