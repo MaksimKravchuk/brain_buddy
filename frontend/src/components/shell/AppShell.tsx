@@ -322,6 +322,7 @@ function AccountMenu(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
+  const reloadSignOutSummary = () => loadSignOutSummary(user?.id ?? "");
 
   useEffect(() => {
     if (!open) {
@@ -349,7 +350,7 @@ function AccountMenu(): React.JSX.Element {
   const requestSignOut = async () => {
     setOpen(false);
     setSignOutNotice(null);
-    setSignOutSummary(await loadSignOutSummary(user?.id ?? ""));
+    setSignOutSummary(await reloadSignOutSummary());
   };
   const cancelSignOut = useCallback(() => {
     setSignOutSummary(null);
@@ -361,7 +362,7 @@ function AccountMenu(): React.JSX.Element {
     if (!shown.unsavedWork) {
       // Unsaved work that appeared since the dialog opened (another tab) was not
       // warned about: show the warning and wait for a second confirmation.
-      const fresh = await loadSignOutSummary(user?.id ?? "");
+      const fresh = await reloadSignOutSummary();
       if (fresh.unsavedWork) {
         setSigningOut(false);
         setSignOutSummary(fresh);
@@ -385,7 +386,7 @@ function AccountMenu(): React.JSX.Element {
     }
     // Not signed out. If the cause is work that appeared between the check
     // above and the cleanup, say so instead of a generic failure.
-    const fresh = shown.unsavedWork ? shown : await loadSignOutSummary(user?.id ?? "");
+    const fresh = shown.unsavedWork ? shown : await reloadSignOutSummary();
     setSigningOut(false);
     if (fresh.unsavedWork && !shown.unsavedWork) {
       setSignOutSummary(fresh);
