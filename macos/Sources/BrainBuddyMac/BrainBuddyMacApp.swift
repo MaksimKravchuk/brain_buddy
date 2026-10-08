@@ -46,12 +46,18 @@ struct BrainBuddyMacApp: App {
         .commands { ProjectMenuCommands() }
     }
 
-    /// X-08 "default": the running copy, named by the lock, comes to the front.
+    /// X-08 "default": the running copy comes to the front. The lock names its process; when that
+    /// process cannot be found, the copy is looked up by bundle id (research R6).
     private static func bringForward(processID: Int32?) -> Bool {
-        guard let processID, processID != ProcessInfo.processInfo.processIdentifier,
-            let running = NSRunningApplication(processIdentifier: processID), !running.isTerminated
-        else { return false }
-        return running.activate(from: .current, options: [])
+        let current = ProcessInfo.processInfo.processIdentifier
+        let named = processID.flatMap { $0 == current ? nil : NSRunningApplication(processIdentifier: $0) }
+        let other = named.flatMap { $0.isTerminated ? nil : $0 }
+            ?? NSRunningApplication.runningApplications(
+                withBundleIdentifier: Bundle.main.bundleIdentifier ?? MacHostConfiguration.bundleIdentifier
+            )
+            .first { $0.processIdentifier != current && !$0.isTerminated }
+        guard let other else { return false }
+        return other.activate(from: .current, options: [])
     }
 
     /// X-08 "unreachable": one standard alert, "OK", then this copy quits.
