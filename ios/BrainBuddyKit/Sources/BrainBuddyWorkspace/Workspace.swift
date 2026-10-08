@@ -331,10 +331,27 @@ public final class Workspace {
         try perform(.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear)))
     }
 
-    /// Archives a project. Like the server today, this removes the project
-    /// from all of its tasks; the tasks stay in their lists. There is no unarchive.
+    /// Archives a project. Every task keeps it and stays in its list (ADR-0020).
     public func archiveProject(_ id: ProjectID) throws(GTDValidationError) {
         try perform(.archiveProject(id))
+    }
+
+    /// Makes an archived project active again; refused while another active project has its name.
+    public func unarchiveProject(_ id: ProjectID) throws(GTDValidationError) {
+        try perform(.unarchiveProject(project: id))
+    }
+
+    /// Sets (or, with nil or blank, clears) a project's desired outcome, archived or not.
+    public func setProjectOutcome(_ id: ProjectID, outcome: String?) throws(GTDValidationError) {
+        try perform(.setProjectOutcome(project: id, outcome: outcome))
+    }
+
+    /// Applies `commands` in order as one change: all of them are validated on a scratch state and
+    /// queued together, or none is and the reason is thrown. For flows that are several commands
+    /// to the person (clarify an Inbox item as a project, follow up a Waiting item). The server still
+    /// receives one request per command, in order.
+    public func apply(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        try perform(commands)
     }
 
     @discardableResult

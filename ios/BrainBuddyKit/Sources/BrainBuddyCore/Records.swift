@@ -232,10 +232,18 @@ public struct ProjectRecord: Identifiable, Hashable, Sendable, Codable, ServerBa
     public var color: String?
     public var state: ProjectState
     public var createdAt: Date
+    /// Spec 021: trimmed, 1...1000 characters; blank is nil.
+    public var desiredOutcome: String?
+    /// Set by an archive on this device, and by a pull; cleared by an unarchive.
+    public var archivedAt: Date?
+    /// Pull only (the server decides): this archive cleared its tasks' project
+    /// before archives kept them, so an empty archived project may not be empty.
+    public var archivedBeforeLossless: Bool
 
     public init(
         id: ProjectID, serverID: String? = nil, serverRevision: Int? = nil, name: String,
-        color: String? = nil, state: ProjectState = .active, createdAt: Date
+        color: String? = nil, state: ProjectState = .active, createdAt: Date, desiredOutcome: String? = nil,
+        archivedAt: Date? = nil, archivedBeforeLossless: Bool = false
     ) {
         self.id = id
         self.serverID = serverID
@@ -244,6 +252,46 @@ public struct ProjectRecord: Identifiable, Hashable, Sendable, Codable, ServerBa
         self.color = color
         self.state = state
         self.createdAt = createdAt
+        self.desiredOutcome = desiredOutcome
+        self.archivedAt = archivedAt
+        self.archivedBeforeLossless = archivedBeforeLossless
+    }
+}
+
+extension ProjectRecord {
+    private enum CodingKeys: String, CodingKey {
+        case id, serverID, serverRevision, name, color, state, createdAt, desiredOutcome, archivedAt
+        case archivedBeforeLossless
+    }
+
+    /// Documents written before spec 021 have none of the last three fields.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(ProjectID.self, forKey: .id)
+        serverID = try values.decodeIfPresent(String.self, forKey: .serverID)
+        serverRevision = try values.decodeIfPresent(Int.self, forKey: .serverRevision)
+        name = try values.decode(String.self, forKey: .name)
+        color = try values.decodeIfPresent(String.self, forKey: .color)
+        state = try values.decode(ProjectState.self, forKey: .state)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        desiredOutcome = try values.decodeIfPresent(String.self, forKey: .desiredOutcome)
+        archivedAt = try values.decodeIfPresent(Date.self, forKey: .archivedAt)
+        archivedBeforeLossless = try values.decodeIfPresent(Bool.self, forKey: .archivedBeforeLossless) ?? false
+    }
+
+    /// The marker is written only when set, so other projects keep their bytes.
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encodeIfPresent(serverID, forKey: .serverID)
+        try values.encodeIfPresent(serverRevision, forKey: .serverRevision)
+        try values.encode(name, forKey: .name)
+        try values.encodeIfPresent(color, forKey: .color)
+        try values.encode(state, forKey: .state)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encodeIfPresent(desiredOutcome, forKey: .desiredOutcome)
+        try values.encodeIfPresent(archivedAt, forKey: .archivedAt)
+        if archivedBeforeLossless { try values.encode(archivedBeforeLossless, forKey: .archivedBeforeLossless) }
     }
 }
 

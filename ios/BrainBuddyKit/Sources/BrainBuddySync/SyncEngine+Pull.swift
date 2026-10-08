@@ -19,19 +19,21 @@ extension SyncEngine {
     // MARK: - Pull
 
     /// A full pull (there is no delta endpoint): every task in every state,
-    /// the active projects and tags, and the archived or deleted ones that
-    /// tasks reference or the base knows. The new base replaces the old one
-    /// under the same client ids, then the outbox is replayed on it.
+    /// every project (`?state=all`), the active tags, and the deleted tags that
+    /// tasks reference or the base knows. A server that ignores `state` lists
+    /// the active projects only, and the archived ones that tasks reference or
+    /// the base knows are fetched by id as before. The new base replaces the
+    /// old one under the same client ids, then the outbox is replayed on it.
     func pull(_ context: CycleContext) async throws {
         let client = context.client
         let tasks = try await client.listAllTasks(.fullPull)
-        var projects = try await client.listProjects()
+        var projects = try await client.listProjects(state: .all)
         var tags = try await client.listTags()
         let known = try await loadDocument().base
-        let activeProjects = Set(projects.map(\.id))
+        let listedProjects = Set(projects.map(\.id))
         let activeTags = Set(tags.map(\.id))
         let missingProjects = Set(tasks.compactMap(\.projectID)).union(known.projects.values.compactMap(\.serverID))
-            .subtracting(activeProjects)
+            .subtracting(listedProjects)
         let missingTags = Set(tasks.flatMap(\.tagIDs)).union(known.tags.values.compactMap(\.serverID))
             .subtracting(activeTags)
         for id in missingProjects.sorted() {

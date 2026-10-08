@@ -78,6 +78,10 @@ struct ProjectRow: Hashable, Sendable {
     var createdAt: Date
     var updatedAt: Date
     var revision: Int
+    /// Spec 021 (`ProjectDocument`): trimmed, blank is nil.
+    var desiredOutcome: String? = nil
+    var archivedAt: Date? = nil
+    var archivedBeforeLossless = false
 }
 
 struct TagRow: Hashable, Sendable {
@@ -160,7 +164,8 @@ struct OwnerData: Sendable {
     func projectDTO(_ row: ProjectRow) -> ProjectDTO {
         ProjectDTO(
             id: row.id, name: row.name, color: row.color, state: row.state, revision: row.revision,
-            openTaskCount: openTaskCount(project: row.id)
+            openTaskCount: openTaskCount(project: row.id), desiredOutcome: row.desiredOutcome,
+            archivedAt: row.archivedAt, archivedBeforeLossless: row.archivedBeforeLossless
         )
     }
 
