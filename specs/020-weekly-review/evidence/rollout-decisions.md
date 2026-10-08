@@ -14,14 +14,14 @@ host-run file exists. The requirement-coverage filter itself is not wired (owner
 2026-10-08).
 
 **ASK approval for the PR-14 landing** is recorded per candidate, as AGENTS.md
-"Production and Release Evidence" requires. It names the exact SHA and is not reusable
-for any other change.
+"Production and Release Evidence" requires. It names the exact head SHA and is not
+reusable for any other change. A commit cannot name its own SHA, so the approval is not
+kept in this file. It lives in immutable records outside the candidate tree:
 
-| | value |
-|---|---|
-| approved candidate (PR #293 head SHA) | PENDING |
-| approved by / date | PENDING |
-| required CI on that SHA | PENDING |
+- an approval comment on PR #293 that names the approved head SHA, the approver and the
+  date, posted before the merge (an approval of an earlier head is void once the head
+  moves);
+- the merge commit message, which repeats the approved SHA and the green CI run on it.
 
 ## Flag stages
 
