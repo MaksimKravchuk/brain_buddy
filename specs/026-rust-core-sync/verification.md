@@ -41,6 +41,8 @@ The smaller review notes about pending dependencies and account purge are alread
 
 A follow-up review identified an overbroad device-epoch requirement at the common write boundary. The contract now limits device registration to the new sync ingress. Legacy adapters retain their existing authenticated principal and stable replay identity; internal jobs use trusted execution authority, durable effect IDs, and lease fencing. Both still publish through the shared receipt/feed transaction. Caller-controlled origin fields cannot exempt a device command from epoch checks. Validation scenarios cover each writer, retries, forged origin, and a stale worker.
 
+The subsequent sequencing review found that T007/T011 depended on job authority/fencing scheduled only in T012. T012 now runs first in Phase 3, through the existing compatible task ports, before T007 connects internal writers. The migration plan and pilot gate require verified authority/fencing and receipt/feed coverage for every writer; no new sync cohort starts while a scheduler still bypasses the feed.
+
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.
