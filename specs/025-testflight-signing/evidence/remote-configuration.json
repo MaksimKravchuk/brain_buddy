@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-10-07T21:13:14.079739+00:00",
+  "environment": "Testflight",
+  "protection_rules": [],
+  "deployment_branch_policy": null,
+  "environment_secrets": [
+    {
+      "name": "IOS_DEVELOPMENT_CERTIFICATE_BASE64",
+      "created_at": "2026-10-07T20:47:29Z",
+      "updated_at": "2026-10-07T20:47:29Z"
+    },
+    {
+      "name": "IOS_DEVELOPMENT_CERTIFICATE_PASSWORD",
+      "created_at": "2026-10-07T20:47:30Z",
+      "updated_at": "2026-10-07T20:47:30Z"
+    }
+  ],
+  "repository_duplicates": [],
+  "source": "GitHub environment/repository secret metadata APIs; no values are accessible or recorded."
+}

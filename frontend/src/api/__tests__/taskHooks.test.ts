@@ -43,12 +43,21 @@ describe("taskHooks", () => {
   // stops being invalidated at all.
   it("namespaces every task cache key under the same root", () => {
     expect(taskKeys.all).toEqual(["tasks"]);
-    expect(taskKeys.projects()).toEqual(["tasks", "projects"]);
-    expect(taskKeys.tags()).toEqual(["tasks", "tags"]);
     const scope = { accountId: null, apiOrigin: clientModule.getApiBaseUrl() };
+    expect(taskKeys.projects()).toEqual(["tasks", "projects", scope]);
+    expect(taskKeys.tags()).toEqual(["tasks", "tags", scope]);
     expect(taskKeys.detail("task-1")).toEqual(["tasks", "detail", scope, "task-1"]);
     expect(taskKeys.list({ state: "next" })).toEqual(["tasks", "list", scope, { state: "next" }]);
     expect(taskKeys.brainDumpProviders()).toEqual(["brain-dump-providers"]);
+  });
+
+  it("020-FR-015 020-FR-042 keeps projects and tags per account, so one account's list never serves another", () => {
+    const apiOrigin = clientModule.getApiBaseUrl();
+    expect(taskKeys.projects({ accountId: "a", apiOrigin })).not.toEqual(taskKeys.projects({ accountId: "b", apiOrigin }));
+    expect(taskKeys.tags({ accountId: "a", apiOrigin })).not.toEqual(taskKeys.tags({ accountId: "b", apiOrigin }));
+    // Writes still invalidate every account's projects and tags by prefix.
+    expect(taskKeys.projects({ accountId: "a", apiOrigin }).slice(0, 2)).toEqual(["tasks", "projects"]);
+    expect(taskKeys.tags({ accountId: "a", apiOrigin }).slice(0, 2)).toEqual(["tasks", "tags"]);
   });
 
   it("keeps a detail key per task, so one task's refetch cannot serve another", () => {

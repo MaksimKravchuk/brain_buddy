@@ -86,6 +86,11 @@ TEST_NAME_HINTS = ("test", "spec", "__tests__")
 
 
 def iter_test_files(root: Path):
+    # CI-only specs use the standard-library gate tests already run by CI.
+    # A strict filename prefix excludes product scripts (including check_spec*).
+    for path in sorted((root / "scripts").glob("test_*.py")):
+        if path.is_file():
+            yield path
     for tree in TEST_TREES:
         base = root / tree
         if not base.is_dir():

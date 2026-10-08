@@ -14,8 +14,10 @@ export const taskKeys = {
   lists: (scope = getTaskCacheScope()) => [...taskKeys.all, "list", scope] as const,
   list: (filters: TaskListFilters, scope = getTaskCacheScope()) => [...taskKeys.lists(scope), filters] as const,
   detail: (taskId: string, scope = getTaskCacheScope()) => [...taskKeys.all, "detail", scope, taskId] as const,
-  projects: () => [...taskKeys.all, "projects"] as const,
-  tags: () => [...taskKeys.all, "tags"] as const,
+  // Projects and tags are per account like tasks: one account's cached list
+  // must never stand in for another's (an archived project would look active).
+  projects: (scope = getTaskCacheScope()) => [...taskKeys.all, "projects", scope] as const,
+  tags: (scope = getTaskCacheScope()) => [...taskKeys.all, "tags", scope] as const,
   brainDumpProviders: () => ["brain-dump-providers"] as const
 };
 
@@ -69,15 +71,17 @@ export function useTaskDetail(taskId: string | undefined) {
 }
 
 export function useProjects() {
+  const accountId = useAuthStore((store) => store.user?.id ?? null);
   return useQuery({
-    queryKey: taskKeys.projects(),
+    queryKey: taskKeys.projects(getTaskCacheScope(accountId)),
     queryFn: ({ signal }) => apiClient.listProjects(signal)
   });
 }
 
 export function useTags() {
+  const accountId = useAuthStore((store) => store.user?.id ?? null);
   return useQuery({
-    queryKey: taskKeys.tags(),
+    queryKey: taskKeys.tags(getTaskCacheScope(accountId)),
     queryFn: ({ signal }) => apiClient.listTags(signal)
   });
 }

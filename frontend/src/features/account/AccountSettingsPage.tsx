@@ -11,6 +11,7 @@ import { Button } from "../../components/ui/Button";
 import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
 import { getErrorContext, getErrorMessage } from "../../utils/error";
+import { ReviewSettingsSection } from "../review/ReviewSettingsSection";
 
 import { AccountSecurity } from "../auth/AccountSecurity";
 
@@ -51,6 +52,8 @@ export function AccountSettingsPage({ directDelete = false }: { directDelete?: b
           </p>
         </header>
         <ProfileSection />
+        {/* Spec 020 D-04; renders nothing while weekly_review is off. */}
+        <ReviewSettingsSection />
         <AccountSecurity directDelete={directDelete} onUpdated={() => { void queryClient.invalidateQueries({ queryKey: accountKeys.detail() }); }} />
       </div>
     </AppShell>

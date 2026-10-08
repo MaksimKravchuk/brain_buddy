@@ -162,11 +162,14 @@ def test_020_FR_025_cli_and_account_purge_never_need_the_navigator_key(
 
     navigator_env.setenv(PROVIDER_ENV, "openai")
     get_config.cache_clear()
-    with (
-        allure.step("the web app still refuses to start"),
-        pytest.raises(ValueError, match=KEY_ENV),
-    ):
-        create_app()
+    with allure.step("the web app still refuses to start"):
+        with pytest.raises(ValueError, match=KEY_ENV) as rejection:
+            create_app()
+        allure.attach(
+            f"{type(rejection.value).__name__}: required variable {KEY_ENV}",
+            "Observed startup rejection",
+            allure.attachment_type.TEXT,
+        )
     with allure.step(f"python -m app.cli {command} without the key"):
         result = CliRunner().invoke(cli.app, [command])
     assert result.exit_code == 0, result.output
