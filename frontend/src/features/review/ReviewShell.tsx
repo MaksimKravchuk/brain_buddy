@@ -160,12 +160,15 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
     action();
   };
 
+  // The bar's own Next/Skip progress write sits outside the run context, so it counts here beside the steps' writes.
+  const inFlight = () => writesRef.current > 0 || bar.pending !== null;
+
   // Browser Back while a write is saving goes nowhere: the entry is put back and the page stays (FR-048);
   // a tab close or reload gets the browser's warning then too, as it does for unsaved text.
   const guard = useLeaveGuard({
-    dirty: unsaved || writing,
+    dirty: unsaved || writing || bar.pending !== null,
     onBack: () => {
-      if (writesRef.current > 0) {
+      if (inFlight()) {
         guard.rearm();
         return;
       }
@@ -174,7 +177,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   });
 
   const advance = (status: "finished" | "skipped") => {
-    if (writesRef.current > 0) {
+    if (inFlight()) {
       return;
     }
     const change: SessionProgress = {
@@ -211,7 +214,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   };
 
   const leave = () => {
-    if (writesRef.current > 0) {
+    if (inFlight()) {
       return;
     }
     forgetRelease(captureReviewScope().accountId as string);

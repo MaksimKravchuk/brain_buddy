@@ -256,6 +256,28 @@ describe("020-FR-048 the shell waits for the step's writes", () => {
     expect(await screen.findByRole("alertdialog", { name: "Take a break?" })).toBeInTheDocument();
   });
 
+  it("020-FR-048 while the bar's own Skip step saves, browser Back stays put and a tab close is warned", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queue([bathroom, cv]));
+    const skipping = deferred<ReviewSession>();
+    progress.mockReturnValueOnce(skipping.promise);
+    renderShell(inDecisions());
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+
+    await user.click(skip());
+    expect(progress.mock.calls[0][0].body).toMatchObject({ step: { code: "decisions", status: "skipped" } });
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    await act(async () => skipping.resolve(sessionFixture({ current_step: "decisions" })));
+    await waitFor(() => expect(leave()).toBeEnabled());
+    act(() => window.history.back());
+    expect(await screen.findByRole("alertdialog", { name: "Take a break?" })).toBeInTheDocument();
+  });
+
   it("020-FR-048 closing the tab while a write saves gets the browser's leave warning", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValue(queue([bathroom, cv]));
