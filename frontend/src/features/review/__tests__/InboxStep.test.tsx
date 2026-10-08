@@ -380,7 +380,7 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.waiting"))).toBe(false);
   });
 
-  it("020-FR-011 an item that cannot be read again after a stale answer is left as it is", async () => {
+  it("020-FR-045 an item that cannot be read again after a stale answer stays current with the Ref and a Retry", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper, dentist]));
     transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_unreadable"));
@@ -390,8 +390,9 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
 
     await user.click(choice("Next actions"));
 
-    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Buy printer paper” was changed on another device, so it stayed in Inbox.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_unreadable");
+    expect(screen.getByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
   });
 
   it("020-FR-042 a choice answered after another account signed in sends no count and shows no Undo", async () => {

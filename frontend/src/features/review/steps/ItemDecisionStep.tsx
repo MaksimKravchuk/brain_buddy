@@ -117,18 +117,20 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
    * key; only when the task moved or was reworded is it left as it is there and
    * its form dropped (FR-011, FR-052).
    */
-  const reconcileStale = async (task: TaskResponse, item: ItemAction, continuation: ReviewContinuation) => {
+  const reconcileStale = async (task: TaskResponse, item: ItemAction, continuation: ReviewContinuation, staleError: unknown) => {
     const fresh = await apiClient.getTask(task.id).catch(() => null);
     if (!continuation.stillCurrent()) {
       return;
     }
-    if (fresh) {
-      applyReviewTask(queryClient, fresh, continuation.scope);
-    } else {
+    if (fresh === null) {
+      // Its current wording is unknown, so nothing typed is dropped and the item stays: the
+      // conflict shows as a failure with its Ref, and Retry reads the task again (FR-052, FR-045).
       refreshAfterReviewWrite(queryClient, continuation.scope);
+      throw staleError;
     }
+    applyReviewTask(queryClient, fresh, continuation.scope);
     focusHeading.current = true;
-    if (fresh !== null && sameWording(task, fresh)) {
+    if (sameWording(task, fresh)) {
       setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
       setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so nothing was applied. Here's the current version; decide again if it still needs it.` });
       return;
@@ -149,7 +151,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
       } catch (error) {
         const { kind, referenceId } = describeReviewError(error);
         if (kind === "stale") {
-          await reconcileStale(task, item, continuation);
+          await reconcileStale(task, item, continuation, error);
           return;
         }
         if (kind in REFUSALS) {

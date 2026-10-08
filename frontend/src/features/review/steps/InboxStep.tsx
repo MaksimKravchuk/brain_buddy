@@ -127,18 +127,20 @@ export function InboxStep(): React.JSX.Element {
    * reworded does the review leave it as it is there and drop its form (FR-011,
    * FR-052).
    */
-  const reconcileStale = async (task: TaskResponse, choice: Choice, continuation: ReviewContinuation) => {
+  const reconcileStale = async (task: TaskResponse, choice: Choice, continuation: ReviewContinuation, staleError: unknown) => {
     const fresh = await apiClient.getTask(task.id).catch(() => null);
     if (!continuation.stillCurrent()) {
       return;
     }
-    if (fresh) {
-      applyReviewTask(queryClient, fresh, continuation.scope);
-    } else {
+    if (fresh === null) {
+      // Its current wording is unknown, so nothing typed is dropped and the item stays: the
+      // conflict shows as a failure with its Ref, and Retry reads the task again (FR-052, FR-045).
       refreshAfterReviewWrite(queryClient, continuation.scope);
+      throw staleError;
     }
+    applyReviewTask(queryClient, fresh, continuation.scope);
     focusHeading.current = true;
-    if (fresh?.state === "inbox" && sameWording(task, fresh)) {
+    if (fresh.state === "inbox" && sameWording(task, fresh)) {
       setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
       setNotice(`“${task.title}” was changed on another device, so nothing was moved. It's still in Inbox; choose again.`);
       return;
@@ -168,7 +170,7 @@ export function InboxStep(): React.JSX.Element {
         if (describeReviewError(error).kind !== "stale") {
           throw error;
         }
-        await reconcileStale(task, choice, continuation);
+        await reconcileStale(task, choice, continuation, error);
         return;
       }
       // Only the person who pressed it may have the count sent for them.

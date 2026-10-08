@@ -605,17 +605,30 @@ describe("020-FR-032 Waiting for, older than 7 days", () => {
     expect(decide).toHaveBeenLastCalledWith("wait_1", { type: "keep_waiting", expected_revision: 8, session_id: "review_1" }, expect.any(String));
   });
 
-  it("020-FR-011 a stale decision whose task cannot be read again leaves it as it is there", async () => {
+  it("020-FR-052 020-FR-045 a stale answer whose task cannot be read again keeps the card and its typed text, and Retry reads it again", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([drill, tiles]));
     decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_unreadable"));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_unreadable_2"));
     vi.mocked(apiClient.getTask).mockRejectedValueOnce(new ApiError("down", 503, null, "corr_read"));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, details: "he said Friday", revision: 9 });
     renderInRun(<WaitingStep />);
+    await user.click(await screen.findByRole("button", { name: "Create a follow-up" }));
+    await user.type(screen.getByRole("textbox", { name: "What will you do to follow up?" }), "Text Sam about the drill");
 
-    await user.click(await screen.findByRole("button", { name: /^Keep waiting/ }));
+    await user.click(screen.getByRole("button", { name: "Save follow-up" }));
 
-    expect(await screen.findByRole("heading", { name: "Quote for the bathroom tiles" })).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("so it was left as it is there.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Ref corr_unreadable");
+    expect(screen.getByRole("heading", { name: "Pick up the drill from Sam" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "What will you do to follow up?" })).toHaveValue("Text Sam about the drill");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".wait_1.follow_up"))).toBe(true);
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("so nothing was applied.");
+    expect(screen.getByRole("textbox", { name: "What will you do to follow up?" })).toHaveValue("Text Sam about the drill");
   });
 
   it("020-FR-042 a stale answer read again after another account signed in changes nothing", async () => {
