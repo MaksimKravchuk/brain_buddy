@@ -178,7 +178,9 @@ struct CompactionPropertyTests {
             }
             kept += outbox.count
         }
-        let rules: Set = ["updateTask", "move", "reopen", "updateSubtask", "updateComment", "updateProject", "renameTag"]
+        let rules: Set = [
+            "updateTask", "move", "reopen", "updateSubtask", "updateComment", "updateProject", "renameTag", "setProjectOutcome",
+        ]
         #expect(folded == rules)
         #expect(kept < appended * 17 / 20, "kept \(kept) of \(appended) operations")
     }
@@ -191,6 +193,7 @@ struct CompactionPropertyTests {
         case .updateComment: "updateComment"
         case .updateProject: "updateProject"
         case .renameTag: "renameTag"
+        case .setProjectOutcome: "setProjectOutcome"
         default: "unexpected: \(command)"
         }
     }

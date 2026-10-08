@@ -37,6 +37,16 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
             url: "\(base)/projects", body: nil, isMutation: false, call: { _ = try await $0.listProjects() }
         ),
         EndpointCase(
+            name: "GET /projects?state=all (021-FR-026)", response: Fixture.json(200, "[\(Fixture.project)]"),
+            method: .get, url: "\(base)/projects?state=all", body: nil, isMutation: false,
+            call: { _ = try await $0.listProjects(state: .all) }
+        ),
+        EndpointCase(
+            name: "GET /projects?state=archived (021-FR-026)", response: Fixture.json(200, "[\(Fixture.archivedProject)]"),
+            method: .get, url: "\(base)/projects?state=archived", body: nil, isMutation: false,
+            call: { _ = try await $0.listProjects(state: .archived) }
+        ),
+        EndpointCase(
             name: "GET /projects/{id}", response: Fixture.json(200, Fixture.archivedProject), method: .get,
             url: "\(base)/projects/project_0a1b2c3d4e5f", body: nil, isMutation: false,
             call: { _ = try await $0.getProject(id: "project_0a1b2c3d4e5f") }
@@ -50,6 +60,32 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
             name: "POST /projects with colour", response: Fixture.json(201, Fixture.project), method: .post,
             url: "\(base)/projects", body: ##"{"color":"#0EA5E9","name":"Home"}"##, isMutation: true,
             call: { _ = try await $0.createProject(name: "Home", color: "#0EA5E9", idempotencyKey: key) }
+        ),
+        EndpointCase(
+            name: "POST /projects with a desired outcome (021-FR-028)", response: Fixture.json(201, Fixture.project),
+            method: .post, url: "\(base)/projects", body: #"{"desired_outcome":"Shed built","name":"Home"}"#,
+            isMutation: true,
+            call: { _ = try await $0.createProject(name: "Home", desiredOutcome: "Shed built", idempotencyKey: key) }
+        ),
+        EndpointCase(
+            name: "PATCH /projects/{id} desired outcome (021-FR-028)", response: Fixture.json(200, Fixture.project),
+            method: .patch, url: "\(base)/projects/project_0a1b2c3d4e5f",
+            body: #"{"desired_outcome":"Shed built","expected_revision":2}"#, isMutation: true,
+            call: {
+                _ = try await $0.updateProject(
+                    id: "project_0a1b2c3d4e5f", desiredOutcome: .set("Shed built"), expectedRevision: 2, idempotencyKey: key
+                )
+            }
+        ),
+        EndpointCase(
+            name: "PATCH /projects/{id} clearing the outcome sends null (021-FR-028)",
+            response: Fixture.json(200, Fixture.project), method: .patch, url: "\(base)/projects/project_0a1b2c3d4e5f",
+            body: #"{"desired_outcome":null,"expected_revision":2}"#, isMutation: true,
+            call: {
+                _ = try await $0.updateProject(
+                    id: "project_0a1b2c3d4e5f", desiredOutcome: .clear, expectedRevision: 2, idempotencyKey: key
+                )
+            }
         ),
         EndpointCase(
             name: "PATCH /projects/{id} rename omits color", response: Fixture.json(200, Fixture.project),
@@ -87,6 +123,12 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
             url: "\(base)/projects/project_0a1b2c3d4e5f/archive", body: #"{"expected_revision":2}"#,
             isMutation: true,
             call: { _ = try await $0.archiveProject(id: "project_0a1b2c3d4e5f", expectedRevision: 2, idempotencyKey: key) }
+        ),
+        EndpointCase(
+            name: "POST /projects/{id}/unarchive (021-FR-026)", response: Fixture.json(200, Fixture.project),
+            method: .post, url: "\(base)/projects/project_0a1b2c3d4e5f/unarchive", body: #"{"expected_revision":3}"#,
+            isMutation: true,
+            call: { _ = try await $0.unarchiveProject(id: "project_0a1b2c3d4e5f", expectedRevision: 3, idempotencyKey: key) }
         ),
     ]
 
@@ -305,9 +347,9 @@ struct EndpointRequestTests {
 
     @Test("Every mutating route in the design table is covered")
     func coversEveryCommandRoute() {
-        // docs/native-ios-app.md › Commands and endpoints: 14 commands, one route each.
+        // docs/native-ios-app.md › Commands and endpoints: 14 commands, one route each, and spec 021's unarchive.
         let routes = Set(EndpointCase.all.filter(\.isMutation).map { "\($0.method.rawValue) \($0.url)" })
-        #expect(routes.count == 14)
+        #expect(routes.count == 15)
     }
 
     @Test("Login sends credentials, no stale cookie, and no Idempotency-Key")

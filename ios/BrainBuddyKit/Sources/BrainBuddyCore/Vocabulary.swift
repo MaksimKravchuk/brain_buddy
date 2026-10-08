@@ -88,4 +88,6 @@ public enum GTDLimits {
     public static let name = 500
     public static let color = 64
     public static let comment = 20_000
+    /// A project's desired outcome (spec 021).
+    public static let outcome = 1_000
 }

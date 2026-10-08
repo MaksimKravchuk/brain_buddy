@@ -62,7 +62,7 @@ Two consequences worth knowing before touching the allowlist:
   carry an exec- or write-capable form; a prefix rule overrides that and
   pre-approves `find -exec`, `rg --pre`, `sort --compress-program` and GNU
   `sed`'s `e` command — each of which runs an arbitrary program, which would
-  walk straight through the `ask` gates on `git push`, `fly` and
+  walk straight through the `ask` gates on force/`main` `git push`, `fly` and
   `submit_to_trunk.sh`.
 - **`Read`/`Edit` deny rules already cover Bash.** They apply to the built-in
   file tools *and* to file commands Claude Code recognises in Bash (`cat`,
@@ -72,6 +72,23 @@ Two consequences worth knowing before touching the allowlist:
 
 Reach for Bash where it is genuinely the right tool: `make` targets, git, the
 `scripts/` validators, `docker compose`.
+
+### Keep git commands promptable
+
+A permission prompt holds the whole command it sits on, so one gated segment
+stalls everything chained to it. Shape git work so a prompt, when one is due,
+is short and holds nothing else:
+
+- **Push on its own.** Run `git push -u origin claude/<branch>` as a separate
+  call after validation and commit succeed — never chained after `make`,
+  `git commit`, a merge or a loop. Force, delete, mirror, `main` and
+  `trunk-candidate` pushes stay behind `ask` rules by design.
+- **No `cd` before git.** Use `git -C <worktree> ...` instead of
+  `cd <worktree> && git ...`; a directory change before a version-control
+  command is flagged because the target may carry untrusted hooks or config.
+- **No shell variables or `source` in a git command.** Activate a venv or set
+  `SP=...` in a separate call, or call the venv's binary by absolute path;
+  a command whose arguments depend on a variable cannot be checked up front.
 
 ## Spec Kit and the delivery pipeline
 

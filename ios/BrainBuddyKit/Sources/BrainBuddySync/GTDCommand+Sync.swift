@@ -24,7 +24,8 @@ extension GTDCommand {
         case .undoDecision, .bulkRelease, .undoBulkRelease, .review: .review
         case .createProject, .createTag, .createTask: nil
         case .updateProject(let update): .project(update.projectID)
-        case .archiveProject(let id): .project(id)
+        case .archiveProject(let id), .unarchiveProject(let id): .project(id)
+        case .setProjectOutcome(let id, _): .project(id)
         case .renameTag(let rename): .tag(rename.tagID)
         case .deleteTag(let id): .tag(id)
         case .updateTask(let update): .task(update.taskID)
@@ -45,7 +46,8 @@ extension GTDCommand {
         switch self {
         case .createProject, .createTag, .createTask, .createSubtask, .createComment: nil
         case .updateProject(let update): base.projects[update.projectID]?.serverRevision
-        case .archiveProject(let id): base.projects[id]?.serverRevision
+        case .archiveProject(let id), .unarchiveProject(let id), .setProjectOutcome(let id, _):
+            base.projects[id]?.serverRevision
         case .renameTag(let rename): base.tags[rename.tagID]?.serverRevision
         case .deleteTag(let id): base.tags[id]?.serverRevision
         case .updateTask(let update): base.tasks[update.taskID]?.serverRevision
@@ -73,12 +75,13 @@ extension GTDCommand {
         }
     }
 
-    /// Archiving a project or deleting a tag also changes (and bumps the
-    /// revision of) every member task on the server, so a pull follows; so
-    /// do a bulk release and its Undo, whose answers carry no tasks.
+    /// Deleting a tag also changes (and bumps the revision of) every task
+    /// that carried it on the server, so a pull follows; so do a bulk release
+    /// and its Undo, whose answers carry no tasks. (An archive no longer
+    /// touches a task, ADR-0020.)
     var changesOtherRecords: Bool {
         switch self {
-        case .archiveProject, .deleteTag, .bulkRelease, .undoBulkRelease: true
+        case .deleteTag, .bulkRelease, .undoBulkRelease: true
         default: false
         }
     }
@@ -105,8 +108,8 @@ extension GTDCommand {
         case .updateComment(let update): update.taskID
         case .decideTask(let decide): decide.taskID
         case .autoParkTask(let park): park.taskID
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
-            .bulkRelease, .undoBulkRelease, .review:
+        case .createProject, .updateProject, .archiveProject, .setProjectOutcome, .unarchiveProject, .createTag,
+            .renameTag, .deleteTag, .undoDecision, .bulkRelease, .undoBulkRelease, .review:
             nil
         }
     }
@@ -156,8 +159,8 @@ extension GTDCommand {
         case .review(.progressSession(var progress)):
             progress.setAsideTaskID = progress.setAsideTaskID.map(swap)
             return .review(.progressSession(progress))
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .undoDecision,
-            .undoBulkRelease, .review:
+        case .createProject, .updateProject, .archiveProject, .setProjectOutcome, .unarchiveProject, .createTag,
+            .renameTag, .deleteTag, .undoDecision, .undoBulkRelease, .review:
             return self
         }
     }
@@ -220,7 +223,11 @@ extension GTDCommand {
                 projectID: now.projectID, name: sent.name == now.name ? nil : now.name,
                 color: sent.color == now.color ? .unchanged : now.color.map { .set($0) } ?? .clear
             )
-            return update.name == nil && update.color == .unchanged ? [] : [.updateProject(update)]
+            var commands: [GTDCommand] = update.name == nil && update.color == .unchanged ? [] : [.updateProject(update)]
+            if sent.desiredOutcome != now.desiredOutcome {
+                commands.append(.setProjectOutcome(project: now.projectID, outcome: now.desiredOutcome))
+            }
+            return commands
         case (.createTag(let sent), .createTag(let now)):
             guard sent.name != now.name else { return [] }
             return [.renameTag(.init(tagID: now.tagID, name: now.name))]

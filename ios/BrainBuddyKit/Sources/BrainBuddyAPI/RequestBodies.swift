@@ -246,28 +246,36 @@ struct SignupBody: Encodable {
     }
 }
 
-/// `ProjectCreateRequest`: `color` omitted when nil.
+/// `ProjectCreateRequest`: `color` and `desired_outcome` omitted when nil.
 struct ProjectCreateBody: Encodable {
     var name: String
     var color: String?
+    var desiredOutcome: String?
 
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(name, forKey: .name)
         try values.encodeIfPresent(color, forKey: .color)
+        try values.encodeIfPresent(desiredOutcome, forKey: .desiredOutcome)
     }
 
-    enum CodingKeys: String, CodingKey { case name, color }
+    enum CodingKeys: String, CodingKey {
+        case name, color
+        case desiredOutcome = "desired_outcome"
+    }
 }
 
-/// `ProjectUpdateRequest`: `name` omitted when nil; `color` `.clear` is `null` (clears it).
+/// `ProjectUpdateRequest`: `name` omitted when nil; `color` and `desired_outcome`
+/// `.clear` are `null` (clears them), `.unchanged` omits them.
 struct ProjectUpdateBody: Encodable {
     var name: String?
     var color: FieldChange<String>
+    var desiredOutcome: FieldChange<String> = .unchanged
     var expectedRevision: Int
 
     enum CodingKeys: String, CodingKey {
         case name, color
+        case desiredOutcome = "desired_outcome"
         case expectedRevision = "expected_revision"
     }
 
@@ -275,11 +283,12 @@ struct ProjectUpdateBody: Encodable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encodeIfPresent(name, forKey: .name)
         try values.encodeChange(color, forKey: .color)
+        try values.encodeChange(desiredOutcome, forKey: .desiredOutcome)
         try values.encode(expectedRevision, forKey: .expectedRevision)
     }
 }
 
-/// `ExpectedRevisionRequest` (project archive).
+/// `ExpectedRevisionRequest` (project archive and unarchive).
 struct ExpectedRevisionBody: Encodable {
     var expectedRevision: Int
     enum CodingKeys: String, CodingKey { case expectedRevision = "expected_revision" }

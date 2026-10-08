@@ -57,7 +57,8 @@ extension ServerState {
     }
 
     /// `PATCH /tasks/{id}`: omitted keys are kept, `null` clears (title and
-    /// priority cannot be null), and the result's references must be active.
+    /// priority cannot be null), and the result's references must be active,
+    /// except the project the task already has.
     /// There is no "nothing changed" check: every accepted PATCH bumps the revision.
     mutating func updateTask(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError) -> Reply {
         let body = try RequestBody(
@@ -94,7 +95,8 @@ extension ServerState {
         }
         if body.has("project_id") { task.projectID = projectID }
         if body.has("tag_ids") { task.tagIDs = tagIDs ?? [] }
-        try data.assertActiveReferences(project: task.projectID, tags: task.tagIDs)
+        // A task may keep the archived project it is in (ADR-0020); only a different one must be active.
+        try data.assertActiveReferences(project: task.projectID == old.projectID ? nil : task.projectID, tags: task.tagIDs)
         if let title { task.title = title }
         if body.has("details") { task.details = details }
         if body.has("due_date") { task.dueDate = dueDate }

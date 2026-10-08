@@ -84,23 +84,55 @@ struct ReducerProjectTests {
         }
     }
 
-    @Test("Archiving removes the project from every task, open or terminal")
+    @Test("021-FR-024 archiving keeps the project on every task, open or terminal")
     func archive() throws {
         var state = Fixture.base
         try apply(.archiveProject("work"), to: &state, at: 7)
-        #expect(state.projects["work"]?.state == .archived)
-        for id: TaskID in ["inbox", "done"] {
-            #expect(state.tasks[id]?.projectID == nil)
-            #expect(state.tasks[id]?.updatedAt == Fixture.at(7))
-            #expect(state.tasks[id]?.state == Fixture.base.tasks[id]?.state, "tasks stay in their lists")
-        }
-        #expect(state.tasks["next"] == Fixture.base.tasks["next"], "other tasks are untouched")
+        #expect(state.projects["work"]?.state == .archived && state.projects["work"]?.archivedAt == Fixture.at(7))
+        #expect(state.tasks == Fixture.base.tasks, "no task changes, so nothing is cleared or touched")
         expectRejection(.updateTask(.init(taskID: "next", changes: .init(projectID: .set("work")))), on: state, .projectNotActive)
         expectRejection(.archiveProject("work"), on: state, .projectAlreadyArchived)
         var replayed = state
         #expect(try apply(.archiveProject("work"), to: &replayed, mode: .replay) == .alreadySatisfied)
         #expect(replayed == state)
         expectRejection(.archiveProject("missing"), on: state, .projectNotFound, mode: .replay)
+    }
+
+    @Test("021-FR-028 a new project's desired outcome is trimmed, blank becomes nil, 1,000 characters are the limit")
+    func createWithAnOutcome() throws {
+        var state = Fixture.base
+        try apply(.createProject(.init(projectID: "a", name: "A", desiredOutcome: "  Garden done \n")), to: &state)
+        #expect(state.projects["a"]?.desiredOutcome == "Garden done")
+        try apply(.createProject(.init(projectID: "b", name: "B", desiredOutcome: " \n ")), to: &state)
+        #expect(state.projects["b"]?.desiredOutcome == nil)
+        try apply(.createProject(.init(projectID: "c", name: "C", desiredOutcome: String(repeating: "o", count: 1_000))), to: &state)
+        #expect(state.projects["c"]?.desiredOutcome?.count == 1_000)
+        let tooLong = GTDCommand.createProject(.init(projectID: "d", name: "D", desiredOutcome: String(repeating: "o", count: 1_001)))
+        expectRejection(tooLong, on: state, .outcomeTooLong)
+        #expect(GTDValidationError.outcomeTooLong.message == "Keep the desired outcome under 1,000 characters.")
+    }
+
+    @Test("021-FR-028 setProjectOutcome sets, clears and checks the outcome of an active or an archived project")
+    func setOutcome() throws {
+        var state = Fixture.base
+        try apply(.setProjectOutcome(project: "work", outcome: " Ship it "), to: &state)
+        #expect(state.projects["work"]?.desiredOutcome == "Ship it")
+        try apply(.setProjectOutcome(project: "old", outcome: "Closed out"), to: &state)
+        #expect(state.projects["old"]?.desiredOutcome == "Closed out" && state.projects["old"]?.state == .archived)
+        try apply(.setProjectOutcome(project: "work", outcome: "  "), to: &state)
+        #expect(state.projects["work"]?.desiredOutcome == nil)
+        expectRejection(.setProjectOutcome(project: "work", outcome: nil), on: state, .nothingToChange)
+        var replayed = state
+        #expect(try apply(.setProjectOutcome(project: "work", outcome: nil), to: &replayed, mode: .replay) == .alreadySatisfied)
+        expectRejection(
+            .setProjectOutcome(project: "work", outcome: String(repeating: "o", count: 1_001)), on: state, .outcomeTooLong
+        )
+        expectRejection(.setProjectOutcome(project: "missing", outcome: "x"), on: state, .projectNotFound)
+    }
+
+    @Test("021-FR-025 a duplicate project name keeps the copy create, rename and merge already show")
+    func duplicateNameCopy() {
+        #expect(GTDValidationError.duplicateProjectName("Work").message == "A project named Work already exists.")
     }
 }
 

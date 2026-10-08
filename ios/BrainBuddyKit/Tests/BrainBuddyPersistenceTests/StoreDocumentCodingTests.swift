@@ -233,6 +233,39 @@ import Testing
         #expect(decoded == document)
     }
 
+    @Test("021-FR-008 a store written before spec 021 decodes, its projects without outcome, archive time or marker")
+    func storeBeforeSpec021Decodes() throws {
+        let document = try StoreDocumentCoding.decode(Data(Self.version1Store.utf8))
+        let project = try #require(document.base.projects["project-1"])
+        #expect(project.name == "Home" && project.desiredOutcome == nil)
+        #expect(project.archivedAt == nil && !project.archivedBeforeLossless)
+        let text = String(decoding: try StoreDocumentCoding.encode(document), as: UTF8.self)
+        #expect(!text.contains("desiredOutcome") && !text.contains("archivedBeforeLossless"), "other projects keep their bytes")
+    }
+
+    @Test("021-FR-008 021-FR-028 the project fields and the new commands round-trip inside operations and issues; the version stays")
+    func spec021FieldsRoundTrip() throws {
+        var document = Fixtures.richDocument()
+        let archivedAt = Date(timeIntervalSinceReferenceDate: 812_345_678.5)
+        document.base.projects["project-1"]?.desiredOutcome = "Shed built"
+        document.base.projects["project-1"]?.archivedAt = archivedAt
+        document.base.projects["project-1"]?.archivedBeforeLossless = true
+        let commands: [GTDCommand] = [
+            .createProject(.init(projectID: "p", name: "Trip", desiredOutcome: "Two weeks away")),
+            .setProjectOutcome(project: "p", outcome: "Back"), .setProjectOutcome(project: "p", outcome: nil),
+            .unarchiveProject(project: "p"),
+        ]
+        document.outbox += commands.map { PendingOperation(command: $0, issuedAt: archivedAt) }
+        document.issues += commands.map { SyncIssue(command: $0, message: "why", referenceID: "ref", occurredAt: archivedAt) }
+
+        let decoded = try StoreDocumentCoding.decode(StoreDocumentCoding.encode(document))
+        #expect(decoded == document)
+        let project = try #require(decoded.base.projects["project-1"])
+        #expect(project.desiredOutcome == "Shed built" && project.archivedAt == archivedAt && project.archivedBeforeLossless)
+        #expect(decoded.outbox.suffix(4).map(\.command) == commands && decoded.issues.suffix(4).map(\.command) == commands)
+        #expect(StoreDocument.currentVersion == 2, "spec 021 adds no store version and no migration step")
+    }
+
     @Test func errorMessagesAreSentences() {
         let errors: [DocumentStoreError] = [.unreadable("x"), .unsupportedVersion(2), .io("disk full")]
         for error in errors {
