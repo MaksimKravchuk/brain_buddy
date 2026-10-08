@@ -1,7 +1,7 @@
-"""Spec 021 PR-02: the tolerant project contract the Apple clients depend on.
+"""Spec 021 PR-02 and PR-03: the project contract the Apple clients depend on.
 
-Archive still clears memberships in this slice (it becomes lossless in PR-03),
-so projects that keep members are seeded straight into the repository.
+Archive keeps every membership (ADR-0020). Pre-feature archives, which cleared
+them, are seeded straight into the repository.
 """
 
 from __future__ import annotations
@@ -383,32 +383,90 @@ def test_021_FR_026_unarchive_requires_a_key_and_a_valid_body(
         assert response.status_code == 422, body
 
 
-# --- 021-FR-027: archive still clears members and marks them -----------------
+# --- 021-FR-024 / 021-FR-027: archive keeps members --------------------------
 
 
-def test_021_FR_027_archive_clears_members_and_sets_the_marker(
-    api_client: TestClient,
+def _complete_and_cancel_one(client: TestClient, project_id: str) -> list[str]:
+    """One open, one completed and one cancelled member; returns their ids."""
+
+    open_task = _task(client, "fr024-open", project_id=project_id)
+    done = _task(client, "fr024-done", project_id=project_id)
+    cancelled = _task(client, "fr024-cancelled", project_id=project_id)
+    for task, action in ((done, "complete"), (cancelled, "cancel")):
+        response = client.post(
+            f"/api/tasks/{task['id']}/transitions",
+            headers={"Idempotency-Key": f"fr024-{action}"},
+            json={"action": action, "expected_revision": task["revision"]},
+        )
+        assert response.status_code == 200, response.text
+    return [open_task["id"], done["id"], cancelled["id"]]
+
+
+def test_021_FR_024_archive_keeps_every_member_and_stamps_the_project(
+    api_client: TestClient, frozen_clock: FrozenClock
 ) -> None:
-    """PR-02 keeps today's clearing; the marker records that it happened."""
+    """Members of every state keep project_id, revision and updated_at."""
 
-    project = _project(api_client, "Clearing", "fr027-clear")
-    task = _task(api_client, "fr027-task", project_id=project["id"])
+    project = _project(api_client, "Keeping", "fr024-project")
+    ids = _complete_and_cancel_one(api_client, project["id"])
+    before = [api_client.get(f"/api/tasks/{task_id}").json() for task_id in ids]
+    frozen_clock.advance(timedelta(hours=1))
 
-    response = _archive(api_client, project, "fr027-archive")
+    response = _archive(api_client, project, "fr024-archive")
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["state"] == "archived"
-    assert body["archived_before_lossless"] is True
-    assert body["archived_at"] is None
-    assert api_client.get(f"/api/tasks/{task['id']}").json()["project_id"] is None
+    assert body["archived_at"] is not None
+    assert body["archived_before_lossless"] is False
+    assert [api_client.get(f"/api/tasks/{i}").json() for i in ids] == before
+    assert {task["project_id"] for task in before} == {project["id"]}
+
+
+def test_021_FR_027_archive_of_a_marked_unarchived_project_clears_the_marker(
+    api_client: TestClient,
+) -> None:
+    """A pre-feature archive that was unarchived is lossless the next time."""
+
+    project = _project(api_client, "Marked", "fr027-clears")
+    seeded = _seed_archive(api_client, project, archived_before_lossless=True)
+    reopened = _unarchive(api_client, project["id"], seeded["revision"], "fr027-c-un")
+    assert reopened.json()["archived_before_lossless"] is True
+
+    response = _archive(api_client, reopened.json(), "fr027-clears-archive")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["archived_before_lossless"] is False
+    assert response.json()["archived_at"] is not None
+
+
+def test_021_SC_006_archive_and_unarchive_keep_every_membership(
+    api_client: TestClient,
+) -> None:
+    """The round trip loses no task and changes none of them."""
+
+    project = _project(api_client, "Round trip", "sc006-project")
+    ids = _complete_and_cancel_one(api_client, project["id"])
+    before = [api_client.get(f"/api/tasks/{task_id}").json() for task_id in ids]
+
+    archived = _archive(api_client, project, "sc006-archive").json()
+    reopened = _unarchive(api_client, project["id"], archived["revision"], "sc006-un")
+
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["state"] == "active"
+    assert reopened.json()["archived_at"] is None
+    assert [api_client.get(f"/api/tasks/{i}").json() for i in ids] == before
+    members = api_client.get(
+        "/api/tasks", params={"project_id": project["id"], "include_completed": True}
+    ).json()["items"]
+    assert {item["id"] for item in members} >= {ids[0], ids[1]}
 
 
 def test_021_FR_027_marker_survives_unarchive(api_client: TestClient) -> None:
     """Unarchive leaves archived_before_lossless as it was."""
 
     project = _project(api_client, "Marked", "fr027-marked")
-    archived = _archive(api_client, project, "fr027-marked-archive").json()
+    archived = _seed_archive(api_client, project, archived_before_lossless=True)
 
     reopened = _unarchive(api_client, project["id"], archived["revision"], "fr027-un")
 
@@ -424,7 +482,7 @@ def test_021_FR_027_marker_survives_unarchive(api_client: TestClient) -> None:
     ],
     ids=["pre-feature", "stamped"],
 )
-def test_021_FR_027_repeat_archive_changes_only_revision_and_updated_at(
+def test_021_FR_027_repeat_archive_keeps_marker(
     api_client: TestClient, frozen_clock: FrozenClock, seed: dict[str, Any]
 ) -> None:
     """A repeat archive never stamps archived_at nor clears the marker."""

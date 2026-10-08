@@ -257,8 +257,8 @@ def test_021_FR_028_export_projects_hold_the_outcome_and_archive_fields(
 
     assert len(projects) == 1
     assert projects[0]["desired_outcome"] == "Tomatoes by July"
-    assert projects[0]["archived_at"] is None
-    assert projects[0]["archived_before_lossless"] is True
+    assert projects[0]["archived_at"] is not None
+    assert projects[0]["archived_before_lossless"] is False
 
 
 def test_export_omits_audio_once_raw_audio_is_deleted(api_client: TestClient) -> None:
