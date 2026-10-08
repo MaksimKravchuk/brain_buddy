@@ -428,7 +428,7 @@ Every task here is *(runtime: macOS lane)* except the docs tasks T130 – T131 a
 - (deferred) T134 Write and observe RED `scripts/test_check_manual_evidence.py` (new): matching and differing tree hashes; a squash-equivalent record passes; each forbidden pattern (`/Users/`, `~/Library`, `Keychains/`, a 32-hex run outside the header's tree-hash fields, an email not ending in `@example.com`, a non-Markdown file under `specs/021-mac-sync/evidence/`) fails; a missing header or per-state checklist fails; the full Keychain round-trip line is demanded when `MacKeychainTests` is disabled by a visible trait; SC-007 reported as pending until `owner-week.md` holds seven dated entries, the template never counting. *(021-SC-007)*
 - (deferred) T135 Make T134 GREEN in `scripts/check_manual_evidence.py` (new; plan "Evidence protocol"). *(021-SC-007)*
 - [ ] T136 Add to the `check-specs` recipe in `Makefile`, beside the 019 line and 020's: `python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements` with every FR and SC id except SC-007 (no manual-evidence checker: T134 and T135 are deferred); re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit (`Makefile` is guarded); `python3 scripts/check_gate_integrity.py` and `make check-specs` pass.
-- [ ] T137 [P] Write `specs/021-mac-sync/evidence/README.md` (the content-free rule and the header format) and `specs/021-mac-sync/evidence/owner-week.md` (the template of quickstart Scenario 9: per day "needed Sync now: yes/no", "saw Mac and iPhone disagree after a minute online: yes/no", the count of sync issues). *(021-SC-007)*
+- [x] T137 [P] Write `specs/021-mac-sync/evidence/README.md` (the content-free rule and the header format) and `specs/021-mac-sync/evidence/owner-week.md` (the template of quickstart Scenario 9: per day "needed Sync now: yes/no", "saw Mac and iPhone disagree after a minute online: yes/no", the count of sync issues). *(021-SC-007)*
 - (deferred) T138 Raise `backend/coverage-floor.json` and `frontend/coverage-floor.json` to the measured values (ratchet only; no coverage suppression in `frontend/src`).
 - [ ] T139 Run the full verification on the frozen candidate: `make check-specs`, `make validate-ci`, `make test-backend`, `make test-frontend`, `make test-e2e`, `sh ios/scripts/swift-linux.sh test`, `cd macos && swift test` on the `macos-app` lane, `make verify-all`, and the quickstart scenarios; the Allure quality gate (`maxFailures: 0`) stays unchanged. *(021-SC-001, 021-SC-002, 021-SC-003, 021-SC-004, 021-SC-005, 021-SC-006)*
 
@@ -730,6 +730,48 @@ Earlier increments are each independently useful and safe:
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
     `evidence/manual-macos-status.md` (T133).
+
+- **PR-10 implementation notes (2026-10-08)**, read with the PR description:
+  - **T136 is not wired and stays unchecked.** The non-waivable invariant "no slice-filtered
+    requirement coverage in the gates" in `scripts/check_gate_integrity.py` (a `MustNotMatch`
+    for `--requirements\b` in `Makefile`, and a twin for `.github/workflows/ci.yml`) forbids the
+    line as T136 words it, so `Makefile` and `.specify/gate-integrity.json` are untouched. The
+    same block blocked 020's T166, which also stays partial. No allowed form achieves the intent
+    either: the unfiltered `python3 scripts/check_requirement_coverage.py specs/021-mac-sync`
+    (run on the base `3b76fb0`) reports 39 of 40 ids traced and fails on `021-SC-007` alone, the
+    owner's week, which no test can name honestly. Tracing it with a placeholder test, editing
+    an invariant, or hiding the id would each defeat the gate. **Owner decision needed**: (a)
+    skip the 021 gate for now, as for 020; (b) amend the invariant in an ASK change that allows
+    `--requirements` with an exhaustive id list, with its own tests; or (c) land
+    `scripts/check_manual_evidence.py` (T134, T135, deferred) so that the unfiltered gate can
+    pass with SC-007 reported pending.
+  - **T137 done.** `evidence/README.md` indexes the three manual plans
+    (`manual-macos-upgrade.md`, `manual-macos-archive.md`, `manual-macos-status.md`) and
+    `owner-week.md`, states the content-free rule and the header format, and records the owner's
+    decision of 2026-10-08 (manual checks follow the merge, the owner's agent runs them on the
+    owner's Mac, a failure is fixed in a separate PR). `evidence/owner-week.md` is the PENDING
+    template of Scenario 9: seven dated rows, "needed Sync now", "saw Mac and iPhone disagree
+    after a minute online" and the count of sync issues.
+  - **T139 stays unchecked: the Linux part is green, the rest is pending.** Run on the PR-10
+    candidate (the tree of `3b76fb0` plus these docs), Linux worktree, no live provider:
+
+    | Command | Result |
+    |---|---|
+    | `make check-specs` | exit 0; `Requirement coverage passed: 33/33 traced` (019) and `20/20 traced` (024); gate integrity passes |
+    | `make validate-ci` | exit 0; 14 unittest modules `OK`; `mutation-scope: 5 enforced file(s) within 10 observed file(s)`; `trunk-ci validation passed` |
+    | `PATH=/usr/local/bin:$PATH make test-backend` | exit 0; `5037 passed, 2074 warnings in 2383.93s`; `backend coverage meets its floor: branch 95.96%, line 98.76%`; `backend-pytest: taxonomy OK for 5037 Allure result file(s)` |
+    | `make test-frontend` | exit 0; `Test Files 90 passed (90)`, `Tests 2248 passed (2248)`; `frontend coverage meets its floor: branches 97.84%, functions 98.94%, lines 99.51%, statements 99.01%`; `frontend-vitest: taxonomy OK for 2248 Allure result file(s)` |
+    | `sh ios/scripts/swift-linux.sh test` | exit 0; `Test run with 994 tests in 95 suites passed after 82.048 seconds` (Swift 6.2 Linux image) |
+    | `python3 scripts/check_requirement_coverage.py specs/021-mac-sync` | exit 1: `Requirement coverage FAILED: 1 of 40 requirements have no test naming them: 021-SC-007`; the other 39 ids ok (see T136) |
+    | `make test-e2e` | not run: it builds a compose stack with Playwright browsers and the modern-auth server, which this worktree cannot start |
+    | `make verify-all` | not run: it includes `test-e2e` and the macOS lanes |
+    | `cd macos && swift test`, the `macos-app` job (including `MacKeychainTests`, which must run, not skip) | CI lane on the candidate SHA, pending |
+    | Quickstart scenarios that need a Mac (5 step 4, 6, 8) and the iPhone | host plans `evidence/manual-macos-*.md`, PENDING; they follow the merge (owner's decision of 2026-10-08) |
+    | Scenario 9, the owner's week (021-SC-007) | `evidence/owner-week.md`, PENDING |
+
+    The Allure quality gate (`maxFailures: 0` in `allurerc.mjs`) and the coverage floors are
+    unchanged. T139 is ticked when the CI lanes are green on the final SHA and the e2e run is
+    recorded.
 
 ## Disposition traceability
 
