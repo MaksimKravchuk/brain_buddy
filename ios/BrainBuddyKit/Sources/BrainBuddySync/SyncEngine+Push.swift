@@ -186,7 +186,9 @@ extension SyncEngine {
             try await pull(context)
             summary.changed = true
             let firstRejection = resent.insert(RejectedBody(operation)).inserted
-            if firstRejection, try await resendWithoutStaleReferences(operation, context) { return }
+            if firstRejection, try await resendWithoutStaleReferences(operation, referenceID: error.referenceID, context) {
+                return
+            }
             try await setAside(operation, message: error.message, referenceID: error.referenceID, context)
         default:
             // 400, 404, 422 and other 4xx, idempotency conflicts, and conflicts that keep coming back.
@@ -279,8 +281,11 @@ extension SyncEngine {
     /// resend carries less than the one before and a body the server rejected
     /// is never sent again as it was (`pushOutbox` also resends each rejected
     /// body at most once).
+    ///
+    /// A new task kept out of a project archived elsewhere says so in a sync issue (`referenceID` is the
+    /// rejection's), since the person put it in that project.
     private func resendWithoutStaleReferences(
-        _ operation: PendingOperation, _ context: CycleContext
+        _ operation: PendingOperation, referenceID: String?, _ context: CycleContext
     ) async throws -> Bool {
         let date = now()
         do {
@@ -292,6 +297,14 @@ extension SyncEngine {
                 let before = OutboxReplayer.replay(Array(doc.outbox[..<index]), onto: doc.base).state
                 let replayable = GTDReducer.replayable(queued, in: before)
                 guard replayable != queued else { throw NothingToResend() }
+                if case .createTask(let create) = queued, let id = create.projectID, let project = before.projects[id],
+                    project.state == .archived, case .createTask(let kept) = replayable, kept.projectID == nil
+                {
+                    doc.issues.append(
+                        SyncIssue(
+                            command: queued, message: SyncIssueDescriber.archivedElsewhere(project: project.name),
+                            referenceID: referenceID, occurredAt: date))
+                }
                 doc.outbox[index].command = replayable
                 doc.outbox[index].rotateKey()
                 doc.replayOutbox(now: date)

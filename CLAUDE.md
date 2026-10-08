@@ -62,8 +62,8 @@ Two consequences worth knowing before touching the allowlist:
   carry an exec- or write-capable form; a prefix rule overrides that and
   pre-approves `find -exec`, `rg --pre`, `sort --compress-program` and GNU
   `sed`'s `e` command — each of which runs an arbitrary program, which would
-  walk straight through the `ask` gates on force/`main` `git push`, `fly` and
-  `submit_to_trunk.sh`.
+  walk straight through the `ask` gates on force/`main` `git push` and
+  destructive `fly` commands.
 - **`Read`/`Edit` deny rules already cover Bash.** They apply to the built-in
   file tools *and* to file commands Claude Code recognises in Bash (`cat`,
   `head`, `tail`, `sed`), so the `.env` and `backend/data/**` denies need no

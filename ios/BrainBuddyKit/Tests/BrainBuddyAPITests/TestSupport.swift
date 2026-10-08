@@ -52,6 +52,13 @@ final class FailingTokenStore: SessionTokenStore {
     func removeToken(for serverURL: URL) throws { throw Locked() }
 }
 
+/// A token store holding a session this build may not read, like the login keychain after a rebuild.
+final class DeniedTokenStore: SessionTokenStore {
+    func token(for serverURL: URL) throws -> String? { throw TokenStoreError.accessDenied }
+    func setToken(_ token: String, for serverURL: URL) throws {}
+    func removeToken(for serverURL: URL) throws {}
+}
+
 /// A token store that reads fine but cannot write.
 final class ReadOnlyTokenStore: SessionTokenStore {
     struct ReadOnly: Error {}
