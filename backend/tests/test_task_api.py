@@ -563,7 +563,9 @@ def test_projectless_inbox_projection_paginates_searches_and_tracks_assignment(
         "/api/tasks", params={"state": "inbox", "unassigned_project": True}
     )
     assert after_archive.status_code == 200, after_archive.text
-    assert first["id"] in {item["id"] for item in after_archive.json()["items"]}
+    assert first["id"] not in {item["id"] for item in after_archive.json()["items"]}
+    kept = api_client.get(f"/api/tasks/{first['id']}").json()
+    assert kept["project_id"] == project["id"]
 
 
 def test_task_endpoints_require_authentication(anonymous_api_client) -> None:
@@ -750,7 +752,7 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
     )
 
 
-def test_project_archive_clears_assignments_from_all_task_states(api_client) -> None:
+def test_project_archive_keeps_assignments_from_all_task_states(api_client) -> None:
     project = api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "archive-project-all-states"},
@@ -788,6 +790,10 @@ def test_project_archive_clears_assignments_from_all_task_states(api_client) -> 
         == 200
     )
 
+    before = {
+        task_id: api_client.get(f"/api/tasks/{task_id}").json()
+        for task_id in (open_task["id"], completed["id"], cancelled["id"])
+    }
     archived = api_client.post(
         f"/api/projects/{project['id']}/archive",
         headers={"Idempotency-Key": "archive-project-command"},
@@ -795,10 +801,11 @@ def test_project_archive_clears_assignments_from_all_task_states(api_client) -> 
     )
     assert archived.status_code == 200, archived.text
 
-    for task_id in (open_task["id"], completed["id"], cancelled["id"]):
+    for task_id, task in before.items():
         detail = api_client.get(f"/api/tasks/{task_id}")
         assert detail.status_code == 200, detail.text
-        assert detail.json()["project_id"] is None
+        assert detail.json()["project_id"] == project["id"]
+        assert detail.json() == task
 
 
 def test_waiting_patch_priority_and_same_state_move_invariants(api_client) -> None:

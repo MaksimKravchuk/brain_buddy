@@ -30,6 +30,7 @@ from app.schemas.tasks import (
     BrainDumpTranscriptAppendRequest,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
+    ProjectListState,
     ProjectUpdateRequest,
     TagCreateRequest,
     TagUpdateRequest,
@@ -341,6 +342,55 @@ def test_update_task_rejects_inactive_project_on_reassignment(
             TaskUpdateRequest(project_id=project.id, expected_revision=1),
             owner_id=OWNER,
             idempotency_key="update-inactive-project-attempt",
+        )
+
+
+def test_021_FR_025_update_task_keeps_an_unchanged_archived_membership(
+    service: TaskService,
+) -> None:
+    """Omitting project_id, or repeating the archived one, is accepted."""
+
+    project = _make_project(service, key="keep-archived-project")
+    task = _make_task(service, key="keep-archived-task", project_id=project.id)
+    service.task_repo.save_project(
+        project.model_copy(update={"state": "archived", "revision": 2})
+    )
+
+    omitted = service.update_task(
+        task.id,
+        TaskUpdateRequest(title="Omitted", expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="keep-archived-omit",
+    )
+    repeated = service.update_task(
+        task.id,
+        TaskUpdateRequest(project_id=project.id, expected_revision=2),
+        owner_id=OWNER,
+        idempotency_key="keep-archived-repeat",
+    )
+
+    assert omitted.project_id == repeated.project_id == project.id
+    assert repeated.revision == 3
+
+
+def test_021_FR_025_update_task_still_validates_tags_with_an_archived_project(
+    service: TaskService,
+) -> None:
+    """Skipping the project check does not skip the tag check."""
+
+    project = _make_project(service, key="tag-archived-project")
+    tag = _make_tag(service, key="tag-archived-tag")
+    task = _make_task(service, key="tag-archived-task", project_id=project.id)
+    service.task_repo.save_project(
+        project.model_copy(update={"state": "archived", "revision": 2})
+    )
+
+    with pytest.raises(ValidationFailure, match="duplicates"):
+        service.update_task(
+            task.id,
+            TaskUpdateRequest(tag_ids=[tag.id, tag.id], expected_revision=1),
+            owner_id=OWNER,
+            idempotency_key="tag-archived-attempt",
         )
 
 
@@ -1523,6 +1573,30 @@ def test_list_projects_filters_inactive_records(service: TaskService) -> None:
 
     listed = service.list_projects(owner_id=OWNER)
     assert [project.id for project in listed] == [active.id]
+
+
+def test_021_FR_026_list_projects_state_selects_the_records(
+    service: TaskService,
+) -> None:
+    """state=archived and state=all keep the case-folded name order."""
+
+    active = _make_project(service, name="beta", key="state-active-project")
+    archived = _make_project(service, name="Alpha", key="state-archived-project")
+    service.archive_project(
+        archived.id,
+        ExpectedRevisionRequest(expected_revision=1),
+        owner_id=OWNER,
+        idempotency_key="state-archive-project",
+    )
+
+    def ids(state: ProjectListState) -> list[str]:
+        return [
+            project.id for project in service.list_projects(owner_id=OWNER, state=state)
+        ]
+
+    assert ids("active") == [active.id]
+    assert ids("archived") == [archived.id]
+    assert ids("all") == [archived.id, active.id]
 
 
 def test_list_tags_filters_inactive_records(service: TaskService) -> None:

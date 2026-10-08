@@ -49,7 +49,7 @@ def test_tags_are_first_class_task_assignments(api_client) -> None:
     assert retired_context_routes.status_code == 404
 
 
-def test_project_archive_and_tag_delete_unassign_tasks_atomically(api_client) -> None:
+def test_project_archive_keeps_and_tag_delete_unassigns_tasks(api_client) -> None:
     project = _post(
         api_client, "/api/projects", "project-home", {"name": "Home"}
     ).json()
@@ -70,7 +70,7 @@ def test_project_archive_and_tag_delete_unassign_tasks_atomically(api_client) ->
     assert archived.json()["state"] == "archived"
 
     after_archive = api_client.get(f"/api/tasks/{task['id']}").json()
-    assert after_archive["project_id"] is None
+    assert after_archive["project_id"] == project["id"]
     assert after_archive["tag_ids"] == [tag["id"]]
 
     deleted = api_client.delete(

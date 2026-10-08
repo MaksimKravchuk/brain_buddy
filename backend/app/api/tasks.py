@@ -61,6 +61,7 @@ from app.schemas.tasks import (
     BrainDumpTranscriptSegmentResponse,
     ExpectedRevisionRequest,
     ProjectCreateRequest,
+    ProjectListState,
     ProjectResponse,
     ProjectUpdateRequest,
     SmartAddCreatedResponse,
@@ -562,17 +563,24 @@ def create_project(
 
 
 @router.get(
-    "/projects", response_model=list[ProjectResponse], responses=error_responses(401)
+    "/projects",
+    response_model=list[ProjectResponse],
+    responses=error_responses(401, 422),
 )
 def list_projects(
+    state: ProjectListState = Query(default="active"),
     current_user: User = Depends(get_current_user),
     task_service: TaskService = Depends(get_task_service),
 ) -> list[ProjectResponse]:
+    counts = task_service.open_task_counts_by_project(owner_id=current_user.id)
     return [
         _to_project_response(
-            project, task_service=task_service, owner_id=current_user.id
+            project,
+            task_service=task_service,
+            owner_id=current_user.id,
+            open_task_count=counts.get(project.id, 0),
         )
-        for project in task_service.list_projects(owner_id=current_user.id)
+        for project in task_service.list_projects(owner_id=current_user.id, state=state)
     ]
 
 
@@ -612,6 +620,29 @@ def archive_project(
     task_service: TaskService = Depends(get_task_service),
 ) -> ProjectResponse:
     project = task_service.archive_project(
+        project_id,
+        payload,
+        owner_id=current_user.id,
+        idempotency_key=_require_idempotency_key(idempotency_key),
+    )
+    return _to_project_response(
+        project, task_service=task_service, owner_id=current_user.id
+    )
+
+
+@router.post(
+    "/projects/{project_id}/unarchive",
+    response_model=ProjectResponse,
+    responses=error_responses(400, 401, 404, 409, 422),
+)
+def unarchive_project(
+    project_id: str,
+    payload: ExpectedRevisionRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    current_user: User = Depends(get_current_user),
+    task_service: TaskService = Depends(get_task_service),
+) -> ProjectResponse:
+    project = task_service.unarchive_project(
         project_id,
         payload,
         owner_id=current_user.id,
@@ -1257,17 +1288,28 @@ def _to_smart_add_response(
 
 
 def _to_project_response(
-    project: ProjectDocument, *, task_service: TaskService, owner_id: str
+    project: ProjectDocument,
+    *,
+    task_service: TaskService,
+    owner_id: str,
+    open_task_count: int | None = None,
 ) -> ProjectResponse:
+    """``open_task_count`` is given by the list route, which counts in one pass."""
+
     return ProjectResponse(
         id=project.id,
         name=project.name,
         color=project.color,
         state=project.state,
         revision=project.revision,
-        open_task_count=task_service.open_task_count_for_project(
-            project.id, owner_id=owner_id
+        open_task_count=(
+            open_task_count
+            if open_task_count is not None
+            else task_service.open_task_count_for_project(project.id, owner_id=owner_id)
         ),
+        desired_outcome=project.desired_outcome,
+        archived_at=project.archived_at,
+        archived_before_lossless=project.archived_before_lossless,
     )
 
 

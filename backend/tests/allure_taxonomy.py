@@ -86,6 +86,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Projects & tags API",
         "Task projects and tags",
     ),
+    # Spec 021 (Mac sync): the project contract the Apple clients depend on.
+    "project_archive_lossless_api": (EPIC_TASKS, "Projects", "Lossless archive"),
+    "project_archive_traces": (EPIC_TASKS, "Projects", "Lossless archive"),
+    "project_desired_outcome_api": (EPIC_TASKS, "Projects", "Desired outcome"),
+    "client_attribution_logging": (EPIC_TASKS, "Projects", "Client attribution"),
     "brain_dump_operations_api": (
         EPIC_TASKS,
         "Brain dump API",

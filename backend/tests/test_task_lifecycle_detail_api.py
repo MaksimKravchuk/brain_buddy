@@ -364,7 +364,7 @@ def test_task_query_and_update_validation_edges(api_client) -> None:
     assert rejected_null_priority.status_code == 400
 
 
-def test_project_archive_clears_assignments_from_all_lifecycle_states(
+def test_project_archive_keeps_assignments_from_all_lifecycle_states(
     api_client,
 ) -> None:
     project = api_client.post(
@@ -394,4 +394,6 @@ def test_project_archive_clears_assignments_from_all_lifecycle_states(
     assert archived.status_code == 200, archived.text
 
     for task in (open_task, done, cancelled):
-        assert api_client.get(f"/api/tasks/{task['id']}").json()["project_id"] is None
+        kept = api_client.get(f"/api/tasks/{task['id']}").json()
+        assert kept["project_id"] == project["id"]
+        assert kept["revision"] == task["revision"]
