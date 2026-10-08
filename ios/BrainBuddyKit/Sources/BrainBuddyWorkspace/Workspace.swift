@@ -395,6 +395,11 @@ public final class Workspace {
     ///
     /// `cancellation` is the person's Cancel (the Mac's X-03): one that wins links nothing and
     /// throws the kit's "cancelled" failure; once the link won, this returns as a normal sign-in.
+    ///
+    /// Account changes are one at a time (spec 021, FR-018): while a sign-out commits this is
+    /// refused with `signInFailed` (`signingOutMessage`) and sends nothing, and while it runs a
+    /// sign-out is refused (`WorkspaceError.signingIn`), so a sign-in never links an account a
+    /// sign-out removed meanwhile.
     public func signIn(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
@@ -404,10 +409,14 @@ public final class Workspace {
         guard let sync else {
             throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil)
         }
+        let signingOut = WorkspaceError.signInFailed(message: Self.signingOutMessage, referenceID: nil)
+        guard !isSigningOut else { throw signingOut }
         // The engine uploads what is in the store, so everything must be there.
         await flush()
         if account == nil { try await convertLocalAutoParksForLinking() }
         await installEventHandlerIfNeeded(sync)
+        // Checked again after the suspensions above, in the same step that marks the sign-in.
+        guard !isSigningOut else { throw signingOut }
         isSigningIn = true
         let linked: LinkedAccount
         do {
@@ -508,16 +517,18 @@ public final class Workspace {
     /// meanwhile (checked again under the store's lock), also when a named change was acknowledged
     /// in between so the count still matches, or an edit was folded into a named change so its id
     /// still matches. One made in this workspace meanwhile is refused (`GTDValidationError.signingOut`,
-    /// `isSigningOut`).
+    /// `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
+    /// `WorkspaceError.signingIn` and nothing is removed.
     public func signOut(removing confirmed: Set<PendingChange>) async throws {
+        guard !isSigningIn else { throw WorkspaceError.signingIn }
         let pending = pendingChanges
         if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
         // Set before the first suspension: nothing performed from here on can slip past the changes
         // the person confirmed and be removed with the account's data.
         isSigningOut = true
         defer { isSigningOut = false }
+        // A browser sign-in not yet completing is cancelled (one completing refused this sign-out).
         nativeSignInID = nil
-        isSigningIn = false
         // Let a write in flight finish, and write nothing new for this account.
         writesSuspended = true
         if let writer { await writer.value }
@@ -983,6 +994,8 @@ public enum WorkspaceError: Error, Hashable, Sendable {
     case invalidServerURL
     case signInFailed(message: String, referenceID: String?)
     case storage(String)
+    /// A sign-out while a sign-in runs: refused, nothing removed (spec 021, FR-018).
+    case signingIn
 
     public var message: String {
         switch self {
@@ -991,6 +1004,12 @@ public enum WorkspaceError: Error, Hashable, Sendable {
         case .invalidServerURL: "Use an https server address."
         case .signInFailed(let message, _): message
         case .storage(let message): message
+        case .signingIn: "Brain Buddy is still signing in. Nothing was removed; try again in a moment."
         }
     }
+}
+
+extension Workspace {
+    /// `signIn`'s refusal while a sign-out commits (`WorkspaceError.signInFailed`).
+    public nonisolated static let signingOutMessage = "Brain Buddy is signing out. Try signing in again in a moment."
 }

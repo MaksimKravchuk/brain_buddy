@@ -297,6 +297,60 @@ struct MacSyncFlowTests {
         #expect(!rig.controller.isSignInOpen)
     }
 
+    @Test("021-FR-018 Sign out… while Sign in again is signing in does nothing; the sign-in links and stays linked")
+    func signOutWhileSigningInDoesNothing() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        await rig.endSession()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .menu)
+        let flow = try #require(rig.controller.signIn)
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        #expect(rig.controller.accountMenu.signOut, "linked, so the item is there")
+        #expect(rig.controller.isSignInOpen, "and disabled")
+
+        // The app menu's (or X-02's) "Sign out…" while X-03 waits for its login.
+        let requests = rig.controller.signOutRequests
+        rig.controller.requestSignOut()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOutRequests == requests, "no unsaved-edit guard, no X-04")
+        #expect(rig.controller.signOut.prompt == nil)
+        #expect(rig.controller.router.signInRequest != nil, "X-03 stays")
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        let stored = try await FileDocumentStore(fileURL: rig.folder.store).load()
+        #expect(stored?.account == rig.workspace.account, "linked in the store as in the window")
+    }
+
+    @Test("021-FR-001 Sign in… while a confirmed sign-out commits does nothing; the sign-out finishes")
+    func signInWhileSigningOutDoesNothing() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        rig.server.holdNextLogout()
+        rig.controller.presentSignOut()
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        await rig.server.logoutGate.waitForArrival()
+        #expect(rig.controller.isSigningOut, "the app menu's Sign in… is disabled")
+
+        rig.controller.beginSignIn(from: .menu)
+        #expect(rig.controller.signIn == nil, "no X-03")
+        #expect(rig.controller.router.signInRequest == nil)
+
+        await rig.server.logoutGate.open()
+        #expect(await confirming.value == .signedOut)
+        await rig.settle()
+        #expect(rig.workspace.account == nil)
+        #expect(rig.server.routes.filter { $0 == "POST /auth/login" }.count == 1, "only the first sign-in's")
+        #expect(!rig.controller.isSigningOut)
+    }
+
     @Test("021-FR-001 021-FR-005 Cancel while signing in keeps the typed values; the reply after it has its session ended and links nothing")
     func cancelWhileSigningIn() async throws {
         let rig = await Rig()

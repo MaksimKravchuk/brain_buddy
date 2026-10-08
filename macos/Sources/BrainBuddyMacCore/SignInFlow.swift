@@ -292,7 +292,7 @@ package final class SignInFlow {
             default:
                 return Message(kind: .server, title: text, referenceID: reference)
             }
-        case .unsyncedChanges, .storage:
+        case .unsyncedChanges, .storage, .signingIn:
             return Message(kind: .server, title: error.message)
         }
     }

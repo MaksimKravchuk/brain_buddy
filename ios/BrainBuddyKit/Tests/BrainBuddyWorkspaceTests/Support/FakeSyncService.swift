@@ -89,9 +89,20 @@ actor FakeSyncService: SyncService {
         }
         await emit(.status(.syncing))
         _ = try? await write { $0.account = account }
+        if let work = duringSignIn {
+            duringSignIn = nil
+            await work()
+        }
         await emit(.status(.idle(lastSyncedAt: Fixture.epoch)))
         return account
     }
+
+    /// Runs inside the next `signIn` once the account is linked, while its first sync runs.
+    func whileSigningIn(_ work: @escaping @Sendable () async -> Void) {
+        duringSignIn = work
+    }
+
+    private var duringSignIn: (@Sendable () async -> Void)?
 
     /// Runs inside the next `signOut`, for example another process writing.
     func whileSigningOut(_ work: @escaping @Sendable () async -> Void) {

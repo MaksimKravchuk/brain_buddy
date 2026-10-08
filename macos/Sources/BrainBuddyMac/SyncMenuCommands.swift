@@ -21,17 +21,20 @@ struct SyncMenuCommands: Commands {
         CommandGroup(after: .appInfo) {
             let items = controller?.accountMenu ?? AccountMenuItems.hidden
             Divider()
-            // Disabled while X-03 is open: one sign-in at a time.
+            // One account change at a time: sign-in items are disabled while X-03 is open or a
+            // sign-out commits, "Sign out…" while X-03 is open (the controller refuses them too).
+            let signInBlocked = (controller?.isSignInOpen ?? false) || (controller?.isSigningOut ?? false)
             if items.signIn {
                 Button(AccountMenuItems.signInTitle) { controller?.beginSignIn(from: .menu) }
-                    .disabled(controller?.isSignInOpen ?? false)
+                    .disabled(signInBlocked)
             }
             if items.signInAgain {
                 Button(AccountMenuItems.signInAgainTitle) { controller?.beginSignIn(from: .menu) }
-                    .disabled(controller?.isSignInOpen ?? false)
+                    .disabled(signInBlocked)
             }
             if items.signOut {
                 Button(AccountMenuItems.signOutTitle) { controller?.requestSignOut() }
+                    .disabled(controller?.isSignInOpen ?? false)
             }
         }
     }

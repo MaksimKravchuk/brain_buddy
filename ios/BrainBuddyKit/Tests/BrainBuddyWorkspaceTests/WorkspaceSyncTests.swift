@@ -410,6 +410,48 @@ import Testing
         #expect(session.workspace.pendingChangeCount == 1, "asked again")
     }
 
+    @Test("021-FR-018 a sign-out while Sign in again waits for its first sync is refused; the account stays linked in the store too")
+    func signOutDuringASignInIsRefused() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.whileSigningIn {
+            do {
+                try await workspace.signOut(discardUnsyncedChanges: true)
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+
+        #expect(refusal.message == WorkspaceError.signingIn.message, "the sign-out was refused")
+        #expect(await session.sync.calls.contains(.signOut) == false)
+        #expect(workspace.account == Fixture.account)
+        #expect(try await session.store.load()?.account == workspace.account, "never linked in the window only")
+    }
+
+    @Test("021-FR-001 a sign-in while a sign-out commits is refused with words; nothing is linked")
+    func signInDuringASignOutIsRefused() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.whileSigningOut {
+            do {
+                try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signOut(discardUnsyncedChanges: false)
+
+        #expect(refusal.message == Workspace.signingOutMessage, "the sign-in was refused")
+        #expect(await session.sync.calls.filter { if case .signIn = $0 { true } else { false } }.isEmpty, "no login was sent")
+        #expect(workspace.account == nil)
+        #expect(try await session.store.load() == nil)
+    }
+
     @Test("021-FR-018 a sign-out that fails takes changes again at once")
     func aFailedSignOutTakesChangesAgain() async throws {
         let session = await signedIn()

@@ -803,6 +803,17 @@ Earlier increments are each independently useful and safe:
     its way) and the menu items are disabled meanwhile (`isSignInOpen`). `MacSyncFlowTests` (red
     before the fix: the flow was replaced and a second sheet presented): the first flow, its one
     login, signed in.
+  - **Account changes are one at a time** (review P1). During "Sign in again" the account stays
+    linked, so "Sign out…" could replace X-03 and start a sign-out while `Workspace.signIn` awaited
+    its first sync; once the sign-out removed the data, the sign-in's continuation set `account`
+    again, linked in the window only. Kit (so the iPhone too): `signOut` is refused while a sign-in
+    runs (`WorkspaceError.signingIn`, nothing removed) and `signIn` while a sign-out commits
+    (`signInFailed`, `Workspace.signingOutMessage`, no login sent). Mac: `requestSignOut` and
+    `presentSignOut` do nothing while X-03 is open, `beginSignIn` nothing while a sign-out commits
+    (`isSigningOut`), and the app menu disables the matching items. Tests, red before:
+    `WorkspaceSyncTests` (sign-out during a sign-in's first sync: was removed, then relinked in the
+    window with no account in the store; sign-in during a sign-out: was sent and wiped) and
+    `MacSyncFlowTests` (Sign out… while X-03 signs in; Sign in… while a sign-out's logout is held).
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
