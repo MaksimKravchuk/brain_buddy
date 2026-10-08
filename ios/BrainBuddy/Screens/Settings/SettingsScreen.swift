@@ -259,12 +259,12 @@ struct SettingsScreen: View {
         openURL(url) { accepted in accountLinkFailed = !accepted }
     }
 
-    /// Always asks first. Without unsynced changes a plain sign-out is
-    /// confirmed; if changes arrive meanwhile, `signOut` asks again with the
-    /// real count.
+    /// Always asks first. Without unsynced changes (or sync issues, which
+    /// would be removed too) a plain sign-out is confirmed; if changes arrive
+    /// meanwhile, `signOut` asks again with the real count.
     private func requestSignOut() {
-        unsyncedCount = workspace.pendingChangeCount
         unsyncedChanges = workspace.pendingChanges
+        unsyncedCount = unsyncedChanges.count
         isConfirmingSignOut = true
     }
 

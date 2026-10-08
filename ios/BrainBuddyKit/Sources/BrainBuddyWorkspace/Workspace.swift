@@ -500,9 +500,9 @@ public final class Workspace {
         if signInCancelledAccountDeletion { signInCancelledAccountDeletion = false }
     }
 
-    /// The pending changes, each by its id and what it holds, for a sign-out confirmation to name
-    /// (`signOut(removing:)`).
-    public var pendingChanges: Set<PendingChange> { Set((document.outbox + unpersisted).map(PendingChange.init)) }
+    /// The local changes a sign-out would remove, each by its id and what it holds: unsent ones and
+    /// open sync issues, for a sign-out confirmation to name (`signOut(removing:)`).
+    public var pendingChanges: Set<PendingChange> { PendingChange.all(in: document, unpersisted: unpersisted) }
 
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
@@ -515,15 +515,15 @@ public final class Workspace {
     }
 
     /// Signs out and removes the account's data from this device, with no more of its unsent
-    /// changes than `confirmed`: the ones the confirmation named (`pendingChanges` when it was
-    /// shown; empty for a plain sign-out). Spec 021, FR-018, X-04.
+    /// changes and sync issues than `confirmed`: the ones the confirmation named (`pendingChanges`
+    /// when it was shown; empty for a plain sign-out). Spec 021, FR-018, X-04.
     ///
-    /// Any other pending change fails it with `WorkspaceError.unsyncedChanges` and the real count,
-    /// and nothing is removed: one already pending, one a widget or App Intent queues in the store
-    /// meanwhile (checked again under the store's lock), also when a named change was acknowledged
-    /// in between so the count still matches, or an edit was folded into a named change so its id
-    /// still matches. One made in this workspace meanwhile is refused (`GTDValidationError.signingOut`,
-    /// `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
+    /// Any other pending change or issue fails it with `WorkspaceError.unsyncedChanges` and the real
+    /// count, and nothing is removed: one already pending, one a widget or App Intent queues in the
+    /// store meanwhile (checked again under the store's lock), also when a named change was
+    /// acknowledged in between so the count still matches, an edit was folded into a named change
+    /// so its id still matches, or a named change the server rejected became an issue. One made in
+    /// this workspace meanwhile is refused (`GTDValidationError.signingOut`, `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
     /// `WorkspaceError.signingIn` and nothing is removed.
     public func signOut(removing confirmed: Set<PendingChange>) async throws {
         guard !isSigningIn else { throw WorkspaceError.signingIn }
@@ -539,8 +539,9 @@ public final class Workspace {
         writesSuspended = true
         if let writer { await writer.value }
         // Another process may have queued changes since the last reload.
-        let unpersistedChanges = Set(unpersisted.map(PendingChange.init))
-        let unsynced = unpersistedChanges.union((try? await store.load())?.outbox.map(PendingChange.init) ?? [])
+        let unpersisted = self.unpersisted
+        let latest = try? await store.load()
+        let unsynced = PendingChange.all(in: latest, unpersisted: unpersisted)
         if !unsynced.isSubset(of: confirmed) {
             writesSuspended = false
             await refreshFromStore()
@@ -553,7 +554,7 @@ public final class Workspace {
         // (any, for a plain sign-out) and nothing is removed.
         let removeData: @Sendable () async throws -> Void = {
             try await store.destroy(after: { stored in
-                let unsynced = unpersistedChanges.union(stored?.outbox.map(PendingChange.init) ?? [])
+                let unsynced = PendingChange.all(in: stored, unpersisted: unpersisted)
                 if !unsynced.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: unsynced.count) }
             })
         }

@@ -825,6 +825,13 @@ Earlier increments are each independently useful and safe:
     (retry after Cancel keeps its session; only the cancelled one is logged out),
     `WorkspaceSyncTests` (a second sign-in while one runs is refused, one login) and
     `MacSyncFlowTests` (after Cancel, Sign in stays disabled until the cancelled request ended).
+  - **Sign-out names sync issues by identity too** (review P1). The removal checks looked at the
+    outbox only, so a named change the server rejected meanwhile (now an issue, with a new id) was
+    removed without X-04 naming it; and on the iPhone a plain "Sign out" with only open issues
+    removed them silently. `PendingChange` now covers unsent changes and sync issues
+    (`Workspace.pendingChanges`), every check, the locked one included, compares both, and the
+    iPhone's confirmation counts issues. Tests, red before: `WorkspaceSyncTests` (a named change
+    rejected during sign-out is refused and kept; a plain sign-out with only an issue is refused).
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

@@ -410,6 +410,51 @@ import Testing
         #expect(session.workspace.pendingChangeCount == 1, "asked again")
     }
 
+    @Test("021-FR-018 Sign out and remove removes only the changes it named: a named change the server rejects meanwhile stops it")
+    func signOutAndRemoveKeepsAnIssueMadeMeanwhile() async throws {
+        let session = await signedIn()
+        try session.workspace.capture(CaptureDraft(text: "Counted and removed"))
+        await session.workspace.flush()
+        let confirmed = session.workspace.pendingChanges
+        let named = try #require(session.workspace.document.outbox.first)
+        let shared = session.store.base
+        // While the engine logs out, its last push comes back rejected: the named change is now an
+        // issue (with a new id), which the confirmation did not name.
+        await session.sync.whileSigningOut {
+            _ = try? await shared.update { document in
+                document.outbox.removeAll { $0.id == named.id }
+                document.issues.append(
+                    SyncIssue(command: named.command, message: "That project is archived.", occurredAt: Fixture.epoch))
+            }
+        }
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(removing: confirmed)
+        }
+        let stored = try await session.store.load()
+        #expect(stored?.issues.map(\.command) == [named.command], "the issue is kept")
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.issues.count == 1, "asked again, naming it")
+    }
+
+    @Test("021-FR-018 a plain sign-out with only an open sync issue is refused; Sign out and remove naming it removes it")
+    func plainSignOutKeepsAnOpenIssue() async throws {
+        let issue = SyncIssue(
+            command: .transitionTask(.init(taskID: "server-1", action: .complete)), message: "Rejected",
+            occurredAt: Fixture.epoch)
+        let session = await signedIn(Self.linkedDocument(issues: [issue]))
+        #expect(session.workspace.pendingChangeCount == 0 && session.workspace.issues == [issue])
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: false)
+        }
+        #expect(try await session.store.load()?.issues == [issue], "the issue is kept")
+        #expect(session.workspace.pendingChanges.count == 1, "the confirmation names it")
+
+        try await session.workspace.signOut(removing: session.workspace.pendingChanges)
+        #expect(try await session.store.load() == nil)
+    }
+
     @Test("021-FR-018 a sign-out while Sign in again waits for its first sync is refused; the account stays linked in the store too")
     func signOutDuringASignInIsRefused() async throws {
         let session = await signedIn()
