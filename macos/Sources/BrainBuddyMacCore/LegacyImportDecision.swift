@@ -292,13 +292,20 @@ package final class LegacyImportCoordinator: Sendable {
             break
         }
 
-        // After the terminal decision: workspace first written, retention, orphaned staging files.
-        state = try localState.update { current in
-            if MacFiles.exists(self.folder.store), current.workspaceFirstWrittenAt == nil {
-                current.workspaceFirstWrittenAt = self.now()
+        // After the terminal decision, housekeeping that the next launch repeats: recording the
+        // workspace's first write (`WorkspaceHost` records it too), backup retention, orphaned
+        // staging files. A failure here must not keep the workspace closed (the decision is
+        // durable), so it is logged and left for the next launch.
+        do {
+            state = try localState.update { current in
+                if MacFiles.exists(self.folder.store), current.workspaceFirstWrittenAt == nil {
+                    current.workspaceFirstWrittenAt = self.now()
+                }
             }
+            if state.legacyImport?.state == .completed { state = try applyRetention(atSignOut: nil) }
+        } catch {
+            log.log(.import, "launch housekeeping failed class=\(String(describing: type(of: error)))")
         }
-        if state.legacyImport?.state == .completed { state = try applyRetention(atSignOut: nil) }
         removeOrphanedStaging(keeping: state.legacyImport)
         return LegacyImportLaunchResult(row: row, notices: notices(for: state))
     }

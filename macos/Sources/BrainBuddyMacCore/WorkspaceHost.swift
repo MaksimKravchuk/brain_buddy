@@ -236,18 +236,30 @@ package struct MacLaunchEnvironment {
 /// import with its X-05 notices, the legacy cookie and cache cleanup, `WorkspaceHost`, and
 /// `workspace.load()`. Sync triggers start in PR-09. While it runs the window shows static
 /// placeholders (X-05 "loading"); an unreadable `store.json` leaves `loadError` set (X-09).
+///
+/// The workspace opens only once the import reached a terminal state (data-model E7.1 invariant
+/// 4). When the import step throws (a full disk, a folder that refuses a write), the launch stops
+/// at `.importFailed`: no `WorkspaceHost`, no `store.json`, the previous version's file as it was.
+/// An empty workspace opened here would become "in use" with its first change and turn that file
+/// into a "later file" that is never imported. "Try again" (`retryImport`) runs the import step
+/// again, which resumes its durable state machine from whatever the failed attempt recorded.
 @MainActor
 @Observable
 package final class MacLaunch {
     package enum Phase {
         case launching
+        /// The import step failed; nothing opened. `retryImport()` runs it again.
+        case importFailed
         case ready(WorkspaceHost)
     }
 
     package private(set) var phase: Phase = .launching
     /// The window's model, once the workspace is loaded.
     package private(set) var model: BrainBuddyModel?
+    /// A launch or a retry is running ("Trying again…").
+    package private(set) var isRunning = false
     @ObservationIgnored private let environment: MacLaunchEnvironment
+    @ObservationIgnored private var presentNotice: (@MainActor (LegacyImportNotice) async -> Void)?
 
     package init(environment: MacLaunchEnvironment) {
         self.environment = environment
@@ -258,10 +270,28 @@ package final class MacLaunch {
         return nil
     }
 
+    package var importFailed: Bool {
+        if case .importFailed = phase { return true }
+        return false
+    }
+
     /// Runs the steps once. `presentNotice` shows one X-05 alert and returns when the person chose
     /// "Continue" or "Show in Finder"; the notice is recorded as seen only then.
-    package func run(presentNotice: @MainActor (LegacyImportNotice) async -> Void) async {
-        guard case .launching = phase, host == nil else { return }
+    package func run(presentNotice: @escaping @MainActor (LegacyImportNotice) async -> Void) async {
+        guard case .launching = phase, !isRunning else { return }
+        self.presentNotice = presentNotice
+        await proceed()
+    }
+
+    /// The import-failed state's "Try again": the import step again, then the rest of the launch.
+    package func retryImport() async {
+        guard importFailed, !isRunning else { return }
+        await proceed()
+    }
+
+    private func proceed() async {
+        isRunning = true
+        defer { isRunning = false }
         let environment = self.environment
         let directory = environment.configuration.directory
         let importer = LegacyImportCoordinator(
@@ -276,15 +306,20 @@ package final class MacLaunch {
         switch result {
         case .success(let launch):
             for notice in launch.notices {
-                await presentNotice(notice)
+                await presentNotice?(notice)
                 try? importer.recordNoticeSeen(notice)
             }
         case .failure(let error):
-            // Nothing was imported and nothing renamed; the next launch decides again.
+            // No terminal state was reached: open nothing (E7.1 invariant 4). The previous
+            // version's file is as it was; the next attempt resumes from the record on disk.
             environment.log.log(.import, "import step failed class=\(String(describing: type(of: error)))")
+            phase = .importFailed
+            return
         }
 
-        // Step 3: once per Mac, never in a dry run.
+        // Step 3: once per Mac, never in a dry run. A failure here leaves the cookies and the
+        // cache for the next launch to remove (`legacyCleanupDoneAt` is recorded only once all
+        // went); it never touches the workspace, so the launch goes on.
         let cleanup = LegacyCookieCleanup(
             jar: environment.cookieJar, cache: environment.responseCache, cacheDirectory: environment.cacheDirectory,
             tokenStore: environment.tokenStore ?? WorkspaceHost.systemTokenStore(),
@@ -299,7 +334,7 @@ package final class MacLaunch {
             }
         }
 
-        // Steps 4 and 5.
+        // Steps 4 and 5. A `store.json` that cannot be read is X-09 (`loadError`), never replaced.
         let host = WorkspaceHost(
             configuration: environment.configuration, tokenStore: environment.tokenStore, transport: environment.transport,
             now: environment.now, makeID: environment.makeID, log: environment.log
@@ -308,6 +343,18 @@ package final class MacLaunch {
         model = BrainBuddyModel(workspace: host.workspace, localStateStore: host.localState, now: environment.now)
         phase = .ready(host)
     }
+}
+
+/// The words of the launch's import-failed state, in the X-09 pattern (one calm panel in place of
+/// the lists, "Try again" the default). Like X-05 "couldn't carry over", it says the previous
+/// version's file is untouched; there is no "Start fresh", which would skip the import.
+package enum LegacyImportFailedCopy {
+    package static let title = "Brain Buddy couldn't finish the update"
+    package static let message =
+        "Brain Buddy couldn't carry over your tasks from the previous version, so it hasn't opened anything yet. The file from the previous version was left exactly as it was."
+    package static let hint = "Make sure your Mac has free space, then try again."
+    package static let tryAgain = "Try again"
+    package static let tryingAgain = "Trying again…"
 }
 
 /// Design X-09's words: the main window's panel when `store.json` cannot be read, and its

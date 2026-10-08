@@ -9,7 +9,8 @@ import SwiftUI
 // review marks; the views here only present it.
 
 /// The window's root: static placeholders while the launch runs (X-05 "loading", after 300 ms),
-/// X-09 when `store.json` cannot be read, else the workspace.
+/// the import-failed panel when the upgrade import could not finish (nothing opens until it does,
+/// data-model E7.1 invariant 4), X-09 when `store.json` cannot be read, else the workspace.
 struct ContentView: View {
     let launch: MacLaunch
     @State private var showsPlaceholders = false
@@ -22,6 +23,8 @@ struct ContentView: View {
                 } else {
                     WorkspaceView(model: model)
                 }
+            } else if launch.importFailed {
+                LegacyImportFailedView(launch: launch)
             } else {
                 LaunchPlaceholderView(visible: showsPlaceholders)
             }

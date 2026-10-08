@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 #if canImport(Darwin)
     import Darwin
@@ -20,6 +21,51 @@ package struct MacFileError: Error, Hashable, Sendable, CustomStringConvertible 
     package var description: String { "\(operation) failed (errno \(code))" }
     /// The destination of an exclusive rename exists.
     package var isAlreadyExists: Bool { code == EEXIST }
+}
+
+/// Injected failures of `MacFiles` operations, for tests: a disk that is full, a folder that
+/// refuses a rename. A fault applies to files directly in one folder whose name starts with a
+/// prefix, so tests in their own temporary folders never see each other's faults. Nothing in the
+/// app injects one; with none injected, `check` only reads an empty list.
+package enum MacFileFaults {
+    package enum Operation: String, Sendable {
+        case read, write, rename, remove
+    }
+
+    private struct Fault: Sendable {
+        var id: UUID
+        var operation: Operation
+        var folder: String
+        var namePrefix: String
+        var code: Int32
+    }
+
+    private static let faults = Mutex<[Fault]>([])
+
+    /// Makes `operation` on files in `folder` named `namePrefix…` fail with `code` until `clear`.
+    @discardableResult
+    package static func inject(
+        _ operation: Operation, in folder: URL, namePrefix: String = "", code: Int32 = ENOSPC
+    ) -> UUID {
+        let fault = Fault(
+            id: UUID(), operation: operation, folder: folder.standardizedFileURL.path, namePrefix: namePrefix, code: code
+        )
+        faults.withLock { $0.append(fault) }
+        return fault.id
+    }
+
+    package static func clear(_ id: UUID) {
+        faults.withLock { $0.removeAll { $0.id == id } }
+    }
+
+    static func check(_ operation: Operation, _ url: URL) throws {
+        let folder = url.deletingLastPathComponent().standardizedFileURL.path
+        let name = url.lastPathComponent
+        let code = faults.withLock { faults in
+            faults.first { $0.operation == operation && $0.folder == folder && name.hasPrefix($0.namePrefix) }?.code
+        }
+        if let code { throw MacFileError(operation.rawValue, code: code) }
+    }
 }
 
 /// The POSIX steps the Mac's own files need: durable atomic writes, exclusive renames that never
@@ -47,6 +93,7 @@ package enum MacFiles {
 
     /// The whole file, or nil when it does not exist.
     package static func contents(of url: URL) throws -> Data? {
+        try MacFileFaults.check(.read, url)
         let descriptor = open(url.path, O_RDONLY | O_CLOEXEC)
         guard descriptor >= 0 else {
             if errno == ENOENT { return nil }
@@ -69,6 +116,7 @@ package enum MacFiles {
     /// Writes `data` to a new temporary file beside `url` (0600), flushes it to storage, renames
     /// it over `url` and flushes the folder: a reader sees the old file or the new one, never a mix.
     package static func writeAtomically(_ data: Data, to url: URL) throws {
+        try MacFileFaults.check(.write, url)
         let directory = url.deletingLastPathComponent()
         let temporary = directory.appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
         try writeNew(data, to: temporary)
@@ -82,6 +130,7 @@ package enum MacFiles {
 
     /// Writes `data` to `url`, which must not exist yet (O_EXCL), 0600, flushed to storage.
     package static func writeNew(_ data: Data, to url: URL) throws {
+        try MacFileFaults.check(.write, url)
         let descriptor = open(url.path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, mode_t(0o600))
         guard descriptor >= 0 else { throw MacFileError("create") }
         var committed = false
@@ -124,6 +173,7 @@ package enum MacFiles {
     /// E7.1 invariants 1 and 3): `renamex_np` with `RENAME_EXCL` on macOS. Throws with
     /// `isAlreadyExists` when the destination exists; never replaces it.
     package static func renameExclusively(_ source: URL, to destination: URL) throws {
+        try MacFileFaults.check(.rename, destination)
         #if canImport(Darwin)
             guard renamex_np(source.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
                 throw MacFileError("rename")
@@ -139,6 +189,7 @@ package enum MacFiles {
 
     /// Removes `url`; an absent file is fine.
     package static func remove(_ url: URL) throws {
+        try MacFileFaults.check(.remove, url)
         guard unlink(url.path) == 0 || errno == ENOENT else { throw MacFileError("remove") }
     }
 

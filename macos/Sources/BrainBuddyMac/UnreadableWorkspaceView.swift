@@ -59,3 +59,42 @@ struct UnreadableWorkspaceView: View {
         }
     }
 }
+
+/// The launch's import-failed state (data-model E7.1 invariant 4): the upgrade import could not
+/// reach a terminal state, so no workspace opens. One calm panel in the X-09 pattern with only
+/// "Try again" (default, focused): it runs the import again, which resumes from what the failed
+/// attempt recorded. There is no "Start fresh": an empty workspace would make the previous
+/// version's file a "later file" that is never imported.
+struct LegacyImportFailedView: View {
+    let launch: MacLaunch
+    @FocusState private var tryAgainFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(LegacyImportFailedCopy.title)
+                .font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 6) {
+                Text(LegacyImportFailedCopy.message)
+                Text(LegacyImportFailedCopy.hint).foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 440)
+            .fixedSize(horizontal: false, vertical: true)
+            Button(launch.isRunning ? LegacyImportFailedCopy.tryingAgain : LegacyImportFailedCopy.tryAgain) {
+                Task { await launch.retryImport() }
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(launch.isRunning)
+            .focused($tryAgainFocused)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 720, minHeight: 480)
+        .onAppear { tryAgainFocused = true }
+    }
+}

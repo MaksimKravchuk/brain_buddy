@@ -688,6 +688,13 @@ Earlier increments are each independently useful and safe:
     refused again, where the design expects the duplicate-name error in the sheet. Left to the
     kit's rule (the Mac re-implements none); recorded in `OfflineWorkspaceTests` and the host
     plan.
+  - **A failed import blocks the launch** (Codex review of PR #297): when the import step throws
+    (a full disk, a folder that refuses a write), `MacLaunch` stops at an import-failed panel
+    with only "Try again" instead of opening an empty workspace, which would turn
+    `local-gtd.json` into a "later file" with its first change (E7.1 invariant 4). Housekeeping
+    after a terminal decision (first-write record, backup retention) is best effort and repeated
+    at the next launch, so it never keeps the workspace closed. `MacLaunchTests` injects the
+    failures through `MacFileFaults`.
   - **XCTest ledger**: the rows whose successor is `MacSyncFlowTests` (T119) describe sign-in
     behaviour the account-less Mac no longer has; their kit successors exist and the Mac case
     arrives with sign-in in PR-09.
@@ -1091,6 +1098,7 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
         "macos/Tests/BrainBuddyMacTests/LegacyCookieCleanupTests.swift",
         "macos/Tests/BrainBuddyMacTests/UnreadableWorkspaceTests.swift",
         "macos/Tests/BrainBuddyMacTests/MacTestSupport.swift",
+        "macos/Tests/BrainBuddyMacTests/MacLaunchTests.swift",
         "macos/Tests/BrainBuddyMacTests/WeeklyReviewRowTests.swift",
         "macos/Tests/BrainBuddyMacTests/APIClientTests.swift",
         "macos/Tests/BrainBuddyMacTests/LocalGTDStoreTests.swift",

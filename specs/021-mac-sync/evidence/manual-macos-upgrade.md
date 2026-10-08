@@ -127,6 +127,25 @@ On a fresh folder each time (`BRAINBUDDY_MAC_DATA_DIR` set to an empty scratch f
    **Expect** the alert again.
 4. "Show in Finder" reveals `local-gtd.json` and closes the alert.
 
+### 5a. The import cannot finish (E7.1 invariant 4)
+
+On a fresh scratch folder holding a pre-021 `local-gtd.json` (note its `shasum -a 256`), make
+the folder refuse writes, then launch with the variable set:
+
+```sh
+touch "$DIR/.instance.lock"   # the single-instance lock must exist, or the launch stops earlier
+chmod 555 "$DIR"
+BRAINBUDDY_MAC_DATA_DIR="$DIR" .build/BrainBuddyMac.app/Contents/MacOS/BrainBuddyMac
+```
+
+| # | Check | Expected |
+|---|---|---|
+| I1 | Panel | "Brain Buddy couldn't finish the update" / "Brain Buddy couldn't carry over your tasks from the previous version, so it hasn't opened anything yet. The file from the previous version was left exactly as it was." / "Make sure your Mac has free space, then try again."; no lists, no sidebar, no "Start fresh"; "Try again" focused and the default. |
+| I2 | Nothing changed | `local-gtd.json` has the same `shasum`; no `store.json` and no `store.import-*.json` in the folder. |
+| I3 | Still failing | "Try again" while the folder is still read-only: the button reads "Trying again…", then the panel stays. |
+| I4 | Recovery | `chmod 700 "$DIR"`, then "Try again": the workspace opens with every record (same counts as the old app), no notice; the folder holds `store.json` and `local-gtd.backup-<UTC>.json` ("bytes identical: yes"). |
+| I5 | Quit instead | Repeat I1, quit, `chmod 700 "$DIR"`, relaunch: the import runs at launch, as in I4. |
+
 ### 6. A previous-version file comes back (Scenario 6 steps 2.5 and 2.6)
 
 After step 4, note `shasum` of `store.json`, quit, launch `BrainBuddyMac-pre021.app` once and
@@ -196,6 +215,7 @@ exactly that process forward, falling back to R6's bundle-id lookup; step 8.3 re
 | U1 – U7 (upgrade) | |
 | Upgrade: adjusted N, not carried N, backup bytes identical (yes/no) | |
 | Step 5 (corrupt, newer, interrupted, Show in Finder) | |
+| I1 – I5 (import cannot finish) | |
 | L1 – L5 (later file) | |
 | X1 – X5 (unreadable store) | |
 | Scenario 8 steps 1 – 3 | |
