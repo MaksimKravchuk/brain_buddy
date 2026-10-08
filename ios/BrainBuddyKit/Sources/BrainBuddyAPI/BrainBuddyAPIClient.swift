@@ -362,14 +362,19 @@ extension BrainBuddyAPIClient {
         let sessionUpdate = response.header("Set-Cookie").flatMap {
             SetCookieParser.update(for: BrainBuddyAPI.sessionCookieName, in: $0)
         }
-        do {
-            switch sessionUpdate {
-            case .set(let token): try tokenStore.setToken(token, for: baseURL)
-            case .removed: try tokenStore.removeToken(for: baseURL)
-            case nil: break
+        switch sessionUpdate {
+        case .set(let token):
+            do {
+                // Only login and signup (which send no session) are a person's own sign-in.
+                try tokenStore.setToken(token, for: baseURL, interactive: !endpoint.sendsSession)
+            } catch {
+                await endUnstoredSession(token)
+                throw APIError.tokenNotSaved(error, referenceID: correlationID)
             }
-        } catch {
-            throw APIError.tokenStorage(error)
+        case .removed:
+            do { try tokenStore.removeToken(for: baseURL) } catch { throw APIError.tokenStorage(error) }
+        case nil:
+            break
         }
 
         if response.statusCode == 401, let sentToken, sessionUpdate == nil {
@@ -381,6 +386,15 @@ extension BrainBuddyAPIClient {
             throw APIError.from(response: response, sentCorrelationID: correlationID)
         }
         return Exchange(response: response, correlationID: correlationID, sessionUpdate: sessionUpdate)
+    }
+
+    /// Ends a session the server just opened and this device could not store, since nothing could
+    /// ever use or end it. One best-effort `POST /auth/logout` carrying that token, with no retry.
+    private func endUnstoredSession(_ token: String) async {
+        let session = BrainBuddyAPIClient(
+            baseURL: baseURL, transport: transport, tokenStore: InMemorySessionTokenStore(tokens: [baseURL: token]),
+            identity: identity, correlationID: makeCorrelationID)
+        try? await session.logout()
     }
 
     func decode<T: Decodable>(_ exchange: Exchange) throws(APIError) -> T {
