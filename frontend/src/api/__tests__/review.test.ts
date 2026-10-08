@@ -13,8 +13,10 @@ import {
   refreshAfterReviewWrite,
   reviewKeys,
   useAcknowledgeExplainer,
+  settleForAccount,
   useAcknowledgeParks,
   useDecideTask,
+  useReviewQueue,
   useThresholdNotice,
   useUpdateReviewSettings
 } from "../reviewHooks";
@@ -24,8 +26,13 @@ import {
   describeReviewError,
   isDecisionAlreadyUndone,
   newIdempotencyKey,
+  newProgressAttempt,
+  parseBulkRelease,
+  parseBulkReleaseUndo,
   parseDecisionResponse,
   parseErrorEnvelope,
+  parseQueue,
+  parseReviewSession,
   parseReviewSettings,
   parseReviewState,
   parseTaskResponse,
@@ -88,7 +95,11 @@ describe("020-FR-045 the copied wire fixtures parse", () => {
     UndoDecisionResponse: parseUndoDecisionResponse,
     ReviewStateResponse: parseReviewState,
     ReviewSettingsResponse: parseReviewSettings,
-    ErrorResponse: parseErrorEnvelope
+    ErrorResponse: parseErrorEnvelope,
+    SessionResponse: parseReviewSession,
+    QueueResponse: parseQueue,
+    BulkReleaseResponse: parseBulkRelease,
+    BulkReleaseUndoResponse: parseBulkReleaseUndo
   };
   const valid = fixtures.entries.filter((entry) => entry.valid && entry.kind === "response" && entry.model in parsers);
 
@@ -124,7 +135,18 @@ describe("020-FR-045 the copied wire fixtures parse", () => {
     ["a decision without its record", () => parseDecisionResponse({ ...obj("W-014"), decision: null })],
     ["a decision whose counts are text", () => parseDecisionResponse({ ...obj("W-014"), session_counts: { done: "1" } })],
     ["an undo without the undone id", () => parseUndoDecisionResponse({ ...obj("W-017"), undone_decision_id: null })],
-    ["an error envelope that is a string", () => parseErrorEnvelope("boom")]
+    ["an error envelope that is a string", () => parseErrorEnvelope("boom")],
+    ["a session without its steps", () => parseReviewSession({ ...obj("W-045"), steps: null })],
+    ["a session whose counts are text", () => parseReviewSession({ ...obj("W-045"), counts: { done: "1" } })],
+    ["a session with an unknown status", () => parseReviewSession({ ...obj("W-045"), status: "paused" })],
+    ["a queue whose items are not a list", () => parseQueue({ ...obj("W-047"), items: {} })],
+    ["a queue item without an id", () => parseQueue({ ...obj("W-047"), items: [{ title: "x" }] })],
+    ["a queue without meta", () => parseQueue({ ...obj("W-047"), meta: null })],
+    ["a bulk release whose released list is missing", () => parseBulkRelease({ ...obj("W-054"), released: null })],
+    ["a bulk release skip without a reason", () => parseBulkRelease({ ...obj("W-054"), skipped: [{ task_id: "task_1" }] })],
+    ["a bulk undo without its restored list", () => parseBulkReleaseUndo({ ...obj("W-055"), restored: "none" })],
+    ["a bulk undo that restored something that is not an id", () => parseBulkReleaseUndo({ ...obj("W-055"), restored: [7] })],
+    ["a state whose last review lost its counts", () => parseReviewState({ ...obj("W-030"), last_counted_review: { ...(obj("W-030").last_counted_review as object), counts: null } })]
   ])("020-FR-045 refuses %s", (_label, parse) => {
     expect(parse).toThrow(ReviewWireError);
   });
@@ -345,6 +367,151 @@ describe("020-FR-045 failures expose the correlation id", () => {
     expect(describeReviewError(new Error("boom"))).toEqual({ kind: "other", referenceId: undefined });
     expect(describeReviewError(new ApiError("x", 400, { detail: { reason: 7 } }))).toEqual({ kind: "other", referenceId: undefined });
     expect(describeReviewError(new ApiError("x", 400, { detail: { reason: "something_new" } }))).toEqual({ kind: "other", referenceId: undefined });
+  });
+});
+
+describe("020-FR-029 020-FR-045 the review run calls", () => {
+  it("020-FR-027 starts a web review with its Idempotency-Key and no client id", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, body("W-045")));
+
+    const session = await reviewApi.startSession({ mode: "quick", entry: "sidebar", origin: "web", replace_open: false }, "key-start");
+
+    expect(session).toEqual(body("W-045"));
+    expect(lastRequest().url).toBe("/api/review/sessions");
+    expect(lastRequest().init.method).toBe("POST");
+    expect(lastRequest().headers.get("Idempotency-Key")).toBe("key-start");
+    expect(lastRequest().json).toEqual({ mode: "quick", entry: "sidebar", origin: "web", replace_open: false });
+  });
+
+  it("020-FR-029 sends one progress change as a PATCH carrying a progress_ id, and a retry resends the same id and key", async () => {
+    const attempt = newProgressAttempt("review_3e8f1a6c", { current_step: "decisions", step: { code: "wins", status: "finished" } });
+    expect(attempt.body.progress_id).toMatch(/^progress_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, { message: "down" })).mockResolvedValueOnce(jsonResponse(200, body("W-045")));
+
+    await expect(reviewApi.progress(attempt)).rejects.toBeInstanceOf(ApiError);
+    const first = lastRequest();
+    await expect(reviewApi.progress(attempt)).resolves.toEqual(body("W-045"));
+    const retry = lastRequest();
+
+    expect(retry.url).toBe("/api/review/sessions/review_3e8f1a6c");
+    expect(retry.init.method).toBe("PATCH");
+    expect(retry.json).toEqual(first.json);
+    expect((retry.json as { progress_id: string }).progress_id).toBe(attempt.body.progress_id);
+    expect(retry.headers.get("Idempotency-Key")).toBe(first.headers.get("Idempotency-Key"));
+    expect(newProgressAttempt("review_3e8f1a6c", {}).body.progress_id).not.toBe(attempt.body.progress_id);
+  });
+
+  it("020-FR-033 finishes a run with the clear-start answer", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-046")));
+
+    await expect(reviewApi.finish("review_3e8f1a6c", body("W-044"), "key-finish")).resolves.toEqual(body("W-046"));
+
+    expect(lastRequest().url).toBe("/api/review/sessions/review_3e8f1a6c/finish");
+    expect(lastRequest().json).toEqual(body("W-044"));
+    expect(lastRequest().headers.get("Idempotency-Key")).toBe("key-finish");
+  });
+
+  it("020-FR-028 reads a step's queue for the run, with the session id escaped", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-048"))).mockResolvedValueOnce(jsonResponse(200, body("W-047")));
+
+    await expect(reviewApi.getQueue("rest_of_next", "review_3e8f1a6c")).resolves.toEqual(body("W-048"));
+    expect(lastRequest().url).toBe("/api/review/queues/rest_of_next?session_id=review_3e8f1a6c");
+    expect(lastRequest().init.method).toBe("GET");
+
+    await reviewApi.getQueue("wins", undefined);
+    expect(lastRequest().url).toBe("/api/review/queues/wins");
+  });
+
+  it("020-FR-017 020-FR-030 releases and un-releases in bulk with keys", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-054"))).mockResolvedValueOnce(jsonResponse(200, body("W-055")));
+
+    await expect(reviewApi.bulkRelease({ kind: "restart", items: [{ task_id: "task_9f3c2a1b4d5e", expected_revision: 8 }] }, "key-release")).resolves.toEqual(body("W-054"));
+    expect(lastRequest().url).toBe("/api/review/bulk-releases");
+    expect(lastRequest().headers.get("Idempotency-Key")).toBe("key-release");
+
+    await expect(reviewApi.undoBulkRelease("bulk_5c2e9f7a", "key-undo")).resolves.toEqual(body("W-055"));
+    expect(lastRequest().url).toBe("/api/review/bulk-releases/bulk_5c2e9f7a/undo");
+    expect(lastRequest().init.method).toBe("POST");
+    expect(lastRequest().headers.get("Idempotency-Key")).toBe("key-undo");
+  });
+
+  it("020-FR-045 reads a session by id for the entry's closed-run line", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, body("W-046")));
+
+    await expect(reviewApi.getSession("review_3e8f1a6c")).resolves.toEqual(body("W-046"));
+
+    expect(lastRequest().url).toBe("/api/review/sessions/review_3e8f1a6c");
+  });
+
+  it("020-FR-045 wraps a malformed JSON body in an ApiError that carries the Ref", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("{not json", { status: 200, headers: { "Content-Type": "application/json", "X-Correlation-ID": "corr_bad_json" } })
+    );
+
+    const caught = await reviewApi.getState().catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(200);
+    expect(describeReviewError(caught)).toEqual({ kind: "other", referenceId: "corr_bad_json" });
+  });
+
+  it("020-FR-045 quotes the id the client sent when a malformed body comes without a Ref header", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{not json", { status: 502, headers: { "Content-Type": "application/json" } }));
+
+    const caught = await reviewApi.getState().catch((error: unknown) => error);
+
+    expect(describeReviewError(caught)).toEqual({ kind: "other", referenceId: lastRequest().headers.get("X-Correlation-ID") });
+  });
+});
+
+describe("020-FR-028 020-FR-042 review run hooks", () => {
+  const userA = { id: "user_a", email: "a@example.test" };
+  const userB = { id: "user_b", email: "b@example.test" };
+
+  afterEach(() => {
+    act(() => useAuthStore.setState({ user: null, status: "loading" }));
+  });
+
+  it("020-FR-028 reads a step's queue under the signed-in account and does not keep it once the step is left", async () => {
+    act(() => useAuthStore.setState({ user: userA, status: "authed" }));
+    fetchMock.mockImplementation(async () => jsonResponse(200, body("W-048")));
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: React.ReactNode }) => createElement(QueryClientProvider, { client }, children);
+
+    const first = renderHook(() => useReviewQueue("rest_of_next", "review_1"), { wrapper });
+    await waitFor(() => expect(first.result.current.data).toEqual(body("W-048")));
+    expect(client.getQueryCache().find({ queryKey: ["review-queue", getReviewCacheScope(userA.id), "rest_of_next", "review_1"] })).toBeDefined();
+    first.unmount();
+
+    // Left and re-entered: a fresh read, never the earlier snapshot.
+    await waitFor(() => expect(client.getQueryCache().getAll()).toHaveLength(0));
+    const again = renderHook(() => useReviewQueue("rest_of_next", "review_1"), { wrapper });
+    await waitFor(() => expect(again.result.current.data).toBeDefined());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("020-FR-042 a write's answer is dropped when its account has gone, and carries the scope when it has not", async () => {
+    act(() => useAuthStore.setState({ user: userA, status: "authed" }));
+
+    const kept = await settleForAccount(async () => "answer");
+    expect(kept).toEqual({ ok: true, value: "answer", scope: getReviewCacheScope(userA.id) });
+
+    const failure = new Error("boom");
+    const failed = await settleForAccount(async () => {
+      throw failure;
+    });
+    expect(failed).toEqual({ ok: false, error: failure, scope: getReviewCacheScope(userA.id) });
+
+    const gone = await settleForAccount(async () => {
+      act(() => useAuthStore.setState({ user: userB, status: "authed" }));
+      return "late";
+    });
+    expect(gone).toBeNull();
+    const goneFailure = await settleForAccount(async () => {
+      act(() => useAuthStore.setState({ user: userA, status: "authed" }));
+      throw failure;
+    });
+    expect(goneFailure).toBeNull();
   });
 });
 

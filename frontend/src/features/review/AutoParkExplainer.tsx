@@ -170,7 +170,7 @@ export function AutoParkExplainer({
         onKeyDown={onKeyDown}
         className="relative flex h-full w-full flex-col overflow-y-auto bg-white shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[480px] sm:rounded-[20px] sm:border sm:border-slate-200"
       >
-        <header className="flex items-start gap-3 px-5 pb-2 pt-5">
+        <div className="flex items-start gap-3 px-5 pb-2 pt-5">
           <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 text-[20px] font-semibold leading-[1.3] text-slate-900 outline-hidden">
             How Next stays fresh
           </h2>
@@ -183,7 +183,7 @@ export function AutoParkExplainer({
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
-        </header>
+        </div>
         <div className="flex flex-col gap-3 px-5 pb-5 text-sm leading-relaxed text-slate-700">
           <p className="m-0">
             <strong className="font-semibold text-slate-900">When a task stalls.</strong>{" "}

@@ -24,6 +24,13 @@ export interface LeaveGuardTarget {
 
 const MARKER = "bbReviewDialog";
 let tokens = 0;
+/**
+ * Pops the guard itself asked for. React's StrictMode (development) runs the
+ * effect twice: the first run's cleanup pops its entry asynchronously, after
+ * the second run has already pushed its own, and that late pop must not read
+ * as the person pressing Back.
+ */
+const ownPops = new WeakSet<Event>();
 
 function stateRecord(state: unknown): Record<string, unknown> {
   return typeof state === "object" && state !== null ? (state as Record<string, unknown>) : {};
@@ -31,11 +38,14 @@ function stateRecord(state: unknown): Record<string, unknown> {
 
 export function useLeaveGuard({
   dirty,
+  active = true,
   onBack,
   onNavigate,
   target = window
 }: {
   dirty: boolean;
+  /** `false` while another guard owns the page (the card inline in the review shell). */
+  active?: boolean;
   /** Browser Back left the dialog's entry: handle it as Close. */
   onBack: () => void;
   /**
@@ -58,12 +68,15 @@ export function useLeaveGuard({
   }, [target]);
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     tokens += 1;
     tokenRef.current = `review-dialog-${tokens}`;
     push();
     const onOurEntry = () => stateRecord(target.history.state)[MARKER] === tokenRef.current;
-    const onPopState = () => {
-      if (!armedRef.current || onOurEntry()) {
+    const onPopState = (event: Event) => {
+      if (ownPops.has(event) || !armedRef.current || onOurEntry()) {
         return;
       }
       armedRef.current = false;
@@ -100,11 +113,12 @@ export function useLeaveGuard({
       target.removeEventListener("beforeunload", onBeforeUnload);
       target.removeEventListener("click", onClick, true);
       if (armedRef.current && onOurEntry()) {
+        target.addEventListener("popstate", (event) => ownPops.add(event), { once: true });
         target.history.back();
       }
       armedRef.current = false;
     };
-  }, [push, target]);
+  }, [active, push, target]);
 
   const release = useCallback(() => {
     armedRef.current = false;

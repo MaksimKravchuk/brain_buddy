@@ -349,6 +349,10 @@ day, no content) for the once-per-day rule of the While-you-were-away dialog (FR
 removed on sign-out, and `bb.reviewLastZone.v1.<origin>.<account>` (the IANA zone this
 browser last observed; a zone change is sent only when the browser's current zone
 differs from it, http §5), removed on sign-out or account switch.
+The review run also keeps `bb.reviewRelease.v1.<origin>.<account>` (the id and count of the
+last restart or Inbox bulk release whose Undo is still offered, no content), so a tab reload
+reopens on the released state with Undo (FR-017, FR-030); removed on sign-out or account
+switch, and when the person moves on.
 
 ## Export and purge (FR-043)
 
