@@ -277,6 +277,28 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     expect(screen.getByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
   });
 
+  it("020-FR-048 020-FR-033 the next item waits while the last one's count is saving or failed, so one Retry is never replaced by another", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    let fail: (error: unknown) => void = () => undefined;
+    const progress = vi.fn(async () => undefined).mockReturnValueOnce(new Promise<undefined>((_, reject) => { fail = reject; }));
+    renderInRun(<InboxStep />, { progress });
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    expect(choice("Someday / maybe")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit title" })).toBeDisabled();
+
+    await act(async () => fail(new ApiError("down", 503, null, "corr_count_hold")));
+    const alert = await screen.findByRole("alert");
+    expect(choice("Someday / maybe")).toBeDisabled();
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(choice("Someday / maybe")).toBeEnabled());
+    expect(progress).toHaveBeenCalledTimes(2);
+  });
+
   it("020-FR-048 a count that is not saved for the last item still ends the step on its processed total, with the Retry", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper]));

@@ -85,6 +85,9 @@ export function InboxStep(): React.JSX.Element {
   const { beginWrite } = run;
   const countFailed = countAction.failure !== null;
   useEffect(() => (countFailed ? beginWrite() : undefined), [countFailed, beginWrite]);
+  // The next item waits for the last one's count too: one count write and one Retry at a time,
+  // so a second failure can never take the place of the first one's Retry.
+  const itemsDisabled = action.disabled || countAction.pending !== null || countFailed;
 
   useEffect(() => {
     if (focusHeading.current) {
@@ -360,7 +363,7 @@ export function InboxStep(): React.JSX.Element {
                   </label>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(() => closeForm(current.id, form.kind))}>Back</button>
-                    <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
+                    <button type="submit" disabled={form.text.trim() === "" || itemsDisabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending !== null ? "Saving…" : form.kind === "title" ? "Save title" : "Move to Waiting for"}
                     </button>
                   </div>
@@ -371,7 +374,7 @@ export function InboxStep(): React.JSX.Element {
                     <button
                       key={choice.id}
                       type="button"
-                      disabled={action.disabled}
+                      disabled={itemsDisabled}
                       className={`${buttonClass} flex flex-col items-start text-left`}
                       onClick={() => (choice.needsWaitingFor ? setForm({ kind: "waiting", choice, text: "" }) : choose(choice, current))}
                     >
@@ -379,7 +382,7 @@ export function InboxStep(): React.JSX.Element {
                       {choice.sub ? <span className="text-xs font-normal text-slate-500">{choice.sub}</span> : null}
                     </button>
                   ))}
-                  <button type="button" disabled={action.disabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
+                  <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
                     Edit title
                   </button>
                 </div>
