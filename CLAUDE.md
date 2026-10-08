@@ -117,6 +117,13 @@ Non-negotiables, whether or not that skill is loaded:
   `specs/` tree — two branches claiming one `NNN-` merge without a conflict and
   then satisfy each other's requirement-coverage gate. `check_spec_kit_specs.py`
   rejects duplicates; `create-new-feature.sh` avoids creating them.
+- Large features ship as many small slices in parallel. `/speckit-implement all`
+  makes this session the conductor: launch every ready slice's worker in the
+  same turn, each with `isolation: worktree` and the agent its slice names —
+  `feature-implementer` (Sonnet) or `mechanical-implementer` (Haiku) — and
+  hand long logs to `ci-log-triage` (Haiku) instead of reading them. Slices stay
+  within their `budget` (`scripts/check_slice_budget.py`); a slice that outgrows
+  it is re-split, not merged as is.
 - `/speckit-implement` is a preserved override guarded by
   `scripts/check_speckit_manifests.py`; `specify integration upgrade --force`
   must not revert it.

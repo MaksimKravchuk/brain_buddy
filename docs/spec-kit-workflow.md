@@ -196,9 +196,9 @@ For a full-path feature:
 ### Multiple PRs for one feature spec
 
 The approved `spec.md`, `plan.md` and `tasks.md` remain one product contract;
-the **unit of coding/review is a PR slice**, not the whole spec. For large
-features or an explicit multi-PR request, `/speckit-tasks` proposes the slice
-boundaries **before** implementation and gets human approval. Record them
+the **unit of coding/review is a PR slice**, not the whole spec. Any feature
+larger than one reviewable PR gets a slice map: `/speckit-tasks` proposes the
+slice boundaries **before** implementation and gets human approval. Record them
 under `## PR-срезы` in `specs/NNN-<slug>/tasks.md` as one fenced JSON map:
 
 ````markdown
@@ -206,18 +206,22 @@ under `## PR-срезы` in `specs/NNN-<slug>/tasks.md` as one fenced JSON map:
 
 ```json
 {
-  "schema_version": "brainbuddy-pr-slices/v1",
+  "schema_version": "brainbuddy-pr-slices/v2",
   "slices": [
-    {"id": "PR-01", "outcome": "A tested foundation for the first journey",
+    {"id": "PR-01", "outcome": "The shared contract is frozen behind a flag",
      "tasks": ["T001", "T002"], "requirements": ["NNN-FR-001"],
      "paths": ["backend/app/example.py", "backend/tests/test_example.py"],
      "depends_on": [], "tests": ["pytest backend/tests/test_example.py"],
-     "acceptance": ["First journey contract is independently testable"]},
-    {"id": "PR-02", "outcome": "The next journey consumes that contract",
+     "acceptance": ["First journey contract is independently testable"],
+     "budget": {"product_loc": 250, "files": 5},
+     "implementer": "feature-implementer"},
+    {"id": "PR-02", "outcome": "The web journey consumes that contract",
      "tasks": ["T003"], "requirements": ["NNN-FR-002"],
      "paths": ["frontend/src/example.tsx", "frontend/src/example.test.tsx"],
      "depends_on": ["PR-01"], "tests": ["npm run test -- example"],
-     "acceptance": ["Second journey works against the accepted contract"]}
+     "acceptance": ["Second journey works against the accepted contract"],
+     "budget": {"product_loc": 300, "files": 6},
+     "implementer": "feature-implementer"}
   ]
 }
 ```
@@ -225,13 +229,29 @@ under `## PR-срезы` in `specs/NNN-<slug>/tasks.md` as one fenced JSON map:
 
 Replace `NNN` and paths with real values; `PR-01` is a slice ID, not a
 GitHub PR number. Every task belongs to exactly one slice; each slice has a
-verifiable outcome, FR/SC coverage, owned write paths,
-checks and dependency/base. `python3 scripts/check_spec_kit_specs.py` rejects
+verifiable outcome, FR/SC coverage, owned write paths, checks,
+dependency/base, a size `budget` and an `implementer` role. The budget caps a
+slice at 400 product lines and 12 product files (tests, docs and specs do not
+count) unless the slice states an `oversize_reason`;
+`scripts/check_slice_budget.py` measures a branch against it. The historical
+`brainbuddy-pr-slices/v1` maps (features 020 and 021) stay valid without a
+budget. `python3 scripts/check_spec_kit_specs.py` rejects
 missing/duplicate tasks, unknown requirements, forward dependencies and
 parallel slices with overlapping paths. Human approval of the boundaries and
 actual CI/review are separate from this structural check. If the section is
 present, `/speckit-implement` requires one explicit `PR-NN` selector and must
 not consume the entire `tasks.md` by default.
+
+Shape the map for parallel work: a contract slice first (schema, types,
+fixtures, a flag defaulting off), then backend, web and iOS slices that consume
+it independently, each small enough to review in one sitting. Pattern-following
+slices (renames, fixtures, tests against a frozen contract, docs) name
+`mechanical-implementer` (Haiku); the rest name `feature-implementer` (Sonnet).
+
+`/speckit-implement all` runs the conductor mode in
+`.specify/agent-commands/speckit-implement/SKILL.md`: the planning session
+launches one worker per ready slice **in parallel**, then the next wave as
+dependencies merge, and routes long logs through `ci-log-triage` (Haiku).
 
 Give each slice a fresh task/session, branch and worktree. Open one PR for that
 slice only; its description names the shared spec, slice ID, requirement IDs,

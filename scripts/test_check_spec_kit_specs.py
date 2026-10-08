@@ -171,6 +171,71 @@ class CheckSpecKitSpecsTests(unittest.TestCase):
         check_spec_kit_specs._validate_delivery_slices(feature, failures)
         self.assertEqual(failures, [])
 
+    def _v2(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload["schema_version"] = "brainbuddy-pr-slices/v2"
+        for item in payload["slices"]:
+            item["budget"] = {"product_loc": 250, "files": 6}
+            item["implementer"] = "feature-implementer"
+        return payload
+
+    def test_v2_slices_with_budget_and_implementer_are_valid(self) -> None:
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, self._v2(payload))
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertEqual(failures, [])
+
+    def test_v2_slice_requires_budget_and_known_implementer(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload = self._v2(payload)
+        del payload["slices"][0]["budget"]
+        payload["slices"][1]["implementer"] = "opus-everything"
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("PR-01 needs budget" in item for item in failures))
+        self.assertTrue(any("PR-02 implementer" in item for item in failures))
+
+    def test_v2_oversize_slice_needs_a_stated_reason(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload = self._v2(payload)
+        payload["slices"][0]["budget"] = {"product_loc": 401, "files": 13}
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("product_loc=401 exceeds 400" in item for item in failures))
+        self.assertTrue(any("files=13 exceeds 12" in item for item in failures))
+
+        feature2 = self.specs_dir / "021-oversize"
+        feature2.mkdir()
+        (feature2 / "tasks.md").write_text((feature / "tasks.md").read_text().split("\n## PR-срезы")[0] + "\n")
+        (feature2 / "spec.md").write_text((feature / "spec.md").read_text())
+        for item in payload["slices"]:
+            item["requirements"] = [r.replace("020-", "021-") for r in item["requirements"]]
+        payload["slices"][0]["oversize_reason"] = "One generated client cannot be split."
+        self._write_slice_section(feature2, payload)
+        failures = []
+        check_spec_kit_specs._validate_delivery_slices(feature2, failures)
+        self.assertEqual(failures, [])
+
+    def test_v2_budget_rejects_non_positive_and_boolean_values(self) -> None:
+        feature, payload = self._slice_fixture()
+        payload = self._v2(payload)
+        payload["slices"][0]["budget"] = {"product_loc": 0, "files": True}
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertTrue(any("budget.product_loc must be a positive integer" in item for item in failures))
+        self.assertTrue(any("budget.files must be a positive integer" in item for item in failures))
+
+    def test_v1_slices_stay_valid_without_budget(self) -> None:
+        """Historical approved maps (020, 021) predate the budget."""
+        feature, payload = self._slice_fixture()
+        self._write_slice_section(feature, payload)
+        failures: list[str] = []
+        check_spec_kit_specs._validate_delivery_slices(feature, failures)
+        self.assertEqual(failures, [])
+
     def test_pr_slices_reject_unassigned_and_duplicate_tasks(self) -> None:
         feature, payload = self._slice_fixture()
         payload["slices"][1]["tasks"] = ["T001"]
