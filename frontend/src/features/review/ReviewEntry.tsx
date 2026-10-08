@@ -46,6 +46,8 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
   const [onboardingClosed, setOnboardingClosed] = useState(false);
   const [awayDone, setAwayDone] = useState(false);
   const [restartDone, setRestartDone] = useState(false);
+  // A restart release or its Undo on its way holds Close, so its answer, failure and Undo stay on screen (FR-048).
+  const [restartSettling, setRestartSettling] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const open = state.open_session;
@@ -101,7 +103,13 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
       title="Weekly review"
       recap={lastReviewText(state)}
       actions={
-        <button ref={closeRef} type="button" className={`${buttonClass} border-transparent bg-transparent text-sky-700`} onClick={() => navigate("/tasks/next")}>
+        <button
+          ref={closeRef}
+          type="button"
+          disabled={showRestart && restartSettling}
+          className={`${buttonClass} border-transparent bg-transparent text-sky-700`}
+          onClick={() => navigate("/tasks/next")}
+        >
           Close
         </button>
       }
@@ -109,7 +117,7 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
       <main className="flex justify-center px-5 py-6 md:px-10">
         <div className="flex w-full max-w-[600px] flex-col gap-3.5">
           {showRestart ? (
-            <RestartStep state={state} onContinue={() => setRestartDone(true)} />
+            <RestartStep state={state} onContinue={() => setRestartDone(true)} onSettlingChange={setRestartSettling} />
           ) : (
             <>
               <h1 className="m-0 text-2xl font-semibold text-slate-900">{open ? "Pick up where you left off?" : "How much time do you have?"}</h1>

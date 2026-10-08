@@ -11,7 +11,7 @@ import type { ProjectResponse, TaskResponse } from "../../../api/taskTypes";
 import { formatReviewDate } from "../formulation";
 import { readRelease, rememberRelease } from "../releaseMemory";
 import { ReviewGate } from "../ReviewGate";
-import { DAY, iso, sessionFixture, signIn, stateFixture, taskFixture, zeroCounts } from "./reviewKit";
+import { DAY, askingTask, iso, sessionFixture, signIn, stateFixture, taskFixture, zeroCounts } from "./reviewKit";
 
 // The steps are tested on their own; here each one is a stand-in that can reach the run.
 vi.mock("../steps/WinsStep", () => ({ WinsStep: () => "Wins content" }));
@@ -70,7 +70,8 @@ vi.mock("../../../api/review", async () => {
       getSession: vi.fn(),
       updateSettings: vi.fn(),
       acknowledgeExplainer: vi.fn(),
-      acknowledgeParks: vi.fn()
+      acknowledgeParks: vi.fn(),
+      bulkRelease: vi.fn()
     }
   };
 });
@@ -435,6 +436,27 @@ describe("020-FR-016 020-FR-051 020-FR-015 020-FR-017 what comes before the pick
     await user.click(await screen.findByRole("button", { name: /^Quick/ }));
 
     expect(startSession).toHaveBeenCalledWith({ mode: "quick", entry: "restart", origin: "web", replace_open: false }, expect.any(String));
+  });
+
+  it("020-FR-048 while a restart release is on its way Close waits, so its answer and Undo stay on screen", async () => {
+    const user = userEvent.setup();
+    getState.mockResolvedValue(stateFixture({ restart_mode: true, last_counted_review_at: iso(-30 * DAY) }));
+    const asking = askingTask("n1", "Update the CV");
+    const aged = { ...asking, formulation: { ...(asking.formulation as NonNullable<TaskResponse["formulation"]>), started_at: iso(-40 * DAY) } };
+    vi.mocked(apiClient.listTasks).mockResolvedValue({ items: [aged], next_cursor: null, has_more: false, counts_by_state: { inbox: 0, next: 1, waiting: 0, someday: 0 } });
+    let resolve: (value: Awaited<ReturnType<typeof reviewApi.bulkRelease>>) => void = () => undefined;
+    vi.mocked(reviewApi.bulkRelease).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderReview();
+
+    await user.click(await screen.findByRole("button", { name: "Release 1 to Someday" }));
+    const close = within(bar()).getByRole("button", { name: "Close" });
+    expect(close).toBeDisabled();
+    await user.click(close);
+    expect(screen.queryByTestId("location")).not.toBeInTheDocument();
+
+    await act(async () => resolve({ id: "bulk_restart_1", released: [{ task_id: "n1", revision_after: 5 }], skipped: [] }));
+    expect(await screen.findByRole("button", { name: "Undo the 1" })).toBeInTheDocument();
+    expect(within(bar()).getByRole("button", { name: "Close" })).toBeEnabled();
   });
 });
 
