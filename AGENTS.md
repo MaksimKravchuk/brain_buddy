@@ -129,6 +129,75 @@ These criteria apply only when rendered UI, copy, navigation, interaction, respo
 - Feature flags are required for significant new capabilities, such as the agent harness, Brain dump and Current Reality Tree. Corrections to expected existing behavior, including completed-task placement and animation, do not require a new flag. Existing feature gates, tests, review, verified delivery and rollback requirements remain unchanged. Flags are never authorization. Owner decision, 2026-09-06: «Давай мы зафиксируем, что флаг нужен для каких-то значительных новых фич, типа агентского харнеса, брейндампа, current reality 3. Вот там вот будут флаги.»
 - There are currently no customer or valuable production data: prioritize MVP velocity, but preserve the candidate → CI → landing → verified deploy traceability.
 
+## Codex Model Routing
+
+For Codex, choose the cheapest capable model for the **decisions still open**
+in a task. Simple behavior implementation belongs on Luna when the architecture
+and contract are already settled. A behavior change alone does not require Sol.
+This applies both to ADR-0023's lightweight brief and to an approved Spec Kit
+slice; delegation does not require a new spec or another gate.
+
+| Work / role | Model | Reasoning effort |
+| --- | --- | --- |
+| `mechanical-implementer`: renames, fixtures, pattern-following tests, docs and copy | `gpt-6-luna` | `low` |
+| `feature-implementer`: bounded code against a settled architecture, contract, error behavior and acceptance outcome | `gpt-6-luna` | `medium` |
+| `ci-log-triage`: extract failures and reproduction commands from saved logs | `gpt-6-luna` | `low` |
+| `delivery-verifier`: run selected deterministic checks and report their actual results | `gpt-6-luna` | `low` |
+| Planning, slicing, design/contract authoring, implementation with unresolved design choices or difficult debugging | `gpt-6-sol` | `high` |
+| Independent code review or feature acceptance against the accepted scope | `gpt-6-sol` | `high` |
+| Novel architecture or adversarial review with material security, privacy, data-loss, concurrency or irreversible-effect risk | `gpt-6-astra` | `high` |
+
+Use the model IDs exposed by the active runtime. Prefer `gpt-6.1-sol` over
+`gpt-6-sol` when it is available. If a listed model is unavailable, select the
+next available capable tier and report the substitution; never silently
+downgrade a contract or review task to Luna. Terra may serve the strongest
+role when the runtime exposes it; do not invent a Terra ID or assume a CLI's
+bundled catalog proves account access. Increase effort above `high` only for
+a specific unresolved problem, rather than using `xhigh`/`max` for every task.
+
+### Handoff and escalation
+
+- Before delegating implementation, give the worker the accepted outcome,
+  absolute worktree path and base SHA, owned write paths, the relevant brief
+  or spec/slice and settled contracts, the nearest existing implementation
+  pattern, and the sufficient checks. A Luna worker can add simple behavior
+  and its necessary tests; it does not choose new boundaries, persistence
+  semantics, auth rules, API shapes or recovery behavior.
+- When a Luna worker discovers an undecided contract, a required out-of-scope
+  edit, or a failure it cannot explain from the existing pattern, it stops
+  that part and returns the concrete question and evidence. The conductor
+  resolves it with Sol (Astra for the material risks above), then resumes the
+  bounded implementation with the decision supplied. Do not spend repeated
+  Luna attempts guessing at the same problem.
+- With `collaboration.spawn_agent`, pass `model` and `reasoning_effort`
+  explicitly according to the table and use `fork_turns: "none"` for a
+  bounded handoff. A full-history fork inherits the parent model and cannot
+  select a cheaper one. Include the instruction to read `AGENTS.md` and any
+  applicable nested instructions; a fresh worker has no conversation history.
+- `.codex/config.toml` enables model overrides and defaults otherwise
+  unspecified subagents to Luna/medium in a trusted Codex CLI project. It
+  leaves the parent model and execution permissions to the active session.
+  Explicitly select Sol/Astra for the roles above; the Luna default is not
+  suitable for independent review or architecture decisions. In a hosted
+  runtime, use its spawn controls; project CLI settings alone do not configure
+  hosted agents. Without model-selecting subagents, use a dedicated worker
+  session with `codex -C <worktree> -m <model> -c 'model_reasoning_effort="<effort>"'`,
+  or report that tiered execution is
+  unavailable instead of claiming a model switch occurred.
+- Give every implementation worker its own branch/worktree. Run independent
+  approved slices concurrently only with disjoint write paths and isolated
+  data directories, ports and E2E artifacts; dependent slices wait for their
+  accepted base. Keep trivial prompt/config/docs edits direct. Return only
+  the commit SHA, changed paths, check results, log paths and unresolved
+  decisions, keeping long logs in files.
+- A verifier running commands does not grade acceptance. The independent
+  reviewer must differ from the writer and review the frozen exact SHA.
+  ADR-0023 still selects one gate for eligible fast-lane changes. On the full
+  planning-review path, use the canonical `/speckit-review` harness and its
+  recorded model provenance; this table does not replace its `ROLE_CONFIGS`
+  or authorize skipping a required lens. ADR-0030 risk classification,
+  exact-SHA CI, verified landing and production smoke still apply.
+
 ## Active Technologies
 
 `.specify/scripts/bash/update-agent-context.sh` appends here on `/speckit-plan`.
