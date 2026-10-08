@@ -14,7 +14,8 @@ import Synchronization
 /// next 401 handling would wipe a valid session.
 public protocol SessionTokenStore: Sendable {
     /// Never shows a system prompt (the sync engine and the launch cleanup read through it): an
-    /// item this build may not use is an error, which the engine treats as "sign in again".
+    /// item this build may not use throws `TokenStoreError.accessDenied`, which the engine treats
+    /// as "sign in again".
     func token(for serverURL: URL) throws -> String?
     /// A routine write, for example a renewed cookie; never prompts either.
     func setToken(_ token: String, for serverURL: URL) throws
@@ -46,6 +47,14 @@ extension SessionTokenStore {
     public func pendingLogouts() throws -> [PendingLogout] { [] }
     public func addPendingLogout(_ logout: PendingLogout) throws {}
     public func removePendingLogout(_ logout: PendingLogout) throws {}
+}
+
+/// A token store failure that means something beyond "try again later", whatever keeps the tokens.
+public enum TokenStoreError: Error, Hashable, Sendable {
+    /// The session is stored but this build may not read it without asking (macOS, after the app
+    /// was rebuilt or re-signed). Only a sign-in the person starts can replace it, so the client
+    /// reports it as an ended session (`.unauthorized`) and the engine asks to sign in again.
+    case accessDenied
 }
 
 /// A server session signed out on this device whose `POST /auth/logout` has
@@ -218,6 +227,11 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             case errSecItemNotFound:
                 return nil
             default:
+                #if os(macOS)
+                    // The item is there, but this build may not read it without asking (a rebuilt
+                    // app is a new client of it): only the person's next sign-in can replace it.
+                    if status == errSecInteractionNotAllowed { throw TokenStoreError.accessDenied }
+                #endif
                 throw KeychainError(status: status)
             }
         }

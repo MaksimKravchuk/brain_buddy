@@ -84,7 +84,8 @@ public protocol SyncService: Sendable {
     /// pending logout (so a crash from here on still ends it); run `remove`, which removes the
     /// device's data; then forget the session and log out on the server now, or when the network
     /// is back. When `remove` throws, the pending logout is withdrawn, syncing resumes, the error
-    /// is rethrown, and nothing else has changed: the person is still signed in.
+    /// is rethrown, and nothing else has changed: the person is still signed in. The same holds,
+    /// without running `remove`, when the session can't be read or its logout can't be recorded.
     func signOut(removingLocalDataWith remove: @Sendable () async throws -> Void) async throws
     /// No account is linked on this device (launch without one, or after the
     /// stored document was set aside): every stored session is stale and is

@@ -292,6 +292,39 @@ struct SyncEngineSessionTests {
         #expect(tokens.reads > 0, "every read goes through the call that never prompts")
     }
 
+    @Test("021-FR-005 021-FR-017 a session this Mac build may not read asks to sign in again, and the waiting change stays")
+    func deniedKeychainAsksToSignInAgain() async throws {
+        let harness = SyncHarness()
+        let rig = FaultyDevice(harness)
+        let account = try await rig.signIn()
+        try await rig.queueTask(titled: "Waiting for the next sign-in")
+        rig.tokens.failReads(with: TokenStoreError.accessDenied)
+        rig.transport.clearLog()
+
+        #expect(await rig.engine.syncNow() == .needsSignIn)
+        #expect(rig.transport.requests.isEmpty, "nothing goes out without a readable session")
+        let document = try #require(try await rig.store.load())
+        #expect(document.account == account)
+        #expect(document.outbox.count == 1, "the change waits for the sign-in that replaces the item")
+        #expect(rig.tokens.storedToken != nil, "the item is left for that sign-in to replace")
+    }
+
+    @Test("021-FR-014 any other unreadable session is a failure to retry, not an ended session")
+    func otherKeychainFailureIsRetried() async throws {
+        let harness = SyncHarness()
+        let rig = FaultyDevice(harness)
+        try await rig.signIn()
+        try await rig.queueTask(titled: "Sent once the Keychain answers")
+        rig.tokens.failReads(with: FaultyTokenStore.Refused())
+
+        #expect(await rig.engine.syncNow() != .needsSignIn)
+        #expect(try await rig.store.load()?.outbox.count == 1)
+
+        rig.tokens.failReads(with: nil)
+        #expect(await rig.engine.syncNow() == .idle(lastSyncedAt: harness.clock.now()))
+        #expect(harness.snapshot.task(titled: "Sent once the Keychain answers") != nil)
+    }
+
     // MARK: Signing out
 
     @Test("021-FR-005 021-FR-018 sign-out records the logout first, removes the data, then the token, then logs out")
@@ -337,6 +370,126 @@ struct SyncEngineSessionTests {
         #expect(await device.status != .needsSignIn)
         #expect(await device.sync() == .idle(lastSyncedAt: harness.clock.now()))
     }
+
+    @Test("021-FR-005 021-FR-018 offline, a sign-out whose logout can't be recorded fails and removes nothing")
+    func unrecordedOfflineLogoutKeepsEverything() async throws {
+        let harness = SyncHarness()
+        let rig = FaultyDevice(harness)
+        let account = try await rig.signIn()
+        await rig.engine.setNetworkAvailable(false)
+        rig.tokens.failPendingLogouts()
+        rig.transport.clearLog()
+        let removal = Removal()
+
+        await #expect(throws: FaultyTokenStore.Refused.self) { try await rig.engine.signOut { removal.run() } }
+
+        #expect(!removal.ran, "the device's data stays")
+        #expect(rig.tokens.storedToken != nil, "and so does the session")
+        #expect(try rig.tokens.pendingLogouts().isEmpty)
+        #expect(try await rig.store.load()?.account == account)
+        #expect(rig.transport.requests.isEmpty)
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1)
+        #expect(await rig.engine.status != .localOnly, "still signed in")
+    }
+
+    @Test("021-FR-005 021-FR-018 a sign-out that can't read the session fails and removes nothing")
+    func unreadableSessionSignOutKeepsEverything() async throws {
+        let harness = SyncHarness()
+        let rig = FaultyDevice(harness)
+        let account = try await rig.signIn()
+        rig.tokens.failReads(with: FaultyTokenStore.Refused())
+        rig.transport.clearLog()
+        let removal = Removal()
+
+        await #expect(throws: FaultyTokenStore.Refused.self) { try await rig.engine.signOut { removal.run() } }
+        await rig.engine.waitUntilIdle()
+
+        #expect(!removal.ran, "the device's data stays")
+        #expect(rig.tokens.storedToken != nil, "and so does the session")
+        #expect(try rig.tokens.pendingLogouts().isEmpty)
+        #expect(try await rig.store.load()?.account == account)
+        #expect(rig.transport.requests.allSatisfy { $0.route != "POST /auth/logout" })
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1)
+        #expect(await rig.engine.status != .localOnly, "still signed in")
+
+        rig.tokens.failReads(with: nil)
+        #expect(await rig.engine.syncNow() == .idle(lastSyncedAt: harness.clock.now()), "and syncing carries on")
+    }
+}
+
+/// An engine over `FaultyTokenStore`, for the Keychain failures a `Device` can't stage.
+private struct FaultyDevice {
+    let harness: SyncHarness
+    let store = InMemoryDocumentStore()
+    let tokens = FaultyTokenStore()
+    let transport: FakeServerTransport
+    let engine: SyncEngine
+
+    init(_ harness: SyncHarness) {
+        self.harness = harness
+        transport = harness.server.makeTransport()
+        engine = SyncEngine(
+            store: store, tokenStore: tokens, transport: transport, now: harness.clock.provider,
+            configuration: SyncConfiguration(scheduler: ManualSyncScheduler(), jitter: { 0.5 }, clientVersion: "test"))
+    }
+
+    @discardableResult
+    func signIn() async throws -> LinkedAccount {
+        try await engine.signIn(
+            serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password)
+    }
+
+    /// Queues a new Inbox task the way the workspace does, without syncing it.
+    func queueTask(titled title: String) async throws {
+        let date = harness.clock.now()
+        _ = try await store.update { doc in
+            let command = GTDCommand.createTask(.init(taskID: "queued", title: title, list: .inbox))
+            doc.outbox = OutboxCompactor.appending(PendingOperation(command: command, issuedAt: date), to: doc.outbox)
+        }
+    }
+}
+
+/// Whether a sign-out ran its removal step.
+private final class Removal: Sendable {
+    private let state = Mutex(false)
+    func run() { state.withLock { $0 = true } }
+    var ran: Bool { state.withLock { $0 } }
+}
+
+/// An in-memory token store whose reads, or pending-logout writes, can be made to fail mid-test.
+final class FaultyTokenStore: SessionTokenStore {
+    struct Refused: Error {}
+    private struct Faults {
+        var read: (any Error & Sendable)?
+        var pendingLogouts = false
+    }
+
+    private let inner = InMemorySessionTokenStore()
+    private let faults = Mutex(Faults())
+
+    /// Every read throws `error` from now on; nil reads normally again.
+    func failReads(with error: (any Error & Sendable)?) { faults.withLock { $0.read = error } }
+    /// Recording a pending logout throws `Refused` from now on.
+    func failPendingLogouts() { faults.withLock { $0.pendingLogouts = true } }
+    /// The token for the fake server, read past any fault.
+    var storedToken: String? { try? inner.token(for: FakeBrainBuddyServer.baseURL) }
+
+    func token(for serverURL: URL) throws -> String? {
+        if let error = faults.withLock({ $0.read }) { throw error }
+        return try inner.token(for: serverURL)
+    }
+
+    func setToken(_ token: String, for serverURL: URL) throws { try inner.setToken(token, for: serverURL) }
+    func removeToken(for serverURL: URL) throws { try inner.removeToken(for: serverURL) }
+    func removeAllTokens() throws { try inner.removeAllTokens() }
+    func pendingLogouts() throws -> [PendingLogout] { try inner.pendingLogouts() }
+
+    func addPendingLogout(_ logout: PendingLogout) throws {
+        if faults.withLock({ $0.pendingLogouts }) { throw Refused() }
+        try inner.addPendingLogout(logout)
+    }
+
+    func removePendingLogout(_ logout: PendingLogout) throws { try inner.removePendingLogout(logout) }
 }
 
 /// What a sign-out's removal step saw.

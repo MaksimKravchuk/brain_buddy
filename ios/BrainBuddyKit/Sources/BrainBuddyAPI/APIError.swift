@@ -246,7 +246,11 @@ extension APIError {
     }
 
     static func tokenStorage(_ error: any Error) -> APIError {
-        APIError(
+        if let error = error as? TokenStoreError, error == .accessDenied {
+            // Not a passing failure: no retry can read the item, only a sign-in can replace it.
+            return APIError(kind: .unauthorized, message: "Sign in again to continue.", requestMayHaveBeenSent: false)
+        }
+        return APIError(
             kind: .tokenStorage(String(describing: error)),
             message: "Brain Buddy couldn't read your sign-in from this device. Unlock the device and try again.",
             requestMayHaveBeenSent: false

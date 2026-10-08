@@ -66,7 +66,7 @@ struct ProjectArchiveTraceReplayTests {
         arguments: traces
     )
     func traceReplaysAgainstTheFakeServer(_ trace: Trace) throws {
-        let replay = try Replay(trace)
+        let replay = try ProjectArchiveReplay(trace)
         for (index, step) in trace.steps.enumerated() {
             replay.run(step, index: index)
         }
@@ -77,7 +77,7 @@ struct ProjectArchiveTraceReplayTests {
 
 /// One trace against a fresh server with two signed-in accounts, run step by step as
 /// `backend/tests/test_project_archive_traces.py` runs it against the backend.
-private final class Replay {
+private final class ProjectArchiveReplay {
     let trace: ProjectArchiveTraceReplayTests.Trace
     let server: FakeBrainBuddyServer
     private let cookies: [String]

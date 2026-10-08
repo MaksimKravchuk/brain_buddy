@@ -168,6 +168,19 @@ struct SessionCookieTests {
         #expect(throws: APIError.self) { try client.hasStoredSession() }
     }
 
+    @Test("021-FR-005 021-FR-017 a session this build may not read is an ended session, and nothing is sent")
+    func deniedStoreIsAnEndedSession() async throws {
+        let transport = ScriptedTransport()
+        let client = Fixture.client(transport, store: DeniedTokenStore())
+
+        let error = try #require(await expectAPIError { _ = try await client.listTasks() })
+
+        #expect(error.kind == .unauthorized, "only a sign-in the person starts can replace the item")
+        #expect(!error.requestMayHaveBeenSent)
+        #expect(!error.isUncertainOutcome)
+        #expect(transport.requests.isEmpty)
+    }
+
     @Test("021-FR-005 021-FR-015 a session that can't be saved after login is ended at once and reported with a reference id")
     func unwritableStore() async throws {
         let transport = ScriptedTransport([

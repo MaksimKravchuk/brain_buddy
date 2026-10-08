@@ -14,18 +14,25 @@ extension SyncEngine {
         signingOut = true
         await stopWork()
         // Recorded first and kept in the token store, so a crash after the removal still ends the
-        // server session at the next launch. If the Keychain refuses, it expires by itself.
+        // server session at the next launch. A session that can't be read or recorded removes
+        // nothing: the device would say "signed out" while the session stays valid on the server.
         let url = signedOut.serverURL
-        let logout = storedToken(for: url).map { PendingLogout(serverURL: url, token: $0, signedOutAt: now()) }
-        if let logout, (try? tokenStore.addPendingLogout(logout)) != nil { mayHavePendingLogouts = true }
+        let logout: PendingLogout?
+        do {
+            logout = try tokenStore.token(for: url).map { PendingLogout(serverURL: url, token: $0, signedOutAt: now()) }
+            if let logout {
+                try tokenStore.addPendingLogout(logout)
+                mayHavePendingLogouts = true
+            }
+        } catch {
+            await resumeAfterFailedSignOut()
+            throw error
+        }
         do {
             try await remove()
         } catch {
             if let logout { try? tokenStore.removePendingLogout(logout) }
-            signingOut = false
-            if status == .syncing { await setStatus(.idle(lastSyncedAt: lastSyncedAt)) }
-            pullRequested = true
-            kick()
+            await resumeAfterFailedSignOut()
             throw error
         }
         epoch += 1
@@ -38,6 +45,14 @@ extension SyncEngine {
         // Signed out here at once; the server is told now, or when the network is back.
         if let logout, networkAvailable, await send(logout) == .done { try? tokenStore.removePendingLogout(logout) }
         await setStatus(.localOnly)
+    }
+
+    /// A sign-out that removed nothing: still signed in, so syncing picks up where it stopped.
+    private func resumeAfterFailedSignOut() async {
+        signingOut = false
+        if status == .syncing { await setStatus(.idle(lastSyncedAt: lastSyncedAt)) }
+        pullRequested = true
+        kick()
     }
 
     public func discardStaleSessions(loggingOut previous: LinkedAccount?) async {
