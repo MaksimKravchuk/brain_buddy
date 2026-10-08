@@ -210,7 +210,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const skip = () => request(() => advance("skipped"));
   // A form's own Back closes only that form, so the rest of the step keeps its state.
   const confirmDiscard = (close: () => void) => request(close, false, true);
-  const run: ReviewRun = { session, state, progress, beginWrite, setQueueBlocked, setUnsaved, confirmDiscard, skipStep: skip, finish };
+  const run: ReviewRun = { session, state, progress, beginWrite, writing, setQueueBlocked, setUnsaved, confirmDiscard, skipStep: skip, finish };
   // Next and Skip also wait for the connection; Leave stays available offline, where a write fails and settles.
   const held = bar.disabled || writing;
   // Next also waits for the step's queue: finishing a step whose tasks were never shown would skip them

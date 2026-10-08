@@ -60,6 +60,10 @@ export function DecisionsStep(): React.JSX.Element {
   };
 
   const notNow = (task: TaskResponse) => {
+    // The card's own decision may still be saving: passing it now would hide its answer (FR-048).
+    if (run.writing) {
+      return;
+    }
     const attempt = newProgressAttempt(run.session.id, { set_aside_task_id: task.id });
     void action.run("not_now", "Not now", async () => {
       await run.progress(attempt);
@@ -123,7 +127,7 @@ export function DecisionsStep(): React.JSX.Element {
             />
             {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
             <div>
-              <button type="button" disabled={action.disabled} className={buttonClass} onClick={() => notNow(current)}>
+              <button type="button" disabled={action.disabled || run.writing} className={buttonClass} onClick={() => notNow(current)}>
                 {action.pending === "not_now" ? "Saving…" : "Not now"}
               </button>
             </div>

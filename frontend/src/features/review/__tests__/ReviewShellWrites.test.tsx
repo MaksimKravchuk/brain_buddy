@@ -114,6 +114,25 @@ describe("020-FR-048 the shell waits for the step's writes", () => {
     expectFree();
   });
 
+  it("020-FR-048 Not now waits while the card's decision saves, so the card is never both decided and set aside", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queue([bathroom, cv]));
+    const saving = deferred<DecisionResponse>();
+    decide.mockReturnValueOnce(saving.promise);
+    renderShell(inDecisions());
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+
+    await user.click(within(screen.getByRole("group", { name: "Decisions" })).getByRole("button", { name: /^Release to Someday/ }));
+    const notNow = screen.getByRole("button", { name: "Not now" });
+    expect(notNow).toBeDisabled();
+    await user.click(notNow);
+    expect(progress).not.toHaveBeenCalled();
+
+    await act(async () => saving.resolve(released(bathroom)));
+    expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Not now" })).toBeEnabled();
+  });
+
   it("020-FR-048 a decision that fails frees the bar again with its error and Retry still on the card", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValue(queue([bathroom, cv]));

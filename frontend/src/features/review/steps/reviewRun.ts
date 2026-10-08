@@ -19,6 +19,12 @@ export interface ReviewRun {
    */
   beginWrite: () => () => void;
   /**
+   * Some write of the run is in flight (FR-048). A step's own move-on controls
+   * (Not now beside an inline decision card) wait for it too, so a card is never
+   * passed while its decision is still saving.
+   */
+  writing: boolean;
+  /**
    * The step's queue is still loading or failed to load (D-03): the shell keeps its
    * Next disabled, so a step is never finished unseen. Skip step stays, because the
    * load failure offers Retry or Skip. Only the step that reported it can hold it:
