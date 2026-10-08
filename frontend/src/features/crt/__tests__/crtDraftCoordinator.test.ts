@@ -584,6 +584,39 @@ describe("CRT draft persistence/reconciliation coordinator", () => {
     expect(await cleanupCrtOwnerScope("cleanup-owner", origin)).toEqual({ ok: true, removed: 0 });
   });
 
+  it("020-FR-052 cleanup honours the caller's loss confirmation: false refuses unprompted, undefined asks, true removes unprompted", async () => {
+    const ownerId = "owner-loss-confirmed";
+    const origin = "https://owner-loss-confirmed.example.test";
+    const activeTree = { ...tree, owner_id: ownerId, metadata: { ...tree.metadata, owner_id: ownerId } };
+    const active = createCoordinator({ owner_id: ownerId, origin, tree_id: activeTree.id, storage: null, lock_manager: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    Object.defineProperty(navigator, "locks", { configurable: true, value: lockManager });
+
+    try {
+      await active.persistBeforeSave(activeTree, graph);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: false })).toEqual({ ok: false, reason: "transition-cancelled" });
+      expect(confirm).not.toHaveBeenCalled();
+      expect(active.hasPendingDraft()).toBe(true);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin)).toEqual({ ok: false, reason: "transition-cancelled" });
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(active.hasPendingDraft()).toBe(true);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: true })).toEqual({ ok: true, removed: 1 });
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(active.hasPendingDraft()).toBe(false);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: false })).toEqual({ ok: true, removed: 0 });
+    } finally {
+      confirm.mockRestore();
+      if (originalLocks === undefined) Reflect.deleteProperty(navigator, "locks");
+      else Object.defineProperty(navigator, "locks", originalLocks);
+      active.dispose();
+    }
+  });
+
   it("020-FR-052 counts the owner's drafts a sign-out would remove, once each, memory-only ones included, removing none", async () => {
     const owner = "owner-count";
     const origin = "https://owner-count.example.test";

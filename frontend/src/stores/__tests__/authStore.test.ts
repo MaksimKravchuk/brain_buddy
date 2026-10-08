@@ -82,6 +82,39 @@ describe("authStore", () => {
     expect(useAuthStore.getState().status).toBe("anon");
   });
 
+  it("020-FR-052 logout hands a confirmed loss to the departing owner's CRT cleanup, and a refused one stays signed in", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 2 });
+    const logoutSpy = vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    await expect(useAuthStore.getState().logout({ lossConfirmed: true })).resolves.toBe(true);
+    expect(cleanup).toHaveBeenCalledWith("u1", window.location.origin, { lossConfirmed: true });
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    logoutSpy.mockClear();
+    cleanup.mockResolvedValue({ ok: false, reason: "transition-cancelled" });
+    await expect(useAuthStore.getState().logout({ lossConfirmed: false })).resolves.toBe(false);
+    expect(cleanup).toHaveBeenLastCalledWith("u1", window.location.origin, { lossConfirmed: false });
+    expect(logoutSpy).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().status).toBe("authed");
+  });
+
+  it("020-FR-052 a confirmed logout keeps the native prompt for another server owner's work", async () => {
+    useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
+    const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: true, removed: 0 });
+    vi.spyOn(authApi, "me")
+      .mockResolvedValueOnce({ id: "u2", email: "b@b.c" })
+      .mockResolvedValueOnce({ id: "u2", email: "b@b.c" })
+      .mockResolvedValueOnce(null);
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+
+    await expect(useAuthStore.getState().logout({ requireServerConfirmation: true, lossConfirmed: true })).resolves.toBe(true);
+
+    expect(cleanup).toHaveBeenNthCalledWith(1, "u2", window.location.origin);
+    expect(cleanup).toHaveBeenNthCalledWith(2, "u1", window.location.origin, { lossConfirmed: true });
+  });
+
   it("cancels logout when departing-owner CRT cleanup fails", async () => {
     useAuthStore.setState({ user: { id: "u1", email: "a@b.c" }, status: "authed" });
     const cleanup = vi.spyOn(crtBoundary, "cleanupCrtOwnerScope").mockResolvedValue({ ok: false, reason: "cleanup-failed" });

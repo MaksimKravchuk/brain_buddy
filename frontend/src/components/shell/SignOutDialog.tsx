@@ -14,15 +14,18 @@ import { signOutSentences, type SignOutSummary } from "./signOutSummary";
 export function SignOutDialog({
   summary,
   pending,
-  failed,
+  notice,
   onCancel,
   onConfirm
 }: {
   summary: SignOutSummary;
   /** Signing out is under way: Esc and both buttons wait. */
   pending: boolean;
-  /** The last attempt did not sign out; the person is still signed in. */
-  failed: boolean;
+  /**
+   * `failed`: the last attempt did not sign out and the person is still signed in.
+   * `changed`: unsaved work appeared after the dialog opened; nothing was removed.
+   */
+  notice: "failed" | "changed" | null;
   onCancel: () => void;
   onConfirm: () => void;
 }): React.JSX.Element {
@@ -32,8 +35,11 @@ export function SignOutDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    cancelRef.current?.focus();
-  }, []);
+    // The safe action has the focus on open and again when an attempt ends. Both
+    // buttons are disabled while signing out: focus then parks on the panel so
+    // Tab has somewhere to stay (see `trapTab`).
+    (pending ? panelRef.current : cancelRef.current)?.focus();
+  }, [pending]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -62,8 +68,9 @@ export function SignOutDialog({
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         aria-busy={pending}
+        tabIndex={-1}
         onKeyDown={onPanelKeyDown}
-        className="w-full max-w-md rounded-[20px] border border-slate-200 bg-white p-5 shadow-floating motion-safe:animate-scale-fade-in"
+        className="w-full max-w-md outline-hidden rounded-[20px] border border-slate-200 bg-white p-5 shadow-floating motion-safe:animate-scale-fade-in"
       >
         <h2 id={titleId} className="m-0 text-[20px] font-semibold leading-[1.3] text-slate-900">
           Sign out?
@@ -75,9 +82,11 @@ export function SignOutDialog({
             </p>
           ))}
         </div>
-        {failed ? (
+        {notice ? (
           <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Sign-out didn&apos;t finish. You&apos;re still signed in. Try again.
+            {notice === "changed"
+              ? "Something changed since this opened. Check and confirm again."
+              : "Sign-out didn't finish. You're still signed in. Try again."}
           </p>
         ) : null}
         <div className="mt-5 flex flex-wrap justify-end gap-2">

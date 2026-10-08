@@ -652,14 +652,23 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
   (PR #301); the web signed out in one click, discarding the account's
   `bb.reviewFormDraft.v1.*` keys silently, which FR-052 rules out. Delivered as a
   small single-surface change under FR-052, outside the PR-срезы map and with no new
-  task id: the account menu's "Sign out" opens "Sign out?" (Cancel first and
-  focused, Esc cancels), the body names "N unsaved weekly-review draft(s) will also
-  be removed from this browser." and, from the CRT store, unsaved Thinking Mode
-  drafts, and `logout()` is unchanged behind Sign out; a `logout()` that does not
-  finish shows an error and stays. Tests carry `020-FR-052`
+  task id. The owner asked for one shared confirmation that says the data will be
+  lost: the account menu's "Sign out" opens "Sign out?" (Cancel first and focused,
+  Esc cancels) with the base sentence and, only when the browser holds unsaved
+  weekly-review or Thinking Mode drafts, "Unsaved changes in this browser will be
+  lost: they have not been saved to your account." (tasks stay in the account, so
+  nothing claims more). The dialog is the only prompt: `logout({ lossConfirmed })`
+  reaches `cleanupCrtOwnerScope`, which skips the native `window.confirm` when true
+  and refuses unprompted when false (work the dialog did not show); omitted, every
+  other caller keeps the native prompt. Unsaved work that appears after the dialog
+  opened re-presents it with the warning and "Something changed since this opened.
+  Check and confirm again."; a `logout()` that does not finish shows an error and
+  stays. Tests carry `020-FR-052`
   (`frontend/src/components/shell/__tests__/{AppShell,SignOutDialog}.test.tsx`,
-  `frontend/src/features/review/__tests__/reviewFormDrafts.test.ts`). Not counted
-  and not removed: unsent task-detail edits kept per tab in `sessionStorage`.
+  `frontend/src/stores/__tests__/authStore.test.ts`,
+  `frontend/src/features/crt/__tests__/crtDraftCoordinator.test.ts`,
+  `frontend/src/features/review/__tests__/{reviewFormDrafts,focusTrap}.test.ts`). Not
+  reported and not removed: unsent task-detail edits kept per tab in `sessionStorage`.
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
   review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and

@@ -1,50 +1,42 @@
 import { getApiBaseUrl } from "../../api/client";
 import { countCrtOwnerDrafts } from "../../features/crt/crtDraftCoordinator";
-import { plural } from "../../features/review/plural";
 import { countUnsavedReviewDrafts } from "../../features/review/reviewFormDrafts";
 
 /**
- * The unsaved work in this browser that signing out removes, as far as the code
- * can count it without asking the server (spec 020, FR-052).
+ * Whether this browser holds unsaved local work that signing out removes
+ * (spec 020, FR-052): weekly-review form text in `localStorage`
+ * (`clearReviewLocalState`) or Thinking Mode drafts not yet saved online
+ * (`cleanupCrtOwnerScope` in `logout()`).
  *
- * - `reviewDrafts`: weekly-review form text kept in `localStorage`, removed by
- *   `clearReviewLocalState` when the account departs.
- * - `crtDrafts`: Thinking Mode drafts not yet saved online, removed by
- *   `cleanupCrtOwnerScope` in `logout()`.
- *
- * A count that cannot be read (storage refused, listing failed) is 0: the
- * dialog then names nothing rather than a number it does not know, and
- * `logout()` still asks before dropping Thinking Mode drafts it finds.
+ * Work that cannot be read (storage refused, listing failed) is not reported:
+ * the dialog then shows only its base sentence, and `logout()` called with
+ * `lossConfirmed: false` refuses to drop Thinking Mode drafts it finds anyway.
  */
 export interface SignOutSummary {
-  reviewDrafts: number;
-  crtDrafts: number;
+  unsavedWork: boolean;
 }
+
+export const SIGN_OUT_BASE =
+  "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account.";
+export const SIGN_OUT_LOSS = "Unsaved changes in this browser will be lost: they have not been saved to your account.";
 
 export async function loadSignOutSummary(accountId: string): Promise<SignOutSummary> {
   let reviewDrafts = 0;
   try {
     reviewDrafts = countUnsavedReviewDrafts({ apiOrigin: getApiBaseUrl(), accountId });
   } catch {
-    // Storage can refuse access (private mode); there is then no draft to name.
+    // Storage can refuse access (private mode); there is then no draft to warn about.
   }
   let crtDrafts: number | null = null;
   try {
     crtDrafts = await countCrtOwnerDrafts(accountId);
   } catch {
-    // Not listable: left unnamed, as above.
+    // Not listable: left unreported, as above.
   }
-  return { reviewDrafts, crtDrafts: crtDrafts ?? 0 };
+  return { unsavedWork: reviewDrafts > 0 || (crtDrafts ?? 0) > 0 };
 }
 
-/** The dialog body, in the native apps' order: the base sentence, then one sentence per kind of unsaved work. */
+/** The dialog body: the base sentence, then one general loss sentence only when unsaved work exists. */
 export function signOutSentences(summary: SignOutSummary): string[] {
-  const sentences = ["You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account."];
-  if (summary.reviewDrafts > 0) {
-    sentences.push(`${plural(summary.reviewDrafts, "unsaved weekly-review draft")} will also be removed from this browser.`);
-  }
-  if (summary.crtDrafts > 0) {
-    sentences.push(`${plural(summary.crtDrafts, "unsaved Thinking Mode draft")} will also be removed from this browser.`);
-  }
-  return sentences;
+  return summary.unsavedWork ? [SIGN_OUT_BASE, SIGN_OUT_LOSS] : [SIGN_OUT_BASE];
 }

@@ -318,7 +318,7 @@ function AccountMenu(): React.JSX.Element {
   // The sign-out confirmation (020-FR-052): set while it is on screen.
   const [signOutSummary, setSignOutSummary] = useState<SignOutSummary | null>(null);
   const [signingOut, setSigningOut] = useState(false);
-  const [signOutFailed, setSignOutFailed] = useState(false);
+  const [signOutNotice, setSignOutNotice] = useState<"failed" | "changed" | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
@@ -348,28 +348,50 @@ function AccountMenu(): React.JSX.Element {
 
   const requestSignOut = async () => {
     setOpen(false);
-    setSignOutFailed(false);
+    setSignOutNotice(null);
     setSignOutSummary(await loadSignOutSummary(user?.id ?? ""));
   };
   const cancelSignOut = useCallback(() => {
     setSignOutSummary(null);
     triggerRef.current?.focus();
   }, []);
-  const confirmSignOut = async () => {
+  const confirmSignOut = async (shown: SignOutSummary) => {
     setSigningOut(true);
-    setSignOutFailed(false);
+    setSignOutNotice(null);
+    if (!shown.unsavedWork) {
+      // Unsaved work that appeared since the dialog opened (another tab) was not
+      // warned about: show the warning and wait for a second confirmation.
+      const fresh = await loadSignOutSummary(user?.id ?? "");
+      if (fresh.unsavedWork) {
+        setSigningOut(false);
+        setSignOutSummary(fresh);
+        setSignOutNotice("changed");
+        return;
+      }
+    }
     let signedOut = false;
     try {
-      signedOut = await logout();
+      // This dialog is the one confirmation: logout() must not ask again, and
+      // refuses (removing nothing) if it finds Thinking Mode drafts this dialog did not warn about.
+      signedOut = await logout({ lossConfirmed: shown.unsavedWork });
     } catch {
       // A refused cleanup or a server error: the session is still in place.
     }
-    setSigningOut(false);
     if (signedOut) {
+      setSigningOut(false);
       setSignOutSummary(null);
       navigate("/login");
+      return;
+    }
+    // Not signed out. If the cause is work that appeared between the check
+    // above and the cleanup, say so instead of a generic failure.
+    const fresh = shown.unsavedWork ? shown : await loadSignOutSummary(user?.id ?? "");
+    setSigningOut(false);
+    if (fresh.unsavedWork && !shown.unsavedWork) {
+      setSignOutSummary(fresh);
+      setSignOutNotice("changed");
     } else {
-      setSignOutFailed(true);
+      setSignOutNotice("failed");
     }
   };
 
@@ -460,9 +482,9 @@ function AccountMenu(): React.JSX.Element {
             <SignOutDialog
               summary={signOutSummary}
               pending={signingOut}
-              failed={signOutFailed}
+              notice={signOutNotice}
               onCancel={cancelSignOut}
-              onConfirm={() => void confirmSignOut()}
+              onConfirm={() => void confirmSignOut(signOutSummary)}
             />,
             document.body
           )

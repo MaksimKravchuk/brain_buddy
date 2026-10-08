@@ -8,11 +8,11 @@ import { saveReviewDraft } from "../../../features/review/reviewFormDrafts";
 import { SignOutDialog } from "../SignOutDialog";
 import { loadSignOutSummary, signOutSentences, type SignOutSummary } from "../signOutSummary";
 
-const none: SignOutSummary = { reviewDrafts: 0, crtDrafts: 0 };
+const none: SignOutSummary = { unsavedWork: false };
 
 function renderDialog(overrides: Partial<Parameters<typeof SignOutDialog>[0]> = {}) {
   const handlers = { onCancel: vi.fn(), onConfirm: vi.fn() };
-  render(<SignOutDialog summary={none} pending={false} failed={false} {...handlers} {...overrides} />);
+  render(<SignOutDialog summary={none} pending={false} notice={null} {...handlers} {...overrides} />);
   return handlers;
 }
 
@@ -26,36 +26,26 @@ afterEach(() => {
 });
 
 describe("Sign-out confirmation copy and behaviour", () => {
-  it("020-FR-052 gives a short plain confirmation when nothing unsaved would be removed", () => {
+  it("020-FR-052 gives a short plain confirmation when nothing unsaved would be lost", () => {
     renderDialog();
 
     const dialog = screen.getByRole("alertdialog", { name: "Sign out?" });
     expect(dialog).toHaveAccessibleDescription(
       "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account."
     );
-    expect(dialog).not.toHaveTextContent("will also be removed");
+    expect(dialog).not.toHaveTextContent("will be lost");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it.each([
-    [1, "1 unsaved weekly-review draft will also be removed from this browser."],
-    [2, "2 unsaved weekly-review drafts will also be removed from this browser."]
-  ])("020-FR-052 names %i unsaved weekly-review draft(s) in the native apps' words", (count, sentence) => {
-    renderDialog({ summary: { reviewDrafts: count, crtDrafts: 0 } });
+  it("020-FR-052 warns once, in general words, that unsaved changes in this browser will be lost", () => {
+    renderDialog({ summary: { unsavedWork: true } });
 
-    expect(screen.getByRole("alertdialog")).toHaveTextContent(sentence);
-    expect(screen.getByRole("alertdialog")).not.toHaveTextContent("Thinking Mode");
-  });
-
-  it("020-FR-052 names unsaved Thinking Mode drafts after the review drafts", () => {
-    expect(signOutSentences({ reviewDrafts: 1, crtDrafts: 1 })).toEqual([
-      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account.",
-      "1 unsaved weekly-review draft will also be removed from this browser.",
-      "1 unsaved Thinking Mode draft will also be removed from this browser."
-    ]);
-    expect(signOutSentences({ reviewDrafts: 0, crtDrafts: 3 })[1]).toBe(
-      "3 unsaved Thinking Mode drafts will also be removed from this browser."
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription(
+      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account. " +
+        "Unsaved changes in this browser will be lost: they have not been saved to your account."
     );
+    expect(signOutSentences({ unsavedWork: true })).toHaveLength(2);
+    expect(signOutSentences({ unsavedWork: false })).toHaveLength(1);
   });
 
   it("020-FR-052 starts on Cancel, cancels on Escape, and runs Sign out only from its own button", async () => {
@@ -98,27 +88,49 @@ describe("Sign-out confirmation copy and behaviour", () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  it("020-FR-052 says the person is still signed in after a sign-out that did not finish", () => {
-    renderDialog({ failed: true });
+  it("020-FR-052 while signing out Tab and Shift+Tab neither throw nor leave the dialog", async () => {
+    const user = userEvent.setup();
+    renderDialog({ pending: true });
+    const dialog = screen.getByRole("alertdialog");
+
+    expect(dialog).toHaveFocus();
+    await user.tab();
+    expect(dialog).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(dialog).toHaveFocus();
+  });
+
+  it("020-FR-052 says the person is still signed in after a sign-out that did not finish, or that something changed", () => {
+    const { unmount } = render(<SignOutDialog summary={none} pending={false} notice="failed" onCancel={vi.fn()} onConfirm={vi.fn()} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("Sign-out didn't finish. You're still signed in. Try again.");
     expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    unmount();
+
+    render(<SignOutDialog summary={{ unsavedWork: true }} pending={false} notice="changed" onCancel={vi.fn()} onConfirm={vi.fn()} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Something changed since this opened. Check and confirm again.");
   });
 });
 
 describe("Sign-out summary of unsaved local work", () => {
-  it("020-FR-052 counts this account's weekly-review drafts and the Thinking Mode drafts", async () => {
+  it("020-FR-052 reports unsaved work from this account's weekly-review drafts alone", async () => {
+    vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValue(0);
     const scope = { apiOrigin: getApiBaseUrl(), accountId: "user-1" };
-    saveReviewDraft(scope, { kind: "task", taskId: "t1", formulationId: "f1" }, { form: "reformulate", text: "one" });
-    saveReviewDraft(scope, { kind: "project", projectId: "p1" }, { form: "first_step", text: "two" });
     saveReviewDraft({ ...scope, accountId: "user-2" }, { kind: "project", projectId: "p1" }, { form: "first_step", text: "other" });
+    await expect(loadSignOutSummary("user-1")).resolves.toEqual({ unsavedWork: false });
+
+    saveReviewDraft(scope, { kind: "task", taskId: "t1", formulationId: "f1" }, { form: "reformulate", text: "one" });
+    await expect(loadSignOutSummary("user-1")).resolves.toEqual({ unsavedWork: true });
+  });
+
+  it("020-FR-052 reports unsaved work from Thinking Mode drafts alone", async () => {
     const count = vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValue(4);
 
-    await expect(loadSignOutSummary("user-1")).resolves.toEqual({ reviewDrafts: 2, crtDrafts: 4 });
+    await expect(loadSignOutSummary("user-1")).resolves.toEqual({ unsavedWork: true });
     expect(count).toHaveBeenCalledWith("user-1");
   });
 
-  it("020-FR-052 names nothing it cannot count: a refused store or an unlistable CRT store reads as none", async () => {
+  it("020-FR-052 reports nothing it cannot read: a refused store or an unlistable CRT store reads as none", async () => {
     const refused = vi.spyOn(window, "localStorage", "get").mockImplementation(() => { throw new Error("denied"); });
     const count = vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValue(null);
     try {

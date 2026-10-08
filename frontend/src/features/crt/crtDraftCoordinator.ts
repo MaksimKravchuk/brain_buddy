@@ -971,8 +971,19 @@ export async function countCrtOwnerDrafts(ownerId: string, origin = globalThis.l
  * The cleanup is fail-closed: a storage/read-back failure leaves the session
  * in place so the caller cannot claim that the departing owner's bytes were
  * cleared.
+ *
+ * `options.lossConfirmed` says whether the caller already asked the person
+ * about losing unsaved work: `true` skips the native `window.confirm` and
+ * removes; `false` means the caller warned of no unsaved work, so pending work
+ * found here is refused (`transition-cancelled`, nothing removed, no prompt);
+ * `undefined` keeps the native `window.confirm` for callers with no dialog of
+ * their own.
  */
-export async function cleanupCrtOwnerScope(ownerId: string, origin = globalThis.location?.origin ?? ""): Promise<CrtOwnerCleanupResult> {
+export async function cleanupCrtOwnerScope(
+  ownerId: string,
+  origin = globalThis.location?.origin ?? "",
+  options: Readonly<{ lossConfirmed?: boolean }> = {}
+): Promise<CrtOwnerCleanupResult> {
   const normalizedOrigin = normalizeOrigin(origin);
   if (!ownerId || !normalizedOrigin) return { ok: false, reason: "cleanup-failed" };
   const active = activeCoordinatorsFor(ownerId, normalizedOrigin);
@@ -985,11 +996,16 @@ export async function cleanupCrtOwnerScope(ownerId: string, origin = globalThis.
       active.forEach((coordinator) => coordinator.dispose());
       return { ok: true, removed: 0 };
     }
-    if (typeof globalThis.window?.confirm !== "function") {
-      return { ok: false, reason: "cleanup-failed" };
-    }
-    if (!globalThis.window.confirm(CRT_ONLINE_ONLY_LOSS_MESSAGE)) {
+    if (options.lossConfirmed === false) {
       return { ok: false, reason: "transition-cancelled" };
+    }
+    if (options.lossConfirmed !== true) {
+      if (typeof globalThis.window?.confirm !== "function") {
+        return { ok: false, reason: "cleanup-failed" };
+      }
+      if (!globalThis.window.confirm(CRT_ONLINE_ONLY_LOSS_MESSAGE)) {
+        return { ok: false, reason: "transition-cancelled" };
+      }
     }
     // Keep active coordinators registered until every coordinator-local draft
     // has been discarded and the owner-wide deletion has verified every
