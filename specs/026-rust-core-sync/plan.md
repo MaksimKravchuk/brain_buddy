@@ -169,9 +169,9 @@ Start with a pilot on existing Apple clients. New sync is off by default for an 
 ## Constitution Check
 
 - Consent/local-first: FR-001/018–022, separate sync and AI permissions, ADR-0002 preserved.
-- Contract ownership: module boundaries in ADR-0001 and Tasks review in ADR-0027 preserved; storage/FFI changes require [adr-draft.md](adr-draft.md).
+- Contract ownership: module boundaries in ADR-0001 and Tasks review behavior/content limits in ADR-0027 preserved; storage/FFI and content-free command-metadata retention changes require [adr-draft.md](adr-draft.md).
 - Tests: existing parity tests plus only missing protocol/FFI/migration invariants; the strategy above follows Principle II.
-- Observability: FR-023 and signal table, no-content diagnostics, current correlation IDs.
+- Observability: FR-023 and signal table, no-content diagnostics, current correlation IDs. Constitution IV's broad client-ID restriction needs the narrow proposed command-identity amendment in `adr-draft.md`; T001 must obtain acceptance and update dependent documents before implementation. Dedicated command deduplication IDs never grant authority and remain separate from observability IDs.
 - Mobile/CRT: UI does not wait for network; background work is bounded; CRT storage/protocol remain unchanged, and performance regression is checked by the existing scenario.
 - Design: [design.md](design.md), M-01…M-04/D-01…D-04; human sign-off pending. This is why the status is proposal, not invented approval.
 - Delivery: isolated worktree; documents do not authorize product migrations. Formal five-lens review and agreed PR slices remain required before implementation.
@@ -197,4 +197,4 @@ Existing integration points: `ios/BrainBuddyKit/Sources/BrainBuddy{Core,Persiste
 
 ## Decisions Not Yet Made on the User's Behalf
 
-The new conflict/recovery UX and a narrow change to accepted ADRs must be accepted before implementation. E2EE, shared spaces/assignees, and release order after Apple remain separate product decisions; the proposed baseline allows development of private trusted-server sync without inventing their semantics. Target devices/load and retention/compatibility defaults are fixed in the first contract slice based on measurements and validation of existing constraints.
+The new conflict/recovery UX, narrow changes to accepted ADRs, and the proposed Constitution IV command-identity amendment must be accepted before implementation. E2EE, shared spaces/assignees, and release order after Apple remain separate product decisions; the proposed baseline allows development of private trusted-server sync without inventing their semantics. Target devices/load and retention/compatibility defaults are fixed in the first contract slice based on measurements and validation of existing constraints.

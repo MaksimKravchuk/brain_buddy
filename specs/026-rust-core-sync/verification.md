@@ -45,6 +45,10 @@ The subsequent sequencing review found that T007/T011 depended on job authority/
 
 A further receipt-ordering review found that mutable version/schema/size validation could prevent recovery of a retained outcome. Current authority and bounded generic envelope parsing now precede receipt matching; only unseen commands face current execution rules. Version retirement retains bounded parsing/fingerprint compatibility and authorized result lookup for retained receipts, without allowing retired commands to execute again.
 
+The retention review found that a proposed 30-day full-response window contradicted the accepted 24-hour task/Review content bound. Full response bodies now expire within 24 hours, including when the owner is inactive or the Review flag is off; only content-free outcome/deduplication metadata survives until account purge. Capture and CRT exceptions retain their separate scope.
+
+The independent retention/compatibility audit also applies source deadlines to every feed/snapshot/receipt copy, preserves legacy Review matching-record responses and Capture commit recovery, and retains Review progress merge and bulk per-item skip semantics instead of imposing universal revision conflicts. The ADR and T001 explicitly identify the proposed Constitution IV command-identity amendment and content-free metadata retention decision as prerequisites to implementation, without claiming acceptance.
+
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.

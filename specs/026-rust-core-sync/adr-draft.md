@@ -8,7 +8,11 @@ The normative Tasks and native-task Review rules are implemented in one pure Rus
 
 ## Decisions being amended
 
-ADR-0001 changes only in the implementation of Tasks rules and its server persistence. Data ownership, application ports, and Capture/Organize/Tasks/Thinking/Execution/Identity boundaries remain. ADR-0027 changes only in storage technology and shared-rule implementation; its auto-park, yield, and review semantics and task+review atomicity remain mandatory.
+ADR-0001 changes only in the implementation of Tasks rules and its server persistence. Data ownership, application ports, and Capture/Organize/Tasks/Thinking/Execution/Identity boundaries remain. ADR-0027's storage technology and shared-rule implementation change, with the command-metadata extension below; its auto-park, yield, review semantics, content-retention limits, and task+review atomicity remain mandatory.
+
+The new protocol additionally proposes durable content-free command deduplication metadata until account purge, beyond the current ordinary 24-hour idempotency window. It preserves ADR-0027's existing matching-record replay and content limits: ordinary task/Review full responses expire within 24 hours, and Review undo/bulk snapshot content within seven days, including copies in the new feed and snapshots. Capture's original commit-recovery exception and CRT's separate policy remain scoped to their existing contracts. This metadata extension must be recorded in the accepted ADR and retention documentation before rollout; it does not authorize longer retention of user text.
+
+Constitution IV requires a proposed narrow amendment before implementation: dedicated owner-scoped command IDs may identify an immutable command for durable deduplication, while observability/correlation IDs remain neither authorization nor deduplication inputs. No client-supplied ID grants authority, changed content under one command ID is rejected, and entity IDs alone do not authorize upsert or replay outside accepted domain contracts. ADR-0027's bounded Review exception remains intact. Acceptance must update the constitution and dependent documentation with preserved history; this draft does not claim that amendment is already approved.
 
 The current `ios/AGENTS.md` instruction, “No third-party dependencies,” needs a narrow allowance for audited, pinned Rust bindings and their required runtime. The product dependency policy can change only after that amendment is accepted; arbitrary Apple packages are not permitted.
 

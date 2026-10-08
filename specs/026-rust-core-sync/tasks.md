@@ -4,7 +4,7 @@ Status: draft sequence, not authorization to execute product changes. The user r
 
 ## Phase 1 — Freeze the contract
 
-- [ ] T001 Clarify and accept `specs/026-rust-core-sync/design.md`, `adr-draft.md`, and the proposed contract defaults; record actual decisions without assigning human sign-off automatically.
+- [ ] T001 Clarify and accept `specs/026-rust-core-sync/design.md`, `adr-draft.md`, and the proposed contract defaults, including the narrow Constitution IV command-identity amendment and content-free deduplication retention decision; update the constitution and dependent retention documentation only after acceptance. Record actual decisions without assigning human sign-off automatically.
 - [ ] T002 Run the mandatory ADR-0011 planning review against current `spec.md`, `design.md`, `plan.md`, and `contracts/sync-v1.md`; fix confirmed defects and obtain an admissible verdict.
 - [ ] T003 Produce schemas/OpenAPI, a mapping of every current writer/command, and the PR-slice map in `specs/026-rust-core-sync/contracts/` and this file; verify FR-001…FR-026 coverage and run analyze. Coding does not begin before contracts are frozen.
 
