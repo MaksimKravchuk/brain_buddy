@@ -86,7 +86,8 @@ final class MacSyncRuntime {
         if becameVisible { await triggers.handle(.windowBecameVisible) }
     }
 
-    /// `applicationShouldTerminate`: what was typed is on disk before the process ends.
+    /// `applicationShouldTerminate`: what was typed is on disk, and a confirmed sign-out's data is
+    /// removed, before the process ends.
     func terminate() async {
         await triggers.handle(.willTerminate)
         triggers.stop()
@@ -98,7 +99,8 @@ final class MacSyncRuntime {
     static var current: MacSyncRuntime?
 }
 
-/// Termination waits for the workspace's last write (`flush()`), then quits.
+/// Termination waits for the workspace's last write (`flush()`) and a confirmed sign-out's local
+/// removal (`SyncTriggerSource`, `.willTerminate`), then quits.
 final class MacAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let runtime = MacSyncRuntime.current else { return .terminateNow }

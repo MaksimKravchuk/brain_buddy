@@ -7,3 +7,4 @@ default_subagent_reasoning_effort = "medium"
 [features.multi_agent_v2]
 enabled = true
 expose_spawn_agent_model_overrides = true
+max_concurrent_threads_per_session = 12

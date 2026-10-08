@@ -55,6 +55,10 @@ package final class SignInFlow {
         case editing
         /// One request is on its way; the fields are read-only, Cancel and Esc stay enabled.
         case signingIn
+        /// Cancelled while signing in: the typed values are back and editable, but "Sign in" stays
+        /// disabled until the cancelled request (and the kit's cleanup of a late reply) has ended, so
+        /// two logins never overlap. Cancel and Esc close the sheet.
+        case cancelling
         /// The account is linked and its first sync runs: still "Signing in…", but Cancel and Esc no
         /// longer apply (the kit refuses a Cancel once the link won), so the sheet never reports as
         /// cancelled a sign-in that linked the account.
@@ -148,7 +152,7 @@ package final class SignInFlow {
         switch phase {
         case .finishing: false
         case .signingIn: !(cancellation?.isCommitted ?? false)
-        case .editing, .deletionCancelledNote, .finished: true
+        case .editing, .cancelling, .deletionCancelledNote, .finished: true
         }
     }
 
@@ -196,8 +200,9 @@ package final class SignInFlow {
 
     /// Cancel or Esc. While "Signing in…" it stops the request, keeps the typed values, puts focus in
     /// Password and changes nothing (if the server's reply arrives after this, the kit ends that
-    /// session at once and links nothing). Once the account is linked it does nothing: the sign-in
-    /// finishes and the sheet closes signed in. Returns true when the sheet should close.
+    /// session at once and links nothing); "Sign in" comes back once that request has ended
+    /// (`.cancelling`). Once the account is linked it does nothing: the sign-in finishes and the
+    /// sheet closes signed in. Returns true when the sheet should close.
     @discardableResult
     package func cancel() -> Bool {
         if phase == .finishing { return false }
@@ -209,10 +214,18 @@ package final class SignInFlow {
         }
         attemptID += 1
         attempt?.cancel()
-        phase = .editing
+        phase = .cancelling
         log.log(.sync, "sign-in cancelled")
         moveFocus(.signInPassword)
         return false
+    }
+
+    /// The cancelled request has ended (its reply undone, if one came): "Sign in" again.
+    private func cancelledAttemptEnded() {
+        guard phase == .cancelling else { return }
+        attempt = nil
+        cancellation = nil
+        phase = .editing
     }
 
     /// "OK", Return or Esc on the "account deletion cancelled" note.
@@ -232,7 +245,7 @@ package final class SignInFlow {
 
     private func succeeded(_ id: Int) {
         // A Cancel that won links nothing, so its attempt never gets here.
-        guard id == attemptID else { return }
+        guard id == attemptID else { return cancelledAttemptEnded() }
         attempt = nil
         cancellation = nil
         log.log(.sync, "sign-in finished outcome=signedIn")
@@ -245,7 +258,7 @@ package final class SignInFlow {
     }
 
     private func failed(_ id: Int, _ error: any Error) {
-        guard id == attemptID else { return }
+        guard id == attemptID else { return cancelledAttemptEnded() }
         attempt = nil
         cancellation = nil
         phase = .editing
@@ -292,7 +305,7 @@ package final class SignInFlow {
             default:
                 return Message(kind: .server, title: text, referenceID: reference)
             }
-        case .unsyncedChanges, .storage:
+        case .unsyncedChanges, .storage, .signingIn:
             return Message(kind: .server, title: error.message)
         }
     }

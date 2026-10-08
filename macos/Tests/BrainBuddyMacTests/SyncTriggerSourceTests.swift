@@ -19,6 +19,7 @@ final class RecordingTriggerTarget: SyncTriggerTarget {
     func syncNow() async { calls.append("syncNow") }
     func flush() async { calls.append("flush") }
     func refreshTaskDetails(_ id: TaskID) async { calls.append("refreshTaskDetails(\(id.rawValue))") }
+    func waitForSignOutRemoval() async { calls.append("waitForSignOutRemoval") }
 }
 
 /// The trigger table of contracts/mac-app-host.md §5 (FR-006), with a fake path monitor, a fake App
@@ -79,13 +80,13 @@ struct SyncTriggerSourceTests {
         #expect(rig.target.calls == ["networkAvailabilityChanged(false)", "networkAvailabilityChanged(true)"])
     }
 
-    @Test("021-FR-006 Sync now, Retry and the popover's Sync now run syncNow; resign and terminate flush")
+    @Test("021-FR-006 021-FR-018 Sync now, Retry and the popover's Sync now run syncNow; resign and terminate flush; terminate waits for a sign-out's removal")
     func syncNowAndFlush() async {
         let rig = Rig()
         await rig.source.syncNowRequested()
         await rig.source.handle(.willResignActive)
         await rig.source.handle(.willTerminate)
-        #expect(rig.target.calls == ["syncNow", "flush", "flush"])
+        #expect(rig.target.calls == ["syncNow", "flush", "flush", "waitForSignOutRemoval"])
     }
 
     @Test("021-FR-006 the App Nap activity is held exactly while an account is linked")

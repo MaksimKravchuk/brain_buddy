@@ -190,7 +190,16 @@ a specific unresolved problem, rather than using `xhigh`/`max` for every task.
 - Give every implementation worker its own branch/worktree. Run independent
   approved slices concurrently only with disjoint write paths and isolated
   data directories, ports and E2E artifacts; dependent slices wait for their
-  accepted base. Keep trivial prompt/config/docs edits direct. Return only
+  accepted base. Codex CLI permits up to 12 concurrent agent threads per
+  session (the conductor plus up to 11 workers)
+  via `features.multi_agent_v2.max_concurrent_threads_per_session`. Launch
+  ready independent slices up to the active runtime's available slots,
+  starting the next ready slice as a slot becomes free; do not wait for a
+  whole wave when another independent slice can start. Finish idle workers
+  using the runtime's completion/close controls when available so they do
+  not hold open-thread capacity after their handoff is complete.
+  Hosted-session limits take precedence and cannot be raised by this file.
+  Keep trivial prompt/config/docs edits direct. Return only
   the commit SHA, changed paths, check results, log paths and unresolved
   decisions, keeping long logs in files.
 - A verifier running commands does not grade acceptance. The independent

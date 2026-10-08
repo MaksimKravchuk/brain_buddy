@@ -100,6 +100,9 @@ public final class Workspace {
     /// meanwhile (the Mac's global Quick Capture, an in-process App Intent) is never accepted and
     /// then removed unseen. The caller keeps what was typed and can try again once it is done.
     @ObservationIgnored public private(set) var isSigningOut = false
+    /// A sign-out has its local removal still to do (or to fail): `waitForSignOutRemoval()`.
+    @ObservationIgnored private var signOutRemovalPending = false
+    @ObservationIgnored private var signOutRemovalWaiters: [CheckedContinuation<Void, Never>] = []
     /// Bumped when the workspace is reset, so results of work started
     /// before (a load, a write) are discarded.
     @ObservationIgnored private var epoch = 0
@@ -395,6 +398,12 @@ public final class Workspace {
     ///
     /// `cancellation` is the person's Cancel (the Mac's X-03): one that wins links nothing and
     /// throws the kit's "cancelled" failure; once the link won, this returns as a normal sign-in.
+    ///
+    /// Account changes are one at a time (spec 021, FR-018): while a sign-out commits this is
+    /// refused with `signInFailed` (`signingOutMessage`) and sends nothing, and while it runs a
+    /// sign-out is refused (`WorkspaceError.signingIn`), so a sign-in never links an account a
+    /// sign-out removed meanwhile. A second sign-in while one runs (a Cancel's request included,
+    /// until it has ended) is refused too (`signInOnItsWayMessage`).
     public func signIn(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
@@ -404,10 +413,13 @@ public final class Workspace {
         guard let sync else {
             throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil)
         }
+        try refuseAnotherAccountChange()
         // The engine uploads what is in the store, so everything must be there.
         await flush()
         if account == nil { try await convertLocalAutoParksForLinking() }
         await installEventHandlerIfNeeded(sync)
+        // Checked again after the suspensions above, in the same step that marks the sign-in.
+        try refuseAnotherAccountChange()
         isSigningIn = true
         let linked: LinkedAccount
         do {
@@ -428,6 +440,12 @@ public final class Workspace {
         refreshDerivedState()
         if account != linked { account = linked }
         if syncStatus == .localOnly { syncStatus = .idle(lastSyncedAt: document.sync.lastPullAt) }
+    }
+
+    /// A sign-in's refusal while a sign-out commits or another sign-in runs.
+    private func refuseAnotherAccountChange() throws(WorkspaceError) {
+        if isSigningOut { throw .signInFailed(message: Self.signingOutMessage, referenceID: nil) }
+        if isSigningIn { throw .signInFailed(message: Self.signInOnItsWayMessage, referenceID: nil) }
     }
 
     /// Additive iOS authentication; legacy password callers keep their contract.
@@ -485,9 +503,9 @@ public final class Workspace {
         if signInCancelledAccountDeletion { signInCancelledAccountDeletion = false }
     }
 
-    /// The pending changes, each by its id and what it holds, for a sign-out confirmation to name
-    /// (`signOut(removing:)`).
-    public var pendingChanges: Set<PendingChange> { Set((document.outbox + unpersisted).map(PendingChange.init)) }
+    /// The local changes a sign-out would remove, each by its id and what it holds: unsent ones and
+    /// open sync issues, for a sign-out confirmation to name (`signOut(removing:)`).
+    public var pendingChanges: Set<PendingChange> { PendingChange.all(in: document, unpersisted: unpersisted) }
 
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
@@ -500,30 +518,37 @@ public final class Workspace {
     }
 
     /// Signs out and removes the account's data from this device, with no more of its unsent
-    /// changes than `confirmed`: the ones the confirmation named (`pendingChanges` when it was
-    /// shown; empty for a plain sign-out). Spec 021, FR-018, X-04.
+    /// changes and sync issues than `confirmed`: the ones the confirmation named (`pendingChanges`
+    /// when it was shown; empty for a plain sign-out). Spec 021, FR-018, X-04.
     ///
-    /// Any other pending change fails it with `WorkspaceError.unsyncedChanges` and the real count,
-    /// and nothing is removed: one already pending, one a widget or App Intent queues in the store
-    /// meanwhile (checked again under the store's lock), also when a named change was acknowledged
-    /// in between so the count still matches, or an edit was folded into a named change so its id
-    /// still matches. One made in this workspace meanwhile is refused (`GTDValidationError.signingOut`,
-    /// `isSigningOut`).
+    /// Any other pending change or issue fails it with `WorkspaceError.unsyncedChanges` and the real
+    /// count, and nothing is removed: one already pending, one a widget or App Intent queues in the
+    /// store meanwhile (checked again under the store's lock), also when a named change was
+    /// acknowledged in between so the count still matches, an edit was folded into a named change
+    /// so its id still matches, or a named change the server rejected became an issue. One made in
+    /// this workspace meanwhile is refused (`GTDValidationError.signingOut`, `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
+    /// `WorkspaceError.signingIn` and nothing is removed.
     public func signOut(removing confirmed: Set<PendingChange>) async throws {
+        guard !isSigningIn else { throw WorkspaceError.signingIn }
         let pending = pendingChanges
         if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
         // Set before the first suspension: nothing performed from here on can slip past the changes
         // the person confirmed and be removed with the account's data.
         isSigningOut = true
-        defer { isSigningOut = false }
+        signOutRemovalPending = true
+        defer {
+            isSigningOut = false
+            signOutRemovalEnded()
+        }
+        // A browser sign-in not yet completing is cancelled (one completing refused this sign-out).
         nativeSignInID = nil
-        isSigningIn = false
         // Let a write in flight finish, and write nothing new for this account.
         writesSuspended = true
         if let writer { await writer.value }
         // Another process may have queued changes since the last reload.
-        let unpersistedChanges = Set(unpersisted.map(PendingChange.init))
-        let unsynced = unpersistedChanges.union((try? await store.load())?.outbox.map(PendingChange.init) ?? [])
+        let unpersisted = self.unpersisted
+        let latest = try? await store.load()
+        let unsynced = PendingChange.all(in: latest, unpersisted: unpersisted)
         if !unsynced.isSubset(of: confirmed) {
             writesSuspended = false
             await refreshFromStore()
@@ -534,11 +559,13 @@ public final class Workspace {
         // The engine runs this once it has recorded the session's logout; it is checked again under
         // the store's lock, so nothing queued in between is lost: a change that was not confirmed
         // (any, for a plain sign-out) and nothing is removed.
-        let removeData: @Sendable () async throws -> Void = {
+        let removeData: @Sendable () async throws -> Void = { [weak self] in
             try await store.destroy(after: { stored in
-                let unsynced = unpersistedChanges.union(stored?.outbox.map(PendingChange.init) ?? [])
+                let unsynced = PendingChange.all(in: stored, unpersisted: unpersisted)
                 if !unsynced.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: unsynced.count) }
             })
+            // Removed: a quit may go ahead now (the logout is recorded, and sent next launch if not now).
+            await self?.signOutRemovalEnded()
         }
         do {
             if let sync { try await sync.signOut(removingLocalDataWith: removeData) } else { try await removeData() }
@@ -553,6 +580,21 @@ public final class Workspace {
         resetToEmptyLocalWorkspace()
         writesSuspended = false
         didPersist?()
+    }
+
+    /// Returns once no sign-out has its local removal still to do: at once when none runs, else when
+    /// its data is removed (or it failed and removed nothing). The Mac's quit waits for it (spec 021,
+    /// FR-018), so a confirmed sign-out never leaves the account's data on the device for the next
+    /// launch. The server logout is not waited for: it is recorded first and sent at the next launch.
+    public func waitForSignOutRemoval() async {
+        while signOutRemovalPending { await withCheckedContinuation { signOutRemovalWaiters.append($0) } }
+    }
+
+    private func signOutRemovalEnded() {
+        signOutRemovalPending = false
+        let waiters = signOutRemovalWaiters
+        signOutRemovalWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     /// The app came to the foreground (or went away). Active: starts the 15 s tick and asks for one
@@ -983,6 +1025,8 @@ public enum WorkspaceError: Error, Hashable, Sendable {
     case invalidServerURL
     case signInFailed(message: String, referenceID: String?)
     case storage(String)
+    /// A sign-out while a sign-in runs: refused, nothing removed (spec 021, FR-018).
+    case signingIn
 
     public var message: String {
         switch self {
@@ -991,6 +1035,14 @@ public enum WorkspaceError: Error, Hashable, Sendable {
         case .invalidServerURL: "Use an https server address."
         case .signInFailed(let message, _): message
         case .storage(let message): message
+        case .signingIn: "Brain Buddy is still signing in. Nothing was removed; try again in a moment."
         }
     }
+}
+
+extension Workspace {
+    /// `signIn`'s refusal while a sign-out commits (`WorkspaceError.signInFailed`).
+    public nonisolated static let signingOutMessage = "Brain Buddy is signing out. Try signing in again in a moment."
+    /// `signIn`'s refusal while another sign-in runs (`WorkspaceError.signInFailed`).
+    public nonisolated static let signInOnItsWayMessage = "Brain Buddy is still finishing the last sign-in. Try again in a moment."
 }

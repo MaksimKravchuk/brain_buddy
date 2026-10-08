@@ -53,7 +53,8 @@ package final class SignOutFlow {
         package var text: SyncCopyText
         /// "Sign out and remove" when changes would be removed, else "Sign out".
         package var confirmTitle: String
-        /// The unsent changes it names, by identity: confirming removes these and no others.
+        /// The unsent changes and sync issues it names, by identity: confirming removes these and no
+        /// others (a change that becomes an issue meanwhile is another one, so X-04 opens again).
         package var changes: Set<PendingChange>
         package var removesUnsent: Bool { unsent > 0 }
     }

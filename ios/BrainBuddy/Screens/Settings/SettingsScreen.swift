@@ -15,6 +15,8 @@ struct SettingsScreen: View {
     @State private var signInRequest: SignInRequest?
     @State private var isConfirmingSignOut = false
     @State private var unsyncedCount = 0
+    /// Open sync issues the confirmation names on their own (FR-018): they are removed too.
+    @State private var unsyncedIssueCount = 0
     /// The unsent changes the confirmation names: "Sign out and remove" removes these and no others.
     @State private var unsyncedChanges: Set<PendingChange> = []
     @State private var isSigningOut = false
@@ -47,7 +49,7 @@ struct SettingsScreen: View {
             isPresented: $isConfirmingSignOut,
             titleVisibility: .visible
         ) {
-            if unsyncedCount > 0 {
+            if unsyncedCount > 0 || unsyncedIssueCount > 0 {
                 Button("Sign out and remove", role: .destructive) { signOut(removing: unsyncedChanges) }
             } else {
                 Button("Sign out", role: .destructive) { signOut(removing: []) }
@@ -128,11 +130,18 @@ struct SettingsScreen: View {
     }
 
     private var signOutMessage: String {
-        guard unsyncedCount > 0 else {
-            return "Your tasks are removed from this \(ThisDevice.name). They stay in your account."
+        var sentences: [String]
+        if unsyncedCount > 0 {
+            let pronoun = unsyncedCount == 1 ? "it" : "them"
+            sentences = ["Sign out and remove \(pronoun) from this \(ThisDevice.name)?"]
+        } else {
+            sentences = ["Your tasks are removed from this \(ThisDevice.name). They stay in your account."]
         }
-        let pronoun = unsyncedCount == 1 ? "it" : "them"
-        return "Sign out and remove \(pronoun) from this \(ThisDevice.name)?"
+        if unsyncedIssueCount > 0 {
+            sentences.append(
+                "\(SyncCopy.changes(unsyncedIssueCount)) that couldn't sync will also be removed from this \(ThisDevice.name).")
+        }
+        return sentences.joined(separator: " ")
     }
 
     // MARK: Sync
@@ -259,13 +268,20 @@ struct SettingsScreen: View {
         openURL(url) { accepted in accountLinkFailed = !accepted }
     }
 
-    /// Always asks first. Without unsynced changes a plain sign-out is
-    /// confirmed; if changes arrive meanwhile, `signOut` asks again with the
-    /// real count.
+    /// Always asks first. Without unsynced changes (or sync issues, which
+    /// would be removed too) a plain sign-out is confirmed; if changes arrive
+    /// meanwhile, `signOut` asks again with the real count.
     private func requestSignOut() {
-        unsyncedCount = workspace.pendingChangeCount
-        unsyncedChanges = workspace.pendingChanges
+        captureUnsynced()
         isConfirmingSignOut = true
+    }
+
+    /// What the confirmation names: unsent changes and open sync issues, counted apart (FR-018),
+    /// and the exact set "Sign out and remove" may remove.
+    private func captureUnsynced() {
+        unsyncedChanges = workspace.pendingChanges
+        unsyncedCount = workspace.pendingChangeCount
+        unsyncedIssueCount = workspace.issues.count
     }
 
     private func signOut(removing changes: Set<PendingChange>) {
@@ -280,10 +296,9 @@ struct SettingsScreen: View {
                 toasts.show("Signed out", actionTitle: nil, action: nil)
             } catch let error as WorkspaceError {
                 isSigningOut = false
-                if case .unsyncedChanges(let count) = error {
-                    // Changes arrived after the check; ask again with the real count.
-                    unsyncedCount = count
-                    unsyncedChanges = workspace.pendingChanges
+                if case .unsyncedChanges = error {
+                    // Changes or issues arrived after the check; ask again with the real counts.
+                    captureUnsynced()
                     isConfirmingSignOut = true
                 } else {
                     toasts.show("\(error.message)", actionTitle: nil, action: nil)

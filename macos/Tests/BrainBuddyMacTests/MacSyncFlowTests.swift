@@ -4,6 +4,7 @@ import BrainBuddyPersistence
 import BrainBuddySync
 import BrainBuddyWorkspace
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BrainBuddyMacCore
@@ -297,6 +298,60 @@ struct MacSyncFlowTests {
         #expect(!rig.controller.isSignInOpen)
     }
 
+    @Test("021-FR-018 Sign out… while Sign in again is signing in does nothing; the sign-in links and stays linked")
+    func signOutWhileSigningInDoesNothing() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        await rig.endSession()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .menu)
+        let flow = try #require(rig.controller.signIn)
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        #expect(rig.controller.accountMenu.signOut, "linked, so the item is there")
+        #expect(rig.controller.isSignInOpen, "and disabled")
+
+        // The app menu's (or X-02's) "Sign out…" while X-03 waits for its login.
+        let requests = rig.controller.signOutRequests
+        rig.controller.requestSignOut()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOutRequests == requests, "no unsaved-edit guard, no X-04")
+        #expect(rig.controller.signOut.prompt == nil)
+        #expect(rig.controller.router.signInRequest != nil, "X-03 stays")
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        let stored = try await FileDocumentStore(fileURL: rig.folder.store).load()
+        #expect(stored?.account == rig.workspace.account, "linked in the store as in the window")
+    }
+
+    @Test("021-FR-001 Sign in… while a confirmed sign-out commits does nothing; the sign-out finishes")
+    func signInWhileSigningOutDoesNothing() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        rig.server.holdNextLogout()
+        rig.controller.presentSignOut()
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        await rig.server.logoutGate.waitForArrival()
+        #expect(rig.controller.isSigningOut, "the app menu's Sign in… is disabled")
+
+        rig.controller.beginSignIn(from: .menu)
+        #expect(rig.controller.signIn == nil, "no X-03")
+        #expect(rig.controller.router.signInRequest == nil)
+
+        await rig.server.logoutGate.open()
+        #expect(await confirming.value == .signedOut)
+        await rig.settle()
+        #expect(rig.workspace.account == nil)
+        #expect(rig.server.routes.filter { $0 == "POST /auth/login" }.count == 1, "only the first sign-in's")
+        #expect(!rig.controller.isSigningOut)
+    }
+
     @Test("021-FR-001 021-FR-005 Cancel while signing in keeps the typed values; the reply after it has its session ended and links nothing")
     func cancelWhileSigningIn() async throws {
         let rig = await Rig()
@@ -310,7 +365,7 @@ struct MacSyncFlowTests {
 
         #expect(flow.canCancel, "before the link, Cancel applies")
         #expect(flow.cancel() == false, "the sheet stays open")
-        #expect(flow.phase == .editing && flow.email == StubServer.ada.email && flow.password == StubServer.ada.password)
+        #expect(flow.phase == .cancelling && flow.email == StubServer.ada.email && flow.password == StubServer.ada.password)
         #expect(flow.preferredFocus == .signInPassword)
         await rig.server.loginGate.open()
         await flow.waitForAttempt()
@@ -321,6 +376,37 @@ struct MacSyncFlowTests {
         #expect(rig.server.routes == ["POST /auth/login", "POST /auth/logout"])
         #expect(flow.phase == .editing && flow.message == nil, "nothing changed in the sheet")
         #expect(rig.tokens.storedTokens.isEmpty)
+    }
+
+    @Test("021-FR-001 021-FR-005 after Cancel, Sign in stays disabled until the cancelled request has ended; then the retry signs in")
+    func signInWaitsForTheCancelledRequest() async throws {
+        let rig = await Rig()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .menu)
+        let flow = try #require(rig.controller.signIn)
+        flow.email = StubServer.ada.email
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        flow.cancel()
+
+        // The cancelled login's reply hasn't come back: no second login may start.
+        #expect(!flow.canSubmit, "Sign in is disabled")
+        flow.submit()
+        #expect(flow.requestsStarted == 1)
+        #expect(!flow.credentialsReadOnly, "what was typed can still be changed")
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .editing && flow.canSubmit, "Sign in is back")
+        flow.submit()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished && flow.requestsStarted == 2)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        #expect(rig.server.liveSessions == 1, "the cancelled session ended, the retry's kept")
+        #expect(rig.tokens.storedTokens.count == 1)
     }
 
     @Test("021-FR-001 021-FR-005 once the account is linked, Cancel never says cancelled: the first sync runs and the sheet closes signed in")
@@ -501,6 +587,41 @@ struct MacSyncFlowTests {
 
         #expect(await rig.controller.confirmSignOut() == .signedOut)
         #expect(rig.workspace.account == nil && rig.workspace.pendingChangeCount == 0)
+    }
+
+    @Test("021-FR-018 Quit while a confirmed sign-out is still removing the data waits for the removal; nothing is left behind")
+    func quitWaitsForTheSignOutsRemoval() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        try await rig.captureWaiting("Removed with the account")
+        // A sync is on its way, so the sign-out waits for it to stop before removing anything.
+        rig.server.holdNextSync()
+        let workspace = rig.workspace
+        let syncing = Task { await workspace.syncNow() }
+        await rig.server.syncGate.waitForArrival()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOut.prompt?.unsent == 1)
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        while !rig.controller.signOut.isSigningOut { await Task.yield() }
+
+        // ⌘Q: the app delegate's terminateLater waits for this before it replies.
+        let quit = Mutex(false)
+        let triggers = rig.triggers
+        let quitting = Task {
+            await triggers.handle(.willTerminate)
+            quit.withLock { $0 = true }
+        }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(!quit.withLock { $0 }, "the reply waits")
+        #expect(try await FileDocumentStore(fileURL: rig.folder.store).load() != nil, "not removed yet")
+
+        await rig.server.syncGate.open()
+        #expect(await confirming.value == .signedOut)
+        await quitting.value
+        await syncing.value
+        #expect(try await FileDocumentStore(fileURL: rig.folder.store).load() == nil, "removed before the process ends")
+        #expect(rig.workspace.account == nil)
     }
 
     @Test("021-FR-018 a Quick Capture while a confirmed sign-out commits is refused with words and never silently removed")

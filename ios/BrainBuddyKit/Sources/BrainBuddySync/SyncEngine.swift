@@ -81,6 +81,14 @@ public actor SyncEngine: SyncService {
     /// account would carry the session being created), and stale sessions
     /// are not discarded.
     var signInsInProgress = 0
+    /// Password sign-ins take turns (spec 021, X-03): one logs in and links, or cleans up after a
+    /// Cancel or a refusal, before the next logs in. The login writes the shared token store and
+    /// the cleanup puts back the token read before it, so a cancelled login's late reply must never
+    /// overlap a newer one's: it would replace, then remove, the newer session.
+    var signInTurnTaken = false
+    var signInTurnWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Sign-ins waiting for their turn.
+    var signInsWaiting: Int { signInTurnWaiters.count }
     var nativeSignIn: NativeSignInContext?
     let nativeSignInGate = NativeSignInGate()
     var nativeCommitInProgress = false
@@ -181,6 +189,8 @@ public actor SyncEngine: SyncService {
     private func linkAccount(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation
     ) async throws(SignInFailure) -> SignInResult {
+        await takeSignInTurn()
+        defer { passSignInTurn() }
         await waitForNativeCommit()
         invalidateNativeSignIn()
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
@@ -252,6 +262,24 @@ public actor SyncEngine: SyncService {
         }
         if !networkAvailable { await setStatus(.offline(lastSyncedAt: lastSyncedAt)) }
         return SignInResult(account: linked, deletionCancelled: me.deletionCancelled)
+    }
+
+    /// Waits until no other password sign-in logs in, links or cleans up (`signInTurnTaken`).
+    private func takeSignInTurn() async {
+        guard signInTurnTaken else {
+            signInTurnTaken = true
+            return
+        }
+        // Handed over by `passSignInTurn()`, still taken.
+        await withCheckedContinuation { signInTurnWaiters.append($0) }
+    }
+
+    private func passSignInTurn() {
+        if signInTurnWaiters.isEmpty {
+            signInTurnTaken = false
+        } else {
+            signInTurnWaiters.removeFirst().resume()
+        }
     }
 
     public func request(_ trigger: SyncTrigger) async {

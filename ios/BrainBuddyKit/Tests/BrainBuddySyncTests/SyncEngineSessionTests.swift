@@ -353,6 +353,45 @@ struct SyncEngineSessionTests {
         #expect(await engine.status == .localOnly)
     }
 
+    @Test("021-FR-001 021-FR-005 a sign-in after a Cancel keeps its session when the cancelled reply arrives late; only that one is ended")
+    func retryAfterCancelKeepsItsSession() async throws {
+        let harness = SyncHarness()
+        let device = HeldDevice(harness: harness) { $0.route == "POST /auth/login" }
+        device.transport.arm()
+        let engine = device.engine
+        let cancellation = SignInCancellation()
+        let first = Task {
+            try await engine.signInWithResult(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password,
+                cancellation: cancellation)
+        }
+        await device.transport.gate.waitForArrival()
+        #expect(cancellation.cancel())
+
+        // Sign in again at once, while the cancelled login's reply is still on its way.
+        let retried = Mutex(false)
+        let retry = Task {
+            defer { retried.withLock { $0 = true } }
+            return try await engine.signInWithResult(
+                serverURL: FakeBrainBuddyServer.baseURL, email: SyncHarness.email, password: SyncHarness.password,
+                cancellation: SignInCancellation())
+        }
+        // The retry either waits for the cancelled one's turn or (unserialized) links first.
+        while !retried.withLock({ $0 }), await engine.signInsWaiting == 0 { await Task.yield() }
+        await device.transport.gate.open()
+        let cancelled = await first.result
+        let linked = try await retry.value
+        await engine.waitUntilIdle()
+
+        #expect(throws: SignInFailure(message: SyncEngine.signInCancelledMessage)) { try cancelled.get() }
+        #expect(linked.account.email == SyncHarness.email)
+        #expect(try await device.store.load()?.account?.email == SyncHarness.email, "the retry is linked")
+        #expect(try device.tokens.token(for: FakeBrainBuddyServer.baseURL) != nil, "with its session")
+        #expect(harness.server.liveSessionCount(email: SyncHarness.email) == 1, "the retry's session is live")
+        #expect(device.inner.requests.filter { $0.route == "POST /auth/logout" }.count == 1, "only the cancelled one ended")
+        #expect(await engine.syncNow() != .needsSignIn, "and it syncs")
+    }
+
     @Test("021-FR-001 021-FR-005 a Cancel decided before the link wins: nothing is linked and the session the server opened is ended")
     func cancelBeforeTheLinkWins() async throws {
         let harness = SyncHarness()

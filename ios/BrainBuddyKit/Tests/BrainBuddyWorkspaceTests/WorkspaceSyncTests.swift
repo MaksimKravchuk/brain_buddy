@@ -410,6 +410,137 @@ import Testing
         #expect(session.workspace.pendingChangeCount == 1, "asked again")
     }
 
+    @Test("021-FR-018 Sign out and remove removes only the changes it named: a named change the server rejects meanwhile stops it")
+    func signOutAndRemoveKeepsAnIssueMadeMeanwhile() async throws {
+        let session = await signedIn()
+        try session.workspace.capture(CaptureDraft(text: "Counted and removed"))
+        await session.workspace.flush()
+        let confirmed = session.workspace.pendingChanges
+        let named = try #require(session.workspace.document.outbox.first)
+        let shared = session.store.base
+        // While the engine logs out, its last push comes back rejected: the named change is now an
+        // issue (with a new id), which the confirmation did not name.
+        await session.sync.whileSigningOut {
+            _ = try? await shared.update { document in
+                document.outbox.removeAll { $0.id == named.id }
+                document.issues.append(
+                    SyncIssue(command: named.command, message: "That project is archived.", occurredAt: Fixture.epoch))
+            }
+        }
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(removing: confirmed)
+        }
+        let stored = try await session.store.load()
+        #expect(stored?.issues.map(\.command) == [named.command], "the issue is kept")
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.issues.count == 1, "asked again, naming it")
+    }
+
+    @Test("021-FR-018 a plain sign-out with only an open sync issue is refused; Sign out and remove naming it removes it")
+    func plainSignOutKeepsAnOpenIssue() async throws {
+        let issue = SyncIssue(
+            command: .transitionTask(.init(taskID: "server-1", action: .complete)), message: "Rejected",
+            occurredAt: Fixture.epoch)
+        let session = await signedIn(Self.linkedDocument(issues: [issue]))
+        #expect(session.workspace.pendingChangeCount == 0 && session.workspace.issues == [issue])
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: false)
+        }
+        #expect(try await session.store.load()?.issues == [issue], "the issue is kept")
+        #expect(session.workspace.pendingChanges.count == 1, "the confirmation names it")
+
+        try await session.workspace.signOut(removing: session.workspace.pendingChanges)
+        #expect(try await session.store.load() == nil)
+    }
+
+    @Test("021-FR-018 a sign-out while Sign in again waits for its first sync is refused; the account stays linked in the store too")
+    func signOutDuringASignInIsRefused() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.whileSigningIn {
+            do {
+                try await workspace.signOut(discardUnsyncedChanges: true)
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+
+        #expect(refusal.message == WorkspaceError.signingIn.message, "the sign-out was refused")
+        #expect(await session.sync.calls.contains(.signOut) == false)
+        #expect(workspace.account == Fixture.account)
+        #expect(try await session.store.load()?.account == workspace.account, "never linked in the window only")
+    }
+
+    @Test("021-FR-001 a second sign-in while one runs is refused with words and sends no login; the first links")
+    func secondSignInWhileOneRunsIsRefused() async throws {
+        let store = InMemoryDocumentStore()
+        let sync = FakeSyncService(store: store)
+        let workspace = await loadedWorkspace(store: store, sync: sync)
+        let refusal = Refusal()
+        await sync.whileSigningIn {
+            do {
+                try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+
+        #expect(refusal.message == Workspace.signInOnItsWayMessage, "the second sign-in was refused")
+        #expect(await sync.calls.filter { if case .signIn = $0 { true } else { false } }.count == 1, "one login")
+        #expect(workspace.account == Fixture.account)
+        #expect(try await store.load()?.account == Fixture.account)
+    }
+
+    @Test("021-FR-001 a sign-in while a sign-out commits is refused with words; nothing is linked")
+    func signInDuringASignOutIsRefused() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.whileSigningOut {
+            do {
+                try await workspace.signIn(serverURL: Fixture.serverURL, email: "ana@example.com", password: "correct horse")
+            } catch {
+                refusal.record((error as? WorkspaceError)?.message ?? "\(error)")
+            }
+        }
+
+        try await workspace.signOut(discardUnsyncedChanges: false)
+
+        #expect(refusal.message == Workspace.signingOutMessage, "the sign-in was refused")
+        #expect(await session.sync.calls.filter { if case .signIn = $0 { true } else { false } }.isEmpty, "no login was sent")
+        #expect(workspace.account == nil)
+        #expect(try await session.store.load() == nil)
+    }
+
+    @Test("021-FR-018 waiting for a sign-out's removal returns once the data is gone, or at once with none running")
+    func waitForSignOutRemovalReturnsAfterTheRemoval() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        await workspace.waitForSignOutRemoval()  // none running: returns at once
+        let shared = session.store.base
+        let waiter = Mutex<Task<Bool, Never>?>(nil)
+        // A quit while the engine stops sync, before anything is removed.
+        await session.sync.whileSigningOut {
+            let waiting = Task { @MainActor in
+                await workspace.waitForSignOutRemoval()
+                return (try? await shared.load()) == nil
+            }
+            waiter.withLock { $0 = waiting }
+        }
+
+        try await workspace.signOut(discardUnsyncedChanges: false)
+
+        let waiting = try #require(waiter.withLock { $0 })
+        #expect(await waiting.value, "the wait returned only once the store was removed")
+    }
+
     @Test("021-FR-018 a sign-out that fails takes changes again at once")
     func aFailedSignOutTakesChangesAgain() async throws {
         let session = await signedIn()

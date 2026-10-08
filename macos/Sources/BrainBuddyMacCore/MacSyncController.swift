@@ -136,18 +136,22 @@ package final class MacSyncController {
     // MARK: X-03
 
     /// An X-03 flow is open: its sheet is shown, or its one request is on its way. The app menu's
-    /// "Sign in…" and "Sign in again…" are disabled meanwhile.
+    /// "Sign in…", "Sign in again…" and "Sign out…" are disabled meanwhile.
     package var isSignInOpen: Bool {
         guard let signIn else { return false }
         return signIn.isSigningIn || router.signInRequest != nil
     }
 
+    /// A confirmed sign-out commits (X-04): the app menu's sign-in items are disabled meanwhile.
+    package var isSigningOut: Bool { signOut.isSigningOut || workspace.isSigningOut }
+
     /// "Sign in to sync", "Sign in…" or "Sign in again": the sheet, locked to the linked account when
     /// one is linked (its session ended). Single-flight: while a flow is open it stays, with what was
-    /// typed and the request on its way, and no second flow (or second login) starts.
+    /// typed and the request on its way, and no second flow (or second login) starts. Account changes
+    /// are one at a time: while a sign-out commits, nothing opens.
     package func beginSignIn(from entry: SignInEntry) {
-        guard !isSignInOpen else {
-            log.log(.sync, "sign-in already open")
+        guard !isSignInOpen, !isSigningOut else {
+            log.log(.sync, "sign-in refused reason=\(isSigningOut ? "signingOut" : "alreadyOpen")")
             return
         }
         let workspace = self.workspace
@@ -183,14 +187,23 @@ package final class MacSyncController {
 
     // MARK: X-04
 
-    /// "Sign out…" from X-02 or the app menu: the window's unsaved-edit guard runs first.
+    /// "Sign out…" from X-02 or the app menu: the window's unsaved-edit guard runs first. Nothing
+    /// while X-03 is open: account changes are one at a time.
     package func requestSignOut() {
+        guard !isSignInOpen else {
+            log.log(.sync, "sign-out refused reason=signingIn")
+            return
+        }
         if case .syncDetails = router.surface { closeSyncDetails() }
         signOutRequests += 1
     }
 
-    /// After the guard: X-04 with what holds now.
+    /// After the guard: X-04 with what holds now (nothing while X-03 is open).
     package func presentSignOut() {
+        guard !isSignInOpen else {
+            log.log(.sync, "sign-out refused reason=signingIn")
+            return
+        }
         signOut.open()
         router.handle(.signOut)
     }

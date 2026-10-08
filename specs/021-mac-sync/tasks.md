@@ -803,6 +803,44 @@ Earlier increments are each independently useful and safe:
     its way) and the menu items are disabled meanwhile (`isSignInOpen`). `MacSyncFlowTests` (red
     before the fix: the flow was replaced and a second sheet presented): the first flow, its one
     login, signed in.
+  - **Account changes are one at a time** (review P1). During "Sign in again" the account stays
+    linked, so "Sign out…" could replace X-03 and start a sign-out while `Workspace.signIn` awaited
+    its first sync; once the sign-out removed the data, the sign-in's continuation set `account`
+    again, linked in the window only. Kit (so the iPhone too): `signOut` is refused while a sign-in
+    runs (`WorkspaceError.signingIn`, nothing removed) and `signIn` while a sign-out commits
+    (`signInFailed`, `Workspace.signingOutMessage`, no login sent). Mac: `requestSignOut` and
+    `presentSignOut` do nothing while X-03 is open, `beginSignIn` nothing while a sign-out commits
+    (`isSigningOut`), and the app menu disables the matching items. Tests, red before:
+    `WorkspaceSyncTests` (sign-out during a sign-in's first sync: was removed, then relinked in the
+    window with no account in the store; sign-in during a sign-out: was sent and wiped) and
+    `MacSyncFlowTests` (Sign out… while X-03 signs in; Sign in… while a sign-out's logout is held).
+  - **A sign-in after Cancel waits for the cancelled one** (review P1). Cancel put X-03 straight
+    back to `.editing`, so a retry could log in while the cancelled login's reply was still on its
+    way; that late reply then wrote its token over the retry's and its cleanup removed it, leaving
+    the retry linked with no session. Engine (so the iPhone too): password sign-ins take turns
+    (`SyncEngine.takeSignInTurn`), each finishing its login, link or cleanup before the next logs
+    in. Workspace: a second `signIn` while one runs is refused (`signInOnItsWayMessage`). Mac:
+    after Cancel the flow is `.cancelling` (typed values back, "Sign in" disabled, Cancel/Esc
+    close) until the cancelled request has ended. Tests, red before: `SyncEngineSessionTests`
+    (retry after Cancel keeps its session; only the cancelled one is logged out),
+    `WorkspaceSyncTests` (a second sign-in while one runs is refused, one login) and
+    `MacSyncFlowTests` (after Cancel, Sign in stays disabled until the cancelled request ended).
+  - **Sign-out names sync issues by identity too** (review P1). The removal checks looked at the
+    outbox only, so a named change the server rejected meanwhile (now an issue, with a new id) was
+    removed without X-04 naming it; and on the iPhone a plain "Sign out" with only open issues
+    removed them silently. `PendingChange` now covers unsent changes and sync issues
+    (`Workspace.pendingChanges`), every check, the locked one included, compares both, and the
+    iPhone's confirmation counts issues. Tests, red before: `WorkspaceSyncTests` (a named change
+    rejected during sign-out is refused and kept; a plain sign-out with only an issue is refused).
+  - **Quit waits for a confirmed sign-out's removal** (review P1). The quit path waited only for
+    `flush()`, which returns at once while a sign-out has suspended writes, so ⌘Q during X-04's
+    commit could end the process before the store was removed: the next launch still held the
+    account and its tasks while the recorded logout ended the session. `.willTerminate` now also
+    awaits `Workspace.waitForSignOutRemoval()` (the removal, not the network logout, which is
+    recorded and sent at the next launch). An in-flight sign-in is not waited for: interrupted, it
+    leaves either no link (a stale token the next launch discards) or a link the next launch syncs.
+    Tests: `MacSyncFlowTests` (quit during the commit waits for the removal; red before: it
+    returned with the store still there), `WorkspaceSyncTests`, `SyncTriggerSourceTests`.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
