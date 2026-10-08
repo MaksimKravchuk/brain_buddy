@@ -59,15 +59,23 @@ CI cannot run.
      needs it, through the Admin Portal flag page (SELECTED_USERS), as
      `specs/020-weekly-review/quickstart.md` "Prerequisites" says.
      - `/admin` admits only operators listed in `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, which is
-       empty in `.env.example`, so set it before `docker compose up` (see `docs/auth.md`). In
-       a testing clone's `.env`, set it to the test account's email; in an existing `.env`,
-       only with the owner's OK.
-     - Then sign in to `/admin` as that account and set `weekly_review` to that account.
+       empty in `.env.example`.
+     - An address on that list is reserved, so a normal invited sign-up with it is refused
+       (409). Use a **separate seeded operator** instead: in a testing clone's `.env`, set
+       `BRAIN_BUDDY_ADMIN_EMAIL` and `BRAIN_BUDDY_ADMIN_PASSWORD` (12 or more characters) and put
+       the same address in `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, before `docker compose up`.
+       See `docs/auth.md` "seeded account" and the comments in `.env.example`. In an existing
+       `.env`, do this only with the owner's OK.
+     - The test account above stays a normal member with a different email.
+     - Sign in to `/admin` as the seeded operator and set `weekly_review` to the test account.
    - Seed a stalled task instead of moving clocks, where a plan allows either:
      `docker compose exec -e BRAIN_BUDDY_ENV=test backend python -m app.cli
      review-seed-aged-task --email <test email> --days <N>`.
-     - The helper refuses to run unless `BRAIN_BUDDY_ENV=test` (it exits with code 2), hence
-       the `-e` for this one command.
+     - The review test helpers refuse to run unless `BRAIN_BUDDY_ENV=test` (they exit with
+       code 2), hence the `-e`.
+     - The same applies to the sweep that some plans run after seeding (for example the M-09
+       parked-task path in `manual-ios-increment1.md`):
+       `docker compose exec -e BRAIN_BUDDY_ENV=test backend python -m app.cli review-run-sweep`.
      - Never point it at production.
 4. **iOS:**
    - Run `(cd ios && xcodegen generate)`, then open `ios/BrainBuddy.xcodeproj`.
