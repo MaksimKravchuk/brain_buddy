@@ -662,7 +662,17 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     - `InboxStep.saveTitle` 409 has no stale branch (the retry reuses the old
       revision);
     - only one count-failure banner is shown at a time;
-    - set-aside is per task per run (a reworded task stays set aside within the run).
+    - set-aside is per task per run (a reworded task stays set aside within the run);
+    - `DecisionDialog` (inline): a stale answer whose reload fails clears the form
+      and shows "no longer asks" with no Retry (the step forms already keep the
+      card, the draft and a Retry);
+    - `ItemDecisionStep`: a deduplicated decision's notice and Undo label follow the
+      attempted item, not `response.decision` / `response.created_task`;
+    - `OnboardingDialog`: Close and Escape stay enabled while Continue saves.
+  - Review backlog (owner decision 2026-10-08): #290 merged once Codex's
+    review was clean and CI green, without further narrowing its scope. Any later
+    finding on the web review is a backlog item for the follow-up feature rather than
+    a fix in PR-13.
   - iOS: optionally read the new `meta.decided_task_ids` / `meta.set_aside_task_ids`
     of `GET /review/queues/decisions` to resume the decisions step across devices.
   - Mac (#276): the evidence file cites the CI run of the previous SHA; the owner's
