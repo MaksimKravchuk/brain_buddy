@@ -203,30 +203,30 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
-    def test_ask_class_workflow_path_fails_closed(self) -> None:
+    def test_ask_class_release_workflow_path_fails_closed(self) -> None:
         """The Ship/Show/Ask gate is mechanical and not skippable: an
         ASK-class path fails the submission even with fast checks skipped
         (the default in these tests) and pushes nothing."""
 
-        self._commit(".github/workflows/evil.yml", "on: push\n")
+        self._commit(".github/workflows/deploy-fly-production.yml", "on: push\n")
         result = self._run()
         combined = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ASK", combined)
         self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
-    def test_ask_class_auth_path_fails_closed(self) -> None:
-        self._commit("backend/app/api/auth.py", "# auth surface\n")
+    def test_ask_class_migration_path_fails_closed(self) -> None:
+        self._commit("backend/migrations/0002_drop.sql", "-- destructive\n")
         result = self._run()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ASK", result.stdout + result.stderr)
         self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
-    def test_non_ascii_ask_workflow_path_fails_closed(self) -> None:
+    def test_non_ascii_ask_data_path_fails_closed(self) -> None:
         """git quotes non-ASCII paths in newline output; the gate must use
         NUL-separated listing so the real path still classifies as ASK."""
 
-        self._commit(".github/workflows/évil.yml", "on: push\n")
+        self._commit("backend/data/évil.json", "{}\n")
         result = self._run()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ASK", result.stdout + result.stderr)
@@ -234,25 +234,25 @@ class SubmitToTrunkScriptTest(unittest.TestCase):
 
     def test_rename_of_ask_path_to_harmless_name_fails_closed(self) -> None:
         """A rename must classify as delete+add (--no-renames): removing an
-        ASK-class workflow is itself an ASK change even when the new path is
+        ASK-class data file is itself an ASK change even when the new path is
         harmless."""
 
         _git(self.clone, "checkout", "main")
-        workflow = self.clone / ".github" / "workflows" / "deploy.yml"
-        workflow.parent.mkdir(parents=True, exist_ok=True)
-        workflow.write_text("on: push\n", encoding="utf-8")
-        _git(self.clone, "add", ".github/workflows/deploy.yml")
-        _git(self.clone, "commit", "-m", "ci: add workflow")
+        data = self.clone / "backend" / "data" / "tree_1.json"
+        data.parent.mkdir(parents=True, exist_ok=True)
+        data.write_text("{}\n", encoding="utf-8")
+        _git(self.clone, "add", "backend/data/tree_1.json")
+        _git(self.clone, "commit", "-m", "chore: add data")
         _git(self.clone, "push", "origin", "main")
         _git(self.clone, "checkout", "-B", "feature", "main")
-        _git(self.clone, "mv", ".github/workflows/deploy.yml", "harmless.txt")
-        _git(self.clone, "commit", "-m", "refactor: rename workflow away")
+        _git(self.clone, "mv", "backend/data/tree_1.json", "harmless.txt")
+        _git(self.clone, "commit", "-m", "refactor: rename data away")
 
         result = self._run()
         combined = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ASK", combined)
-        self.assertIn(".github/workflows/deploy.yml", combined)
+        self.assertIn("backend/data/tree_1.json", combined)
         self.assertNotIn("trunk-candidate", "".join(self._origin_refs()))
 
     def test_ship_class_docs_path_is_submitted(self) -> None:

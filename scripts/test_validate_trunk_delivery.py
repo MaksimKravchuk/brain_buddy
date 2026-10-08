@@ -278,21 +278,25 @@ class DeployContractTest(unittest.TestCase):
 
     def test_exact_classifier_path_fixtures_cover_all_revisions(self) -> None:
         for name, paths, expected in (
-            ("old 17-path listing", OLD_17_PATHS, {"ASK": 11, "SHIP": 6}),
-            ("prior 18-path listing", PRIOR_18_PATHS, {"ASK": 12, "SHIP": 6}),
+            # ADR-0030: of these listings only the landing machinery
+            # (release workflow, gate-integrity checker and manifest) is ASK.
+            ("old 17-path listing", OLD_17_PATHS, {"ASK": 3, "SHIP": 14}),
+            ("prior 18-path listing", PRIOR_18_PATHS, {"ASK": 3, "SHIP": 15}),
             (
                 "80cc5e4 successor correction listing",
                 SUCCESSOR_2_PATHS,
-                {"ASK": 2, "SHIP": 0},
+                {"ASK": 0, "SHIP": 2},
             ),
-            ("current 19-path listing", CURRENT_19_PATHS, {"ASK": 13, "SHIP": 6}),
+            ("current 19-path listing", CURRENT_19_PATHS, {"ASK": 3, "SHIP": 16}),
         ):
             with self.subTest(listing=name):
                 self.assertEqual(len(paths), sum(expected.values()))
                 returncode, counts = self._risk_classes(paths)
                 self.assertEqual(counts, expected)
                 self.assertEqual(
-                    returncode, 1, "overall ASK must block automatic promotion"
+                    returncode,
+                    1 if expected["ASK"] else 0,
+                    "any ASK path must block automatic promotion",
                 )
 
     def test_deploy_classifier_mutant_marks_only_successor_validator_as_needed(
