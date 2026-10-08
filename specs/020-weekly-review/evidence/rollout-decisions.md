@@ -11,8 +11,17 @@ Landing class: PR-14 is ASK, because it changes `Makefile` and re-records the
 gate-integrity manifest. The changes are the allowed part of T166: the byte comparisons
 of the vector, wire-fixture and trace copies, and the check that the FR-041 macOS
 host-run file exists. The requirement-coverage filter itself is not wired (owner decision
-2026-10-08). PR-14 merges under the owner's standing authorization of 2026-10-08 for
-ASK-class slices that are green with no open P1.
+2026-10-08).
+
+**ASK approval for the PR-14 landing** is recorded per candidate, as AGENTS.md
+"Production and Release Evidence" requires. It names the exact SHA and is not reusable
+for any other change.
+
+| | value |
+|---|---|
+| approved candidate (PR #293 head SHA) | PENDING |
+| approved by / date | PENDING |
+| required CI on that SHA | PENDING |
 
 ## Flag stages
 
