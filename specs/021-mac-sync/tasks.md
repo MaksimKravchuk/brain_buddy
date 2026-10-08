@@ -786,6 +786,20 @@ Earlier increments are each independently useful and safe:
     removed; Sign out and remove keeps a change another process queued meanwhile; a failed
     sign-out takes changes again. `MacSyncFlowTests`: a Quick Capture while a confirmed sign-out
     commits (logout held) is refused with words (red before the fix: taken, then erased).
+  - **Sign-out removes only the changes X-04 named, by identity** (review P1; kit, so the iPhone
+    too). The count bound let a change another process queued pass when one of the counted changes
+    was acknowledged meanwhile (same count, different change). The confirmation now captures
+    `Workspace.pendingChangeIDs` (Mac `SignOutFlow.Prompt.changes`, the iPhone's Settings dialog)
+    and `Workspace.signOut(removing:)` refuses with `unsyncedChanges` whenever a pending change,
+    found up front or under the store's lock, is not among them; the count words are unchanged.
+    `WorkspaceSyncTests` (red before the fix: the widget's change was removed): confirm {A}, A
+    acknowledged and B queued meanwhile, refused, B kept.
+  - **X-03 is single-flight across entries** (review P1). The app menu's "Sign in…" while the
+    sheet waited for its login replaced the flow without cancelling its request, so two logins
+    could race. `MacSyncController.beginSignIn` now keeps an open flow (sheet shown or request on
+    its way) and the menu items are disabled meanwhile (`isSignInOpen`). `MacSyncFlowTests` (red
+    before the fix: the flow was replaced and a second sheet presented): the first flow, its one
+    login, signed in.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

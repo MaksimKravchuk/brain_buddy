@@ -353,6 +353,33 @@ import Testing
         #expect(try await session.store.load() == nil)
     }
 
+    @Test("021-FR-018 Sign out and remove removes only the changes it named: one acknowledged and another queued meanwhile stops it")
+    func signOutAndRemoveKeepsAChangeQueuedInPlaceOfAnAcknowledgedOne() async throws {
+        let session = await signedIn()
+        try session.workspace.capture(CaptureDraft(text: "Counted and removed"))
+        await session.workspace.flush()
+        let confirmed = session.workspace.pendingChangeIDs
+        #expect(confirmed.count == 1 && confirmed == Set(session.workspace.document.outbox.map(\.id)), "what the confirmation named")
+        let shared = session.store.base
+        let queuedElsewhere = PendingOperation(
+            command: .transitionTask(.init(taskID: "server-1", action: .complete)), issuedAt: Fixture.epoch)
+        // While the engine logs out, the server acknowledges the named change and a widget queues
+        // another one: the count is what the confirmation named, the change is not.
+        await session.sync.whileSigningOut {
+            _ = try? await shared.update { document in
+                document.outbox.removeAll { confirmed.contains($0.id) }
+                document.outbox.append(queuedElsewhere)
+            }
+        }
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(removing: confirmed)
+        }
+        #expect(try await session.store.load()?.outbox.map(\.id) == [queuedElsewhere.id], "the widget's change is kept")
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.pendingChangeCount == 1, "asked again, naming it")
+    }
+
     @Test("021-FR-018 a sign-out that fails takes changes again at once")
     func aFailedSignOutTakesChangesAgain() async throws {
         let session = await signedIn()

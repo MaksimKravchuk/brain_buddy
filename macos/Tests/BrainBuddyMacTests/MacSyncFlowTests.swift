@@ -268,6 +268,35 @@ struct MacSyncFlowTests {
         #expect(rig.controller.router.focus?.target == .statusWords, "the trailing action vanished: focus to the words")
     }
 
+    @Test("021-FR-001 Sign in… again while X-03 is signing in keeps that flow and its request; no second login starts")
+    func secondSignInWhileSigningInKeepsTheFirst() async throws {
+        let rig = await Rig()
+        rig.server.holdNextLogin()
+        rig.controller.beginSignIn(from: .statusLineAction)
+        let flow = try #require(rig.controller.signIn)
+        flow.email = StubServer.ada.email
+        flow.password = StubServer.ada.password
+        flow.submit()
+        await rig.server.loginGate.waitForArrival()
+        let presented = rig.controller.router.presented.count
+        #expect(rig.controller.isSignInOpen, "the app menu's Sign in… is disabled")
+
+        // The app menu's "Sign in…" (or any other entry) while the first sheet waits for its login.
+        rig.controller.beginSignIn(from: .menu)
+        #expect(rig.controller.signIn === flow, "the open flow stays")
+        #expect(rig.controller.router.presented.count == presented, "no second sheet")
+        #expect(flow.phase == .signingIn && flow.email == StubServer.ada.email)
+
+        await rig.server.loginGate.open()
+        await flow.waitForAttempt()
+        await rig.settle()
+        #expect(flow.phase == .finished && flow.requestsStarted == 1)
+        #expect(rig.server.routes.filter { $0 == "POST /auth/login" }.count == 1)
+        #expect(rig.workspace.account?.email == StubServer.ada.email)
+        rig.controller.closeSignIn()
+        #expect(!rig.controller.isSignInOpen)
+    }
+
     @Test("021-FR-001 021-FR-005 Cancel while signing in keeps the typed values; the reply after it has its session ended and links nothing")
     func cancelWhileSigningIn() async throws {
         let rig = await Rig()

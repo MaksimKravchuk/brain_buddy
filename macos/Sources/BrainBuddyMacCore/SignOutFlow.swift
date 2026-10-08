@@ -53,6 +53,8 @@ package final class SignOutFlow {
         package var text: SyncCopyText
         /// "Sign out and remove" when changes would be removed, else "Sign out".
         package var confirmTitle: String
+        /// The unsent changes it names, by identity: confirming removes these and no others.
+        package var changes: Set<PendingOperation.ID>
         package var removesUnsent: Bool { unsent > 0 }
     }
 
@@ -103,7 +105,8 @@ package final class SignOutFlow {
         )
         return Prompt(
             unsent: unsent, issues: issues, offline: !snapshot.isOnline, sessionEnded: snapshot.sessionEnded,
-            backup: backup, text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut
+            backup: backup, text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut,
+            changes: workspace.pendingChangeIDs
         )
     }
 
@@ -123,8 +126,9 @@ package final class SignOutFlow {
     }
 
     /// "Sign out" or "Sign out and remove". Removes only what the dialog named: when the count of
-    /// unsent changes or open issues differs from it, or the kit refuses a plain sign-out because
-    /// changes arrived, nothing is signed out and X-04 opens again with the new count.
+    /// unsent changes or open issues differs from it, or the kit finds a change it did not name (by
+    /// identity, so also one queued in place of an acknowledged one), nothing is signed out and X-04
+    /// opens again with the new count.
     @discardableResult
     package func confirm() async -> Outcome {
         guard !isSigningOut else { return .changed }
@@ -142,7 +146,7 @@ package final class SignOutFlow {
         defer { isSigningOut = false }
         let initialUpload = workspace.syncSnapshot.initialUploadRemaining
         do {
-            try await workspace.signOut(discardUnsyncedChanges: shown.removesUnsent)
+            try await workspace.signOut(removing: shown.changes)
         } catch WorkspaceError.unsyncedChanges {
             log.log(.sync, "sign-out re-presented reason=unsyncedChanges")
             open()

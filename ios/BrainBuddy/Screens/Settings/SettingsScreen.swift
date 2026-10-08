@@ -15,6 +15,8 @@ struct SettingsScreen: View {
     @State private var signInRequest: SignInRequest?
     @State private var isConfirmingSignOut = false
     @State private var unsyncedCount = 0
+    /// The unsent changes the confirmation names: "Sign out and remove" removes these and no others.
+    @State private var unsyncedChanges: Set<PendingOperation.ID> = []
     @State private var isSigningOut = false
     @State private var accountOrigin: String?
     @State private var accountLinkFailed = false
@@ -46,9 +48,9 @@ struct SettingsScreen: View {
             titleVisibility: .visible
         ) {
             if unsyncedCount > 0 {
-                Button("Sign out and remove", role: .destructive) { signOut(discardingUnsyncedChanges: true) }
+                Button("Sign out and remove", role: .destructive) { signOut(removing: unsyncedChanges) }
             } else {
-                Button("Sign out", role: .destructive) { signOut(discardingUnsyncedChanges: false) }
+                Button("Sign out", role: .destructive) { signOut(removing: []) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -262,15 +264,16 @@ struct SettingsScreen: View {
     /// real count.
     private func requestSignOut() {
         unsyncedCount = workspace.pendingChangeCount
+        unsyncedChanges = workspace.pendingChangeIDs
         isConfirmingSignOut = true
     }
 
-    private func signOut(discardingUnsyncedChanges discard: Bool) {
+    private func signOut(removing changes: Set<PendingOperation.ID>) {
         guard !isSigningOut else { return }
         isSigningOut = true
         Task {
             do {
-                try await workspace.signOut(discardUnsyncedChanges: discard)
+                try await workspace.signOut(removing: changes)
                 isSigningOut = false
                 // Recent searches can hold words from the account's tasks.
                 UserDefaults.standard.removeObject(forKey: RecentSearches.storageKey)
@@ -280,6 +283,7 @@ struct SettingsScreen: View {
                 if case .unsyncedChanges(let count) = error {
                     // Changes arrived after the check; ask again with the real count.
                     unsyncedCount = count
+                    unsyncedChanges = workspace.pendingChangeIDs
                     isConfirmingSignOut = true
                 } else {
                     toasts.show("\(error.message)", actionTitle: nil, action: nil)
