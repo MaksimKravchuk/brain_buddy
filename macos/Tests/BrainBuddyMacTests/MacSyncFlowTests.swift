@@ -474,6 +474,37 @@ struct MacSyncFlowTests {
         #expect(rig.workspace.account == nil && rig.workspace.pendingChangeCount == 0)
     }
 
+    @Test("021-FR-018 a Quick Capture while a confirmed sign-out commits is refused with words and never silently removed")
+    func quickCaptureWhileSigningOutIsNeverLost() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        rig.server.holdNextLogout()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOut.prompt?.unsent == 0)
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        // The data is removed; the logout is on its way.
+        await rig.server.logoutGate.waitForArrival()
+
+        var refusal: String?
+        do {
+            try rig.model.quickCaptureInbox("Water the tomatoes")
+        } catch {
+            refusal = error.message
+        }
+        await rig.server.logoutGate.open()
+        #expect(await confirming.value == .signedOut)
+        await rig.settle()
+
+        #expect(
+            refusal != nil || rig.workspace.state.tasks.values.contains { $0.title == "Water the tomatoes" },
+            "refused, so the panel keeps the text, or kept")
+        #expect(refusal == "Brain Buddy is signing out. This wasn't saved; try again in a moment.")
+        #expect(rig.workspace.account == nil)
+        try rig.model.quickCaptureInbox("Water the tomatoes")
+        #expect(rig.workspace.pendingChangeCount == 1, "saved again once signed out, on this Mac")
+    }
+
     @Test("021-FR-018 a plain Sign out the kit refuses, because another process queued a change, shows X-04 again")
     func plainSignOutRefusedByTheKit() async throws {
         let rig = await Rig()

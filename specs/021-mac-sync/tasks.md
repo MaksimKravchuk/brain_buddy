@@ -768,6 +768,24 @@ Earlier increments are each independently useful and safe:
     cancelled" (red before the fix: the sheet went back to `.editing` and logged "sign-in
     cancelled"), and in `SyncEngineSessionTests` the Cancel-before-the-link and
     Cancel-during-the-link's-write cases.
+  - **Sign-out removes only what X-04 counted** (review P1; kit, so the iPhone too). After the
+    count check, `Workspace.signOut` suspends (writer, engine stop, removal, logout) while
+    `writesSuspended` blocked only persistence: a command made meanwhile (the Mac's global Quick
+    Capture) was accepted into `unpersisted`, never counted, and erased by
+    `resetToEmptyLocalWorkspace()`. Now `Workspace.isSigningOut` is set before the first suspension
+    and `perform` refuses every command until the sign-out returns, with
+    `GTDValidationError.signingOut` ("Brain Buddy is signing out. This wasn't saved; try again in a
+    moment."): Quick Capture and the main window show it and keep the typed text, and the same
+    capture is taken once signed out. And "Sign out and remove" removes no more than the count it
+    was called with: a change another process (an iPhone widget or App Intent) queues meanwhile
+    fails the removal check under the store's lock with `unsyncedChanges` and the real count, so
+    X-04 (and the iPhone's confirmation) asks again and nothing is removed. Chosen over "abort and
+    re-present on any in-process change" because a change after the removal can't re-present
+    anything; refusing it is the one way it can't be lost. Tests (`WorkspaceSyncTests`, red before
+    the fix): a capture before the removal (both choices) and after it is refused, never silently
+    removed; Sign out and remove keeps a change another process queued meanwhile; a failed
+    sign-out takes changes again. `MacSyncFlowTests`: a Quick Capture while a confirmed sign-out
+    commits (logout held) is refused with words (red before the fix: taken, then erased).
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

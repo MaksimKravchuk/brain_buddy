@@ -95,6 +95,11 @@ public final class Workspace {
     @ObservationIgnored private var deferredDocument: StoreDocument?
     /// Set during sign-out: nothing new is written for the old account.
     @ObservationIgnored private var writesSuspended = false
+    /// A sign-out is committing (spec 021, FR-018, X-04): from its last count check to the empty
+    /// workspace, every command is refused with `GTDValidationError.signingOut`, so a change made
+    /// meanwhile (the Mac's global Quick Capture, an in-process App Intent) is never accepted and
+    /// then removed unseen. The caller keeps what was typed and can try again once it is done.
+    @ObservationIgnored public private(set) var isSigningOut = false
     /// Bumped when the workspace is reset, so results of work started
     /// before (a load, a write) are discarded.
     @ObservationIgnored private var epoch = 0
@@ -484,10 +489,20 @@ public final class Workspace {
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
     /// while changes are still pending, counting those a widget or App Intent
     /// queued in the store that this workspace has not picked up yet.
+    ///
+    /// It removes only the changes it counted (spec 021, FR-018, X-04): `pendingChangeCount` when
+    /// called, which is what the confirmation named. A change another process queues meanwhile
+    /// stops it with `unsyncedChanges` and the real count, and nothing is removed; one made in this
+    /// workspace meanwhile is refused (`GTDValidationError.signingOut`, `isSigningOut`).
     public func signOut(discardUnsyncedChanges: Bool) async throws {
         if pendingChangeCount > 0, !discardUnsyncedChanges {
             throw WorkspaceError.unsyncedChanges(count: pendingChangeCount)
         }
+        let counted = pendingChangeCount
+        // Set before the first suspension: nothing performed from here on can slip past the count
+        // the person confirmed and be removed with the account's data.
+        isSigningOut = true
+        defer { isSigningOut = false }
         nativeSignInID = nil
         isSigningIn = false
         // Let a write in flight finish, and write nothing new for this account.
@@ -504,14 +519,14 @@ public final class Workspace {
             }
         }
         let unpersistedCount = unpersisted.count
-        let discard = discardUnsyncedChanges
         let store = self.store
         // The engine runs this once it has recorded the session's logout; it is checked again under
-        // the store's lock, so nothing queued in between is lost.
+        // the store's lock, so nothing queued in between is lost: more changes than were counted
+        // (none, for a plain sign-out) and nothing is removed.
         let removeData: @Sendable () async throws -> Void = {
             try await store.destroy(after: { stored in
                 let unsynced = unpersistedCount + (stored?.outbox.count ?? 0)
-                if unsynced > 0, !discard { throw WorkspaceError.unsyncedChanges(count: unsynced) }
+                if unsynced > counted { throw WorkspaceError.unsyncedChanges(count: unsynced) }
             })
         }
         do {
@@ -617,6 +632,7 @@ extension Workspace {
     /// Before that the reducer derives one (no id is drawn, so nothing else
     /// changes while the feature is off).
     func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        guard !isSigningOut else { throw .signingOut }
         let issuedAt = Self.storedPrecision(now())
         let makeID = self.makeID
         let commands =

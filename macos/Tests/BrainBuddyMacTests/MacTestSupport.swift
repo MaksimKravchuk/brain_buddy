@@ -165,11 +165,13 @@ final class StubServer: HTTPTransport {
         var deletionScheduled: Set<String> = []
         var holdNextLogin = false
         var holdNextSync = false
+        var holdNextLogout = false
     }
 
     private let state = Mutex(State())
     let loginGate = ResponseGate()
     let syncGate = ResponseGate()
+    let logoutGate = ResponseGate()
 
     init(_ accounts: [Account] = [StubServer.ada]) {
         state.withLock { state in for account in accounts { state.accounts[account.email.lowercased()] = account } }
@@ -193,6 +195,8 @@ final class StubServer: HTTPTransport {
     func holdNextLogin() { state.withLock { $0.holdNextLogin = true } }
     /// The next request a session sends (the first sync's first request) waits for `syncGate`.
     func holdNextSync() { state.withLock { $0.holdNextSync = true } }
+    /// The next logout waits for `logoutGate` (a sign-out's, after the local removal).
+    func holdNextLogout() { state.withLock { $0.holdNextLogout = true } }
     /// The email now belongs to another account id (deleted and created again).
     func reassign(_ email: String, to id: String) { state.withLock { $0.accounts[email.lowercased()]?.id = id } }
 
@@ -214,6 +218,14 @@ final class StubServer: HTTPTransport {
         case (.post, "/auth/login"):
             return await login(request)
         case (.post, "/auth/logout"):
+            let hold = state.withLock { state -> Bool in
+                defer { state.holdNextLogout = false }
+                return state.holdNextLogout
+            }
+            if hold {
+                await logoutGate.arrive()
+                await logoutGate.wait()
+            }
             if let token = Self.session(request) { _ = state.withLock { $0.sessions.removeValue(forKey: token) } }
             return HTTPResponse(statusCode: 204)
         default:

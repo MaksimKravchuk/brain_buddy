@@ -269,6 +269,101 @@ import Testing
         )
     }
 
+    /// A capture through the workspace while its sign-out is suspended: the refusal's words, or nil
+    /// when it was taken.
+    static func captureWhileSigningOut(_ workspace: Workspace, _ title: String, into refusal: Refusal) async {
+        await MainActor.run {
+            do throws(GTDValidationError) {
+                _ = try workspace.capture(CaptureDraft(text: title))
+            } catch {
+                refusal.record(error.message)
+            }
+        }
+    }
+
+    /// The words a refused capture showed.
+    final class Refusal: Sendable {
+        private let words = Mutex<String?>(nil)
+        func record(_ message: String) { words.withLock { $0 = message } }
+        var message: String? { words.withLock { $0 } }
+    }
+
+    @Test(
+        "021-FR-018 a capture while a sign-out waits for the engine, before the removal, is refused with words, never silently removed",
+        arguments: [false, true])
+    func captureBeforeTheRemovalIsNeverLost(discard: Bool) async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.whileSigningOut { await Self.captureWhileSigningOut(workspace, "Water the tomatoes", into: refusal) }
+
+        try await workspace.signOut(discardUnsyncedChanges: discard)
+
+        let refused = refusal.message
+        #expect(
+            refused != nil || workspace.state.tasks.values.contains { $0.title == "Water the tomatoes" },
+            "the capture was refused, so its text is still where it was typed, or it was kept")
+        #expect(refused == GTDValidationError.signingOut.message)
+        #expect(workspace.account == nil, "the sign-out went through")
+        let retried = try workspace.capture(CaptureDraft(text: "Water the tomatoes"))
+        #expect(workspace.task(retried) != nil, "once signed out, the same capture is taken")
+    }
+
+    @Test("021-FR-018 a capture after the removal, while the logout is on its way, is refused with words, never silently removed")
+    func captureAfterTheRemovalIsNeverLost() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        let refusal = Refusal()
+        await session.sync.afterRemovingDataWhileSigningOut {
+            await Self.captureWhileSigningOut(workspace, "Water the tomatoes", into: refusal)
+        }
+
+        try await workspace.signOut(discardUnsyncedChanges: false)
+
+        let refused = refusal.message
+        #expect(
+            refused != nil || workspace.state.tasks.values.contains { $0.title == "Water the tomatoes" },
+            "the capture was refused, so its text is still where it was typed, or it was kept")
+        #expect(refused == GTDValidationError.signingOut.message)
+        #expect(workspace.account == nil && workspace.pendingChangeCount == 0)
+    }
+
+    @Test("021-FR-018 Sign out and remove removes only the changes it counted: one another process queued meanwhile stops it")
+    func signOutAndRemoveKeepsAChangeQueuedMeanwhile() async throws {
+        let session = await signedIn()
+        try session.workspace.capture(CaptureDraft(text: "Counted and removed"))
+        #expect(session.workspace.pendingChangeCount == 1, "what the confirmation named")
+        let shared = session.store.base
+        // A widget writes after the confirmation, while the engine logs out.
+        await session.sync.whileSigningOut {
+            _ = try? await shared.update { document in
+                let command = GTDCommand.transitionTask(.init(taskID: "server-1", action: .complete))
+                document.outbox.append(PendingOperation(command: command, issuedAt: Fixture.epoch))
+            }
+        }
+
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 2)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: true)
+        }
+        #expect(try await session.store.load()?.outbox.count == 2, "nothing was removed")
+        #expect(session.workspace.account == Fixture.account)
+        #expect(session.workspace.pendingChangeCount == 2, "asked again with the real count")
+
+        try await session.workspace.signOut(discardUnsyncedChanges: true)
+        #expect(try await session.store.load() == nil)
+    }
+
+    @Test("021-FR-018 a sign-out that fails takes changes again at once")
+    func aFailedSignOutTakesChangesAgain() async throws {
+        let session = await signedIn()
+        try session.workspace.capture(CaptureDraft(text: "Not synced"))
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) {
+            try await session.workspace.signOut(discardUnsyncedChanges: false)
+        }
+        let id = try session.workspace.capture(CaptureDraft(text: "Still taking changes"))
+        #expect(session.workspace.task(id) != nil)
+    }
+
     @Test func signOutWithEverythingSyncedNeedsNoConfirmation() async throws {
         let session = await signedIn()
 
