@@ -89,6 +89,17 @@ extension Workspace {
     public func projectsNeedingNextAction() -> [ProjectSummary] { GTDQueries.projectsNeedingNextAction(in: state) }
     public func datesAhead() -> [DueDay] { GTDQueries.datesAhead(in: state, today: today) }
     public func lastCountedReview() -> Date? { GTDQueries.lastCountedReview(in: state) }
+    public func daysSinceLastReview() -> Int? { GTDQueries.daysSinceLastReview(in: state, today: today) }
+    public func reviewEntryNotice() -> ReviewEntryNotice? { GTDQueries.entryNotice(in: state) }
+    public func openRestartReleases() -> [BulkReleaseRecord] { GTDQueries.openRestartReleases(in: state) }
+
+    public func openInboxReleases(in session: ReviewSession) -> [BulkReleaseRecord] {
+        GTDQueries.openInboxReleases(in: state, session: session)
+    }
+
+    public func decisionStep(in session: ReviewSession) -> DecisionStepOutcome {
+        GTDQueries.decisionStep(in: state, session: session, now: reviewNow, timeZone: classificationZone)
+    }
     public var explainerNeeded: Bool { GTDQueries.explainerNeeded(in: state, local: local) }
 
     /// FR-005: whether the card shows the third-stall offer for `id`.

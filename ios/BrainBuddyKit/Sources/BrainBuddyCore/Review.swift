@@ -305,6 +305,14 @@ public struct ReviewSession: Identifiable, Hashable, Sendable, Codable {
 
     public var isCounted: Bool { status.isCounted(qualifyingActivity: qualifyingActivity) }
 
+    /// Decisions made in the run: the summary's counts without Inbox processed.
+    public var decisionCount: Int { counts.total - counts[.inboxProcessed] }
+
+    /// Closed by the 7-day idle rule (FR-029), as `ReviewSessionUpkeep.closeIdle` ends it.
+    public var closedForIdleness: Bool {
+        (status == .partial || status == .abandoned) && endedAt == lastActivityAt.addingTimeInterval(Self.idleCloseAfter)
+    }
+
     /// The regularity instant this session contributes, if counted (data-model E3).
     public var countedAt: Date? {
         guard isCounted else { return nil }
@@ -354,9 +362,12 @@ public struct TaskStamp: Hashable, Sendable, Codable {
 }
 
 /// FR-011: the task as a decision card or form showed it. A person's
-/// decision on a task that changed since is stale: the task itself (its
-/// revision and `updatedAt`) or its children. Child edits leave the parent
-/// untouched, on the device (`Reducer+Children`) and on the server (a
+/// decision on a task that changed since is stale: the task itself or its
+/// children. The task is compared by what a person sees (`visible`): its
+/// revision, write instants and other server-set fields are left out, so an
+/// acknowledgement of an edit that was queued before the card opened is not a
+/// change. Child edits leave the parent untouched, on the device
+/// (`Reducer+Children`) and on the server (a
 /// subtask or comment has its own revision), so the children are compared
 /// by what a person sees: ids, subtask title, state and order, comment body.
 /// Server ids, revisions, authors and server-set times are left out, so an
@@ -371,8 +382,8 @@ public struct TaskStamp: Hashable, Sendable, Codable {
 /// A child another device created before this one hydrated the task cannot
 /// be told from one that already existed. Never encoded or stored.
 public struct ShownTask: Hashable, Sendable {
-    /// The task's own revision and `updatedAt`.
-    public var stamp: TaskStamp
+    /// The task as a person sees it (`visible`).
+    public var content: TaskRecord
     /// The device held every child when the card opened: the task's detail
     /// was read (`childrenSyncedAt`), or the server has not seen the task
     /// yet, so all of its children are on the device.
@@ -385,7 +396,7 @@ public struct ShownTask: Hashable, Sendable {
 
     public init(_ task: TaskRecord, localChildEdits: Int = 0) {
         self.localChildEdits = localChildEdits
-        stamp = TaskStamp(task)
+        content = Self.visible(task)
         childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
         subtasks = Self.visible(task.subtasks)
         comments = Self.visible(task.comments)
@@ -399,7 +410,7 @@ public struct ShownTask: Hashable, Sendable {
     }
 
     public func matches(_ task: TaskRecord?) -> Bool {
-        guard let task, stamp.matches(task) else { return false }
+        guard let task, content == Self.visible(task) else { return false }
         let currentSubtasks = Self.visible(task.subtasks)
         let currentComments = Self.visible(task.comments)
         if childrenKnown { return currentSubtasks == subtasks && currentComments == comments }
@@ -420,6 +431,24 @@ public struct ShownTask: Hashable, Sendable {
         guard shownOrder == currentOrder else { return false }
         let commentsByID = Dictionary(currentComments.map { ($0.id, $0.body) }, uniquingKeysWith: { first, _ in first })
         return comments.allSatisfy { commentsByID[$0.id] == $0.body }
+    }
+
+    /// The task without its ids, revision, server-set instants and order key,
+    /// and without the children (compared on their own).
+    static func visible(_ task: TaskRecord) -> TaskRecord {
+        var visible = task
+        visible.serverID = nil
+        visible.serverRevision = nil
+        visible.waitingSince = nil
+        visible.completedAt = nil
+        visible.cancelledAt = nil
+        visible.orderKey = 0
+        visible.createdAt = .distantPast
+        visible.updatedAt = .distantPast
+        visible.subtasks = []
+        visible.comments = []
+        visible.childrenSyncedAt = nil
+        return visible
     }
 
     static func visible(_ subtasks: [SubtaskRecord]) -> [SubtaskRecord] {

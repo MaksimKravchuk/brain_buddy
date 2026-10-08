@@ -191,7 +191,7 @@ struct FormulationTests {
         case "decide":
             return .done(try decide(task, event, settings, now), settings, nil)
         case "undo_decision":
-            return .done(FormulationRule.restore(task, from: try clock(event["task_before"] ?? .null)), settings, nil)
+            return .done(FormulationRule.restore(task, from: try clock(event["task_before"] ?? .null), settings: settings), settings, nil)
         case "auto_park":
             guard let parked = FormulationRule.autoPark(task, settings: settings, now: now) else { return .notApplied }
             return .done(parked, settings, nil)
