@@ -4,6 +4,7 @@ import { crtApi, type CrtTreeResponse } from "../../../api/crt";
 import { createGraphState, type GraphState } from "../graphModel";
 import {
   cleanupCrtOwnerScope,
+  countCrtOwnerDrafts,
   createCrtDraftCoordinator,
   createCrtLossBarrier,
   draftWriteInputFromCrtState,
@@ -581,6 +582,77 @@ describe("CRT draft persistence/reconciliation coordinator", () => {
     noConfirm.mockRestore();
     active.dispose();
     expect(await cleanupCrtOwnerScope("cleanup-owner", origin)).toEqual({ ok: true, removed: 0 });
+  });
+
+  it("020-FR-052 cleanup honours the caller's loss confirmation: false refuses unprompted, undefined asks, true removes unprompted", async () => {
+    const ownerId = "owner-loss-confirmed";
+    const origin = "https://owner-loss-confirmed.example.test";
+    const activeTree = { ...tree, owner_id: ownerId, metadata: { ...tree.metadata, owner_id: ownerId } };
+    const active = createCoordinator({ owner_id: ownerId, origin, tree_id: activeTree.id, storage: null, lock_manager: null });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    Object.defineProperty(navigator, "locks", { configurable: true, value: lockManager });
+
+    try {
+      await active.persistBeforeSave(activeTree, graph);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: false })).toEqual({ ok: false, reason: "transition-cancelled" });
+      expect(confirm).not.toHaveBeenCalled();
+      expect(active.hasPendingDraft()).toBe(true);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin)).toEqual({ ok: false, reason: "transition-cancelled" });
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(active.hasPendingDraft()).toBe(true);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: true })).toEqual({ ok: true, removed: 1 });
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(active.hasPendingDraft()).toBe(false);
+
+      expect(await cleanupCrtOwnerScope(ownerId, origin, { lossConfirmed: false })).toEqual({ ok: true, removed: 0 });
+    } finally {
+      confirm.mockRestore();
+      if (originalLocks === undefined) Reflect.deleteProperty(navigator, "locks");
+      else Object.defineProperty(navigator, "locks", originalLocks);
+      active.dispose();
+    }
+  });
+
+  it("020-FR-052 counts the owner's drafts a sign-out would remove, once each, memory-only ones included, removing none", async () => {
+    const owner = "owner-count";
+    const origin = "https://owner-count.example.test";
+    const storage = new MemoryStorage();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(navigator, "locks", { configurable: true, value: lockManager });
+    const ownerTree = (id: string) => ({ ...tree, id, owner_id: owner, metadata: { ...tree.metadata, owner_id: owner } });
+    const first = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-1" });
+    const second = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-2" });
+    const memoryOnly = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-3", storage: null, lock_manager: null });
+    try {
+      expect(await countCrtOwnerDrafts(owner, origin)).toBe(0);
+      await first.persistBeforeSave(ownerTree("tree-1"), graph);
+      await second.persistBeforeSave(ownerTree("tree-2"), graph);
+      await memoryOnly.persistBeforeSave(ownerTree("tree-3"), graph);
+
+      expect(await countCrtOwnerDrafts(owner, origin)).toBe(3);
+      expect(await countCrtOwnerDrafts("another-owner", origin)).toBe(0);
+      expect(storage.length).toBe(2);
+      expect(first.hasPendingDraft()).toBe(true);
+      expect(await countCrtOwnerDrafts("", origin)).toBeNull();
+      expect(await countCrtOwnerDrafts(owner, "ftp://owner-count.example.test")).toBeNull();
+
+      const unreadable = new MemoryStorage();
+      Object.defineProperty(unreadable, "length", { configurable: true, get: () => { throw new Error("length"); } });
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, value: unreadable });
+      expect(await countCrtOwnerDrafts(owner, origin)).toBeNull();
+    } finally {
+      first.dispose();
+      second.dispose();
+      memoryOnly.dispose();
+      if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage); else Reflect.deleteProperty(globalThis, "localStorage");
+      if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks); else Reflect.deleteProperty(navigator, "locks");
+    }
   });
 
   it("covers navigation barrier event filters, beforeunload, popstate restoration, and detach", () => {

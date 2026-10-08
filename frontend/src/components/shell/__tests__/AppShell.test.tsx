@@ -4,8 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { apiClient } from "../../../api/client";
+import { apiClient, getApiBaseUrl } from "../../../api/client";
 import { reviewApi, type ReviewState } from "../../../api/review";
+import * as crtBoundary from "../../../features/crt/crtDraftCoordinator";
+import { saveReviewDraft } from "../../../features/review/reviewFormDrafts";
 import { markWhileAwayShown, readWhileAwayLastShown, localDay } from "../../../features/review/wywaPresentation";
 import type { ProjectResponse, TagResponse, TaskCounts } from "../../../api/taskTypes";
 import { useAuthStore } from "../../../stores/authStore";
@@ -652,7 +654,54 @@ describe("AppShell account menu", () => {
     expect(currentLocation()).toBe("/privacy");
   });
 
-  it("signs out and lands on the login route", async () => {
+  it("020-FR-052 Sign out asks first: the dialog opens with focus on Cancel and Cancel keeps the session", async () => {
+    const user = userEvent.setup();
+    const logout = vi.fn(async () => true);
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Account menu for max@example.test" });
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Sign out?" });
+    expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
+    expect(dialog).toHaveAccessibleDescription(
+      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account."
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(logout).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(logout).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().user?.id).toBe("user-1");
+    expect(currentLocation()).toBe("/tasks/next");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("020-FR-052 Escape cancels the sign-out dialog and keeps the session", async () => {
+    const user = userEvent.setup();
+    const logout = vi.fn(async () => true);
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    await screen.findByRole("alertdialog", { name: "Sign out?" });
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(logout).not.toHaveBeenCalled();
+    expect(currentLocation()).toBe("/tasks/next");
+  });
+
+  it("020-FR-052 confirming signs out through logout() and lands on the login route", async () => {
     const user = userEvent.setup();
     const logout = vi.fn(async () => {
       useAuthStore.setState({ user: null, status: "anon" });
@@ -665,13 +714,158 @@ describe("AppShell account menu", () => {
 
     await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
     await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    expect(logout).toHaveBeenCalledWith({ lossConfirmed: false });
+    await waitFor(() => expect(currentLocation()).toBe("/login"));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-052 a sign-out that did not finish shows an error, keeps the dialog and the route, and can be retried", async () => {
+    const user = userEvent.setup();
+    const logout = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockRejectedValueOnce(new Error("cleanup"))
+      .mockImplementationOnce(async () => {
+        useAuthStore.setState({ user: null, status: "anon" });
+        return true;
+      });
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sign-out didn't finish. You're still signed in. Try again.");
+    expect(screen.getByRole("alertdialog", { name: "Sign out?" })).toBeInTheDocument();
+    expect(currentLocation()).toBe("/tasks/next");
+    expect(useAuthStore.getState().user?.id).toBe("user-1");
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(logout).toHaveBeenCalledTimes(2);
+    expect(currentLocation()).toBe("/tasks/next");
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
     await waitFor(() => expect(currentLocation()).toBe("/login"));
   });
 
-  it("stays on the current route when signing out does not clear the session", async () => {
+  it("020-FR-052 warns that unsaved changes will be lost when the account has weekly-review drafts, and not otherwise", async () => {
     const user = userEvent.setup();
+    const scope = { apiOrigin: getApiBaseUrl(), accountId: "user-1" };
+    window.localStorage.clear();
+    saveReviewDraft({ ...scope, accountId: "user-2" }, { kind: "task", taskId: "t1", formulationId: "f1" }, { form: "reformulate", text: "not mine" });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(await screen.findByRole("alertdialog")).not.toHaveTextContent("will be lost");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    saveReviewDraft(scope, { kind: "task", taskId: "t1", formulationId: "f1" }, { form: "reformulate", text: "one" });
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent(
+      "Unsaved changes in this browser will be lost: they have not been saved to your account."
+    );
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Your tasks stay in your account.");
+    window.localStorage.clear();
+  });
+
+  it("020-FR-052 confirming with unsaved Thinking Mode drafts hands the confirmation to logout() and never opens a second window.confirm", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValue(2);
+    const nativeConfirm = vi.spyOn(window, "confirm");
+    const logout = vi.fn(async () => {
+      useAuthStore.setState({ user: null, status: "anon" });
+      return true;
+    });
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Unsaved changes in this browser will be lost");
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(currentLocation()).toBe("/login"));
+    expect(logout).toHaveBeenCalledWith({ lossConfirmed: true });
+    expect(nativeConfirm).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-052 unsaved work that appears before confirming is warned about and nothing is removed until the second confirm", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValueOnce(0).mockResolvedValue(1);
+    const nativeConfirm = vi.spyOn(window, "confirm");
+    const logout = vi.fn(async () => {
+      useAuthStore.setState({ user: null, status: "anon" });
+      return true;
+    });
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(await screen.findByRole("alertdialog")).not.toHaveTextContent("will be lost");
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something changed since this opened. Check and confirm again.");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Unsaved changes in this browser will be lost");
+    expect(logout).not.toHaveBeenCalled();
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().user?.id).toBe("user-1");
+    expect(currentLocation()).toBe("/tasks/next");
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(currentLocation()).toBe("/login"));
+    expect(logout).toHaveBeenCalledWith({ lossConfirmed: true });
+    expect(nativeConfirm).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-052 a weekly-review draft written after the dialog opened is kept, warned about, and only removed by a second confirm", async () => {
+    const user = userEvent.setup();
+    const scope = { apiOrigin: getApiBaseUrl(), accountId: "user-1" };
+    window.localStorage.clear();
+    const logout = vi.fn(async () => {
+      useAuthStore.setState({ user: null, status: "anon" });
+      return true;
+    });
+    act(() => {
+      useAuthStore.setState({ logout });
+    });
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(await screen.findByRole("alertdialog")).not.toHaveTextContent("will be lost");
+    // Another tab types into a review form while this dialog is open.
+    saveReviewDraft(scope, { kind: "task", taskId: "t1", formulationId: "f1" }, { form: "reformulate", text: "typed elsewhere" });
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something changed since this opened. Check and confirm again.");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Unsaved changes in this browser will be lost");
+    expect(logout).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(1);
+    expect(useAuthStore.getState().user?.id).toBe("user-1");
+
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(currentLocation()).toBe("/login"));
+    expect(logout).toHaveBeenCalledWith({ lossConfirmed: true });
+    window.localStorage.clear();
+  });
+
+  it("020-FR-052 a refused cleanup that finds work the dialog did not show re-presents the dialog with the warning", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(crtBoundary, "countCrtOwnerDrafts").mockResolvedValueOnce(0).mockResolvedValueOnce(0).mockResolvedValue(1);
     const logout = vi.fn(async () => false);
     act(() => {
       useAuthStore.setState({ logout });
@@ -680,10 +874,12 @@ describe("AppShell account menu", () => {
 
     await user.click(screen.getByRole("button", { name: "Account menu for max@example.test" }));
     await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
-    expect(currentLocation()).toBe("/tasks/next");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something changed since this opened. Check and confirm again.");
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Unsaved changes in this browser will be lost");
+    expect(logout).toHaveBeenCalledWith({ lossConfirmed: false });
+    expect(useAuthStore.getState().user?.id).toBe("user-1");
   });
 
   it("closes on Escape, on an outside click, and on a second press of the trigger", async () => {

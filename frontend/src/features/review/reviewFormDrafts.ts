@@ -248,6 +248,21 @@ export function clearReviewLocalState(scope: ReviewDraftScope, storage = default
   }
 }
 
+/**
+ * How many unsaved review drafts of this account `clearReviewLocalState` would
+ * remove at sign-out, for the confirmation to name: this account's drafts that
+ * hold text and have not expired. Read-only. It cannot tell a draft whose
+ * wording was since replaced on another device (that one is dropped when its
+ * form next opens), so it may name one that would never have come back.
+ */
+export function countUnsavedReviewDrafts(scope: ReviewDraftScope, now = new Date(), storage = defaultStorage()): number {
+  const prefix = accountPrefix(scope);
+  return keysOf(storage).filter((key) => {
+    const draft = key.startsWith(prefix) ? parseDraft(attempt(() => storage.getItem(key), null)) : null;
+    return draft !== null && draft.text !== "" && !isExpired(draft, now);
+  }).length;
+}
+
 /** Clears the departing account's review keys whenever the signed-in account changes. */
 export function subscribeReviewLocalCleanup(apiOrigin = getApiBaseUrl()): () => void {
   return useAuthStore.subscribe((state, previous) => {

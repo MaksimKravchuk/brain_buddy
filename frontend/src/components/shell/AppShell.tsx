@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
@@ -39,6 +40,8 @@ import {
   undoShortcutLabel
 } from "./shellToast";
 import type { ShellNotify, ShellToastAction } from "./shellToast";
+import { SignOutDialog } from "./SignOutDialog";
+import { loadSignOutSummary, type SignOutSummary } from "./signOutSummary";
 
 interface AppShellProps {
   children: ReactNode;
@@ -312,9 +315,14 @@ function AccountMenu(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const [open, setOpen] = useState(false);
+  // The sign-out confirmation (020-FR-052): set while it is on screen.
+  const [signOutSummary, setSignOutSummary] = useState<SignOutSummary | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutNotice, setSignOutNotice] = useState<"failed" | "changed" | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
+  const reloadSignOutSummary = () => loadSignOutSummary(user?.id ?? "");
 
   useEffect(() => {
     if (!open) {
@@ -338,6 +346,55 @@ function AccountMenu(): React.JSX.Element {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  const requestSignOut = async () => {
+    setOpen(false);
+    setSignOutNotice(null);
+    setSignOutSummary(await reloadSignOutSummary());
+  };
+  const cancelSignOut = useCallback(() => {
+    setSignOutSummary(null);
+    triggerRef.current?.focus();
+  }, []);
+  const confirmSignOut = async (shown: SignOutSummary) => {
+    setSigningOut(true);
+    setSignOutNotice(null);
+    if (!shown.unsavedWork) {
+      // Unsaved work that appeared since the dialog opened (another tab) was not
+      // warned about: show the warning and wait for a second confirmation.
+      const fresh = await reloadSignOutSummary();
+      if (fresh.unsavedWork) {
+        setSigningOut(false);
+        setSignOutSummary(fresh);
+        setSignOutNotice("changed");
+        return;
+      }
+    }
+    let signedOut = false;
+    try {
+      // This dialog is the one confirmation: logout() must not ask again, and
+      // refuses (removing nothing) if it finds Thinking Mode drafts this dialog did not warn about.
+      signedOut = await logout({ lossConfirmed: shown.unsavedWork });
+    } catch {
+      // A refused cleanup or a server error: the session is still in place.
+    }
+    if (signedOut) {
+      setSigningOut(false);
+      setSignOutSummary(null);
+      navigate("/login");
+      return;
+    }
+    // Not signed out. If the cause is work that appeared between the check
+    // above and the cleanup, say so instead of a generic failure.
+    const fresh = shown.unsavedWork ? shown : await reloadSignOutSummary();
+    setSigningOut(false);
+    if (fresh.unsavedWork && !shown.unsavedWork) {
+      setSignOutSummary(fresh);
+      setSignOutNotice("changed");
+    } else {
+      setSignOutNotice("failed");
+    }
+  };
 
   const itemClass =
     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900";
@@ -415,15 +472,24 @@ function AccountMenu(): React.JSX.Element {
             type="button"
             role="menuitem"
             className={itemClass}
-            onClick={async () => {
-              setOpen(false);
-              if (await logout()) navigate("/login");
-            }}
+            onClick={() => void requestSignOut()}
           >
             <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
           </button>
         </div>
       ) : null}
+      {signOutSummary
+        ? createPortal(
+            <SignOutDialog
+              summary={signOutSummary}
+              pending={signingOut}
+              notice={signOutNotice}
+              onCancel={cancelSignOut}
+              onConfirm={() => void confirmSignOut(signOutSummary)}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

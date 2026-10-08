@@ -923,6 +923,45 @@ export type CrtOwnerCleanupResult =
 
 const activeCrtCoordinators = new Set<CrtDraftCoordinator>();
 
+function activeCoordinatorsFor(ownerId: string, normalizedOrigin: string): CrtDraftCoordinator[] {
+  return [...activeCrtCoordinators].filter((coordinator) => {
+    const scope = coordinator.activeScope;
+    return scope.owner_id === ownerId && scope.origin === normalizedOrigin;
+  });
+}
+
+/**
+ * How many local CRT drafts `cleanupCrtOwnerScope` would remove for this owner
+ * in this browser, for a sign-out confirmation to name. It reads the same
+ * listings the cleanup walks (the durable store plus every mounted
+ * coordinator, which also sees memory-only drafts) and removes nothing.
+ * `null` when the drafts cannot be listed: the caller must not claim zero.
+ */
+export async function countCrtOwnerDrafts(ownerId: string, origin = globalThis.location?.origin ?? ""): Promise<number | null> {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!ownerId || !normalizedOrigin) return null;
+  const mounted = activeCoordinatorsFor(ownerId, normalizedOrigin);
+  const scanner = createCrtDraftCoordinator({ owner_id: ownerId, origin: normalizedOrigin, tree_id: null });
+  try {
+    const draftKeys = new Set<string>();
+    for (const coordinator of [scanner, ...mounted]) {
+      const listed = await coordinator.enumerateOwnerDrafts();
+      if (!listed.ok) return null;
+      for (const { draft } of listed.value) {
+        draftKeys.add(draftStorageKey({
+          owner_id: draft.owner_id,
+          origin: draft.origin,
+          tree_id: draft.tree_id,
+          create_idempotency_key: draft.create_idempotency_key
+        }));
+      }
+    }
+    return draftKeys.size;
+  } finally {
+    scanner.dispose();
+  }
+}
+
 /**
  * Complete the browser-local part of an authenticated owner transition.
  *
@@ -932,14 +971,22 @@ const activeCrtCoordinators = new Set<CrtDraftCoordinator>();
  * The cleanup is fail-closed: a storage/read-back failure leaves the session
  * in place so the caller cannot claim that the departing owner's bytes were
  * cleared.
+ *
+ * `options.lossConfirmed` says whether the caller already asked the person
+ * about losing unsaved work: `true` skips the native `window.confirm` and
+ * removes; `false` means the caller warned of no unsaved work, so pending work
+ * found here is refused (`transition-cancelled`, nothing removed, no prompt);
+ * `undefined` keeps the native `window.confirm` for callers with no dialog of
+ * their own.
  */
-export async function cleanupCrtOwnerScope(ownerId: string, origin = globalThis.location?.origin ?? ""): Promise<CrtOwnerCleanupResult> {
+export async function cleanupCrtOwnerScope(
+  ownerId: string,
+  origin = globalThis.location?.origin ?? "",
+  options: Readonly<{ lossConfirmed?: boolean }> = {}
+): Promise<CrtOwnerCleanupResult> {
   const normalizedOrigin = normalizeOrigin(origin);
   if (!ownerId || !normalizedOrigin) return { ok: false, reason: "cleanup-failed" };
-  const active = [...activeCrtCoordinators].filter((coordinator) => {
-    const scope = coordinator.activeScope;
-    return scope.owner_id === ownerId && scope.origin === normalizedOrigin;
-  });
+  const active = activeCoordinatorsFor(ownerId, normalizedOrigin);
   const scanner = createCrtDraftCoordinator({ owner_id: ownerId, origin: normalizedOrigin, tree_id: null });
   try {
     const listed = await scanner.enumerateOwnerDrafts();
@@ -949,11 +996,16 @@ export async function cleanupCrtOwnerScope(ownerId: string, origin = globalThis.
       active.forEach((coordinator) => coordinator.dispose());
       return { ok: true, removed: 0 };
     }
-    if (typeof globalThis.window?.confirm !== "function") {
-      return { ok: false, reason: "cleanup-failed" };
-    }
-    if (!globalThis.window.confirm(CRT_ONLINE_ONLY_LOSS_MESSAGE)) {
+    if (options.lossConfirmed === false) {
       return { ok: false, reason: "transition-cancelled" };
+    }
+    if (options.lossConfirmed !== true) {
+      if (typeof globalThis.window?.confirm !== "function") {
+        return { ok: false, reason: "cleanup-failed" };
+      }
+      if (!globalThis.window.confirm(CRT_ONLINE_ONLY_LOSS_MESSAGE)) {
+        return { ok: false, reason: "transition-cancelled" };
+      }
     }
     // Keep active coordinators registered until every coordinator-local draft
     // has been discarded and the owner-wide deletion has verified every

@@ -41,4 +41,15 @@ describe("020-FR-052 Tab stays inside a review dialog", () => {
     get("middle").focus();
     expect(press(true)).toBe(false);
   });
+
+  it("020-FR-052 with every control disabled, Tab and Shift+Tab keep focus on the container and do not throw", () => {
+    document.body.innerHTML = `<div id="box" tabindex="-1"><button id="only" disabled>Only</button></div>`;
+    const box = document.getElementById("box") as HTMLElement;
+    for (const shiftKey of [false, true]) {
+      let prevented = false;
+      expect(() => trapTab({ shiftKey, preventDefault: () => { prevented = true; } } as unknown as ReactKeyboardEvent, box)).not.toThrow();
+      expect(prevented).toBe(true);
+      expect(box).toHaveFocus();
+    }
+  });
 });

@@ -31,7 +31,13 @@ interface AuthStoreState {
   refreshSession: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<void>;
   signup: (payload: SignupPayload) => Promise<void>;
-  logout: (options?: { requireServerConfirmation: boolean }) => Promise<boolean>;
+  /**
+   * `lossConfirmed`: the caller's own dialog already asked about unsaved local
+   * work (`true`: remove without the native prompt; `false`: it warned of none,
+   * so pending work found is refused and nothing is removed). Omitted: the
+   * native prompt, as for every other transition.
+   */
+  logout: (options?: { requireServerConfirmation?: boolean; lossConfirmed?: boolean }) => Promise<boolean>;
   /** Immediate local boundary used by 401 handlers; cleanup is started for the captured owner. */
   clearSession: () => boolean;
   /** Fail-closed boundary for destructive transitions such as account deletion. */
@@ -49,9 +55,14 @@ interface AuthStoreState {
 // the newer one (010-FR-009).
 let sessionGeneration = 0;
 
-async function cleanupDepartingOwner(user: AuthUser | null): Promise<boolean> {
+async function cleanupDepartingOwner(user: AuthUser | null, lossConfirmed?: boolean): Promise<boolean> {
   if (!user) return true;
-  const result = await cleanupCrtOwnerScope(user.id, globalThis.location?.origin ?? "");
+  const origin = globalThis.location?.origin ?? "";
+  // Only a caller that owns a confirmation of its own says anything about loss;
+  // every other path keeps the CRT boundary's native prompt.
+  const result = lossConfirmed === undefined
+    ? await cleanupCrtOwnerScope(user.id, origin)
+    : await cleanupCrtOwnerScope(user.id, origin, { lossConfirmed });
   return result.ok;
 }
 
@@ -170,7 +181,7 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
         if (!stillCurrent()) return false;
       }
     }
-    if (!(await cleanupDepartingOwner(get().user))) return false;
+    if (!(await cleanupDepartingOwner(get().user, options?.lossConfirmed))) return false;
     if (!stillCurrent()) return false;
     if (options?.requireServerConfirmation) {
       const currentServerOwner = await authApi.me();

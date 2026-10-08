@@ -49,6 +49,7 @@ test.describe("account & data rights acceptance", () => {
     await test.step("sign out through the account menu", async () => {
       await page.getByRole("button", { name: `Account menu for ${email}` }).click();
       await page.getByRole("menuitem", { name: "Sign out" }).click();
+      await page.getByRole("alertdialog", { name: "Sign out?" }).getByRole("button", { name: "Sign out", exact: true }).click();
       await expect(page).toHaveURL(/\/login$/);
     });
 

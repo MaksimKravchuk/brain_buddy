@@ -647,6 +647,28 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
   - **What stays open:** the manual-run part of each task (T094, T159, T165's host
     record, T169, T171) stays unchecked until its Results are recorded.
     `/speckit-accept` does not accept a requirement on a PENDING plan.
+- **Web sign-out asks first (owner decision 2026-10-08; backlog note, no slice).** The
+  native apps confirm a sign-out and name the unsaved weekly-review drafts it removes
+  (PR #301); the web signed out in one click, discarding the account's
+  `bb.reviewFormDraft.v1.*` keys silently, which FR-052 rules out. Delivered as a
+  small single-surface change under FR-052, outside the PR slice map and with no new
+  task id. The owner asked for one shared confirmation that says the data will be
+  lost: the account menu's "Sign out" opens "Sign out?" (Cancel first and focused,
+  Esc cancels) with the base sentence and, only when the browser holds unsaved
+  weekly-review or Thinking Mode drafts, "Unsaved changes in this browser will be
+  lost: they have not been saved to your account." (tasks stay in the account, so
+  nothing claims more). The dialog is the only prompt: `logout({ lossConfirmed })`
+  reaches `cleanupCrtOwnerScope`, which skips the native `window.confirm` when true
+  and refuses unprompted when false (work the dialog did not show); omitted, every
+  other caller keeps the native prompt. Unsaved work that appears after the dialog
+  opened re-presents it with the warning and "Something changed since this opened.
+  Check and confirm again."; a `logout()` that does not finish shows an error and
+  stays. Tests carry `020-FR-052`
+  (`frontend/src/components/shell/__tests__/{AppShell,SignOutDialog}.test.tsx`,
+  `frontend/src/stores/__tests__/authStore.test.ts`,
+  `frontend/src/features/crt/__tests__/crtDraftCoordinator.test.ts`,
+  `frontend/src/features/review/__tests__/{reviewFormDrafts,focusTrap}.test.ts`). Not
+  reported and not removed: unsent task-detail edits kept per tab in `sessionStorage`.
 - **Deferred review findings recorded for the follow-up feature (owner P1-only rule,
   2026-10-08).** The P2s below were found in review of slices that merge on P1 fixes
   only. None is listed in "Deferred review findings (PR-12)" above.
@@ -683,6 +705,9 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     design says. No change.
   - owner decision 2026-10-08: the sign-out confirmation names unsaved
     weekly-review drafts that sign-out would remove (feature 021 follow-up PR).
+  - web sign-out (#302): a weekly-review draft written by another tab during
+    `logout()`'s own awaits (after the confirm-time re-check) is still cleared
+    without a warning; coordinate review-draft writes with the account transition.
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
   review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and
