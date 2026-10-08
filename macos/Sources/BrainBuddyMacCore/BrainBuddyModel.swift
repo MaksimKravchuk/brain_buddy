@@ -685,9 +685,22 @@ package final class BrainBuddyModel {
 
     // MARK: Footer
 
-    /// The sidebar footer's line from the kit's describer: "On this Mac · Sign in to sync" while
-    /// account-less (its "Sign in to sync" action arrives with X-03 in PR-09).
+    /// The kit's describer over this workspace: "On this Mac · Sign in to sync" while account-less.
+    /// The window's footer is `SyncStatusLine` over `MacSyncController.line` (PR-09).
     package var syncLine: SyncStatusDescription {
         SyncStatusDescriber.describe(workspace.syncSnapshot, now: now(), device: .mac, calendar: .current)
+    }
+
+    // MARK: Sign-out
+
+    /// After a sign-out (design X-04 "empty (first run) after sign-out"): the workspace is empty and
+    /// account-less, the selection goes to Inbox, and the drafts the person chose to discard go.
+    /// Review marks in the sidecar are kept.
+    package func didSignOut() {
+        draft = ""
+        waitingForDraft = ""
+        taskEditInProgress = false
+        unarchiveRefusal = nil
+        choose(.list(.inbox))
     }
 }
