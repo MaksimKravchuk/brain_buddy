@@ -1,0 +1,524 @@
+{
+ "version": 1,
+ "generation": 41,
+ "tasks": [
+  {
+   "id": "task_plumber",
+   "title": "Call the plumber",
+   "details": null,
+   "state": "inbox",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": null,
+   "tagIDs": [
+    "tag_calls",
+    "tag_old"
+   ],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 1,
+   "createdAt": "2026-10-05T08:10:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_insurance",
+   "title": "Look into bike insurance",
+   "details": "Compare two offers",
+   "state": "inbox",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_moveflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 2,
+   "createdAt": "2026-10-05T08:20:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_soil",
+   "title": "Order soil",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_garden",
+   "tagIDs": [
+    "tag_errands"
+   ],
+   "dueDate": "2026-10-10",
+   "priority": "high",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 1,
+   "createdAt": "2026-09-20T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_van",
+   "title": "Book a van",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 6,
+   "projectID": "project_moveflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "medium",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 2,
+   "createdAt": "2026-09-21T09:00:00Z",
+   "subtasks": [
+    {
+     "id": "sub_prices",
+     "title": "Compare prices",
+     "state": "open",
+     "orderKey": 1,
+     "revision": 1
+    },
+    {
+     "id": "sub_boxes",
+     "title": "Measure the boxes",
+     "state": "completed",
+     "orderKey": 2,
+     "revision": 2
+    },
+    {
+     "id": "sub_sam",
+     "title": "Ask Sam about his van",
+     "state": "cancelled",
+     "orderKey": 3,
+     "revision": 2
+    }
+   ],
+   "comments": [
+    {
+     "id": "comment_friday",
+     "body": "Van company said Friday is free",
+     "actorID": "local",
+     "createdAt": "2026-09-22T10:00:00Z",
+     "editedAt": null,
+     "revision": 1
+    },
+    {
+     "id": "comment_budget",
+     "body": "Budget is 120 EUR, fuel included",
+     "actorID": "local",
+     "createdAt": "2026-09-22T11:00:00Z",
+     "editedAt": "2026-09-23T08:00:00Z",
+     "revision": 2
+    }
+   ]
+  },
+  {
+   "id": "task_passport",
+   "title": "Renew passport",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": null,
+   "tagIDs": [
+    "tag_deepwork"
+   ],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 3,
+   "createdAt": "2026-09-22T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_paint",
+   "title": "Paint the hallway",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_oldflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 4,
+   "createdAt": "2026-08-01T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_beds",
+   "title": "Plan the beds",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_garden",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 5,
+   "createdAt": "2026-09-23T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_keys",
+   "title": "Return the keys",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_oldflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 6,
+   "createdAt": "2026-08-02T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_pack",
+   "title": "Pack the kitchen",
+   "details": null,
+   "state": "next",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_kv5",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 7,
+   "createdAt": "2026-09-24T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_deposit",
+   "title": "Deposit back from landlord",
+   "details": null,
+   "state": "waiting",
+   "lastOpenState": null,
+   "revision": 3,
+   "projectID": "project_moveflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": "Landlord",
+   "waitingSince": "2026-09-28T16:45:00Z",
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 1,
+   "createdAt": "2026-09-25T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_movers",
+   "title": "Quote from movers",
+   "details": null,
+   "state": "waiting",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_moveflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": "Movers",
+   "waitingSince": "2026-09-29T09:00:00Z",
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 2,
+   "createdAt": "2026-09-29T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_neighbour",
+   "title": "Spare key from the neighbour",
+   "details": null,
+   "state": "waiting",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": null,
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": "Neighbour",
+   "waitingSince": "2026-09-10T09:00:00Z",
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 3,
+   "createdAt": "2026-09-10T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_sofa",
+   "title": "Sell the old sofa",
+   "details": null,
+   "state": "someday",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_oldflat",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 1,
+   "createdAt": "2026-08-03T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_greenhouse",
+   "title": "Build a greenhouse",
+   "details": null,
+   "state": "someday",
+   "lastOpenState": null,
+   "revision": 2,
+   "projectID": "project_garden",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 2,
+   "createdAt": "2026-09-01T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_pottery",
+   "title": "Learn pottery",
+   "details": null,
+   "state": "someday",
+   "lastOpenState": null,
+   "revision": 4,
+   "projectID": null,
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 3,
+   "createdAt": "2026-09-02T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_seeds",
+   "title": "Buy seeds",
+   "details": null,
+   "state": "completed",
+   "lastOpenState": "next",
+   "revision": 2,
+   "projectID": "project_garden",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": "2026-09-18T17:30:00Z",
+   "cancelledAt": null,
+   "orderKey": 8,
+   "createdAt": "2026-09-15T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_oldlandlord",
+   "title": "Call the old landlord",
+   "details": null,
+   "state": "cancelled",
+   "lastOpenState": "waiting",
+   "revision": 3,
+   "projectID": "project_kv5_old",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": "2026-07-20T12:00:00Z",
+   "orderKey": 4,
+   "createdAt": "2026-07-01T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  },
+  {
+   "id": "task_meter",
+   "title": "Read the gas meter",
+   "details": null,
+   "state": "someday",
+   "lastOpenState": null,
+   "revision": 1,
+   "projectID": "project_kv5_old",
+   "tagIDs": [],
+   "dueDate": null,
+   "priority": "none",
+   "waitingFor": null,
+   "waitingSince": null,
+   "completedAt": null,
+   "cancelledAt": null,
+   "orderKey": 4,
+   "createdAt": "2026-07-02T09:00:00Z",
+   "subtasks": [],
+   "comments": []
+  }
+ ],
+ "projects": [
+  {
+   "id": "project_garden",
+   "name": "Garden",
+   "color": null,
+   "state": "active",
+   "revision": 3,
+   "desiredOutcome": "Vegetables growing by May",
+   "lastReviewedAt": "2026-10-03T18:00:00Z",
+   "lastReviewDecision": "keep",
+   "lastReviewedTaskSignature": "8c288978f9c3ad14427b4a58e3a58de1bb0c15097e53f0bd4469d3e6a48040de"
+  },
+  {
+   "id": "project_moveflat",
+   "name": "Move flat",
+   "color": null,
+   "state": "active",
+   "revision": 2,
+   "desiredOutcome": null,
+   "lastReviewedAt": "2026-10-02T18:00:00Z",
+   "lastReviewDecision": "actionUpdated",
+   "lastReviewedTaskSignature": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "id": "project_oldflat",
+   "name": "Old flat",
+   "color": null,
+   "state": "archived",
+   "revision": 4,
+   "desiredOutcome": "Keys returned and the deposit back"
+  },
+  {
+   "id": "project_tax2024",
+   "name": "Tax return 2024",
+   "color": null,
+   "state": "archived",
+   "revision": 2
+  },
+  {
+   "id": "project_kv5_old",
+   "name": "Квартира №5",
+   "color": null,
+   "state": "archived",
+   "revision": 2
+  },
+  {
+   "id": "project_kv5",
+   "name": "Квартира No5",
+   "color": null,
+   "state": "active",
+   "revision": 1
+  }
+ ],
+ "tags": [
+  {
+   "id": "tag_calls",
+   "name": "calls",
+   "state": "active",
+   "revision": 1
+  },
+  {
+   "id": "tag_errands",
+   "name": "errands",
+   "state": "active",
+   "revision": 1
+  },
+  {
+   "id": "tag_deepwork",
+   "name": "deep-work",
+   "state": "active",
+   "revision": 1
+  },
+  {
+   "id": "tag_old",
+   "name": "old-tag",
+   "state": "deleted",
+   "revision": 2
+  }
+ ],
+ "idempotency": {
+  "8d2f6c9e-0000-0000-0000-000000000001": "task_plumber"
+ },
+ "idempotencyReceipts": {
+  "8d2f6c9e-0000-0000-0000-000000000001": {
+   "fingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+   "response": "e30="
+  }
+ },
+ "waitingReviews": {
+  "task_movers": {
+   "taskRevision": 1,
+   "reviewedAt": "2026-10-04T10:00:00Z"
+  },
+  "task_neighbour": {
+   "taskRevision": 1,
+   "reviewedAt": "2026-09-20T10:00:00Z"
+  },
+  "task_deposit": {
+   "taskRevision": 2,
+   "reviewedAt": "2026-10-05T10:00:00Z"
+  }
+ },
+ "somedayReviews": {
+  "task_greenhouse": {
+   "taskRevision": 2,
+   "reviewedAt": "2026-10-01T10:00:00Z"
+  },
+  "task_pottery": {
+   "taskRevision": 3,
+   "reviewedAt": "2026-10-01T10:00:00Z"
+  }
+ }
+}

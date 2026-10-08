@@ -1,7 +1,63 @@
 import AppKit
 import AVFoundation
 import SwiftUI
-import WhisperKit
+// `@preconcurrency`, documented as research R2 asks: WhisperKit 0.18.0 declares `WhisperKit` as an
+// `open class` with no `Sendable` conformance and no isolation, so every `await` on it from an actor
+// is reported as sending a non-Sendable value. It is safe here because the one instance is created,
+// held and called only inside `VoiceTranscriber`, never escapes it, and `VoiceTranscriber` refuses a
+// second transcription while one is running, so the instance is never used by two tasks at once.
+@preconcurrency import WhisperKit
+
+/// Why a recording could not become text, in the words the sheet shows.
+struct VoiceCaptureError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+
+    static let modelMissing = VoiceCaptureError(message: "The local speech model is missing from this app.")
+    static let microphone = VoiceCaptureError(message: "The microphone could not start recording.")
+    static let busy = VoiceCaptureError(message: "Wait for the current transcription to finish.")
+}
+
+/// The only place WhisperKit runs (research R2): the model loads once, on first use, and
+/// transcribes one recording at a time on this Mac. Nothing leaves the device.
+actor VoiceTranscriber {
+    private var whisper: WhisperKit?
+    private var isTranscribing = false
+
+    /// Whether the next `transcribe` loads the model first.
+    var needsModel: Bool { whisper == nil }
+
+    /// The bundled model and tokenizer folders, or `nil` when the app was built without them.
+    nonisolated static func bundledModel(in bundle: Bundle = .main) -> (model: URL, tokenizer: URL)? {
+        guard let resources = bundle.resourceURL else { return nil }
+        let speech = resources.appendingPathComponent("Whisper", isDirectory: true)
+        let model = speech.appendingPathComponent("openai_whisper-base", isDirectory: true)
+        let tokenizer = speech.appendingPathComponent("whisper-base", isDirectory: true)
+        let files = FileManager.default
+        guard files.fileExists(atPath: model.path),
+              files.fileExists(atPath: tokenizer.appendingPathComponent("tokenizer.json").path)
+        else { return nil }
+        return (model, tokenizer)
+    }
+
+    /// Transcribes the recording at `audio`; `language` is a Whisper language code, or `nil` to detect it.
+    func transcribe(audio: URL, language: String?, model: URL, tokenizer: URL) async throws -> String {
+        guard !isTranscribing else { throw VoiceCaptureError.busy }
+        isTranscribing = true
+        defer { isTranscribing = false }
+        let whisper = try await loadedModel(model: model, tokenizer: tokenizer)
+        let options = DecodingOptions(task: .transcribe, language: language)
+        let segments = try await whisper.transcribe(audioPath: audio.path, decodeOptions: options)
+        return segments.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func loadedModel(model: URL, tokenizer: URL) async throws -> WhisperKit {
+        if let whisper { return whisper }
+        let loaded = try await WhisperKit(WhisperKitConfig(modelFolder: model.path, tokenizerFolder: tokenizer, download: false))
+        whisper = loaded
+        return loaded
+    }
+}
 
 @MainActor
 final class VoiceCaptureModel: ObservableObject {
@@ -13,7 +69,7 @@ final class VoiceCaptureModel: ObservableObject {
 
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
-    private var whisper: WhisperKit?
+    private let transcriber = VoiceTranscriber()
 
     func start() async {
         error = nil
@@ -34,9 +90,7 @@ final class VoiceCaptureModel: ObservableObject {
                 AVLinearPCMIsBigEndianKey: false,
             ]
             let newRecorder = try AVAudioRecorder(url: url, settings: settings)
-            guard newRecorder.record() else {
-                throw APIError(message: "The microphone could not start recording.")
-            }
+            guard newRecorder.record() else { throw VoiceCaptureError.microphone }
             recorder = newRecorder
             recordingURL = url
             transcript = ""
@@ -53,7 +107,7 @@ final class VoiceCaptureModel: ObservableObject {
         recording = false
         recordingURL = nil
         transcribing = true
-        preparingModel = whisper == nil
+        preparingModel = await transcriber.needsModel
         error = nil
         defer {
             transcribing = false
@@ -61,29 +115,11 @@ final class VoiceCaptureModel: ObservableObject {
             try? FileManager.default.removeItem(at: url)
         }
         do {
-            if whisper == nil {
-                guard let resources = Bundle.main.resourceURL else {
-                    throw APIError(message: "The local speech model is missing from this app.")
-                }
-                let speechResources = resources.appendingPathComponent("Whisper", isDirectory: true)
-                let modelFolder = speechResources.appendingPathComponent("openai_whisper-base", isDirectory: true)
-                let tokenizerFolder = speechResources.appendingPathComponent("whisper-base", isDirectory: true)
-                guard FileManager.default.fileExists(atPath: modelFolder.path),
-                      FileManager.default.fileExists(atPath: tokenizerFolder.appendingPathComponent("tokenizer.json").path) else {
-                    throw APIError(message: "The local speech model is missing from this app.")
-                }
-                whisper = try await WhisperKit(WhisperKitConfig(
-                    modelFolder: modelFolder.path,
-                    tokenizerFolder: tokenizerFolder,
-                    download: false
-                ))
-            }
-            preparingModel = false
-            guard let whisper else { return }
-            let options = DecodingOptions(task: .transcribe, language: language == "auto" ? nil : language)
-            let segments = try await whisper.transcribe(audioPath: url.path, decodeOptions: options)
-            transcript = segments.map(\.text).joined(separator: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let bundled = VoiceTranscriber.bundledModel() else { throw VoiceCaptureError.modelMissing }
+            transcript = try await transcriber.transcribe(
+                audio: url, language: language == "auto" ? nil : language,
+                model: bundled.model, tokenizer: bundled.tokenizer
+            )
         } catch {
             self.error = error.localizedDescription
         }
