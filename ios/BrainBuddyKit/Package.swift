@@ -38,6 +38,12 @@ let package = Package(
             name: "BrainBuddySyncTests", dependencies: ["BrainBuddySync", "BrainBuddyFakeServer"],
             resources: [.copy("Resources")]
         ),
-        .testTarget(name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"]),
+        // `Resources/legacy-import-golden.json` is the Mac importer's real output over its populated
+        // fixture (spec 021, `macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift` keeps
+        // the two byte-identical); `.copy` keeps its bytes.
+        .testTarget(
+            name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"],
+            resources: [.copy("Resources")]
+        ),
     ]
 )
