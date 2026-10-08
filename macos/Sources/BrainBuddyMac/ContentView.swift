@@ -1378,38 +1378,8 @@ final class BrainBuddyModel: ObservableObject {
     }
 }
 
-enum DateDestination: String, Hashable {
-    case overdue, today, upcoming
-
-    var title: String { rawValue.capitalized }
-    var symbol: String {
-        switch self {
-        case .overdue: "exclamationmark.triangle"
-        case .today: "calendar"
-        case .upcoming: "arrow.up.right"
-        }
-    }
-}
-
-enum WorkspaceDestination: Hashable {
-    case list(TaskList)
-    case date(DateDestination)
-    case project(String)
-    case tag(String)
-    case history(HistoryState)
-
-    var isHistory: Bool {
-        if case .history = self { return true }
-        return false
-    }
-}
-
-enum HistoryState: String, Hashable {
-    case completed, cancelled
-
-    var title: String { rawValue.capitalized }
-    var symbol: String { self == .completed ? "checkmark.circle" : "xmark.circle" }
-}
+// `DateDestination`, `WorkspaceDestination` and `HistoryState` live in
+// SidebarEntries.swift, which stays free of SwiftUI so the sidebar can be unit-tested.
 
 private enum PendingEditorNavigation {
     case destination(WorkspaceDestination)
@@ -1957,19 +1927,8 @@ struct ContentView: View {
 
     private func sidebar(account: Account) -> some View {
         List {
-            Section("Lists") {
-                ForEach(TaskList.allCases) { list in
-                    sidebarButton(list.title, symbol: list.symbol, destination: .list(list))
-                }
-            }
-            Section("Dates") {
-                ForEach([DateDestination.overdue, .today, .upcoming], id: \.self) { day in
-                    sidebarButton(day.title, symbol: day.symbol, destination: .date(day))
-                }
-            }
-            Section("History") {
-                sidebarButton("Completed", symbol: HistoryState.completed.symbol, destination: .history(.completed))
-                sidebarButton("Cancelled", symbol: HistoryState.cancelled.symbol, destination: .history(.cancelled))
+            ForEach(SidebarEntries.standard.sections) { section in
+                sidebarSection(section)
             }
             Section {
                 ForEach(model.projects.filter { $0.state == "active" }) { project in
@@ -2080,6 +2039,53 @@ struct ContentView: View {
             }
             .padding(12)
         }
+    }
+
+    @ViewBuilder
+    private func sidebarSection(_ section: SidebarSection) -> some View {
+        if let header = section.header {
+            Section(header) { sidebarRows(section.rows) }
+        } else {
+            Section { sidebarRows(section.rows) }
+        }
+    }
+
+    private func sidebarRows(_ rows: [SidebarRow]) -> some View {
+        ForEach(rows) { row in
+            switch row.kind {
+            case .destination(let destination):
+                sidebarButton(row.title, symbol: row.symbol, destination: destination)
+            case .deferred(let note):
+                deferredSidebarRow(row, note: note)
+            }
+        }
+    }
+
+    /// A visibly deferred feature (020-FR-041), the iOS `DeferredRow` pattern: shown,
+    /// not interactive, and says so in words. No button, no selection, no destination;
+    /// VoiceOver reads it as one static text element, "Weekly review, coming later".
+    private func deferredSidebarRow(_ row: SidebarRow, note: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 20)
+                .accessibilityHidden(true)
+            Text(row.title)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 0)
+            Text(note)
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityAddTraits(.isStaticText)
+        .listRowBackground(Color.clear)
+        .selectionDisabled()
     }
 
     private func sidebarButton(

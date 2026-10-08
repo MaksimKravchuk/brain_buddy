@@ -466,7 +466,7 @@ a contract):
 
 ### Mac pre-sync row (slice PR-06)
 
-- [ ] T164 [US6] Write and observe RED `macos/Tests/BrainBuddyMacTests/WeeklyReviewRowTests.swift` (`020-FR-041`): the sidebar entries, extracted into the new testable `macos/Sources/BrainBuddyMac/SidebarEntries.swift`, include a non-interactive "Weekly review · coming later" row right after Lists, with no action. *(020-FR-041)*
+- [x] T164 [US6] Write and observe RED `macos/Tests/BrainBuddyMacTests/WeeklyReviewRowTests.swift` (`020-FR-041`): the sidebar entries, extracted into the new testable `macos/Sources/BrainBuddyMac/SidebarEntries.swift`, include a non-interactive "Weekly review · coming later" row right after Lists, with no action. *(020-FR-041)*
 - [ ] T165 [US6] Make T164 GREEN in `macos/Sources/BrainBuddyMac/ContentView.swift` (`sidebar(account:)` renders `SidebarEntries`; the iOS `DeferredRow` pattern; no local-only review) and record the `swift test --disable-sandbox` run on a macOS host in `specs/020-weekly-review/evidence/macos-host-run.md` (no CI lane runs `macos/`). *(020-FR-041)*
 
 ### Deferred — blocked on the Mac↔backend sync spec (not tasks of this feature)
@@ -637,6 +637,14 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     compares the task's visible content, not its revision), the design.md M-02 copy
     amendment, a PR-04 deviations line, the TR-005 message, and the
     `/review/decisions/{id}/undo` path parameter taking the reference shape.
+- **Manual checks follow the merge (owner decision 2026-10-08).** A slice whose only
+  remaining checks are manual (a simulator, device or Mac run) merges once CI is
+  green. It carries its manual test plan as an evidence file under `evidence/`.
+  - **Who runs the plans:** later, the owner's agent runs them on the owner's
+    hardware and fills in the Results. A failed check is fixed in a separate PR.
+  - **What stays open:** the manual-run part of each task (T094, T159, T165's host
+    record, T169, T171) stays unchecked until its Results are recorded.
+    `/speckit-accept` does not accept a requirement on a PENDING plan.
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
   review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and
