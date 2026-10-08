@@ -3,9 +3,11 @@ import BrainBuddyCore
 import Foundation
 
 /// Why a sync cycle is wanted. `localChange` is debounced (about 2 s after
-/// the last change); the others run as soon as the engine is free.
+/// the last change); the others run as soon as the engine is free, except
+/// `periodic`, the repeating tick (`PeriodicSyncTicker`): it does nothing
+/// unless the last pull is due or changes wait, and never shortens a retry's backoff.
 public enum SyncTrigger: String, Sendable, Hashable {
-    case launch, foreground, localChange, networkRestored, manual, backgroundRefresh
+    case launch, foreground, localChange, networkRestored, manual, backgroundRefresh, periodic
 }
 
 /// What the engine tells the workspace.
@@ -78,9 +80,13 @@ public protocol SyncService: Sendable {
     func signIn(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> LinkedAccount
     /// `signIn`, also reporting what the server said about the account.
     func signInWithResult(serverURL: URL, email: String, password: String) async throws(SignInFailure) -> SignInResult
-    /// Logs out on the server (best effort; retried later when offline) and
-    /// forgets the session. The workspace removes the document itself.
-    func signOut() async
+    /// Signs out. In order: stop syncing and wait for a running cycle; record the session as a
+    /// pending logout (so a crash from here on still ends it); run `remove`, which removes the
+    /// device's data; then forget the session and log out on the server now, or when the network
+    /// is back. When `remove` throws, the pending logout is withdrawn, syncing resumes, the error
+    /// is rethrown, and nothing else has changed: the person is still signed in. The same holds,
+    /// without running `remove`, when the session can't be read or its logout can't be recorded.
+    func signOut(removingLocalDataWith remove: @Sendable () async throws -> Void) async throws
     /// No account is linked on this device (launch without one, or after the
     /// stored document was set aside): every stored session is stale and is
     /// forgotten. `account`, when known, is the account of a document just set
