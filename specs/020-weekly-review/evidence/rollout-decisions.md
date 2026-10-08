@@ -7,9 +7,12 @@ Owner decisions this draft builds on: the slice map (2026-10-06), the navigator 
 (2026-10-07), and the manual-check, gate and backlog decisions of 2026-10-08 (listed
 under "Decisions of record").
 
-Landing class: PR-14 is SHIP. Its paths are the coverage floors, `tasks.md` and the
-evidence files. With the requirement-coverage gate not wired (T166, owner decision
-2026-10-08), it no longer touches `Makefile` or the gate-integrity manifest.
+Landing class: PR-14 is ASK, because it changes `Makefile` and re-records the
+gate-integrity manifest. The changes are the allowed part of T166: the byte comparisons
+of the vector, wire-fixture and trace copies, and the check that the FR-041 macOS
+host-run file exists. The requirement-coverage filter itself is not wired (owner decision
+2026-10-08). PR-14 merges under the owner's standing authorization of 2026-10-08 for
+ASK-class slices that are green with no open P1.
 
 ## Flag stages
 
