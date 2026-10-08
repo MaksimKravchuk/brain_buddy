@@ -297,6 +297,10 @@ class ReviewService:
                 self._log_rejection(owner_id, task_id, payload.type, "stale")
                 raise
         self._check_decision(task, payload, owner_id=owner_id)
+        repeated = self._repeated_cosmetic(task, payload, owner_id=owner_id)
+        if repeated is not None:
+            self._log_decision(repeated, outcome="already_applied", started=started)
+            return repeated
         result = self._apply_decision(
             task,
             payload,
@@ -316,6 +320,37 @@ class ReviewService:
         self._write_decision(result, owner_id=owner_id, previous=task)
         self._log_decision(result, outcome="applied", started=started)
         return result
+
+    def _repeated_cosmetic(
+        self, task: TaskDocument, payload: DecisionRequest, *, owner_id: str
+    ) -> DecisionResultDocument | None:
+        """The run's first cosmetic save of this wording, when this is a repeat.
+
+        A "Save anyway" (FR-002) keeps the task asking, so a second device, a
+        reload or a retry under a fresh key can send it again for the same task
+        and formulation in the same run. That is not a second decision: it
+        changes nothing and answers the first one (http §3), so the run counts
+        it once. A different run, wording class or formulation is a new decision.
+        """
+
+        session_id = self._known_session(owner_id, payload.session_id)
+        if (
+            session_id is None
+            or payload.type != "reformulate"
+            or formulation.is_substantive(task.title, _required(payload.title))
+        ):
+            return None
+        for earlier in self.task_repo.list_review_decisions_for_session(
+            owner_id, session_id
+        ):
+            if (
+                earlier.task_id == task.id
+                and earlier.type == "reformulate"
+                and earlier.substantive is False
+                and earlier.formulation_id == payload.formulation_id
+            ):
+                return self._stored_decision_result(earlier, owner_id=owner_id)
+        return None
 
     def _check_decision(
         self, task: TaskDocument, payload: DecisionRequest, *, owner_id: str

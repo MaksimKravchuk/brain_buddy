@@ -331,6 +331,74 @@ def test_020_FR_002_cosmetic_save_anyway_is_a_reformulate_without_a_clock_change
     assert result["task"]["title"] == "call bob."
 
 
+def test_020_FR_002_020_FR_048_a_repeated_save_anyway_in_one_run_counts_once(
+    api: ReviewApi,
+) -> None:
+    """A second cosmetic save of the same wording in the run is the first one.
+
+    Another browser, a reload or a retry under a fresh key sends it again with
+    the task as it now is (fresh revision, same formulation): nothing is
+    written, the run's counter stays at one and the first decision answers.
+    """
+
+    task = _asking(api, "Call Bob")
+    session = api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=session.id)
+    now = api.task(task["id"])
+
+    with allure.step("The same wording class again, with a fresh key and revision"):
+        again = api.decide(now, "reformulate", title="CALL BOB", session_id=session.id)
+
+    assert again["decision"]["id"] == first["decision"]["id"]
+    assert again["task"]["title"] == "call bob."
+    assert again["task"]["revision"] == now["revision"]
+    assert again["session_counts"]["reformulated"] == 1
+    assert [d.id for d in api.decisions()] == [first["decision"]["id"]]
+    stored = api.container.task_repo.get_review_session(api.owner_id, session.id)
+    assert stored is not None and stored.counts.reformulated == 1
+
+    with allure.step(
+        "Undo takes the first one back; saving anyway is a decision again"
+    ):
+        undone = api.undo_raw(first["decision"]["id"], now["revision"])
+        assert undone.status_code == 200, undone.text
+        restored = api.task(task["id"])
+        third = api.decide(
+            restored, "reformulate", title="call bob.", session_id=session.id
+        )
+    assert third["decision"]["id"] != first["decision"]["id"]
+    assert third["session_counts"]["reformulated"] == 1
+
+
+def test_020_FR_002_020_FR_048_a_cosmetic_save_is_new_in_another_run_or_wording(
+    api: ReviewApi,
+) -> None:
+    """The guard is per run, per task and per formulation; a real edit is a decision."""
+
+    task = _asking(api, "Call Bob")
+    one, two = api.session(), api.session()
+    first = api.decide(task, "reformulate", title="call bob.", session_id=one.id)
+    now = api.task(task["id"])
+
+    with allure.step("Another run counts its own"):
+        other_run = api.decide(now, "reformulate", title="Call Bob", session_id=two.id)
+    assert other_run["decision"]["id"] != first["decision"]["id"]
+
+    with allure.step("Outside any run it is an ordinary recorded decision"):
+        now = api.task(task["id"])
+        outside = api.decide(now, "reformulate", title="CALL BOB!")
+    assert outside["decision"]["session_id"] is None
+
+    with allure.step("A substantive rewording in the first run is a decision"):
+        now = api.task(task["id"])
+        reworded = api.decide(
+            now, "reformulate", title="Call Bob about the quote", session_id=one.id
+        )
+    assert reworded["decision"]["id"] != first["decision"]["id"]
+    assert reworded["decision"]["substantive"] is True
+    assert len(api.decisions()) == 4
+
+
 def test_020_FR_002_substantive_reformulate_adopts_the_client_formulation_id(
     api: ReviewApi,
 ) -> None:

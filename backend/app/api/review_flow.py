@@ -44,6 +44,7 @@ from app.schemas.review import (
     BulkReleaseResponse,
     BulkReleaseUndoResponse,
     DatesQueueMeta,
+    DecisionsQueueMeta,
     EmptyQueueMeta,
     QueueResponse,
     RestOfNextQueueMeta,
@@ -86,6 +87,7 @@ def _queue_meta(
     | RestOfNextQueueMeta
     | SomedayQueueMeta
     | DatesQueueMeta
+    | DecisionsQueueMeta
     | EmptyQueueMeta
 ):
     meta: dict[str, Any] = view.meta
@@ -97,6 +99,8 @@ def _queue_meta(
         return SomedayQueueMeta.model_validate(meta)
     if view.step == "dates":
         return DatesQueueMeta.model_validate(meta)
+    if view.step == "decisions":
+        return DecisionsQueueMeta.model_validate(meta)
     return EmptyQueueMeta()
 
 
