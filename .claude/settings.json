@@ -63,7 +63,6 @@
       "mcp__ccd_pr__get_status"
     ],
     "ask": [
-      "Bash(./scripts/submit_to_trunk.sh:*)",
       "Bash(git push -f*)",
       "Bash(git push * -f*)",
       "Bash(git push *--force*)",
@@ -76,8 +75,12 @@
       "Bash(git push *:main*)",
       "Bash(git push *refs/heads/*)",
       "Bash(git push *trunk-candidate*)",
-      "Bash(fly:*)",
-      "Bash(flyctl:*)"
+      "Bash(fly *destroy*)",
+      "Bash(fly *delete*)",
+      "Bash(fly * rm *)",
+      "Bash(flyctl *destroy*)",
+      "Bash(flyctl *delete*)",
+      "Bash(flyctl * rm *)"
     ],
     "deny": [
       "Read(//home/user/brain_buddy/backend/data/**)",
