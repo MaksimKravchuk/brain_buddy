@@ -252,13 +252,32 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
                 {
                     // The item is there but this build may not use it (a rebuilt app is a new client of
                     // it): replace it, which only a sign-in the person started may do.
-                    try remove(serverURL, interactive: true)
-                    try store(token, for: serverURL, interactive: true)
+                    try replace(token, for: serverURL)
+                    return
+                }
+                // On the file-based login keychain, writing an item's data is allowed to any app, but
+                // reading it back only to the apps its access list trusts (the build that created it).
+                // So after a rebuild the update above succeeds and leaves an item this build can't read:
+                // every routine read would then ask to sign in again. A person's sign-in therefore
+                // checks, without a prompt, that it can read the token back, and replaces the item
+                // (a new one trusts this build) when it can't.
+                if interactive, (try? self.token(for: serverURL)) != token {
+                    try replace(token, for: serverURL)
                 }
             #else
                 try store(token, for: serverURL, interactive: interactive)
             #endif
         }
+
+        #if os(macOS)
+            /// Deletes the item and adds it again, so its access list is this build's, then checks the
+            /// token reads back without a prompt. Only a sign-in the person started gets here.
+            private func replace(_ token: String, for serverURL: URL) throws {
+                try remove(serverURL, interactive: true)
+                try store(token, for: serverURL, interactive: true)
+                guard (try? self.token(for: serverURL)) == token else { throw KeychainError(status: errSecAuthFailed) }
+            }
+        #endif
 
         private func store(_ token: String, for serverURL: URL, interactive: Bool) throws {
             let account = BrainBuddyAPI.sessionScope(for: serverURL)
@@ -300,20 +319,45 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         /// one per logout (account = its id), holding the JSON of `PendingLogout`.
         public var pendingLogoutService: String { service + ".pending-logout" }
 
+        /// Lists the items' accounts first, then reads each one's data: the macOS file-based keychain
+        /// (the Mac's login keychain) refuses `kSecReturnData` together with `kSecMatchLimitAll` with
+        /// `errSecParam` (-50), which the data-protection keychain of iOS accepts. One query shape
+        /// for both platforms.
         public func pendingLogouts() throws -> [PendingLogout] {
             var query = searchQuery(pendingLogoutService)
-            query[kSecReturnData as String] = true
+            query[kSecReturnAttributes as String] = true
             query[kSecMatchLimit as String] = kSecMatchLimitAll
             var result: CFTypeRef?
             let status = SecItemCopyMatching(query as CFDictionary, &result)
             switch status {
             case errSecSuccess:
-                let items = (result as? [Data]) ?? []
-                let decoder = JSONDecoder()
-                return items.compactMap { try? decoder.decode(PendingLogout.self, from: $0) }
-                    .sorted { ($0.signedOutAt, $0.id.uuidString) < ($1.signedOutAt, $1.id.uuidString) }
+                break
             case errSecItemNotFound:
                 return []
+            default:
+                throw KeychainError(status: status)
+            }
+            let accounts = ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
+            let decoder = JSONDecoder()
+            return try Set(accounts).compactMap { account in
+                try pendingLogoutData(account).flatMap { try? decoder.decode(PendingLogout.self, from: $0) }
+            }
+            .sorted { ($0.signedOutAt, $0.id.uuidString) < ($1.signedOutAt, $1.id.uuidString) }
+        }
+
+        /// One pending logout's JSON, never prompting: nil when it went meanwhile, or when this build
+        /// may not read it (an older build's; its session then ends by expiring on the server).
+        private func pendingLogoutData(_ account: String) throws -> Data? {
+            var query = searchQuery(pendingLogoutService, account: account)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            switch status {
+            case errSecSuccess:
+                return result as? Data
+            case errSecItemNotFound, errSecInteractionNotAllowed, errSecAuthFailed:
+                return nil
             default:
                 throw KeychainError(status: status)
             }

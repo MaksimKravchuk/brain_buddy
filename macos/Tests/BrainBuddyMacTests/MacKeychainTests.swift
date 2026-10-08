@@ -27,11 +27,12 @@
         final class TemporaryKeychain {
             let keychain: SecKeychain
             let folder: URL
+            let path: String
 
             init() throws {
                 folder = FileManager.default.temporaryDirectory.appendingPathComponent("bb-keychain-\(UUID().uuidString)")
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let path = folder.appendingPathComponent("test.keychain-db").path
+                path = folder.appendingPathComponent("test.keychain-db").path
                 let password = Array(UUID().uuidString.utf8)
                 var created: SecKeychain?
                 let status = SecKeychainCreate(path, UInt32(password.count), password, false, nil, &created)
@@ -75,6 +76,24 @@
             ]
             let added = SecItemAdd(item as CFDictionary, nil)
             guard added == errSecSuccess else { throw KeychainFailure(step: "SecItemAdd", status: added) }
+        }
+
+        /// The session item as an earlier build left it: created by another program, so its access list
+        /// trusts that program and not this one. `/usr/bin/security` writes it into the temporary
+        /// keychain, the way the previous, differently signed build of the app created its item:
+        /// this process may write the item's data but may not read it back without asking.
+        static func addOtherBuildsItem(service: String, in keychain: TemporaryKeychain) throws {
+            let tool = Process()
+            tool.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+            tool.arguments = [
+                "add-generic-password", "-s", service, "-a", BrainBuddyAPI.sessionScope(for: server), "-w", "old-session",
+                keychain.path,
+            ]
+            try tool.run()
+            tool.waitUntilExit()
+            guard tool.terminationStatus == 0 else {
+                throw KeychainFailure(step: "security add-generic-password", status: OSStatus(tool.terminationStatus))
+            }
         }
 
         /// The item's attributes, read from the temporary keychain only.
@@ -126,12 +145,22 @@
             let service = Self.service()
             let store = KeychainSessionTokenStore(service: service, keychain: temporary.keychain)
             let logout = PendingLogout(serverURL: Self.server, token: "session-ended", signedOutAt: TestClock.importTime)
+            let earlier = PendingLogout(
+                serverURL: URL(string: "https://brain.example.org/api")!, token: "legacy-session",
+                signedOutAt: TestClock.importTime.addingTimeInterval(-60)
+            )
             try Self.withoutPrompts {
                 #expect(try store.pendingLogouts().isEmpty)
                 try store.addPendingLogout(logout)
                 #expect(try store.pendingLogouts() == [logout])
+                // Several at once (a sign-out offline beside the pre-021 sessions the cleanup queued):
+                // the listing that the engine's retry reads, oldest first.
+                try store.addPendingLogout(earlier)
+                #expect(try store.pendingLogouts() == [earlier, logout])
                 #expect(!Self.defaultKeychainHas(service: store.pendingLogoutService))
                 try store.removePendingLogout(logout)
+                #expect(try store.pendingLogouts() == [earlier])
+                try store.removePendingLogout(earlier)
                 #expect(try store.pendingLogouts().isEmpty)
             }
         }
@@ -165,13 +194,19 @@
             }
         }
 
-        @Test("021-FR-005 a person's sign-in replaces an item it may not write: deleted and added again", .timeLimit(.minutes(1)))
-        func refusedInteractiveWriteIsReplaced() throws {
+        @Test(
+            "021-FR-005 a person's sign-in replaces an item an earlier build left, so this build can read it",
+            .timeLimit(.minutes(1))
+        )
+        func otherBuildsItemIsReplacedAtSignIn() throws {
             let temporary = try TemporaryKeychain()
             let service = Self.service()
-            try Self.addRefusedItem(service: service, in: temporary.keychain)
+            try Self.addOtherBuildsItem(service: service, in: temporary)
             let store = KeychainSessionTokenStore(service: service, keychain: temporary.keychain)
             try Self.withoutPrompts {
+                #expect(throws: TokenStoreError.accessDenied, "before: routine sync can't read it and asks to sign in again") {
+                    try store.token(for: Self.server)
+                }
                 try store.setToken("fresh-session", for: Self.server, interactive: true)
                 #expect(try store.token(for: Self.server) == "fresh-session", "the new item is this build's own")
                 #expect(!Self.defaultKeychainHas(service: service))

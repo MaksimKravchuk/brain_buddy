@@ -726,6 +726,16 @@ Earlier increments are each independently useful and safe:
   - **Sign-out keeps typed text until it happens**: the window's discard confirmation comes first
     (G28), but the drafts are cleared only once the sign-out succeeded
     (`BrainBuddyModel.didSignOut`), so Cancel in X-04 loses nothing.
+  - **Found by `MacKeychainTests` on the `macos-app` lane** (kit fixes, both production bugs on the
+    Mac's file-based login keychain): `pendingLogouts()` asked for `kSecReturnData` with
+    `kSecMatchLimitAll`, which that keychain refuses with `errSecParam` (-50), so no queued logout
+    (offline sign-out, crash recovery, the pre-021 cookie sessions) could ever be listed and sent;
+    it now lists the items' attributes and reads each item's data. And a sign-in after a rebuild
+    updated the earlier build's item in place (writing data is allowed to any app) but could not
+    read it back (its access list trusts the earlier build), so every routine read asked to sign in
+    again; an interactive write now reads the token back without a prompt and deletes and adds the
+    item when it can't. The test models "an earlier build's item" as one `/usr/bin/security`
+    created.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan
