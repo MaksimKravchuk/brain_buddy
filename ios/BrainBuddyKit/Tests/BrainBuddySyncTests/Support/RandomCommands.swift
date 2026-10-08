@@ -67,6 +67,16 @@ struct RandomCommands {
             return .transitionSubtask(.init(taskID: task.id, subtaskID: subtask.id, action: action))
         case 86..<93:
             return .createComment(.init(taskID: task.id, commentID: CommentID("\(stamp)-comment"), body: "\(stamp) note"))
+        case 98:
+            guard let id = state.projects.values.sorted(by: { $0.replayKey < $1.replayKey }).map(\.id).randomElement(using: &rng)
+            else { break }
+            return .setProjectOutcome(project: id, outcome: pick([nil, "Garden done", "  ", "\(stamp) outcome"]))
+        case 99:
+            guard
+                let id = state.projects.values.filter({ $0.state == .archived }).sorted(by: { $0.replayKey < $1.replayKey })
+                    .map(\.id).randomElement(using: &rng)
+            else { break }
+            return .unarchiveProject(project: id)
         default:
             guard let comment = task.comments.randomElement(using: &rng) else { break }
             return .updateComment(.init(taskID: task.id, commentID: comment.id, body: "\(stamp) edited"))

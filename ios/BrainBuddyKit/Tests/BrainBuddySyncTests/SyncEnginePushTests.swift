@@ -96,7 +96,7 @@ struct SyncEnginePushTests {
         #expect(task.details == "Photos first")
         #expect(task.state == .completed)
         #expect(task.priority == .medium)
-        #expect(task.projectID == nil)
+        #expect(task.projectID == projectServerID, "an archive leaves the task in its project")
         #expect(task.tagIDs.isEmpty)
         #expect(task.subtasks.map(\.title) == ["Book photo studio"])
         #expect(task.subtasks.map(\.state) == [.completed])

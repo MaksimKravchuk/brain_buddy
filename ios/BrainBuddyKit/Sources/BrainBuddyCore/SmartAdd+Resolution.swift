@@ -93,9 +93,9 @@ extension CapturePlanner {
         {
             return (.existing(record.id, name: record.name), nil)
         }
-        // There is no unarchive on iOS, and the server refuses a Smart Add name
-        // that belongs to an archived project, so capture stops here rather
-        // than creating a second project with the same name.
+        // The server refuses a Smart Add name that belongs to an archived
+        // project, so capture stops here (`CapturePreview.problemMessage` says
+        // to unarchive it) rather than creating a second project with the same name.
         if let archived = projects.first(where: { $0.state == .archived && NameNormalizer.project($0.name) == key }) {
             return (.existing(archived.id, name: archived.name), .projectNotActive)
         }
@@ -177,5 +177,17 @@ extension CapturePlanner {
 
     private static func isBlank(_ value: String) -> Bool {
         value.unicodeScalars.allSatisfy(\.properties.isWhitespace)
+    }
+}
+
+extension CapturePreview {
+    /// The words for `problem`. An archived project that capture named (or started from)
+    /// says how to go on (design X-06); every other problem keeps its own copy.
+    public var problemMessage: String? {
+        guard let problem else { return nil }
+        if problem == .projectNotActive, let project {
+            return "Unarchive “\(project.name)” before adding a task to it."
+        }
+        return problem.message
     }
 }

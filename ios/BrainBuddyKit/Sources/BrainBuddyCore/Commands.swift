@@ -61,6 +61,10 @@ public enum GTDCommand: Hashable, Sendable, Codable {
     case createProject(CreateProject)
     case updateProject(UpdateProject)
     case archiveProject(ProjectID)
+    /// `PATCH /projects/{id}` with `desired_outcome` (spec 021); nil clears it.
+    case setProjectOutcome(project: ProjectID, outcome: String?)
+    /// `POST /projects/{id}/unarchive` (ADR-0020).
+    case unarchiveProject(project: ProjectID)
     case createTag(CreateTag)
     case renameTag(RenameTag)
     case deleteTag(TagID)
@@ -89,10 +93,12 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var projectID: ProjectID
         public var name: String
         public var color: String?
-        public init(projectID: ProjectID, name: String, color: String? = nil) {
+        public var desiredOutcome: String?
+        public init(projectID: ProjectID, name: String, color: String? = nil, desiredOutcome: String? = nil) {
             self.projectID = projectID
             self.name = name
             self.color = color
+            self.desiredOutcome = desiredOutcome
         }
     }
 
@@ -486,6 +492,13 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case priorityRequired
     case projectAlreadyArchived
     case tagAlreadyDeleted
+    // Spec 021 (contracts/kit-commands.md §2).
+    case outcomeTooLong
+    case unarchiveNameInUse(String)
+    /// A merge by name did not apply the local archive to the account's active project.
+    case archiveNotMerged(String)
+    /// A merge by name kept the account's desired outcome; the local one is in the issue's command.
+    case outcomeKept
     // Spec 020 (contracts/ios-commands.md §2).
     case decisionNotAllowed
     case extensionAlreadyUsed
@@ -537,6 +550,11 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .priorityRequired: "Choose a priority, or No priority."
         case .projectAlreadyArchived: "This project is already archived."
         case .tagAlreadyDeleted: "This tag was already deleted."
+        case .outcomeTooLong: "Keep the desired outcome under 1,000 characters."
+        case .unarchiveNameInUse(let name): "Another active project is already called “\(name)”. Rename one first."
+        case .outcomeKept: "Kept the desired outcome already on your account. Yours is below, so you can copy it."
+        case .archiveNotMerged(let name):
+            "Your account already has an active project called “\(name)”. This Mac's tasks were added to it, and it stays active."
         case .decisionNotAllowed: "This decision isn't available for this task's current list. Nothing was changed."
         case .extensionAlreadyUsed: "You've already kept this wording 7 more days once."
         case .extensionNotDue: "This wording can be kept 7 more days once it asks for a decision."

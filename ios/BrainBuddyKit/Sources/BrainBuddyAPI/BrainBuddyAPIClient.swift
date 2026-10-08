@@ -4,7 +4,8 @@ import Foundation
 /// Typed client for the Brain Buddy REST API: one async method per endpoint,
 /// no retries and no sync logic (that is `BrainBuddySync`'s job).
 ///
-/// - Every request carries `X-Client: brainbuddy-ios/<version>` and a fresh
+/// - Every request carries `X-Client: <identity>/<version>` (`brainbuddy-ios` unless
+///   the host passes another `ClientIdentity`) and a fresh
 ///   lowercase-UUID `X-Correlation-ID` (the server echoes it as `reference_id`).
 /// - Mutations take the operation's `Idempotency-Key`; resend the same key and
 ///   the same body to retry safely (the server keeps keys for 24 hours).
@@ -18,6 +19,7 @@ public final class BrainBuddyAPIClient: Sendable {
     /// API base including `/api`, for example `https://brain-buddy-frontend.fly.dev/api`.
     public let baseURL: URL
     public let clientVersion: String
+    public let identity: ClientIdentity
     private let transport: any HTTPTransport
     private let tokenStore: any SessionTokenStore
     private let makeCorrelationID: @Sendable () -> UUID
@@ -26,13 +28,15 @@ public final class BrainBuddyAPIClient: Sendable {
         baseURL: URL = BrainBuddyAPI.defaultServerURL,
         transport: any HTTPTransport = URLSessionTransport(),
         tokenStore: any SessionTokenStore,
-        clientVersion: String = BrainBuddyAPI.bundleVersion,
+        clientVersion: String? = nil,
+        identity: ClientIdentity = .iOS,
         correlationID: @escaping @Sendable () -> UUID = { UUID() }
     ) {
         self.baseURL = baseURL
         self.transport = transport
         self.tokenStore = tokenStore
-        self.clientVersion = clientVersion
+        self.clientVersion = clientVersion ?? identity.version
+        self.identity = ClientIdentity(name: identity.name, version: self.clientVersion)
         self.makeCorrelationID = correlationID
     }
 
@@ -82,9 +86,10 @@ public final class BrainBuddyAPIClient: Sendable {
 
     // MARK: - Projects
 
-    /// `GET /projects` → active projects, sorted by name.
-    public func listProjects() async throws(APIError) -> [ProjectDTO] {
-        try await get(["projects"])
+    /// `GET /projects[?state=]` → the projects in that state (default `active`), sorted by name.
+    /// A server older than spec 021 ignores `state` and lists the active ones.
+    public func listProjects(state: ProjectListState = .active) async throws(APIError) -> [ProjectDTO] {
+        try await get(["projects"], query: state == .active ? [] : [(name: "state", value: state.rawValue)])
     }
 
     /// `GET /projects/{id}` → the project in any state (active or archived).
@@ -92,31 +97,42 @@ public final class BrainBuddyAPIClient: Sendable {
         try await get(["projects", id])
     }
 
-    /// `POST /projects {name, color?}` → 201. `color` is omitted when nil.
+    /// `POST /projects {name, color?, desired_outcome?}` → 201. Nil fields are omitted.
     /// A taken name is `.duplicateName(resource: "Project", name:)`.
     public func createProject(
-        name: String, color: String? = nil, idempotencyKey: UUID
+        name: String, color: String? = nil, desiredOutcome: String? = nil, idempotencyKey: UUID
     ) async throws(APIError) -> ProjectDTO {
-        try await mutate(.post, ["projects"], ProjectCreateBody(name: name, color: color), key: idempotencyKey)
+        let body = ProjectCreateBody(name: name, color: color, desiredOutcome: desiredOutcome)
+        return try await mutate(.post, ["projects"], body, key: idempotencyKey)
     }
 
-    /// `PATCH /projects/{id} {name?, color?, expected_revision}`. `name` is
-    /// omitted when nil; `color: .clear` sends `null` and removes the colour.
+    /// `PATCH /projects/{id} {name?, color?, desired_outcome?, expected_revision}`. `name` is
+    /// omitted when nil; `color: .clear` sends `null` and removes the colour, and so does
+    /// `desiredOutcome: .clear` for the outcome.
     public func updateProject(
-        id: String, name: String? = nil, color: FieldChange<String> = .unchanged, expectedRevision: Int,
-        idempotencyKey: UUID
+        id: String, name: String? = nil, color: FieldChange<String> = .unchanged,
+        desiredOutcome: FieldChange<String> = .unchanged, expectedRevision: Int, idempotencyKey: UUID
     ) async throws(APIError) -> ProjectDTO {
-        let body = ProjectUpdateBody(name: name, color: color, expectedRevision: expectedRevision)
+        let body = ProjectUpdateBody(
+            name: name, color: color, desiredOutcome: desiredOutcome, expectedRevision: expectedRevision)
         return try await mutate(.patch, ["projects", id], body, key: idempotencyKey)
     }
 
-    /// `POST /projects/{id}/archive {expected_revision}`. The server also
-    /// removes the project from every task (bumping their revisions).
+    /// `POST /projects/{id}/archive {expected_revision}`. Since ADR-0020 every task keeps its project.
     public func archiveProject(
         id: String, expectedRevision: Int, idempotencyKey: UUID
     ) async throws(APIError) -> ProjectDTO {
         let body = ExpectedRevisionBody(expectedRevision: expectedRevision)
         return try await mutate(.post, ["projects", id, "archive"], body, key: idempotencyKey)
+    }
+
+    /// `POST /projects/{id}/unarchive {expected_revision}`. A project that is active already is
+    /// answered unchanged; an active project with the same name is `.duplicateName`.
+    public func unarchiveProject(
+        id: String, expectedRevision: Int, idempotencyKey: UUID
+    ) async throws(APIError) -> ProjectDTO {
+        let body = ExpectedRevisionBody(expectedRevision: expectedRevision)
+        return try await mutate(.post, ["projects", id, "unarchive"], body, key: idempotencyKey)
     }
 
     // MARK: - Tags
@@ -309,7 +325,7 @@ extension BrainBuddyAPIClient {
         let correlationID = makeCorrelationID().uuidString.lowercased()
         var headers = [
             "Accept": "application/json",
-            "X-Client": "\(BrainBuddyAPI.clientName)/\(clientVersion)",
+            "X-Client": "\(identity.name)/\(identity.version)",
             "X-Correlation-ID": correlationID,
         ]
         if endpoint.body != nil { headers["Content-Type"] = "application/json" }

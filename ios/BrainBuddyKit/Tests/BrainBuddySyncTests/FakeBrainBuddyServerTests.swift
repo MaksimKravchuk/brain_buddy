@@ -108,7 +108,7 @@ struct FakeBrainBuddyServerTests {
         #expect(try await client.getProject(id: work.id).state == .archived)
     }
 
-    @Test("Archiving and tag deletion change member tasks; subtask and comment edits do not")
+    @Test("Tag deletion changes member tasks, archiving keeps them (ADR-0020); subtask and comment edits change nothing")
     func sideEffects() async throws {
         let project = try await client.createProject(name: "Garden", idempotencyKey: UUID())
         let tag = try await client.createTag(name: "outside", idempotencyKey: UUID())
@@ -125,9 +125,9 @@ struct FakeBrainBuddyServerTests {
         _ = try await client.archiveProject(id: project.id, expectedRevision: 1, idempotencyKey: UUID())
         _ = try await client.deleteTag(id: tag.id, expectedRevision: 1, idempotencyKey: UUID())
         let detail = try await client.getTask(id: task.id)
-        #expect(detail.projectID == nil)
+        #expect(detail.projectID == project.id, "an archive leaves the task alone")
         #expect(detail.tagIDs.isEmpty)
-        #expect(detail.revision == 3)
+        #expect(detail.revision == 2, "only the tag deletion touched it")
         #expect(detail.subtasks.map(\.title) == ["Buy 40 bulbs"])
         #expect(detail.comments.map(\.body) == ["Before frost."])
         let listed = try await client.listAllTasks()

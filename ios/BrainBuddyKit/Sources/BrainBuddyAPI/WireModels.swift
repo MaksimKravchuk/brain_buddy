@@ -43,7 +43,14 @@ public struct MeDTO: Codable, Hashable, Sendable {
     }
 }
 
-/// `ProjectResponse`. `GET /projects` lists active ones only; `GET /projects/{id}` returns any state.
+/// `GET /projects?state=`: `active` is the default and the server's own.
+public enum ProjectListState: String, Sendable {
+    case active, archived, all
+}
+
+/// `ProjectResponse`. `GET /projects` lists the active ones unless a state is
+/// asked for; `GET /projects/{id}` returns any state. The last three fields
+/// are spec 021's and absent from an older server.
 public struct ProjectDTO: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
@@ -51,9 +58,13 @@ public struct ProjectDTO: Codable, Hashable, Sendable, Identifiable {
     public var state: ProjectState
     public var revision: Int
     public var openTaskCount: Int
+    public var desiredOutcome: String?
+    public var archivedAt: Date?
+    public var archivedBeforeLossless: Bool
 
     public init(
-        id: String, name: String, color: String? = nil, state: ProjectState, revision: Int, openTaskCount: Int = 0
+        id: String, name: String, color: String? = nil, state: ProjectState, revision: Int, openTaskCount: Int = 0,
+        desiredOutcome: String? = nil, archivedAt: Date? = nil, archivedBeforeLossless: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -61,11 +72,17 @@ public struct ProjectDTO: Codable, Hashable, Sendable, Identifiable {
         self.state = state
         self.revision = revision
         self.openTaskCount = openTaskCount
+        self.desiredOutcome = desiredOutcome
+        self.archivedAt = archivedAt
+        self.archivedBeforeLossless = archivedBeforeLossless
     }
 
     enum CodingKeys: String, CodingKey {
         case id, name, color, state, revision
         case openTaskCount = "open_task_count"
+        case desiredOutcome = "desired_outcome"
+        case archivedAt = "archived_at"
+        case archivedBeforeLossless = "archived_before_lossless"
     }
 
     public init(from decoder: Decoder) throws {
@@ -76,6 +93,9 @@ public struct ProjectDTO: Codable, Hashable, Sendable, Identifiable {
         state = try values.decode(ProjectState.self, forKey: .state)
         revision = try values.decode(Int.self, forKey: .revision)
         openTaskCount = try values.decodeIfPresent(Int.self, forKey: .openTaskCount) ?? 0
+        desiredOutcome = try values.decodeIfPresent(String.self, forKey: .desiredOutcome)
+        archivedAt = try values.decodeIfPresent(Date.self, forKey: .archivedAt)
+        archivedBeforeLossless = try values.decodeIfPresent(Bool.self, forKey: .archivedBeforeLossless) ?? false
     }
 }
 

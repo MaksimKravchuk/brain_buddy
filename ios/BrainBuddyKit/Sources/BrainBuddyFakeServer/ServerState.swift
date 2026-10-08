@@ -60,11 +60,13 @@ struct ServerState: Sendable {
         switch resource {
         case "projects":
             switch (method, path.count) {
-            case (.get, 1): return listProjects(owner)
+            case (.get, 1): return try listProjects(query, owner: owner)
             case (.post, 1): return try createProject(request, owner: owner, now: now)
             case (.get, 2): return try getProject(path[1], owner: owner)
             case (.patch, 2): return try updateProject(path[1], request, owner: owner, now: now)
             case (.post, 3) where path[2] == "archive": return try archiveProject(path[1], request, owner: owner, now: now)
+            case (.post, 3) where path[2] == "unarchive":
+                return try unarchiveProject(path[1], request, owner: owner, now: now)
             default: throw .routeNotFound
             }
         case "tags":
@@ -226,5 +228,24 @@ struct IDGenerator: Sendable {
             text += String(repeating: "0", count: 16 - chunk.count) + chunk
         }
         return String(text.prefix(digits))
+    }
+}
+
+extension FakeBrainBuddyServer {
+    /// Test seed: archives the account's project straight in the store, one revision up. With
+    /// `keepingMembers` it is what a lossless archive leaves (`archived_at` set); without, what
+    /// an archive made before spec 021 looks like (`archived_at` nil, `archived_before_lossless` true).
+    public func seedArchive(project id: String, email: String, keepingMembers: Bool) {
+        let date = Self.serverTime(now())
+        state.withLock { state in
+            guard let owner = state.accountIDsByEmail[email.lowercased()], var project = state.owners[owner]?.projects[id]
+            else { return }
+            project.state = .archived
+            project.archivedAt = keepingMembers ? date : nil
+            project.archivedBeforeLossless = !keepingMembers
+            project.updatedAt = date
+            project.revision += 1
+            state.owners[owner]?.projects[id] = project
+        }
     }
 }

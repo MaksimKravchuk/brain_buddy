@@ -7,11 +7,11 @@ import Foundation
 /// moved its task out of Waiting. Replay then keeps what still makes sense
 /// instead of losing the whole command:
 ///
-/// - a reference to a project or tag that is missing or no longer active is
-///   dropped, and the task keeps everything else. That is the server's own
-///   outcome had the command landed first: archiving a project and deleting
-///   a tag remove them from every task. A task edit that set such a project
-///   therefore clears the project rather than restoring the previous one;
+/// - a new reference to a project or tag that is missing or no longer active
+///   is dropped, and the task keeps everything else. The project a task is
+///   already in may stay archived (ADR-0020); deleting a tag still removes it
+///   from every task. A task edit that set an archived project therefore
+///   clears the project rather than restoring the previous one;
 /// - a task edit keeps every field change the task can still take, and loses
 ///   only the others (a waiting note on a task that left Waiting, a value
 ///   that fails a limit), so a folded edit is never rejected for the sake of
@@ -36,8 +36,8 @@ extension GTDReducer {
             guard let task = state.tasks[update.taskID] else { return command }
             update.changes = replayable(update.changes, for: task, in: state)
             return .updateTask(update)
-        case .createProject, .updateProject, .archiveProject, .createTag, .renameTag, .deleteTag, .transitionTask,
-            .createSubtask, .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask,
+        case .createProject, .updateProject, .archiveProject, .setProjectOutcome, .unarchiveProject, .createTag,
+            .renameTag, .deleteTag, .transitionTask, .createSubtask, .updateSubtask, .transitionSubtask, .createComment, .updateComment, .decideTask,
             .undoDecision, .autoParkTask, .bulkRelease, .undoBulkRelease, .review:
             return command
         }
@@ -70,7 +70,12 @@ extension GTDReducer {
                 changes.waitingFor = .unchanged
             }
         }
-        if case .set(let id) = changes.projectID, !isActive(project: id, in: state) { changes.projectID = .clear }
+        // A task keeps the archived project it is in (ADR-0020); a new reference to one is dropped.
+        if case .set(let id) = changes.projectID, !isActive(project: id, in: state),
+            !(id == task.projectID && state.projects[id] != nil)
+        {
+            changes.projectID = .clear
+        }
         if case .set(let ids) = changes.tagIDs { changes.tagIDs = .set(activeTags(ids, in: state)) }
         return changes
     }

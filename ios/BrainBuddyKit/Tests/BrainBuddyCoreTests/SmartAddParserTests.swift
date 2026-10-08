@@ -237,3 +237,35 @@ struct SmartAddParserTests {
         #expect(parse("(#work) @Дом").cleanTitle == "")
     }
 }
+
+/// The Mac's `SmartAddParserTests` cases are covered by the suites above, `SmartAddWebParityTests` and
+/// `CapturePlannerTests`, except what the kit did not say yet: the words for an archived project (design X-06).
+@Suite("Smart Add: archived projects")
+struct SmartAddArchivedProjectTests {
+    private let state = SmartAddFixtures.state(
+        projects: [
+            SmartAddFixtures.project("p-launch", "Launch v2"),
+            SmartAddFixtures.project("p-old", "Old Launch", state: .archived),
+        ]
+    )
+
+    @Test("021-FR-025 an archived project's name is shown and capture is refused with the unarchive copy")
+    func archivedNameIsShownAndRefused() {
+        let preview = CapturePlanner.preview(CaptureDraft(text: "Plan @\"old launch\""), in: state)
+        #expect(preview.project == ClassificationPreview(name: "Old Launch", isNew: false))
+        #expect(preview.problem == .projectNotActive && !preview.isValid)
+        #expect(preview.problemMessage == "Unarchive “Old Launch” before adding a task to it.")
+    }
+
+    @Test("021-FR-025 the same words when the archived project is the screen the capture started from")
+    func archivedContextProject() {
+        let preview = CapturePlanner.preview(CaptureDraft(text: "Plan", contextProjectID: "p-old"), in: state)
+        #expect(preview.problemMessage == "Unarchive “Old Launch” before adding a task to it.")
+    }
+
+    @Test("021-FR-010 021-FR-025 other problems keep their own copy, and a valid capture has none")
+    func otherProblemsKeepTheirCopy() {
+        #expect(CapturePlanner.preview(CaptureDraft(text: "#work"), in: state).problemMessage == GTDValidationError.emptyTitle.message)
+        #expect(CapturePlanner.preview(CaptureDraft(text: "Plan @\"Launch v2\""), in: state).problemMessage == nil)
+    }
+}
