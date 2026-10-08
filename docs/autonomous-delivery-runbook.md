@@ -70,8 +70,10 @@ external effects — never land automatically; they use the ASK landing procedur
 
 ### Procedure
 
-1. Implement the slice test-first in an isolated worktree, as one candidate commit whose
-   parent is the current `origin/main` (squash an atomic series before submitting).
+1. Implement the slice in an isolated worktree under
+   [Constitution Principle II's testing policy](../.specify/memory/constitution.md#ii-tested-delivery-across-stack),
+   as one candidate commit whose parent is the current `origin/main`
+   (squash an atomic series before submitting).
 2. Freeze the candidate and obtain ADR-0023's risk-selected independent gate on that
    exact SHA. On the full path, obtain every gate required by its accepted criteria.
 3. Run `scripts/submit_to_trunk.sh`. It validates clean state, current base, and a single

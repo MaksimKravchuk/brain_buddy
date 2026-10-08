@@ -46,9 +46,10 @@ Amend the spec first when implementation intent changes.
 - Consent & Safety: How will data stay local-first, with explicit consent and
   provider/API-key enforcement where needed? Confirm no real data, secrets, raw
   audio/transcripts, paths, or content fingerprints are committed/logged.
-- Tests: What backend (pytest/FastAPI TestClient), frontend (Vitest + Testing
-  Library), operation, or documentation checks will fail first and then pass?
-  Include edge cases for AI/persistence/voice/routing flows.
+- Tests: Read `.specify/memory/constitution.md` and apply Principle II.
+  Which existing checks protect the expected result and material failure risks?
+  Name only necessary additions/extensions, their least costly reliable level,
+  and any applicable test-first ordering; no separate test inventory is required.
 - Contracts: Which schemas/endpoints/events/state machines change, and how will
   compatibility be preserved across backend, frontend, and generated specs?
 - Observability: How will correlation IDs, structured redacted logs, progress,
@@ -57,8 +58,8 @@ Amend the spec first when implementation intent changes.
   offline windows, data-loss protections, and ~200-node canvas responsiveness be
   maintained?
 - Delivery boundary: Confirm Spec Kit tasks are portable planning input only;
-  isolated worktrees, TDD, independent verification, ADR-0008 landing, CI, and
-  Fly release gates remain authoritative regardless of execution tooling.
+  isolated worktrees, Constitution Principle II testing, independent verification,
+  ADR-0008 landing, CI, and Fly release gates remain authoritative regardless of execution tooling.
 - Design citation: For any feature with a user-visible surface, this plan MUST
   cite `specs/[###-feature]/design.md` and name the specific screen and state
   ids (`D-01`, `M-01`, …) each implementation section realizes. A feature with

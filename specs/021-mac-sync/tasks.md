@@ -137,7 +137,7 @@ T126 (the undated backup sentence), T029 (`CoreFixtures.swift`) and the per-stor
 The phases below follow the slices; this index groups the same tasks by user story
 (constitution "Tasks MUST be grouped by independently shippable user story"; found by
 `/speckit-analyze`), with each story's independent test and the slices that complete it.
-Setup and polish (T001 – T005, T134 – T139) carry no story.
+Setup and polish (T001 – T005, T134 – T139) carry no story. T066 – T089, T134, T135 and T138 are deferred (Notes, 2026-10-07).
 
 | story | tasks | complete after | independent test |
 |---|---|---|---|
@@ -209,7 +209,7 @@ Setup and polish (T001 – T005, T134 – T139) carry no story.
 
 - [x] T020 [US5] Write and observe RED: flip the clearing assertions to lossless in `backend/tests/test_task_api.py` (the archive cases near l.470, 556 – 566 and 753), `backend/tests/test_task_lifecycle_detail_api.py` (near l.367) and `backend/tests/test_task_tag_project_mvp_api.py` (near l.52); in `backend/tests/test_project_archive_lossless_api.py` replace the PR-02 archive cases: every member task (open, completed, cancelled) keeps `project_id` with no revision or `updated_at` change, the project gets `archived_at` = now and `archived_before_lossless: false`; `test_021_FR_027_repeat_archive_keeps_marker` (a seeded pre-feature archive archived again keeps the marker true and `archived_at` null); a lossless archive of a marked, unarchived project clears the marker; `test_021_SC_006_archive_and_unarchive_keep_every_membership`. *(021-FR-024, 021-FR-027, 021-SC-006)*
 - [x] T021 [US5] Update `backend/tests/fixtures/project_archive_traces.json` to lossless archive (members kept, `archived_at` set, marker false; repeat archive as before) and observe `backend/tests/test_project_archive_traces.py` RED against the PR-02 service. *(021-FR-024)*
-- [x] T022 [US5] Make T020 and T021 GREEN in `backend/app/modules/tasks/service.py`: `archive_project` changes no task, sets `archived_at = now` and `archived_before_lossless = False`, and keeps the repeat-archive guard; then `cd backend && pytest --no-cov tests/test_project_archive_lossless_api.py tests/test_project_archive_traces.py tests/test_task_api.py tests/test_task_lifecycle_detail_api.py tests/test_task_tag_project_mvp_api.py -q` and `make test-backend`. Deploy PR-06 right after this slice (http.md §7). *(021-FR-024, 021-SC-006)*
+- [x] T022 [US5] Make T020 and T021 GREEN in `backend/app/modules/tasks/service.py`: `archive_project` changes no task, sets `archived_at = now` and `archived_before_lossless = False`, and keeps the repeat-archive guard; then `cd backend && pytest --no-cov tests/test_project_archive_lossless_api.py tests/test_project_archive_traces.py tests/test_task_api.py tests/test_task_lifecycle_detail_api.py tests/test_task_tag_project_mvp_api.py -q` and `make test-backend`. The web page for archived projects (PR-06) is deferred: until the follow-up the web shows a task in a project archived from now on as "No project" (review c2, G45). *(021-FR-024, 021-SC-006)*
 
 **Checkpoint**: the server keeps memberships; older clients see what http.md §7 states.
 
@@ -298,49 +298,49 @@ Setup and polish (T001 – T005, T134 – T139) carry no story.
 
 ---
 
-## Phase 6: Web archived projects and refetch — US5, FR-032 (slice PR-06, SHOW)
+## Phase 6: Web archived projects and refetch — US5, FR-032 (DEFERRED, no slice; owner decision 2026-10-07)
 
-**Goal**: Design D-01 on the web, the 45 s visible-tab refetch (SC-001 Mac → web), the parity manifest. Deployed right after PR-03 (http.md §7).
+**Goal**: Design D-01 on the web, the 45 s visible-tab refetch (SC-001 Mac → web), the parity manifest. Kept for the follow-up feature; not in the manifest.
 
 **Independent Test**: quickstart Scenario 7 (web) with Vitest and Playwright.
 
-- [ ] T066 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/client.test.ts`: `listProjects(state)` sends `?state=`; `unarchiveProject` posts `/projects/{id}/unarchive` with `Idempotency-Key` and `expected_revision`; project responses carry `desired_outcome`, `archived_at`, `archived_before_lossless`. *(021-FR-026, 021-FR-027)*
-- [ ] T067 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/clientParity.test.ts`: the manifest `contracts/api-client-parity.json` lists `unarchiveProject` and `listProjects(state)`, the operation count follows the manifest, and adapter keys equal it (review c2, G09). *(021-FR-026)*
-- [ ] T068 [P] [US1] Write and observe RED in `frontend/src/api/__tests__/taskHooks.test.ts`: `useTaskList`, `useProjects` (with `state: "all"`), `useTags` and the open task's `useTaskDetail` set `refetchInterval: 45_000` and `refetchIntervalInBackground: false`. *(021-FR-032, 021-SC-001)*
-- [ ] T069 [P] [US5] Write and observe RED in `frontend/src/components/shell/__tests__/AppShell.test.tsx`: the "Archived projects 2" disclosure (accessible name "Archived projects, 2"), hidden when none; active projects only under Projects on every page that renders the shell; the archive hint line "Archiving keeps its tasks. You can unarchive it from Archived projects."; archived options offer only "Unarchive"; "Rename…" opens the options popover's name field for an archived project, a clash (409 from the server) shows its message "Project 'Old flat 2' already exists." with Ref in the popover, focus kept in the field; Escape returns focus to the options button. *(021-FR-024, 021-FR-025, 021-FR-026)*
-- [ ] T070 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx`, every D-01 state: the archived project page (chip, secondary "Unarchive", no composer, "Archived projects don't take new tasks. Unarchive it to add tasks."); "Unarchiving…" with `aria-disabled` and a polite status, focus kept; unarchived → focus to the heading and toast "Unarchived “Old flat”"; archived just now → archived page, focus to the heading, toast "Archived “Old flat”"; error → notice with Ref and Retry (`role=alert`), focus on Retry; 409 refusal → "Another active project is already called “Old flat”. Rename one first." with Ref and "Rename…", no Retry, focus on Unarchive; offline → Unarchive disabled with "You're offline. Unarchive is available when you're back online."; "Old flat · archived" in groupings; filtered empty copy. *(021-FR-015, 021-FR-024, 021-FR-025, 021-FR-026)*
-- [ ] T071 [P] [US5] Write and observe RED `frontend/src/features/tasks/__tests__/ArchivedProjectNotice.test.tsx` (new): the FR-027 line ("Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.") shows only when `archived_before_lossless` is true and the project has no task in any state, with the same cases as the kit's `ProjectDisplayTests`. *(021-FR-027)*
-- [ ] T072 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskDetailPanel.test.tsx`: the project picker lists active projects only, plus a task's own archived project labelled "Old flat · archived" and selected; an archived project is never offered as a new choice; archived names resolve. *(021-FR-025)*
-- [ ] T073 [P] [US1] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskDetailAutosaveUI.contract.test.tsx`: a detail refetch while typing keeps the typed text and shows the untouched field's incoming value; scroll and selection do not move. *(021-FR-009, 021-FR-032)*
-- [ ] T074 [US5] Make T066 – T068 GREEN in `frontend/src/api/client.ts` (`listProjects(state)`, `unarchiveProject`), `frontend/src/api/taskTypes.ts` (`ProjectResponse.state: "active" | "archived"`, the three fields), `frontend/src/api/taskHooks.ts` (the refetch on the four queries) and `contracts/api-client-parity.json`. *(021-FR-026, 021-FR-032)*
-- [ ] T075 [P] [US5] Make T071 GREEN in `frontend/src/features/tasks/ArchivedProjectNotice.tsx` (new). *(021-FR-027)*
-- [ ] T076 [US5] Make T069 GREEN in `frontend/src/components/shell/AppShell.tsx`: split active from archived projects, the disclosure, the archive hint, the archived options. *(021-FR-024, 021-FR-025, 021-FR-026)*
-- [ ] T077 [US5] Make T070, T072 and T073 GREEN in `frontend/src/features/tasks/TaskListPage.tsx` (archived page, Unarchive states and focus rules, "· archived" groupings, the 390 px full-width 44 px button) and `frontend/src/features/tasks/TaskDetailPanel.tsx` (picker; archived names). *(021-FR-025, 021-FR-026, 021-FR-032)*
-- [ ] T078 [US5] Write and observe RED, then GREEN, the Playwright specs `frontend/tests/e2e/archived-projects.spec.ts` (new; disclosure, opening "Old flat" lists 3 tasks with no composer, Unarchive with focus and toast, "Tax return 2024" shows the FR-027 line, no horizontal overflow at 390 × 851, a 44 px button, an axe scan with no violations) and `frontend/tests/e2e/cross-client-refresh.spec.ts` (new; with a fake clock, a subtask, a comment and a tag rename made through the API appear within 45 s, scroll and selection unchanged); add a path rule to `frontend/tests/allure.fixtures.ts` if the default does not cover them. *(021-FR-024, 021-FR-026, 021-FR-027, 021-FR-032, 021-SC-001, 021-SC-006)*
-- [ ] T079 [US5] Verify the slice: `cd frontend && npx vitest run src/api src/components/shell src/features/tasks`, `make test-frontend` (coverage floor; no coverage suppression in `frontend/src`), `cd frontend && npm run lint && npm run typecheck`, `make test-e2e`, the requirement scan.
+- (deferred) T066 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/client.test.ts`: `listProjects(state)` sends `?state=`; `unarchiveProject` posts `/projects/{id}/unarchive` with `Idempotency-Key` and `expected_revision`; project responses carry `desired_outcome`, `archived_at`, `archived_before_lossless`. *(021-FR-026, 021-FR-027)*
+- (deferred) T067 [P] [US5] Write and observe RED in `frontend/src/api/__tests__/clientParity.test.ts`: the manifest `contracts/api-client-parity.json` lists `unarchiveProject` and `listProjects(state)`, the operation count follows the manifest, and adapter keys equal it (review c2, G09). *(021-FR-026)*
+- (deferred) T068 [P] [US1] Write and observe RED in `frontend/src/api/__tests__/taskHooks.test.ts`: `useTaskList`, `useProjects` (with `state: "all"`), `useTags` and the open task's `useTaskDetail` set `refetchInterval: 45_000` and `refetchIntervalInBackground: false`. *(021-FR-032, 021-SC-001)*
+- (deferred) T069 [P] [US5] Write and observe RED in `frontend/src/components/shell/__tests__/AppShell.test.tsx`: the "Archived projects 2" disclosure (accessible name "Archived projects, 2"), hidden when none; active projects only under Projects on every page that renders the shell; the archive hint line "Archiving keeps its tasks. You can unarchive it from Archived projects."; archived options offer only "Unarchive"; "Rename…" opens the options popover's name field for an archived project, a clash (409 from the server) shows its message "Project 'Old flat 2' already exists." with Ref in the popover, focus kept in the field; Escape returns focus to the options button. *(021-FR-024, 021-FR-025, 021-FR-026)*
+- (deferred) T070 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskListPage.test.tsx`, every D-01 state: the archived project page (chip, secondary "Unarchive", no composer, "Archived projects don't take new tasks. Unarchive it to add tasks."); "Unarchiving…" with `aria-disabled` and a polite status, focus kept; unarchived → focus to the heading and toast "Unarchived “Old flat”"; archived just now → archived page, focus to the heading, toast "Archived “Old flat”"; error → notice with Ref and Retry (`role=alert`), focus on Retry; 409 refusal → "Another active project is already called “Old flat”. Rename one first." with Ref and "Rename…", no Retry, focus on Unarchive; offline → Unarchive disabled with "You're offline. Unarchive is available when you're back online."; "Old flat · archived" in groupings; filtered empty copy. *(021-FR-015, 021-FR-024, 021-FR-025, 021-FR-026)*
+- (deferred) T071 [P] [US5] Write and observe RED `frontend/src/features/tasks/__tests__/ArchivedProjectNotice.test.tsx` (new): the FR-027 line ("Archived before projects kept their tasks, so none are listed here. Those tasks are still in their lists.") shows only when `archived_before_lossless` is true and the project has no task in any state, with the same cases as the kit's `ProjectDisplayTests`. *(021-FR-027)*
+- (deferred) T072 [P] [US5] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskDetailPanel.test.tsx`: the project picker lists active projects only, plus a task's own archived project labelled "Old flat · archived" and selected; an archived project is never offered as a new choice; archived names resolve. *(021-FR-025)*
+- (deferred) T073 [P] [US1] Write and observe RED in `frontend/src/features/tasks/__tests__/TaskDetailAutosaveUI.contract.test.tsx`: a detail refetch while typing keeps the typed text and shows the untouched field's incoming value; scroll and selection do not move. *(021-FR-009, 021-FR-032)*
+- (deferred) T074 [US5] Make T066 – T068 GREEN in `frontend/src/api/client.ts` (`listProjects(state)`, `unarchiveProject`), `frontend/src/api/taskTypes.ts` (`ProjectResponse.state: "active" | "archived"`, the three fields), `frontend/src/api/taskHooks.ts` (the refetch on the four queries) and `contracts/api-client-parity.json`. *(021-FR-026, 021-FR-032)*
+- (deferred) T075 [P] [US5] Make T071 GREEN in `frontend/src/features/tasks/ArchivedProjectNotice.tsx` (new). *(021-FR-027)*
+- (deferred) T076 [US5] Make T069 GREEN in `frontend/src/components/shell/AppShell.tsx`: split active from archived projects, the disclosure, the archive hint, the archived options. *(021-FR-024, 021-FR-025, 021-FR-026)*
+- (deferred) T077 [US5] Make T070, T072 and T073 GREEN in `frontend/src/features/tasks/TaskListPage.tsx` (archived page, Unarchive states and focus rules, "· archived" groupings, the 390 px full-width 44 px button) and `frontend/src/features/tasks/TaskDetailPanel.tsx` (picker; archived names). *(021-FR-025, 021-FR-026, 021-FR-032)*
+- (deferred) T078 [US5] Write and observe RED, then GREEN, the Playwright specs `frontend/tests/e2e/archived-projects.spec.ts` (new; disclosure, opening "Old flat" lists 3 tasks with no composer, Unarchive with focus and toast, "Tax return 2024" shows the FR-027 line, no horizontal overflow at 390 × 851, a 44 px button, an axe scan with no violations) and `frontend/tests/e2e/cross-client-refresh.spec.ts` (new; with a fake clock, a subtask, a comment and a tag rename made through the API appear within 45 s, scroll and selection unchanged); add a path rule to `frontend/tests/allure.fixtures.ts` if the default does not cover them. *(021-FR-024, 021-FR-026, 021-FR-027, 021-FR-032, 021-SC-001, 021-SC-006)*
+- (deferred) T079 [US5] Verify the slice: `cd frontend && npx vitest run src/api src/components/shell src/features/tasks`, `make test-frontend` (coverage floor; no coverage suppression in `frontend/src`), `cd frontend && npm run lint && npm run typecheck`, `make test-e2e`, the requirement scan.
 
 **Checkpoint**: the web shows archived projects with their tasks and refreshes changes from other clients.
 
 ---
 
-## Phase 7: iPhone status line and archive — US3, US5 (slice PR-07, SHOW)
+## Phase 7: iPhone status line and archive — US3, US5 (DEFERRED, no slice; owner decision 2026-10-07)
 
-**Goal**: Design M-01 and M-02 on the iPhone: the shared status words, actionable attention rows, single-flight Settings "Sync now", the foreground ticker, unarchive.
+**Goal** (kept for the follow-up feature; not in the manifest): Design M-01 and M-02 on the iPhone: the shared status words, actionable attention rows, single-flight Settings "Sync now", the foreground ticker, unarchive.
 
 **Independent Test**: the `ios-app` lane builds; quickstart Scenario 5 step 5 and Scenario 7 (iPhone) as host checks.
 
 **Note**: the iPhone app has no test target; its rules are the kit's (PR-04, PR-05 tests). Tests-first here means the host checklists are written before the code, and the automated lane's evidence is the build plus the kit tests. Every task below is *(runtime: macOS lane)* except T080 and T089.
 
-- [ ] T080 [US3] Write the host checklists first, unfilled, with the evidence header (tree hashes of `ios/BrainBuddy/` and `ios/BrainBuddyKit/`, iOS version, date): `specs/021-mac-sync/evidence/manual-ios-status.md` (every M-01 state at Dynamic Type AX5, Reduce Motion, "first upload", "error, then offline", long-press and VoiceOver "Copy reference ID", the 44 pt account-less row, Settings "Sync now" enabled while syncing, sign-out with open issues, a web change appearing within 60 s with no touch and nothing fetched in the background) and `specs/021-mac-sync/evidence/manual-ios-archive.md` (every M-02 state, the non-destructive archive confirmation, swipe, toolbar and VoiceOver Unarchive, the rename sheet after a refusal). *(runtime: host)* *(021-FR-019, 021-FR-032, 021-FR-026)*
-- [ ] T081 [US3] Render the describer in `ios/BrainBuddy/Components/SyncStatusLabel.swift`: words plus the indicator (static glyph under Reduce Motion), re-described at least every 30 s, wrapping after " · " up to AX5; "Syncing…", the em dash and the immediate "Sync failed — …" go; attention rows become buttons at least 44 pt tall (Retry → Sync now; "Sign in again to sync" → the sign-in sheet with the email locked; "N changes couldn't sync" → Sync issues); the "Couldn't sync" row's long-press and a VoiceOver custom action offer "Copy reference ID"; the account-less "Sign in to sync" target is at least 44 pt; attention states announced once. *(021-FR-012, 021-FR-013, 021-FR-014, 021-FR-015, 021-FR-019)*
-- [ ] T082 [US5] Update `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift`: the M-01 status row; the M-02 archived project screen rendered from `GTDQueries.projectDisplay` (tasks listed and editable, toolbar "Unarchive", "Archived project · it doesn't take new tasks", the FR-027 empty line), the name-clash refusal with "Rename…" opening the existing `ProjectEditorSheet`, VoiceOver focus kept on Unarchive. *(021-FR-019, 021-FR-025, 021-FR-026, 021-FR-027)*
-- [ ] T083 [US3] Update `ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift`: the hub row subtitle in the new words; the Archived projects row hidden when there is none. *(021-FR-019, 021-FR-026)*
-- [ ] T084 [US5] Update `ios/BrainBuddy/Screens/Browse/ProjectsScreen.swift`: the archive confirmation loses its destructive role and reads "Archive “Old flat”?" / "It leaves your project lists. Its tasks keep the project, and you can unarchive it any time from Archived projects."; Archived projects rows open the project; swipe "Unarchive" (full swipe allowed) and a VoiceOver custom action; toast "Unarchived “Old flat”"; the refusal with "Rename…"; empty copy "No archived projects". *(021-FR-024, 021-FR-026)*
-- [ ] T085 [US3] Update `ios/BrainBuddy/Screens/Settings/SettingsScreen.swift` (the Sync section's words from the describer; "Sync now" no longer disabled by a running sync; the Reference ID shown from the first failure; the first-upload progress line; the earlier failure's time and Reference ID while offline; the sign-out confirmation appends `signOutIssues(n)` with "iPhone") and `ios/BrainBuddy/Screens/Settings/SignInSheet.swift` (opened locked to the email from the status row; the account-switch refusal from the catalogue with "iPhone"). *(021-FR-004, 021-FR-015, 021-FR-018, 021-FR-019)*
-- [ ] T086 [US1] In `ios/BrainBuddy/App/BrainBuddyApp.swift`, call `Workspace.setForegroundActive(_:)` from the scene phase and pass `SyncTiming.pullAge` as the pull interval; the old foreground `syncNow` call goes; `WidgetReloadAfterSync` keeps firing only on real cycles. *(021-FR-032, 021-FR-006)*
-- [ ] T087 [P] [US3] Update `ios/AGENTS.md` (the copy example becomes "Offline · 3 changes waiting") and `docs/native-ios-app.md` (lossless archive and unarchive; backend asks 5 and 7 done; `X-Client` with the macOS identity; the 15 s tick and 30 s pull age). *(021-FR-019, 021-FR-024)*
-- [ ] T088 [US3] Verify the automated lane: `sh ios/scripts/swift-linux.sh test` and the iPhone build of T049 on the `ios-app` lane, both on the exact SHA; the requirement scan. The landing produces one TestFlight build.
-- [ ] T089 [US3] Host lane (the owner): fill `specs/021-mac-sync/evidence/manual-ios-status.md` and `manual-ios-archive.md` on the landed build (or a candidate with identical trees), committed afterwards in a docs-only commit (plan "Evidence protocol"). *(runtime: host)* *(021-FR-019, 021-FR-032)*
+- (deferred) T080 [US3] Write the host checklists first, unfilled, with the evidence header (tree hashes of `ios/BrainBuddy/` and `ios/BrainBuddyKit/`, iOS version, date): `specs/021-mac-sync/evidence/manual-ios-status.md` (every M-01 state at Dynamic Type AX5, Reduce Motion, "first upload", "error, then offline", long-press and VoiceOver "Copy reference ID", the 44 pt account-less row, Settings "Sync now" enabled while syncing, sign-out with open issues, a web change appearing within 60 s with no touch and nothing fetched in the background) and `specs/021-mac-sync/evidence/manual-ios-archive.md` (every M-02 state, the non-destructive archive confirmation, swipe, toolbar and VoiceOver Unarchive, the rename sheet after a refusal). *(runtime: host)* *(021-FR-019, 021-FR-032, 021-FR-026)*
+- (deferred) T081 [US3] Render the describer in `ios/BrainBuddy/Components/SyncStatusLabel.swift`: words plus the indicator (static glyph under Reduce Motion), re-described at least every 30 s, wrapping after " · " up to AX5; "Syncing…", the em dash and the immediate "Sync failed — …" go; attention rows become buttons at least 44 pt tall (Retry → Sync now; "Sign in again to sync" → the sign-in sheet with the email locked; "N changes couldn't sync" → Sync issues); the "Couldn't sync" row's long-press and a VoiceOver custom action offer "Copy reference ID"; the account-less "Sign in to sync" target is at least 44 pt; attention states announced once. *(021-FR-012, 021-FR-013, 021-FR-014, 021-FR-015, 021-FR-019)*
+- (deferred) T082 [US5] Update `ios/BrainBuddy/Screens/Lists/TaskListScreen.swift`: the M-01 status row; the M-02 archived project screen rendered from `GTDQueries.projectDisplay` (tasks listed and editable, toolbar "Unarchive", "Archived project · it doesn't take new tasks", the FR-027 empty line), the name-clash refusal with "Rename…" opening the existing `ProjectEditorSheet`, VoiceOver focus kept on Unarchive. *(021-FR-019, 021-FR-025, 021-FR-026, 021-FR-027)*
+- (deferred) T083 [US3] Update `ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift`: the hub row subtitle in the new words; the Archived projects row hidden when there is none. *(021-FR-019, 021-FR-026)*
+- (deferred) T084 [US5] Update `ios/BrainBuddy/Screens/Browse/ProjectsScreen.swift`: the archive confirmation loses its destructive role and reads "Archive “Old flat”?" / "It leaves your project lists. Its tasks keep the project, and you can unarchive it any time from Archived projects."; Archived projects rows open the project; swipe "Unarchive" (full swipe allowed) and a VoiceOver custom action; toast "Unarchived “Old flat”"; the refusal with "Rename…"; empty copy "No archived projects". *(021-FR-024, 021-FR-026)*
+- (deferred) T085 [US3] Update `ios/BrainBuddy/Screens/Settings/SettingsScreen.swift` (the Sync section's words from the describer; "Sync now" no longer disabled by a running sync; the Reference ID shown from the first failure; the first-upload progress line; the earlier failure's time and Reference ID while offline; the sign-out confirmation appends `signOutIssues(n)` with "iPhone") and `ios/BrainBuddy/Screens/Settings/SignInSheet.swift` (opened locked to the email from the status row; the account-switch refusal from the catalogue with "iPhone"). *(021-FR-004, 021-FR-015, 021-FR-018, 021-FR-019)*
+- (deferred) T086 [US1] In `ios/BrainBuddy/App/BrainBuddyApp.swift`, call `Workspace.setForegroundActive(_:)` from the scene phase and pass `SyncTiming.pullAge` as the pull interval; the old foreground `syncNow` call goes; `WidgetReloadAfterSync` keeps firing only on real cycles. *(021-FR-032, 021-FR-006)*
+- (deferred) T087 [P] [US3] Update `ios/AGENTS.md` (the copy example becomes "Offline · 3 changes waiting") and `docs/native-ios-app.md` (lossless archive and unarchive; backend asks 5 and 7 done; `X-Client` with the macOS identity; the 15 s tick and 30 s pull age). *(021-FR-019, 021-FR-024)*
+- (deferred) T088 [US3] Verify the automated lane: `sh ios/scripts/swift-linux.sh test` and the iPhone build of T049 on the `ios-app` lane, both on the exact SHA; the requirement scan. The landing produces one TestFlight build.
+- (deferred) T089 [US3] Host lane (the owner): fill `specs/021-mac-sync/evidence/manual-ios-status.md` and `manual-ios-archive.md` on the landed build (or a candidate with identical trees), committed afterwards in a docs-only commit (plan "Evidence protocol"). *(runtime: host)* *(021-FR-019, 021-FR-032)*
 
 **Checkpoint**: the iPhone speaks the same status language as the Mac will, and unarchives.
 
@@ -423,13 +423,13 @@ Every task here is *(runtime: macOS lane)* except the docs tasks T130 – T131 a
 
 ## Phase 10: Polish — release gates (slice PR-10, ASK)
 
-**Purpose**: Turn on the feature's gates: requirement coverage, manual evidence by content, coverage floors, the owner week.
+**Purpose**: Turn on the minimum gate: requirement coverage, the owner week, the full verification. T134, T135 and T138 are deferred (owner decision 2026-10-07).
 
-- [ ] T134 Write and observe RED `scripts/test_check_manual_evidence.py` (new): matching and differing tree hashes; a squash-equivalent record passes; each forbidden pattern (`/Users/`, `~/Library`, `Keychains/`, a 32-hex run outside the header's tree-hash fields, an email not ending in `@example.com`, a non-Markdown file under `specs/021-mac-sync/evidence/`) fails; a missing header or per-state checklist fails; the full Keychain round-trip line is demanded when `MacKeychainTests` is disabled by a visible trait; SC-007 reported as pending until `owner-week.md` holds seven dated entries, the template never counting. *(021-SC-007)*
-- [ ] T135 Make T134 GREEN in `scripts/check_manual_evidence.py` (new; plan "Evidence protocol"). *(021-SC-007)*
-- [ ] T136 Add to the `check-specs` recipe in `Makefile`, beside the 019 line and 020's: `python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements` with every FR and SC id except SC-007, and `python3 scripts/check_manual_evidence.py`; re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit (`Makefile` is guarded); `python3 scripts/check_gate_integrity.py` and `make check-specs` pass.
+- (deferred) T134 Write and observe RED `scripts/test_check_manual_evidence.py` (new): matching and differing tree hashes; a squash-equivalent record passes; each forbidden pattern (`/Users/`, `~/Library`, `Keychains/`, a 32-hex run outside the header's tree-hash fields, an email not ending in `@example.com`, a non-Markdown file under `specs/021-mac-sync/evidence/`) fails; a missing header or per-state checklist fails; the full Keychain round-trip line is demanded when `MacKeychainTests` is disabled by a visible trait; SC-007 reported as pending until `owner-week.md` holds seven dated entries, the template never counting. *(021-SC-007)*
+- (deferred) T135 Make T134 GREEN in `scripts/check_manual_evidence.py` (new; plan "Evidence protocol"). *(021-SC-007)*
+- [ ] T136 Add to the `check-specs` recipe in `Makefile`, beside the 019 line and 020's: `python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements` with every FR and SC id except SC-007 (no manual-evidence checker: T134 and T135 are deferred); re-record `.specify/gate-integrity.json` with `python3 scripts/check_gate_integrity.py --update` in the same commit (`Makefile` is guarded); `python3 scripts/check_gate_integrity.py` and `make check-specs` pass.
 - [ ] T137 [P] Write `specs/021-mac-sync/evidence/README.md` (the content-free rule and the header format) and `specs/021-mac-sync/evidence/owner-week.md` (the template of quickstart Scenario 9: per day "needed Sync now: yes/no", "saw Mac and iPhone disagree after a minute online: yes/no", the count of sync issues). *(021-SC-007)*
-- [ ] T138 Raise `backend/coverage-floor.json` and `frontend/coverage-floor.json` to the measured values (ratchet only; no coverage suppression in `frontend/src`).
+- (deferred) T138 Raise `backend/coverage-floor.json` and `frontend/coverage-floor.json` to the measured values (ratchet only; no coverage suppression in `frontend/src`).
 - [ ] T139 Run the full verification on the frozen candidate: `make check-specs`, `make validate-ci`, `make test-backend`, `make test-frontend`, `make test-e2e`, `sh ios/scripts/swift-linux.sh test`, `cd macos && swift test` on the `macos-app` lane, `make verify-all`, and the quickstart scenarios; the Allure quality gate (`maxFailures: 0`) stays unchanged. *(021-SC-001, 021-SC-002, 021-SC-003, 021-SC-004, 021-SC-005, 021-SC-006)*
 
 ---
@@ -554,10 +554,9 @@ the manifest's last `acceptance` line and match the plan.
 - **Setup (Phase 1, PR-01)**: no dependency; it must land before PR-08.
 - **Backend (Phases 2 – 3)**: PR-02 needs 020 PR-02 (landed); PR-03 needs PR-02.
 - **Kit (Phases 4 – 5)**: PR-04 needs PR-03 deployed (its traces and TestFlight build); PR-05 lands after PR-04 (its pure status files may be developed beside it).
-- **Web (Phase 6, PR-06)**: needs PR-03; deployed right after it.
-- **iPhone (Phase 7, PR-07)**: needs PR-05's approved landing.
+- **Web, iPhone (Phases 6 – 7)**: deferred (owner decision 2026-10-07); no slice.
 - **Mac (Phases 8 – 9)**: PR-08 needs PR-01, PR-05 and 020 PR-06; PR-09 needs PR-08.
-- **Polish (Phase 10, PR-10)**: needs PR-06, PR-07 and PR-09; 020 PR-01 (landed).
+- **Polish (Phase 10, PR-10)**: needs PR-09; 020 PR-01 (landed).
 
 ### User Story Dependencies
 
@@ -570,10 +569,9 @@ the manifest's last `acceptance` line and match the plan.
 
 ```text
 PR-01 ───────────────────────────────────────────────┐
-PR-02 → PR-03 → PR-06 (web)                           │
-              → PR-04 → PR-05 → PR-07 (iPhone)        │
+PR-02 → PR-03 → PR-04 → PR-05                         │
                               → PR-08 (Mac) ←─────────┘ → PR-09 (Mac sync UI)
-PR-06 + PR-07 + PR-09 → PR-10
+PR-09 → PR-10          (PR-06 web and PR-07 iPhone: deferred)
 ```
 
 ### Within Each Slice
@@ -585,11 +583,9 @@ PR-06 + PR-07 + PR-09 → PR-10
 ### Parallel Opportunities
 
 - PR-01 runs beside every other slice until PR-08.
-- PR-06 (frontend only) runs beside PR-04, PR-05 and PR-07: disjoint paths.
 - Inside PR-02: T008, T009, T010 and T018 in parallel.
 - Inside PR-04: lanes (a) – (d) in parallel; (e) after (a) – (c).
 - Inside PR-05: T052, T053 and T056 in parallel; T052 – T054 may start beside PR-04.
-- Inside PR-06: every RED test (T066 – T073) in parallel.
 - Inside PR-08: lane (a) tests T094 – T097 in parallel; lane (b) after lane (a)'s host types exist; T111 and T112 in parallel with both.
 - Inside PR-09: T115 – T118, T120 and T121 in parallel.
 - Across features: see each slice's `serialize_with` (020 slices writing the same paths).
@@ -606,14 +602,6 @@ Task: "T034 ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceRepla
 Task: "T039 ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ImportCanonicalizerTests.swift"   # (d) helpers
 ```
 
-## Parallel Example: web and iPhone after the kit
-
-```bash
-# PR-06 needs only PR-03; PR-07 needs PR-05. No shared path:
-Task: "T070 frontend/src/features/tasks/__tests__/TaskListPage.test.tsx"   # PR-06
-Task: "T081 ios/BrainBuddy/Components/SyncStatusLabel.swift"                # PR-07
-```
-
 ---
 
 ## Implementation Strategy
@@ -623,15 +611,15 @@ Task: "T081 ios/BrainBuddy/Components/SyncStatusLabel.swift"                # PR
 The person-visible MVP is US1 + US2 on the Mac, which needs PR-01 – PR-05, PR-08 and PR-09.
 Earlier increments are each independently useful and safe:
 
-1. PR-02 → PR-03 → PR-06: lossless archive and unarchive on the server and the web (US5).
-2. PR-04 → PR-05 → PR-07: the iPhone gets the aligned status line and unarchive (US3, US5).
+1. PR-02 → PR-03: lossless archive and unarchive on the server (US5), which the Mac merge needs.
+2. PR-04 → PR-05: the shared kit rules and sync logic (US1 – US3, US5); the iPhone keeps building on it.
 3. PR-08: the upgraded Mac on the kit, account-less, with nothing lost (US4-1, US4-2, US4-4); the dry run on a copy of the owner's folder before the owner upgrades.
 4. PR-09: the Mac signs in and syncs (US1, US2, US3, US4-3, US4-5). **STOP and VALIDATE**: quickstart Scenarios 4 – 6 on hosts.
-5. PR-10: gates on; then the owner week (SC-007, quickstart Scenario 9).
+5. PR-10: the minimum gate on; then the owner week (SC-007, quickstart Scenario 9).
 
 ### Parallel Team Strategy
 
-1. One worker per lane: backend (PR-02 → PR-03), CI (PR-01), web (PR-06), kit (PR-04 → PR-05), iPhone (PR-07), Mac (PR-08 → PR-09).
+1. One worker per lane: backend (PR-02 → PR-03), CI (PR-01), kit (PR-04 → PR-05), Mac (PR-08 → PR-09).
 2. A dependent slice starts from an accepted base, never from a speculative parallel branch.
 3. ASK slices (PR-01, PR-02, PR-05, PR-08, PR-09, PR-10) go as PRs with the owner's recorded approval; their automated lanes finish without a person.
 
@@ -657,6 +645,20 @@ Earlier increments are each independently useful and safe:
   date continues only after the owner re-accepts or a targeted planning review is re-run
   over the artifacts those slices rely on.
 - No AI or paid provider is involved; `/verify-live` is not part of this feature.
+- **Rescope, 2026-10-07 (owner decision): the minimal path to "the Mac syncs with the backend".**
+  Slices left: PR-01 (merged), PR-02, PR-03, PR-04, PR-05, PR-08, PR-09 and PR-10 reduced to
+  the minimum release gate. Slice ids are kept so the review dispositions stay traceable.
+  PR-02 and PR-03 stay whole: the Mac's archived projects, outcomes and edits of tasks in
+  archived projects cannot sync without the tolerant PATCH, unarchive, `desired_outcome` and
+  lossless archive (FR-024 – FR-028; spec US5 "Why this priority"; SC-003, SC-006).
+- **Deferred to a follow-up feature (owner decision 2026-10-07)**: PR-06 web archived projects
+  and refetch (T066 – T079); PR-07 iPhone status line and archive (T080 – T089); from PR-10 the
+  manual-evidence checker (T134, T135) and the coverage-floor raise (T138). The manifest has
+  no deferral field, so their text stays in Phases 6, 7 and 10 as "(deferred)" entries instead
+  of checklist items: the slice validator then needs no owner for them. `spec.md` is unchanged
+  and every requirement still has a kit test, so the coverage scan passes, but the web and
+  iPhone halves of FR-019, FR-024 – FR-027, FR-032, SC-001 (Mac ↔ web) and SC-006 wait for the
+  follow-up. Dispositions F05, F55, G09, G55, G58 and G65 were discharged only by deferred tasks.
 
 ## Disposition traceability
 
@@ -887,7 +889,7 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
       "acceptance": [
         "quickstart Scenario 1 steps 1 and 9: every member task (open, completed, cancelled) keeps project_id with no revision or updated_at change; the project gets archived_at and archived_before_lossless: false",
         "test_021_SC_006_archive_and_unarchive_keep_every_membership green; the golden traces are lossless and pass against the real API",
-        "PR-06 deployed right after this slice (http.md §7)",
+        "the web page for archived projects (former PR-06) is deferred, so the web shows a task in a project archived from now on as \"No project\" until the follow-up (review c2, G45); no membership is lost",
         "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW: cross-client behaviour change)"
       ]
     },
@@ -1019,83 +1021,6 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
       ]
     },
     {
-      "id": "PR-06",
-      "outcome": "Web D-01: the Archived projects disclosure, the archived project page, Unarchive in every state incl. the name-clash refusal with Rename... and the focus rules, the archive hint, archived just now, '· archived' names, the task project picker (active plus the task's own archived project), the FR-027 line, the 45 s visible-tab refetch of the list, projects, tags and the open task, the parity manifest with its adapters and count, Playwright (archive and cross-client refresh) and axe. Deployed right after PR-03.",
-      "tasks": ["T066", "T067", "T068", "T069", "T070", "T071", "T072", "T073", "T074", "T075", "T076", "T077", "T078", "T079"],
-      "requirements": ["021-FR-009", "021-FR-015", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-032", "021-SC-001", "021-SC-006"],
-      "paths": [
-        "frontend/src/api/__tests__/client.test.ts",
-        "frontend/src/api/__tests__/clientParity.test.ts",
-        "frontend/src/api/__tests__/taskHooks.test.ts",
-        "frontend/src/components/shell/__tests__/AppShell.test.tsx",
-        "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx",
-        "frontend/src/features/tasks/__tests__/ArchivedProjectNotice.test.tsx",
-        "frontend/src/features/tasks/__tests__/TaskDetailPanel.test.tsx",
-        "frontend/src/features/tasks/__tests__/TaskDetailAutosaveUI.contract.test.tsx",
-        "frontend/src/api/client.ts",
-        "frontend/src/api/taskTypes.ts",
-        "frontend/src/api/taskHooks.ts",
-        "contracts/api-client-parity.json",
-        "frontend/src/features/tasks/ArchivedProjectNotice.tsx",
-        "frontend/src/components/shell/AppShell.tsx",
-        "frontend/src/features/tasks/TaskListPage.tsx",
-        "frontend/src/features/tasks/TaskDetailPanel.tsx",
-        "frontend/tests/e2e/archived-projects.spec.ts",
-        "frontend/tests/e2e/cross-client-refresh.spec.ts",
-        "frontend/tests/allure.fixtures.ts"
-      ],
-      "depends_on": ["PR-03"],
-      "external_depends_on": [],
-      "serialize_with": ["020-weekly-review/PR-05", "020-weekly-review/PR-10", "020-weekly-review/PR-13"],
-      "tests": [
-        "cd frontend && npx vitest run src/api src/components/shell src/features/tasks",
-        "make test-frontend",
-        "cd frontend && npm run lint && npm run typecheck",
-        "make test-e2e",
-        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-009,021-FR-015,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-032,021-SC-001,021-SC-006"
-      ],
-      "acceptance": [
-        "quickstart Scenario 7 (web): every D-01 state, focus rule and string of design.md proven in Vitest",
-        "Playwright archived-projects and cross-client-refresh green: a subtask, a comment and a tag rename made through the API appear within 45 s; axe with no violations; no horizontal overflow at 390 x 851",
-        "frontend coverage floor unchanged or higher; no coverage suppression in frontend/src",
-        "deployed right after PR-03 (http.md §7)",
-        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW)"
-      ]
-    },
-    {
-      "id": "PR-07",
-      "outcome": "iPhone M-01 and M-02: the status row from the shared describer (lists, Lists hub, Settings > Sync), attention rows as 44 pt buttons, Copy reference ID by long-press and VoiceOver, Settings Sync now enabled during a sync, setForegroundActive from the scene phase, the sign-out confirmation naming open issues, the non-destructive archive copy, the archived project screen via projectDisplay with Unarchive and the name-clash refusal; ios/AGENTS.md copy and docs/native-ios-app.md; host evidence.",
-      "tasks": ["T080", "T081", "T082", "T083", "T084", "T085", "T086", "T087", "T088", "T089"],
-      "requirements": ["021-FR-004", "021-FR-006", "021-FR-012", "021-FR-013", "021-FR-014", "021-FR-015", "021-FR-018", "021-FR-019", "021-FR-024", "021-FR-025", "021-FR-026", "021-FR-027", "021-FR-032"],
-      "paths": [
-        "specs/021-mac-sync/evidence/manual-ios-status.md",
-        "specs/021-mac-sync/evidence/manual-ios-archive.md",
-        "ios/BrainBuddy/Components/SyncStatusLabel.swift",
-        "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift",
-        "ios/BrainBuddy/Screens/Browse/ListsHubScreen.swift",
-        "ios/BrainBuddy/Screens/Browse/ProjectsScreen.swift",
-        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
-        "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
-        "ios/BrainBuddy/App/BrainBuddyApp.swift",
-        "ios/AGENTS.md",
-        "docs/native-ios-app.md"
-      ],
-      "depends_on": ["PR-05"],
-      "external_depends_on": [],
-      "serialize_with": ["020-weekly-review/PR-04", "020-weekly-review/PR-08", "020-weekly-review/PR-09", "020-weekly-review/PR-12"],
-      "tests": [
-        "sh ios/scripts/swift-linux.sh test",
-        "cd ios && xcodegen generate --spec project.yml && xcodebuild -project BrainBuddy.xcodeproj -scheme BrainBuddy -destination 'generic/platform=iOS Simulator' -configuration Debug CODE_SIGNING_ALLOWED=NO build  # ios-app lane",
-        "python3 scripts/check_requirement_coverage.py specs/021-mac-sync --requirements 021-FR-004,021-FR-006,021-FR-012,021-FR-013,021-FR-014,021-FR-015,021-FR-018,021-FR-019,021-FR-024,021-FR-025,021-FR-026,021-FR-027,021-FR-032"
-      ],
-      "acceptance": [
-        "ios-app lane green on the exact SHA; the iPhone app has no test target, so its ids are proven by the kit tests of PR-04 and PR-05 plus the host evidence",
-        "specs/021-mac-sync/evidence/manual-ios-status.md and manual-ios-archive.md filled by the owner on the landed build (or a candidate with identical trees) and committed in a docs-only commit: every M-01 and M-02 state at Dynamic Type AX5, VoiceOver, a web change within 60 s",
-        "the landing produces one TestFlight build",
-        "landing class SHOW (scripts/classify_path_risk.py: SHIP; semantic SHOW)"
-      ]
-    },
-    {
       "id": "PR-08",
       "outcome": "Mac adoption, account-less: Swift 6.2 and the kit dependency; WorkspaceHost; SingleInstanceGuard with X-08; X-09 for an unreadable workspace; the one-time legacy import through ImportCanonicalizer with its durable state machine, staging, verification, report, exclusive backup rename and every X-05 state; the golden import artifact and the kit case that signs in with it; MacLocalState review marks; the legacy cookie and HTTP-cache cleanup; a dry run (BRAINBUDDY_MAC_DATA_DIR) that touches no cookie, cache or Keychain item; the views rebound to Workspace with X-06 and the File-menu archive; the old store, REST client and parser removed with the XCTest ledger; data-retention rows, the privacy-policy paragraph; upgrade and archive host evidence.",
       "tasks": ["T090", "T091", "T092", "T093", "T094", "T095", "T096", "T097", "T098", "T099", "T100", "T101", "T102", "T103", "T104", "T105", "T106", "T107", "T108", "T109", "T110", "T111", "T112", "T113", "T114"],
@@ -1211,24 +1136,19 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
     },
     {
       "id": "PR-10",
-      "outcome": "Release gates: the manual-evidence checker (headers, per-state checklists, tree-hash identity, the content-free guard, the Keychain round-trip line when the CI test was disabled, SC-007 pending) and the 021 requirement scan (every id except SC-007) in make check-specs with gate integrity re-recorded; coverage floors raised; the evidence README and the owner-week template; the full verification on the frozen candidate.",
-      "tasks": ["T134", "T135", "T136", "T137", "T138", "T139"],
+      "outcome": "Minimum release gate: the 021 requirement scan (every id except SC-007) in make check-specs with gate integrity re-recorded; the evidence README and the owner-week template; the full verification on the frozen candidate. The manual-evidence checker and the coverage-floor raise are deferred.",
+      "tasks": ["T136", "T137", "T139"],
       "requirements": ["021-SC-001", "021-SC-002", "021-SC-003", "021-SC-004", "021-SC-005", "021-SC-006", "021-SC-007"],
       "paths": [
-        "scripts/test_check_manual_evidence.py",
-        "scripts/check_manual_evidence.py",
         "Makefile",
         ".specify/gate-integrity.json",
         "specs/021-mac-sync/evidence/README.md",
-        "specs/021-mac-sync/evidence/owner-week.md",
-        "backend/coverage-floor.json",
-        "frontend/coverage-floor.json"
+        "specs/021-mac-sync/evidence/owner-week.md"
       ],
-      "depends_on": ["PR-06", "PR-07", "PR-09"],
+      "depends_on": ["PR-09"],
       "external_depends_on": ["020-weekly-review/PR-01"],
       "serialize_with": ["020-weekly-review/PR-14"],
       "tests": [
-        "python3 -m unittest scripts/test_check_manual_evidence.py",
         "python3 scripts/check_gate_integrity.py",
         "make check-specs",
         "make validate-ci && make test-backend && make test-frontend && make test-e2e",
@@ -1236,10 +1156,9 @@ waves"; either order, the second rebases). `scripts/check_spec_kit_specs.py` ign
         "make verify-all"
       ],
       "acceptance": [
-        "the requirement scan in make check-specs passes for every 021 FR and SC except SC-007; SC-007 is reported pending until owner-week.md holds seven dated entries",
-        "gate-integrity manifest re-recorded in the same commit as the Makefile change; invariants intact",
-        "coverage floors ratcheted to the measured values; the Allure quality gate (maxFailures: 0) unchanged",
-        "owner's recorded ASK approval (Makefile, scripts/)",
+        "the requirement scan in make check-specs passes for every 021 FR and SC except SC-007; SC-007 is the owner's week, logged in owner-week.md",
+        "gate-integrity manifest re-recorded in the same commit as the Makefile change; invariants intact; the Allure quality gate (maxFailures: 0) unchanged",
+        "owner's recorded ASK approval (Makefile)",
         "landing class ASK (scripts/classify_path_risk.py: ASK)"
       ]
     }

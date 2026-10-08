@@ -53,5 +53,6 @@ and `docs/spec-kit-workflow.md`. Read `docs/spec-kit-workflow.md` before
 authoring specs. Spec Kit maintains versioned artifacts under `specs/`.
 
 Generated `tasks.md` is portable planning input: implement it directly when the
-user's request includes implementation, while preserving worktree, TDD, review,
-CI, landing, and release gates.
+user's request includes implementation, while preserving worktree,
+[Constitution Principle II's testing policy](../../memory/constitution.md#ii-tested-delivery-across-stack),
+review, CI, landing, and release gates.
