@@ -54,6 +54,26 @@ public enum ParkReturnProblem: Hashable, Sendable {
     case projectArchived(name: String)
 }
 
+/// M-16 (FR-034, FR-050, SC-002): where the decision step stands.
+public enum DecisionStepOutcome: Hashable, Sendable {
+    /// The card to show: `position` of `total` in the run's queue.
+    case card(TaskID, position: Int, total: Int)
+    /// Nothing asked for a decision.
+    case nothingAsks
+    /// Every card is decided; `keptWording` of them ("Save anyway") still ask.
+    case allDecided(Int, keptWording: Int)
+    /// "Not now" was used: `stillAsking` of the queue wait for a decision.
+    case someLeft(decided: Int, total: Int, stillAsking: Int)
+}
+
+/// M-11: a neutral line about an earlier review above Quick and Full.
+public enum ReviewEntryNotice: Hashable, Sendable {
+    /// A review of `origin` was closed when a newer one synced (FR-029).
+    case replacedElsewhere(origin: ReviewOrigin, decisions: Int)
+    /// The 7-day idle rule closed the review started at `startedAt`.
+    case closedAfterAWeek(startedAt: Date, decisions: Int)
+}
+
 /// The pure review-flow rules, run against `review_flow_vectors.json` like
 /// `backend/app/modules/tasks/review_rules.py`.
 public enum ReviewRules {
@@ -315,6 +335,68 @@ extension GTDQueries {
         if let projectID = task.projectID, let project = state.projects[projectID], project.state != .active {
             return .projectArchived(name: project.name)
         }
+        return nil
+    }
+
+    /// The decision step (M-16) for `session`: its queue is the snapshot taken
+    /// when the step opened. The card is the first task not decided, not set
+    /// aside with "Not now" and still asking; a decision of this run counts
+    /// even when the task still asks afterwards (a cosmetic save, FR-002).
+    public static func decisionStep(
+        in state: GTDState, session: ReviewSession, now: Date, timeZone: String? = nil
+    ) -> DecisionStepOutcome {
+        let queue = session.decisionQueue ?? decisionQueue(in: state, now: now, timeZone: timeZone).map(\.id)
+        let decided = Set(state.review.decisions.values.filter { $0.sessionID == session.id }.map(\.taskID))
+        let aside = Set(session.setAsideTaskIDs)
+        func asks(_ id: TaskID) -> Bool {
+            guard let task = state.tasks[id] else { return false }
+            return formulationClass(of: task, now: now, settings: state.review.settings, timeZone: timeZone).asksForDecision
+        }
+        if let current = queue.first(where: { !decided.contains($0) && !aside.contains($0) && asks($0) }) {
+            return .card(current, position: (queue.firstIndex(of: current) ?? 0) + 1, total: queue.count)
+        }
+        let decidedCount = queue.filter(decided.contains).count
+        let kept = queue.filter { decided.contains($0) && asks($0) }.count
+        let left = queue.filter { aside.contains($0) && !decided.contains($0) && asks($0) }.count
+        if left > 0 { return .someLeft(decided: decidedCount, total: queue.count, stillAsking: left + kept) }
+        return decidedCount == 0 ? .nothingAsks : .allDecided(decidedCount, keptWording: kept)
+    }
+
+    /// FR-017: restart releases the person can still undo: not undone, and no
+    /// review started since ("Start the review" is moving on).
+    public static func openRestartReleases(in state: GTDState) -> [BulkReleaseRecord] {
+        let lastStart = state.review.sessions.values.map(\.startedAt).max()
+        return state.review.bulkReleases.values.filter { record in
+            record.kind == .restart && record.undoneAt == nil && !record.released.isEmpty
+                && (lastStart.map { $0 < record.createdAt } ?? true)
+        }
+        .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
+    }
+
+    /// FR-030: the Inbox-remainder releases of `session` the person can still
+    /// undo: not undone, and the Inbox step is not left yet.
+    public static func openInboxReleases(in state: GTDState, session: ReviewSession) -> [BulkReleaseRecord] {
+        guard (session.steps[.inbox] ?? .pending) == .pending else { return [] }
+        return state.review.bulkReleases.values.filter { record in
+            record.kind == .inboxRemainder && record.sessionID == session.id && record.undoneAt == nil
+                && !record.released.isEmpty
+        }
+        .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
+    }
+
+    /// Whole local days since the last counted review (FR-038), nil when there is none.
+    public static func daysSinceLastReview(in state: GTDState, today: CalendarDay, calendar: Calendar = .current) -> Int? {
+        lastCountedReview(in: state).map { max(0, CalendarDay(date: $0, calendar: calendar).days(to: today)) }
+    }
+
+    /// M-11: the latest ended review, when another device ended it or the
+    /// idle rule closed it.
+    public static func entryNotice(in state: GTDState) -> ReviewEntryNotice? {
+        let ended = state.review.sessions.values.filter { $0.status != .open }
+        guard let latest = ended.max(by: { ($0.endedAt ?? $0.startedAt, $0.id) < ($1.endedAt ?? $1.startedAt, $1.id) })
+        else { return nil }
+        if latest.endedElsewhere { return .replacedElsewhere(origin: latest.origin, decisions: latest.decisionCount) }
+        if latest.closedForIdleness { return .closedAfterAWeek(startedAt: latest.startedAt, decisions: latest.decisionCount) }
         return nil
     }
 

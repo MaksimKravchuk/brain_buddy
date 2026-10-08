@@ -21,6 +21,8 @@ struct AppRouteView: View {
             SettingsScreen()
         case .syncIssues:
             SyncIssuesScreen()
+        case .review:
+            ReviewEntryScreen()
         }
     }
 }

@@ -389,6 +389,30 @@ struct ReviewSyncTests {
         #expect(after.formulation?.id == before.formulation?.id && after.formulation?.startedAt == before.formulation?.startedAt)
     }
 
+    @Test("020-FR-017 020-FR-043 a restart item the server released but the device's replay did not is undone with its pre-release clock")
+    func bulkUndoOfAnItemOnlyTheServerReleased() async throws {
+        let (harness, phone) = try await activated()
+        harness.clock.advance(by: 60)
+        try await nextTask("Renovate the bathroom", id: "t1", form: 1, on: phone)
+        let before = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        // 20 days old when asked: not restart-eligible on the device; 29 days old when the server evaluates it.
+        harness.clock.advance(by: 20 * Self.day)
+        try await phone.review(.bulkRelease(.init(bulkID: Self.bulk(1), kind: .restart, taskIDs: ["t1"])))
+        harness.clock.advance(by: 9 * Self.day)
+        await phone.sync()
+        #expect(harness.snapshot.task(titled: "Renovate the bathroom")?.state == .someday, "the server released it")
+
+        try await phone.review(.undoBulkRelease(Self.bulk(1)))
+        let shown = try #require(try await phone.current().task(titled: "Renovate the bathroom"))
+        #expect(shown.state == .next && shown.formulation == before.formulation?.clock, "never a Next task without its clock")
+        await phone.sync()
+        let document = try await phone.document()
+        #expect(document.issues.isEmpty && document.outbox.isEmpty)
+        let after = try #require(harness.snapshot.task(titled: "Renovate the bathroom"))
+        #expect(after.state == .next && after.formulation?.startedAt == before.formulation?.startedAt)
+        #expect(document.base.review.bulkReleases[Self.bulk(1)]?.released.allSatisfy { $0.clockBefore == nil } == true)
+    }
+
     // MARK: - Pulls between a lost answer and its retry (review round on 3e0f799)
 
     /// The answer to the matching request is lost, the device stays offline

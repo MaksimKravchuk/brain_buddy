@@ -3,9 +3,36 @@ import BrainBuddyWorkspace
 import SwiftUI
 
 /// Process inbox — the GTD *clarify* step, one inbox item at a time, fully
-/// offline. Presented as a full-screen cover while `router.isProcessingInbox`.
-///
-/// The inbox is snapshotted when the screen appears; items that leave the
+/// offline. Presented as a full-screen cover while `router.isProcessingInbox`;
+/// the item view itself is `InboxClarifier`, which the weekly review's Inbox
+/// step (M-15) reuses.
+struct ProcessInboxScreen: View {
+    @Environment(AppRouter.self) private var router
+    @Environment(\.dismiss) private var dismiss
+
+    init() {}
+
+    var body: some View {
+        NavigationStack {
+            InboxClarifier(onClose: close)
+                .navigationTitle("Process inbox")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close", action: close)
+                    }
+                }
+        }
+        .toastMagicTap()
+    }
+
+    private func close() {
+        router.isProcessingInbox = false
+        dismiss()
+    }
+}
+
+/// The inbox is snapshotted when the view appears; items that leave the
 /// inbox meanwhile (processed elsewhere, given a project on another device)
 /// are passed over. For each item you can first add a project, tags or a due
 /// date, then decide: Next action, Waiting for… (asks who or what), Someday /
@@ -16,11 +43,14 @@ import SwiftUI
 /// for a moment after each decision so a double tap can't decide the next
 /// item too. At accessibility text sizes the buttons scroll with the item
 /// instead of being pinned, so the item stays readable.
-struct ProcessInboxScreen: View {
+///
+/// In the weekly review (M-15) it is given the items to go through, reports
+/// every processed item and every Undo (`onProcessed(+1)` / `(-1)`, the run's
+/// "Inbox processed" count), and calls `onDone` instead of showing its own
+/// finished screen.
+struct InboxClarifier: View {
     @Environment(Workspace.self) private var workspace
-    @Environment(AppRouter.self) private var router
     @Environment(ToastCenter.self) private var toasts
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var queue: [TaskID] = []
@@ -34,35 +64,43 @@ struct ProcessInboxScreen: View {
     @State private var isSettling = false
     @AccessibilityFocusState private var isTitleFocused: Bool
 
+    private let fixedQueue: [TaskID]?
+    private let onProcessed: ((Int) -> Void)?
+    private let onDone: (() -> Void)?
+    private let onClose: () -> Void
+
     /// How long taps on the decision buttons are ignored after a decision.
     private static let settleDelay: Duration = .milliseconds(300)
 
-    init() {}
+    init(
+        queue: [TaskID]? = nil, onProcessed: ((Int) -> Void)? = nil, onDone: (() -> Void)? = nil,
+        onClose: @escaping () -> Void
+    ) {
+        fixedQueue = queue
+        self.onProcessed = onProcessed
+        self.onDone = onDone
+        self.onClose = onClose
+    }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !hasSnapshot {
-                    Color.clear
-                } else if let item = current {
-                    clarifyView(item)
-                } else {
-                    finishedView
-                        .safeAreaInset(edge: .bottom) {
-                            ToastHost()
-                        }
-                }
-            }
-            .navigationTitle("Process inbox")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close", action: close)
-                }
+        Group {
+            if !hasSnapshot {
+                Color.clear
+            } else if let item = current {
+                clarifyView(item)
+            } else if onDone != nil {
+                Color.clear
+            } else {
+                finishedView
+                    .safeAreaInset(edge: .bottom) {
+                        ToastHost()
+                    }
             }
         }
-        .toastMagicTap()
         .onAppear(perform: takeSnapshot)
+        .onChange(of: hasSnapshot && current == nil) { _, isDone in
+            if isDone { onDone?() }
+        }
         .onChange(of: current?.task.id, initial: true) { _, _ in
             // A new item starts from what it already has; nothing is staged.
             stage = current.map { ClarifyStage(task: $0.task) } ?? ClarifyStage()
@@ -106,7 +144,7 @@ struct ProcessInboxScreen: View {
 
     private func takeSnapshot() {
         guard !hasSnapshot else { return }
-        queue = workspace.list(.list(.inbox)).sections.flatMap(\.tasks).filter(Self.isInInbox).map(\.id)
+        queue = fixedQueue ?? workspace.list(.list(.inbox)).sections.flatMap(\.tasks).filter(Self.isInInbox).map(\.id)
         cursor = 0
         hasSnapshot = true
     }
@@ -370,6 +408,7 @@ struct ProcessInboxScreen: View {
             }
         }
         guard succeeded else { return }
+        onProcessed?(1)
         beginSettling()
         moveCursor(to: item.index + 1)
         toasts.show(action.confirmation, actionTitle: "Undo") {
@@ -404,6 +443,7 @@ struct ProcessInboxScreen: View {
             }
         }
         guard restored else { return }
+        onProcessed?(-1)
         skipped.removeAll { $0 == original.id }
         moveCursor(to: min(cursor, index))
     }
@@ -454,8 +494,7 @@ struct ProcessInboxScreen: View {
     }
 
     private func close() {
-        router.isProcessingInbox = false
-        dismiss()
+        onClose()
     }
 }
 

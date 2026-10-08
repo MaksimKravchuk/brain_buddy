@@ -233,6 +233,18 @@ struct ReducerReviewTests {
         #expect(replayed.tasks["t1"]?.state == .completed)
     }
 
+    @Test("020-FR-011 an acknowledgement that moves only the revision and the server-set fields is not a change")
+    func acknowledgementIsNotAChange() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0, serverRevision: 4)])
+        let shown = try #require(state.tasks["t1"])
+        // The server acknowledges an edit queued before the card opened.
+        state.tasks["t1"]?.serverRevision = 5
+        state.tasks["t1"]?.updatedAt = Review.now
+        state.tasks["t1"]?.orderKey = 7
+        try Review.apply(decide(.someday, shown: shown), to: &state)
+        #expect(state.tasks["t1"]?.state == .someday)
+    }
+
     @Test("020-FR-042 while the review is hidden a person's review actions are refused; replay still follows the server")
     func hiddenReviewRefusesInteractiveActions() throws {
         let asking = Review.nextTask("t1", started: t0, serverRevision: 4)
@@ -559,6 +571,32 @@ struct ReducerReviewTests {
         #expect(state.review.receipts.isEmpty, "the receipts the decisions wrote are gone")
     }
 
+    @Test("020-FR-048 020-FR-046 undo into Next keeps a park floor written since the decision")
+    func undoKeepsFloorWrittenSince() throws {
+        let due = CalendarDay(year: 2026, month: 9, day: 20)
+        var state = Review.state([Review.nextTask("t1", started: t0, due: due)])
+        try Review.apply(Review.decide(.extend, "t1", decision: 1, formulation: Review.form(1), reason: "Waiting for the quote"), to: &state)
+        // A time-zone change floors due-dated Next tasks without touching the task's revision or `updatedAt`.
+        try Review.apply(.review(.updateSettings(.init(timeZone: "America/New_York"))), at: Review.now.addingTimeInterval(60), to: &state)
+        let floor = try #require(state.tasks["t1"]?.formulation?.parkFloorAt)
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(120), to: &state)
+        let clock = try #require(state.tasks["t1"]?.formulation)
+        #expect(clock.extendedAt == nil && clock.extensionReason == nil, "the extension is undone")
+        #expect(clock.parkFloorAt == floor, "the floor written after the decision survives")
+    }
+
+    @Test("020-FR-048 020-FR-016 a decision made before activation, undone after it, restores the clock with the activation clamp")
+    func undoClampsToActivation() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0)], settings: ReviewSettings())
+        try Review.apply(Review.decide(.someday, "t1", decision: 1, formulation: Review.form(1)), to: &state)
+        try Review.apply(.review(.acknowledgeExplainer(timeZone: "Europe/Berlin")), at: Review.now, to: &state)
+        try Review.apply(.undoDecision(Review.decision(1)), at: Review.now.addingTimeInterval(60), to: &state)
+        let clock = try #require(state.tasks["t1"]?.formulation)
+        #expect(state.tasks["t1"]?.state == .next && clock.id == Review.form(1))
+        #expect(clock.startedAt == Review.now)
+        #expect(clock.parkFloorAt == Review.now.addingTimeInterval(14 * Review.day))
+    }
+
     @Test("020-FR-048 undo is refused when the task or the follow-up changed since; an absent decision is already undone")
     func undoRefused() throws {
         var state = Review.state([Review.nextTask("t1", started: t0), Review.task("w1", title: "Drill", state: .waiting)])
@@ -613,7 +651,7 @@ struct ReducerReviewTests {
         guard let scenario = try CompactionScenario(vector) else {
             // Owner-level events, the yield, the undos and refused events are
             // not a queued command of one task; FormulationTests runs every
-            // one of the 65 vectors through the rule itself.
+            // one of the 67 vectors through the rule itself.
             #expect(Self.notQueued.contains(vector["event"]?["type"]?.string ?? "") || vector["expect"]?["error"] != nil
                 || vector["expect"]?["applied"]?.bool == false, "\(vector.id) skipped without a reason")
             return
@@ -658,7 +696,7 @@ struct ReducerReviewTests {
                 && vector["expect"]?["applied"]?.bool != false
         }
         #expect(covered == queued.count)
-        #expect(vectors.count == 65)
+        #expect(vectors.count == 67)
     }
 
     struct ClockFields: Hashable {
@@ -894,6 +932,37 @@ struct ReducerReviewTests {
         try Review.apply(.review(.startSession(.init(sessionID: Review.session(3), mode: .quick, entry: .widgetDecisions, skipSteps: [.wins, .inbox]))), to: &state)
         #expect(state.review.sessions[Review.session(2)]?.status == .abandoned)
         #expect(state.review.sessions[Review.session(3)]?.currentStep == .decisions)
+    }
+
+    @Test("020-FR-028 progress naming a step outside the review's mode is refused and queues nothing, whatever the status")
+    func progressOutsideModeIsRefused() throws {
+        var state = Review.state([Review.nextTask("t1", started: t0)])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(1), mode: .quick, entry: .list))), to: &state)
+        let outOfMode: [SessionProgress] = [
+            .init(sessionID: Review.session(1), progressID: Review.progress(1), step: .dates, stepStatus: .finished),
+            .init(sessionID: Review.session(1), progressID: Review.progress(2), activeStep: .restOfNext, activeSeconds: 30),
+        ]
+        func expectRefusals() {
+            for progress in outOfMode {
+                let before = state
+                #expect(Review.error { try Review.apply(.review(.progressSession(progress)), to: &state) } == .stepNotInReview)
+                #expect(state == before, "the session is unchanged")
+            }
+        }
+        expectRefusals()
+        try Review.apply(.review(.finishSession(.init(sessionID: Review.session(1)))), to: &state)
+        expectRefusals()
+        // A mode's own steps are still merged.
+        var full = Review.state([])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(2), mode: .full, entry: .list))), to: &full)
+        let inMode = SessionProgress(sessionID: Review.session(2), progressID: Review.progress(3), step: .dates, stepStatus: .skipped)
+        try Review.apply(.review(.progressSession(inMode)), to: &full)
+        #expect(full.review.sessions[Review.session(2)]?.steps[.dates] == .skipped)
+        var quick = Review.state([])
+        try Review.apply(.review(.startSession(.init(sessionID: Review.session(3), mode: .quick, entry: .list))), to: &quick)
+        let inQuick = SessionProgress(sessionID: Review.session(3), progressID: Review.progress(4), step: .wins, stepStatus: .finished, activeStep: .inbox, activeSeconds: 5)
+        try Review.apply(.review(.progressSession(inQuick)), to: &quick)
+        #expect(quick.review.sessions[Review.session(3)]?.steps[.wins] == .finished)
     }
 
     @Test("020-FR-029 progressSession is never folded into another one")

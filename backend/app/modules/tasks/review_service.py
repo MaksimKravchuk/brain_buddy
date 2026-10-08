@@ -733,40 +733,15 @@ class ReviewService:
     def _restored_task(
         self, snapshot: TaskDocument, current: TaskDocument, *, owner_id: str
     ) -> TaskDocument:
-        """formulation-clock §3 "decision undo": the snapshot, floors kept.
+        """formulation-clock §3 "decision undo": the shared pure restore applied
+        to the stored snapshot, so the server keeps one rule."""
 
-        The time-zone floor and the activation clamp are clock bookkeeping
-        written without a revision bump, so they can land after the decision
-        and still leave its Undo available. A task restored into Next keeps
-        ``max(snapshot floor, current floor)``, and a restored formulation that
-        started before ``activated_at`` gets the activation clamp.
-        """
-
-        if snapshot.state != "next":
-            return snapshot
-        restored = snapshot
-        floors = [
-            floor
-            for floor in (
-                snapshot.formulation_park_floor_at,
-                current.formulation_park_floor_at if current.state == "next" else None,
-            )
-            if floor is not None
-        ]
-        if floors:
-            restored = restored.model_copy(
-                update={"formulation_park_floor_at": max(floors)}
-            )
-        activated_at = self.settings_for(owner_id).activated_at
-        started = restored.formulation_started_at
-        if activated_at is not None and started is not None and started < activated_at:
-            clock = formulation.activate_clock(
-                task_clock(restored),
-                activated_at=activated_at,
-                formulation_id=generate_id("form"),
-            )
-            restored = with_clock(restored, clock)
-        return restored
+        restored = formulation.restore(
+            task_clock(current),
+            task_clock(snapshot),
+            settings=self.settings_for(owner_id).clock_settings(),
+        )
+        return with_clock(snapshot, restored)
 
     def _set_park_returned(
         self,

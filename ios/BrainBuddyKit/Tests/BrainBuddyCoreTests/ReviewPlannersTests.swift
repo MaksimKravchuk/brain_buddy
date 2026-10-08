@@ -468,4 +468,36 @@ struct ReviewPlannersTests {
         )
         #expect(sections.allSatisfy { !ReviewVectors.section(Self.flow, $0).isEmpty })
     }
+
+    @Test("020-FR-030 the Inbox step asks only over 15 items; Process 10 takes the first ten, and the third choice releases the rest")
+    func inboxStepPlan() {
+        let items = (1...23).map { TaskID("t\($0)") }
+        #expect(!InboxStepPlan.needsChoice(itemCount: 15) && InboxStepPlan.needsChoice(itemCount: 16))
+        #expect(InboxStepPlan.split(items, choice: nil) == (items, []))
+        #expect(InboxStepPlan.split(items, choice: .processAll) == (items, []))
+        let ten = Array(items.prefix(10))
+        #expect(InboxStepPlan.split(items, choice: .processTen) == (ten, []))
+        let released = InboxStepPlan.split(items, choice: .processTenReleaseRest)
+        #expect(released.process == ten && released.release == Array(items.dropFirst(10)))
+        #expect(InboxStepPlan.split(Array(items.prefix(4)), choice: .processTenReleaseRest) == (Array(items.prefix(4)), []))
+    }
+
+    @Test("020-FR-031 the capacity mirror says the figures and never a limit; before 4 weeks only the count and an honest line")
+    func capacityCopy() {
+        let full = ReviewCopy.capacity(CapacityMirror(nextCount: 41, weeksOfHistory: 6, weeklyAverage4w: 9, impliedWeeks: 4.5))
+        #expect(full.figures == ["41 next actions", "9 done per week, last 4 weeks", "~4½ weeks of work at that pace"])
+        #expect(full.note.hasPrefix("No limit."))
+        let one = ReviewCopy.capacity(CapacityMirror(nextCount: 1, weeksOfHistory: 5, weeklyAverage4w: 1, impliedWeeks: 1))
+        #expect(one.figures == ["1 next action", "1 done per week, last 4 weeks", "~1 week of work at that pace"])
+        let early = ReviewCopy.capacity(CapacityMirror(nextCount: 3, weeksOfHistory: 1, weeklyAverage4w: nil, impliedWeeks: nil))
+        #expect(early.figures == ["3 next actions"] && early.note.hasPrefix("After a few weeks"))
+        #expect(ReviewCopy.capacity(CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil)).note == "Next is empty.")
+    }
+
+    @Test("020-FR-028 020-FR-029 each step has a heading and the Quick review names its four")
+    func stepHeadings() {
+        #expect(Set(ReviewStep.allCases.map(ReviewCopy.stepTitle)).count == ReviewStep.allCases.count)
+        #expect(ReviewMode.quick.steps == [.wins, .inbox, .decisions, .summary])
+        #expect(ReviewCopy.stepPosition(4, of: 10) == "4 of 10")
+    }
 }
