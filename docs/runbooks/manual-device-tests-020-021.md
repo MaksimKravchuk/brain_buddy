@@ -46,16 +46,29 @@ CI cannot run.
    - the Whisper model and tokenizer that `macos/build_app.sh` needs (see `macos/README.md`).
 3. **Test backend.** This is needed for the 021 sign-in and sync checks, and for any signed-in
    iOS check.
-   - Run `cp .env.example .env`, then `docker compose up --build`. The API is on the compose
-     stack and the web app on `http://localhost:8080`. `.env.example` documents every variable.
+   - **Never overwrite an existing `.env`.** It is gitignored and may be the only copy of the
+     owner's keys and settings.
+     - If `.env` already exists, leave it as it is, or run the stack from a separate clone made
+       for testing.
+     - Only when no `.env` exists: `cp .env.example .env`.
+   - Then run `docker compose up --build`. The API runs on the compose stack and the web app on
+     `http://localhost:8080`. `.env.example` documents every variable.
    - Create a test account: `docker compose exec backend python -m app.cli create-invite`, then
      sign up on the web app with that invite code and a throwaway email.
    - The `weekly_review` flag is off by default. Turn it on for the test account where a check
      needs it, through the Admin Portal flag page (SELECTED_USERS), as
      `specs/020-weekly-review/quickstart.md` "Prerequisites" says.
-   - Seed a stalled task with `docker compose exec backend python -m app.cli
-     review-seed-aged-task --email <test email> --days <N>` instead of moving clocks, where a
-     plan allows either. This is a TEST-only helper, so never point it at production.
+     - `/admin` admits only operators listed in `BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS`, which is
+       empty in `.env.example`, so set it before `docker compose up` (see `docs/auth.md`). In
+       a testing clone's `.env`, set it to the test account's email; in an existing `.env`,
+       only with the owner's OK.
+     - Then sign in to `/admin` as that account and set `weekly_review` to that account.
+   - Seed a stalled task instead of moving clocks, where a plan allows either:
+     `docker compose exec -e BRAIN_BUDDY_ENV=test backend python -m app.cli
+     review-seed-aged-task --email <test email> --days <N>`.
+     - The helper refuses to run unless `BRAIN_BUDDY_ENV=test` (it exits with code 2), hence
+       the `-e` for this one command.
+     - Never point it at production.
 4. **iOS:**
    - Run `(cd ios && xcodegen generate)`, then open `ios/BrainBuddy.xcodeproj`.
    - Use the Debug configuration with `BBWeeklyReviewLocal = YES` for the account-less weekly
