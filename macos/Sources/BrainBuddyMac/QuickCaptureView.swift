@@ -1,20 +1,25 @@
 import AppKit
+import BrainBuddyCore
+import BrainBuddyMacCore
 import Carbon.HIToolbox
 import SwiftUI
 
 private let quickCaptureSignature: OSType = 0x42424350 // BBCP
 private let quickCaptureHotKeyID: UInt32 = 1
 
-private let quickCaptureEventHandler: EventHandlerUPP = { _, event, context in
+/// The Carbon hot-key callback, a plain function so it converts to a C function pointer and holds
+/// no state: it reaches the controller through `context`, the unretained pointer `start` passed,
+/// which `stop()` invalidates by removing the handler first.
+private func quickCaptureHotKeyPressed(
+    _ call: EventHandlerCallRef?, _ event: EventRef?, _ context: UnsafeMutableRawPointer?
+) -> OSStatus {
     guard let event, let context else { return OSStatus(eventNotHandledErr) }
     var identifier = EventHotKeyID()
     let result = GetEventParameter(
         event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
         nil, MemoryLayout<EventHotKeyID>.size, nil, &identifier
     )
-    guard result == noErr,
-          identifier.signature == quickCaptureSignature,
-          identifier.id == quickCaptureHotKeyID else {
+    guard result == noErr, identifier.signature == quickCaptureSignature, identifier.id == quickCaptureHotKeyID else {
         return OSStatus(eventNotHandledErr)
     }
     let controller = Unmanaged<QuickCaptureController>.fromOpaque(context).takeUnretainedValue()
@@ -39,7 +44,7 @@ final class QuickCaptureController: ObservableObject {
             eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)
         )
         let handlerResult = InstallEventHandler(
-            GetApplicationEventTarget(), quickCaptureEventHandler, 1, &eventType,
+            GetApplicationEventTarget(), quickCaptureHotKeyPressed, 1, &eventType,
             Unmanaged.passUnretained(self).toOpaque(), &eventHandler
         )
         guard handlerResult == noErr else {
@@ -71,7 +76,7 @@ final class QuickCaptureController: ObservableObject {
     }
 
     func show() {
-        guard let model, model.isLocalWorkspace else { return }
+        guard let model else { return }
         if let panel {
             panel.makeKeyAndOrderFront(nil)
             return
@@ -108,16 +113,16 @@ final class QuickCaptureController: ObservableObject {
     }
 }
 
+/// Quick Capture (⌃⌥⇧B) to Inbox through the kit's capture: it applies at once on this Mac and
+/// never waits for the network (FR-010).
 @MainActor
 private struct QuickCaptureView: View {
-    @ObservedObject var model: BrainBuddyModel
+    let model: BrainBuddyModel
     let onClose: () -> Void
 
     @State private var title = ""
-    @State private var saving = false
     @State private var error: String?
     @State private var confirmingDiscard = false
-    @State private var pendingSave: (title: String, key: UUID)?
     @FocusState private var titleFocused: Bool
 
     private var cleanTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -129,8 +134,7 @@ private struct QuickCaptureView: View {
             TextField("What's on your mind?", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .focused($titleFocused)
-                .onSubmit { Task { await save() } }
-                .disabled(saving)
+                .onSubmit(save)
             Text("You can clarify and organize it later.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -141,10 +145,9 @@ private struct QuickCaptureView: View {
                 Spacer()
                 Button("Cancel") { requestClose() }
                     .keyboardShortcut(.cancelAction)
-                    .disabled(saving)
-                Button(saving ? "Saving…" : "Save to Inbox") { Task { await save() } }
+                Button("Save to Inbox", action: save)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(saving || cleanTitle.isEmpty || cleanTitle.count > 500)
+                    .disabled(cleanTitle.isEmpty || !EditorLimits.fits(cleanTitle, EditorLimits.title))
             }
         }
         .padding(22)
@@ -159,23 +162,16 @@ private struct QuickCaptureView: View {
     }
 
     private func requestClose() {
-        if title.isEmpty { onClose() }
-        else { confirmingDiscard = true }
+        if title.isEmpty { onClose() } else { confirmingDiscard = true }
     }
 
-    private func save() async {
-        guard !saving, !cleanTitle.isEmpty, cleanTitle.count <= 500 else { return }
-        let key = pendingSave?.title == cleanTitle ? pendingSave!.key : UUID()
-        pendingSave = (cleanTitle, key)
-        saving = true
-        error = nil
+    private func save() {
+        guard !cleanTitle.isEmpty, EditorLimits.fits(cleanTitle, EditorLimits.title) else { return }
         do {
-            try await model.quickCaptureInbox(cleanTitle, idempotencyKey: key)
-            pendingSave = nil
+            try model.quickCaptureInbox(cleanTitle)
             onClose()
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.message
         }
-        saving = false
     }
 }

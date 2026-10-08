@@ -189,7 +189,11 @@ public enum ImportCanonicalizer {
             if list == .waiting {
                 let raw = task.waitingFor ?? ""
                 out.waitingFor = text(raw, fallback: "(not recorded)", limit: GTDLimits.waitingFor) { added.append("Waiting for: \($0)") }
-                note("task waiting-for", raw, out.waitingFor ?? "", "trimmed, required in Waiting, 1 to 500 characters")
+                // A closed task passes through Waiting only on its way to closing, which clears the
+                // note again; the old app had already cleared it, so nothing the person sees changes.
+                if state.isOpen || !raw.isEmpty {
+                    note("task waiting-for", raw, out.waitingFor ?? "", "trimmed, required in Waiting, 1 to 500 characters")
+                }
             } else {
                 out.waitingFor = nil
             }
@@ -248,7 +252,10 @@ public enum ImportCanonicalizer {
     ) -> String {
         // "…" is not stable under NFKC (it becomes "..."), so a name is cut with the form it is stored in.
         let ellipsis = display("…")
+        // The name the reducer stores is `display` of what it is given, so the result must be a fixed
+        // point: "@@home" is "@home" after one pass and "home" after the next.
         var name = display(raw)
+        while display(name) != name { name = display(name) }
         if name.isEmpty { name = fallback }
         name = cut(name, to: GTDLimits.name, ellipsis: ellipsis)
         guard let unique else { return name }
@@ -298,6 +305,9 @@ public enum ImportCanonicalizer {
     /// `text` as consecutive pieces of at most `size` scalars, cut at grapheme boundaries (a single
     /// cluster longer than a piece is cut by scalars). Joined, they are the text.
     private static func pieces(_ text: String, size: Int) -> [String] {
+        // Text that already fits is one piece (or none): no grapheme walk, which a large store's
+        // ordinary notes and comments would otherwise pay for at every import.
+        if scalars(text) <= size { return text.isEmpty ? [] : [text] }
         var pieces: [String] = []
         var current = String.UnicodeScalarView()
         var used = 0

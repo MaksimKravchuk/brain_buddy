@@ -1,5 +1,5 @@
 import XCTest
-@testable import BrainBuddyMac
+@testable import BrainBuddyMacCore
 
 /// 020-FR-041: until Mac↔backend sync exists, the Mac sidebar shows a non-interactive
 /// "Weekly review · coming later" row right after Lists, in the iOS `DeferredRow`
