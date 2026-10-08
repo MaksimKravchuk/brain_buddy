@@ -19,7 +19,7 @@ import { sameWording } from "../formulation";
 import { runUndo } from "../reviewUndo";
 import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate, Ref } from "./stepParts";
-import { useReviewRun } from "./reviewRun";
+import { useReviewRun, useTrackedWrite } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
 
 export interface ItemAction {
@@ -56,6 +56,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
   const queryClient = useQueryClient();
   const queue = useReviewQueue(config.step, run.session.id);
   const action = useStepAction();
+  const track = useTrackedWrite();
   const drafts = useReviewDrafts(run.session.id, config.step);
   const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
@@ -166,15 +167,17 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
           label: "Undo",
           accessibleLabel: `Undo: ${item.undoName} ${task.title}`,
           onAction: () =>
-            void runUndo(notify, queryClient, response, task.title, (restored) => {
-              focusHeading.current = true;
-              setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
-              setHandled((ids) => {
-                const next = new Set(ids);
-                next.delete(restored.id);
-                return next;
-              });
-            })
+            void track(() =>
+              runUndo(notify, queryClient, response, task.title, (restored) => {
+                focusHeading.current = true;
+                setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
+                setHandled((ids) => {
+                  const next = new Set(ids);
+                  next.delete(restored.id);
+                  return next;
+                });
+              })
+            )
         }
       });
     });

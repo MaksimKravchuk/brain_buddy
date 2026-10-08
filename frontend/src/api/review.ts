@@ -193,6 +193,10 @@ export interface QueueMeta {
   eligible_total?: number;
   shown?: number;
   days?: Array<{ day: string; task_ids: string[] }>;
+  /** `decisions` only: the cards of this run that already have a decision (an Undo takes it back). */
+  decided_task_ids?: string[];
+  /** `decisions` only: the cards of this run that were set aside with "Not now" and not decided since. */
+  set_aside_task_ids?: string[];
 }
 
 export interface ReviewQueue {
@@ -438,7 +442,17 @@ export function parseReviewSession(value: unknown): ReviewSession {
 export function parseQueue(value: unknown): ReviewQueue {
   const queue = record(value, "queue");
   list(queue.items, "queue.items", checkTask);
-  record(queue.meta, "queue.meta");
+  const meta = record(queue.meta, "queue.meta");
+  // The decisions step's handled cards; a server that predates them sends neither.
+  for (const key of ["decided_task_ids", "set_aside_task_ids"] as const) {
+    if (meta[key] !== undefined) {
+      list(meta[key], `queue.meta.${key}`, (entry, at) => {
+        if (typeof entry !== "string") {
+          throw new ReviewWireError(at);
+        }
+      });
+    }
+  }
   return value as ReviewQueue;
 }
 

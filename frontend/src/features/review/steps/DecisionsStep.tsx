@@ -4,13 +4,15 @@
  * the task asking (FR-050); an Undo after each decision brings its card back
  * (FR-048).
  *
- * The queue is the run's stable snapshot, so after a reload or on another
- * device it still lists every card of the run. Which of them are handled comes
- * from the server's own task first: one that left Next, or no longer asks, was
- * decided (or settled elsewhere) and is not shown again. Two cases leave the
- * task unchanged on the server (a card saved anyway, FR-002, and a card set
- * aside, FR-050; the server keeps neither per task on the wire), so this
- * browser remembers them, per formulation, as long as the run's drafts live.
+ * The queue is the run's stable snapshot, so after a reload, in another
+ * browser or on another device it still lists every card of the run. Which of
+ * them are handled comes from the server (http §6): the queue says which cards
+ * have a decision in this run (a card saved anyway included, FR-002; an Undo
+ * deletes the decision) and which were set aside (FR-050), and the server's own
+ * task settles a card that left Next or no longer asks. Nothing is kept in this
+ * browser. What this view did itself is held here at once, until the queue is
+ * read again; a card the person undid here stays, even when its restored
+ * wording no longer asks, until they move on.
  */
 import { useState } from "react";
 
@@ -24,63 +26,44 @@ import type { DecisionOutcome } from "../DecisionDialog";
 import { asksForDecision, classifyFromInstants, formulationInstants } from "../formulation";
 import { pick } from "../plural";
 import { buttonClass, FailureBanner, QueueGate } from "./stepParts";
-import { useReviewDrafts } from "../useReviewDrafts";
 import { useReviewRun } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
 
+const plus = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set(ids).add(id);
 const without = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set([...ids].filter((entry) => entry !== id));
 
-/** A task that is out of Next, or whose wording no longer asks: nothing is left to decide on it. */
-const settledOnServer = (task: TaskResponse, now: Date): boolean =>
-  task.state !== "next" || !asksForDecision(classifyFromInstants(now, formulationInstants(task.formulation)));
+const asks = (task: TaskResponse, now: Date): boolean => task.state === "next" && asksForDecision(classifyFromInstants(now, formulationInstants(task.formulation)));
 
 export function DecisionsStep(): React.JSX.Element {
   const run = useReviewRun();
   const queue = useReviewQueue("decisions", run.session.id);
   const projects = useProjects();
   const action = useStepAction();
-  const marks = useReviewDrafts(run.session.id, "decisions_marks");
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
-  const [stillAsking, setStillAsking] = useState<ReadonlySet<string>>(new Set());
+  const [undone, setUndone] = useState<ReadonlySet<string>>(new Set());
   const [passed, setPassed] = useState<ReadonlySet<string>>(new Set());
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
-
-  // What this browser remembers of the run comes back once, when the queue has arrived.
-  const [marksRead, setMarksRead] = useState(false);
-  if (!marksRead && queue.data !== undefined) {
-    setMarksRead(true);
-    const marked = (kind: "decided" | "passed") =>
-      new Set(queue.data.items.filter((item) => item.formulation && marks.load(item.id, kind) === item.formulation.id).map((item) => item.id));
-    setDecided(marked("decided"));
-    setStillAsking(marked("decided"));
-    setPassed(marked("passed"));
-  }
 
   const onClose = (outcome: DecisionOutcome) => {
     // The inline card has no Close or Escape, so it only ever ends with a decision.
     const { task } = outcome as Extract<DecisionOutcome, { kind: "decided" }>;
-    setDecided((ids) => new Set(ids).add(task.id));
-    // A card saved anyway (FR-002) is decided, yet its task still asks.
-    if (task.state === "next" && asksForDecision(classifyFromInstants(new Date(), formulationInstants(task.formulation)))) {
-      setStillAsking((ids) => new Set(ids).add(task.id));
-      marks.save(task.id, "decided", (task.formulation as { id: string }).id);
-    }
+    setDecided((ids) => plus(ids, task.id));
+    setUndone((ids) => without(ids, task.id));
+    // The task as the decision left it: a card saved anyway (FR-002) still asks, any other no longer does.
+    setLatest((tasks) => ({ ...tasks, [task.id]: task }));
   };
 
   const onUndone = (restored: TaskResponse) => {
     setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
     setDecided((ids) => without(ids, restored.id));
-    setStillAsking((ids) => without(ids, restored.id));
-    marks.clear(restored.id, "decided");
+    setUndone((ids) => plus(ids, restored.id));
   };
 
   const notNow = (task: TaskResponse) => {
     const attempt = newProgressAttempt(run.session.id, { set_aside_task_id: task.id });
     void action.run("not_now", "Not now", async () => {
       await run.progress(attempt);
-      setPassed((ids) => new Set(ids).add(task.id));
-      // A card that is shown asks, so it has a running clock.
-      marks.save(task.id, "passed", (task.formulation as { id: string }).id);
+      setPassed((ids) => plus(ids, task.id));
     });
   };
 
@@ -88,15 +71,23 @@ export function DecisionsStep(): React.JSX.Element {
     <QueueGate queries={[queue, projects]}>
       {() => {
         const now = new Date();
-        const items = (queue.data as ReviewQueue).items.map((item) => latest[item.id] ?? item);
+        const { items: queued, meta } = queue.data as ReviewQueue;
+        const items = queued.map((item) => latest[item.id] ?? item);
         if (items.length === 0) {
           return <p className="m-0 text-sm text-slate-600">Nothing asks for a decision</p>;
         }
-        const isDecided = (item: TaskResponse) => decided.has(item.id) || settledOnServer(item, now);
-        const current = items.find((item) => !isDecided(item) && !passed.has(item.id));
+        const serverDecided = new Set(meta.decided_task_ids ?? []);
+        const serverAside = new Set(meta.set_aside_task_ids ?? []);
+        // A decision recorded in this run, here or anywhere; an Undo here overrides a queue read before it.
+        const hasDecision = (item: TaskResponse) => decided.has(item.id) || (serverDecided.has(item.id) && !undone.has(item.id));
+        // A card that left Next or no longer asks is settled, unless the person just undid it here.
+        const isDecided = (item: TaskResponse) => hasDecision(item) || (!undone.has(item.id) && !asks(item, now));
+        const isPassed = (item: TaskResponse) => passed.has(item.id) || serverAside.has(item.id);
+        const current = items.find((item) => !isDecided(item) && !isPassed(item));
         if (current === undefined) {
           const decidedCount = items.filter(isDecided).length;
           const left = items.length - decidedCount;
+          const stillAsking = items.filter((item) => hasDecision(item) && asks(item, now)).length;
           return left > 0 ? (
             <>
               <p className="m-0 text-base font-medium text-slate-900">{`${decidedCount} of ${items.length} decided`}</p>
@@ -106,8 +97,8 @@ export function DecisionsStep(): React.JSX.Element {
             <>
               <p className="m-0 text-base font-medium text-slate-900">{`All ${items.length} decided`}</p>
               <p className="m-0 text-sm text-slate-600">
-                {stillAsking.size > 0
-                  ? `${stillAsking.size} kept ${pick(stillAsking.size, "its", "their")} wording, so ${pick(stillAsking.size, "it still asks", "they still ask")} for a decision.`
+                {stillAsking > 0
+                  ? `${stillAsking} kept ${pick(stillAsking, "its", "their")} wording, so ${pick(stillAsking, "it still asks", "they still ask")} for a decision.`
                   : "Nothing in Next is waiting for a decision now."}
               </p>
             </>

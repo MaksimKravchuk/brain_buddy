@@ -19,7 +19,7 @@ import { sameWording } from "../formulation";
 import { plural } from "../plural";
 import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate } from "./stepParts";
-import { useReviewRun } from "./reviewRun";
+import { useReviewRun, useTrackedWrite } from "./reviewRun";
 import { useBulkRelease } from "./useBulkRelease";
 import { useStepAction } from "./useStepAction";
 
@@ -62,6 +62,7 @@ export function InboxStep(): React.JSX.Element {
   const queue = useReviewQueue("inbox", run.session.id);
   const action = useStepAction();
   const countAction = useStepAction();
+  const track = useTrackedWrite();
   const drafts = useReviewDrafts(run.session.id, "inbox");
   const bulk = useBulkRelease("inbox_remainder", run.session.id, run.session.steps.inbox === "pending");
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -189,7 +190,7 @@ export function InboxStep(): React.JSX.Element {
           }
           // Undo is offered once the count is in, so it takes off what was added.
           notify(`“${task.title}” ${choice.toast}`, {
-            action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void undoChoice(task, moved) }
+            action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void track(() => undoChoice(task, moved)) }
           });
           // Its own pending and failure states; a Retry of this count reaches it too.
           if (willFinish && plan?.release && remaining.length > 0) {

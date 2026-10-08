@@ -9,6 +9,7 @@ import { useCallback, useState } from "react";
 import { describeReviewError } from "../../../api/review";
 import { settleForAccount, useOnlineStatus } from "../../../api/reviewHooks";
 import type { ReviewContinuation } from "../../../api/reviewHooks";
+import { useTrackedWrite } from "./reviewRun";
 
 export interface StepFailure {
   label: string;
@@ -22,6 +23,8 @@ export function useStepAction() {
   const online = useOnlineStatus();
   const [pending, setPending] = useState<string | null>(null);
   const [failure, setFailure] = useState<StepFailure | null>(null);
+  // Inside a running review the shell holds Next, Skip and Leave while this settles.
+  const track = useTrackedWrite();
 
   const run = useCallback(async function runAction(
     id: string,
@@ -31,7 +34,7 @@ export function useStepAction() {
   ): Promise<boolean> {
     setPending(id);
     setFailure(null);
-    const settled = await settleForAccount(action);
+    const settled = await track(() => settleForAccount(action));
     if (settled === null) {
       return false;
     }
@@ -40,7 +43,7 @@ export function useStepAction() {
       setFailure({ label, message, referenceId: describeReviewError(settled.error).referenceId, retry: () => void runAction(id, label, action, message) });
     }
     return settled.ok;
-  }, []);
+  }, [track]);
 
   return { pending, failure, run, online, disabled: !online || pending !== null };
 }

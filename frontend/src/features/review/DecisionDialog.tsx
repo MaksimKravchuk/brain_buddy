@@ -47,6 +47,7 @@ import {
   type ReviewDraftTarget
 } from "./reviewFormDrafts";
 import { runUndo } from "./reviewUndo";
+import { useTrackedWrite } from "./steps/reviewRun";
 import { recommendedDecision, STALL_REASONS, type StallReason } from "./stallRecommendation";
 import { useLeaveGuard } from "./useLeaveGuard";
 
@@ -181,6 +182,7 @@ export function DecisionDialog({
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const decideMutation = useDecideTask();
+  const track = useTrackedWrite();
   const online = useOnlineStatus();
   const now = useReviewClock();
   const user = useAuthStore((state) => state.user);
@@ -351,7 +353,7 @@ export function DecisionDialog({
     focusAfterViewChange.current = "field";
   };
 
-  const send = async (attempt: Attempt) => {
+  const sendAttempt = async (attempt: Attempt) => {
     // The account that sent the decision. An answer that arrives after the
     // session switched account shows, closes and discards nothing, and a stale
     // answer's refetch is published to this account's caches only.
@@ -370,7 +372,7 @@ export function DecisionDialog({
         action: {
           label: "Undo",
           accessibleLabel: `Undo: ${UNDO_NAMES[attempt.type]} ${title}`,
-          onAction: () => void runUndo(notify, queryClient, response, title, onUndone)
+          onAction: () => void track(() => runUndo(notify, queryClient, response, title, onUndone))
         }
       });
       onClose({ kind: "decided", task: response.task, leftNext: response.task.state !== "next" });
@@ -408,6 +410,9 @@ export function DecisionDialog({
       }
     }
   };
+
+  /** Inside a running review the shell holds its navigation until the decision, or its Undo, has settled (FR-048). */
+  const send = (attempt: Attempt) => track(() => sendAttempt(attempt));
 
   const decide = (type: CardDecision, value = "") => {
     const live = current as TaskResponse;

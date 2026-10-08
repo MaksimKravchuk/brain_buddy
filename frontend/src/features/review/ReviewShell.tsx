@@ -7,7 +7,7 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, RotateCcw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -92,6 +92,21 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const [stepKey, setStepKey] = useState(0);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // Writes of the showing step still in flight (FR-048): the run stays on this step until they settle.
+  const writesRef = useRef(0);
+  const [writing, setWriting] = useState(false);
+  const beginWrite = useCallback(() => {
+    let open = true;
+    writesRef.current += 1;
+    setWriting(true);
+    return () => {
+      if (open) {
+        open = false;
+        writesRef.current -= 1;
+        setWriting(writesRef.current > 0);
+      }
+    };
+  }, []);
 
   const steps = STEP_ORDER.filter((code) => code in session.steps);
   const current = session.current_step ?? "summary";
@@ -145,9 +160,23 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
     action();
   };
 
-  const guard = useLeaveGuard({ dirty: unsaved, onBack: () => request(() => setConfirm({ kind: "leave", rearm: true }), true) });
+  // Browser Back while a write is saving goes nowhere: the entry is put back and the page stays (FR-048);
+  // a tab close or reload gets the browser's warning then too, as it does for unsaved text.
+  const guard = useLeaveGuard({
+    dirty: unsaved || writing,
+    onBack: () => {
+      if (writesRef.current > 0) {
+        guard.rearm();
+        return;
+      }
+      request(() => setConfirm({ kind: "leave", rearm: true }), true);
+    }
+  });
 
   const advance = (status: "finished" | "skipped") => {
+    if (writesRef.current > 0) {
+      return;
+    }
     const change: SessionProgress = {
       step: { code: current, status },
       current_step: steps[position],
@@ -169,7 +198,10 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const skip = () => request(() => advance("skipped"));
   // A form's own Back closes only that form, so the rest of the step keeps its state.
   const confirmDiscard = (close: () => void) => request(close, false, true);
-  const run: ReviewRun = { session, state, progress, setUnsaved, confirmDiscard, skipStep: skip, finish };
+  const run: ReviewRun = { session, state, progress, beginWrite, setUnsaved, confirmDiscard, skipStep: skip, finish };
+  // Next and Skip also wait for the connection; Leave stays available offline, where a write fails and settles.
+  const held = bar.disabled || writing;
+  const saving = bar.pending !== null || writing;
 
   const keepGoing = (rearm: boolean) => {
     if (rearm) {
@@ -179,6 +211,9 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   };
 
   const leave = () => {
+    if (writesRef.current > 0) {
+      return;
+    }
     forgetRelease(captureReviewScope().accountId as string);
     guard.release();
     navigate("/tasks/next", { replace: true });
@@ -191,11 +226,11 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
       actions={
         <>
           {ended || current === "summary" ? null : (
-            <button type="button" disabled={bar.disabled} className={`${buttonClass} border-transparent bg-transparent text-sky-700`} onClick={skip}>
+            <button type="button" disabled={held} className={`${buttonClass} border-transparent bg-transparent text-sky-700`} onClick={skip}>
               Skip step
             </button>
           )}
-          <button type="button" className={buttonClass} onClick={() => request(() => setConfirm({ kind: "leave", rearm: false }))}>
+          <button type="button" disabled={saving} className={buttonClass} onClick={() => request(() => setConfirm({ kind: "leave", rearm: false }))}>
             Leave
           </button>
         </>
@@ -263,7 +298,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
                   <div className="mt-2 flex justify-end">
                     <button
                       type="button"
-                      disabled={bar.disabled}
+                      disabled={held}
                       className="min-h-11 rounded-lg bg-sky-700 px-5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
                       onClick={() => request(() => advance("finished"))}
                     >

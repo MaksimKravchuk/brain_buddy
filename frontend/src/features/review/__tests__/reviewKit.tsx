@@ -145,9 +145,9 @@ export const lastToast = (): [string, ShellToastOptions | undefined] => notify.m
 
 export function renderInRun(
   ui: React.ReactNode,
-  { session = sessionFixture(), state = stateFixture(), progress = vi.fn(async () => undefined), setUnsaved = vi.fn(), skipStep = vi.fn(), confirmDiscard = vi.fn((close: () => void) => close()), finish = vi.fn(async () => undefined), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) }: Partial<ReviewRun> & { client?: QueryClient } = {}
+  { session = sessionFixture(), state = stateFixture(), progress = vi.fn(async () => undefined), beginWrite = vi.fn(() => () => undefined), setUnsaved = vi.fn(), skipStep = vi.fn(), confirmDiscard = vi.fn((close: () => void) => close()), finish = vi.fn(async () => undefined), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) }: Partial<ReviewRun> & { client?: QueryClient } = {}
 ) {
-  const run: ReviewRun = { session, state, progress, setUnsaved, confirmDiscard, skipStep, finish };
+  const run: ReviewRun = { session, state, progress, beginWrite, setUnsaved, confirmDiscard, skipStep, finish };
   const view = render(
     <QueryClientProvider client={client}>
       <ShellToastContext.Provider value={notify}>
