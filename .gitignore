@@ -73,7 +73,8 @@ data/
 .specify/feature.json
 
 # Codex
-.codex/
+.codex/*
+!.codex/config.toml
 # CodeSpeak
 .codespeak/ignored/
 

@@ -150,7 +150,9 @@ onboarding first), the notification skip (preceding 6 days, FR-036), "Last revie
 days ago" (FR-038) and the SC-001 weekly read-out.
 
 **Wire subset**: `SessionResponse` carries every field above except
-`set_aside_task_ids` (sent as `set_aside_count`), `decision_queue` (served through the
+`set_aside_task_ids` (sent as `set_aside_count`; the ids come back in the `decisions`
+queue's `meta`, with the tasks the run has decided, which are read from E4 by
+`session_id`, no new column), `decision_queue` (served through the
 `decisions` queue), the per-step `finished_empty` flags and `applied_progress`; the
 exact list is in contracts/http.md §6.
 

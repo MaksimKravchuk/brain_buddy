@@ -267,6 +267,38 @@ inbox_processed, kept, moved_to_next`.
 `formulation_id` is required for the Next-only types and must equal the task's
 current formulation, otherwise the decision is stale.
 
+**A repeated cosmetic save is not a second decision.** A "Save anyway" keeps the task
+asking (FR-002), so another browser, a reload or a retry under a new Idempotency-Key
+can send it again for the same task and formulation in the same run. When the request
+is a `reformulate` that is not substantive, names a `session_id` the owner holds, and
+that run already holds a `reformulate` decision for this task with `substantive: false`
+and the same `formulation_id`, nothing is written and nothing is counted: the response
+is a 200 with the **original** decision, the task as it now is, and the run's current
+counts (the same as the matching-record replay above). It runs under the owner lock
+after the revision, formulation and list checks, so a stale request is still 409. An
+Undo of the first decision deletes it, and a later cosmetic save is a decision again.
+Another run, a request without a run, and a substantive rewording are not repeats.
+(The new text of the repeat is not applied; clients that read the answer's `task` show
+the wording the first save left.)
+
+**One card, one decision per run for the types that leave the revision alone.**
+`keep_waiting`, `keep_someday` and `follow_up` do not bump the task's revision, so a card
+open on two devices passes the `expected_revision` check twice and would record, count
+and (for `follow_up`) create a second Next task. The same idempotent no-op therefore
+covers them: when the request names a `session_id` the owner holds, and that run already
+holds a decision of one of these three types for this task whose
+`task_revision_after` still equals the task's current revision (the task is as the
+decision left it), nothing is written, nothing is counted and no task is created. The
+response is a 200 with the **original** decision (so a `follow_up` repeat returns the
+first one's `created_task`, and `keep_waiting` after `follow_up` answers the follow-up),
+the task as it is now, the original receipt and the run's current counts. There is no
+new error code: clients need no change, and a client that applies the answer shows the
+first outcome. The check runs under the owner lock after the revision, list and
+formulation checks. It does not apply without a run, in another run, or to a task that
+changed since the decision (a later edit makes a new keep a new decision, which
+refreshes the receipt). Undo deletes the decision, so the card is new again. Types that
+change the task (everything else in the table) are guarded by `expected_revision` alone.
+
 `session_id`: a decision naming a session that exists for the owner is linked to it and
 counted, whether the session is open or already finished (an offline review's decisions
 can arrive after another device finished it). A decision naming a session id the server
@@ -504,7 +536,7 @@ M-09 / the web dialog without "Continue" sends nothing (the parks stay unseen).
 | GET | `/review/sessions/{id}` | — | session |
 | PATCH | `/review/sessions/{id}` | `{progress_id, current_step?, step?: {code, status}, active_seconds?: {code, seconds}, set_aside_task_id?, inbox_processed_delta?, snapshot_decision_queue?: true}` | merged session (rules below); no version conflict. `progress_id` (`progress_<uuid>`, minted by the client once per progress change, iOS and web alike, and reused unchanged on every retry of that change) is required (422 without it). A `step` or `active_seconds` `code` that is not one of the session's steps (a full-only step on a quick review) → 422, the request-validation envelope with `loc` `["body", "step" \| "active_seconds", "code"]`, nothing merged, whatever the session's status |
 | POST | `/review/sessions/{id}/finish` | `{clear_start?: yes \| not_really}` | the person tapped Done on the summary: status `completed` or `completed_empty` per data-model E3. There is no "left" outcome: leaving only pauses a review (FR-029); it ends without Done only by replacement or the 7-day idle close. Idempotent: finishing an already finished session returns it unchanged (200) |
-| GET | `/review/queues/{step}` | query `session_id` (a session reference, "Client-supplied ids"; any other shape → 422) | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; within a day `task_ids` follow the Next list's manual order (`order_key`, then `id`); `items` holds those tasks in the same order. A device in another zone computes its own window (ios-commands §6) and may differ by one day at either edge, which is accepted; other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
+| GET | `/review/queues/{step}` | query `session_id` (a session reference, "Client-supplied ids"; any other shape → 422) | `{items: TaskResponse[], meta}`; `meta` per step: `wins` `{count}`; `rest_of_next` `{next_count, weekly_average_4w, weeks_of_history, implied_weeks}` (`weekly_average_4w` and `implied_weeks` are `null` when `weeks_of_history < 4` or there were no completions in them, FR-031); `someday` `{eligible_total, shown ≤ 7}`; `dates` `{days: [{day: YYYY-MM-DD, task_ids: [id]}]}`: one entry per local day, in the stored zone, from today to today + 13 that has at least one open task due, ascending; within a day `task_ids` follow the Next list's manual order (`order_key`, then `id`); `items` holds those tasks in the same order. A device in another zone computes its own window (ios-commands §6) and may differ by one day at either edge, which is accepted; `decisions` `{decided_task_ids: [id], set_aside_task_ids: [id]}` ("Queues" below); other steps' `meta` is `{}`. Unknown or foreign `session_id` → the same 404 ("Ownership") |
 
 **Session progress is merged, not version-checked**, so two devices moving the same
 review never conflict: `step` statuses merge monotonically (`finished` > `skipped` >
@@ -548,7 +580,18 @@ Its size is one entry per progress change of one review.
 `asks_for_decision`, formulation-clock §5 order), taken when the step first opens.
 It is taken once: a snapshot taken with nothing asking stays taken and empty, and a
 later `snapshot_decision_queue` changes nothing; until it is taken the queue is the
-live aggregate. `waiting` = Waiting tasks whose `waiting_since` is more than 7 days ago and that no
+live aggregate. The `decisions` queue also says which of its cards the run has
+handled already, so a run resumed in another browser or on another device does not
+show them again (additive: older readers ignore the two lists, as the iOS
+`QueueMetaDTO` does). `meta.decided_task_ids`: tasks of the queue for which a
+decision linked to this run exists (any type; a "Save anyway" included, FR-002; an
+Undo deletes the decision, so the card is not handled any more).
+`meta.set_aside_task_ids`: tasks of the queue in the run's E3 `set_aside_task_ids`
+that have no decision in the run since. Both follow the queue's order, name only
+tasks the queue lists, and are empty when no `session_id` is given. They are derived
+on read from the stored decisions and the run's set-aside list, so they need no
+new column or table. Task state is not in them: a card whose task left Next or no
+longer asks is settled by the task itself, which the queue returns. `waiting` = Waiting tasks whose `waiting_since` is more than 7 days ago and that no
 current receipt hides, oldest `waiting_since` first. `someday` = Someday tasks that no
 current receipt hides (a person's own release writes a `source: release` Someday
 receipt, data-model E5, so tasks released by the person in the last 30 days are left
@@ -562,8 +605,9 @@ ended_at, current_step, steps` (map step code → `pending | finished | skipped`
 active_seconds_by_step, counts` (the ten counters)`, set_aside_count` (the length of
 E3 `set_aside_task_ids`)`, qualifying_activity, clear_start, revision`. `status` ∈
 `open | completed | completed_empty | partial | abandoned`. Server-internal and not
-on the wire: `set_aside_task_ids` (ids only; the count is enough for the client, which
-keeps its own set-aside list for the session it runs), `decision_queue` (its items are
+on the wire: `set_aside_task_ids` (ids only; the session carries the count, and the
+ids come back in the `decisions` queue's `meta`, which is how a client on another
+device learns which cards were set aside), `decision_queue` (its items are
 returned through the `decisions` queue), the per-step `finished_empty` flags (they
 only feed `qualifying_activity`), and `applied_progress` (replay protection only).
 

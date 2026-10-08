@@ -7,7 +7,7 @@ import { ApiError, apiClient } from "../../../api/client";
 import { reviewApi, type DecisionResponse, type ReviewQueue } from "../../../api/review";
 import type { TaskResponse } from "../../../api/taskTypes";
 import { DecisionsStep } from "../steps/DecisionsStep";
-import { askingTask, iso, lastToast, notify, renderInRun, signIn } from "./reviewKit";
+import { askingTask, DAY, iso, lastToast, notify, renderInRun, signIn } from "./reviewKit";
 
 vi.mock("../../../api/review", async () => {
   const actual = await vi.importActual<typeof import("../../../api/review")>("../../../api/review");
@@ -25,7 +25,8 @@ const undoDecision = vi.mocked(reviewApi.undoDecision);
 const bathroom = askingTask("task_bath", "Renovate the bathroom", { project_id: "project-home" });
 const cv = askingTask("task_cv", "Update the CV");
 const garage = askingTask("task_garage", "Clean out the garage");
-const queue = (items: TaskResponse[]): ReviewQueue => ({ items, meta: {} });
+const bathroomClock = bathroom.formulation as NonNullable<TaskResponse["formulation"]>;
+const queue = (items: TaskResponse[], meta: ReviewQueue["meta"] = {}): ReviewQueue => ({ items, meta });
 
 function decided(task: TaskResponse, type: string, after: Partial<TaskResponse>): DecisionResponse {
   return {
@@ -266,4 +267,117 @@ describe("020-FR-034 Decisions step: the card inline", () => {
     await user.click(screen.getByRole("button", { name: "Not now" }));
     expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
   });
+
+  it("020-FR-048 resuming after a reload skips the cards the server already settled and shows the first one that still asks", async () => {
+    const user = userEvent.setup();
+    const moved = { ...cv, state: "someday" as const, formulation: null, revision: 9 };
+    const cancelled = { ...garage, state: "cancelled" as const, formulation: null, revision: 9 };
+    const reformulated = askingTask("task_new", "Fix the gutter", { formulation: { ...bathroomClock, id: "form_fresh", started_at: iso(-1000), ageing_at: iso(7 * 86_400_000), ask_at: iso(13 * 86_400_000), park_due_at: iso(20 * 86_400_000) } });
+    const extended = askingTask("task_ext", "Order the tiles", { formulation: { ...bathroomClock, extended_at: iso(-1000), extension_reason: "waiting for a quote", paused_until: iso(6 * 86_400_000) } });
+    getQueue.mockResolvedValueOnce(queue([moved, cancelled, reformulated, extended, bathroom]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByText("5 of 5 · earliest-asking first")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Update the CV" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+
+    expect(await screen.findByText("4 of 5 decided")).toBeInTheDocument();
+    expect(screen.getByText(/^1 still ask for a decision\./)).toBeInTheDocument();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-048 020-FR-002 a fresh browser does not show a card the server says was saved anyway, and does not send it twice", async () => {
+    const user = userEvent.setup();
+    expect(window.localStorage.length).toBe(0);
+    const savedAnyway = { ...bathroom, title: "Renovate the Bathroom", revision: 8 };
+    getQueue.mockResolvedValueOnce(queue([savedAnyway, cv], { decided_task_ids: ["task_bath"], set_aside_task_ids: [] }));
+    decide.mockResolvedValueOnce(decided(cv, "someday", { state: "someday", formulation: null }));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Renovate the Bathroom" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 of 2 · earliest-asking first")).toBeInTheDocument();
+    await user.click(decisionButton(/^Release to Someday/));
+
+    expect(await screen.findByText("All 2 decided")).toBeInTheDocument();
+    expect(screen.getByText("1 kept its wording, so it still asks for a decision.")).toBeInTheDocument();
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledWith("task_cv", expect.anything(), expect.any(String));
+  });
+
+  it("020-FR-050 a fresh browser does not show a card the server says was set aside with Not now", async () => {
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv], { decided_task_ids: [], set_aside_task_ids: ["task_bath"] }));
+    const { run } = renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+    expect(run.progress).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("020-FR-050 when the server says every card was set aside the step says how many still ask", async () => {
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv], { decided_task_ids: [], set_aside_task_ids: ["task_bath", "task_cv"] }));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByText("0 of 2 decided")).toBeInTheDocument();
+    expect(screen.getByText(/^2 still ask for a decision\./)).toBeInTheDocument();
+  });
+
+  it("020-FR-048 a card the server lists as decided is skipped and the one it does not list asks", async () => {
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv], { decided_task_ids: ["task_cv"], set_aside_task_ids: [] }));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 · earliest-asking first")).toBeInTheDocument();
+  });
+
+  it("020-FR-048 an older server that sends no handled lists leaves the cards to their tasks", async () => {
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+  });
+
+  it("020-FR-048 Undo of a card saved anyway brings it back, and nothing is kept in this browser", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    decide.mockResolvedValueOnce(decided(bathroom, "reformulate", { title: "Renovate the Bathroom" }));
+    undoDecision.mockResolvedValueOnce({ task: { ...bathroom, revision: 9 }, undone_decision_id: "decision_task_bath", deleted_task_id: null, session_counts: null });
+    renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(decisionButton(/^Reformulate/));
+    const field = screen.getByRole("textbox", { name: "New wording" });
+    await user.clear(field);
+    await user.type(field, "Renovate the Bathroom");
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+    await screen.findByRole("region", { name: "Update the CV" });
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 · earliest-asking first")).toBeInTheDocument();
+    expect(Object.keys(window.localStorage).filter((key) => key.includes("decisions_marks"))).toEqual([]);
+  });
+
+  it("020-FR-048 a card undone here whose restored clock no longer asks stays on screen with the notice, and Not now passes it", async () => {
+    const user = userEvent.setup();
+    const quiet = { ...bathroom, revision: 9, formulation: { ...bathroomClock, started_at: iso(-1000), ageing_at: iso(7 * DAY), ask_at: iso(13 * DAY), park_due_at: iso(20 * DAY) } };
+    getQueue.mockResolvedValueOnce(queue([bathroom]));
+    decide.mockResolvedValueOnce(decided(bathroom, "someday", { state: "someday", formulation: null }));
+    undoDecision.mockResolvedValueOnce({ task: quiet, undone_decision_id: "decision_task_bath", deleted_task_id: null, session_counts: null });
+    renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(decisionButton(/^Release to Someday/));
+    await screen.findByText("All 1 decided");
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    const back = await screen.findByRole("region", { name: "Renovate the bathroom" });
+    expect(within(back).getByRole("heading", { name: "Renovate the bathroom" })).toHaveFocus();
+    expect(within(back).getByText(/^This task no longer asks for a decision\./)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+    expect(await screen.findByText("0 of 1 decided")).toBeInTheDocument();
+  });
 });
+

@@ -16,7 +16,7 @@ vi.mock("../../../api/review", async () => {
 });
 vi.mock("../../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../../api/client")>("../../../api/client");
-  return { ...actual, apiClient: { ...actual.apiClient, transitionTask: vi.fn(), updateTask: vi.fn() } };
+  return { ...actual, apiClient: { ...actual.apiClient, transitionTask: vi.fn(), updateTask: vi.fn(), getTask: vi.fn() } };
 });
 
 const getQueue = vi.mocked(reviewApi.getQueue);
@@ -24,6 +24,7 @@ const bulkRelease = vi.mocked(reviewApi.bulkRelease);
 const undoBulkRelease = vi.mocked(reviewApi.undoBulkRelease);
 const transitionTask = vi.mocked(apiClient.transitionTask);
 const updateTask = vi.mocked(apiClient.updateTask);
+const getTask = vi.mocked(apiClient.getTask);
 
 const inbox = (id: string, title: string, revision = 3): TaskResponse => taskFixture({ id, title, state: "inbox", revision });
 const paper = inbox("inbox_1", "Buy printer paper");
@@ -53,6 +54,7 @@ afterEach(() => {
   undoBulkRelease.mockReset();
   transitionTask.mockReset();
   updateTask.mockReset();
+  getTask.mockReset();
   notify.mockReset();
   window.localStorage.clear();
 });
@@ -248,7 +250,7 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     expect(transitionTask.mock.calls[1][2]).toBe(transitionTask.mock.calls[0][2]);
   });
 
-  it("020-FR-045 a progress count that is not saved fails the choice the same way and retries without moving the item twice", async () => {
+  it("020-FR-048 a count that is not saved after the move shows the item as processed with the Ref, and Retry resends only the count under the same id", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper, dentist]));
     const progress = vi.fn(async () => undefined).mockRejectedValueOnce(new ApiError("down", 503, null, "corr_count"));
@@ -256,20 +258,83 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     await screen.findByRole("heading", { name: "Buy printer paper" });
 
     await user.click(choice("Next actions"));
+
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toHaveFocus();
+    expect(screen.getByText("Item 2 of 2")).toBeInTheDocument();
     const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("“Buy printer paper” moved to Next actions, but the processed count didn't go up.");
     expect(alert).toHaveTextContent("Ref corr_count");
+    expect(notify).not.toHaveBeenCalled();
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(transitionTask).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledTimes(2);
+    const bodies = progress.mock.calls.map((call) => (call as unknown as [{ body: { inbox_processed_delta: number; progress_id: string } }])[0].body);
+    expect(bodies[1]).toEqual({ inbox_processed_delta: 1, progress_id: bodies[0].progress_id });
+    expect(lastToast()[0]).toBe("“Buy printer paper” moved to Next actions");
+    expect(lastToast()[1]?.action?.accessibleLabel).toBe("Undo: Moved to Next actions Buy printer paper");
+    expect(screen.getByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+  });
+
+  it("020-FR-048 020-FR-033 the next item waits while the last one's count is saving or failed, so one Retry is never replaced by another", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    let fail: (error: unknown) => void = () => undefined;
+    const progress = vi.fn(async () => undefined).mockReturnValueOnce(new Promise<undefined>((_, reject) => { fail = reject; }));
+    renderInRun(<InboxStep />, { progress });
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    expect(choice("Someday / maybe")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit title" })).toBeDisabled();
+
+    await act(async () => fail(new ApiError("down", 503, null, "corr_count_hold")));
+    const alert = await screen.findByRole("alert");
+    expect(choice("Someday / maybe")).toBeDisabled();
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(choice("Someday / maybe")).toBeEnabled());
+    expect(progress).toHaveBeenCalledTimes(2);
+  });
+
+  it("020-FR-048 a count that is not saved for the last item still ends the step on its processed total, with the Retry", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    const progress = vi.fn(async () => undefined).mockRejectedValueOnce(new ApiError("down", 503, null, "corr_count_last"));
+    renderInRun(<InboxStep />, { progress });
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.click(choice("Next actions"));
+
+    expect(await screen.findByText("1 item processed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_count_last");
+  });
+
+  it("020-FR-045 a move that fails keeps the item and sends no count; its Retry moves it once under the same key and then counts it", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    transitionTask.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_move"));
+    const { run } = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.click(choice("Next actions"));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't save “Next actions”. Nothing was changed.");
+    expect(run.progress).not.toHaveBeenCalled();
     await user.click(within(alert).getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
-    expect(progress).toHaveBeenCalledTimes(2);
-    expect((progress.mock.calls[1] as unknown as [{ body: { progress_id: string } }])[0].body.progress_id).toBe((progress.mock.calls[0] as unknown as [{ body: { progress_id: string } }])[0].body.progress_id);
     expect(transitionTask.mock.calls[1][2]).toBe(transitionTask.mock.calls[0][2]);
+    expect(run.progress).toHaveBeenCalledTimes(1);
   });
 
   it("020-FR-011 an item changed elsewhere is named, stays in the Inbox, is not counted and the review moves on", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper, dentist]));
     transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_stale_inbox"));
+    getTask.mockResolvedValueOnce({ ...paper, state: "someday", revision: 5 });
     const { run } = renderInRun(<InboxStep />);
     await screen.findByRole("heading", { name: "Buy printer paper" });
 
@@ -285,6 +350,7 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper]));
     transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_stale_last"));
+    getTask.mockResolvedValueOnce({ ...paper, state: "someday", revision: 5 });
     renderInRun(<InboxStep />);
     await screen.findByRole("heading", { name: "Buy printer paper" });
 
@@ -292,6 +358,63 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
 
     expect(await screen.findByText("0 items processed")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Buy printer paper” was changed on another device, so it stayed in Inbox.");
+  });
+
+  it("020-FR-052 an item whose revision moved but whose wording did not keeps its Waiting-for text and retries on the new revision", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_notes"));
+    getTask.mockResolvedValueOnce({ ...paper, details: "from the shop", revision: 6 });
+    const { run } = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Waiting for…"));
+    await user.type(screen.getByRole("textbox", { name: "Who or what are you waiting for?" }), "the shop");
+
+    await user.click(screen.getByRole("button", { name: "Move to Waiting for" }));
+
+    expect(await screen.findByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Buy printer paper” was changed on another device, so nothing was moved. It's still in Inbox; choose again.");
+    expect(screen.getByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Who or what are you waiting for?" })).toHaveValue("the shop");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.waiting"))).toBe(true);
+    expect(run.setUnsaved).not.toHaveBeenLastCalledWith(false);
+    await user.click(screen.getByRole("button", { name: "Move to Waiting for" }));
+
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    expect(transitionTask).toHaveBeenLastCalledWith("inbox_1", { action: "move", to_state: "waiting", waiting_for: "the shop", expected_revision: 6 }, expect.any(String));
+    expect(transitionTask.mock.calls[1][2]).not.toBe(transitionTask.mock.calls[0][2]);
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.waiting"))).toBe(false);
+  });
+
+  it("020-FR-011 an item reworded elsewhere is left there and its typed Waiting-for text is dropped with it", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_reworded"));
+    getTask.mockResolvedValueOnce({ ...paper, title: "Buy A3 plotter paper", revision: 6 });
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Waiting for…"));
+    await user.type(screen.getByRole("textbox", { name: "Who or what are you waiting for?" }), "the shop");
+
+    await user.click(screen.getByRole("button", { name: "Move to Waiting for" }));
+
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Buy printer paper” was changed on another device, so it stayed in Inbox.");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.waiting"))).toBe(false);
+  });
+
+  it("020-FR-045 an item that cannot be read again after a stale answer stays current with the Ref and a Retry", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_unreadable"));
+    getTask.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_read"));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.click(choice("Next actions"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ref corr_unreadable");
+    expect(screen.getByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
   });
 
   it("020-FR-042 a choice answered after another account signed in sends no count and shows no Undo", async () => {
@@ -307,6 +430,41 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     await act(async () => resolve({ ...paper, state: "next", revision: 4 }));
 
     expect(run.progress).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    act(() => signIn("user-1"));
+  });
+
+  it("020-FR-042 a stale answer read again after another account signed in changes nothing", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_stale_switch"));
+    let resolve: (task: TaskResponse) => void = () => undefined;
+    getTask.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Next actions"));
+
+    act(() => signIn("user-2"));
+    await act(async () => resolve({ ...paper, state: "someday", revision: 5 }));
+
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
+    expect(notify).not.toHaveBeenCalled();
+    act(() => signIn("user-1"));
+  });
+
+  it("020-FR-042 a count answered after another account signed in shows no Undo", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    let resolve: () => void = () => undefined;
+    const progress = vi.fn(() => new Promise<undefined>((done) => { resolve = () => done(undefined); }));
+    renderInRun(<InboxStep />, { progress });
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Next actions"));
+    await waitFor(() => expect(progress).toHaveBeenCalledTimes(1));
+
+    act(() => signIn("user-2"));
+    await act(async () => resolve());
+
     expect(notify).not.toHaveBeenCalled();
     act(() => signIn("user-1"));
   });

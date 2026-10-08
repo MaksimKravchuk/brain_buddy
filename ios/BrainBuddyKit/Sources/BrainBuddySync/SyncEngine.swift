@@ -81,6 +81,14 @@ public actor SyncEngine: SyncService {
     /// account would carry the session being created), and stale sessions
     /// are not discarded.
     var signInsInProgress = 0
+    /// Password sign-ins take turns (spec 021, X-03): one logs in and links, or cleans up after a
+    /// Cancel or a refusal, before the next logs in. The login writes the shared token store and
+    /// the cleanup puts back the token read before it, so a cancelled login's late reply must never
+    /// overlap a newer one's: it would replace, then remove, the newer session.
+    var signInTurnTaken = false
+    var signInTurnWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Sign-ins waiting for their turn.
+    var signInsWaiting: Int { signInTurnWaiters.count }
     var nativeSignIn: NativeSignInContext?
     let nativeSignInGate = NativeSignInGate()
     var nativeCommitInProgress = false
@@ -154,9 +162,15 @@ public actor SyncEngine: SyncService {
     public func signInWithResult(
         serverURL: URL, email: String, password: String
     ) async throws(SignInFailure) -> SignInResult {
+        try await signInWithResult(serverURL: serverURL, email: email, password: password, cancellation: SignInCancellation())
+    }
+
+    public func signInWithResult(
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
+    ) async throws(SignInFailure) -> SignInResult {
         let result: SignInResult
         do throws(SignInFailure) {
-            result = try await linkAccount(serverURL: serverURL, email: email, password: password)
+            result = try await linkAccount(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
         } catch {
             // Nothing was linked: the account that was (if any) carries on.
             if account != nil {
@@ -173,8 +187,10 @@ public actor SyncEngine: SyncService {
     /// Logs in and links the account in the document. Nothing of the linked
     /// account runs meanwhile, and a refused link leaves it as it was.
     private func linkAccount(
-        serverURL: URL, email: String, password: String
+        serverURL: URL, email: String, password: String, cancellation: SignInCancellation
     ) async throws(SignInFailure) -> SignInResult {
+        await takeSignInTurn()
+        defer { passSignInTurn() }
         await waitForNativeCommit()
         invalidateNativeSignIn()
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
@@ -193,6 +209,17 @@ public actor SyncEngine: SyncService {
             me = try await client.login(email: email, password: password)
         } catch {
             throw Self.signInFailure(error)
+        }
+        // The one point where Cancel and the link are decided (the Mac's X-03 Cancel): with no
+        // suspension between here and the link's write, a Cancel that came first ends the session
+        // the server just opened and links nothing (spec 021, FR-001, FR-005); otherwise the link
+        // wins, and a Cancel from now on is refused (`SignInCancellation.cancel()` returns false):
+        // the sign-in and its first sync finish as a normal one, never reported as cancelled. The
+        // logout runs in a task of its own, which a task cancellation does not reach (a request of
+        // the cancelled task would never leave); offline it waits as a pending logout.
+        if Task.isCancelled || !cancellation.commit() {
+            await Task { await self.abandonSession(on: url, restoring: previousToken) }.value
+            throw SignInFailure(message: Self.signInCancelledMessage)
         }
         let linked = LinkedAccount(
             id: me.id, email: me.email, displayName: me.displayName, serverURL: url, linkedAt: now()
@@ -235,6 +262,24 @@ public actor SyncEngine: SyncService {
         }
         if !networkAvailable { await setStatus(.offline(lastSyncedAt: lastSyncedAt)) }
         return SignInResult(account: linked, deletionCancelled: me.deletionCancelled)
+    }
+
+    /// Waits until no other password sign-in logs in, links or cleans up (`signInTurnTaken`).
+    private func takeSignInTurn() async {
+        guard signInTurnTaken else {
+            signInTurnTaken = true
+            return
+        }
+        // Handed over by `passSignInTurn()`, still taken.
+        await withCheckedContinuation { signInTurnWaiters.append($0) }
+    }
+
+    private func passSignInTurn() {
+        if signInTurnWaiters.isEmpty {
+            signInTurnTaken = false
+        } else {
+            signInTurnWaiters.removeFirst().resume()
+        }
     }
 
     public func request(_ trigger: SyncTrigger) async {
@@ -540,12 +585,21 @@ public actor SyncEngine: SyncService {
             SignInFailure(message: "Check your email and password.", referenceID: error.referenceID)
         case .rateLimited:
             SignInFailure(message: "Too many attempts. Try again in a few minutes.", referenceID: error.referenceID)
-        case .network, .cancelled:
-            SignInFailure(message: "Can't reach the server. Check your connection.")
+        case .network:
+            // The id the request carried: online, a request with no answer is "Brain Buddy didn't
+            // answer" on the Mac, quoted with that id (spec 021, FR-015); offline the app shows none.
+            SignInFailure(message: networkFailureMessage, referenceID: error.referenceID)
+        case .cancelled:
+            SignInFailure(message: networkFailureMessage)
         default:
             SignInFailure(message: error.message, referenceID: error.referenceID)
         }
     }
+
+    /// A sign-in whose request got no answer (or never left).
+    public static let networkFailureMessage = "Can't reach the server. Check your connection."
+    /// A sign-in the person cancelled: its late reply was undone.
+    public static let signInCancelledMessage = "The sign-in was cancelled."
 }
 
 /// How one cycle ended.

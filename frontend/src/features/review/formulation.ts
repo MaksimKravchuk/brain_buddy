@@ -8,7 +8,7 @@
  * save. Both run against the shared vector file; nothing here reads the DOM.
  */
 
-import type { TaskFormulationResponse } from "../../api/taskTypes";
+import type { TaskFormulationResponse, TaskResponse } from "../../api/taskTypes";
 
 export type FormulationClass = "none" | "fresh" | "ageing" | "asks" | "moves_tomorrow" | "park_due" | "paused";
 
@@ -153,6 +153,22 @@ export function formulationKey(title: string): string {
 /** A title change starts a new formulation iff the keys differ (FR-002). */
 export function isSubstantiveChange(oldTitle: string, newTitle: string): boolean {
   return formulationKey(oldTitle) !== formulationKey(newTitle);
+}
+
+/**
+ * Whether a task read again after a stale answer still has the wording (and
+ * list) that text typed for it was written against. A revision that only moved
+ * (notes, tags, a cosmetic title change) keeps it, and so keeps typed text
+ * (FR-052); a new formulation, another list or a title with another key does not.
+ */
+export function sameWording(before: TaskResponse, after: TaskResponse): boolean {
+  if (before.state !== after.state) {
+    return false;
+  }
+  if (before.formulation && after.formulation) {
+    return before.formulation.id === after.formulation.id;
+  }
+  return !isSubstantiveChange(before.title, after.title);
 }
 
 // ------------------------------------------------------------ §5 classify

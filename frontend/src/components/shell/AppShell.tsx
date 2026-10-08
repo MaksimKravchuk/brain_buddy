@@ -112,7 +112,9 @@ export function ShellToastProvider({ children }: { children: ReactNode }): React
   // timer and an older one's Undo can never fire for the newer message.
   const notify = useCallback<ShellNotify>((message, options) => {
     toastIdRef.current += 1;
-    setToast({ id: toastIdRef.current, message, action: options?.action });
+    const id = toastIdRef.current;
+    setToast({ id, message, action: options?.action });
+    return () => setToast((showing) => (showing?.id === id ? null : showing));
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
   return (

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 // Update these two constants when the policy text changes or the contact moves.
 const CONTACT_EMAIL = "maksim.v.kravchuk@gmail.com";
-const LAST_UPDATED = "October 6, 2026";
+const LAST_UPDATED = "October 8, 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
@@ -135,6 +135,14 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
             Account data and content are kept until you delete your account. Deletion has a
             14-day grace period during which signing back in cancels it; after that, everything
             is permanently erased.
+          </p>
+          <p>
+            The Brain Buddy apps for Mac and iPhone keep a working copy of your tasks on the
+            device until you sign out there, including after a session ends or your account is
+            deleted. On a Mac, deleting the app does not remove that copy. The copy of your tasks
+            from before the Mac update is kept for at least 30 days and until you sign out on that
+            Mac. We cannot erase copies on your devices or in their backups, such as Time Machine;
+            signing out removes the app's copy from that device.
           </p>
           <p>
             When an operator looks up an account or signs it out, we record that it happened
@@ -317,6 +325,8 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           <p>
             <strong>Erasure:</strong> delete your account in Account settings. Voice-specific
             controls (withdraw consent, delete raw audio) are available on each recording.
+            Erasure covers everything our servers hold. Copies on your devices are removed by
+            signing out on each device.
           </p>
           <p>
             <strong>Restriction, objection, complaint:</strong> email{" "}

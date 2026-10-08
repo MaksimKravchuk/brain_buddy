@@ -140,14 +140,14 @@ export function signIn(id = "user-1", flags: Record<string, boolean> = { weekly_
   });
 }
 
-export const notify = vi.fn<ShellNotify>();
+export const notify = vi.fn<ShellNotify>(() => () => undefined);
 export const lastToast = (): [string, ShellToastOptions | undefined] => notify.mock.calls[notify.mock.calls.length - 1] as [string, ShellToastOptions | undefined];
 
 export function renderInRun(
   ui: React.ReactNode,
-  { session = sessionFixture(), state = stateFixture(), progress = vi.fn(async () => undefined), setUnsaved = vi.fn(), skipStep = vi.fn(), confirmDiscard = vi.fn((close: () => void) => close()), finish = vi.fn(async () => undefined), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) }: Partial<ReviewRun> & { client?: QueryClient } = {}
+  { session = sessionFixture(), state = stateFixture(), progress = vi.fn(async () => undefined), beginWrite = vi.fn(() => () => undefined), writing = false, setQueueBlocked = vi.fn(), setUnsaved = vi.fn(), skipStep = vi.fn(), confirmDiscard = vi.fn((close: () => void) => close()), finish = vi.fn(async () => undefined), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) }: Partial<ReviewRun> & { client?: QueryClient } = {}
 ) {
-  const run: ReviewRun = { session, state, progress, setUnsaved, confirmDiscard, skipStep, finish };
+  const run: ReviewRun = { session, state, progress, beginWrite, writing, setQueueBlocked, setUnsaved, confirmDiscard, skipStep, finish };
   const view = render(
     <QueryClientProvider client={client}>
       <ShellToastContext.Provider value={notify}>

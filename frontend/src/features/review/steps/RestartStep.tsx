@@ -39,7 +39,16 @@ function restartEligible(task: TaskResponse, now: Date): boolean {
   return Boolean(formulation) && classifyFromInstants(now, formulationInstants(formulation)) !== "paused" && now.getTime() - Date.parse((formulation as NonNullable<typeof formulation>).started_at) >= FOUR_WEEKS_MS;
 }
 
-export function RestartStep({ state, onContinue }: { state: ReviewState; onContinue: () => void }): React.JSX.Element {
+export function RestartStep({
+  state,
+  onContinue,
+  onSettlingChange
+}: {
+  state: ReviewState;
+  onContinue: () => void;
+  /** Told whenever a release or its Undo starts or stops being on its way, so the entry's Close can wait too. */
+  onSettlingChange?: (settling: boolean) => void;
+}): React.JSX.Element {
   const accountId = useAuthStore((store) => (store.user as AuthUser).id);
   const bulk = useBulkRelease("restart", null);
   const next = useQuery({
@@ -64,8 +73,13 @@ export function RestartStep({ state, onContinue }: { state: ReviewState; onConti
     onContinue();
   };
 
+  // A release or its Undo still on its way holds every way on, so its answer, failure and Undo stay on screen.
+  const settling = bulk.releaseAction.pending !== null || bulk.undoAction.pending !== null;
+  useEffect(() => {
+    onSettlingChange?.(settling);
+  }, [settling, onSettlingChange]);
   const startButton = (
-    <button type="button" className={primaryButtonClass} onClick={start}>
+    <button type="button" disabled={settling} className={primaryButtonClass} onClick={start}>
       Start the review
     </button>
   );
@@ -156,7 +170,7 @@ export function RestartStep({ state, onContinue }: { state: ReviewState; onConti
             >
               {bulk.releaseAction.pending === "release" ? "Releasing…" : `Release ${eligible.length} to Someday`}
             </button>
-            <button type="button" className={buttonClass} onClick={onContinue}>Keep them</button>
+            <button type="button" disabled={settling} className={buttonClass} onClick={onContinue}>Keep them</button>
             <button type="button" className={buttonClass} onClick={() => setExpanded(!expanded)}>{expanded ? "Hide the list" : "See which ones"}</button>
           </div>
         </div>

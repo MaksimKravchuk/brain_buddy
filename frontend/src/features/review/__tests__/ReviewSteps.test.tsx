@@ -35,6 +35,7 @@ const listProjects = vi.mocked(apiClient.listProjects);
 const queue = (items: TaskResponse[], meta: QueueMeta = {}): ReviewQueue => ({ items, meta });
 
 beforeEach(() => {
+  window.localStorage.clear();
   signIn();
   listProjects.mockResolvedValue([]);
 });
@@ -49,6 +50,7 @@ afterEach(() => {
   createTask.mockReset();
   listProjects.mockReset();
   notify.mockReset();
+  window.localStorage.clear();
 });
 
 describe("020-FR-028 a step's queue loads before it shows", () => {
@@ -524,6 +526,7 @@ describe("020-FR-032 Waiting for, older than 7 days", () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([drill, tiles]));
     decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_stale"));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, state: "someday", revision: 5 });
     renderInRun(<WaitingStep />);
 
     await user.click(await screen.findByRole("button", { name: /^Keep waiting/ }));
@@ -536,12 +539,112 @@ describe("020-FR-032 Waiting for, older than 7 days", () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([drill]));
     decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_stale_last"));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, state: "someday", revision: 5 });
     renderInRun(<WaitingStep />);
 
     await user.click(await screen.findByRole("button", { name: /^Keep waiting/ }));
 
     expect(await screen.findByText("All caught up.")).toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Pick up the drill from Sam” changed on another device, so it was left as it is there.");
+  });
+
+  it("020-FR-052 a follow-up title typed before a revision-only conflict stays, and the next try carries the new revision under a new key", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([drill, tiles]));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_notes"));
+    decide.mockResolvedValueOnce(decided(drill, "follow_up", {}, taskFixture({ id: "task_fu", title: "Text Sam about the drill", state: "next" })));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, details: "he said Friday", revision: 9 });
+    const { run } = renderInRun(<WaitingStep />);
+    await user.click(await screen.findByRole("button", { name: "Create a follow-up" }));
+    await user.type(screen.getByRole("textbox", { name: "What will you do to follow up?" }), "Text Sam about the drill");
+
+    await user.click(screen.getByRole("button", { name: "Save follow-up" }));
+
+    expect(await screen.findByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Pick up the drill from Sam” changed on another device, so nothing was applied.");
+    expect(screen.getByRole("heading", { name: "Pick up the drill from Sam" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "What will you do to follow up?" })).toHaveValue("Text Sam about the drill");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".wait_1.follow_up"))).toBe(true);
+    expect(run.setUnsaved).not.toHaveBeenLastCalledWith(false);
+    await user.click(screen.getByRole("button", { name: "Save follow-up" }));
+
+    expect(await screen.findByRole("heading", { name: "Quote for the bathroom tiles" })).toBeInTheDocument();
+    expect(decide).toHaveBeenLastCalledWith("wait_1", { type: "follow_up", expected_revision: 9, title: "Text Sam about the drill", session_id: "review_1" }, expect.any(String));
+    expect(decide.mock.calls[1][2]).not.toBe(decide.mock.calls[0][2]);
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".wait_1.follow_up"))).toBe(false);
+  });
+
+  it("020-FR-011 a return-to-Next title typed before the task was reworded elsewhere goes with the old wording", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([drill, tiles]));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_reworded"));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, title: "Collect the saw from Sam", revision: 9 });
+    renderInRun(<WaitingStep />);
+    await user.click(await screen.findByRole("button", { name: "Return to Next" }));
+    await user.type(screen.getByRole("textbox", { name: "What's the next action now?" }), " today");
+
+    await user.click(screen.getByRole("button", { name: "Move to Next" }));
+
+    expect(await screen.findByRole("heading", { name: "Quote for the bathroom tiles" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Pick up the drill from Sam” changed on another device, so it was left as it is there.");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".wait_1.return_to_next"))).toBe(false);
+  });
+
+  it("020-FR-011 a decision without a form that meets a revision-only conflict keeps the card and can be made again on the new revision", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([drill]));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_keep_stale"));
+    decide.mockResolvedValueOnce(decided(drill, "keep_waiting", {}));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, details: "notes", revision: 8 });
+    renderInRun(<WaitingStep />);
+
+    await user.click(await screen.findByRole("button", { name: /^Keep waiting/ }));
+    expect(await screen.findByRole("status", { name: "Changed elsewhere" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Keep waiting/ }));
+
+    expect(await screen.findByText("All caught up.")).toBeInTheDocument();
+    expect(decide).toHaveBeenLastCalledWith("wait_1", { type: "keep_waiting", expected_revision: 8, session_id: "review_1" }, expect.any(String));
+  });
+
+  it("020-FR-052 020-FR-045 a stale answer whose task cannot be read again keeps the card and its typed text, and Retry reads it again", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([drill, tiles]));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_unreadable"));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_unreadable_2"));
+    vi.mocked(apiClient.getTask).mockRejectedValueOnce(new ApiError("down", 503, null, "corr_read"));
+    vi.mocked(apiClient.getTask).mockResolvedValueOnce({ ...drill, details: "he said Friday", revision: 9 });
+    renderInRun(<WaitingStep />);
+    await user.click(await screen.findByRole("button", { name: "Create a follow-up" }));
+    await user.type(screen.getByRole("textbox", { name: "What will you do to follow up?" }), "Text Sam about the drill");
+
+    await user.click(screen.getByRole("button", { name: "Save follow-up" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Ref corr_unreadable");
+    expect(screen.getByRole("heading", { name: "Pick up the drill from Sam" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "What will you do to follow up?" })).toHaveValue("Text Sam about the drill");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".wait_1.follow_up"))).toBe(true);
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("so nothing was applied.");
+    expect(screen.getByRole("textbox", { name: "What will you do to follow up?" })).toHaveValue("Text Sam about the drill");
+  });
+
+  it("020-FR-042 a stale answer read again after another account signed in changes nothing", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([drill, tiles]));
+    decide.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "wait_1" } }, "corr_switch"));
+    let resolve: (task: TaskResponse) => void = () => undefined;
+    vi.mocked(apiClient.getTask).mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderInRun(<WaitingStep />);
+
+    await user.click(await screen.findByRole("button", { name: /^Keep waiting/ }));
+    act(() => signIn("user-2"));
+    await act(async () => resolve({ ...drill, state: "someday", revision: 5 }));
+
+    expect(screen.queryByRole("status", { name: "Changed elsewhere" })).not.toBeInTheDocument();
+    act(() => signIn("user-1"));
   });
 
   it("020-FR-032 an archived project blocks the follow-up with its reason", async () => {

@@ -22,6 +22,7 @@ import { ReviewFrame } from "./ReviewShell";
 import { RestartStep } from "./steps/RestartStep";
 import { buttonClass, CountsGrid, FailureBanner, primaryButtonClass } from "./steps/stepParts";
 import { useStepAction } from "./steps/useStepAction";
+import { useLeaveGuard } from "./useLeaveGuard";
 import { WhileYouWereAway } from "./WhileYouWereAway";
 import { localDay } from "./wywaPresentation";
 
@@ -46,6 +47,8 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
   const [onboardingClosed, setOnboardingClosed] = useState(false);
   const [awayDone, setAwayDone] = useState(false);
   const [restartDone, setRestartDone] = useState(false);
+  // A restart release or its Undo on its way holds Close, so its answer, failure and Undo stay on screen (FR-048).
+  const [restartSettling, setRestartSettling] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const open = state.open_session;
@@ -94,6 +97,16 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
   };
 
   const showRestart = state.restart_mode && !restartDone;
+  const restartHolds = showRestart && restartSettling;
+
+  // While a restart release or its Undo is on its way, browser Back goes nowhere (the entry is put back),
+  // in-app links are not followed, and a tab close or reload gets the browser's warning (FR-048).
+  const guard = useLeaveGuard({
+    dirty: restartHolds,
+    active: restartHolds,
+    onBack: () => guard.rearm(),
+    onNavigate: () => undefined
+  });
   const stepCodes = open ? Object.keys(open.steps) : [];
 
   return (
@@ -101,7 +114,13 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
       title="Weekly review"
       recap={lastReviewText(state)}
       actions={
-        <button ref={closeRef} type="button" className={`${buttonClass} border-transparent bg-transparent text-sky-700`} onClick={() => navigate("/tasks/next")}>
+        <button
+          ref={closeRef}
+          type="button"
+          disabled={restartHolds}
+          className={`${buttonClass} border-transparent bg-transparent text-sky-700`}
+          onClick={() => navigate("/tasks/next")}
+        >
           Close
         </button>
       }
@@ -109,7 +128,7 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
       <main className="flex justify-center px-5 py-6 md:px-10">
         <div className="flex w-full max-w-[600px] flex-col gap-3.5">
           {showRestart ? (
-            <RestartStep state={state} onContinue={() => setRestartDone(true)} />
+            <RestartStep state={state} onContinue={() => setRestartDone(true)} onSettlingChange={setRestartSettling} />
           ) : (
             <>
               <h1 className="m-0 text-2xl font-semibold text-slate-900">{open ? "Pick up where you left off?" : "How much time do you have?"}</h1>
@@ -123,7 +142,8 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
                       <b className="text-[15px] text-slate-900">{`${open.mode === "quick" ? "Quick" : "Full"} review · step ${stepCodes.indexOf(open.current_step as string) + 1} of ${stepCodes.length}`}</b>
                       <span className="text-sm text-slate-700">{`Started ${startedText(open)} on ${ORIGINS[open.origin]}. ${decisionCount(open.counts)} decisions made so far.`}</span>
                     </div>
-                    <button type="button" className={primaryButtonClass} onClick={() => onStart(open)}>
+                    {/* A replacement on its way would end this run: Continue waits for its answer. */}
+                    <button type="button" disabled={action.pending !== null} className={primaryButtonClass} onClick={() => onStart(open)}>
                       Continue
                     </button>
                   </div>

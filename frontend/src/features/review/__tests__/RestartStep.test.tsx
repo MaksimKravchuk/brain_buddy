@@ -111,6 +111,37 @@ describe("020-FR-017 restart mode", () => {
     expect(bulkRelease).not.toHaveBeenCalled();
   });
 
+  it("020-FR-048 while the release is on its way Keep them waits, so its answer and Undo stay on screen", async () => {
+    const user = userEvent.setup();
+    let resolve: (value: Awaited<ReturnType<typeof reviewApi.bulkRelease>>) => void = () => undefined;
+    bulkRelease.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    renderStep();
+
+    await user.click(await screen.findByRole("button", { name: "Release 3 to Someday" }));
+    const keep = screen.getByRole("button", { name: "Keep them" });
+    expect(keep).toBeDisabled();
+    await user.click(keep);
+    expect(onContinue).not.toHaveBeenCalled();
+
+    await act(async () => resolve({ id: "bulk_restart_1", released: [{ task_id: "n1", revision_after: 5 }], skipped: [] }));
+    expect(await screen.findByRole("button", { name: "Undo the 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start the review" })).toBeEnabled();
+  });
+
+  it("020-FR-048 while an Undo is on its way Start the review waits", async () => {
+    const user = userEvent.setup();
+    bulkRelease.mockResolvedValueOnce({ id: "bulk_restart_1", released: [{ task_id: "n1", revision_after: 5 }], skipped: [] });
+    let resolveUndo: (value: Awaited<ReturnType<typeof reviewApi.undoBulkRelease>>) => void = () => undefined;
+    undoBulkRelease.mockReturnValueOnce(new Promise((done) => { resolveUndo = done; }));
+    renderStep();
+
+    await user.click(await screen.findByRole("button", { name: "Release 3 to Someday" }));
+    await user.click(await screen.findByRole("button", { name: "Undo the 1" }));
+    expect(screen.getByRole("button", { name: "Start the review" })).toBeDisabled();
+    expect(onContinue).not.toHaveBeenCalled();
+    await act(async () => resolveUndo({ restored: ["n1"], skipped: [] }));
+  });
+
   it("020-FR-017 releasing shows Releasing…, then the new Next count with Undo and the way on", async () => {
     const user = userEvent.setup();
     let resolve: (value: Awaited<ReturnType<typeof reviewApi.bulkRelease>>) => void = () => undefined;

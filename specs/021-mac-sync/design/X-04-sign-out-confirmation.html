@@ -135,6 +135,7 @@ figure{margin:0;width:330px}figcaption{font-size:12px;line-height:1.45;color:var
     <li>Focus on open: "Cancel" (default). Return and Esc both cancel. Tab reaches "Sign out and remove"; Space activates it.</li>
     <li>VoiceOver reads the title and the message on open. Closing returns focus to the status words in the sidebar footer (X-01).</li>
     <li>Loading: none. Sign-out is local and immediate; an offline logout is queued (FR-005).</li>
+    <li>As delivered (2026-10-08): "Sign out and remove" removes only the changes this alert named (by id and content). If any other change is pending at confirm, nothing is removed and the alert shows again with the real count. Edits made while the sign-out runs are refused with words and keep the typed text. Open sync issues are named the same way: an issue the alert did not name, or a named change the server rejected meanwhile, refuses too. Quitting the app waits for the removal.</li>
   </ul>
 </div>
 

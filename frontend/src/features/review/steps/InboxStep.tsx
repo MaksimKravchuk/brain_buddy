@@ -12,11 +12,14 @@ import { apiClient } from "../../../api/client";
 import { describeReviewError, newIdempotencyKey, newProgressAttempt, withReference } from "../../../api/review";
 import type { ReviewQueue } from "../../../api/review";
 import { applyReviewTask, refreshAfterReviewWrite, settleForAccount, useReviewQueue } from "../../../api/reviewHooks";
+import type { ReviewContinuation } from "../../../api/reviewHooks";
 import type { OpenTaskState, TaskResponse, TaskTransitionRequest } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
+import { sameWording } from "../formulation";
 import { plural } from "../plural";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate } from "./stepParts";
-import { useReviewRun } from "./reviewRun";
+import { useReviewRun, useTrackedWrite } from "./reviewRun";
 import { useBulkRelease } from "./useBulkRelease";
 import { useStepAction } from "./useStepAction";
 
@@ -58,6 +61,9 @@ export function InboxStep(): React.JSX.Element {
   const queryClient = useQueryClient();
   const queue = useReviewQueue("inbox", run.session.id);
   const action = useStepAction();
+  const countAction = useStepAction();
+  const track = useTrackedWrite();
+  const drafts = useReviewDrafts(run.session.id, "inbox");
   const bulk = useBulkRelease("inbox_remainder", run.session.id, run.session.steps.inbox === "pending");
   const [plan, setPlan] = useState<Plan | null>(null);
   const [processed, setProcessed] = useState<readonly string[]>([]);
@@ -74,6 +80,15 @@ export function InboxStep(): React.JSX.Element {
   const limit = plan?.limit ?? items.length;
   const current = handled.size < limit ? items.find((item) => !handled.has(item.id)) : undefined;
 
+  // A processed count that did not save holds the run on this step until its Retry lands (FR-048,
+  // FR-033): leaving would unmount the only Retry and leave the run's Inbox count wrong for good.
+  const { beginWrite } = run;
+  const countFailed = countAction.failure !== null;
+  useEffect(() => (countFailed ? beginWrite() : undefined), [countFailed, beginWrite]);
+  // The next item waits for the last one's count too: one count write and one Retry at a time,
+  // so a second failure can never take the place of the first one's Retry.
+  const itemsDisabled = action.disabled || countAction.pending !== null || countFailed;
+
   useEffect(() => {
     if (focusHeading.current) {
       focusHeading.current = false;
@@ -87,11 +102,69 @@ export function InboxStep(): React.JSX.Element {
     }
   }, [form]);
 
-  const closeForm = () => {
+  // Text typed before a reload or a closed tab comes back in its form (FR-052), once per item shown:
+  // a form the person closes must not reopen on its own.
+  const [draftsCheckedFor, setDraftsCheckedFor] = useState<string | null>(null);
+  if (current !== undefined && draftsCheckedFor !== current.id) {
+    setDraftsCheckedFor(current.id);
+    const title = form === null ? drafts.load(current.id, "title") : null;
+    const waitingFor = form === null ? drafts.load(current.id, "waiting") : null;
+    if (title !== null) {
+      setForm({ kind: "title", text: title });
+    } else if (waitingFor !== null) {
+      setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
+    }
+  }
+  useEffect(() => {
+    if (form !== null && form.text.trim() !== "") {
+      run.setUnsaved(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
+  }, [draftsCheckedFor]);
+
+  /** The form is over, saved or discarded: so is its draft. */
+  const closeForm = (taskId: string, field: string) => {
     setForm(null);
+    drafts.clear(taskId, field);
     run.setUnsaved(false);
   };
 
+  /**
+   * A choice the server refused as stale: read the item again. When its
+   * wording is unchanged (a notes edit elsewhere, say) the item and whatever
+   * was typed for it stay, against the new revision; only when it moved or was
+   * reworded does the review leave it as it is there and drop its form (FR-011,
+   * FR-052).
+   */
+  const reconcileStale = async (task: TaskResponse, choice: Choice, continuation: ReviewContinuation, staleError: unknown) => {
+    const fresh = await apiClient.getTask(task.id).catch(() => null);
+    if (!continuation.stillCurrent()) {
+      return;
+    }
+    if (fresh === null) {
+      // Its current wording is unknown, so nothing typed is dropped and the item stays: the
+      // conflict shows as a failure with its Ref, and Retry reads the task again (FR-052, FR-045).
+      refreshAfterReviewWrite(queryClient, continuation.scope);
+      throw staleError;
+    }
+    applyReviewTask(queryClient, fresh, continuation.scope);
+    focusHeading.current = true;
+    if (fresh.state === "inbox" && sameWording(task, fresh)) {
+      setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
+      setNotice(`“${task.title}” was changed on another device, so nothing was moved. It's still in Inbox; choose again.`);
+      return;
+    }
+    setStale((ids) => [...ids, task.id]);
+    closeForm(task.id, choice.id);
+    setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
+  };
+
+  /**
+   * The move and the count are two writes, handled separately (as in Undo): once
+   * the item is out of the Inbox it is shown as processed whatever happens to
+   * the count, and a count that did not go up is retried alone under the same
+   * progress id, so the replay is counted once (FR-048, FR-011).
+   */
   const choose = (choice: Choice, task: TaskResponse, waitingFor?: string) => {
     const key = newIdempotencyKey();
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: 1 });
@@ -106,32 +179,40 @@ export function InboxStep(): React.JSX.Element {
         if (describeReviewError(error).kind !== "stale") {
           throw error;
         }
-        refreshAfterReviewWrite(queryClient, continuation.scope);
-        focusHeading.current = true;
-        setStale((ids) => [...ids, task.id]);
-        closeForm();
-        setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
+        await reconcileStale(task, choice, continuation, error);
         return;
       }
       // Only the person who pressed it may have the count sent for them.
       if (!continuation.stillCurrent()) {
         return;
       }
-      await run.progress(count);
       applyReviewTask(queryClient, moved, continuation.scope);
       focusHeading.current = true;
       setProcessed((ids) => [...ids, task.id]);
-      closeForm();
-      notify(`“${task.title}” ${choice.toast}`, {
-        action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void undoChoice(task, moved) }
-      });
-      // Its own pending and failure states; a Retry of this choice reaches it too.
-      if (willFinish && plan?.release && remaining.length > 0) {
-        void bulk.release(
-          remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
-          "Couldn't release the rest of your Inbox. Nothing was moved."
-        );
-      }
+      closeForm(task.id, choice.id);
+      // The item is processed now; the count has its own pending and failure states.
+      void countAction.run(
+        "count",
+        "Update the Inbox count",
+        async (counting) => {
+          await run.progress(count);
+          if (!counting.stillCurrent()) {
+            return;
+          }
+          // Undo is offered once the count is in, so it takes off what was added.
+          notify(`“${task.title}” ${choice.toast}`, {
+            action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void track(() => undoChoice(task, moved)) }
+          });
+          // Its own pending and failure states; a Retry of this count reaches it too.
+          if (willFinish && plan?.release && remaining.length > 0) {
+            void bulk.release(
+              remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
+              "Couldn't release the rest of your Inbox. Nothing was moved."
+            );
+          }
+        },
+        `“${task.title}” ${choice.toast}, but the processed count didn't go up.`
+      );
     });
   };
 
@@ -162,7 +243,7 @@ export function InboxStep(): React.JSX.Element {
     setProcessed((ids) => ids.filter((id) => id !== task.id));
     notify(`“${task.title}” is back in your Inbox`);
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: -1 });
-    void action.run(
+    void countAction.run(
       "undo-count",
       "Update the Inbox count",
       () => run.progress(count),
@@ -182,7 +263,7 @@ export function InboxStep(): React.JSX.Element {
       }
       applyReviewTask(queryClient, updated, continuation.scope);
       setLatest((tasks) => ({ ...tasks, [task.id]: updated }));
-      closeForm();
+      closeForm(task.id, "title");
     });
   };
 
@@ -247,6 +328,7 @@ export function InboxStep(): React.JSX.Element {
             <>
               {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice}</p> : null}
               <p className="m-0 text-base font-medium text-slate-900">{`${plural(processed.length, "item")} processed`}</p>
+              {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
               {bulk.releaseAction.pending ? <p role="status" className="m-0 text-sm text-slate-600">Releasing…</p> : null}
               {bulk.releaseAction.failure ? <FailureBanner failure={bulk.releaseAction.failure} online={bulk.releaseAction.online} /> : null}
             </>
@@ -260,6 +342,7 @@ export function InboxStep(): React.JSX.Element {
               <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-lg font-semibold text-slate-900 outline-hidden">{current.title}</h2>
               <p className="m-0 -mt-2 text-xs text-slate-500">Is it actionable? Choose where it belongs.</p>
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
+              {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
               {form ? (
                 <form className="flex flex-col gap-2" onSubmit={(event) => (form.kind === "title" ? saveTitle(event, current, form.text) : submitWaiting(event, current, form.choice, form.text))}>
                   <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
@@ -273,13 +356,14 @@ export function InboxStep(): React.JSX.Element {
                       onChange={(event) => {
                         const text = event.currentTarget.value;
                         setForm({ ...form, text });
+                        drafts.save(current.id, form.kind, text, form.kind === "title" ? current.title : "");
                         run.setUnsaved(text.trim() !== "" && text !== (form.kind === "title" ? current.title : ""));
                       }}
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
-                    <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(() => closeForm(current.id, form.kind))}>Back</button>
+                    <button type="submit" disabled={form.text.trim() === "" || itemsDisabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending !== null ? "Saving…" : form.kind === "title" ? "Save title" : "Move to Waiting for"}
                     </button>
                   </div>
@@ -290,7 +374,7 @@ export function InboxStep(): React.JSX.Element {
                     <button
                       key={choice.id}
                       type="button"
-                      disabled={action.disabled}
+                      disabled={itemsDisabled}
                       className={`${buttonClass} flex flex-col items-start text-left`}
                       onClick={() => (choice.needsWaitingFor ? setForm({ kind: "waiting", choice, text: "" }) : choose(choice, current))}
                     >
@@ -298,7 +382,7 @@ export function InboxStep(): React.JSX.Element {
                       {choice.sub ? <span className="text-xs font-normal text-slate-500">{choice.sub}</span> : null}
                     </button>
                   ))}
-                  <button type="button" disabled={action.disabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
+                  <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
                     Edit title
                   </button>
                 </div>

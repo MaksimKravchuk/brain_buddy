@@ -86,7 +86,7 @@ function wrap(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     createElement(QueryClientProvider, { client },
-      createElement(ShellToastContext.Provider, { value: () => undefined },
+      createElement(ShellToastContext.Provider, { value: () => () => undefined },
         createElement(MemoryRouter, null, node)))
   );
 }

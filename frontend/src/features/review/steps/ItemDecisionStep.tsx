@@ -10,12 +10,16 @@ import type { FormEvent } from "react";
 
 import { describeReviewError, newIdempotencyKey, reviewApi } from "../../../api/review";
 import type { DecisionRequest, DecisionResponse, DecisionType, ReviewQueue, StepCode } from "../../../api/review";
-import { applyReviewTask, useReviewQueue } from "../../../api/reviewHooks";
+import { applyReviewTask, refreshAfterReviewWrite, useReviewQueue } from "../../../api/reviewHooks";
+import type { ReviewContinuation } from "../../../api/reviewHooks";
+import { apiClient } from "../../../api/client";
 import type { TaskResponse } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
+import { sameWording } from "../formulation";
 import { runUndo } from "../reviewUndo";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate, Ref } from "./stepParts";
-import { useReviewRun } from "./reviewRun";
+import { useReviewRun, useTrackedWrite } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
 
 export interface ItemAction {
@@ -52,6 +56,8 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
   const queryClient = useQueryClient();
   const queue = useReviewQueue(config.step, run.session.id);
   const action = useStepAction();
+  const track = useTrackedWrite();
+  const drafts = useReviewDrafts(run.session.id, config.step);
   const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
   const [form, setForm] = useState<{ action: ItemAction; text: string; initial: string } | null>(null);
@@ -77,9 +83,61 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
     }
   }, [form]);
 
-  const closeForm = () => {
+  // Text typed before a reload or a closed tab comes back in its form (FR-052), once per item shown:
+  // a form the person closes must not reopen on its own.
+  const [draftsCheckedFor, setDraftsCheckedFor] = useState<string | null>(null);
+  if (current !== undefined && draftsCheckedFor !== current.id) {
+    setDraftsCheckedFor(current.id);
+    for (const item of config.actions) {
+      const text = form === null && item.form ? drafts.load(current.id, item.id) : null;
+      if (item.form && text !== null) {
+        setForm({ action: item, text, initial: item.form.prefill ? current.title : "" });
+        break;
+      }
+    }
+  }
+  useEffect(() => {
+    if (form !== null && form.text.trim() !== "") {
+      run.setUnsaved(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
+  }, [draftsCheckedFor]);
+
+  /** The form is over, saved or discarded: so is its draft. */
+  const closeForm = (taskId: string, field: string) => {
     setForm(null);
+    drafts.clear(taskId, field);
     run.setUnsaved(false);
+  };
+
+  /**
+   * A decision the server refused as stale: read the task again. When its
+   * wording is unchanged (a notes edit elsewhere, say) the card, the open form
+   * and its draft stay, and the next try carries the new revision under a new
+   * key; only when the task moved or was reworded is it left as it is there and
+   * its form dropped (FR-011, FR-052).
+   */
+  const reconcileStale = async (task: TaskResponse, item: ItemAction, continuation: ReviewContinuation, staleError: unknown) => {
+    const fresh = await apiClient.getTask(task.id).catch(() => null);
+    if (!continuation.stillCurrent()) {
+      return;
+    }
+    if (fresh === null) {
+      // Its current wording is unknown, so nothing typed is dropped and the item stays: the
+      // conflict shows as a failure with its Ref, and Retry reads the task again (FR-052, FR-045).
+      refreshAfterReviewWrite(queryClient, continuation.scope);
+      throw staleError;
+    }
+    applyReviewTask(queryClient, fresh, continuation.scope);
+    focusHeading.current = true;
+    if (sameWording(task, fresh)) {
+      setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
+      setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so nothing was applied. Here's the current version; decide again if it still needs it.` });
+      return;
+    }
+    setHandled((ids) => new Set(ids).add(task.id));
+    closeForm(task.id, item.id);
+    setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so it was left as it is there.` });
   };
 
   const decide = (item: ItemAction, task: TaskResponse, text: string) => {
@@ -93,10 +151,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
       } catch (error) {
         const { kind, referenceId } = describeReviewError(error);
         if (kind === "stale") {
-          focusHeading.current = true;
-          setHandled((ids) => new Set(ids).add(task.id));
-          closeForm();
-          setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so it was left as it is there.` });
+          await reconcileStale(task, item, continuation, error);
           return;
         }
         if (kind in REFUSALS) {
@@ -108,21 +163,23 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
       applyReviewTask(queryClient, response.task, continuation.scope);
       focusHeading.current = true;
       setHandled((ids) => new Set(ids).add(task.id));
-      closeForm();
+      closeForm(task.id, item.id);
       notify(item.toast(task.title, text), {
         action: {
           label: "Undo",
           accessibleLabel: `Undo: ${item.undoName} ${task.title}`,
           onAction: () =>
-            void runUndo(notify, queryClient, response, task.title, (restored) => {
-              focusHeading.current = true;
-              setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
-              setHandled((ids) => {
-                const next = new Set(ids);
-                next.delete(restored.id);
-                return next;
-              });
-            })
+            void track(() =>
+              runUndo(notify, queryClient, response, task.title, (restored) => {
+                focusHeading.current = true;
+                setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
+                setHandled((ids) => {
+                  const next = new Set(ids);
+                  next.delete(restored.id);
+                  return next;
+                });
+              })
+            )
         }
       });
     });
@@ -178,12 +235,13 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
                       onChange={(event) => {
                         const text = event.currentTarget.value;
                         setForm({ ...form, text });
+                        drafts.save(current.id, form.action.id, text, form.initial);
                         run.setUnsaved(text.trim() !== "" && text !== form.initial);
                       }}
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(() => closeForm(current.id, form.action.id))}>Back</button>
                     <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending === form.action.id ? "Saving…" : form.action.form?.save}
                     </button>

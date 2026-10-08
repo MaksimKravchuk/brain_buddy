@@ -7,10 +7,15 @@ import {
   clearReviewLocalState,
   DRAFT_MAX_AGE_MS,
   loadReviewDraft,
+  loadStepDraft,
   removeOtherFormulationDrafts,
   removeReviewDraft,
+  removeStepDraft,
+  removeStepDrafts,
   reviewDraftKey,
+  reviewStepDraftKey,
   saveReviewDraft,
+  saveStepDraft,
   subscribeReviewLocalCleanup,
   sweepReviewLocalState
 } from "../reviewFormDrafts";
@@ -18,6 +23,7 @@ import {
 const scope = { apiOrigin: "http://localhost:3000/api", accountId: "user_1" };
 const otherScope = { apiOrigin: "http://localhost:3000/api", accountId: "user_2" };
 const task = { kind: "task", taskId: "task_9f3c", formulationId: "form_a" } as const;
+const stepField = { sessionId: "review_1", step: "inbox", itemId: "task_9f3c", field: "title" } as const;
 const now = new Date("2026-10-09T14:02:00Z");
 const sentinel = "SENTINEL draft wording: call the landlord about the leak";
 
@@ -220,6 +226,57 @@ describe("020-FR-052 browser-local review form drafts", () => {
     expect(window.localStorage.length).toBe(1);
   });
 
+  it("020-FR-052 keeps a review step's field under its own run, step, item and field, never meeting a task or project key", () => {
+    expect(reviewStepDraftKey(scope, stepField)).toBe(
+      "bb.reviewFormDraft.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.user_1.step.review_1.inbox.task_9f3c.title"
+    );
+    saveStepDraft(scope, stepField, "typed", now);
+    saveReviewDraft(scope, task, { form: "reformulate", text: "wording" }, now);
+
+    expect(loadStepDraft(scope, stepField, now)).toBe("typed");
+    expect(loadStepDraft(scope, { ...stepField, field: "waiting" }, now)).toBeNull();
+    expect(loadStepDraft(otherScope, stepField, now)).toBeNull();
+    removeOtherFormulationDrafts(scope, "task_9f3c", null);
+    expect(loadStepDraft(scope, stepField, now)).toBe("typed");
+    removeStepDraft(scope, stepField);
+    expect(loadStepDraft(scope, stepField, now)).toBeNull();
+    saveStepDraft(scope, stepField, "typed", now);
+    saveStepDraft(scope, stepField, "", now);
+    expect(loadStepDraft(scope, stepField, now)).toBeNull();
+  });
+
+  it("020-FR-052 expires a step field's draft after 7 days, and the sweep and sign-out clear it like any other", () => {
+    saveStepDraft(scope, stepField, "a week old", now);
+    saveStepDraft(otherScope, stepField, "someone else's", now);
+    const later = new Date(now.getTime() + DRAFT_MAX_AGE_MS);
+    expect(loadStepDraft(scope, stepField, new Date(later.getTime() - 1))).toBe("a week old");
+    expect(loadStepDraft(scope, stepField, later)).toBeNull();
+
+    saveStepDraft(scope, stepField, "fresh", later);
+    sweepReviewLocalState(scope, later);
+    expect(loadStepDraft(scope, stepField, later)).toBe("fresh");
+    expect(loadStepDraft(otherScope, stepField, later)).toBeNull();
+
+    clearReviewLocalState(scope);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("020-FR-052 removes every field draft of one step of one run and no other", () => {
+    saveStepDraft(scope, stepField, "one", now);
+    saveStepDraft(scope, { ...stepField, itemId: "task_other", field: "waiting" }, "two", now);
+    saveStepDraft(scope, { ...stepField, step: "waiting" }, "other step", now);
+    saveStepDraft(scope, { ...stepField, sessionId: "review_2" }, "other run", now);
+    saveStepDraft(otherScope, stepField, "other account", now);
+
+    removeStepDrafts(scope, "review_1", "inbox");
+
+    expect(loadStepDraft(scope, stepField, now)).toBeNull();
+    expect(loadStepDraft(scope, { ...stepField, step: "waiting" }, now)).toBe("other step");
+    expect(loadStepDraft(scope, { ...stepField, sessionId: "review_2" }, now)).toBe("other run");
+    expect(loadStepDraft(otherScope, stepField, now)).toBe("other account");
+    expect(window.localStorage.length).toBe(3);
+  });
+
   it("020-FR-052 survives a browser that refuses storage, and never sends or logs the text", () => {
     const refusing = {
       getItem: () => { throw new Error("denied"); },
@@ -235,6 +292,10 @@ describe("020-FR-052 browser-local review form drafts", () => {
     expect(() => sweepReviewLocalState(scope, now, refusing)).not.toThrow();
     expect(() => clearReviewLocalState(scope, refusing)).not.toThrow();
     expect(() => removeOtherFormulationDrafts(scope, "task_9f3c", "form_a", refusing)).not.toThrow();
+    expect(() => saveStepDraft(scope, stepField, sentinel, now, refusing)).not.toThrow();
+    expect(loadStepDraft(scope, stepField, now, refusing)).toBeNull();
+    expect(() => removeStepDraft(scope, stepField, refusing)).not.toThrow();
+    expect(() => removeStepDrafts(scope, "review_1", "inbox", refusing)).not.toThrow();
 
     saveReviewDraft(scope, task, { form: "reformulate", text: sentinel }, now);
     loadReviewDraft(scope, task, now);

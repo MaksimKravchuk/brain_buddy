@@ -113,7 +113,7 @@ figure{margin:0;width:470px}figcaption{font-size:12px;line-height:1.45;color:var
 </figure>
 
 <figure>
-<figcaption><b>X-03 · loading (signing in)</b>Fields are read-only for the request. Cancel and Esc stay enabled: cancelling stops the request, keeps the typed values, puts focus in Password and changes nothing (planning review c1). Other windows and the quick-capture panel stay usable. The sheet closes on success without a toast.</figcaption>
+<figcaption><b>X-03 · loading (signing in)</b>Fields are read-only for the request. Cancel and Esc stay enabled until the account is linked: cancelling stops the request, keeps the typed values, puts focus in Password and changes nothing (planning review c1). As delivered (2026-10-08) the kit decides Cancel once, just before it writes the link; from then on the sheet looks the same but Cancel and Esc are disabled while the first sync runs, and it closes signed in. A second "Sign in…" while this sheet is open does nothing, and neither does "Sign out…" (sign-in and sign-out never overlap). After a Cancel the typed values are back but "Sign in" stays disabled until the cancelled request has ended (as delivered 2026-10-08). Other windows and the quick-capture panel stay usable. The sheet closes on success without a toast.</figcaption>
 <div class="stage"><div class="sheet" aria-busy="true">
   <h2>Sign in to Brain Buddy</h2>
   <div class="info"><svg class="i" style="margin-top:2px"><use href="#i-info"/></svg><span><b>Your tasks on this Mac will be added to your account.</b> Projects and tags with the same name become one. Tasks are never merged by title, so nothing is lost or doubled.</span></div>

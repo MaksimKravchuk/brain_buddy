@@ -4,7 +4,7 @@
  * dialog of the Leave and unsaved-text rules.
  */
 import type { UseQueryResult } from "@tanstack/react-query";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 
 import { describeReviewError } from "../../../api/review";
@@ -54,7 +54,14 @@ export function CountsGrid({ counts, label }: { counts: SessionCounts; label: st
 /** A step's content once all its queries have answered; a placeholder or the load failure before. */
 export function QueueGate({ queries, children }: { queries: Array<UseQueryResult<unknown>>; children: () => ReactNode }): React.JSX.Element {
   const run = useReviewRun();
+  const { setQueueBlocked } = run;
   const failed = queries.find((query) => query.isError && !query.isFetching);
+  // Whatever the gate does not show the content for holds the shell's Next (D-03).
+  const blocked = failed !== undefined || queries.some((query) => query.data === undefined);
+  useLayoutEffect(() => {
+    setQueueBlocked(blocked);
+    return () => setQueueBlocked(false);
+  }, [blocked, setQueueBlocked]);
   if (failed) {
     return (
       <div role="alert" className={bannerClass}>
