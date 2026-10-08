@@ -16,7 +16,7 @@ Date: 2026-10-08. The subject is the documentation package, not a Rust or new-sy
 | Browser rendering | The Chromium/Playwright attempt failed because the sandbox denied `setsockopt` during crashpad startup. iPhone geometry, screenshots, and runtime accessibility are not claimed as verified |
 | Backend/native/new-sync product tests | N/A for the spec-only outcome; criteria for the future implementation are recorded in the plan and contract |
 
-`make verify-all`, exact-SHA product CI, and release/production smoke were not run: this work does not implement or release the described product. Formal Spec Kit planning review, human design sign-off, ADR acceptance, and PR-slice approval are still outstanding and are not replaced by a passing validator.
+`make verify-all` and release/production smoke were not run locally: this work does not implement or release the described product. PR CI subsequently passed on `2e92e463efb0430c61c7c92b052a065f0d55e7c9` ([run 37837009146](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/37837009146)); this is evidence for that revision only. Formal Spec Kit planning review, human design sign-off, ADR acceptance, and PR-slice approval are still outstanding and are not replaced by a passing validator.
 
 ## Independent review
 
@@ -29,6 +29,15 @@ A separate adversarial protocol review found three consequential defects. All we
 3. An old backup could restore purged data or a revoked session. Restore remains closed until subsequent purge/revocation decisions from a separate control ledger are applied; unproven reconciliation cannot reopen access.
 
 This is substantive review of the text, not official five-lens approval or proof of correctness for code that has not been written.
+
+## PR review corrections
+
+[PR #304](https://github.com/MaksimKravchuk/brain_buddy/pull/304) identified two further contract contradictions, both confirmed against the accepted contracts and addressed in `contracts/sync-v1.md`:
+
+1. Entity IDs retain their accepted per-field prefixes, including all six client-created Review ID forms. A sync command's bare UUID does not replace an entity's wire shape. The validation scenarios now require new-runtime records to pass legacy body/path validators.
+2. Receipt lookup precedes the active-device-epoch check. An authorized retry can read the retained outcome after its epoch closes; only unseen commands require an active epoch. Current authorization and restore-generation checks remain mandatory. The validation scenarios cover a lost response followed by epoch closure, unknown-command rejection, and revoked access.
+
+The smaller review notes about pending dependencies and account purge are already covered by contract sections 4 and 6: unresolved dependencies return `DEPENDENCY_PENDING`, and account purge removes all receipts. They do not change the agreed behavior. CI and review evidence for subsequent revisions is recorded on the PR.
 
 ## Reading copy
 
