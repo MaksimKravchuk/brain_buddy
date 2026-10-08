@@ -809,6 +809,7 @@ Earlier increments are each independently useful and safe:
     `evidence/manual-macos-status.md` (T133).
 
 - **PR-10 implementation notes (2026-10-08)**, read with the PR description:
+  - **Planning docs brought in line with PR-09 as delivered** (docs only): plan, research R17, data-model E9, contracts (mac-app-host §7/§8, kit-commands §4), design X-03/X-04, quickstart and `docs/native-macos-app.md` now describe the numbered Keychain items, Cancel decided once at the link, single-flight sign-in and sign-out by identity; the PR-09 notes above record the deviations.
   - **T136 is not wired and stays unchecked.** The non-waivable invariant "no slice-filtered
     requirement coverage in the gates" in `scripts/check_gate_integrity.py` (a `MustNotMatch`
     for `--requirements\b` in `Makefile`, and a twin for `.github/workflows/ci.yml`) forbids the

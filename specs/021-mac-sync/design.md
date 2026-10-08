@@ -174,7 +174,7 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 |---|---|---|---|---|
 | default | "Sign in to sync" / "Sign in…" with no tasks on this Mac | Title, one line, Email, Password, collapsed "Advanced"; "Sign in" default, disabled until filled | "Sign in to Brain Buddy" / "Use the same tasks on this Mac, your iPhone and the web." | FR-001 |
 | first sign-in with local tasks | the Mac holds account-less tasks | A sky info box above the fields, shown only in this case | "Your tasks on this Mac will be added to your account. Projects and tags with the same name become one. Tasks are never merged by title, so nothing is lost or doubled." | FR-003, US4-3, SC-003 |
-| loading (signing in) | Sign in | Fields read-only; button "Signing in…" with the indicator; **Cancel and Esc stay enabled**: cancelling stops the request, keeps the typed values, puts focus in Password and changes nothing. Other windows and the quick-capture panel stay usable | "Signing in…" | FR-001 |
+| loading (signing in) | Sign in | Fields read-only; button "Signing in…" with the indicator; **Cancel and Esc stay enabled until the account is linked**: cancelling stops the request, keeps the typed values, puts focus in Password and changes nothing. From the moment the kit links the account (a decision made once, in `commit()`, just before the link is written) Cancel and Esc are disabled, the sheet still reads "Signing in…" while the first sync runs, and it closes signed in (as delivered 2026-10-08). Other windows and the quick-capture panel stay usable | "Signing in…" | FR-001 |
 | error: no answer | online, but the request got no reply in time | Amber message above the fields with the reference ID; focus to Password | "Brain Buddy didn't answer. Try again." | FR-001, FR-015 |
 | error: couldn't save sign-in | the sign-in succeeded but this Mac could not store it in the Keychain | Amber message with the reference ID; nothing is linked | "Brain Buddy couldn't save your sign-in on this Mac. Try again." | FR-001, FR-005, FR-015 |
 | error: wrong password | 401 | Amber message above the fields with the reference ID; focus to Password with its text selected | "Check your email and password." | FR-001, FR-015 |
@@ -201,7 +201,7 @@ The "partial failure" example "it was deleted on another device" is a defensive 
 | backup kept | any variant while the pre-upgrade backup exists and this sign-out does not delete it | One more sentence, last, with the date it can be deleted; once that date has passed but the backup is still kept (a record not carried, or a sign-out during the first upload), the same sentence without a date (added after `/speckit-analyze`) | "A copy of your tasks from before the update stays on this Mac until 5 Nov." / "A copy of your tasks from before the update stays on this Mac." | FR-021 |
 | backup removed | this sign-out will delete the backup (its date has passed, nothing unsent from the first upload, every record carried) | One more sentence, last, instead of "backup kept"; the deletion is never silent (planning review c2) | "The copy of your tasks from before the update will also be removed from this Mac." | FR-021 |
 | unsaved edit or capture draft | "Sign out…" while a task edit is unsaved or the capture draft is not empty | First the existing discard confirmation for that draft (today's guard); X-04 opens only after "Discard" or when there is nothing to discard. Cancel there cancels the sign-out (planning review c2) | (the existing discard confirmation copy) | FR-018, constitution V |
-| changes arrived while open | a capture or other change, or a new sync issue, appeared while X-04 was showing | At confirm nothing is signed out; X-04 shows again with the new count, focus on "Cancel". "Sign out and remove" removes only what the dialog named (planning review c2) | "4 changes haven't synced yet." (the count updated) | FR-018 |
+| changes arrived while open | a capture or other change, or a new sync issue, appeared while X-04 was showing | At confirm nothing is signed out; X-04 shows again with the new count, focus on "Cancel". "Sign out and remove" removes only what the dialog named (planning review c2); as delivered (2026-10-08) "named" is by operation id and content, so a different change with the same count, or an edit folded into a named change, also shows X-04 again with the real count and nothing is removed. Edits made while a confirmed sign-out runs are refused with words and the typed text is kept | "4 changes haven't synced yet." (the count updated) | FR-018 |
 | during the first upload | signed in moments ago; local or imported tasks are still being sent | The unsent-changes variant with their count, since they have not reached the account | "1,284 changes haven't synced yet." / "Sign out and remove them from this Mac? They haven't reached your account." | FR-018, US4-3 |
 | error | local data couldn't be removed | Stays signed in; nothing removed; no reference ID | "Couldn't sign out" / "Brain Buddy couldn't remove your tasks from this Mac, so you're still signed in. Nothing was removed." | US1-6 |
 | empty (first run) after sign-out | confirmed | Immediate: empty account-less workspace; selection resets to Inbox; footer account-less; the logout is queued if offline | "On this Mac · Sign in to sync" | US1-6, FR-005, FR-002 |
@@ -374,7 +374,7 @@ listed.
 | X-02 | "Sign out…" | Opens X-04 ("Sign out?", or the unsent-changes warning) | FR-001, FR-016, FR-018 |
 | X-02 | Esc / click outside | Closes the popover, focus back to the status words | FR-016 |
 | X-03 | Email, Password, "Sign in" | Signs in; first sign-in merges local tasks | FR-001, FR-003 |
-| X-03 | "Cancel" / Esc | Closes without change, also while "Signing in…" runs (stops the request) | FR-001 |
+| X-03 | "Cancel" / Esc | Closes without change, also while "Signing in…" waits for the login reply (stops the request); disabled once the account is linked and the first sync runs (as delivered 2026-10-08) | FR-001 |
 | X-03 | "Advanced" › Server address, "Use the default server" | Chooses the server (today's "API URL", renamed as on the iPhone) | FR-001 |
 | X-04 | "Cancel" (default) | Keeps the changes; no sign-out | FR-018 |
 | X-04 | "Sign out and remove" | Signs out and removes unsent changes from this Mac | FR-018 |
@@ -513,7 +513,7 @@ and failures appear only after 60 s, in one place.
 - **Focus inside X-02 after Dismiss**: the next issue's Copy, or the previous issue's when the last row was dismissed; after the last issue, "Sync now", or "Sign out…" when Sync now is disabled.
   - iPhone: VoiceOver focus stays on the row that was acted on, or moves to the navigation title if the row disappeared.
 - **Escape**:
-  - Closes X-02 and X-03 (Cancel), X-03 also while "Signing in…" runs.
+  - Closes X-02 and X-03 (Cancel), X-03 also while "Signing in…" waits for the login reply; not once the account is linked (2026-10-08, as delivered).
   - Cancels X-04.
   - Is not mapped in X-05 (the notice must be read once; Return continues).
   - Closes the D-01 options popover.
@@ -603,6 +603,14 @@ Planning review campaign `021-mac-sync-c2` added the following, again without ch
 - **X-06, M-02, D-01**: "rename archived project"; error and refusal focus; the partial-failure copy says where the project stands; D-01's task project picker and Escape focus return.
 - **X-09** (new screen id): tasks couldn't be opened.
 - **M-01**: "first upload", "error, then offline", the VoiceOver action for "Copy reference ID", 44 pt for the account-less "Sign in to sync".
+
+## As delivered, PR-09 (2026-10-08)
+
+Implementation of X-03 and X-04 differs from the signed-off wording in three places; each keeps the screens and copy and only narrows when a control applies. Contracts: `contracts/mac-app-host.md` §7, `contracts/kit-commands.md` §4.
+
+- **X-03 Cancel ends at the link.** Cancel and Esc are enabled while "Signing in…" waits for the login reply. The kit decides Cancel against the link exactly once, immediately before it writes the durable link: Cancel before that links nothing and ends the session the server opened; after it, Cancel and Esc are disabled, the sheet still reads "Signing in…" while the first sync runs, and it closes signed in (after the "account deletion cancelled" note when there is one). The loading mockup describes the first part. A Cancel after the link would otherwise have reported "cancelled" for a sign-in that stuck.
+- **X-03 is single flight.** While the sheet is shown or its request is on its way, a second "Sign in…" or "Sign in again…" does nothing and the app menu's two items are disabled.
+- **X-04 removes only what it named.** "Sign out and remove" removes the changes the dialog named, identified by operation id and content. Any other pending change (queued in place of an acknowledged one, or an edit folded into a named one) refuses, removes nothing and shows X-04 again with the real count. Edits made while a confirmed sign-out runs are refused ("Brain Buddy is signing out. This wasn't saved; try again in a moment."): Quick Capture and the main window keep the typed text.
 
 ## Sign-off
 

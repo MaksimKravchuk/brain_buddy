@@ -66,6 +66,13 @@ until they reach the server. The token is never written to a file or logged.
   person started may let macOS ask for access.
 - **A write that fails at sign-in** shows "Brain Buddy couldn't save your sign-in on this Mac. Try
   again." with a reference id; the session the server just opened is ended at once.
+- **Cancel is decided once.** Cancel and Esc work while "Signing in…" waits for the server's reply:
+  nothing is linked, the typed values stay and the session the server opened is ended. The kit
+  decides Cancel against the link exactly once, just before it writes the link. After that Cancel
+  and Esc are disabled, the sheet keeps reading "Signing in…" while the first sync runs, and it
+  closes signed in, so a sign-in that stuck is never reported as cancelled.
+- **One sign-in at a time.** While the sheet is shown or its request is on its way, a second
+  "Sign in…" does nothing and the app menu's "Sign in…" and "Sign in again…" are disabled.
 
 ### "Sign in again" after a rebuild
 
@@ -126,8 +133,13 @@ accept client times, which is out of scope.
 
 "Sign out…" (popover or app menu) first runs the window's discard confirmation when a task edit is
 unsaved or the capture draft is not empty, then the confirmation with the count of changes that
-would be removed, the open sync issues and the pre-upgrade backup. If a change arrives while it is
-open, nothing is signed out and it shows again with the new count. The kit records the session as
+would be removed, the open sync issues and the pre-upgrade backup. "Sign out and remove" removes
+only the changes the confirmation named (each by operation id and content). If any other change is
+pending when you confirm, whether one that arrived while it was open, one queued in place of a
+change that was just sent, or an edit folded into a named change, nothing is signed out or removed
+and it shows again with the real count. While the sign-out runs, edits are refused ("Brain Buddy is
+signing out. This wasn't saved; try again in a moment."): Quick Capture and the main window keep
+what you typed, and it can be saved once you are signed out. The kit records the session as
 a pending logout, removes this Mac's copy of the account's data, and only then removes the token
 and ends the server session (now, or when the network is back); if the removal fails, nothing is
 removed and the person is still signed in ("Couldn't sign out"). Review marks are kept.

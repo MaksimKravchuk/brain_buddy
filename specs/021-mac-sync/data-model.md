@@ -310,7 +310,7 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
 | class | generic password |
 | keychain | the person's **login keychain** (file-based). The data-protection keychain needs a signed application-identifier entitlement that the ad-hoc-signed local build lacks (research R17) |
 | service | `app.brainbuddy.mac.session` |
-| account | lower-cased server host (kit `KeychainSessionTokenStore`) |
+| account | lower-cased server host (kit `KeychainSessionTokenStore`). On macOS the session is stored as numbered items, `<host>`, `<host>#1`, `<host>#2`, … and the **highest-numbered item is the session** (see "Recovery after a rebuild", as delivered 2026-10-08). iOS keeps the one item `<host>` |
 | `kSecAttrSynchronizable` | false, set explicitly and asserted by a macOS-lane test: never in iCloud Keychain |
 | `kSecAttrAccessible` | not set on macOS: on the login keychain it cannot deliver "this device only", so the store does not claim it. iOS keeps `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` |
 | pending logouts | `<service>.pending-logout` (kit). Each holds the raw token until its logout is delivered |
@@ -324,6 +324,12 @@ An unreadable legacy file, and a previous-version file kept under FR-033, are ne
 - A Keychain **write** failure at sign-in is a sign-in error with a reference id (design X-03 "error: couldn't save sign-in"); the session the server just opened is ended at once. It is never a silent "Sign in again".
 - A Keychain **read** failure other than "not found" (for example access refused after an ad-hoc rebuild) shows "Sign in again to sync" and is logged as the error class `keychain_read_failed`, never with the token or the host.
 - **No prompt during routine sync** (review c2, G34): every read by the sync engine and the launch cleanup is **non-interactive** (`kSecUseAuthenticationUI` set to fail, or an `LAContext` with `interactionNotAllowed`), so a rebuilt binary gets `errSecInteractionNotAllowed` instead of a system prompt; that is treated as "Sign in again to sync". Only a sign-in the person started may let macOS show its access prompt. All Keychain calls run off the main actor (the engine is an actor; `WorkspaceHost` runs its launch cleanup in a detached task).
+- **Recovery after a rebuild, as delivered** (2026-10-08, PR-09; replaces the earlier "delete and re-add" recovery, which macOS refuses): the file-based login keychain lets another build overwrite an item's data but neither read nor delete it (`errSecInvalidOwnerEdit`, -25244, with no prompt), and refuses a listing that asks for data of all matches (`errSecParam`, -50). So the store never deletes and re-adds an item it did not create:
+  - a routine read, or a routine write, of a highest item this build may not read is "Sign in again to sync" (above); nothing is written into it;
+  - the person-started sign-in saves the new session as the next number (`<host>#1`, then `#2`, …) when the highest item is one this build may not read: an item this build created and so reads back without a prompt; if that read-back fails the sign-in shows "couldn't save sign-in";
+  - sign-out and the launch cleanup delete every item this build may delete, and leave without failing an item it may neither read nor delete;
+  - pending logouts are one item each, found by listing attributes and read one by one; an unreadable one is skipped.
+  - **Known residual**: an orphaned older item stays in the login keychain, unread and unused, until its server session expires (30 days) or the person deletes it in Keychain Access. No access prompt is ever raised.
 - **Recovery after "Deny"**: at a person-started sign-in, an access-denied or interaction-not-allowed status on the existing item deletes that item and adds it again; if macOS refuses the deletion too, X-03 shows "couldn't save sign-in" and `docs/native-macos-app.md` tells the person how to remove the `app.brainbuddy.mac.session` item in Keychain Access.
 
 **Data-retention row** (PR-09):
