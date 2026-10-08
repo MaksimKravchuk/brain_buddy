@@ -43,6 +43,8 @@ A follow-up review identified an overbroad device-epoch requirement at the commo
 
 The subsequent sequencing review found that T007/T011 depended on job authority/fencing scheduled only in T012. T012 now runs first in Phase 3, through the existing compatible task ports, before T007 connects internal writers. The migration plan and pilot gate require verified authority/fencing and receipt/feed coverage for every writer; no new sync cohort starts while a scheduler still bypasses the feed.
 
+A further receipt-ordering review found that mutable version/schema/size validation could prevent recovery of a retained outcome. Current authority and bounded generic envelope parsing now precede receipt matching; only unseen commands face current execution rules. Version retirement retains bounded parsing/fingerprint compatibility and authorized result lookup for retained receipts, without allowing retired commands to execute again.
+
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.
