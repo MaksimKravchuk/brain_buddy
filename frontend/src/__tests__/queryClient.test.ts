@@ -7,6 +7,8 @@ import { getApiBaseUrl } from "../api/client";
 // renders. A test that built its own QueryClient would prove the helper works
 // and prove nothing about production wiring.
 import { queryClient } from "../queryClient";
+import { reviewDraftKey, saveReviewDraft } from "../features/review/reviewFormDrafts";
+import { markWhileAwayShown, whileAwayLastShownKey } from "../features/review/wywaPresentation";
 import { rememberTaskAgentPreference, taskAgentPreferenceKey } from "../features/tasks/taskAgentPreference";
 import { useAuthStore } from "../stores/authStore";
 
@@ -76,5 +78,19 @@ describe("queryClient process wiring (009-FR-005)", () => {
     });
 
     expect(window.localStorage.getItem(key)).toBeNull();
+  });
+
+  it("020-FR-052 020-FR-042 production wiring clears the departing account's review keys with the weekly_review flag off", () => {
+    const apiOrigin = getApiBaseUrl();
+    const member = { id: "member-7", email: "member@example.com", feature_flags: {} };
+    useAuthStore.setState({ user: member, status: "authed", deletionCancelledNotice: false });
+    const draft = reviewDraftKey({ apiOrigin, accountId: member.id }, { kind: "task", taskId: "task-1", formulationId: "form_a" });
+    saveReviewDraft({ apiOrigin, accountId: member.id }, { kind: "task", taskId: "task-1", formulationId: "form_a" }, { form: "reformulate", text: "unsaved" });
+    markWhileAwayShown({ apiOrigin, accountId: member.id }, "2026-10-09");
+
+    useAuthStore.getState().clearSession();
+
+    expect(window.localStorage.getItem(draft)).toBeNull();
+    expect(window.localStorage.getItem(whileAwayLastShownKey({ apiOrigin, accountId: member.id }))).toBeNull();
   });
 });

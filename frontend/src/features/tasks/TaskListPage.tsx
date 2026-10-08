@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarDays, Check, ChevronDown, Layers, Plus, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Archive, CalendarDays, Check, ChevronDown, CircleHelp, Layers, Plus, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -28,6 +28,9 @@ import { getTaskDetailAutosaveController } from "./taskDetailAutosave";
 import type { AutosaveResult } from "./taskDetailAutosave";
 import { useTaskTitleAutocomplete } from "./useTaskTitleAutocomplete";
 import { useTaskCompletionAnimation } from "./useTaskCompletionAnimation";
+import { useOnlineStatus, useReviewClock, useReviewState, useThresholdNotice, useWeeklyReviewEnabled, type ThresholdNotice } from "../../api/reviewHooks";
+import { DecisionDialog, type DecisionOutcome } from "../review/DecisionDialog";
+import { classifyFromInstants, formatReviewDate, formulationInstants, listMarkerFor, type ListMarker } from "../review/formulation";
 
 const stateLabels: Record<OpenTaskState, string> = {
   inbox: "Inbox",
@@ -230,8 +233,33 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const user = useAuthStore((store) => store.user);
   const accountId = user?.id;
+  // Spec 020 D-01: list markers from the server's instants and the browser
+  // clock (re-read every minute), and the decision dialog they open.
+  const reviewEnabled = useWeeklyReviewEnabled();
+  const reviewNow = useReviewClock(reviewEnabled);
+  const online = useOnlineStatus();
+  // The open decision card belongs to the account (cache scope) it was opened in.
+  const [openDecision, setOpenDecision] = useState<{ task: TaskResponse; scopeKey: string } | null>(null);
+  const decisionOriginRef = useRef<HTMLElement | null>(null);
+  const reviewFocusRef = useRef<{ kind: "origin" } | { kind: "row"; taskId: string | undefined } | null>(null);
+  const [reviewFocusRequest, setReviewFocusRequest] = useState(0);
+  const markerFor = (task: TaskResponse): ListMarker | null =>
+    reviewEnabled ? listMarkerFor(classifyFromInstants(reviewNow, formulationInstants(task.formulation))) : null;
+  // The note's count is the server's aggregate (formulation-clock §5), never the
+  // loaded or filtered rows of this page.
+  const asksForDecision = useReviewState().data?.counts.asks_for_decision;
+  const thresholdNotice = useThresholdNotice((store) => store.notice);
+  const dismissThresholdNotice = useThresholdNotice((store) => store.dismiss);
   const cacheScope = getTaskCacheScope(accountId ?? null);
   const scopeKey = JSON.stringify(cacheScope);
+  // An account switch while the page stays mounted closes the card for good:
+  // the next account must not see the previous one's task, and the dialog must
+  // not store that task's text under the next account's draft keys (FR-052).
+  if (openDecision !== null && openDecision.scopeKey !== scopeKey) {
+    setOpenDecision(null);
+  }
+  const decisionTask = openDecision?.scopeKey === scopeKey ? openDecision.task : null;
+  const setDecisionTask = (task: TaskResponse | null) => setOpenDecision(task === null ? null : { task, scopeKey });
   const completionAnimation = useTaskCompletionAnimation(scopeKey, JSON.stringify({ state, projectId, tagId, dateView, searchQuery, sort, groupByProject, showCancelled }));
   const isCurrentScope = () => {
     const current = getTaskCacheScope();
@@ -545,6 +573,30 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     setAgentFocusTarget(null);
   }, [agentFocusTarget, agentRunSummaries]);
 
+  // D-02 focus on close: back to the marker that opened it, or after a
+  // decision to the next row's title (the list heading when none is left).
+  useEffect(() => {
+    const request = reviewFocusRef.current;
+    reviewFocusRef.current = null;
+    if (request?.kind === "origin") {
+      decisionOriginRef.current?.focus({ preventScroll: true });
+    } else if (request?.kind === "row") {
+      (rowLinkRefs.current.get(request.taskId ?? "") ?? listHeadingRef.current)?.focus({ preventScroll: true });
+    }
+  }, [reviewFocusRequest]);
+
+  const closeDecision = (outcome: DecisionOutcome) => {
+    const decided = decisionTask as TaskResponse;
+    setDecisionTask(null);
+    if (outcome.kind === "decided") {
+      const index = displayedTasks.findIndex((task) => task.id === decided.id);
+      reviewFocusRef.current = { kind: "row", taskId: (displayedTasks[index + 1] ?? displayedTasks[index - 1])?.id };
+    } else {
+      reviewFocusRef.current = { kind: "origin" };
+    }
+    setReviewFocusRequest((request) => request + 1);
+  };
+
   const closeRowHandoff = () => setRowHandoff(null);
   const handleRowHandoffDispatched = (run: AgentRunResponse) => {
     if (accountId && rowHandoff) {
@@ -605,7 +657,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     onOpenTask: (task: TaskResponse) => {
       if (task.id !== taskId) navigate({ pathname: `${listPath}/${task.id}`, search: searchParams.toString() });
     },
-    onCloseSelectedTask: closeSelectedTask
+    onCloseSelectedTask: closeSelectedTask,
+    markerFor,
+    reviewOffline: !online,
+    onOpenDecision: (task: TaskResponse, origin: HTMLElement) => {
+      decisionOriginRef.current = origin;
+      setDecisionTask(task);
+    }
   };
 
   const isSavedNotice = mutationError === "Saved";
@@ -917,6 +975,18 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
         </div>
 
         {!taskId ? mutationNotice : null}
+        {reviewEnabled && !online ? (
+          <p id={REVIEW_OFFLINE_REASON_ID} role="status" className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            {REVIEW_OFFLINE_REASON}
+          </p>
+        ) : null}
+        {reviewEnabled && state === "next" && thresholdNotice?.accountId === accountId && asksForDecision !== undefined ? (
+          <ThresholdChangedNote
+            notice={thresholdNotice as ThresholdNotice}
+            asking={asksForDecision}
+            onDismiss={dismissThresholdNotice}
+          />
+        ) : null}
         {selectionRecoveryNotice}
         {agentSummaryNotice}
 
@@ -1003,6 +1073,13 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
         {dateView ? <DateViewCaptureHint /> : null}
       </section>
+      {decisionTask ? (
+        <DecisionDialog
+          task={decisionTask}
+          projectName={projects.find((project) => project.id === decisionTask.project_id)?.name ?? null}
+          onClose={closeDecision}
+        />
+      ) : null}
       {rowHandoff ? createPortal(
         <AgentHandoffOverlay
           taskId={rowHandoff.task.id}
@@ -1120,6 +1197,56 @@ function Chip({ variant, truncate = false, title, children }: {
   );
 }
 
+const REVIEW_OFFLINE_REASON_ID = "review-marker-offline-reason";
+const REVIEW_OFFLINE_REASON = "You're offline. Decisions need a connection. Retry when you're back online.";
+
+/**
+ * D-01 marker: "Asks for a decision" (indigo) or "Moves to Someday tomorrow"
+ * (amber), text plus icon, never rose. A 22 px chip with a 44 px hit area;
+ * offline it stays in the tab order with `aria-disabled` and the reason, and
+ * still opens the dialog in its offline state.
+ */
+function ReviewMarkerChip({ marker, title, offline, onOpen }: {
+  marker: ListMarker;
+  title: string;
+  offline: boolean;
+  onOpen: (origin: HTMLElement) => void;
+}): React.JSX.Element {
+  const asks = marker === "asks";
+  const label = asks ? "Asks for a decision" : "Moves to Someday tomorrow";
+  return (
+    <button
+      type="button"
+      aria-label={`${label}. Open decision for ${title}`}
+      aria-disabled={offline ? "true" : undefined}
+      aria-describedby={offline ? REVIEW_OFFLINE_REASON_ID : undefined}
+      className={`relative inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium after:absolute after:-inset-y-[11px] after:inset-x-0 after:content-[''] ${
+        asks ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-200 bg-amber-50 text-amber-800"
+      }`}
+      onClick={(event) => onOpen(event.currentTarget)}
+    >
+      {asks ? <CircleHelp className="h-[11px] w-[11px]" aria-hidden /> : <Archive className="h-[11px] w-[11px]" aria-hidden />}
+      {label}
+    </button>
+  );
+}
+
+/** D-01 / M-01 "threshold just changed": one dismissible note after a D-04 change (FR-039). */
+function ThresholdChangedNote({ notice, asking, onDismiss }: {
+  notice: ThresholdNotice;
+  asking: number;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  return (
+    <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+      <span className="min-w-0 flex-1">
+        {`Your threshold is now ${notice.threshold_days} days. ${asking} ${asking === 1 ? "task asks" : "tasks ask"} for a decision. Nothing moves to Someday before ${formatReviewDate(notice.floor)}.`}
+      </span>
+      <Button size="sm" variant="ghost" onClick={onDismiss}>OK</Button>
+    </div>
+  );
+}
+
 function tagLabel(tag: TagResponse): string {
   return tag.name.startsWith("@") ? tag.name : `#${tag.name.replace(/^#/, "")}`;
 }
@@ -1141,6 +1268,9 @@ function TaskList({
   onReviewAgent,
   onOpenTask,
   onCloseSelectedTask,
+  markerFor,
+  reviewOffline,
+  onOpenDecision,
   inlineDetail,
   label
 }: {
@@ -1161,6 +1291,9 @@ function TaskList({
   onReviewAgent: (task: TaskResponse, connectionId: string) => void;
   onOpenTask: (task: TaskResponse) => void;
   onCloseSelectedTask: () => void;
+  markerFor: (task: TaskResponse) => ListMarker | null;
+  reviewOffline: boolean;
+  onOpenDecision: (task: TaskResponse, origin: HTMLElement) => void;
   inlineDetail?: ReactNode;
   /** Names this list for assistive tech; each group supplies its project name. */
   label?: string;
@@ -1186,6 +1319,9 @@ function TaskList({
           onReviewAgent={onReviewAgent}
           onOpenTask={onOpenTask}
           onCloseSelectedTask={onCloseSelectedTask}
+          marker={markerFor(task)}
+          reviewOffline={reviewOffline}
+          onOpenDecision={onOpenDecision}
           inlineDetail={selectedTaskId === task.id ? inlineDetail : undefined}
         />
       ))}
@@ -1208,6 +1344,9 @@ function TaskRow({
   onReviewAgent,
   onOpenTask,
   onCloseSelectedTask,
+  marker,
+  reviewOffline,
+  onOpenDecision,
   inlineDetail
 }: {
   task: TaskResponse;
@@ -1224,6 +1363,9 @@ function TaskRow({
   onReviewAgent: (task: TaskResponse, connectionId: string) => void;
   onOpenTask: (task: TaskResponse) => void;
   onCloseSelectedTask: () => void;
+  marker: ListMarker | null;
+  reviewOffline: boolean;
+  onOpenDecision: (task: TaskResponse, origin: HTMLElement) => void;
   inlineDetail?: ReactNode;
 }): React.JSX.Element {
   const isTerminal = task.state === "completed" || task.state === "cancelled";
@@ -1240,7 +1382,7 @@ function TaskRow({
     >
       <div
         data-testid="task-row-header"
-        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"}`}
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth ${isSelected ? "bg-slate-50" : "hover:bg-slate-50/70"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
         onClick={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("a, button, input, textarea, select, label")) return;
@@ -1293,6 +1435,17 @@ function TaskRow({
         >
           {task.title}
         </Link>
+        {marker ? (
+          // At 390 px the chip takes its own line under the title (D-01 narrow).
+          <span className="inline-flex shrink-0 max-sm:order-last max-sm:basis-full max-sm:pl-[42px]">
+            <ReviewMarkerChip
+              marker={marker}
+              title={task.title}
+              offline={reviewOffline}
+              onOpen={(origin) => onOpenDecision(task, origin)}
+            />
+          </span>
+        ) : null}
         {task.due_date ? (
           <span className="hidden md:inline-flex">
             <Chip variant="due">
