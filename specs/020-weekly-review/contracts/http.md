@@ -281,6 +281,24 @@ Another run, a request without a run, and a substantive rewording are not repeat
 (The new text of the repeat is not applied; clients that read the answer's `task` show
 the wording the first save left.)
 
+**One card, one decision per run for the types that leave the revision alone.**
+`keep_waiting`, `keep_someday` and `follow_up` do not bump the task's revision, so a card
+open on two devices passes the `expected_revision` check twice and would record, count
+and (for `follow_up`) create a second Next task. The same idempotent no-op therefore
+covers them: when the request names a `session_id` the owner holds, and that run already
+holds a decision of one of these three types for this task whose
+`task_revision_after` still equals the task's current revision (the task is as the
+decision left it), nothing is written, nothing is counted and no task is created. The
+response is a 200 with the **original** decision (so a `follow_up` repeat returns the
+first one's `created_task`, and `keep_waiting` after `follow_up` answers the follow-up),
+the task as it is now, the original receipt and the run's current counts. There is no
+new error code: clients need no change, and a client that applies the answer shows the
+first outcome. The check runs under the owner lock after the revision, list and
+formulation checks. It does not apply without a run, in another run, or to a task that
+changed since the decision (a later edit makes a new keep a new decision, which
+refreshes the receipt). Undo deletes the decision, so the card is new again. Types that
+change the task (everything else in the table) are guarded by `expected_revision` alone.
+
 `session_id`: a decision naming a session that exists for the owner is linked to it and
 counted, whether the session is open or already finished (an offline review's decisions
 can arrive after another device finished it). A decision naming a session id the server

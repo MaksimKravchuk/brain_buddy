@@ -153,6 +153,10 @@ _ON_FORMULATION = frozenset(
 )
 """Types decided on the current formulation: a different id is stale."""
 
+NO_REVISION_DECISIONS = frozenset({"keep_waiting", "keep_someday", "follow_up"})
+"""Types that leave the task's revision alone (http §3): the revision check
+cannot tell a repeat from the first, so the run's own record does."""
+
 _MESSAGES: dict[str, str] = {
     "decision_not_allowed": (
         "This decision isn't available for this task's current list. "
@@ -297,7 +301,7 @@ class ReviewService:
                 self._log_rejection(owner_id, task_id, payload.type, "stale")
                 raise
         self._check_decision(task, payload, owner_id=owner_id)
-        repeated = self._repeated_cosmetic(task, payload, owner_id=owner_id)
+        repeated = self._repeated_decision(task, payload, owner_id=owner_id)
         if repeated is not None:
             self._log_decision(repeated, outcome="already_applied", started=started)
             return repeated
@@ -321,34 +325,44 @@ class ReviewService:
         self._log_decision(result, outcome="applied", started=started)
         return result
 
-    def _repeated_cosmetic(
+    def _repeated_decision(
         self, task: TaskDocument, payload: DecisionRequest, *, owner_id: str
     ) -> DecisionResultDocument | None:
-        """The run's first cosmetic save of this wording, when this is a repeat.
+        """The run's first decision of this card, when this request repeats it.
 
-        A "Save anyway" (FR-002) keeps the task asking, so a second device, a
-        reload or a retry under a fresh key can send it again for the same task
-        and formulation in the same run. That is not a second decision: it
-        changes nothing and answers the first one (http §3), so the run counts
-        it once. A different run, wording class or formulation is a new decision.
+        One card, one decision per run (http §3). The revision check cannot
+        tell a repeat apart when the first decision left the task as it was,
+        so a second device, a reload or a retry under a fresh key would record
+        and count it again (and a repeated ``follow_up`` would create a second
+        Next task). A repeat changes nothing and answers the first decision,
+        so the run counts it once. Two kinds repeat:
+
+        * a cosmetic (non-substantive) ``reformulate`` of the same task and
+          formulation after one the run already holds ("Save anyway", FR-002);
+        * a ``keep_waiting``, ``keep_someday`` or ``follow_up`` of a task that
+          has not changed since the run's decision of that kind (its revision
+          is still the decision's ``task_revision_after``).
+
+        An Undo deletes the decision, so the card is new again; another run, a
+        request without a run, a substantive rewording and a task changed since
+        are new decisions.
         """
 
         session_id = self._known_session(owner_id, payload.session_id)
-        if (
-            session_id is None
-            or payload.type != "reformulate"
-            or formulation.is_substantive(task.title, _required(payload.title))
-        ):
+        if session_id is None:
+            return None
+        if payload.type == "reformulate":
+            if formulation.is_substantive(task.title, _required(payload.title)):
+                return None
+            matches = _is_repeated_cosmetic
+        elif payload.type in NO_REVISION_DECISIONS:
+            matches = _is_repeated_no_revision
+        else:
             return None
         for earlier in self.task_repo.list_review_decisions_for_session(
             owner_id, session_id
         ):
-            if (
-                earlier.task_id == task.id
-                and earlier.type == "reformulate"
-                and earlier.substantive is False
-                and earlier.formulation_id == payload.formulation_id
-            ):
+            if earlier.task_id == task.id and matches(earlier, task, payload):
                 return self._stored_decision_result(earlier, owner_id=owner_id)
         return None
 
@@ -1857,6 +1871,29 @@ def _decision_matches(
         stored.task_id == task_id
         and stored.type == payload.type
         and stored.formulation_id == payload.formulation_id
+    )
+
+
+def _is_repeated_cosmetic(
+    earlier: ReviewDecisionDocument, task: TaskDocument, payload: DecisionRequest
+) -> bool:
+    del task
+    return (
+        earlier.type == "reformulate"
+        and earlier.substantive is False
+        and earlier.formulation_id == payload.formulation_id
+    )
+
+
+def _is_repeated_no_revision(
+    earlier: ReviewDecisionDocument, task: TaskDocument, payload: DecisionRequest
+) -> bool:
+    """The task is still as the run's keep or follow-up decision left it."""
+
+    del payload
+    return (
+        earlier.type in NO_REVISION_DECISIONS
+        and earlier.task_revision_after == task.revision
     )
 
 
