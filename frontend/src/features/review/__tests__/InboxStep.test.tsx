@@ -136,6 +136,51 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     expect(screen.getByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
   });
 
+  it("020-FR-048 an Undo whose transition fails sends no count change and leaves the item processed", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    const { run } = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    transitionTask.mockRejectedValueOnce(new ApiError("Conflict", 409, null, "corr_no_transition"));
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(lastToast()[0]).toBe("Couldn't undo. Nothing was changed. Ref corr_no_transition");
+    expect(run.progress).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("020-FR-048 an Undo whose count is not saved shows the item again with the Ref, and Retry resends only that count under the same id", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    const progress = vi.fn(async () => undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new ApiError("down", 503, null, "corr_undo_count"));
+    renderInRun(<InboxStep />, { progress });
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(transitionTask).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("heading", { name: "Buy printer paper" })).toHaveFocus();
+    expect(screen.getByText("Item 1 of 2")).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("“Buy printer paper” is back in your Inbox, but the processed count didn't go down.");
+    expect(alert).toHaveTextContent("Ref corr_undo_count");
+
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(transitionTask).toHaveBeenCalledTimes(2);
+    expect(progress).toHaveBeenCalledTimes(3);
+    const bodies = progress.mock.calls.map((call) => (call as unknown as [{ body: { inbox_processed_delta: number; progress_id: string } }])[0].body);
+    expect(bodies[2]).toEqual({ inbox_processed_delta: -1, progress_id: bodies[1].progress_id });
+    expect(screen.getByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+  });
+
   it("020-FR-034 Waiting for asks who or what first and moves the item there", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper, dentist]));

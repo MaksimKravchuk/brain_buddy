@@ -183,7 +183,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={closeForm}>Back</button>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
                     <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending === form.action.id ? "Saving…" : form.action.form?.save}
                     </button>

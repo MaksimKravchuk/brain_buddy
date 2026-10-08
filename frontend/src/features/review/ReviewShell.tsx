@@ -77,7 +77,7 @@ export function ReviewFrame({
   );
 }
 
-type Confirm = { kind: "discard"; then: () => void; rearm: boolean } | { kind: "leave"; rearm: boolean };
+type Confirm = { kind: "discard"; then: () => void; rearm: boolean; keepStep: boolean } | { kind: "leave"; rearm: boolean };
 
 export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession; state: ReviewState; onExit: () => void }): React.JSX.Element {
   const navigate = useNavigate();
@@ -135,9 +135,9 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   };
 
   /** Anything that leaves the step asks first when a field holds unsaved text (FR-052). */
-  const request = (action: () => void, rearm = false) => {
+  const request = (action: () => void, rearm = false, keepStep = false) => {
     if (unsaved) {
-      setConfirm({ kind: "discard", then: action, rearm });
+      setConfirm({ kind: "discard", then: action, rearm, keepStep });
       return;
     }
     action();
@@ -165,7 +165,9 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   };
 
   const skip = () => request(() => advance("skipped"));
-  const run: ReviewRun = { session, state, progress, setUnsaved, skipStep: skip, finish };
+  // A form's own Back closes only that form, so the rest of the step keeps its state.
+  const confirmDiscard = (close: () => void) => request(close, false, true);
+  const run: ReviewRun = { session, state, progress, setUnsaved, confirmDiscard, skipStep: skip, finish };
 
   const keepGoing = (rearm: boolean) => {
     if (rearm) {
@@ -281,7 +283,9 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
           onKeep={() => keepGoing(confirm.rearm)}
           onOther={() => {
             setUnsaved(false);
-            setStepKey((key) => key + 1);
+            if (!confirm.keepStep) {
+              setStepKey((key) => key + 1);
+            }
             setConfirm(null);
             confirm.then();
           }}
