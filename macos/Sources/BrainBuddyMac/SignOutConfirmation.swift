@@ -4,7 +4,7 @@ import SwiftUI
 /// Design X-04, the sign-out confirmation (contracts/mac-app-host.md §7): an alert sheet on the
 /// window, opened only by the person's "Sign out…" after the window's unsaved-edit guard. Its words
 /// are `SignOutFlow.Prompt` (the unsent-changes or nothing-unsent variant, the open issues, the
-/// backup sentence); "Cancel" is the default (Return) and Esc; "Sign out and remove" is the
+/// unsaved weekly-review drafts, the backup sentence); "Cancel" is the default (Return) and Esc; "Sign out and remove" is the
 /// destructive button when changes would be removed, else "Sign out". When the count changed, or
 /// the kit refused a plain sign-out, the router presents it again with the new count. A failed
 /// removal shows "Couldn't sign out": nothing was removed and the person is still signed in.

@@ -406,6 +406,16 @@ public enum SyncCopy {
         "\(changes(count)) that couldn't sync will also be removed from this \(device.noun)."
     }
 
+    /// "1 unsaved weekly-review draft", "3 unsaved weekly-review drafts".
+    public static func reviewDrafts(_ count: Int) -> String {
+        count == 1 ? "1 unsaved weekly-review draft" : "\(grouped(count)) unsaved weekly-review drafts"
+    }
+
+    /// Text typed into weekly-review forms and not saved; sign-out removes it with the account's data.
+    public static func signOutReviewDrafts(count: Int, device: DeviceKind) -> String {
+        "\(reviewDrafts(count)) will also be removed from this \(device.noun)."
+    }
+
     /// Mac only. Undated once the date has passed while the backup is still kept.
     public static func signOutBackup(until: Date, now: Date, calendar: Calendar) -> String {
         let base = "A copy of your tasks from before the update stays on this Mac"
@@ -415,9 +425,10 @@ public enum SyncCopy {
 
     public static let signOutBackupRemoved = "The copy of your tasks from before the update will also be removed from this Mac."
 
-    /// The whole confirmation, its sentences in order: the base text, the open issues, then the backup note.
+    /// The whole confirmation, its sentences in order: the base text, the open issues, the unsaved
+    /// weekly-review drafts, then the backup note.
     public static func signOutConfirmation(
-        unsent: Int, offline: Bool, sessionEnded: Bool, issues: Int, backup: SignOutBackupNote?,
+        unsent: Int, offline: Bool, sessionEnded: Bool, issues: Int, reviewDrafts: Int = 0, backup: SignOutBackupNote?,
         device: DeviceKind, now: Date, calendar: Calendar
     ) -> SyncCopyText {
         var text =
@@ -426,6 +437,7 @@ public enum SyncCopy {
             : signOutNothingUnsent(device: device)
         var sentences = [text.detail].compactMap { $0 }
         if issues > 0 { sentences.append(signOutIssues(count: issues, device: device)) }
+        if reviewDrafts > 0 { sentences.append(signOutReviewDrafts(count: reviewDrafts, device: device)) }
         switch backup {
         case .kept(let until)?: sentences.append(signOutBackup(until: until, now: now, calendar: calendar))
         case .removed?: sentences.append(signOutBackupRemoved)

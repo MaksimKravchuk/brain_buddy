@@ -47,6 +47,8 @@ package final class SignOutFlow {
     package struct Prompt: Equatable, Sendable {
         package var unsent: Int
         package var issues: Int
+        /// Unsaved weekly-review drafts the sign-out removes; named in the text, never in the button.
+        package var reviewDrafts: Int
         package var offline: Bool
         package var sessionEnded: Bool
         package var backup: SignOutBackupNote?
@@ -99,13 +101,15 @@ package final class SignOutFlow {
         let snapshot = workspace.syncSnapshot
         let unsent = workspace.pendingChangeCount
         let issues = workspace.issues.count
+        let reviewDrafts = workspace.unsavedReviewDraftCount
         let backup = backupNote(initialUploadRemaining: snapshot.initialUploadRemaining)
         let text = SyncCopy.signOutConfirmation(
             unsent: unsent, offline: !snapshot.isOnline, sessionEnded: snapshot.sessionEnded, issues: issues,
-            backup: backup, device: .mac, now: now(), calendar: calendar
+            reviewDrafts: reviewDrafts, backup: backup, device: .mac, now: now(), calendar: calendar
         )
         return Prompt(
-            unsent: unsent, issues: issues, offline: !snapshot.isOnline, sessionEnded: snapshot.sessionEnded,
+            unsent: unsent, issues: issues, reviewDrafts: reviewDrafts, offline: !snapshot.isOnline,
+            sessionEnded: snapshot.sessionEnded,
             backup: backup, text: text, confirmTitle: unsent > 0 ? SignOutCopy.signOutAndRemove : SignOutCopy.signOut,
             changes: workspace.pendingChanges
         )

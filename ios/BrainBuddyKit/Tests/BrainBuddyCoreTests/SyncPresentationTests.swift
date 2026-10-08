@@ -405,6 +405,37 @@ struct SyncPresentationTests {
         #expect(confirm(unsent: 3).title == "3 changes haven't synced yet.")
     }
 
+    @Test("021-FR-018 unsaved weekly-review drafts are named singular and plural, after the issues and before the backup")
+    func signOutReviewDraftSentences() {
+        let calendar = Self.calendar
+        let until = Self.date(2026, 11, 5)
+        func confirm(
+            unsent: Int = 0, issues: Int = 0, drafts: Int, backup: SignOutBackupNote? = nil, device: DeviceKind = .mac
+        ) -> SyncCopyText {
+            SyncCopy.signOutConfirmation(
+                unsent: unsent, offline: false, sessionEnded: false, issues: issues, reviewDrafts: drafts, backup: backup,
+                device: device, now: SyncPresentationTests.now, calendar: calendar)
+        }
+        let base = "Your tasks are removed from this Mac. They stay in your account."
+        let one = "1 unsaved weekly-review draft will also be removed from this Mac."
+        let many = "3 unsaved weekly-review drafts will also be removed from this Mac."
+        #expect(SyncCopy.signOutReviewDrafts(count: 1, device: .mac) == one)
+        #expect(SyncCopy.signOutReviewDrafts(count: 3, device: .mac) == many)
+        #expect(SyncCopy.signOutReviewDrafts(count: 2, device: .iPhone) == "2 unsaved weekly-review drafts will also be removed from this iPhone.")
+        #expect(SyncCopy.reviewDrafts(1) == "1 unsaved weekly-review draft")
+        #expect(SyncCopy.reviewDrafts(1_200) == "1,200 unsaved weekly-review drafts")
+        #expect(confirm(drafts: 0).detail == base, "no drafts, no sentence")
+        #expect(confirm(drafts: 1).detail == base + " " + one)
+        #expect(confirm(unsent: 2, drafts: 3).detail?.hasSuffix(" " + many) == true)
+        let full = confirm(issues: 2, drafts: 3, backup: .kept(until: until)).detail
+        let issues = "2 changes that couldn't sync will also be removed from this Mac."
+        let backup = "A copy of your tasks from before the update stays on this Mac until 5 Nov."
+        #expect(full == [base, issues, many, backup].joined(separator: " "))
+        #expect(confirm(drafts: 1, backup: .removed).detail == [base, one, SyncCopy.signOutBackupRemoved].joined(separator: " "))
+        #expect(confirm(unsent: 3, drafts: 0).title == "3 changes haven't synced yet.", "drafts never change the title")
+        #expect(!SyncCopy.signOutReviewDrafts(count: 2, device: .mac).contains("—"))
+    }
+
     // MARK: Formats and the retired dash
 
     @Test("021-FR-016 how old the oldest change is, at each boundary")

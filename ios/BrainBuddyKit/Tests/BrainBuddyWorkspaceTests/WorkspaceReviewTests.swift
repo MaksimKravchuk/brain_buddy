@@ -383,6 +383,29 @@ import Testing
         #expect(try await workspace.store.load() == nil)
     }
 
+    @Test("021-FR-018 unsavedReviewDraftCount counts the drafts a sign-out removes, not expired or discarded ones")
+    func unsavedReviewDraftCountNamesWhatSignOutRemoves() async throws {
+        let clock = TestClock()
+        let workspace = try await activatedWorkspace(clock: clock)
+        #expect(workspace.unsavedReviewDraftCount == 0)
+        let project = try workspace.createProject(name: "Renovation")
+        let projectKey = DraftKey.projectNextAction(project)
+        let stepKey = DraftKey.reviewStep(session: ReviewSessionID.make(UUID()), step: .mindSweep, item: "0")
+        workspace.saveDraft("Call the plumber", for: projectKey)
+        #expect(workspace.unsavedReviewDraftCount == 1)
+        clock.advance(by: 6 * Self.day)
+        workspace.saveDraft("Call the bank", for: stepKey)
+        #expect(workspace.unsavedReviewDraftCount == 2)
+        workspace.discardDraft(for: stepKey)
+        #expect(workspace.unsavedReviewDraftCount == 1)
+        workspace.saveDraft("Call the bank", for: stepKey)
+        clock.advance(by: 1 * Self.day + 1)
+        #expect(workspace.unsavedReviewDraftCount == 1, "the first draft is older than 7 days and not shown any more")
+        await workspace.flush()
+        try await workspace.signOut(discardUnsyncedChanges: true)
+        #expect(workspace.unsavedReviewDraftCount == 0)
+    }
+
     // MARK: - Device auto-park (T089)
 
     @Test("020-FR-012 020-SC-006 no park without 24 hours of moves tomorrow; at most 10 per call; account-less parks are final")
