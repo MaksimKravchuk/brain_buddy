@@ -1,8 +1,7 @@
 # Feature 020 rollout decisions
 
-**Status: DRAFT, prepared from the defaults in `tasks.md` T169 on 2026-10-08. Awaiting the
-owner's confirmation.** Nothing here is an approval until the owner fills in the
-confirmation table at the end.
+**Status: CONFIRMED by the owner on 2026-10-08, with the defaults from `tasks.md` T169
+unchanged.** The cycle values below stay PENDING until the cycle has run.
 
 Owner decisions this draft builds on: the slice map (2026-10-06), the navigator scope cut
 (2026-10-07), and the manual-check, gate and backlog decisions of 2026-10-08 (listed
@@ -76,6 +75,6 @@ feature takes it.
 
 | | value |
 |---|---|
-| stages and entry criteria above confirmed (or edited) | PENDING |
-| `BBWeeklyReviewLocal` decision confirmed | PENDING |
-| confirmed by / date | PENDING |
+| stages and entry criteria above confirmed (or edited) | confirmed as drafted, no edits |
+| `BBWeeklyReviewLocal` decision confirmed | confirmed as drafted |
+| confirmed by / date | the owner (MaksimKravchuk), in the delivery session, 2026-10-08 |
