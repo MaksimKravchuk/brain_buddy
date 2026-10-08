@@ -605,10 +605,20 @@ public enum FormulationRule {
         return bump(restored)
     }
 
-    /// Decision Undo: the snapshot field for field, at `revision + 1` (FR-048).
-    public static func restore(_ task: ClockedTask, from snapshot: ClockedTask) -> ClockedTask {
+    /// Decision Undo: the snapshot at `revision + 1`, keeping the bookkeeping
+    /// written since the decision (FR-048, §3 "decision undo"). A task restored
+    /// into Next keeps the larger of the snapshot's park floor and the current
+    /// task's (counted only while it is in Next), and a formulation that
+    /// started before the activation instant gets the activation clamp.
+    public static func restore(_ task: ClockedTask, from snapshot: ClockedTask, settings: OwnerClockSettings) -> ClockedTask {
         var restored = snapshot
         restored.revision = task.revision + 1
+        guard restored.state == .next else { return restored }
+        let floors = [snapshot.formulation?.parkFloorAt, task.state == .next ? task.formulation?.parkFloorAt : nil]
+        if let floor = floors.compactMap({ $0 }).max() { restored.formulation?.parkFloorAt = floor }
+        if let activatedAt = settings.activatedAt, let clock = restored.formulation, clock.startedAt < activatedAt {
+            restored = activateClock(restored, activatedAt: activatedAt, formulationID: clock.id)
+        }
         return restored
     }
 

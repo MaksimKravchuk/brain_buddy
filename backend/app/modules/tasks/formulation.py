@@ -678,10 +678,42 @@ def undo_release(
     return _bump(restored)
 
 
-def restore(clock: TaskClock, snapshot: TaskClock) -> TaskClock:
-    """Decision Undo: the snapshot field for field, at ``revision + 1`` (FR-048)."""
+def restore(
+    clock: TaskClock, snapshot: TaskClock, *, settings: OwnerClockSettings
+) -> TaskClock:
+    """Decision Undo: the snapshot at ``revision + 1``, keeping the bookkeeping
+    written since the decision (FR-048, §3 "decision undo").
 
-    return replace(snapshot, revision=clock.revision + 1)
+    A task restored into Next keeps ``max(snapshot floor, current floor)`` (the
+    current one counts only while it is in Next), and a restored formulation
+    that started before ``activated_at`` gets the activation clamp.
+    """
+
+    restored = replace(snapshot, revision=clock.revision + 1)
+    if restored.state != "next":
+        return restored
+    floors = [
+        floor
+        for floor in (
+            snapshot.formulation_park_floor_at,
+            clock.formulation_park_floor_at if clock.state == "next" else None,
+        )
+        if floor is not None
+    ]
+    if floors:
+        restored = replace(restored, formulation_park_floor_at=max(floors))
+    started = restored.formulation_started_at
+    if (
+        settings.activated_at is not None
+        and started is not None
+        and started < settings.activated_at
+    ):
+        restored = activate_clock(
+            restored,
+            activated_at=settings.activated_at,
+            formulation_id=restored.formulation_id or "",
+        )
+    return restored
 
 
 # ------------------------------------------------- clock bookkeeping (no bump)

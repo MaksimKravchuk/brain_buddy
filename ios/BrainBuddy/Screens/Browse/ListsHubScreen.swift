@@ -44,11 +44,27 @@ struct ListsHubScreen: View {
         }
     }
 
-    /// Weekly review sits apart from the four lists: it is not a fifth list,
-    /// and it is visibly deferred.
+    /// Weekly review sits apart from the four lists: it is not a fifth list.
+    /// While it is exposed it is a working row with a neutral recap; until
+    /// then it is visibly deferred (FR-042).
     private var reviewSection: some View {
         Section {
-            DeferredRow(title: "Weekly review", systemImage: "arrow.counterclockwise")
+            if workspace.reviewExposed {
+                NavigationLink(value: AppRoute.review) {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ReviewCopy.weeklyReview)
+                            Text(workspace.daysSinceLastReview().map { ReviewCopy.lastReview(daysAgo: $0) } ?? ReviewCopy.setUpInAMinute)
+                                .font(BBFont.meta)
+                                .foregroundStyle(BBColor.textTertiary)
+                        }
+                    } icon: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                }
+            } else {
+                DeferredRow(title: ReviewCopy.weeklyReview, systemImage: "arrow.counterclockwise")
+            }
         }
     }
 
