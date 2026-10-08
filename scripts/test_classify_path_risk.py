@@ -5,7 +5,8 @@ The classifier is the mechanical Ship/Show/Ask gate (ADR-0008): a PR-less
 trunk candidate must fail closed before any push when its changed paths touch
 ASK-class surfaces. ADR-0030 narrows ASK, while there are no real users, to
 persisted data and migrations, secrets, GDPR account deletion/export, the
-Allure gate rules and the landing machinery itself. Ambiguity fails toward
+Allure gate rules, every GitHub workflow (they can read repository
+secrets) and the landing machinery itself. Ambiguity fails toward
 ASK; documentation-only paths are SHIP.
 """
 
@@ -47,7 +48,11 @@ ASK_PATHS = (
     "scripts/classify_path_risk.py",
     "scripts/check_gate_integrity.py",
     ".specify/gate-integrity.json",
+    # Any workflow can read repository secrets.
     ".github/workflows/deploy-fly-production.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/claude.yml",
+    ".github/actions/anything/action.yml",
 )
 
 SHIP_PATHS = (
@@ -59,8 +64,6 @@ SHIP_PATHS = (
     "feature.txt",
     # ADR-0030: CI, delivery scripts, Docker/Fly configuration and auth code
     # are SHIP while there are no real users; CI and review still guard them.
-    ".github/workflows/ci.yml",
-    ".github/actions/anything/action.yml",
     "scripts/submit_to_trunk.sh",
     "scripts/production_smoke.sh",
     "scripts/new_helper.py",
@@ -132,7 +135,7 @@ class ClassifyPathTest(unittest.TestCase):
         for path in (
             "scripts/classify_path_risk.py",
             "./scripts/check_gate_integrity.py",
-            ".github/workflows/deploy-fly-production.yml",
+            ".specify/gate-integrity.json",
         ):
             with self.subTest(path=path):
                 classification, reason = classify_path(path)
@@ -140,7 +143,7 @@ class ClassifyPathTest(unittest.TestCase):
                 self.assertIn("landing gate", reason)
         for path in (
             "scripts/test_classify_path_risk.py",
-            ".github/workflows/fly-review-frontend.yml",
+            "scripts/check_gate_integrity_notes.py",
             "backend/app/services/account_service_helpers.py",
         ):
             with self.subTest(path=path):

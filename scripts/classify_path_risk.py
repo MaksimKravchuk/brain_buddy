@@ -7,12 +7,13 @@ ASK class. ASK-class surfaces must land through a reviewed PR or an explicitly
 authorized manual high-risk landing, never automatic trunk promotion.
 
 ADR-0030 narrows ASK, while the product has no real users, to what cannot be
-undone after a mistake: persisted data and migrations, secrets, GDPR account
-deletion/export, the Allure quality-gate rules, and the landing machinery
-that enforces this classification (this file, the gate-integrity checker and
-its manifest, and the default-branch release workflow). CI workflows,
-delivery scripts, Docker/Fly configuration and auth/session code are SHIP:
-CI, review and the verified deploy smoke still guard them.
+undone after a mistake: persisted data and migrations, secrets (including
+every GitHub workflow, since any of them can read repository secrets), GDPR
+account deletion/export, the Allure quality-gate rules, and the landing
+machinery that enforces this classification (this file and the
+gate-integrity checker and its manifest). Delivery scripts, Docker/Fly
+configuration and auth/session code are SHIP: CI, review and the verified
+deploy smoke still guard them.
 
 Two input modes:
 
@@ -30,7 +31,8 @@ Two input modes:
 
 Classification rules are ordered and fail closed toward ASK:
 
-1. ASK directory prefix ``backend/data/`` (persisted data).
+1. ASK directory prefixes ``backend/data/`` (persisted data) and
+   ``.github/`` (workflows can read repository secrets).
 2. ASK exact paths: GDPR account deletion/export, the Allure quality-gate
    rules, and the landing/gate machinery.
 3. ASK filenames: ``.env`` and ``.env.*`` (environment/secrets templates).
@@ -58,6 +60,9 @@ SHIP = "SHIP"
 
 ASK_PREFIXES: tuple[tuple[str, str], ...] = (
     ("backend/data/", "persisted data surface"),
+    # Any workflow can read repository secrets, and which ones a new or edited
+    # workflow reaches cannot be decided from its path.
+    (".github/", "CI/workflow surface (repository secrets)"),
 )
 
 # Surfaces whose names carry no risk token. Exact paths only: sibling paths
@@ -76,9 +81,6 @@ ASK_EXACT_PATHS: dict[str, str] = {
     "scripts/classify_path_risk.py": "landing gate surface (risk classifier)",
     "scripts/check_gate_integrity.py": "landing gate surface (gate integrity)",
     ".specify/gate-integrity.json": "landing gate surface (gate manifest)",
-    ".github/workflows/deploy-fly-production.yml": (
-        "landing gate surface (release workflow)"
-    ),
 }
 
 SECRET_TOKENS: frozenset[str] = frozenset(

@@ -278,16 +278,16 @@ class DeployContractTest(unittest.TestCase):
 
     def test_exact_classifier_path_fixtures_cover_all_revisions(self) -> None:
         for name, paths, expected in (
-            # ADR-0030: of these listings only the landing machinery
-            # (release workflow, gate-integrity checker and manifest) is ASK.
-            ("old 17-path listing", OLD_17_PATHS, {"ASK": 3, "SHIP": 14}),
-            ("prior 18-path listing", PRIOR_18_PATHS, {"ASK": 3, "SHIP": 15}),
+            # ADR-0030: of these listings only the workflows and the landing
+            # machinery (gate-integrity checker and manifest) are ASK.
+            ("old 17-path listing", OLD_17_PATHS, {"ASK": 4, "SHIP": 13}),
+            ("prior 18-path listing", PRIOR_18_PATHS, {"ASK": 4, "SHIP": 14}),
             (
                 "80cc5e4 successor correction listing",
                 SUCCESSOR_2_PATHS,
                 {"ASK": 0, "SHIP": 2},
             ),
-            ("current 19-path listing", CURRENT_19_PATHS, {"ASK": 3, "SHIP": 16}),
+            ("current 19-path listing", CURRENT_19_PATHS, {"ASK": 4, "SHIP": 15}),
         ):
             with self.subTest(listing=name):
                 self.assertEqual(len(paths), sum(expected.values()))

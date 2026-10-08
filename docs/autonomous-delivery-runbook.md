@@ -81,7 +81,7 @@ external effects — never land automatically; they use the ASK landing procedur
    `scripts/classify_path_risk.py` fed by `git diff --no-renames --name-only -z`
    (NUL-separated, so non-ASCII paths classify on their real names and a rename away
    from an ASK path still surfaces as its deletion; ASK-class paths — under ADR-0030,
-   persisted data and migrations, secrets, GDPR account deletion/export,
+   persisted data and migrations, secrets, GitHub workflows, GDPR account deletion/export,
    `allurerc.mjs`, and the landing gate itself — fail the submission; this
    gate is never skippable), runs fast local checks, pushes the exact SHA to
    `trunk-candidate/<sha>`, and prints the Actions URL. It never pushes `main` and

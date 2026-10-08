@@ -34,19 +34,21 @@ plus the machinery that enforces this boundary:
 
 - persisted data and migrations: `backend/data/`, and `migration`/`migrations`/`alembic` tokens;
 - secrets: `.env`/`.env.*`, and `secret`/`secrets`/`credential`/`credentials` tokens;
+- every GitHub workflow and action under `.github/`: any of them can read repository
+  secrets, and which ones a new or edited workflow reaches cannot be decided from its path;
 - GDPR account deletion and export: `backend/app/services/account_service.py`;
 - the Allure quality-gate rules: `allurerc.mjs`;
 - the landing gate itself:
   - `scripts/classify_path_risk.py`;
   - `scripts/check_gate_integrity.py`;
   - `.specify/gate-integrity.json`;
-  - `.github/workflows/deploy-fly-production.yml`.
+  - `.github/workflows/deploy-fly-production.yml`, which is already covered by `.github/`.
 
 The landing-gate paths stay ASK because a candidate that could change them could
 widen SHIP for itself and every change after it.
 
 The following are SHIP:
-- the other CI workflows, delivery scripts and the `Makefile`;
+- delivery scripts and the `Makefile`;
 - Docker, Compose and Fly configuration;
 - auth, session, user and permission code, including the four API modules ADR-0008
   listed by exact path.
@@ -67,7 +69,7 @@ is unchanged:
 Before the first real (non-owner, non-test) user is invited, or before any valuable
 data is stored, restore the ADR-0008 ASK scope:
 - auth/session/user code and the four API privacy modules;
-- CI/CD, Docker/Fly and delivery scripts.
+- Docker/Fly configuration and delivery scripts.
 
 This ADR then becomes superseded. Treat a missed trigger as a defect, not a judgement call.
 
@@ -75,6 +77,7 @@ This ADR then becomes superseded. Treat a missed trigger as a defect, not a judg
 
 - Most feature work is eligible for the ADR-0023 fast lane, and `submit_to_trunk.sh`
   accepts it.
-- An auth or CI regression can reach the test environment faster. CI, review and the
+- An auth or delivery-script regression can reach the test environment faster. CI, review and the
   deploy smoke are the only guard on those surfaces until the trigger fires.
-- Data loss, leaked secrets and changes to the gate itself still need the owner.
+- Data loss, leaked secrets, workflow changes and changes to the gate itself still need
+  the owner.
