@@ -78,9 +78,15 @@
       "Bash(fly *destroy*)",
       "Bash(fly *delete*)",
       "Bash(fly * rm *)",
+      "Bash(fly *unset*)",
+      "Bash(fly *remove*)",
+      "Bash(fly *release*)",
       "Bash(flyctl *destroy*)",
       "Bash(flyctl *delete*)",
-      "Bash(flyctl * rm *)"
+      "Bash(flyctl * rm *)",
+      "Bash(flyctl *unset*)",
+      "Bash(flyctl *remove*)",
+      "Bash(flyctl *release*)"
     ],
     "deny": [
       "Read(//home/user/brain_buddy/backend/data/**)",

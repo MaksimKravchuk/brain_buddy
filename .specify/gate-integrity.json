@@ -1,7 +1,7 @@
 {
   "comment": "Hashes of the files that define this repository's delivery gates. Regenerate deliberately with `python3 scripts/check_gate_integrity.py --update`, and expect a reviewer to ask what changed and why.",
   "files": {
-    ".claude/settings.json": "68b13c70f38b39e128facbeadd5c7a3ceeddb76d262b4f5e9d5950765c342f97",
+    ".claude/settings.json": "29b39d0c630e569d3fc43c94486b844cfad5fea59b83bcf076108def59560c4e",
     ".specify/extensions.yml": "fa7d9ee179b86d2dc349938557aa4e97eec963fb358c794154cce37a5d78b7e8",
     ".specify/templates/pre-freeze-receipt.schema.json": "44abf5960fd42e7130f889ecda463c186c46953b461e3abbeed043f78050ca8d",
     ".specify/workflows/speckit/handoff.schema.json": "089076b6df81ada79d7ba596b873c686a9d1748b8a921c592cce31f98dc82bf1",
