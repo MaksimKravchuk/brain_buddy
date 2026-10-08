@@ -18,6 +18,14 @@ export interface ReviewRun {
    * twice is harmless. Steps go through `useTrackedWrite` rather than calling this.
    */
   beginWrite: () => () => void;
+  /**
+   * The step's queue is still loading or failed to load (D-03): the shell keeps its
+   * Next disabled, so a step is never finished unseen. Skip step stays, because the
+   * load failure offers Retry or Skip. Only the step that reported it can hold it:
+   * the hold is gone when that step is, whatever it last reported. Steps without a
+   * queue never call it. `QueueGate` is the one caller.
+   */
+  setQueueBlocked: (blocked: boolean) => void;
   /** A field of the step holds text that has not been saved: leaving asks first (FR-052). */
   setUnsaved: (unsaved: boolean) => void;
   /** Run `close` for a form's Back or Cancel: at once when nothing unsaved is typed, else after the discard confirmation (FR-052). */

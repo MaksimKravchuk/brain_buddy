@@ -298,9 +298,12 @@ test("E2E-A11Y-01 020-FR-048 020-FR-052 a whole quick review with the keyboard a
     await tabTo(page, /^Quick/);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "Wins of the week" })).toBeFocused();
+    // Next waits for the step's queue (D-03) and Tab skips it while disabled, so wait for it first.
+    await expect(page.getByRole("button", { name: "Next", exact: true })).toBeEnabled();
     await tabTo(page, "Next", true);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Next", exact: true })).toBeEnabled();
     await tabTo(page, "Next", true);
     await page.keyboard.press("Enter");
     await expect(page.getByRole("region", { name: "Renovate the bathroom" })).toBeVisible();

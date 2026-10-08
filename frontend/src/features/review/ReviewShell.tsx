@@ -108,6 +108,15 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
     };
   }, []);
 
+  // The showing step's queue is loading or failed (D-03). Held against the step it came from, so a
+  // hold left by the step before can never reach the next one.
+  const stepInstance = `${session.current_step ?? "summary"}-${stepKey}`;
+  const [blockedBy, setBlockedBy] = useState<string | null>(null);
+  const setQueueBlocked = useCallback(
+    (blocked: boolean) => setBlockedBy((held) => (blocked ? stepInstance : held === stepInstance ? null : held)),
+    [stepInstance]
+  );
+
   const steps = STEP_ORDER.filter((code) => code in session.steps);
   const current = session.current_step ?? "summary";
   const position = steps.indexOf(current) + 1;
@@ -201,9 +210,12 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const skip = () => request(() => advance("skipped"));
   // A form's own Back closes only that form, so the rest of the step keeps its state.
   const confirmDiscard = (close: () => void) => request(close, false, true);
-  const run: ReviewRun = { session, state, progress, beginWrite, setUnsaved, confirmDiscard, skipStep: skip, finish };
+  const run: ReviewRun = { session, state, progress, beginWrite, setQueueBlocked, setUnsaved, confirmDiscard, skipStep: skip, finish };
   // Next and Skip also wait for the connection; Leave stays available offline, where a write fails and settles.
   const held = bar.disabled || writing;
+  // Next also waits for the step's queue: finishing a step whose tasks were never shown would skip them
+  // unseen, and bypass the load failure's Retry or Skip. Skip step is not held by it.
+  const nextHeld = held || blockedBy === stepInstance;
   const saving = bar.pending !== null || writing;
 
   const keepGoing = (rearm: boolean) => {
@@ -301,7 +313,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
                   <div className="mt-2 flex justify-end">
                     <button
                       type="button"
-                      disabled={held}
+                      disabled={nextHeld}
                       className="min-h-11 rounded-lg bg-sky-700 px-5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
                       onClick={() => request(() => advance("finished"))}
                     >
