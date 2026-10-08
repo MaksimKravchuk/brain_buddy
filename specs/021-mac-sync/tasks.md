@@ -733,9 +733,24 @@ Earlier increments are each independently useful and safe:
     it now lists the items' attributes and reads each item's data. And a sign-in after a rebuild
     updated the earlier build's item in place (writing data is allowed to any app) but could not
     read it back (its access list trusts the earlier build), so every routine read asked to sign in
-    again; an interactive write now reads the token back without a prompt and deletes and adds the
-    item when it can't. The test models "an earlier build's item" as one `/usr/bin/security`
-    created.
+    again. The test models "an earlier build's item" as one `/usr/bin/security` created.
+  - **Deviation: no delete-and-re-add after a rebuild** (contracts/mac-app-host.md §7 "The Keychain
+    prompt" and §8, data-model E9 "Recovery after Deny", kit-commands §4, plan, research R17 still
+    describe it). The `macos-app` lane showed macOS refuses to let a build delete an item another
+    program created: `errSecInvalidOwnerEdit` (-25244), with no prompt. So on macOS the store
+    writes past the earlier build's item instead: a server's session items are accounts `<host>`,
+    `<host>#1`, `<host>#2`, …; the highest generation is the session. A routine read of a highest
+    item this build may not read is `accessDenied` ("Sign in again to sync", unchanged); a routine
+    write never goes past it (`accessDenied`); the person's sign-in adds the next generation (this
+    build created it, so it reads back without a prompt; checked, and a failure is "couldn't save
+    sign-in") and never writes into the earlier build's item. Removals delete every item this build
+    may delete and leave, without failing, an item it may neither read nor delete. The earlier
+    build's item stays, unread, until the person deletes it in Keychain Access; its server session
+    ends at expiry (FR-005 residual, recorded in `docs/native-macos-app.md` and the data-retention
+    row). Pending logouts already follow this: one item per logout, an unreadable one skipped. No
+    access prompt is ever raised, so the spec's "may ask once" assumption holds trivially. iOS is
+    unchanged (one item per server). `MacKeychainTests` gains "the newest item decides", seven
+    tests in all (manual plan K2 and its count updated).
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

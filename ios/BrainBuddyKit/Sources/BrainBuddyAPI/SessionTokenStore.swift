@@ -17,10 +17,12 @@ public protocol SessionTokenStore: Sendable {
     /// item this build may not use throws `TokenStoreError.accessDenied`, which the engine treats
     /// as "sign in again".
     func token(for serverURL: URL) throws -> String?
-    /// A routine write, for example a renewed cookie; never prompts either.
+    /// A routine write, for example a renewed cookie; never prompts either, and never goes past a
+    /// session this build may not use (it throws `TokenStoreError.accessDenied`).
     func setToken(_ token: String, for serverURL: URL) throws
-    /// The write of a sign-in the person started: the one place the system may ask for access, and
-    /// where an item this build can no longer use is replaced. `setToken(_:for:)` is for the rest.
+    /// The write of a sign-in the person started: the one place the system may ask (for example to
+    /// unlock the keychain), and the one write that puts a new session in place of one this build
+    /// can no longer use. `setToken(_:for:)` is for the rest.
     func setToken(_ token: String, for serverURL: URL, interactive: Bool) throws
     func removeToken(for serverURL: URL) throws
     /// Removes the session token of every server: with no account linked on
@@ -52,7 +54,8 @@ extension SessionTokenStore {
 /// A token store failure that means something beyond "try again later", whatever keeps the tokens.
 public enum TokenStoreError: Error, Hashable, Sendable {
     /// The session is stored but this build may not read it without asking (macOS, after the app
-    /// was rebuilt or re-signed). Only a sign-in the person starts can replace it, so the client
+    /// was rebuilt or re-signed). Only a sign-in the person starts can put a new session in its
+    /// place, so the client
     /// reports it as an ended session (`.unauthorized`) and the engine asks to sign in again.
     case accessDenied
 }
@@ -142,6 +145,17 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
     /// is set; it is only kept out of iCloud Keychain, and every call but a person's sign-in fails
     /// instead of showing macOS's access prompt. The widgets and App Intents never sync and never
     /// read the session, and there is no keychain sharing, so `accessGroup` stays nil.
+    ///
+    /// **Session items on macOS.** On the file-based login keychain any app may overwrite an item's
+    /// data, but only the apps its access list trusts may read it, and only the app that created it
+    /// may delete it (any other gets `errSecInvalidOwnerEdit`, -25244, with no prompt). An ad-hoc
+    /// rebuilt app is a new client, so the item an earlier build left can be neither used nor
+    /// removed. The store therefore writes past it instead of into it: a server's session items are
+    /// accounts `<host>`, `<host>#1`, `<host>#2`, … and the **highest generation is the session**.
+    /// Items under it are ignored: never read, never written, and left by removals that macOS
+    /// refuses. A routine read of a highest item this build may not read is `accessDenied` ("sign in
+    /// again"); a person's sign-in then adds the next generation, which this build created and so
+    /// reads without a prompt. iOS keeps one item per server, `<host>`, and none of this.
     public final class KeychainSessionTokenStore: SessionTokenStore {
         public static let defaultService = "app.brainbuddy.session"
 
@@ -214,29 +228,48 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
             return item
         }
 
+
         public func token(for serverURL: URL) throws -> String? {
-            var query = searchQuery(service, account: BrainBuddyAPI.sessionScope(for: serverURL))
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            try sessionToken(BrainBuddyAPI.sessionScope(for: serverURL))
+        }
+
+        /// The session of one server: on macOS the highest generation's item, on iOS the one item.
+        private func sessionToken(_ scope: String) throws -> String? {
+            #if os(macOS)
+                guard let current = try sessionItems(scope).first else { return nil }
+                return try readToken(account: current.account)
+            #else
+                return try readToken(account: scope)
+            #endif
+        }
+
+        /// One session item's token, never prompting.
+        private func readToken(account: String) throws -> String? {
+            let (status, data) = readData(service, account: account)
             switch status {
             case errSecSuccess:
-                guard let data = result as? Data else { return nil }
-                return String(data: data, encoding: .utf8)
+                return data.flatMap { String(data: $0, encoding: .utf8) }
             case errSecItemNotFound:
                 return nil
             default:
                 #if os(macOS)
                     // The item is there, but this build may not read it without asking (a rebuilt
-                    // app is a new client of it): only the person's next sign-in can replace it. A
-                    // refused access reads as either status, as the interactive write below treats them.
-                    if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
-                        throw TokenStoreError.accessDenied
-                    }
+                    // app is a new client of it): only the person's next sign-in can write past it.
+                    // A refused access reads as either status.
+                    if Self.isRefusal(status) { throw TokenStoreError.accessDenied }
                 #endif
                 throw KeychainError(status: status)
             }
+        }
+
+        /// One item's data, read without a prompt on macOS.
+        private func readData(_ service: String, account: String) -> (OSStatus, Data?) {
+            var query = searchQuery(service, account: account)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            return (status, result as? Data)
         }
 
         public func setToken(_ token: String, for serverURL: URL) throws {
@@ -244,44 +277,20 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         }
 
         public func setToken(_ token: String, for serverURL: URL, interactive: Bool) throws {
+            try store(token, for: serverURL, interactive: interactive)
+        }
+
+        private func store(_ token: String, for serverURL: URL, interactive: Bool) throws {
+            let scope = BrainBuddyAPI.sessionScope(for: serverURL)
             #if os(macOS)
-                do {
-                    try store(token, for: serverURL, interactive: interactive)
-                } catch let error as KeychainError
-                    where interactive && (error.status == errSecAuthFailed || error.status == errSecInteractionNotAllowed)
-                {
-                    // The item is there but this build may not use it (a rebuilt app is a new client of
-                    // it): replace it, which only a sign-in the person started may do.
-                    try replace(token, for: serverURL)
-                    return
-                }
-                // On the file-based login keychain, writing an item's data is allowed to any app, but
-                // reading it back only to the apps its access list trusts (the build that created it).
-                // So after a rebuild the update above succeeds and leaves an item this build can't read:
-                // every routine read would then ask to sign in again. A person's sign-in therefore
-                // checks, without a prompt, that it can read the token back, and replaces the item
-                // (a new one trusts this build) when it can't.
-                if interactive, (try? self.token(for: serverURL)) != token {
-                    try replace(token, for: serverURL)
-                }
+                try storeOnMac(token, scope: scope, interactive: interactive)
             #else
-                try store(token, for: serverURL, interactive: interactive)
+                try upsert(Data(token.utf8), account: scope, interactive: interactive)
             #endif
         }
 
-        #if os(macOS)
-            /// Deletes the item and adds it again, so its access list is this build's, then checks the
-            /// token reads back without a prompt. Only a sign-in the person started gets here.
-            private func replace(_ token: String, for serverURL: URL) throws {
-                try remove(serverURL, interactive: true)
-                try store(token, for: serverURL, interactive: true)
-                guard (try? self.token(for: serverURL)) == token else { throw KeychainError(status: errSecAuthFailed) }
-            }
-        #endif
-
-        private func store(_ token: String, for serverURL: URL, interactive: Bool) throws {
-            let account = BrainBuddyAPI.sessionScope(for: serverURL)
-            let data = Data(token.utf8)
+        /// Overwrites the item's data, or adds the item when there is none.
+        private func upsert(_ data: Data, account: String, interactive: Bool) throws {
             var attributes: [String: Any] = [kSecValueData as String: data]
             attributes.merge(Self.storageAttributes) { _, new in new }
             let query = searchQuery(service, account: account, interactive: interactive)
@@ -298,19 +307,123 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         }
 
         public func removeToken(for serverURL: URL) throws {
-            try remove(serverURL, interactive: false)
-        }
-
-        private func remove(_ serverURL: URL, interactive: Bool) throws {
-            let query = searchQuery(service, account: BrainBuddyAPI.sessionScope(for: serverURL), interactive: interactive)
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+            let scope = BrainBuddyAPI.sessionScope(for: serverURL)
+            #if os(macOS)
+                try delete(service, accounts: sessionItems(scope).map(\.account))
+            #else
+                try Self.deleteAll(searchQuery(service, account: scope))
+            #endif
         }
 
         /// Every item of `service` (all servers); pending logouts live under
         /// another service and stay.
         public func removeAllTokens() throws {
-            try Self.deleteAll(searchQuery(service))
+            #if os(macOS)
+                try delete(service, accounts: accounts(of: service))
+            #else
+                try Self.deleteAll(searchQuery(service))
+            #endif
+        }
+
+        #if os(macOS)
+            /// One of a server's session items on macOS (see the type's documentation).
+            private struct SessionItem {
+                var account: String
+                var generation: Int
+            }
+
+            /// The session items of one server, highest generation first. Their attributes are listed
+            /// without reading any item's data, which needs no access to it.
+            private func sessionItems(_ scope: String) throws -> [SessionItem] {
+                try accounts(of: service)
+                    .compactMap { account in
+                        Self.generation(of: account, scope: scope).map { SessionItem(account: account, generation: $0) }
+                    }
+                    .sorted { $0.generation > $1.generation }
+            }
+
+            /// `<host>` is generation 0, `<host>#<n>` (n ≥ 1, written as `String(n)`) generation n;
+            /// any other account is not this server's session.
+            private static func generation(of account: String, scope: String) -> Int? {
+                if account == scope { return 0 }
+                let prefix = scope + "#"
+                guard account.hasPrefix(prefix) else { return nil }
+                let suffix = String(account.dropFirst(prefix.count))
+                guard let generation = Int(suffix), generation > 0, String(generation) == suffix else { return nil }
+                return generation
+            }
+
+            private static func account(scope: String, generation: Int) -> String {
+                generation == 0 ? scope : "\(scope)#\(generation)"
+            }
+
+            /// The highest item, when this build may read it, is the one to write; a routine write
+            /// never goes past one it may not read ("sign in again" stays). A person's sign-in writes
+            /// past it: a new item of the next generation, which only this build created and so is the
+            /// one it may read. It never writes into an item another build created (that build could
+            /// read the new session), and it checks without a prompt that the token reads back.
+            private func storeOnMac(_ token: String, scope: String, interactive: Bool) throws {
+                let data = Data(token.utf8)
+                if let current = try sessionItems(scope).first {
+                    if isRefused(service, account: current.account) {
+                        guard interactive else { throw TokenStoreError.accessDenied }
+                        let next = Self.account(scope: scope, generation: current.generation + 1)
+                        try upsert(data, account: next, interactive: true)
+                    } else {
+                        try upsert(data, account: current.account, interactive: interactive)
+                    }
+                } else {
+                    try upsert(data, account: scope, interactive: interactive)
+                }
+                if interactive, (try? sessionToken(scope)) != token {
+                    throw KeychainError(status: errSecAuthFailed)
+                }
+            }
+
+            /// Whether this build may not read the item without asking.
+            private func isRefused(_ service: String, account: String) -> Bool {
+                Self.isRefusal(readData(service, account: account).0)
+            }
+
+            private static func isRefusal(_ status: OSStatus) -> Bool {
+                status == errSecInteractionNotAllowed || status == errSecAuthFailed
+            }
+
+            /// Deletes each item, never prompting, and tries every one before it reports a failure. An
+            /// item this build may not read and macOS won't let it delete (another build created it:
+            /// `errSecInvalidOwnerEdit`, or a refusal without a prompt) is left: nothing reads it, and
+            /// its server session ends by expiring. Any other failure is reported.
+            private func delete(_ service: String, accounts: [String]) throws {
+                var failure: KeychainError?
+                for account in accounts {
+                    let status = SecItemDelete(searchQuery(service, account: account) as CFDictionary)
+                    if status == errSecSuccess || status == errSecItemNotFound { continue }
+                    let refusedDeletion = status == errSecInvalidOwnerEdit || Self.isRefusal(status)
+                    if refusedDeletion, isRefused(service, account: account) { continue }
+                    failure = failure ?? KeychainError(status: status)
+                }
+                if let failure { throw failure }
+            }
+        #endif
+
+        /// The accounts of every item of `service`, from their attributes: the macOS file-based
+        /// keychain (the Mac's login keychain) refuses `kSecReturnData` together with
+        /// `kSecMatchLimitAll` with `errSecParam` (-50), which the data-protection keychain of iOS
+        /// accepts, so data is read one item at a time.
+        private func accounts(of service: String) throws -> [String] {
+            var query = searchQuery(service)
+            query[kSecReturnAttributes as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitAll
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            switch status {
+            case errSecSuccess:
+                return ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
+            case errSecItemNotFound:
+                return []
+            default:
+                throw KeychainError(status: status)
+            }
         }
 
         // MARK: Pending logouts
@@ -319,27 +432,13 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         /// one per logout (account = its id), holding the JSON of `PendingLogout`.
         public var pendingLogoutService: String { service + ".pending-logout" }
 
-        /// Lists the items' accounts first, then reads each one's data: the macOS file-based keychain
-        /// (the Mac's login keychain) refuses `kSecReturnData` together with `kSecMatchLimitAll` with
-        /// `errSecParam` (-50), which the data-protection keychain of iOS accepts. One query shape
-        /// for both platforms.
+        /// Lists the items' accounts first, then reads each one's data (`accounts(of:)`). Each
+        /// logout is an item of its own (account = its id), so a new one never meets an earlier
+        /// build's item: one this build may not read is skipped, never sent and never removed, and
+        /// its session ends by expiring on the server.
         public func pendingLogouts() throws -> [PendingLogout] {
-            var query = searchQuery(pendingLogoutService)
-            query[kSecReturnAttributes as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitAll
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            switch status {
-            case errSecSuccess:
-                break
-            case errSecItemNotFound:
-                return []
-            default:
-                throw KeychainError(status: status)
-            }
-            let accounts = ((result as? [[String: Any]]) ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
             let decoder = JSONDecoder()
-            return try Set(accounts).compactMap { account in
+            return try Set(accounts(of: pendingLogoutService)).compactMap { account in
                 try pendingLogoutData(account).flatMap { try? decoder.decode(PendingLogout.self, from: $0) }
             }
             .sorted { ($0.signedOutAt, $0.id.uuidString) < ($1.signedOutAt, $1.id.uuidString) }
@@ -348,14 +447,10 @@ public final class InMemorySessionTokenStore: SessionTokenStore {
         /// One pending logout's JSON, never prompting: nil when it went meanwhile, or when this build
         /// may not read it (an older build's; its session then ends by expiring on the server).
         private func pendingLogoutData(_ account: String) throws -> Data? {
-            var query = searchQuery(pendingLogoutService, account: account)
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-            var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            let (status, data) = readData(pendingLogoutService, account: account)
             switch status {
             case errSecSuccess:
-                return result as? Data
+                return data
             case errSecItemNotFound, errSecInteractionNotAllowed, errSecAuthFailed:
                 return nil
             default:
