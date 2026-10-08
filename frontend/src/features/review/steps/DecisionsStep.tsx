@@ -3,6 +3,14 @@
  * one task at a time, earliest-asking first. "Not now" passes a card and keeps
  * the task asking (FR-050); an Undo after each decision brings its card back
  * (FR-048).
+ *
+ * The queue is the run's stable snapshot, so after a reload or on another
+ * device it still lists every card of the run. Which of them are handled comes
+ * from the server's own task first: one that left Next, or no longer asks, was
+ * decided (or settled elsewhere) and is not shown again. Two cases leave the
+ * task unchanged on the server (a card saved anyway, FR-002, and a card set
+ * aside, FR-050; the server keeps neither per task on the wire), so this
+ * browser remembers them, per formulation, as long as the run's drafts live.
  */
 import { useState } from "react";
 
@@ -16,20 +24,37 @@ import type { DecisionOutcome } from "../DecisionDialog";
 import { asksForDecision, classifyFromInstants, formulationInstants } from "../formulation";
 import { pick } from "../plural";
 import { buttonClass, FailureBanner, QueueGate } from "./stepParts";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { useReviewRun } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
 
 const without = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set([...ids].filter((entry) => entry !== id));
+
+/** A task that is out of Next, or whose wording no longer asks: nothing is left to decide on it. */
+const settledOnServer = (task: TaskResponse, now: Date): boolean =>
+  task.state !== "next" || !asksForDecision(classifyFromInstants(now, formulationInstants(task.formulation)));
 
 export function DecisionsStep(): React.JSX.Element {
   const run = useReviewRun();
   const queue = useReviewQueue("decisions", run.session.id);
   const projects = useProjects();
   const action = useStepAction();
+  const marks = useReviewDrafts(run.session.id, "decisions_marks");
   const [decided, setDecided] = useState<ReadonlySet<string>>(new Set());
   const [stillAsking, setStillAsking] = useState<ReadonlySet<string>>(new Set());
   const [passed, setPassed] = useState<ReadonlySet<string>>(new Set());
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
+
+  // What this browser remembers of the run comes back once, when the queue has arrived.
+  const [marksRead, setMarksRead] = useState(false);
+  if (!marksRead && queue.data !== undefined) {
+    setMarksRead(true);
+    const marked = (kind: "decided" | "passed") =>
+      new Set(queue.data.items.filter((item) => item.formulation && marks.load(item.id, kind) === item.formulation.id).map((item) => item.id));
+    setDecided(marked("decided"));
+    setStillAsking(marked("decided"));
+    setPassed(marked("passed"));
+  }
 
   const onClose = (outcome: DecisionOutcome) => {
     // The inline card has no Close or Escape, so it only ever ends with a decision.
@@ -38,6 +63,7 @@ export function DecisionsStep(): React.JSX.Element {
     // A card saved anyway (FR-002) is decided, yet its task still asks.
     if (task.state === "next" && asksForDecision(classifyFromInstants(new Date(), formulationInstants(task.formulation)))) {
       setStillAsking((ids) => new Set(ids).add(task.id));
+      marks.save(task.id, "decided", (task.formulation as { id: string }).id);
     }
   };
 
@@ -45,6 +71,7 @@ export function DecisionsStep(): React.JSX.Element {
     setLatest((tasks) => ({ ...tasks, [restored.id]: restored }));
     setDecided((ids) => without(ids, restored.id));
     setStillAsking((ids) => without(ids, restored.id));
+    marks.clear(restored.id, "decided");
   };
 
   const notNow = (task: TaskResponse) => {
@@ -52,22 +79,27 @@ export function DecisionsStep(): React.JSX.Element {
     void action.run("not_now", "Not now", async () => {
       await run.progress(attempt);
       setPassed((ids) => new Set(ids).add(task.id));
+      // A card that is shown asks, so it has a running clock.
+      marks.save(task.id, "passed", (task.formulation as { id: string }).id);
     });
   };
 
   return (
     <QueueGate queries={[queue, projects]}>
       {() => {
+        const now = new Date();
         const items = (queue.data as ReviewQueue).items.map((item) => latest[item.id] ?? item);
         if (items.length === 0) {
           return <p className="m-0 text-sm text-slate-600">Nothing asks for a decision</p>;
         }
-        const current = items.find((item) => !decided.has(item.id) && !passed.has(item.id));
+        const isDecided = (item: TaskResponse) => decided.has(item.id) || settledOnServer(item, now);
+        const current = items.find((item) => !isDecided(item) && !passed.has(item.id));
         if (current === undefined) {
-          const left = items.length - decided.size;
-          return passed.size > 0 ? (
+          const decidedCount = items.filter(isDecided).length;
+          const left = items.length - decidedCount;
+          return left > 0 ? (
             <>
-              <p className="m-0 text-base font-medium text-slate-900">{`${decided.size} of ${items.length} decided`}</p>
+              <p className="m-0 text-base font-medium text-slate-900">{`${decidedCount} of ${items.length} decided`}</p>
               <p className="m-0 text-sm text-slate-600">{`${left} still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided.`}</p>
             </>
           ) : (

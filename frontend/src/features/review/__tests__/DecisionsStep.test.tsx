@@ -25,6 +25,7 @@ const undoDecision = vi.mocked(reviewApi.undoDecision);
 const bathroom = askingTask("task_bath", "Renovate the bathroom", { project_id: "project-home" });
 const cv = askingTask("task_cv", "Update the CV");
 const garage = askingTask("task_garage", "Clean out the garage");
+const bathroomClock = bathroom.formulation as NonNullable<TaskResponse["formulation"]>;
 const queue = (items: TaskResponse[]): ReviewQueue => ({ items, meta: {} });
 
 function decided(task: TaskResponse, type: string, after: Partial<TaskResponse>): DecisionResponse {
@@ -265,5 +266,127 @@ describe("020-FR-034 Decisions step: the card inline", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Not now" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Not now" }));
     expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+  });
+
+  it("020-FR-048 resuming after a reload skips the cards the server already settled and shows the first one that still asks", async () => {
+    const user = userEvent.setup();
+    const moved = { ...cv, state: "someday" as const, formulation: null, revision: 9 };
+    const cancelled = { ...garage, state: "cancelled" as const, formulation: null, revision: 9 };
+    const reformulated = askingTask("task_new", "Fix the gutter", { formulation: { ...bathroomClock, id: "form_fresh", started_at: iso(-1000), ageing_at: iso(7 * 86_400_000), ask_at: iso(13 * 86_400_000), park_due_at: iso(20 * 86_400_000) } });
+    const extended = askingTask("task_ext", "Order the tiles", { formulation: { ...bathroomClock, extended_at: iso(-1000), extension_reason: "waiting for a quote", paused_until: iso(6 * 86_400_000) } });
+    getQueue.mockResolvedValueOnce(queue([moved, cancelled, reformulated, extended, bathroom]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByText("5 of 5 · earliest-asking first")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Update the CV" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+
+    expect(await screen.findByText("4 of 5 decided")).toBeInTheDocument();
+    expect(screen.getByText(/^1 still ask for a decision\./)).toBeInTheDocument();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-048 a card saved anyway before a reload is not asked again and is not counted twice", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    decide.mockResolvedValueOnce(decided(bathroom, "reformulate", { title: "Renovate the Bathroom" }));
+    const first = renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(decisionButton(/^Reformulate/));
+    const field = screen.getByRole("textbox", { name: "New wording" });
+    await user.clear(field);
+    await user.type(field, "Renovate the Bathroom");
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+    await screen.findByRole("region", { name: "Update the CV" });
+    first.unmount();
+
+    getQueue.mockResolvedValueOnce(queue([{ ...bathroom, title: "Renovate the Bathroom", revision: 8 }, cv]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Renovate the Bathroom" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 of 2 · earliest-asking first")).toBeInTheDocument();
+    await user.click(decisionButton(/^Release to Someday/));
+    expect(decide).toHaveBeenCalledTimes(2);
+  });
+
+  it("020-FR-002 after a reload a card saved anyway still counts as decided and the step says it still asks", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom]));
+    decide.mockResolvedValueOnce(decided(bathroom, "reformulate", { title: "Renovate the Bathroom" }));
+    const first = renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(decisionButton(/^Reformulate/));
+    const field = screen.getByRole("textbox", { name: "New wording" });
+    await user.clear(field);
+    await user.type(field, "Renovate the Bathroom");
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+    await screen.findByText("All 1 decided");
+    first.unmount();
+
+    getQueue.mockResolvedValueOnce(queue([{ ...bathroom, title: "Renovate the Bathroom", revision: 8 }]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByText("All 1 decided")).toBeInTheDocument();
+    expect(screen.getByText("1 kept its wording, so it still asks for a decision.")).toBeInTheDocument();
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+
+  it("020-FR-050 a card set aside with Not now stays set aside after a reload", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    const first = renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+    await screen.findByRole("region", { name: "Update the CV" });
+    first.unmount();
+
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Update the CV" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Renovate the bathroom" })).not.toBeInTheDocument();
+  });
+
+  it("020-FR-048 Undo of a card saved anyway brings it back after a reload too", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom, cv]));
+    decide.mockResolvedValueOnce(decided(bathroom, "reformulate", { title: "Renovate the Bathroom" }));
+    undoDecision.mockResolvedValueOnce({ task: { ...bathroom, revision: 9 }, undone_decision_id: "decision_task_bath", deleted_task_id: null, session_counts: null });
+    const first = renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(decisionButton(/^Reformulate/));
+    const field = screen.getByRole("textbox", { name: "New wording" });
+    await user.clear(field);
+    await user.type(field, "Renovate the Bathroom");
+    await user.click(screen.getByRole("button", { name: "Save anyway" }));
+    await screen.findByRole("region", { name: "Update the CV" });
+    await act(async () => lastToast()[1]?.action?.onAction());
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    first.unmount();
+
+    getQueue.mockResolvedValueOnce(queue([{ ...bathroom, revision: 9 }, cv]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 · earliest-asking first")).toBeInTheDocument();
+  });
+
+  it("020-FR-048 what a browser remembers is for the wording it was made on: a new formulation asks again", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([bathroom]));
+    const first = renderInRun(<DecisionsStep />);
+    await screen.findByRole("region", { name: "Renovate the bathroom" });
+    await user.click(screen.getByRole("button", { name: "Not now" }));
+    await screen.findByText("0 of 1 decided");
+    first.unmount();
+
+    const reworded = { ...bathroom, formulation: { ...bathroomClock, id: "form_task_bath_2" } };
+    getQueue.mockResolvedValueOnce(queue([reworded]));
+    renderInRun(<DecisionsStep />);
+
+    expect(await screen.findByRole("region", { name: "Renovate the bathroom" })).toBeInTheDocument();
   });
 });

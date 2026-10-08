@@ -24,7 +24,15 @@ export interface ReviewDrafts {
   clearAll: () => void;
 }
 
-export function useReviewDrafts(sessionId: string, step: StepCode): ReviewDrafts {
+/**
+ * The decision step also keeps which cards the person already handled in this
+ * run (a card saved anyway, a card set aside) under `decisions_marks`: the
+ * server tells neither, and the name keeps them out of the step's own text
+ * drafts, which a discard clears.
+ */
+export type DraftStep = StepCode | "decisions_marks";
+
+export function useReviewDrafts(sessionId: string, step: DraftStep): ReviewDrafts {
   // The review is only reachable signed in with the flag on (FR-042).
   const [scope] = useState(() => ({ apiOrigin: getApiBaseUrl(), accountId: (useAuthStore.getState().user as AuthUser).id }));
   const owns = () => useAuthStore.getState().user?.id === scope.accountId;

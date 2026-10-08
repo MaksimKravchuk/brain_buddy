@@ -12,8 +12,10 @@ import { apiClient } from "../../../api/client";
 import { describeReviewError, newIdempotencyKey, newProgressAttempt, withReference } from "../../../api/review";
 import type { ReviewQueue } from "../../../api/review";
 import { applyReviewTask, refreshAfterReviewWrite, settleForAccount, useReviewQueue } from "../../../api/reviewHooks";
+import type { ReviewContinuation } from "../../../api/reviewHooks";
 import type { OpenTaskState, TaskResponse, TaskTransitionRequest } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
+import { sameWording } from "../formulation";
 import { plural } from "../plural";
 import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate } from "./stepParts";
@@ -59,6 +61,7 @@ export function InboxStep(): React.JSX.Element {
   const queryClient = useQueryClient();
   const queue = useReviewQueue("inbox", run.session.id);
   const action = useStepAction();
+  const countAction = useStepAction();
   const drafts = useReviewDrafts(run.session.id, "inbox");
   const bulk = useBulkRelease("inbox_remainder", run.session.id, run.session.steps.inbox === "pending");
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -116,6 +119,40 @@ export function InboxStep(): React.JSX.Element {
     run.setUnsaved(false);
   };
 
+  /**
+   * A choice the server refused as stale: read the item again. When its
+   * wording is unchanged (a notes edit elsewhere, say) the item and whatever
+   * was typed for it stay, against the new revision; only when it moved or was
+   * reworded does the review leave it as it is there and drop its form (FR-011,
+   * FR-052).
+   */
+  const reconcileStale = async (task: TaskResponse, choice: Choice, continuation: ReviewContinuation) => {
+    const fresh = await apiClient.getTask(task.id).catch(() => null);
+    if (!continuation.stillCurrent()) {
+      return;
+    }
+    if (fresh) {
+      applyReviewTask(queryClient, fresh, continuation.scope);
+    } else {
+      refreshAfterReviewWrite(queryClient, continuation.scope);
+    }
+    focusHeading.current = true;
+    if (fresh?.state === "inbox" && sameWording(task, fresh)) {
+      setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
+      setNotice(`“${task.title}” was changed on another device, so nothing was moved. It's still in Inbox; choose again.`);
+      return;
+    }
+    setStale((ids) => [...ids, task.id]);
+    closeForm(task.id, choice.id);
+    setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
+  };
+
+  /**
+   * The move and the count are two writes, handled separately (as in Undo): once
+   * the item is out of the Inbox it is shown as processed whatever happens to
+   * the count, and a count that did not go up is retried alone under the same
+   * progress id, so the replay is counted once (FR-048, FR-011).
+   */
   const choose = (choice: Choice, task: TaskResponse, waitingFor?: string) => {
     const key = newIdempotencyKey();
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: 1 });
@@ -130,32 +167,40 @@ export function InboxStep(): React.JSX.Element {
         if (describeReviewError(error).kind !== "stale") {
           throw error;
         }
-        refreshAfterReviewWrite(queryClient, continuation.scope);
-        focusHeading.current = true;
-        setStale((ids) => [...ids, task.id]);
-        closeForm(task.id, choice.id);
-        setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
+        await reconcileStale(task, choice, continuation);
         return;
       }
       // Only the person who pressed it may have the count sent for them.
       if (!continuation.stillCurrent()) {
         return;
       }
-      await run.progress(count);
       applyReviewTask(queryClient, moved, continuation.scope);
       focusHeading.current = true;
       setProcessed((ids) => [...ids, task.id]);
       closeForm(task.id, choice.id);
-      notify(`“${task.title}” ${choice.toast}`, {
-        action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void undoChoice(task, moved) }
-      });
-      // Its own pending and failure states; a Retry of this choice reaches it too.
-      if (willFinish && plan?.release && remaining.length > 0) {
-        void bulk.release(
-          remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
-          "Couldn't release the rest of your Inbox. Nothing was moved."
-        );
-      }
+      // The item is processed now; the count has its own pending and failure states.
+      void countAction.run(
+        "count",
+        "Update the Inbox count",
+        async (counting) => {
+          await run.progress(count);
+          if (!counting.stillCurrent()) {
+            return;
+          }
+          // Undo is offered once the count is in, so it takes off what was added.
+          notify(`“${task.title}” ${choice.toast}`, {
+            action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void undoChoice(task, moved) }
+          });
+          // Its own pending and failure states; a Retry of this count reaches it too.
+          if (willFinish && plan?.release && remaining.length > 0) {
+            void bulk.release(
+              remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
+              "Couldn't release the rest of your Inbox. Nothing was moved."
+            );
+          }
+        },
+        `“${task.title}” ${choice.toast}, but the processed count didn't go up.`
+      );
     });
   };
 
@@ -271,6 +316,7 @@ export function InboxStep(): React.JSX.Element {
             <>
               {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice}</p> : null}
               <p className="m-0 text-base font-medium text-slate-900">{`${plural(processed.length, "item")} processed`}</p>
+              {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
               {bulk.releaseAction.pending ? <p role="status" className="m-0 text-sm text-slate-600">Releasing…</p> : null}
               {bulk.releaseAction.failure ? <FailureBanner failure={bulk.releaseAction.failure} online={bulk.releaseAction.online} /> : null}
             </>
@@ -284,6 +330,7 @@ export function InboxStep(): React.JSX.Element {
               <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-lg font-semibold text-slate-900 outline-hidden">{current.title}</h2>
               <p className="m-0 -mt-2 text-xs text-slate-500">Is it actionable? Choose where it belongs.</p>
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
+              {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
               {form ? (
                 <form className="flex flex-col gap-2" onSubmit={(event) => (form.kind === "title" ? saveTitle(event, current, form.text) : submitWaiting(event, current, form.choice, form.text))}>
                   <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">

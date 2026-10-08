@@ -10,9 +10,12 @@ import type { FormEvent } from "react";
 
 import { describeReviewError, newIdempotencyKey, reviewApi } from "../../../api/review";
 import type { DecisionRequest, DecisionResponse, DecisionType, ReviewQueue, StepCode } from "../../../api/review";
-import { applyReviewTask, useReviewQueue } from "../../../api/reviewHooks";
+import { applyReviewTask, refreshAfterReviewWrite, useReviewQueue } from "../../../api/reviewHooks";
+import type { ReviewContinuation } from "../../../api/reviewHooks";
+import { apiClient } from "../../../api/client";
 import type { TaskResponse } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
+import { sameWording } from "../formulation";
 import { runUndo } from "../reviewUndo";
 import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate, Ref } from "./stepParts";
@@ -106,6 +109,34 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
     run.setUnsaved(false);
   };
 
+  /**
+   * A decision the server refused as stale: read the task again. When its
+   * wording is unchanged (a notes edit elsewhere, say) the card, the open form
+   * and its draft stay, and the next try carries the new revision under a new
+   * key; only when the task moved or was reworded is it left as it is there and
+   * its form dropped (FR-011, FR-052).
+   */
+  const reconcileStale = async (task: TaskResponse, item: ItemAction, continuation: ReviewContinuation) => {
+    const fresh = await apiClient.getTask(task.id).catch(() => null);
+    if (!continuation.stillCurrent()) {
+      return;
+    }
+    if (fresh) {
+      applyReviewTask(queryClient, fresh, continuation.scope);
+    } else {
+      refreshAfterReviewWrite(queryClient, continuation.scope);
+    }
+    focusHeading.current = true;
+    if (fresh !== null && sameWording(task, fresh)) {
+      setLatest((tasks) => ({ ...tasks, [task.id]: fresh }));
+      setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so nothing was applied. Here's the current version; decide again if it still needs it.` });
+      return;
+    }
+    setHandled((ids) => new Set(ids).add(task.id));
+    closeForm(task.id, item.id);
+    setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so it was left as it is there.` });
+  };
+
   const decide = (item: ItemAction, task: TaskResponse, text: string) => {
     const key = newIdempotencyKey();
     const body: DecisionRequest = { type: item.type, expected_revision: task.revision, ...(item.form ? { title: text } : {}), session_id: run.session.id };
@@ -117,10 +148,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
       } catch (error) {
         const { kind, referenceId } = describeReviewError(error);
         if (kind === "stale") {
-          focusHeading.current = true;
-          setHandled((ids) => new Set(ids).add(task.id));
-          closeForm(task.id, item.id);
-          setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so it was left as it is there.` });
+          await reconcileStale(task, item, continuation);
           return;
         }
         if (kind in REFUSALS) {
