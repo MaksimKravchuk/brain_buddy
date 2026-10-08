@@ -5,6 +5,7 @@ import { useAuthStore } from "../../../stores/authStore";
 import {
   bindReviewLocalState,
   clearReviewLocalState,
+  countUnsavedReviewDrafts,
   DRAFT_MAX_AGE_MS,
   loadReviewDraft,
   loadStepDraft,
@@ -202,6 +203,37 @@ describe("020-FR-052 browser-local review form drafts", () => {
     clearReviewLocalState(scope);
 
     expect(Object.keys(window.localStorage)).toEqual([reviewDraftKey(otherScope, task)]);
+  });
+
+  it("020-FR-052 counts the unsaved drafts a sign-out removes: this account's, with text, not expired, read-only", () => {
+    saveReviewDraft(scope, task, { form: "reformulate", text: sentinel }, now);
+    saveReviewDraft(scope, { kind: "project", projectId: "project_1a" }, { form: "first_step", text: "call" }, now);
+    saveStepDraft(scope, stepField, "step text", now);
+    saveReviewDraft(otherScope, task, { form: "reformulate", text: "another account" }, now);
+    saveReviewDraft(scope, { ...task, taskId: "task_old" }, { form: "waiting", text: "stale" }, new Date(now.getTime() - DRAFT_MAX_AGE_MS));
+    window.localStorage.setItem(`${reviewDraftKey(scope, { ...task, taskId: "task_empty" })}`, JSON.stringify({ form: "waiting", text: "", savedAt: now.toISOString() }));
+    window.localStorage.setItem(`${reviewDraftKey(scope, { ...task, taskId: "task_bad" })}`, "not json");
+    window.localStorage.setItem("bb.reviewWywaLastShown.v1.http%3A%2F%2Flocalhost%3A3000%2Fapi.user_1", "2026-10-09");
+    const before = window.localStorage.length;
+
+    expect(countUnsavedReviewDrafts(scope, now)).toBe(3);
+    expect(countUnsavedReviewDrafts(otherScope, now)).toBe(1);
+    expect(countUnsavedReviewDrafts({ ...scope, accountId: "user_3" }, now)).toBe(0);
+    expect(window.localStorage.length).toBe(before);
+
+    window.localStorage.clear();
+    saveReviewDraft(scope, task, { form: "reformulate", text: sentinel });
+    expect(countUnsavedReviewDrafts(scope)).toBe(1);
+  });
+
+  it("020-FR-052 counts nothing in a browser that refuses storage", () => {
+    const refusing = {
+      getItem: () => { throw new Error("denied"); },
+      key: () => { throw new Error("denied"); },
+      get length(): number { throw new Error("denied"); }
+    } as unknown as Storage;
+
+    expect(countUnsavedReviewDrafts(scope, now, refusing)).toBe(0);
   });
 
   it("020-FR-052 watches the session: sign-out and an account switch clear the departing account's review keys", () => {

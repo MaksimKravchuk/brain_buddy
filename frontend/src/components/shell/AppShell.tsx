@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 
 import type { OpenTaskState, ProjectResponse, TagResponse, TaskCounts } from "../../api/taskTypes";
@@ -39,6 +40,8 @@ import {
   undoShortcutLabel
 } from "./shellToast";
 import type { ShellNotify, ShellToastAction } from "./shellToast";
+import { SignOutDialog } from "./SignOutDialog";
+import { loadSignOutSummary, type SignOutSummary } from "./signOutSummary";
 
 interface AppShellProps {
   children: ReactNode;
@@ -312,6 +315,10 @@ function AccountMenu(): React.JSX.Element {
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
   const [open, setOpen] = useState(false);
+  // The sign-out confirmation (020-FR-052): set while it is on screen.
+  const [signOutSummary, setSignOutSummary] = useState<SignOutSummary | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const initial = (user?.display_name?.[0] ?? user?.email?.[0])?.toUpperCase() ?? "M";
@@ -338,6 +345,33 @@ function AccountMenu(): React.JSX.Element {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  const requestSignOut = async () => {
+    setOpen(false);
+    setSignOutFailed(false);
+    setSignOutSummary(await loadSignOutSummary(user?.id ?? ""));
+  };
+  const cancelSignOut = useCallback(() => {
+    setSignOutSummary(null);
+    triggerRef.current?.focus();
+  }, []);
+  const confirmSignOut = async () => {
+    setSigningOut(true);
+    setSignOutFailed(false);
+    let signedOut = false;
+    try {
+      signedOut = await logout();
+    } catch {
+      // A refused cleanup or a server error: the session is still in place.
+    }
+    setSigningOut(false);
+    if (signedOut) {
+      setSignOutSummary(null);
+      navigate("/login");
+    } else {
+      setSignOutFailed(true);
+    }
+  };
 
   const itemClass =
     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900";
@@ -415,15 +449,24 @@ function AccountMenu(): React.JSX.Element {
             type="button"
             role="menuitem"
             className={itemClass}
-            onClick={async () => {
-              setOpen(false);
-              if (await logout()) navigate("/login");
-            }}
+            onClick={() => void requestSignOut()}
           >
             <LogOut className="h-4 w-4 text-slate-500" aria-hidden /> Sign out
           </button>
         </div>
       ) : null}
+      {signOutSummary
+        ? createPortal(
+            <SignOutDialog
+              summary={signOutSummary}
+              pending={signingOut}
+              failed={signOutFailed}
+              onCancel={cancelSignOut}
+              onConfirm={() => void confirmSignOut()}
+            />,
+            document.body
+          )
+        : null}
     </div>
   );
 }

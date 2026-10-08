@@ -647,6 +647,19 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
   - **What stays open:** the manual-run part of each task (T094, T159, T165's host
     record, T169, T171) stays unchecked until its Results are recorded.
     `/speckit-accept` does not accept a requirement on a PENDING plan.
+- **Web sign-out asks first (owner decision 2026-10-08; backlog note, no slice).** The
+  native apps confirm a sign-out and name the unsaved weekly-review drafts it removes
+  (PR #301); the web signed out in one click, discarding the account's
+  `bb.reviewFormDraft.v1.*` keys silently, which FR-052 rules out. Delivered as a
+  small single-surface change under FR-052, outside the PR-срезы map and with no new
+  task id: the account menu's "Sign out" opens "Sign out?" (Cancel first and
+  focused, Esc cancels), the body names "N unsaved weekly-review draft(s) will also
+  be removed from this browser." and, from the CRT store, unsaved Thinking Mode
+  drafts, and `logout()` is unchanged behind Sign out; a `logout()` that does not
+  finish shows an error and stays. Tests carry `020-FR-052`
+  (`frontend/src/components/shell/__tests__/{AppShell,SignOutDialog}.test.tsx`,
+  `frontend/src/features/review/__tests__/reviewFormDrafts.test.ts`). Not counted
+  and not removed: unsent task-detail edits kept per tab in `sessionStorage`.
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
   review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and

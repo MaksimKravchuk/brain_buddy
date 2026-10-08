@@ -100,6 +100,10 @@ The three credential-sensitive actions return **403** on a failed password
 re-check (401 is reserved for "session gone") and share a per-user in-memory
 rate limit (10 attempts / 10 minutes).
 
+## Signing out on the web
+
+The account menu's "Sign out" opens a confirmation ("Sign out?", **Cancel** with the initial focus, Esc cancels) instead of signing out at once (spec 020, FR-052; owner decision 2026-10-08, matching the native apps). The text says plainly what this browser loses: after the base sentence it counts the signed-in account's unsaved weekly-review drafts (`localStorage`, `bb.reviewFormDraft.v1.…`, unexpired and non-empty) and unsaved Thinking Mode drafts (the CRT draft store), each as "N unsaved … draft(s) will also be removed from this browser." and nothing at all when there are none. A count that cannot be read is not named. Confirming runs the same `logout()` as before: the departing owner's local CRT work is cleaned up fail-closed (the CRT loss prompt still asks if drafts are found), the server session is revoked, then the app goes to `/login`. If `logout()` does not finish, the dialog stays open with an error and the person is still signed in. The LoginPage "Sign out and use linked account" flow, the 401 `clearSession` path and account deletion are unchanged. Unsent task-detail edits (kept per tab in `sessionStorage`) are not removed by sign-out and are not counted.
+
 ## Known limitations (ordered by urgency if you scale)
 
 | Limitation | How to fix later |
@@ -128,6 +132,7 @@ None of these are urgent at the current scale, but they're worth knowing about.
 - **Frontend auth store** — `frontend/src/stores/authStore.ts`
 - **Frontend pages** — `frontend/src/pages/{LoginPage,SignupPage}.tsx`
 - **Route guard** — `frontend/src/components/auth/ProtectedRoute.tsx`
+- **Sign-out confirmation** — `frontend/src/components/shell/{SignOutDialog.tsx,signOutSummary.ts}`, opened from the account menu in `AppShell.tsx`
 
 ## CLI device approval (ADR-0029)
 

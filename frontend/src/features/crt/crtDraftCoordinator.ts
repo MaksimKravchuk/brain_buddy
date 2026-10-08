@@ -923,6 +923,45 @@ export type CrtOwnerCleanupResult =
 
 const activeCrtCoordinators = new Set<CrtDraftCoordinator>();
 
+function activeCoordinatorsFor(ownerId: string, normalizedOrigin: string): CrtDraftCoordinator[] {
+  return [...activeCrtCoordinators].filter((coordinator) => {
+    const scope = coordinator.activeScope;
+    return scope.owner_id === ownerId && scope.origin === normalizedOrigin;
+  });
+}
+
+/**
+ * How many local CRT drafts `cleanupCrtOwnerScope` would remove for this owner
+ * in this browser, for a sign-out confirmation to name. It reads the same
+ * listings the cleanup walks (the durable store plus every mounted
+ * coordinator, which also sees memory-only drafts) and removes nothing.
+ * `null` when the drafts cannot be listed: the caller must not claim zero.
+ */
+export async function countCrtOwnerDrafts(ownerId: string, origin = globalThis.location?.origin ?? ""): Promise<number | null> {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!ownerId || !normalizedOrigin) return null;
+  const mounted = activeCoordinatorsFor(ownerId, normalizedOrigin);
+  const scanner = createCrtDraftCoordinator({ owner_id: ownerId, origin: normalizedOrigin, tree_id: null });
+  try {
+    const draftKeys = new Set<string>();
+    for (const coordinator of [scanner, ...mounted]) {
+      const listed = await coordinator.enumerateOwnerDrafts();
+      if (!listed.ok) return null;
+      for (const { draft } of listed.value) {
+        draftKeys.add(draftStorageKey({
+          owner_id: draft.owner_id,
+          origin: draft.origin,
+          tree_id: draft.tree_id,
+          create_idempotency_key: draft.create_idempotency_key
+        }));
+      }
+    }
+    return draftKeys.size;
+  } finally {
+    scanner.dispose();
+  }
+}
+
 /**
  * Complete the browser-local part of an authenticated owner transition.
  *
@@ -936,10 +975,7 @@ const activeCrtCoordinators = new Set<CrtDraftCoordinator>();
 export async function cleanupCrtOwnerScope(ownerId: string, origin = globalThis.location?.origin ?? ""): Promise<CrtOwnerCleanupResult> {
   const normalizedOrigin = normalizeOrigin(origin);
   if (!ownerId || !normalizedOrigin) return { ok: false, reason: "cleanup-failed" };
-  const active = [...activeCrtCoordinators].filter((coordinator) => {
-    const scope = coordinator.activeScope;
-    return scope.owner_id === ownerId && scope.origin === normalizedOrigin;
-  });
+  const active = activeCoordinatorsFor(ownerId, normalizedOrigin);
   const scanner = createCrtDraftCoordinator({ owner_id: ownerId, origin: normalizedOrigin, tree_id: null });
   try {
     const listed = await scanner.enumerateOwnerDrafts();

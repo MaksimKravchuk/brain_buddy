@@ -4,6 +4,7 @@ import { crtApi, type CrtTreeResponse } from "../../../api/crt";
 import { createGraphState, type GraphState } from "../graphModel";
 import {
   cleanupCrtOwnerScope,
+  countCrtOwnerDrafts,
   createCrtDraftCoordinator,
   createCrtLossBarrier,
   draftWriteInputFromCrtState,
@@ -581,6 +582,44 @@ describe("CRT draft persistence/reconciliation coordinator", () => {
     noConfirm.mockRestore();
     active.dispose();
     expect(await cleanupCrtOwnerScope("cleanup-owner", origin)).toEqual({ ok: true, removed: 0 });
+  });
+
+  it("020-FR-052 counts the owner's drafts a sign-out would remove, once each, memory-only ones included, removing none", async () => {
+    const owner = "owner-count";
+    const origin = "https://owner-count.example.test";
+    const storage = new MemoryStorage();
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(navigator, "locks", { configurable: true, value: lockManager });
+    const ownerTree = (id: string) => ({ ...tree, id, owner_id: owner, metadata: { ...tree.metadata, owner_id: owner } });
+    const first = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-1" });
+    const second = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-2" });
+    const memoryOnly = createCrtDraftCoordinator({ owner_id: owner, origin, tree_id: "tree-3", storage: null, lock_manager: null });
+    try {
+      expect(await countCrtOwnerDrafts(owner, origin)).toBe(0);
+      await first.persistBeforeSave(ownerTree("tree-1"), graph);
+      await second.persistBeforeSave(ownerTree("tree-2"), graph);
+      await memoryOnly.persistBeforeSave(ownerTree("tree-3"), graph);
+
+      expect(await countCrtOwnerDrafts(owner, origin)).toBe(3);
+      expect(await countCrtOwnerDrafts("another-owner", origin)).toBe(0);
+      expect(storage.length).toBe(2);
+      expect(first.hasPendingDraft()).toBe(true);
+      expect(await countCrtOwnerDrafts("", origin)).toBeNull();
+      expect(await countCrtOwnerDrafts(owner, "ftp://owner-count.example.test")).toBeNull();
+
+      const unreadable = new MemoryStorage();
+      Object.defineProperty(unreadable, "length", { configurable: true, get: () => { throw new Error("length"); } });
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, value: unreadable });
+      expect(await countCrtOwnerDrafts(owner, origin)).toBeNull();
+    } finally {
+      first.dispose();
+      second.dispose();
+      memoryOnly.dispose();
+      if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage); else Reflect.deleteProperty(globalThis, "localStorage");
+      if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks); else Reflect.deleteProperty(navigator, "locks");
+    }
   });
 
   it("covers navigation barrier event filters, beforeunload, popstate restoration, and detach", () => {

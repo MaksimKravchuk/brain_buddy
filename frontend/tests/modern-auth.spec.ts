@@ -253,6 +253,7 @@ async function finishApple(page: Page): Promise<void> {
 async function signOut(page: Page, email: string): Promise<void> {
   await page.getByRole("button", { name: `Account menu for ${email}`, exact: true }).click();
   await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  await page.getByRole("alertdialog", { name: "Sign out?" }).getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("button", { name: "Continue with email", exact: true })).toBeVisible();
   expect((await api(page, "/auth/me")).status).toBe(401);
 }
