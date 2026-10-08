@@ -18,6 +18,7 @@ from app.exceptions import ConflictError, NotFoundError, ValidationFailure
 from app.schemas.tasks import (
     ExpectedRevisionRequest,
     ProjectCreateRequest,
+    ProjectListState,
     ProjectUpdateRequest,
     SmartAddClassificationRef,
     SmartAddTaskCreateRequest,
@@ -212,6 +213,7 @@ class TaskService:
             name=name,
             normalized_name=normalize_task_name(name),
             color=payload.color,
+            desired_outcome=payload.desired_outcome,
             created_at=now,
             updated_at=now,
         )
@@ -782,7 +784,9 @@ class TaskService:
         tag_ids = payload.tag_ids if "tag_ids" in fields else task.tag_ids
         self._assert_active_references(
             owner_id=owner_id,
-            project_id=project_id,
+            # Spec 021 (ADR-0020): a membership the task already has is never
+            # re-validated, so an archived project's tasks stay editable.
+            project_id=project_id if project_id != task.project_id else None,
             tag_ids=tag_ids or [],
         )
         now = self.clock()
@@ -1186,12 +1190,14 @@ class TaskService:
         )
         return page, next_cursor, has_more, counts
 
-    def list_projects(self, *, owner_id: str) -> list[ProjectDocument]:
+    def list_projects(
+        self, *, owner_id: str, state: ProjectListState = "active"
+    ) -> list[ProjectDocument]:
         return sorted(
             (
                 project
                 for project in self.task_repo.list_projects_for_owner(owner_id=owner_id)
-                if project.state == "active"
+                if state == "all" or project.state == state
             ),
             key=lambda project: (project.name.strip().casefold(), project.id),
         )
@@ -1217,6 +1223,15 @@ class TaskService:
             task.project_id == project_id and task.state in _OPEN_STATES
             for task in self.task_repo.list_for_owner(owner_id=owner_id)
         )
+
+    def open_task_counts_by_project(self, *, owner_id: str) -> dict[str, int]:
+        """Open task counts for every project, from one load of the tasks."""
+
+        counts: dict[str, int] = {}
+        for task in self.task_repo.list_for_owner(owner_id=owner_id):
+            if task.project_id is not None and task.state in _OPEN_STATES:
+                counts[task.project_id] = counts.get(task.project_id, 0) + 1
+        return counts
 
     def open_task_count_for_tag(self, tag_id: str, *, owner_id: str) -> int:
         return sum(
@@ -1258,6 +1273,11 @@ class TaskService:
                 "name": name,
                 "normalized_name": normalize_task_name(name),
                 "color": payload.color if "color" in fields else project.color,
+                "desired_outcome": (
+                    payload.desired_outcome
+                    if "desired_outcome" in fields
+                    else project.desired_outcome
+                ),
                 "updated_at": self.clock(),
                 "revision": project.revision + 1,
             }
@@ -1298,18 +1318,26 @@ class TaskService:
             "Project", project.id, project.revision, payload.expected_revision
         )
         now = self.clock()
+        # A repeat archive changes only the revision and the timestamp: the
+        # marker is the one signal a pre-feature archive has (data-model E1).
+        repeat = project.state == "archived"
         updated_project = project.model_copy(
             update={
                 "state": "archived",
                 "updated_at": now,
                 "revision": project.revision + 1,
+                **({} if repeat else {"archived_before_lossless": True}),
             }
         )
-        affected = [
-            task
-            for task in self.task_repo.list_for_owner(owner_id=owner_id)
-            if task.project_id == project_id
-        ]
+        affected = (
+            []
+            if repeat
+            else [
+                task
+                for task in self.task_repo.list_for_owner(owner_id=owner_id)
+                if task.project_id == project_id
+            ]
+        )
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1330,6 +1358,53 @@ class TaskService:
                 )
             )
         return updated_project
+
+    @_serialized_write
+    def unarchive_project(
+        self,
+        project_id: str,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> ProjectDocument:
+        command = f"unarchive_project:{project_id}"
+        request_hash = self._request_hash(command, payload)
+        record = self._idempotency_record(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return self._project_result(record, owner_id=owner_id)
+        project = self.get_project(project_id, owner_id=owner_id)
+        if project.state == "active":
+            # Checked before the revision: a retry after the key expired still
+            # carries the old revision and must get the same answer (http §3).
+            return project
+        self._assert_revision(
+            "Project", project.id, project.revision, payload.expected_revision
+        )
+        updated = project.model_copy(
+            update={
+                "state": "active",
+                "archived_at": None,
+                "updated_at": self.clock(),
+                "revision": project.revision + 1,
+            }
+        )
+        self._assert_unique_project_name(owner_id=owner_id, project=updated)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+        )
+        self.task_repo.save_project(updated)
+        return updated
 
     @_serialized_write
     def update_tag(
@@ -1466,7 +1541,7 @@ class TaskService:
             # reconcile; their bodies are not task snapshots.
             return
         if record.command == "create_project" or record.command.startswith(
-            ("update_project:", "archive_project:")
+            ("update_project:", "archive_project:", "unarchive_project:")
         ):
             self._project_result(record, owner_id=owner_id)
         # "create_context" records can persist from the retired /contexts shim.
