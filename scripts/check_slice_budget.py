@@ -85,6 +85,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"slice budget: {args.slice_id} declares no budget (v1 map?)", file=sys.stderr)
         return 2
 
+    # The measurement is of committed work only, so uncommitted or untracked
+    # files would slip past it and land in the PR unmeasured.
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    if dirty:
+        print(
+            "slice budget: commit or stash every change first; uncommitted and "
+            "untracked files would not be measured",
+            file=sys.stderr,
+        )
+        return 2
+
     numstat = subprocess.run(
         ["git", "diff", "--numstat", "--no-renames", f"{args.base}...HEAD"],
         check=True,

@@ -84,7 +84,9 @@ class BudgetCliTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def _run(self, tasks_text: str) -> subprocess.CompletedProcess[str]:
-        tasks = self.repo / "tasks.md"
+        # Outside the repo, so the tasks file itself does not dirty the tree.
+        tasks = Path(self.tmp.name + "-tasks.md")
+        self.addCleanup(tasks.unlink, missing_ok=True)
         tasks.write_text(tasks_text, encoding="utf-8")
         return subprocess.run(
             [sys.executable, str(SCRIPT), str(tasks), "PR-01", "--base", "main"],
@@ -107,8 +109,15 @@ class BudgetCliTest(unittest.TestCase):
         result = self._run(_tasks(20, 2, reason="Generated client"))
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_uncommitted_or_untracked_work_is_refused(self) -> None:
+        (self.repo / "app" / "big.py").write_text("y = 2\n" * 1000)
+        result = self._run(_tasks(40, 2))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("commit or stash", result.stderr)
+
     def test_unknown_slice_is_a_usage_error(self) -> None:
-        tasks = self.repo / "tasks.md"
+        tasks = Path(self.tmp.name + "-tasks.md")
+        self.addCleanup(tasks.unlink, missing_ok=True)
         tasks.write_text(_tasks(40, 2), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(SCRIPT), str(tasks), "PR-09", "--base", "main"],
