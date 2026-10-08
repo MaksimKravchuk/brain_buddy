@@ -677,9 +677,12 @@ Task: "T126 backend/tests/test_review_flow_api.py"       # PR-11
     of `GET /review/queues/decisions` to resume the decisions step across devices.
   - Mac (#276): the evidence file cites the CI run of the previous SHA; the owner's
     host run records the candidate SHA.
-  - open owner question: retained members of an archived project get 400
-    `project_archived` on Return to Next in the weekly review, which matches the
-    "restore project first" design. Should they be allowed?
+  - owner decision 2026-10-08 (was an open question): retained members of an
+    archived project keep getting 400 `project_archived` on Return to Next in the
+    weekly review until the project is restored, as the "restore project first"
+    design says. No change.
+  - owner decision 2026-10-08: the sign-out confirmation names unsaved
+    weekly-review drafts that sign-out would remove (feature 021 follow-up PR).
 - **Deferred to a follow-up feature (owner decision 2026-10-07).** The work is bloated
   (about 98k lines so far), so the not-started slices keep only what ships a usable weekly
   review on the surfaces already built (backend, iOS, web): US1 and US2, the Quick and
