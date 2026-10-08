@@ -35,6 +35,7 @@ const listProjects = vi.mocked(apiClient.listProjects);
 const queue = (items: TaskResponse[], meta: QueueMeta = {}): ReviewQueue => ({ items, meta });
 
 beforeEach(() => {
+  window.localStorage.clear();
   signIn();
   listProjects.mockResolvedValue([]);
 });
@@ -49,6 +50,7 @@ afterEach(() => {
   createTask.mockReset();
   listProjects.mockReset();
   notify.mockReset();
+  window.localStorage.clear();
 });
 
 describe("020-FR-028 a step's queue loads before it shows", () => {

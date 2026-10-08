@@ -17,6 +17,7 @@ import { captureReviewScope, refreshAfterReviewWrite, settleForAccount, useOnlin
 import { decisionCount, lastReviewText } from "./lastReview";
 import { forgetRelease } from "./releaseMemory";
 import { useLeaveGuard } from "./useLeaveGuard";
+import { useReviewDrafts } from "./useReviewDrafts";
 import { DatesStep } from "./steps/DatesStep";
 import { DecisionsStep } from "./steps/DecisionsStep";
 import { InboxStep } from "./steps/InboxStep";
@@ -98,6 +99,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
   const ended = session.status !== "open";
   const idleClosed = ended && Date.parse(session.ended_at as string) - Date.parse(session.last_activity_at) >= 7 * DAY_MS;
   const View = STEPS[current].view;
+  const drafts = useReviewDrafts(initial.id, current);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -284,6 +286,8 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
           onOther={() => {
             setUnsaved(false);
             if (!confirm.keepStep) {
+              // The step starts over (or is left): what was typed in it goes with it, drafts included.
+              drafts.clearAll();
               setStepKey((key) => key + 1);
             }
             setConfirm(null);

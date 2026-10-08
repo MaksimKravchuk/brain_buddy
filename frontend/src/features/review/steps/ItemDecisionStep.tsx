@@ -14,6 +14,7 @@ import { applyReviewTask, useReviewQueue } from "../../../api/reviewHooks";
 import type { TaskResponse } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
 import { runUndo } from "../reviewUndo";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate, Ref } from "./stepParts";
 import { useReviewRun } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
@@ -52,6 +53,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
   const queryClient = useQueryClient();
   const queue = useReviewQueue(config.step, run.session.id);
   const action = useStepAction();
+  const drafts = useReviewDrafts(run.session.id, config.step);
   const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
   const [form, setForm] = useState<{ action: ItemAction; text: string; initial: string } | null>(null);
@@ -77,8 +79,30 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
     }
   }, [form]);
 
-  const closeForm = () => {
+  // Text typed before a reload or a closed tab comes back in its form (FR-052), once per item shown:
+  // a form the person closes must not reopen on its own.
+  const [draftsCheckedFor, setDraftsCheckedFor] = useState<string | null>(null);
+  if (current !== undefined && draftsCheckedFor !== current.id) {
+    setDraftsCheckedFor(current.id);
+    for (const item of config.actions) {
+      const text = form === null && item.form ? drafts.load(current.id, item.id) : null;
+      if (item.form && text !== null) {
+        setForm({ action: item, text, initial: item.form.prefill ? current.title : "" });
+        break;
+      }
+    }
+  }
+  useEffect(() => {
+    if (form !== null && form.text.trim() !== "") {
+      run.setUnsaved(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
+  }, [draftsCheckedFor]);
+
+  /** The form is over, saved or discarded: so is its draft. */
+  const closeForm = (taskId: string, field: string) => {
     setForm(null);
+    drafts.clear(taskId, field);
     run.setUnsaved(false);
   };
 
@@ -95,7 +119,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
         if (kind === "stale") {
           focusHeading.current = true;
           setHandled((ids) => new Set(ids).add(task.id));
-          closeForm();
+          closeForm(task.id, item.id);
           setNotice({ kind: "stale", text: `“${task.title}” changed on another device, so it was left as it is there.` });
           return;
         }
@@ -108,7 +132,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
       applyReviewTask(queryClient, response.task, continuation.scope);
       focusHeading.current = true;
       setHandled((ids) => new Set(ids).add(task.id));
-      closeForm();
+      closeForm(task.id, item.id);
       notify(item.toast(task.title, text), {
         action: {
           label: "Undo",
@@ -178,12 +202,13 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
                       onChange={(event) => {
                         const text = event.currentTarget.value;
                         setForm({ ...form, text });
+                        drafts.save(current.id, form.action.id, text, form.initial);
                         run.setUnsaved(text.trim() !== "" && text !== form.initial);
                       }}
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(() => closeForm(current.id, form.action.id))}>Back</button>
                     <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending === form.action.id ? "Saving…" : form.action.form?.save}
                     </button>

@@ -1,18 +1,31 @@
 /** M-14 Mind sweep: capture anything on the mind into the Inbox, unsorted (FR-028, FR-052). */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { apiClient } from "../../../api/client";
 import { newIdempotencyKey } from "../../../api/review";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { fieldClass, FailureBanner, primaryButtonClass } from "./stepParts";
 import { useReviewRun } from "./reviewRun";
 import { useStepAction } from "./useStepAction";
 
+/** The one line of this step: it is about no task, so it has one fixed item and field. */
+const LINE = { item: "line", field: "title" } as const;
+
 export function MindSweepStep(): React.JSX.Element {
   const run = useReviewRun();
   const action = useStepAction();
-  const [text, setText] = useState("");
+  const drafts = useReviewDrafts(run.session.id, "mind_sweep");
+  // A line typed before a reload or a closed tab comes back (FR-052).
+  const [text, setText] = useState(() => drafts.load(LINE.item, LINE.field) ?? "");
   const [added, setAdded] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (text.trim() !== "") {
+      run.setUnsaved(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per opened step: only a restored line is unsaved text before anything is typed.
+  }, []);
 
   const submit = (event: FormEvent) => {
     // A disabled submit button blocks implicit submission, so a submit always carries a line.
@@ -23,6 +36,7 @@ export function MindSweepStep(): React.JSX.Element {
       const created = await apiClient.createTask({ title, state: "inbox" }, key);
       setAdded((current) => [...current, created.title]);
       setText("");
+      drafts.clear(LINE.item, LINE.field);
       run.setUnsaved(false);
     });
   };
@@ -40,6 +54,7 @@ export function MindSweepStep(): React.JSX.Element {
           className={fieldClass}
           onChange={(event) => {
             setText(event.currentTarget.value);
+            drafts.save(LINE.item, LINE.field, event.currentTarget.value);
             run.setUnsaved(event.currentTarget.value.trim() !== "");
           }}
         />

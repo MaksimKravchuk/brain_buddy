@@ -15,6 +15,7 @@ import { applyReviewTask, refreshAfterReviewWrite, settleForAccount, useReviewQu
 import type { OpenTaskState, TaskResponse, TaskTransitionRequest } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
 import { plural } from "../plural";
+import { useReviewDrafts } from "../useReviewDrafts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate } from "./stepParts";
 import { useReviewRun } from "./reviewRun";
 import { useBulkRelease } from "./useBulkRelease";
@@ -58,6 +59,7 @@ export function InboxStep(): React.JSX.Element {
   const queryClient = useQueryClient();
   const queue = useReviewQueue("inbox", run.session.id);
   const action = useStepAction();
+  const drafts = useReviewDrafts(run.session.id, "inbox");
   const bulk = useBulkRelease("inbox_remainder", run.session.id, run.session.steps.inbox === "pending");
   const [plan, setPlan] = useState<Plan | null>(null);
   const [processed, setProcessed] = useState<readonly string[]>([]);
@@ -87,8 +89,30 @@ export function InboxStep(): React.JSX.Element {
     }
   }, [form]);
 
-  const closeForm = () => {
+  // Text typed before a reload or a closed tab comes back in its form (FR-052), once per item shown:
+  // a form the person closes must not reopen on its own.
+  const [draftsCheckedFor, setDraftsCheckedFor] = useState<string | null>(null);
+  if (current !== undefined && draftsCheckedFor !== current.id) {
+    setDraftsCheckedFor(current.id);
+    const title = form === null ? drafts.load(current.id, "title") : null;
+    const waitingFor = form === null ? drafts.load(current.id, "waiting") : null;
+    if (title !== null) {
+      setForm({ kind: "title", text: title });
+    } else if (waitingFor !== null) {
+      setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
+    }
+  }
+  useEffect(() => {
+    if (form !== null && form.text.trim() !== "") {
+      run.setUnsaved(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
+  }, [draftsCheckedFor]);
+
+  /** The form is over, saved or discarded: so is its draft. */
+  const closeForm = (taskId: string, field: string) => {
     setForm(null);
+    drafts.clear(taskId, field);
     run.setUnsaved(false);
   };
 
@@ -109,7 +133,7 @@ export function InboxStep(): React.JSX.Element {
         refreshAfterReviewWrite(queryClient, continuation.scope);
         focusHeading.current = true;
         setStale((ids) => [...ids, task.id]);
-        closeForm();
+        closeForm(task.id, choice.id);
         setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
         return;
       }
@@ -121,7 +145,7 @@ export function InboxStep(): React.JSX.Element {
       applyReviewTask(queryClient, moved, continuation.scope);
       focusHeading.current = true;
       setProcessed((ids) => [...ids, task.id]);
-      closeForm();
+      closeForm(task.id, choice.id);
       notify(`“${task.title}” ${choice.toast}`, {
         action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void undoChoice(task, moved) }
       });
@@ -182,7 +206,7 @@ export function InboxStep(): React.JSX.Element {
       }
       applyReviewTask(queryClient, updated, continuation.scope);
       setLatest((tasks) => ({ ...tasks, [task.id]: updated }));
-      closeForm();
+      closeForm(task.id, "title");
     });
   };
 
@@ -273,12 +297,13 @@ export function InboxStep(): React.JSX.Element {
                       onChange={(event) => {
                         const text = event.currentTarget.value;
                         setForm({ ...form, text });
+                        drafts.save(current.id, form.kind, text, form.kind === "title" ? current.title : "");
                         run.setUnsaved(text.trim() !== "" && text !== (form.kind === "title" ? current.title : ""));
                       }}
                     />
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(closeForm)}>Back</button>
+                    <button type="button" disabled={action.pending !== null} className={buttonClass} onClick={() => run.confirmDiscard(() => closeForm(current.id, form.kind))}>Back</button>
                     <button type="submit" disabled={form.text.trim() === "" || action.disabled} className={`${primaryButtonClass} ml-auto`}>
                       {action.pending !== null ? "Saving…" : form.kind === "title" ? "Save title" : "Move to Waiting for"}
                     </button>
