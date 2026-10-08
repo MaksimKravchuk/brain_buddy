@@ -39,6 +39,8 @@ This is substantive review of the text, not official five-lens approval or proof
 
 The smaller review notes about pending dependencies and account purge are already covered by contract sections 4 and 6: unresolved dependencies return `DEPENDENCY_PENDING`, and account purge removes all receipts. They do not change the agreed behavior. CI and review evidence for subsequent revisions is recorded on the PR.
 
+A follow-up review identified an overbroad device-epoch requirement at the common write boundary. The contract now limits device registration to the new sync ingress. Legacy adapters retain their existing authenticated principal and stable replay identity; internal jobs use trusted execution authority, durable effect IDs, and lease fencing. Both still publish through the shared receipt/feed transaction. Caller-controlled origin fields cannot exempt a device command from epoch checks. Validation scenarios cover each writer, retries, forged origin, and a stale worker.
+
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.
