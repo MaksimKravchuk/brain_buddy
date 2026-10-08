@@ -100,6 +100,9 @@ public final class Workspace {
     /// meanwhile (the Mac's global Quick Capture, an in-process App Intent) is never accepted and
     /// then removed unseen. The caller keeps what was typed and can try again once it is done.
     @ObservationIgnored public private(set) var isSigningOut = false
+    /// A sign-out has its local removal still to do (or to fail): `waitForSignOutRemoval()`.
+    @ObservationIgnored private var signOutRemovalPending = false
+    @ObservationIgnored private var signOutRemovalWaiters: [CheckedContinuation<Void, Never>] = []
     /// Bumped when the workspace is reset, so results of work started
     /// before (a load, a write) are discarded.
     @ObservationIgnored private var epoch = 0
@@ -532,7 +535,11 @@ public final class Workspace {
         // Set before the first suspension: nothing performed from here on can slip past the changes
         // the person confirmed and be removed with the account's data.
         isSigningOut = true
-        defer { isSigningOut = false }
+        signOutRemovalPending = true
+        defer {
+            isSigningOut = false
+            signOutRemovalEnded()
+        }
         // A browser sign-in not yet completing is cancelled (one completing refused this sign-out).
         nativeSignInID = nil
         // Let a write in flight finish, and write nothing new for this account.
@@ -552,11 +559,13 @@ public final class Workspace {
         // The engine runs this once it has recorded the session's logout; it is checked again under
         // the store's lock, so nothing queued in between is lost: a change that was not confirmed
         // (any, for a plain sign-out) and nothing is removed.
-        let removeData: @Sendable () async throws -> Void = {
+        let removeData: @Sendable () async throws -> Void = { [weak self] in
             try await store.destroy(after: { stored in
                 let unsynced = PendingChange.all(in: stored, unpersisted: unpersisted)
                 if !unsynced.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: unsynced.count) }
             })
+            // Removed: a quit may go ahead now (the logout is recorded, and sent next launch if not now).
+            await self?.signOutRemovalEnded()
         }
         do {
             if let sync { try await sync.signOut(removingLocalDataWith: removeData) } else { try await removeData() }
@@ -571,6 +580,21 @@ public final class Workspace {
         resetToEmptyLocalWorkspace()
         writesSuspended = false
         didPersist?()
+    }
+
+    /// Returns once no sign-out has its local removal still to do: at once when none runs, else when
+    /// its data is removed (or it failed and removed nothing). The Mac's quit waits for it (spec 021,
+    /// FR-018), so a confirmed sign-out never leaves the account's data on the device for the next
+    /// launch. The server logout is not waited for: it is recorded first and sent at the next launch.
+    public func waitForSignOutRemoval() async {
+        while signOutRemovalPending { await withCheckedContinuation { signOutRemovalWaiters.append($0) } }
+    }
+
+    private func signOutRemovalEnded() {
+        signOutRemovalPending = false
+        let waiters = signOutRemovalWaiters
+        signOutRemovalWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     /// The app came to the foreground (or went away). Active: starts the 15 s tick and asks for one

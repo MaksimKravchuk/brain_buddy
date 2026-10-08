@@ -832,6 +832,15 @@ Earlier increments are each independently useful and safe:
     (`Workspace.pendingChanges`), every check, the locked one included, compares both, and the
     iPhone's confirmation counts issues. Tests, red before: `WorkspaceSyncTests` (a named change
     rejected during sign-out is refused and kept; a plain sign-out with only an issue is refused).
+  - **Quit waits for a confirmed sign-out's removal** (review P1). The quit path waited only for
+    `flush()`, which returns at once while a sign-out has suspended writes, so ⌘Q during X-04's
+    commit could end the process before the store was removed: the next launch still held the
+    account and its tasks while the recorded logout ended the session. `.willTerminate` now also
+    awaits `Workspace.waitForSignOutRemoval()` (the removal, not the network logout, which is
+    recorded and sent at the next launch). An in-flight sign-in is not waited for: interrupted, it
+    leaves either no link (a stale token the next launch discards) or a link the next launch syncs.
+    Tests: `MacSyncFlowTests` (quit during the commit waits for the removal; red before: it
+    returned with the store still there), `WorkspaceSyncTests`, `SyncTriggerSourceTests`.
   - **Not compiled before CI**: the `BrainBuddyMac` views and `MacKeychainTests` (macOS-only) are
     parse-checked only; their first type-check and run are the `macos-app` lane of T132. T120 and
     T122 – T129 are ticked as written on that basis. The host checks are the PENDING plan

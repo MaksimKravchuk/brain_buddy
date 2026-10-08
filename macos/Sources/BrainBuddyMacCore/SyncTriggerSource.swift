@@ -17,6 +17,8 @@ package protocol SyncTriggerTarget: AnyObject {
     func syncNow() async
     func flush() async
     func refreshTaskDetails(_ id: TaskID) async
+    /// Returns once a confirmed sign-out has removed the account's data (`Workspace.waitForSignOutRemoval()`).
+    func waitForSignOutRemoval() async
 }
 
 /// The network path, as `NWPathMonitor` reports it (`SyncTriggerSource+Live.swift`); tests fake it.
@@ -55,7 +57,8 @@ package enum AppLifecycleEvent: Hashable, Sendable {
 /// | the window visible again | `.foreground` |
 /// | network back / gone | `networkAvailabilityChanged(true / false)`, on changes only |
 /// | File › "Sync now", popover "Sync now", "Retry" | `syncNow()` |
-/// | resign, terminate | `flush()` |
+/// | resign | `flush()` |
+/// | terminate | `flush()`, then a confirmed sign-out's removal (`waitForSignOutRemoval()`) |
 ///
 /// Local changes reach the engine through the kit's own 2 s debounce. While an account is linked
 /// the App Nap activity is held; account-less, none. An open task's detail is read again on every
@@ -113,8 +116,13 @@ package final class SyncTriggerSource {
             }
         case .windowBecameVisible:
             await target.requestForegroundPull()
-        case .willResignActive, .willTerminate:
+        case .willResignActive:
             await target.flush()
+        case .willTerminate:
+            await target.flush()
+            // A confirmed sign-out finishes removing the account's data before the process ends
+            // (FR-018); its server logout is recorded and goes at the next launch if not now.
+            await target.waitForSignOutRemoval()
         }
         accountLinkChanged()
     }
@@ -181,4 +189,5 @@ extension WorkspaceHost: SyncTriggerTarget {
     package func syncNow() async { await workspace.syncNow() }
     package func flush() async { await workspace.flush() }
     package func refreshTaskDetails(_ id: TaskID) async { await workspace.refreshTaskDetails(id) }
+    package func waitForSignOutRemoval() async { await workspace.waitForSignOutRemoval() }
 }

@@ -4,6 +4,7 @@ import BrainBuddyPersistence
 import BrainBuddySync
 import BrainBuddyWorkspace
 import Foundation
+import Synchronization
 import Testing
 
 @testable import BrainBuddyMacCore
@@ -586,6 +587,41 @@ struct MacSyncFlowTests {
 
         #expect(await rig.controller.confirmSignOut() == .signedOut)
         #expect(rig.workspace.account == nil && rig.workspace.pendingChangeCount == 0)
+    }
+
+    @Test("021-FR-018 Quit while a confirmed sign-out is still removing the data waits for the removal; nothing is left behind")
+    func quitWaitsForTheSignOutsRemoval() async throws {
+        let rig = await Rig()
+        await rig.signIn()
+        try await rig.captureWaiting("Removed with the account")
+        // A sync is on its way, so the sign-out waits for it to stop before removing anything.
+        rig.server.holdNextSync()
+        let workspace = rig.workspace
+        let syncing = Task { await workspace.syncNow() }
+        await rig.server.syncGate.waitForArrival()
+        rig.controller.presentSignOut()
+        #expect(rig.controller.signOut.prompt?.unsent == 1)
+        let controller = rig.controller
+        let confirming = Task { await controller.confirmSignOut() }
+        while !rig.controller.signOut.isSigningOut { await Task.yield() }
+
+        // ⌘Q: the app delegate's terminateLater waits for this before it replies.
+        let quit = Mutex(false)
+        let triggers = rig.triggers
+        let quitting = Task {
+            await triggers.handle(.willTerminate)
+            quit.withLock { $0 = true }
+        }
+        for _ in 0..<200 { await Task.yield() }
+        #expect(!quit.withLock { $0 }, "the reply waits")
+        #expect(try await FileDocumentStore(fileURL: rig.folder.store).load() != nil, "not removed yet")
+
+        await rig.server.syncGate.open()
+        #expect(await confirming.value == .signedOut)
+        await quitting.value
+        await syncing.value
+        #expect(try await FileDocumentStore(fileURL: rig.folder.store).load() == nil, "removed before the process ends")
+        #expect(rig.workspace.account == nil)
     }
 
     @Test("021-FR-018 a Quick Capture while a confirmed sign-out commits is refused with words and never silently removed")

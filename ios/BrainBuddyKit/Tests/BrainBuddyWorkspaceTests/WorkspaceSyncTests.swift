@@ -519,6 +519,28 @@ import Testing
         #expect(try await session.store.load() == nil)
     }
 
+    @Test("021-FR-018 waiting for a sign-out's removal returns once the data is gone, or at once with none running")
+    func waitForSignOutRemovalReturnsAfterTheRemoval() async throws {
+        let session = await signedIn()
+        let workspace = session.workspace
+        await workspace.waitForSignOutRemoval()  // none running: returns at once
+        let shared = session.store.base
+        let waiter = Mutex<Task<Bool, Never>?>(nil)
+        // A quit while the engine stops sync, before anything is removed.
+        await session.sync.whileSigningOut {
+            let waiting = Task { @MainActor in
+                await workspace.waitForSignOutRemoval()
+                return (try? await shared.load()) == nil
+            }
+            waiter.withLock { $0 = waiting }
+        }
+
+        try await workspace.signOut(discardUnsyncedChanges: false)
+
+        let waiting = try #require(waiter.withLock { $0 })
+        #expect(await waiting.value, "the wait returned only once the store was removed")
+    }
+
     @Test("021-FR-018 a sign-out that fails takes changes again at once")
     func aFailedSignOutTakesChangesAgain() async throws {
         let session = await signedIn()

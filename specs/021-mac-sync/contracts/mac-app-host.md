@@ -111,7 +111,8 @@ targets: [
 | `NWPathMonitor` unsatisfied | `networkAvailabilityChanged(isAvailable: false)` → `SyncSnapshot.isOnline = false` |
 | kit `PeriodicSyncTicker`, active for the life of the process (15 s) | `.periodic`: a cycle only when the pull is 30 s old or changes wait, never during a scheduled retry (kit-commands §4) |
 | File › "Sync now" ⌘R, popover "Sync now", "Retry" | `syncNow()` (`.manual`) |
-| `willResignActive`, `willTerminate` | `flush()` |
+| `willResignActive` | `flush()` |
+| `willTerminate` (`applicationShouldTerminate` → `.terminateLater`) | `flush()`, then `Workspace.waitForSignOutRemoval()`: a confirmed sign-out finishes removing the account's data before the process ends (FR-018); its server logout is recorded and goes at the next launch if not now |
 
 Sync runs only while the app runs: there is no login item and no agent (spec Assumptions).
 
