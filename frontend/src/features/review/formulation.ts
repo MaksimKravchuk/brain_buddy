@@ -48,7 +48,8 @@ function isPythonSpace(code: number): boolean {
 /**
  * Python `str.casefold()` of one NFKC-stable scalar outside the ranges handled
  * in `caseFoldScalar`. The cases are the scalars whose full case folding is not
- * their full lowercase mapping (Unicode 14, the server's Python 3.11), ported
+ * their full lowercase mapping (Unicode 16.0.0, the server's Python 3.14; the
+ * same set as in Unicode 14), ported
  * from `NameNormalizer.swift` (research R3).
  */
 function foldSingleScalar(code: number): string {

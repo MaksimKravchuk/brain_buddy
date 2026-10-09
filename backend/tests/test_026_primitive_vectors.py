@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import zoneinfo
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any
 import allure
 import pytest
 
-from app.modules.tasks.formulation import due_start
+from app.modules.tasks.formulation import due_start, formulation_key
 from app.modules.tasks.repository import (
     display_project_name,
     display_tag_name,
@@ -57,7 +58,13 @@ def test_026_FR_002_primitive_vector_file_has_every_section() -> None:
     """No section is missing or empty, and ids are unique."""
 
     with allure.step("Check the declared sections"):
-        sections = ["name_normalization", "search", "whitespace", "scalar_length"]
+        sections = [
+            "name_normalization",
+            "search",
+            "whitespace",
+            "scalar_length",
+            "unicode_data",
+        ]
         check_equal(
             "vector file schema", VECTORS["schema"], "brainbuddy-primitive-vectors/v1"
         )
@@ -108,6 +115,43 @@ def test_026_FR_002_search_key_vector(row: dict[str, Any]) -> None:
             TaskService._normalize_search_query(row["input"]),
             row["search_query_key"],
         )
+
+
+def test_026_FR_002_unicode_data_version_is_the_agreed_release() -> None:
+    """CPython's Unicode tables are normative, so their release is pinned.
+
+    The Rust core pins ``unicode-normalization``, ``caseless`` and
+    ``unicode-general-category`` to the same release and its parity test reads
+    the version from the same vector file; move all of them together.
+    """
+
+    with allure.step("Compare the interpreter's Unicode release with the contract"):
+        attach_json("interpreter", {"unidata_version": unicodedata.unidata_version})
+        check_equal("agreed release", VECTORS["unidata_version"], "16.0.0")
+        check_equal(
+            "unicodedata.unidata_version",
+            unicodedata.unidata_version,
+            VECTORS["unidata_version"],
+        )
+
+
+@pytest.mark.parametrize(
+    "row", VECTORS["unicode_data"], ids=_ids(VECTORS["unicode_data"])
+)
+def test_026_FR_002_unicode_data_vector(row: dict[str, Any]) -> None:
+    """Scalars changed after Unicode 14 normalise as the Rust core must."""
+
+    value = row["input"]
+    with allure.step("Run the server's functions on a post-Unicode-14 scalar"):
+        attach_json("input vector", row)
+        check_equal(
+            "project display", display_project_name(value), row["project_display"]
+        )
+        check_equal("project key", normalize_task_name(value), row["project_key"])
+        check_equal(
+            "search key", TaskService._normalize_for_search(value), row["search_key"]
+        )
+        check_equal("formulation key", formulation_key(value), row["formulation_key"])
 
 
 @pytest.mark.parametrize("row", VECTORS["whitespace"], ids=_ids(VECTORS["whitespace"]))
