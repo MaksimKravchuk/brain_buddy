@@ -17,6 +17,7 @@
 - `./scripts/smoke_test.sh`: call core API endpoints against the compose stack.
 
 ## Coding Style & Naming Conventions
+- Write all documentation in English, including specifications, ADRs, plans, runbooks, and PR descriptions, regardless of the conversation language.
 - Python: Black (88-col) + Ruff enforced; prefer descriptive snake_case for functions/vars.
 - TypeScript/React: follow existing component naming (`PascalCase` files), use TypeScript strict types.
 - Keep comments purposeful; leverage existing store/service patterns when extending features.
