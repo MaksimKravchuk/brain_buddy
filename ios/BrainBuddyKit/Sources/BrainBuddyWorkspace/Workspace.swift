@@ -363,12 +363,13 @@ public final class Workspace {
         try perform(.setProjectOutcome(project: id, outcome: outcome))
     }
 
-    /// Clarifies an Inbox item as a project, as one change: creates the project, makes the item its
-    /// first Next action under the title `firstAction`, with `changes` (tags, due date) applied too.
-    /// Pass `projectName` and `firstAction` trimmed, as every client does.
+    /// Clarifies an Inbox item as a project, as one change: creates the project (with its desired
+    /// `outcome`, if any), makes the item its first Next action under the title `firstAction`, with
+    /// `changes` (tags, due date) applied too. Pass the text trimmed, as every client does.
     @discardableResult
     public func clarifyAsProject(
-        _ id: TaskID, projectName: String, firstAction: String, changes: TaskChanges = TaskChanges()
+        _ id: TaskID, projectName: String, outcome: String? = nil, firstAction: String,
+        changes: TaskChanges = TaskChanges()
     ) throws(GTDValidationError) -> ProjectID {
         guard let task = state.tasks[id] else { throw .taskNotFound }
         let projectID = ProjectID(Self.rawID(makeID()))
@@ -376,7 +377,7 @@ public final class Workspace {
         changes.projectID = .set(projectID)
         changes.title = firstAction == task.title ? .unchanged : .set(firstAction)
         try perform([
-            .createProject(.init(projectID: projectID, name: projectName)),
+            .createProject(.init(projectID: projectID, name: projectName, desiredOutcome: outcome)),
             .updateTask(.init(taskID: id, changes: changes)),
             .transitionTask(.init(taskID: id, action: .move, toList: .next)),
         ])

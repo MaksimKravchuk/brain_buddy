@@ -351,7 +351,8 @@ data, or need a sign-in.
       what will be created before saving.
 - [ ] Process inbox: clarify each item to Next, Waiting (asks who or what),
       Someday, a project, or complete it, one at a time. "Make it a project"
-      names the project and asks for the first next action; Undo puts the
+      names the project, an optional desired outcome and the first next
+      action; Undo puts the
       item back and archives the project. The Project chip can also create a
       new project.
 - [ ] Move between lists, complete (the undo toast reopens into the previous

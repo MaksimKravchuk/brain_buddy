@@ -313,11 +313,12 @@ import Testing
         let item = try workspace.capture(CaptureDraft(text: "Collect user interviews"))
 
         let projectID = try workspace.clarifyAsProject(
-            item, projectName: "Collect user interviews", firstAction: "Email Anna for three contacts",
-            changes: TaskChanges(tagIDs: .set([tag]))
+            item, projectName: "Collect user interviews", outcome: "Ten interviews summarised",
+            firstAction: "Email Anna for three contacts", changes: TaskChanges(tagIDs: .set([tag]))
         )
 
         #expect(workspace.project(projectID)?.name == "Collect user interviews")
+        #expect(workspace.project(projectID)?.desiredOutcome == "Ten interviews summarised")
         let task = try #require(workspace.task(item))
         #expect(task.title == "Email Anna for three contacts" && task.state == .next)
         #expect(task.projectID == projectID && task.tagIDs == [tag])
@@ -327,6 +328,7 @@ import Testing
         let other = try workspace.capture(CaptureDraft(text: "Call the plumber"))
         let second = try workspace.clarifyAsProject(other, projectName: "Fix the leak", firstAction: "Call the plumber")
         #expect(workspace.task(other)?.title == "Call the plumber" && workspace.task(other)?.projectID == second)
+        #expect(workspace.project(second)?.desiredOutcome == nil, "the outcome is optional")
 
         // A taken name or a blank first action refuses the whole change.
         let third = try workspace.capture(CaptureDraft(text: "Plan the trip"))

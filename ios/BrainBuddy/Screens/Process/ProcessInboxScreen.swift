@@ -37,7 +37,8 @@ struct ProcessInboxScreen: View {
 /// are passed over. For each item you can first add a project (an existing
 /// one or a new one), tags or a due date, then decide: Next action, Waiting
 /// for… (asks who or what), Someday / maybe, Make it a project (names the
-/// project and asks for its first next action, which the item becomes), Done
+/// project, optionally its desired outcome, and asks for its first next
+/// action, which the item becomes), Done
 /// — under 2 minutes (complete), Not needed (cancel), or Skip. Every decision
 /// is one change with an Undo toast that puts the item back in the Inbox
 /// exactly as it was (a project made from it is archived again). The toast
@@ -133,8 +134,8 @@ struct InboxClarifier: View {
         }
         .sheet(isPresented: $isMakingProject) {
             if let item = current {
-                MakeProjectSheet(taskTitle: item.task.title) { name, firstAction in
-                    try makeProject(of: item, name: name, firstAction: firstAction)
+                MakeProjectSheet(taskTitle: item.task.title) { name, outcome, firstAction in
+                    try makeProject(of: item, name: name, outcome: outcome, firstAction: firstAction)
                 }
             }
         }
@@ -477,12 +478,12 @@ struct InboxClarifier: View {
     /// "Make it a project": a new project whose first Next action is the item,
     /// titled `firstAction`, with the staged tags and due date. Throws, and
     /// changes nothing, when the workspace refuses it (the sheet shows why).
-    private func makeProject(of item: InboxItem, name: String, firstAction: String) throws {
+    private func makeProject(of item: InboxItem, name: String, outcome: String?, firstAction: String) throws {
         let original = item.task
         var staged = stage.changes(for: original)
         staged.projectID = .unchanged
         let projectID = try workspace.clarifyAsProject(
-            original.id, projectName: name, firstAction: firstAction, changes: staged
+            original.id, projectName: name, outcome: outcome, firstAction: firstAction, changes: staged
         )
         var changes = staged
         changes.projectID = .set(projectID)
@@ -704,21 +705,26 @@ private struct StagedTagsSheet: View {
     }
 }
 
-/// "Make it a project": the project's name (the item's title to start with)
-/// and its first next action, which the item becomes in Next actions.
+/// "Make it a project": the project's name (the item's title to start with),
+/// optionally its desired outcome, and its first next action, which the item
+/// becomes in Next actions.
 private struct MakeProjectSheet: View {
     let taskTitle: String
-    let onCreate: (_ name: String, _ firstAction: String) throws -> Void
+    let onCreate: (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    @State private var outcome = ""
     @State private var firstAction = ""
     @State private var message: String?
     @FocusState private var focus: Field?
 
-    private enum Field { case name, firstAction }
+    private enum Field { case name, outcome, firstAction }
 
-    init(taskTitle: String, onCreate: @escaping (_ name: String, _ firstAction: String) throws -> Void) {
+    init(
+        taskTitle: String,
+        onCreate: @escaping (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
+    ) {
         self.taskTitle = taskTitle
         self.onCreate = onCreate
         _name = State(initialValue: taskTitle)
@@ -731,9 +737,18 @@ private struct MakeProjectSheet: View {
                     TextField("Project name", text: $name)
                         .submitLabel(.next)
                         .focused($focus, equals: .name)
-                        .onSubmit { focus = .firstAction }
+                        .onSubmit { focus = .outcome }
                 } header: {
                     Text("Project")
+                }
+                Section {
+                    TextField("What will be true when it's done?", text: $outcome, axis: .vertical)
+                        .lineLimit(1...4)
+                        .textInputAutocapitalization(.sentences)
+                        .focused($focus, equals: .outcome)
+                        .accessibilityLabel("Desired outcome")
+                } header: {
+                    Text("Desired outcome · optional")
                 }
                 Section {
                     TextField("What's the very next step?", text: $firstAction)
@@ -764,6 +779,7 @@ private struct MakeProjectSheet: View {
                 }
             }
             .onChange(of: name) { message = nil }
+            .onChange(of: outcome) { message = nil }
             .onChange(of: firstAction) { message = nil }
             // The name is already there; the next step is what is missing.
             .onAppear { focus = .firstAction }
@@ -778,9 +794,10 @@ private struct MakeProjectSheet: View {
     private func create() {
         let projectName = trimmed(name)
         let action = trimmed(firstAction)
+        let desiredOutcome = trimmed(outcome)
         guard !projectName.isEmpty, !action.isEmpty else { return }
         do {
-            try onCreate(projectName, action)
+            try onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action)
             dismiss()
         } catch {
             message = TaskCommandRunner.message(for: error)
