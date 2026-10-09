@@ -58,6 +58,28 @@ class RequirementCoverageTests(unittest.TestCase):
             self.assertEqual(result["FR-001"], ["cli/tests/journey.rs"])
             self.assertEqual(result["FR-002"], [])
 
+    def test_rust_workspace_counts_tests_dirs_and_inline_tests_but_not_product_code(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, feature_dir = self.build(tmp, backend_test="")
+            crate = root / "rust/crates/bb-protocol"
+            (crate / "tests/contract").mkdir(parents=True)
+            (crate / "src").mkdir(parents=True)
+            (crate / "tests/contract/feed.rs").write_text("fn a_006_fr_001() {}")
+            (crate / "src/inline.rs").write_text(
+                "// 006-FR-002\n#[cfg(test)]\nmod tests {}\n"
+            )
+            (crate / "src/lib.rs").write_text("//! 006-SC-001 documented, untested")
+            (root / "rust/target/debug").mkdir(parents=True)
+            (root / "rust/target/debug/build.rs").write_text("// 006-SC-001 #[test]")
+            result = self.module.coverage(root, feature_dir)
+            self.assertEqual(
+                result["FR-001"], ["rust/crates/bb-protocol/tests/contract/feed.rs"]
+            )
+            self.assertEqual(result["FR-002"], ["rust/crates/bb-protocol/src/inline.rs"])
+            self.assertEqual(result["SC-001"], [])
+
     def setUp(self) -> None:
         self.module = load_module()
 

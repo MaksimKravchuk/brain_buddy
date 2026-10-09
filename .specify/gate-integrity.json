@@ -10,7 +10,7 @@
     "Makefile": "c64120a090fb27b764348f34ae15c40411a55a20fb08738387ba50d2ea0ada9f",
     "backend/mutation-enforced-scope.txt": "6d301c35b52b2366d4b3df01116c7fc44a7e0e10fef700ebdec4169cc10e5a5d",
     "scripts/check_gate_integrity.py": "5a00abc20be021e18189ac2cbdd0ea71673178b34cbc95d546c1e6069568e80d",
-    "scripts/check_requirement_coverage.py": "d07351ac903ff03e4bf5028c64a7061f84fba495b5cdc83069942d238240fb4c",
+    "scripts/check_requirement_coverage.py": "7f52b14a9051b1a545fa2d363d049480d28e2de08f77d53453c0d6d09d10b9fb",
     "scripts/check_spec_kit_specs.py": "11c4f98e98ff205947e9d5200866d97aa1c5294cbab3d6f6aee46320e48cc2b1",
     "scripts/check_speckit_manifests.py": "16db34acb64062ddd075a14ee096d4ad96e780feeacee47d8ed454cd65a2f18b",
     "scripts/classify_path_risk.py": "b45d49706d0037fb71cf676a0a4c84a295c910ffb89ccc307b73d6565e7666ec",
