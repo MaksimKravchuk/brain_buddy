@@ -268,6 +268,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Flag ON and OFF give identical task HTTP",
     ),
     "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
+    "task_job_worker": (
+        EPIC_TASKS,
+        "Durable job ledger",
+        "Worker loop, wake and shutdown",
+    ),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",
