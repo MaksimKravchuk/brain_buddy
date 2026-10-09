@@ -1052,6 +1052,7 @@ def test_026_FR_024_bridge_returns_typed_values_and_concurrent_calls_agree() -> 
                     _inputs(datetime(2026, 10, 9, tzinfo=UTC), "owner-1"),
                 )
             assert unsupported.value.code == "UPGRADE_REQUIRED"
+            _evidence("unsupported command code", unsupported.value.code)
         with allure.step("threads share one runtime and all get the same answer"):
             answers: list[str] = []
 
@@ -1072,6 +1073,7 @@ def test_026_FR_024_bridge_returns_typed_values_and_concurrent_calls_agree() -> 
         with pytest.raises(RustBridgeError) as closed:
             _fresh_decision(core, {}, "Late")
         assert closed.value.code == "WORKSPACE_CLOSED"
+        _evidence("closed runtime code", closed.value.code)
 
 
 def test_026_FR_024_core_refusal_is_a_value_not_an_exception() -> None:
