@@ -32,6 +32,8 @@ enum AppRoute: Hashable {
     case syncIssues
     /// The weekly review's entry (M-11).
     case review
+    /// Beta performance diagnostics (`PerformanceDiagnostics`).
+    case performance
 }
 
 /// Where a capture started, so the sheet can preselect the list and due date

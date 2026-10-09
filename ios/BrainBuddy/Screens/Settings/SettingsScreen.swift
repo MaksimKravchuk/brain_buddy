@@ -11,6 +11,8 @@ struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.openURL) private var openURL
+    /// Nil unless the build records performance diagnostics (beta builds).
+    @Environment(PerformanceDiagnostics.self) private var diagnostics: PerformanceDiagnostics?
 
     @State private var signInRequest: SignInRequest?
     @State private var isConfirmingSignOut = false
@@ -310,6 +312,11 @@ struct SettingsScreen: View {
             valueRow("Version", systemImage: "info.circle", value: Self.versionDescription)
             if let buildLabel = Self.buildLabel {
                 valueRow("Build", systemImage: "hammer", value: buildLabel)
+            }
+            if diagnostics != nil {
+                NavigationLink(value: AppRoute.performance) {
+                    Label("Performance", systemImage: "gauge.with.dots.needle.33percent")
+                }
             }
         } header: {
             Text("About")

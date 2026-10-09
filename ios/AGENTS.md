@@ -27,6 +27,7 @@ tests and leave the app build to CI (the `ios-app` lane of
 | `BrainBuddyKit/Sources/BrainBuddyCore` | Models, `GTDCommand`, `GTDReducer`, replay, queries, Smart Add | Import SwiftUI, UIKit, WidgetKit or anything Apple-only |
 | `BrainBuddyKit/Sources/BrainBuddy{Persistence,API,Sync}` | Store file, REST client, sync engine | Hold GTD rules |
 | `BrainBuddyKit/Sources/BrainBuddyWorkspace` | The `@Observable` model the UI binds to | Hold GTD rules |
+| `BrainBuddyKit/Sources/BrainBuddyDiagnostics` | Beta performance diagnostics: the bounded log, CPU arithmetic, summary, export (`README.md`, "Performance diagnostics") | Depend on the rest of the kit, or record user content |
 | `BrainBuddy/` | App: `App/`, `DesignSystem/`, `Components/`, `Screens/`, `Intents/`, `Resources/` | Hold GTD rules |
 | `BrainBuddyWidgets/` | Widgets and Control Center controls | Sync, or hold GTD rules |
 | `Shared/` | Code and resources for **both** the app and the widget extension | Use app-only API (`UIApplication.shared`, …) |

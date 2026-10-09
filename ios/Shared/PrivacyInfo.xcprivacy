@@ -18,6 +18,10 @@
   to the Brain Buddy server the user signs in to: the email address (sign-in
   and sign-up) and other user content (tasks, notes, subtasks, comments,
   projects and tags). No analytics, no crash reporting, no tracking.
+  Beta performance diagnostics (CPU samples, thermal states, MetricKit reports;
+  App/PerformanceDiagnostics.swift) stay on the device and leave it only in a
+  file the person chooses to share, so they are not collected data. They read
+  process CPU time with clock_gettime and no required-reason API.
 -->
 <plist version="1.0">
 <dict>

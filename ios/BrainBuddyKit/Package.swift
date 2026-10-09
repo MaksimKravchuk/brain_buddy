@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "BrainBuddyAPI", targets: ["BrainBuddyAPI"]),
         .library(name: "BrainBuddySync", targets: ["BrainBuddySync"]),
         .library(name: "BrainBuddyWorkspace", targets: ["BrainBuddyWorkspace"]),
+        .library(name: "BrainBuddyDiagnostics", targets: ["BrainBuddyDiagnostics"]),
     ],
     targets: [
         .target(name: "BrainBuddyCore"),
@@ -26,6 +27,10 @@ let package = Package(
         // An in-memory Brain Buddy server behind `HTTPTransport`, for tests
         // (sync, workspace) that need realistic server semantics offline.
         .target(name: "BrainBuddyFakeServer", dependencies: ["BrainBuddyCore", "BrainBuddyAPI"]),
+        // The app's beta performance diagnostics (Settings → About → Performance):
+        // the bounded log, CPU arithmetic, summary and export. No GTD rules, no
+        // dependency on the rest of the kit.
+        .target(name: "BrainBuddyDiagnostics"),
         // The shared review vectors and golden wire fixtures (spec 020) are
         // byte-identical copies of `backend/tests/fixtures/*.json`; `.copy`
         // keeps their bytes as they are.
@@ -45,5 +50,6 @@ let package = Package(
             name: "BrainBuddyWorkspaceTests", dependencies: ["BrainBuddyWorkspace", "BrainBuddyFakeServer"],
             resources: [.copy("Resources")]
         ),
+        .testTarget(name: "BrainBuddyDiagnosticsTests", dependencies: ["BrainBuddyDiagnostics"]),
     ]
 )

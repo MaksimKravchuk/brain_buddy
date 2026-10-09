@@ -121,6 +121,7 @@ private struct MainTabView: View {
             )
         ) { context in
             CaptureSheet(context: context)
+                .diagnosticsScreen("capture")
                 .onAppear { captureOnScreen = true }
                 .onDisappear { captureOnScreen = false }
         }
@@ -147,6 +148,7 @@ private struct MainTabView: View {
         // shows once the cover has gone.
         .fullScreenCover(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPendingCapture() }) {
             ProcessInboxScreen()
+                .diagnosticsScreen("process inbox")
         }
         // Changes stay on screen and are retried with the next save; say so
         // when a save fails instead of pretending it worked.
@@ -283,9 +285,11 @@ private struct TabRootView: View {
         NavigationStack(path: router.path(for: tab)) {
             TabRootScreen(tab: tab)
                 .toastMagicTap()
+                .diagnosticsScreen(tab.rawValue)
                 .navigationDestination(for: AppRoute.self) { route in
                     AppRouteView(route: route)
                         .toastMagicTap()
+                        .diagnosticsScreen(route.diagnosticsName)
                 }
         }
         .environment(\.appTab, tab)
