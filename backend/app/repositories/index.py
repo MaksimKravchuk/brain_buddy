@@ -53,7 +53,7 @@ class IndexRepository(BaseRepository):
             self.save_all(updated)
 
     @contextmanager
-    def _exclusive_index_lock(self) -> Generator[None, None, None]:
+    def _exclusive_index_lock(self) -> Generator[None]:
         """Serialize read-modify-write operations for the shared index."""
 
         lock_path = self.resolve(".index.lock")

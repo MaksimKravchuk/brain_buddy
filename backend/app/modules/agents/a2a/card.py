@@ -656,7 +656,7 @@ def fetch_card(
 
     try:
         payload = json.loads(response.body)
-    except (ValueError, UnicodeDecodeError):
+    except ValueError, UnicodeDecodeError:
         return _failure(A2A_NOT_AN_AGENT)
 
     def _validate_interface_host(url: str) -> None:

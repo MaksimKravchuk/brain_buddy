@@ -1,6 +1,6 @@
 {
  "schema": "brainbuddy-primitive-vectors/v1",
- "format": "Contract for the 026 shared normalization and calendar primitives (tasks.md T002/T006). name_normalization: the inputs of ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift; every expected value is the result of the backend functions display_project_name, normalize_task_name, display_tag_name on Python 3.11 / Unicode 14 and equals what the Swift test asserts. search: TaskService._normalize_for_search / _normalize_search_query (input null is the absent query). whitespace: Python str.strip() and ' '.join(str.split()). scalar_length: Python len() (Unicode scalars, what pydantic max_length counts) next to the UTF-16 and UTF-8 lengths other runtimes would count. calendar.valid_iso/invalid_iso: strict YYYY-MM-DD with years 0001..9999. calendar.local_day: the local date of a Unix second in an IANA zone (datetime.fromtimestamp(s, zone).date()). calendar.start_instant: backend formulation.due_start(day, zone) as Unix seconds, with the local date one second before and at that instant. clamp rows saturate at 0001-01-01/9999-12-31 (Python raises OverflowError there; Swift and Rust clamp). Zone rows use only rules that are identical in every tz database release since 2018; they are not a statement about future rule changes.",
+ "format": "Contract for the 026 shared normalization and calendar primitives (tasks.md T002/T006). name_normalization: the inputs of ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift; every expected value is the result of the backend functions display_project_name, normalize_task_name, display_tag_name on Python 3.14 / Unicode 16.0.0 and equals what the Swift test asserts. search: TaskService._normalize_for_search / _normalize_search_query (input null is the absent query). whitespace: Python str.strip() and ' '.join(str.split()). scalar_length: Python len() (Unicode scalars, what pydantic max_length counts) next to the UTF-16 and UTF-8 lengths other runtimes would count. calendar.valid_iso/invalid_iso: strict YYYY-MM-DD with years 0001..9999. calendar.local_day: the local date of a Unix second in an IANA zone (datetime.fromtimestamp(s, zone).date()). calendar.start_instant: backend formulation.due_start(day, zone) as Unix seconds, with the local date one second before and at that instant. clamp rows saturate at 0001-01-01/9999-12-31 (Python raises OverflowError there; Swift and Rust clamp). unicode_data: scalars whose NFKC, case folding or general category changed after Unicode 14, with unidata_version the Unicode release every runtime must carry (CPython unicodedata.unidata_version, and the unicode-normalization, caseless and unicode-general-category crates); the expected values are the backend functions display_project_name, normalize_task_name, TaskService._normalize_for_search and formulation_key. Zone rows use only rules that are identical in every tz database release since 2018; they are not a statement about future rule changes.",
  "name_normalization": [
   {
    "id": "NN-001",
@@ -435,6 +435,41 @@
    "utf16_units": 0,
    "utf8_bytes": 0,
    "within_500": true
+  }
+ ],
+ "unidata_version": "16.0.0",
+ "unicode_data": [
+  {
+   "id": "UD-001",
+   "input": "\ud838\udc30",
+   "project_display": "\u0430",
+   "project_key": "\u0430",
+   "search_key": "\u0430",
+   "formulation_key": "\u0430"
+  },
+  {
+   "id": "UD-002",
+   "input": "\ud803\udd50",
+   "project_display": "\ud803\udd50",
+   "project_key": "\ud803\udd70",
+   "search_key": "\ud803\udd70",
+   "formulation_key": "\ud803\udd70"
+  },
+  {
+   "id": "UD-003",
+   "input": "\ua7dc",
+   "project_display": "\ua7dc",
+   "project_key": "\u019b",
+   "search_key": "\u019b",
+   "formulation_key": "\u019b"
+  },
+  {
+   "id": "UD-004",
+   "input": "a\ud806\udf00b",
+   "project_display": "a\ud806\udf00b",
+   "project_key": "a\ud806\udf00b",
+   "search_key": "a\ud806\udf00b",
+   "formulation_key": "a b"
   }
  ],
  "calendar": {

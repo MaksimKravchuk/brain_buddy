@@ -300,7 +300,7 @@ async def apple_callback(
             or len(fields.get("id_token", [""])[0]) > 16384
         ):
             raise ValueError()
-    except (ValueError, UnicodeError):
+    except ValueError, UnicodeError:
         raise ModernAuthError() from None
     result = auth.provider_callback(
         "apple",

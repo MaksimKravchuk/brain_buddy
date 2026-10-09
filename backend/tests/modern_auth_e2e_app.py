@@ -99,7 +99,7 @@ class _SyntheticGoogle:
                 )
             ):
                 raise ValueError()
-        except (ValueError, KeyError, TypeError, UnicodeError):
+        except ValueError, KeyError, TypeError, UnicodeError:
             return httpx.Response(400, json={"error": "invalid_grant"})
         now = int(time.time())
         token = jwt.encode(
@@ -176,7 +176,7 @@ class _SyntheticApple:
                 and (not isinstance(fixture["email"], str) or not fixture["email"])
             ):
                 raise ValueError()
-        except (JoseError, ValueError, KeyError, TypeError, UnicodeError):
+        except JoseError, ValueError, KeyError, TypeError, UnicodeError:
             return httpx.Response(400, json={"error": "invalid_grant"})
         claims = {
             "iss": "https://appleid.apple.com",

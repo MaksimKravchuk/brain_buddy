@@ -10,7 +10,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
+from typing import Any, Concatenate, Protocol, cast
 
 from pydantic import BaseModel
 
@@ -75,9 +75,6 @@ review_logger = logging.getLogger("app.modules.tasks.review")
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
-_P = ParamSpec("_P")
-_Result = TypeVar("_Result")
-
 FORMULATION_SETTINGS_FIELD = "formulation_settings"
 """Key of the settings snapshot inside a stored ``TaskDocument`` response body."""
 
@@ -120,15 +117,12 @@ class SerializedWriter(Protocol):
     def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None: ...
 
 
-_Writer = TypeVar("_Writer", bound=SerializedWriter)
-
-
-def serialized_write(
-    command: Callable[Concatenate[_Writer, _P], _Result],
-) -> Callable[Concatenate[_Writer, _P], _Result]:
+def serialized_write[Writer: SerializedWriter, **P, Result](
+    command: Callable[Concatenate[Writer, P], Result],
+) -> Callable[Concatenate[Writer, P], Result]:
     """Hold the owner command lock over idempotency and resource persistence."""
 
-    def wrapped(service: _Writer, /, *args: _P.args, **kwargs: _P.kwargs) -> _Result:
+    def wrapped(service: Writer, /, *args: P.args, **kwargs: P.kwargs) -> Result:
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.task_repo.command_lock(owner_id):

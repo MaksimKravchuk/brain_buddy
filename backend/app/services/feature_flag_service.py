@@ -413,7 +413,7 @@ class FeatureFlagService:
                 outcome="refused_mode_not_selected_users",
             )
             raise
-        except (OSError, StorageUnavailableError):
+        except OSError, StorageUnavailableError:
             self._record(
                 action,
                 flag=flag,

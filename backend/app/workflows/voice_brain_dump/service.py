@@ -14,7 +14,7 @@ import logging
 import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Concatenate, Literal, ParamSpec, TypeVar, cast
+from typing import Concatenate, Literal, cast
 
 from pydantic import BaseModel
 
@@ -81,18 +81,15 @@ from .task_port import TaskPort
 
 logger = logging.getLogger(__name__)
 
-_P = ParamSpec("_P")
-_Result = TypeVar("_Result")
 
-
-def _serialized_write(
-    command: Callable[Concatenate[VoiceBrainDumpService, _P], _Result],
-) -> Callable[Concatenate[VoiceBrainDumpService, _P], _Result]:
+def _serialized_write[**P, Result](
+    command: Callable[Concatenate[VoiceBrainDumpService, P], Result],
+) -> Callable[Concatenate[VoiceBrainDumpService, P], Result]:
     """Hold the owner command lock over idempotency and resource persistence."""
 
     def wrapped(
-        service: VoiceBrainDumpService, /, *args: _P.args, **kwargs: _P.kwargs
-    ) -> _Result:
+        service: VoiceBrainDumpService, /, *args: P.args, **kwargs: P.kwargs
+    ) -> Result:
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with service.operation_repo.command_lock(owner_id):
@@ -843,7 +840,7 @@ class VoiceBrainDumpService:
                     ),
                 )
                 recovered += 1
-            except (ValidationFailure, ConflictError, NotFoundError):
+            except ValidationFailure, ConflictError, NotFoundError:
                 # Lost the compare-and-set race to a concurrent manual retry,
                 # cancel, or another sweep pass; the expected-revision check
                 # inside retry_brain_dump_operation is authoritative, so
@@ -880,7 +877,7 @@ class VoiceBrainDumpService:
                         f"commit_recovery:{candidate.id}:{candidate.revision}"
                     ),
                 )
-            except (ValidationFailure, ConflictError, NotFoundError):
+            except ValidationFailure, ConflictError, NotFoundError:
                 # A concurrent manual retry, cancel, or withdrawal moved the
                 # operation out of ``committing`` first; the begin-commit checks
                 # are authoritative, so losing that race is a safe no-op.

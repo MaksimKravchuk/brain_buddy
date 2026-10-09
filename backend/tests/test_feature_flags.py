@@ -32,7 +32,7 @@ MOBILE_CLASSIFICATION_FLAG = "mobile_task_classification"
 
 
 @pytest.fixture(autouse=True)
-def reset_config_cache() -> Generator[None, None, None]:
+def reset_config_cache() -> Generator[None]:
     """Ensure configuration cache is cleared between tests."""
 
     get_config.cache_clear()  # type: ignore[attr-defined]

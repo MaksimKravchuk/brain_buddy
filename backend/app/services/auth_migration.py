@@ -134,7 +134,7 @@ class AuthMigration:
             os.fchmod(descriptor, 0o600)
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             yield
-        except (OSError, ValueError, sqlite3.Error):
+        except OSError, ValueError, sqlite3.Error:
             # Validation exceptions may contain private source input; expose only
             # the coarse checkpoint failure, including when logged with a traceback.
             raise RepositoryError(
@@ -620,7 +620,7 @@ class AuthMigration:
                 return self._erase_backup()
             if ledger is not None and ledger["backup_expires_at"] is not None:
                 expiry = min(expiry, _timestamp(ledger["backup_expires_at"]))
-        except (ValueError, TypeError, KeyError, RepositoryError):
+        except ValueError, TypeError, KeyError, RepositoryError:
             return self._erase_backup()
         return self._erase_backup() if expiry <= self.clock() else False
 
