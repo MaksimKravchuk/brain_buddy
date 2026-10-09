@@ -1624,3 +1624,150 @@ fn smart_add_026_fr_002_literal_task_create_keeps_its_text() {
         &smart_add_command(json!({ "title": "t" })).command
     ));
 }
+
+#[test]
+fn smart_add_026_fr_002_one_alias_cannot_bind_two_different_tags() {
+    let state = rs(
+        &[],
+        &[
+            ("tag_work", "Work", "active"),
+            ("tag_home", "Home", "active"),
+        ],
+    );
+    // Both references reuse the alias T1 but resolve to different active tags.
+    let error = refusal(
+        &state,
+        json!({
+            "title": "t",
+            "tags": [
+                { "name": "Work", "proposed_id": T1 },
+                { "name": "Home", "proposed_id": T1 }
+            ]
+        }),
+    );
+    assert_eq!(
+        (error.reason, error.field.as_deref()),
+        (Reason::InvalidPayload, Some("tags"))
+    );
+    assert_eq!(error.entity, Some((EntityType::Tag, vec![T1.to_owned()])));
+
+    // The same alias for an existing tag and a tag the request would create.
+    let mixed = refusal(
+        &state,
+        json!({
+            "title": "t",
+            "tags": [
+                { "name": "Work", "proposed_id": T1 },
+                { "name": "Fresh", "proposed_id": T1 }
+            ]
+        }),
+    );
+    assert_eq!(
+        (mixed.reason, mixed.field.as_deref()),
+        (Reason::InvalidPayload, Some("tags"))
+    );
+}
+
+#[test]
+fn smart_add_026_fr_002_a_repeated_alias_for_the_same_tag_is_accepted() {
+    let state = rs(&[], &[("tag_work", "Work", "active")]);
+    let set = ok(
+        &state,
+        json!({
+            "title": "t",
+            "tags": [
+                { "name": "Work", "proposed_id": T1 },
+                { "name": "WORK", "proposed_id": T1 }
+            ]
+        }),
+    );
+    assert_eq!(
+        set.result.id_bindings,
+        [binding(EntityType::Tag, T1, "tag_work")]
+    );
+    assert_eq!(
+        landed(&set)
+            .task
+            .tag_ids
+            .iter()
+            .map(TagId::as_str)
+            .collect::<Vec<_>>(),
+        ["tag_work"]
+    );
+
+    // A new tag named twice under one alias is one tag, one identity binding.
+    let created = ok(
+        &ReadSet::default(),
+        json!({
+            "title": "t",
+            "tags": [
+                { "name": "Fresh", "proposed_id": T1 },
+                { "name": "fresh", "proposed_id": T1 }
+            ]
+        }),
+    );
+    assert_eq!(
+        created.result.id_bindings,
+        [binding(EntityType::Tag, T1, T1)]
+    );
+    assert_eq!(landed(&created).tags.len(), 1);
+}
+
+#[test]
+fn smart_add_026_fr_002_a_project_alias_binds_once_to_its_resolved_project() {
+    // A request has a single project reference, so a project alias cannot
+    // collide with itself (tag and project ids are typed apart); it binds once.
+    let state = rs(&[("project_work", "Work", "active")], &[]);
+    let set = ok(
+        &state,
+        json!({ "title": "t", "project": { "name": "work", "proposed_id": P1 } }),
+    );
+    assert_eq!(
+        set.result.id_bindings,
+        [binding(EntityType::Project, P1, "project_work")]
+    );
+}
+
+#[test]
+fn smart_add_026_fr_002_same_name_ties_go_to_the_lowest_id_like_the_server() {
+    // Inserted newest-id first: the server scans its `(owner_id, id)` key, so
+    // the lowest id wins, and the read set (no creation time) agrees. The Swift
+    // planner's `(createdAt, id)` order cannot be reproduced without a creation
+    // time on the record.
+    let state = rs(
+        &[
+            ("project_c", "Launch", "active"),
+            ("project_a", "launch", "active"),
+            ("project_b", "LAUNCH", "active"),
+        ],
+        &[
+            ("tag_c", "Focus", "active"),
+            ("tag_a", "focus", "active"),
+            ("tag_b", "FOCUS", "active"),
+        ],
+    );
+
+    let plan = resolve(&state, &Draft::new("Plan @Launch #Focus"));
+    assert!(
+        matches!(&plan.project, Some(Classification::Existing { id, .. }) if id.as_str() == "project_a")
+    );
+    assert!(matches!(&plan.tags[0], Classification::Existing { id, .. } if id.as_str() == "tag_a"));
+
+    let set = ok(
+        &state,
+        json!({
+            "title": "t",
+            "project": { "name": "LAUNCH", "proposed_id": P1 },
+            "tags": [ { "name": "focus", "proposed_id": T1 } ]
+        }),
+    );
+    let task = landed(&set).task;
+    assert_eq!(
+        task.project_id.as_ref().map(ProjectId::as_str),
+        Some("project_a")
+    );
+    assert_eq!(
+        task.tag_ids.iter().map(TagId::as_str).collect::<Vec<_>>(),
+        ["tag_a"]
+    );
+}
