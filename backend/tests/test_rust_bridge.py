@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import allure
 import bb_core
 import pytest
 
@@ -228,3 +229,50 @@ def test_026_FR_002_one_rust_toolchain_pin_builds_every_wheel() -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / name).read_text()
         versions = set(re.findall(r"toolchain: ([\d.]+)", workflow))
         assert versions == {pinned}, name
+
+
+QUERY_INPUTS: dict[str, Any] = {
+    "now": "2026-10-09T12:00:00Z",
+    "device_zone": "UTC",
+    "policy": {
+        "weekly_review": False,
+        "navigator_provider": None,
+        "navigator_available": False,
+        "consent_text_version": 1,
+    },
+}
+
+
+def _evidence(name: str, content: object) -> None:
+    allure.attach(
+        content if isinstance(content, str) else json.dumps(content, indent=2),
+        name=name,
+        attachment_type=allure.attachment_type.TEXT,
+    )
+
+
+def test_026_FR_002_a_typed_query_is_answered_with_plain_values(
+    core: RustCore,
+) -> None:
+    """An answered query returns the result as plain JSON values."""
+    with allure.step("ask for the tags of an empty read set"):
+        result = core.query({}, {"kind": "tags"}, QUERY_INPUTS)
+        _evidence("result", result)
+    with allure.step("the answer is the typed result, not a wrapper"):
+        assert result == {"kind": "tags", "value": []}
+        _evidence("kind", result["kind"])
+
+
+def test_026_FR_002_a_refused_query_is_a_validation_failure_with_a_reason_code(
+    core: RustCore,
+) -> None:
+    """A refused query raises with the stable reason code and no input text."""
+    missing = "task_5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d11"
+    with allure.step("ask for a task the read set does not hold"):
+        with pytest.raises(ValidationFailure) as refused:
+            core.query({}, {"kind": "task_detail", "task_id": missing}, QUERY_INPUTS)
+        _evidence("detail", refused.value.detail)
+    with allure.step("the refusal names its reason, never the asked-for id"):
+        assert refused.value.detail == {"reason": "not_found"}
+        assert missing not in str(refused.value) + repr(refused.value.detail)
+        _evidence("reason", refused.value.detail["reason"])

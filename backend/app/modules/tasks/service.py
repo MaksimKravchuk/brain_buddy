@@ -67,6 +67,7 @@ from .review_domain import (
     task_clock,
     with_clock,
 )
+from .rust_task_facade import RustTaskFacade
 
 # Spec 020: content-free clock events (ids only, FR-044).
 review_logger = logging.getLogger("app.modules.tasks.review")
@@ -195,12 +196,28 @@ class TaskService:
         task_repo: TaskRepository,
         *,
         clock: Callable[[], datetime] = utcnow,
+        rust_facade: RustTaskFacade | None = None,
+        rust_core_enabled: Callable[[str], bool] | None = None,
     ) -> None:
         self.task_repo = task_repo
+        # Spec 026 T018: with ``rust_core_sync`` effective for the owner, task and
+        # organization decisions come from the shared Rust core through this
+        # facade. Without both seams (or with the flag off) every command keeps
+        # its Python rules, byte for byte.
+        self._rust_facade = rust_facade
+        self._rust_core_enabled = rust_core_enabled
         # The one time seam of the task module (spec 020, research R21): every
         # timestamp and the idempotency purge read this injected clock, so tests
         # drive time through ``frozen_clock`` instead of patching ``utcnow``.
         self.clock = clock
+
+    def _rust(self, owner_id: str) -> RustTaskFacade | None:
+        """The Rust facade when ``rust_core_sync`` is effective for this owner."""
+
+        facade = self._rust_facade
+        if facade is None or self._rust_core_enabled is None:
+            return None
+        return facade if self._rust_core_enabled(owner_id) else None
 
     @_serialized_write
     def create_project(
@@ -222,18 +239,22 @@ class TaskService:
             return self._project_result(record, owner_id=owner_id)
 
         now = self.clock()
-        name = display_project_name(payload.name)
-        project = ProjectDocument(
-            id=generate_id("project"),
-            owner_id=owner_id,
-            name=name,
-            normalized_name=normalize_task_name(name),
-            color=payload.color,
-            desired_outcome=payload.desired_outcome,
-            created_at=now,
-            updated_at=now,
-        )
-        self._assert_unique_project_name(owner_id=owner_id, project=project)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            project = rust.create_project(payload, owner_id=owner_id, now=now)
+        else:
+            name = display_project_name(payload.name)
+            project = ProjectDocument(
+                id=generate_id("project"),
+                owner_id=owner_id,
+                name=name,
+                normalized_name=normalize_task_name(name),
+                color=payload.color,
+                desired_outcome=payload.desired_outcome,
+                created_at=now,
+                updated_at=now,
+            )
+            self._assert_unique_project_name(owner_id=owner_id, project=project)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -265,16 +286,20 @@ class TaskService:
             return self._tag_result(record, owner_id=owner_id)
 
         now = self.clock()
-        name = display_tag_name(payload.name)
-        tag = TagDocument(
-            id=generate_id("tag"),
-            owner_id=owner_id,
-            name=name,
-            normalized_name=normalize_task_name(name, strip_tag_prefix=True),
-            created_at=now,
-            updated_at=now,
-        )
-        self._assert_unique_tag_name(owner_id=owner_id, tag=tag)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            tag = rust.create_tag(payload, owner_id=owner_id, now=now)
+        else:
+            name = display_tag_name(payload.name)
+            tag = TagDocument(
+                id=generate_id("tag"),
+                owner_id=owner_id,
+                name=name,
+                normalized_name=normalize_task_name(name, strip_tag_prefix=True),
+                created_at=now,
+                updated_at=now,
+            )
+            self._assert_unique_tag_name(owner_id=owner_id, tag=tag)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -318,6 +343,31 @@ class TaskService:
         if record is not None:
             return self._task_command_result(record, owner_id=owner_id)
 
+        rust = self._rust(owner_id)
+        if rust is not None:
+            task = rust.create_task(payload, owner_id=owner_id, now=self.clock())
+        else:
+            task = self._python_created_task(
+                payload, owner_id=owner_id, now=self.clock()
+            )
+        snapshot = self.formulation_settings(owner_id)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=task.id,
+            response=task,
+            formulation_settings=snapshot,
+        )
+        self.task_repo.create(task)
+        return TaskCommandResult(task, snapshot)
+
+    def _python_created_task(
+        self, payload: TaskCreateRequest, *, owner_id: str, now: datetime
+    ) -> TaskDocument:
+        """The task ``POST /tasks`` creates under the Python rules."""
+
         self._assert_active_references(
             owner_id=owner_id,
             project_id=payload.project_id,
@@ -328,7 +378,6 @@ class TaskService:
             if payload.state == "waiting"
             else None
         )
-        now = self.clock()
         task = TaskDocument(
             id=generate_id("task"),
             owner_id=owner_id,
@@ -348,19 +397,7 @@ class TaskService:
             created_at=now,
             updated_at=now,
         )
-        task = self._started_if_next(task, payload.new_formulation_id, now=now)
-        snapshot = self.formulation_settings(owner_id)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=task.id,
-            response=task,
-            formulation_settings=snapshot,
-        )
-        self.task_repo.create(task)
-        return TaskCommandResult(task, snapshot)
+        return self._started_if_next(task, payload.new_formulation_id, now=now)
 
     @_serialized_write
     def create_native_inbox_task(
@@ -782,6 +819,31 @@ class TaskService:
             return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            updated = rust.update_task(
+                task, payload, owner_id=owner_id, now=self.clock()
+            )
+        else:
+            updated = self._python_updated_task(task, payload, owner_id=owner_id)
+        snapshot = self.formulation_settings(owner_id)
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated.id,
+            response=updated,
+            formulation_settings=snapshot,
+        )
+        self.task_repo.save(updated)
+        return TaskCommandResult(updated, snapshot)
+
+    def _python_updated_task(
+        self, task: TaskDocument, payload: TaskUpdateRequest, *, owner_id: str
+    ) -> TaskDocument:
+        """The task ``PATCH /tasks/{id}`` yields under the Python rules."""
+
         self._assert_current(task, payload.expected_revision)
         fields = payload.model_fields_set
         if "title" in fields and payload.title is None:
@@ -818,25 +880,13 @@ class TaskService:
             updated_at=now,
             revision=task.revision + 1,
         )
-        updated = self._clock_after_edit(
+        return self._clock_after_edit(
             task,
             updated,
             owner_id=owner_id,
             now=now,
             new_formulation_id=payload.new_formulation_id,
         )
-        snapshot = self.formulation_settings(owner_id)
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated.id,
-            response=updated,
-            formulation_settings=snapshot,
-        )
-        self.task_repo.save(updated)
-        return TaskCommandResult(updated, snapshot)
 
     def transition_task(
         self,
@@ -873,17 +923,22 @@ class TaskService:
             return self._task_command_result(record, owner_id=owner_id)
 
         task = self.get_task(task_id, owner_id=owner_id)
-        self._assert_current(task, payload.expected_revision)
         now = self.clock()
-        updated = self._transitioned(
-            task,
-            action=payload.action,
-            to_state=payload.to_state,
-            waiting_for=payload.waiting_for,
-            new_formulation_id=payload.new_formulation_id,
-            owner_id=owner_id,
-            now=now,
-        )
+        rust = self._rust(owner_id)
+        if rust is not None:
+            moved = rust.transition_task(task, payload, owner_id=owner_id, now=now)
+            updated = moved.task
+        else:
+            self._assert_current(task, payload.expected_revision)
+            updated = self._transitioned(
+                task,
+                action=payload.action,
+                to_state=payload.to_state,
+                waiting_for=payload.waiting_for,
+                new_formulation_id=payload.new_formulation_id,
+                owner_id=owner_id,
+                now=now,
+            )
         snapshot = self.formulation_settings(owner_id)
         self._store_idempotency(
             owner_id=owner_id,
@@ -895,7 +950,11 @@ class TaskService:
             formulation_settings=snapshot,
         )
         self.task_repo.save(updated)
-        self._note_park_return(task, updated, owner_id=owner_id, now=now)
+        if rust is not None:
+            if moved.park_ack is not None:
+                self.task_repo.save_park_ack(moved.park_ack)
+        else:
+            self._note_park_return(task, updated, owner_id=owner_id, now=now)
         return TaskCommandResult(updated, snapshot)
 
     def _transitioned(
@@ -1275,30 +1334,36 @@ class TaskService:
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
         project = self.get_project(project_id, owner_id=owner_id)
-        self._assert_revision(
-            "Project", project.id, project.revision, payload.expected_revision
-        )
-        fields = payload.model_fields_set
-        name = (
-            display_project_name(payload.name)
-            if "name" in fields and payload.name
-            else project.name
-        )
-        updated = project.model_copy(
-            update={
-                "name": name,
-                "normalized_name": normalize_task_name(name),
-                "color": payload.color if "color" in fields else project.color,
-                "desired_outcome": (
-                    payload.desired_outcome
-                    if "desired_outcome" in fields
-                    else project.desired_outcome
-                ),
-                "updated_at": self.clock(),
-                "revision": project.revision + 1,
-            }
-        )
-        self._assert_unique_project_name(owner_id=owner_id, project=updated)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            updated = rust.update_project(
+                project, payload, owner_id=owner_id, now=self.clock()
+            )
+        else:
+            self._assert_revision(
+                "Project", project.id, project.revision, payload.expected_revision
+            )
+            fields = payload.model_fields_set
+            name = (
+                display_project_name(payload.name)
+                if "name" in fields and payload.name
+                else project.name
+            )
+            updated = project.model_copy(
+                update={
+                    "name": name,
+                    "normalized_name": normalize_task_name(name),
+                    "color": payload.color if "color" in fields else project.color,
+                    "desired_outcome": (
+                        payload.desired_outcome
+                        if "desired_outcome" in fields
+                        else project.desired_outcome
+                    ),
+                    "updated_at": self.clock(),
+                    "revision": project.revision + 1,
+                }
+            )
+            self._assert_unique_project_name(owner_id=owner_id, project=updated)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1330,26 +1395,32 @@ class TaskService:
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
         project = self.get_project(project_id, owner_id=owner_id)
-        self._assert_revision(
-            "Project", project.id, project.revision, payload.expected_revision
-        )
         now = self.clock()
-        # Archiving keeps every membership (ADR-0020). A repeat archive changes
-        # only the revision and the timestamp: archived_at and the marker are
-        # the one signal a pre-feature archive has (data-model E1).
-        repeat = project.state == "archived"
-        updated_project = project.model_copy(
-            update={
-                "state": "archived",
-                "updated_at": now,
-                "revision": project.revision + 1,
-                **(
-                    {}
-                    if repeat
-                    else {"archived_at": now, "archived_before_lossless": False}
-                ),
-            }
-        )
+        rust = self._rust(owner_id)
+        if rust is not None:
+            updated_project = rust.archive_project(
+                project, payload, owner_id=owner_id, now=now
+            )
+        else:
+            self._assert_revision(
+                "Project", project.id, project.revision, payload.expected_revision
+            )
+            # Archiving keeps every membership (ADR-0020). A repeat archive changes
+            # only the revision and the timestamp: archived_at and the marker are
+            # the one signal a pre-feature archive has (data-model E1).
+            repeat = project.state == "archived"
+            updated_project = project.model_copy(
+                update={
+                    "state": "archived",
+                    "updated_at": now,
+                    "revision": project.revision + 1,
+                    **(
+                        {}
+                        if repeat
+                        else {"archived_at": now, "archived_before_lossless": False}
+                    ),
+                }
+            )
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1381,22 +1452,31 @@ class TaskService:
         if record is not None:
             return self._project_result(record, owner_id=owner_id)
         project = self.get_project(project_id, owner_id=owner_id)
-        if project.state == "active":
-            # Checked before the revision: a retry after the key expired still
-            # carries the old revision and must get the same answer (http §3).
-            return project
-        self._assert_revision(
-            "Project", project.id, project.revision, payload.expected_revision
-        )
-        updated = project.model_copy(
-            update={
-                "state": "active",
-                "archived_at": None,
-                "updated_at": self.clock(),
-                "revision": project.revision + 1,
-            }
-        )
-        self._assert_unique_project_name(owner_id=owner_id, project=updated)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            unarchived = rust.unarchive_project(
+                project, payload, owner_id=owner_id, now=self.clock()
+            )
+            if unarchived is None:
+                return project
+            updated = unarchived
+        else:
+            if project.state == "active":
+                # Checked before the revision: a retry after the key expired still
+                # carries the old revision and must get the same answer (http §3).
+                return project
+            self._assert_revision(
+                "Project", project.id, project.revision, payload.expected_revision
+            )
+            updated = project.model_copy(
+                update={
+                    "state": "active",
+                    "archived_at": None,
+                    "updated_at": self.clock(),
+                    "revision": project.revision + 1,
+                }
+            )
+            self._assert_unique_project_name(owner_id=owner_id, project=updated)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1428,22 +1508,28 @@ class TaskService:
         if record is not None:
             return self._tag_result(record, owner_id=owner_id)
         tag = self.get_tag(tag_id, owner_id=owner_id)
-        self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
-        fields = payload.model_fields_set
-        name = (
-            display_tag_name(payload.name)
-            if "name" in fields and payload.name
-            else tag.name
-        )
-        updated = tag.model_copy(
-            update={
-                "name": name,
-                "normalized_name": normalize_task_name(name, strip_tag_prefix=True),
-                "updated_at": self.clock(),
-                "revision": tag.revision + 1,
-            }
-        )
-        self._assert_unique_tag_name(owner_id=owner_id, tag=updated)
+        rust = self._rust(owner_id)
+        if rust is not None:
+            updated = rust.update_tag(tag, payload, owner_id=owner_id, now=self.clock())
+        else:
+            self._assert_revision(
+                "Tag", tag.id, tag.revision, payload.expected_revision
+            )
+            fields = payload.model_fields_set
+            name = (
+                display_tag_name(payload.name)
+                if "name" in fields and payload.name
+                else tag.name
+            )
+            updated = tag.model_copy(
+                update={
+                    "name": name,
+                    "normalized_name": normalize_task_name(name, strip_tag_prefix=True),
+                    "updated_at": self.clock(),
+                    "revision": tag.revision + 1,
+                }
+            )
+            self._assert_unique_tag_name(owner_id=owner_id, tag=updated)
         self._store_idempotency(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1475,27 +1561,23 @@ class TaskService:
         if record is not None:
             return self._tag_result(record, owner_id=owner_id)
         tag = self.get_tag(tag_id, owner_id=owner_id)
-        self._assert_revision("Tag", tag.id, tag.revision, payload.expected_revision)
         now = self.clock()
-        updated_tag = tag.model_copy(
-            update={"state": "deleted", "updated_at": now, "revision": tag.revision + 1}
-        )
-        affected = [
-            task
-            for task in self.task_repo.list_for_owner(owner_id=owner_id)
-            if tag_id in task.tag_ids
-        ]
-        self._store_idempotency(
-            owner_id=owner_id,
-            key=idempotency_key,
-            command=command,
-            request_hash=request_hash,
-            resource_id=updated_tag.id,
-            response=updated_tag,
-        )
-        self.task_repo.save_tag(updated_tag)
-        for task in affected:
-            self.task_repo.save(
+        rust = self._rust(owner_id)
+        if rust is not None:
+            deleted = rust.delete_tag(tag, payload, owner_id=owner_id, now=now)
+            updated_tag, saved_tasks = deleted.tag, deleted.affected
+        else:
+            self._assert_revision(
+                "Tag", tag.id, tag.revision, payload.expected_revision
+            )
+            updated_tag = tag.model_copy(
+                update={
+                    "state": "deleted",
+                    "updated_at": now,
+                    "revision": tag.revision + 1,
+                }
+            )
+            saved_tasks = [
                 task.model_copy(
                     update={
                         "tag_ids": [
@@ -1505,7 +1587,20 @@ class TaskService:
                         "revision": task.revision + 1,
                     }
                 )
-            )
+                for task in self.task_repo.list_for_owner(owner_id=owner_id)
+                if tag_id in task.tag_ids
+            ]
+        self._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=updated_tag.id,
+            response=updated_tag,
+        )
+        self.task_repo.save_tag(updated_tag)
+        for task in saved_tasks:
+            self.task_repo.save(task)
         return updated_tag
 
     def _idempotency_record(

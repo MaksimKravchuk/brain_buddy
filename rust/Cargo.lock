@@ -34,8 +34,10 @@ dependencies = [
 name = "bb-python"
 version = "0.1.0"
 dependencies = [
+ "bb-domain",
  "bb-protocol",
  "pyo3",
+ "serde",
  "serde_json",
 ]
 

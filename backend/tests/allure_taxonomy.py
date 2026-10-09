@@ -266,6 +266,12 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Rust core bridge",
         "PyO3 command codec and lifecycle",
     ),
+    # Spec 026 (T018): the Rust-backed task facade behind ``rust_core_sync``.
+    "rust_task_parity": (
+        EPIC_TASKS,
+        "Rust task facade",
+        "Flag ON and OFF give identical task HTTP",
+    ),
     "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_job_worker": (
         EPIC_TASKS,
