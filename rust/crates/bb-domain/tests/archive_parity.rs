@@ -35,7 +35,8 @@ fn project_json(
     json!({
         "id": id, "name": name, "color": null, "state": state,
         "revision": "3", "desired_outcome": null,
-        "archived_at": archived_at, "archived_before_lossless": marker
+        "archived_at": archived_at, "archived_before_lossless": marker,
+        "created_at": "2026-09-01T09:00:00Z"
     })
 }
 
@@ -83,7 +84,8 @@ fn owner_read_set(owner: &str) -> ReadSet {
                 "id": p["id"], "name": p["name"], "color": p["color"], "state": p["state"],
                 "revision": revision(p), "desired_outcome": p["desired_outcome"],
                 "archived_at": p["archived_at"],
-                "archived_before_lossless": p["archived_before_lossless"]
+                "archived_before_lossless": p["archived_before_lossless"],
+                "created_at": p["created_at"]
             })
         })
         .collect();

@@ -109,12 +109,13 @@ fn project_json(id: &str, name: &str, state: &str, revision: u64) -> Value {
         "id": id, "name": name, "color": null, "state": state,
         "revision": revision.to_string(), "desired_outcome": null,
         "archived_at": if archived { json!("2026-09-01T09:00:00Z") } else { Value::Null },
-        "archived_before_lossless": false
+        "archived_before_lossless": false, "created_at": "2026-09-01T09:00:00Z"
     })
 }
 
 fn tag_json(id: &str, name: &str, state: &str, revision: u64) -> Value {
-    json!({ "id": id, "name": name, "state": state, "revision": revision.to_string() })
+    json!({ "id": id, "name": name, "state": state, "revision": revision.to_string(),
+             "created_at": "2026-09-01T09:00:00Z" })
 }
 
 fn task_json(id: &str, state: &str, project: Option<&str>, tags: &[&str], revision: u64) -> Value {
@@ -416,6 +417,63 @@ fn organize_026_fr_002_project_names_are_unique_among_active_projects_by_normali
     assert_eq!(err.reason, Reason::DuplicateProjectName);
     // A project key keeps the leading @ (only tags drop it).
     accepted(store.decide(&project_create("project_at", "@Work")));
+}
+
+#[test]
+fn organize_026_fr_002_created_records_carry_the_input_time_and_clashes_name_the_oldest() {
+    let dated = |mut row: Value, created_at: &str| {
+        row["created_at"] = json!(created_at);
+        row
+    };
+    // Legacy namesakes: the lowest id is the newest, the highest the oldest.
+    let store = Store::new(
+        &[
+            dated(
+                project_json("project_a", "Launch", "active", 1),
+                "2026-09-03T09:00:00Z",
+            ),
+            dated(
+                project_json("project_b", "launch", "active", 1),
+                "2026-09-01T09:00:00Z",
+            ),
+            dated(
+                project_json("project_c", "LAUNCH", "active", 1),
+                "2026-09-02T09:00:00Z",
+            ),
+        ],
+        &[
+            dated(
+                tag_json("tag_a", "focus", "active", 1),
+                "2026-09-03T09:00:00Z",
+            ),
+            dated(
+                tag_json("tag_b", "Focus", "active", 1),
+                "2026-09-01T09:00:00Z",
+            ),
+            dated(
+                tag_json("tag_c", "FOCUS", "active", 1),
+                "2026-09-02T09:00:00Z",
+            ),
+        ],
+        &[],
+    );
+    let project_clash = refusal(store.decide(&project_create("project_x", "Launch")));
+    assert_eq!(
+        project_clash.entity,
+        Some((EntityType::Project, vec!["project_b".to_owned()]))
+    );
+    let tag_clash = refusal(store.decide(&tag_create("tag_x", "focus")));
+    assert_eq!(
+        tag_clash.entity,
+        Some((EntityType::Tag, vec!["tag_b".to_owned()]))
+    );
+
+    // A created record is stamped with the input time and nothing else.
+    let world = world();
+    let project = accepted(world.decide(&project_create("project_fresh", "Fresh")));
+    assert_eq!(the_project(&project).created_at.as_str(), NOW);
+    let tag = accepted(world.decide(&tag_create("tag_fresh", "fresh")));
+    assert_eq!(the_tag(&tag).created_at.as_str(), NOW);
 }
 
 #[test]
@@ -1276,13 +1334,14 @@ fn owner_store(owner: &str) -> Store {
                 "id": p["id"], "name": p["name"], "color": p["color"], "state": p["state"],
                 "revision": revision(p), "desired_outcome": p["desired_outcome"],
                 "archived_at": p["archived_at"],
-                "archived_before_lossless": p["archived_before_lossless"]
+                "archived_before_lossless": p["archived_before_lossless"],
+                "created_at": p["created_at"]
             })
         })
         .collect();
     let tags: Vec<Value> = of_owner("tags")
         .iter()
-        .map(|t| json!({ "id": t["id"], "name": t["name"], "state": t["state"], "revision": revision(t) }))
+        .map(|t| json!({ "id": t["id"], "name": t["name"], "state": t["state"], "revision": revision(t), "created_at": t["created_at"] }))
         .collect();
     let tasks: Vec<Value> = of_owner("tasks").iter().map(public_task).collect();
     Store::new(&projects, &tags, &tasks)

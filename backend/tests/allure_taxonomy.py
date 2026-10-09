@@ -102,6 +102,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Shared core parity",
         "Frozen oracle files",
     ),
+    "026_smart_add_name_tiebreak": (
+        EPIC_TASKS,
+        "Shared core parity",
+        "Smart Add same-name tie-break",
+    ),
     "brain_dump_operations_api": (
         EPIC_TASKS,
         "Brain dump API",
