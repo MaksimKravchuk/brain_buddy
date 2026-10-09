@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:brainbuddy:spec-026:sync-v1",
+  "title": "BrainBuddy sync v1 wire shapes",
+  "description": "Generated from contracts/command-catalog.md and contracts/sync-v1.md (frozen-v1). Those documents remain authoritative; this file adds no field.",
+  "$defs": {
+    "Counter": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Nonnegative canonical decimal string; domain revisions start at 1."},
+    "Id": {"type": "string", "minLength": 1, "description": "Opaque or prefixed entity/scope/device ID."},
+    "CommandId": {"type": "string", "format": "uuid"},
+    "Instant": {"type": "string", "format": "date-time"},
+    "Marker": {"type": ["string", "integer"], "description": "Version marker; its JSON type is not fixed by sync-v1."},
+    "TagChanges": {
+      "type": "object",
+      "properties": {"add_tag_ids": {"type": "array", "items": {"$ref": "#/$defs/Id"}, "uniqueItems": true}, "remove_tag_ids": {"type": "array", "items": {"$ref": "#/$defs/Id"}, "uniqueItems": true}}
+    },
+    "EntityType": {
+      "enum": [
+        "task", "project", "tag", "subtask", "comment", "review_settings", "review_session", "review_decision_queue",
+        "review_decision", "review_receipt", "review_park_ack", "review_bulk_release", "review_navigator_consent"
+      ]
+    },
+    "CommandType": {
+      "enum": [
+        "project.create", "project.update", "project.archive", "project.unarchive", "tag.create", "tag.update",
+        "tag.delete", "task.create", "task.smart_add", "task.update", "task.tags", "task.transition", "subtask.create",
+        "subtask.update", "subtask.transition", "comment.create", "comment.update", "review.decide",
+        "review.undo_decision", "review.auto_park", "review.explainer_ack", "review.settings", "review.parks_ack",
+        "review.session_start", "review.session_progress", "review.session_finish", "review.bulk_release",
+        "review.bulk_undo", "review.consent_grant", "review.consent_revoke"
+      ]
+    },
+    "RecordKey": {"type": "array", "items": {"type": "string"}, "description": "JSON array of key components; empty for singleton records."},
+    "CommonResponse": {
+      "type": "object",
+      "properties": {"correlation_id": {"type": "string"}, "scope_id": {"$ref": "#/$defs/Id"}, "server_generation": {"type": "string"}, "server_now": {"$ref": "#/$defs/Instant"}},
+      "required": ["correlation_id", "scope_id", "server_generation", "server_now"]
+    },
+    "CommandRef": {
+      "type": "object",
+      "properties": {"command_id": {"$ref": "#/$defs/CommandId"}, "entity_type": {"$ref": "#/$defs/EntityType"}, "entity_id": {"$ref": "#/$defs/Id"}},
+      "required": ["command_id", "entity_type", "entity_id"],
+      "additionalProperties": false
+    },
+    "Precondition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {"entity_type": {"$ref": "#/$defs/EntityType"}, "entity_id": {"$ref": "#/$defs/Id"}, "edit_revision": {"$ref": "#/$defs/Counter"}},
+          "required": ["entity_type", "entity_id", "edit_revision"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {"after_command": {"$ref": "#/$defs/CommandRef"}},
+          "required": ["after_command"],
+          "additionalProperties": false,
+          "description": "Substitute the referenced command's receipt edit_revision; also list it in depends_on."
+        }
+      ]
+    },
+    "CommandEnvelope": {
+      "type": "object",
+      "properties": {
+        "protocol_version": {"const": 1},
+        "command_id": {"$ref": "#/$defs/CommandId"},
+        "scope_id": {"$ref": "#/$defs/Id"},
+        "device_id": {"$ref": "#/$defs/Id"},
+        "device_epoch": {"$ref": "#/$defs/Id"},
+        "local_sequence": {"$ref": "#/$defs/Counter"},
+        "type": {"$ref": "#/$defs/CommandType"},
+        "command_version": {"type": "integer", "minimum": 1},
+        "entity_id": {"$ref": "#/$defs/Id"},
+        "preconditions": {"type": "array", "items": {"$ref": "#/$defs/Precondition"}},
+        "depends_on": {"type": "array", "items": {"$ref": "#/$defs/CommandId"}},
+        "issued_at": {"$ref": "#/$defs/Instant"},
+        "supersedes_command_id": {"$ref": "#/$defs/CommandId"},
+        "payload": {"type": "object"}
+      },
+      "required": ["protocol_version", "command_id", "scope_id", "device_id", "device_epoch", "local_sequence", "type", "command_version", "entity_id", "preconditions", "depends_on", "issued_at", "payload"],
+      "additionalProperties": false,
+      "description": "Immutable device-originated envelope (sync-v1 section 3). Payload fields keep the canonical request schema named in x-command-baselines, except as the command catalog states; those schemas stay authoritative for payload validation.",
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"enum": ["subtask.create", "subtask.update", "subtask.transition", "comment.create", "comment.update"]}}, "required": ["type"]},
+          "then": {"properties": {"payload": {"required": ["task_id"]}}}
+        },
+        {"if": {"properties": {"type": {"enum": ["task.tags"]}}, "required": ["type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/TagChanges"}}}},
+        {"if": {"properties": {"type": {"enum": ["task.update"]}}, "required": ["type"]}, "then": {"properties": {"payload": {"properties": {"tag_changes": {"$ref": "#/$defs/TagChanges"}}}}}},
+        {"if": {"properties": {"type": {"enum": ["review.parks_ack"]}}, "required": ["type"]}, "then": {"properties": {"payload": {"properties": {"items": {"type": "array", "maxItems": 200}}}}}},
+        {"if": {"properties": {"type": {"enum": ["review.bulk_release"]}}, "required": ["type"]}, "then": {"properties": {"payload": {"properties": {"items": {"type": "array", "maxItems": 500}}}}}}
+      ],
+      "x-command-baselines": {
+        "project.create": "create_project / ProjectCreateRequest",
+        "project.update": "update_project / ProjectUpdateRequest; Apple setProjectOutcome",
+        "project.archive": "Corresponding TaskService methods / ExpectedRevisionRequest",
+        "project.unarchive": "Corresponding TaskService methods / ExpectedRevisionRequest",
+        "tag.create": "create_tag/update_tag/delete_tag / Tag requests",
+        "tag.update": "create_tag/update_tag/delete_tag / Tag requests",
+        "tag.delete": "create_tag/update_tag/delete_tag / Tag requests",
+        "task.create": "create_task_result / TaskCreateRequest",
+        "task.smart_add": "smart_add_task / SmartAddTaskCreateRequest",
+        "task.update": "update_task_result / TaskUpdateRequest",
+        "task.tags": "Existing task tag-membership edit",
+        "task.transition": "transition_task_result / TaskTransitionRequest",
+        "subtask.create": "TaskSubtask request types / corresponding TaskService methods",
+        "subtask.update": "TaskSubtask request types / corresponding TaskService methods",
+        "subtask.transition": "TaskSubtask request types / corresponding TaskService methods",
+        "comment.create": "TaskComment request types / corresponding TaskService methods",
+        "comment.update": "TaskComment request types / corresponding TaskService methods",
+        "review.decide": "ReviewService.decide / DecisionRequest",
+        "review.undo_decision": "undo_decision / UndoDecisionRequest",
+        "review.auto_park": "auto_park / AutoParkRequest",
+        "review.explainer_ack": "acknowledge_explainer / ExplainerAcknowledgeRequest",
+        "review.settings": "update_settings / ReviewSettingsUpdateRequest",
+        "review.parks_ack": "acknowledge_parks / ParkAcknowledgeRequest",
+        "review.session_start": "ReviewFlowService.start_session / SessionStartRequest",
+        "review.session_progress": "progress_session / SessionProgressRequest",
+        "review.session_finish": "finish_session / SessionFinishRequest",
+        "review.bulk_release": "bulk_release / BulkReleaseRequest",
+        "review.bulk_undo": "undo_bulk_release",
+        "review.consent_grant": "NavigatorService.grant_consent/revoke_consent",
+        "review.consent_revoke": "NavigatorService.grant_consent/revoke_consent"
+      }
+    },
+    "Version": {
+      "type": "object",
+      "properties": {"entity_type": {"$ref": "#/$defs/EntityType"}, "record_key": {"$ref": "#/$defs/RecordKey"}, "record_version": {"$ref": "#/$defs/Counter"}, "edit_revision": {"$ref": "#/$defs/Counter"}},
+      "required": ["entity_type", "record_key", "record_version"]
+    },
+    "Binding": {
+      "type": "object",
+      "properties": {"entity_type": {"$ref": "#/$defs/EntityType"}, "alias_id": {"$ref": "#/$defs/Id"}, "entity_id": {"$ref": "#/$defs/Id"}},
+      "required": ["entity_type", "alias_id", "entity_id"],
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Open set: a canonical validation reason is also a code.",
+          "examples": [
+            "AUTH_REQUIRED", "RESOURCE_NOT_FOUND", "ACCESS_DENIED", "EPOCH_CLOSED", "RESET_REQUIRED", "UPGRADE_REQUIRED",
+            "IDEMPOTENCY_KEY_REUSED", "DEPENDENCY_PENDING", "REVISION_CONFLICT", "ENTITY_DELETED", "DEPENDENCY_REJECTED",
+            "INVALID_REQUEST", "COMMAND_TOO_LARGE", "RATE_LIMITED", "TEMPORARILY_UNAVAILABLE"
+          ]
+        },
+        "retryable": {"type": "boolean"},
+        "message": {"type": "string"},
+        "details": {
+          "type": "object",
+          "properties": {
+            "reason": {"type": "string"},
+            "current_versions": {"type": "array", "items": {"$ref": "#/$defs/Version"}},
+            "dependency_ids": {"type": "array", "items": {"$ref": "#/$defs/CommandId"}},
+            "epoch_status": {"enum": ["active", "closed"]},
+            "reset_reason": {"type": "string"},
+            "retry_after_seconds": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false,
+          "description": "Allowlisted, content-free keys only."
+        }
+      },
+      "required": ["code", "retryable", "message", "details"]
+    },
+    "ErrorBody": {
+      "type": "object",
+      "properties": {"error": {"$ref": "#/$defs/Error"}, "correlation_id": {"type": "string"}},
+      "required": ["error", "correlation_id"],
+      "description": "Outside a receipt. Before scope authority only error and correlation_id are present."
+    },
+    "Receipt": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {
+        "command_id": {"$ref": "#/$defs/CommandId"},
+        "outcome": {"enum": ["accepted", "rejected"]},
+        "has_changes": {"type": "boolean"},
+        "commit_seq": {"anyOf": [{"$ref": "#/$defs/Counter"}, {"type": "null"}]},
+        "result_versions": {"type": "array", "items": {"$ref": "#/$defs/Version"}},
+        "id_bindings": {"type": "array", "items": {"$ref": "#/$defs/Binding"}},
+        "result_redacted": {"type": "boolean"},
+        "result": {"type": ["object", "null"]},
+        "error": {"anyOf": [{"$ref": "#/$defs/Error"}, {"type": "null"}]}
+      },
+      "required": ["command_id", "outcome", "has_changes", "commit_seq", "result_versions", "id_bindings", "result_redacted", "result", "error"],
+      "allOf": [
+        {
+          "if": {"properties": {"outcome": {"const": "rejected"}}, "required": ["outcome"]},
+          "then": {"properties": {"has_changes": {"const": false}, "commit_seq": {"type": "null"}, "error": {"$ref": "#/$defs/Error"}}},
+          "else": {"properties": {"error": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"has_changes": {"const": true}}, "required": ["has_changes"]},
+          "then": {"properties": {"commit_seq": {"$ref": "#/$defs/Counter"}}},
+          "else": {"properties": {"commit_seq": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"result_redacted": {"const": true}}, "required": ["result_redacted"]},
+          "then": {"properties": {"result": {"type": "null"}}}
+        }
+      ]
+    },
+    "DeviceRegistrationRequest": {
+      "type": "object",
+      "properties": {"scope_id": {"$ref": "#/$defs/Id"}, "device_id": {"$ref": "#/$defs/Id"}, "device_epoch": {"$ref": "#/$defs/Id"}, "protocol_version": {"const": 1}},
+      "required": ["scope_id", "device_id", "device_epoch", "protocol_version"],
+      "additionalProperties": false
+    },
+    "DeviceRegistration": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {"device_id": {"$ref": "#/$defs/Id"}, "device_epoch": {"$ref": "#/$defs/Id"}, "epoch_status": {"const": "active"}},
+      "required": ["device_id", "device_epoch", "epoch_status"]
+    },
+    "Capabilities": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {
+        "protocol_versions": {"type": "array", "items": {"type": "integer"}},
+        "command_versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {"type": {"$ref": "#/$defs/CommandType"}, "supported_versions": {"type": "array", "items": {"type": "integer"}}, "retire_at_by_version": {"type": "object"}},
+            "required": ["type", "supported_versions", "retire_at_by_version"]
+          }
+        },
+        "rule_version": {"$ref": "#/$defs/Marker"},
+        "projection_schema_version": {"$ref": "#/$defs/Marker"},
+        "storage_epoch": {"$ref": "#/$defs/Marker"},
+        "feed_generation": {"type": "string"},
+        "scope_enabled": {"type": "boolean"},
+        "limits": {"type": "object", "description": "Command bytes, stable replay bytes, inline page bytes/transactions, transfer page bytes, snapshot/transfer TTL, feed retention."},
+        "recovery": {"type": "object", "description": "Snapshot support and, when authenticated with one, the device epoch status."}
+      },
+      "required": ["protocol_versions", "command_versions", "rule_version", "projection_schema_version", "storage_epoch", "feed_generation", "scope_enabled", "limits", "recovery"]
+    },
+    "CommandLookup": {
+      "$ref": "#/$defs/CommonResponse",
+      "oneOf": [
+        {"type": "object", "properties": {"status": {"const": "terminal"}, "receipt": {"$ref": "#/$defs/Receipt"}}, "required": ["status", "receipt"]},
+        {"type": "object", "properties": {"status": {"enum": ["pending", "not_found"]}, "command_id": {"$ref": "#/$defs/CommandId"}}, "required": ["status", "command_id"]}
+      ]
+    },
+    "Change": {
+      "type": "object",
+      "properties": {
+        "entity_type": {"$ref": "#/$defs/EntityType"},
+        "record_key": {"$ref": "#/$defs/RecordKey"},
+        "record_version": {"$ref": "#/$defs/Counter"},
+        "edit_revision": {"$ref": "#/$defs/Counter"},
+        "operation": {"enum": ["upsert", "tombstone"]},
+        "value": {"type": ["object", "null"]}
+      },
+      "required": ["entity_type", "record_key", "record_version", "operation", "value"],
+      "allOf": [
+        {
+          "if": {"properties": {"operation": {"const": "tombstone"}}, "required": ["operation"]},
+          "then": {"properties": {"value": {"type": "null"}}},
+          "else": {"properties": {"value": {"type": "object"}}}
+        }
+      ]
+    },
+    "Transaction": {
+      "type": "object",
+      "properties": {
+        "transaction_id": {"type": "string"},
+        "commit_seq": {"$ref": "#/$defs/Counter"},
+        "source_command_id": {"$ref": "#/$defs/CommandId"},
+        "changes": {"type": "array", "items": {"$ref": "#/$defs/Change"}}
+      },
+      "required": ["transaction_id", "commit_seq", "source_command_id", "changes"]
+    },
+    "TransferManifest": {
+      "type": "object",
+      "properties": {
+        "transfer_id": {"$ref": "#/$defs/Id"},
+        "transaction_id": {"type": "string"},
+        "commit_seq": {"$ref": "#/$defs/Counter"},
+        "source_command_id": {"$ref": "#/$defs/CommandId"},
+        "page_count": {"type": "integer", "minimum": 1},
+        "record_count": {"type": "integer", "minimum": 0},
+        "total_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string"},
+        "expires_at": {"$ref": "#/$defs/Instant"},
+        "first_page_token": {"type": "string"},
+        "after_cursor": {"type": "string"}
+      },
+      "required": ["transfer_id", "transaction_id", "commit_seq", "source_command_id", "page_count", "record_count", "total_bytes", "sha256", "expires_at", "first_page_token", "after_cursor"]
+    },
+    "ChangesPage": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {
+        "from_cursor": {"type": "string"},
+        "transactions": {"type": "array", "items": {"$ref": "#/$defs/Transaction"}},
+        "has_more": {"type": "boolean"},
+        "next_cursor": {"type": "string"},
+        "high_watermark": {"$ref": "#/$defs/Counter"},
+        "transaction_manifest": {"$ref": "#/$defs/TransferManifest"}
+      },
+      "required": ["from_cursor", "transactions", "has_more", "next_cursor", "high_watermark"],
+      "description": "transaction_manifest appears only with transactions=[] and has_more=true."
+    },
+    "SnapshotRequest": {
+      "type": "object",
+      "properties": {"scope_id": {"$ref": "#/$defs/Id"}, "projection_schema_version": {"$ref": "#/$defs/Marker"}},
+      "required": ["scope_id", "projection_schema_version"],
+      "additionalProperties": false
+    },
+    "SnapshotManifest": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {
+        "snapshot_id": {"$ref": "#/$defs/Id"},
+        "watermark": {"$ref": "#/$defs/Counter"},
+        "cursor": {"type": "string"},
+        "page_count": {"type": "integer", "minimum": 1},
+        "record_count": {"type": "integer", "minimum": 0},
+        "total_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string"},
+        "expires_at": {"$ref": "#/$defs/Instant"},
+        "first_page_token": {"type": "string"}
+      },
+      "required": ["snapshot_id", "watermark", "cursor", "page_count", "record_count", "total_bytes", "sha256", "expires_at", "first_page_token"]
+    },
+    "BytePage": {
+      "$ref": "#/$defs/CommonResponse",
+      "type": "object",
+      "properties": {
+        "page_index": {"type": "integer", "minimum": 0},
+        "payload_base64": {"type": "string", "contentEncoding": "base64"},
+        "page_sha256": {"type": "string"},
+        "has_more": {"type": "boolean"},
+        "next_page_token": {"type": ["string", "null"]}
+      },
+      "required": ["page_index", "payload_base64", "page_sha256", "has_more", "next_page_token"],
+      "allOf": [
+        {
+          "if": {"properties": {"has_more": {"const": false}}, "required": ["has_more"]},
+          "then": {"properties": {"next_page_token": {"type": "null"}}},
+          "else": {"properties": {"next_page_token": {"type": "string"}}}
+        }
+      ],
+      "description": "Decoded bytes are consecutive chunks of the canonical JSON Change array."
+    },
+    "SnapshotPage": {"$ref": "#/$defs/BytePage", "properties": {"snapshot_id": {"$ref": "#/$defs/Id"}, "watermark": {"$ref": "#/$defs/Counter"}}, "required": ["snapshot_id", "watermark"]},
+    "TransferPage": {"$ref": "#/$defs/BytePage", "properties": {"transfer_id": {"$ref": "#/$defs/Id"}}, "required": ["transfer_id"], "description": "Chunks of one transaction's canonical JSON Change array."},
+    "HintEvent": {
+      "type": "object",
+      "properties": {
+        "scope_id": {"$ref": "#/$defs/Id"},
+        "server_generation": {"type": "string"},
+        "feed_generation": {"type": "string"},
+        "server_now": {"$ref": "#/$defs/Instant"},
+        "correlation_id": {"type": "string"}
+      },
+      "required": ["scope_id", "server_generation", "feed_generation", "server_now", "correlation_id"],
+      "additionalProperties": false,
+      "description": "Data of an SSE event named scope_changed; a wake-up only, carrying no task content, command ID or cursor."
+    }
+  }
+}

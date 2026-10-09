@@ -1,0 +1,201 @@
+openapi: 3.1.0
+info:
+  title: BrainBuddy sync v1
+  version: 1.0.0
+  summary: Generated from contracts/command-catalog.md and contracts/sync-v1.md (frozen-v1).
+  description: |
+    Those documents are authoritative; this file adds no field. Routes are specified, not implemented.
+    Authentication is the existing Identity session authority, supplied by the transport and never in a
+    URL. Every response carries X-Correlation-ID. Outside a receipt, protocol failures use the
+    ProtocolError response with the statuses of sync-v1 section 11: 400/422 INVALID_REQUEST, 401
+    AUTH_REQUIRED, 403 ACCESS_DENIED, 404 RESOURCE_NOT_FOUND, 409
+    EPOCH_CLOSED/RESET_REQUIRED/IDEMPOTENCY_KEY_REUSED/DEPENDENCY_PENDING, 413 COMMAND_TOO_LARGE, 426
+    UPGRADE_REQUIRED, 429 RATE_LIMITED, 503 TEMPORARILY_UNAVAILABLE. A domain rejection of a command is
+    HTTP 200 with a terminal Receipt.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+paths:
+  /api/sync/v1/devices:
+    post:
+      operationId: registerDevice
+      summary: Register a device epoch for the current owner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: sync-v1.schema.json#/$defs/DeviceRegistrationRequest}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/DeviceRegistration}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/commands:
+    post:
+      operationId: submitCommand
+      summary: One command; terminal receipt or retryable error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: sync-v1.schema.json#/$defs/CommandEnvelope}
+      responses:
+        '200':
+          description: Terminal receipt, including domain rejections.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/Receipt}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/commands/{id}:
+    get:
+      operationId: lookupCommand
+      summary: Owner-scoped result lookup
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {$ref: sync-v1.schema.json#/$defs/CommandId}
+      - name: scope_id
+        in: query
+        required: true
+        description: Scope being addressed; authority is rechecked on every call.
+        schema: {type: string}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/CommandLookup}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/snapshots:
+    post:
+      operationId: createSnapshot
+      summary: Create a stable snapshot and watermark
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: sync-v1.schema.json#/$defs/SnapshotRequest}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/SnapshotManifest}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/snapshots/{id}:
+    get:
+      operationId: getSnapshotPage
+      summary: Next page of the immutable snapshot
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {$ref: sync-v1.schema.json#/$defs/Id}
+      - name: scope_id
+        in: query
+        required: true
+        description: Scope being addressed; authority is rechecked on every call.
+        schema: {type: string}
+      - name: page_token
+        in: query
+        required: true
+        description: Resume token bound to the immutable object and page index.
+        schema: {type: string}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/SnapshotPage}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/changes:
+    get:
+      operationId: getChanges
+      summary: Complete change transactions after the cursor
+      parameters:
+      - name: scope_id
+        in: query
+        required: true
+        description: Scope being addressed; authority is rechecked on every call.
+        schema: {type: string}
+      - name: cursor
+        in: query
+        required: true
+        description: Opaque token bound to scope, access generation and feed generation.
+        schema: {type: string}
+      - name: limit
+        in: query
+        required: false
+        description: Maximum complete transactions to return.
+        schema: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/ChangesPage}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/capabilities:
+    get:
+      operationId: getCapabilities
+      summary: Protocol/schema/command versions, limits and reset policy
+      parameters:
+      - name: scope_id
+        in: query
+        required: true
+        description: Scope being addressed; authority is rechecked on every call.
+        schema: {type: string}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/Capabilities}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/transactions/{transfer_id}:
+    get:
+      operationId: getTransactionTransferPage
+      summary: Next byte page of an oversized transaction transfer
+      parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema: {$ref: sync-v1.schema.json#/$defs/Id}
+      - name: page_token
+        in: query
+        required: true
+        description: Resume token bound to the immutable object and page index.
+        schema: {type: string}
+      responses:
+        '200':
+          description: Authorized JSON with the common response fields.
+          content:
+            application/json:
+              schema: {$ref: sync-v1.schema.json#/$defs/TransferPage}
+        default: {$ref: '#/components/responses/ProtocolError'}
+  /api/sync/v1/hints:
+    get:
+      operationId: streamHints
+      summary: Authenticated SSE wake-ups (sync-v1 section 11)
+      description: 200 text/event-stream with Cache-Control no-store. Each event is named scope_changed and its data is a HintEvent. Last-Event-ID is ignored.
+      parameters:
+      - name: scope_id
+        in: query
+        required: true
+        description: Scope being addressed; authority is rechecked on every call.
+        schema: {type: string}
+      responses:
+        '200':
+          description: Server-sent events; the JSON data of each event is a HintEvent.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        default: {$ref: '#/components/responses/ProtocolError'}
+components:
+  responses:
+    ProtocolError:
+      description: Protocol or transport failure; creates no command receipt.
+      content:
+        application/json:
+          schema: {$ref: sync-v1.schema.json#/$defs/ErrorBody}

@@ -1,6 +1,6 @@
 # Proposed ADR: shared Rust core and task sync
 
-Status: Proposed, 2026-10-08. An accepted ADR number is not reserved yet. The user confirmed the Rust + custom sync direction; the concrete protocol, UX, and migration boundaries below are proposed for acceptance.
+Status: **Enacted as [ADR-0031](../../docs/decisions/0031-shared-rust-core-and-task-sync.md) on 2026-10-09** (PR-01, per [approval.md](approval.md)). This draft is kept unchanged below as history; the ADR is the authority. Original status line: Proposed, 2026-10-08. An accepted ADR number is not reserved yet. The user confirmed the Rust + custom sync direction; the concrete protocol, UX, and migration boundaries below are proposed for acceptance.
 
 ## Decision
 

@@ -1,5 +1,28 @@
 # Specification verification
 
+## PR-01 governance and contract enactment — October 9
+
+Slice PR-01 (T001) enacts the already accepted decisions; it adds no approval of its own. Authority: [approval.md](approval.md), [owner-acceptance.json](evidence/026-native-20261009-1/owner-acceptance.json), [human-signoff.json](evidence/026-native-20261009-1/human-signoff.json) and the planning gate `approved` in [accepted-summary.json](evidence/026-native-20261009-1/accepted-summary.json). On 2026-10-09 the owner also answered "Да, делай PR-01" to the conductor's question whether to enact ADR-0031, the Constitution IV exception, the pinned-Rust-binding allowance, frozen contracts with generated schema/OpenAPI, and a default-OFF `rust_core_sync` flag. That answer is relayed by the conductor; it has no evidence file.
+
+| Enacted | Where |
+| --- | --- |
+| ADR-0031 Accepted (2026-10-09); `adr-draft.md` kept as history | `docs/decisions/0031-shared-rust-core-and-task-sync.md` |
+| Constitution IV command-identity exception, version 3.0.0 to 4.0.0 (MAJOR: narrow breaking clarification), sync impact report, prior report preserved | `.specify/memory/constitution.md` |
+| Audited, pinned Rust bindings and runtime allowed; other third-party dependencies still forbidden | `ios/AGENTS.md` |
+| Contracts frozen-v1: command catalog, runtime/FFI, sync v1 | `contracts/*.md` |
+| `sync-v1.schema.json` (JSON Schema 2020-12) and `sync-v1.openapi.yaml` (OpenAPI 3.1) generated from the catalog | `contracts/` |
+| Design status line now defers to approval.md | `design.md` |
+
+Contract fixes found while freezing, each a real inconsistency: the snapshot page route said `?page=...` while section 11 uses `scope_id` and `page_token`; the oversized-transaction page route was missing from the section 6 route table; `review_state` was listed as a feed projection type although data-model.md defines it as a derived view; `capabilities` returns `scope_id` and `scope_enabled` but took no scope. No other semantics changed.
+
+Schema and OpenAPI: both parse; the schema passes the 2020-12 meta-schema; the OpenAPI document passes `openapi-spec-validator` 0.9.0; the section 3 envelope and section 5 receipt examples validate; negative cases (unknown command, extra field, non-string counter, over-limit park/bulk items, subtask without parent `task_id`, accepted-with-changes lacking `commit_seq`) are rejected; all 30 catalog commands appear in the `CommandType` enum and the baseline map. Payload shapes stay by reference to the canonical request schemas, as the catalog states; the schema constrains only what the catalog constrains.
+
+**Flag added, default OFF:** `rust_core_sync` is now in `KNOWN_FEATURE_FLAGS` (`backend/app/core/config.py`), `MANAGED_FLAGS` and `_POST_ADR_0019_DEFAULT_OFF_FLAGS` (`backend/app/repositories/feature_flag.py`), following the `weekly_review` pattern. The hard-coded flag-set expectations in the backend test modules were updated to match. Nothing reads the flag yet and no capability is enabled.
+
+Checks run: `python3 scripts/check_spec_kit_specs.py`, `make check-specs` and `make validate-ci` pass. Backend flag/config tests (`pytest -q --no-cov` over `test_feature_flags`, `test_feature_flag_service`, `test_feature_flag_repository`, `test_admin_config`, `test_admin_feature_flags_api`, `test_auth_routes`, `test_admin_deploy_contract`: 244 passed) and ruff, black, mypy on `config.py` pass on the unchanged file. The ADR-0011 verdict that applies is the existing six-lens run `026-native-20261009-1` (6 of 6, four findings closed, gate approved); PR-01 ran no new review campaign and no new analyze pass.
+
+Still outstanding, not certified: measured sizing for the complex slices PR-03/04/05/34/49/59/60/61/62/64 (including Cargo.lock) before their boundaries are approved; the docs/data-retention.md and privacy disclosure update before rollout; no runtime, rendering or acceptance evidence exists.
+
 ## Current delivery amendment — October 9
 
 The owner requested independently reviewable PRs, an explicit dependency graph, maximum safe parallel work and no approximately 5,000-line PRs. The amended [tasks](tasks.md) preserve the technical outcome while changing delivery ownership/order: 64 unique tasks and slices, 94 edges, a complete [graph](delivery-graph.md), the existing product caps and a strict 800-line full-diff cap. Ready independent workers start immediately as merged prerequisites and slots permit. Domain families, job adapters and SSE/delta have disjoint write paths; small registration/handoff slices own shared files. The Task lifecycle/formulation, snapshot/transfer and all-writer/pilot dependencies remain explicit. Graph depth decreases from 40 to 34 topological levels; this describes dependency structure, not measured calendar duration.

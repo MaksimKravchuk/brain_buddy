@@ -45,7 +45,12 @@ tests and leave the app build to CI (the `ios-app` lane of
   `#if canImport(...)` or in the app target. Run
   `sh ios/scripts/swift-linux.sh test` before calling package work done.
 - **No third-party dependencies**, in the package or the app. `Package.swift`
-  has none; keep it that way.
+  has none; keep it that way. The one exception (ADR-0031, spec 026): the shared
+  Rust domain/runtime and its audited, pinned generated Swift bindings. Their build
+  inputs, licenses, lockfile, reproducible packaging, supported targets and the
+  Foundation-only Linux test boundary must be reviewed before they land. This does
+  not permit arbitrary Swift packages, bundled model weights or any other native
+  dependency.
 - **`project.yml` is the source of truth.** The `.xcodeproj`, both
   Info.plists and both `.entitlements` files are generated and git-ignored.
   A new Info.plist key, entitlement, capability, build setting or target goes

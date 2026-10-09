@@ -1,5 +1,25 @@
 <!--
 Sync Impact Report:
+- Version change: 3.0.0 -> 4.0.0
+- Why MAJOR: Owner-accepted narrow breaking clarification of Principle IV
+  (specs/026-rust-core-sync/approval.md; ADR-0031, enacted in PR-01). The absolute
+  rule that client-supplied IDs are never idempotency inputs gains one exception:
+  dedicated owner-scoped command IDs may identify an immutable command for durable
+  deduplication under an accepted domain contract. Correlation and observability
+  IDs stay labels only; no client-supplied ID grants authority.
+- Modified principles: IV. Traceable & Actionable Observability (first bullet)
+- Modified sections: None
+- Added sections: None
+- Removed sections: None
+- Dependent docs updated: ios/AGENTS.md (Apple dependency allowance),
+  docs/decisions/0031-shared-rust-core-and-task-sync.md
+- Templates updated: None
+- Follow-up TODOs: audit AGENTS.md, CLAUDE.md, .specify/templates/ and
+  observability docs for the command-ID versus correlation-ID distinction; update
+  docs/data-retention.md and the privacy disclosure before rollout (ADR-0031).
+-->
+<!--
+Prior Sync Impact Report (3.0.0), preserved:
 - Version change: 2.0.0 -> 3.0.0
 - Why MAJOR: Owner-approved proportionate testing replaces universal test-first
   ordering with behavior/risk-based test selection and bounded test-first use.
@@ -50,7 +70,7 @@ Shared contracts are the source of truth and cannot drift across tiers, agents, 
 
 ### IV. Traceable & Actionable Observability
 Every request, operation, route, and review action must be diagnosable without exposing user content.
-- Backend responses MUST include `X-Correlation-ID`; accepted client-supplied IDs are observability labels only and never authorization or idempotency inputs.
+- Backend responses MUST include `X-Correlation-ID`. Correlation and observability IDs are labels only and never authorization or idempotency inputs. Dedicated owner-scoped command IDs MAY identify an immutable command for durable deduplication under an accepted domain contract. No client-supplied ID grants authority; replay MUST recheck current authority and reject changed command content under the same ID. Entity IDs alone do not authorize upsert or replay beyond the accepted domain contract.
 - Long-running capture, review, AI, import/export, and save flows MUST expose progress, retry state, cancellation state, and partial-failure evidence.
 - Logs, metrics, and operation events MUST contain IDs, timings, coarse confidence/error bands, and stage names rather than raw user text or media.
 - Debug/profiling hooks may exist in development, but production UX must remain clean and privacy-preserving.
@@ -99,4 +119,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance is checked by ADR-0023's risk-selected independent gate before SHIP/SHOW release and by the full review path for ineligible or ASK work; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 3.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-07
+**Version**: 4.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-09
