@@ -1,6 +1,6 @@
 # Command and writer catalog
 
-Status: proposed sync v1 names, using current accepted request semantics. This is the migration coverage map, not evidence these routes/crates already exist. Current baselines: `backend/app/schemas/tasks.py`, `schemas/review.py`, `modules/tasks/{service,review_service,review_flow,navigator}.py`; Apple `ios/BrainBuddyKit/Sources/BrainBuddyCore/{Commands,SmartAdd,Review}.swift` and `BrainBuddySync/`. Keep existing HTTP response bodies/statuses in legacy adapters.
+Status: **frozen-v1** (2026-10-09, PR-01; ADR-0031). The command names below are the sync v1 set, using current accepted request semantics; a new or changed command needs an amendment to this contract before execution. [sync-v1.schema.json](sync-v1.schema.json) and [sync-v1.openapi.yaml](sync-v1.openapi.yaml) are generated from this catalog. This is the migration coverage map, not evidence these routes/crates already exist. Current baselines: `backend/app/schemas/tasks.py`, `schemas/review.py`, `modules/tasks/{service,review_service,review_flow,navigator}.py`; Apple `ios/BrainBuddyKit/Sources/BrainBuddyCore/{Commands,SmartAdd,Review}.swift` and `BrainBuddySync/`. Keep existing HTTP response bodies/statuses in legacy adapters.
 
 ## Payload translation
 
@@ -8,7 +8,7 @@ Each command uses sync-v1 §3's immutable envelope. Payload fields retain the re
 
 For normal revision-required commands use the target's domain revision or an `after_command` reference. Do not use the parent task revision for a child's revision check. Creation requires absent scoped ID plus canonical reference/uniqueness checks. All related read sets (parent/reference state, normalized names, memberships, Undo dependencies) are loaded under the owner lock. Result versions cover every changed replicated row; projections without a domain revision omit `edit_revision`.
 
-| Proposed command | Existing command/request baseline | Concurrency and atomic effects |
+| Command | Existing command/request baseline | Concurrency and atomic effects |
 | --- | --- | --- |
 | `project.create` | `create_project` / `ProjectCreateRequest` | Supplied project ID; active-name uniqueness. |
 | `project.update` | `update_project` / `ProjectUpdateRequest`; Apple setProjectOutcome | Project revision; same patch supports desired outcome. |

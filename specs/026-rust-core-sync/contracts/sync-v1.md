@@ -1,6 +1,6 @@
-# Proposed Sync v1 Contract
+# Sync v1 Contract
 
-Status: Draft. This is a new protocol for the Tasks aggregate and native-task Review only. “v1” means the first version of the new protocol, not the current REST API. Neither CRT nor Identity nor raw audio is placed in the task change feed. [Data model](../data-model.md), [command catalog](command-catalog.md), and [runtime/FFI contract](runtime-ffi.md) supply the concrete record, writer and binding definitions. The endpoint names below are proposed; these routes do not yet exist.
+Status: **frozen-v1** (2026-10-09, PR-01; ADR-0031). Machine-readable forms: [sync-v1.schema.json](sync-v1.schema.json) and [sync-v1.openapi.yaml](sync-v1.openapi.yaml), generated from the [command catalog](command-catalog.md). Measured values called "proposed" below (retention horizons, watcher interval, size ceilings) are frozen as the design defaults and remain subject to the SC-001–SC-008 measurements. This is a new protocol for the Tasks aggregate and native-task Review only. “v1” means the first version of the new protocol, not the current REST API. Neither CRT nor Identity nor raw audio is placed in the task change feed. [Data model](../data-model.md), [command catalog](command-catalog.md), and [runtime/FFI contract](runtime-ffi.md) supply the concrete record, writer and binding definitions. The endpoint names below are the frozen v1 names; these routes do not yet exist.
 
 ## 1. Core Guarantees
 
@@ -116,9 +116,10 @@ Proposed API:
 | `POST /api/sync/v1/commands` | One command; terminal receipt or retryable error |
 | `GET /api/sync/v1/commands/{id}` | Owner-scoped result lookup |
 | `POST /api/sync/v1/snapshots` | Create a stable snapshot and watermark |
-| `GET /api/sync/v1/snapshots/{id}?page=...` | Next page of the immutable snapshot |
+| `GET /api/sync/v1/snapshots/{id}?scope_id=...&page_token=...` | Next page of the immutable snapshot (§11) |
+| `GET /api/sync/v1/transactions/{transfer_id}?page_token=...` | Next byte page of an oversized transaction transfer (§11) |
 | `GET /api/sync/v1/changes?cursor=...&limit=...` | Complete change transactions after the cursor |
-| `GET /api/sync/v1/capabilities` | Protocol/schema/command versions, limits, and reset policy |
+| `GET /api/sync/v1/capabilities?scope_id=...` | Protocol/schema/command versions, limits, and reset policy |
 | `GET /api/sync/v1/hints?scope_id=...` | Authenticated SSE wake-ups; §11 defines events and authority checks |
 
 The cursor is an opaque token bound to scope, access generation, and feed generation. `has_more` and `next_cursor` are required. A response contains transaction ID, commit sequence, source command ID, and typed upsert/tombstone public after-images with record versions. A transaction contains every changed client-visible projection of the Tasks and native Review aggregate: tasks with formulation clocks, projects/tags and membership, children, and all Review projections below. Snapshot bootstrap contains the same complete set at its watermark; it is not limited to the earlier clocks/settings/receipts shorthand.
@@ -133,7 +134,7 @@ The cursor is an opaque token bound to scope, access generation, and feed genera
 | `review_park_ack` | Task/formulation/park identity and public seen/returned/unseen state |
 | `review_bulk_release` | Identity/kind/session/time, released task IDs and revisions, skipped reasons, undone state, and the public content-free Undo result |
 | `review_navigator_consent` | Current per-provider consent status, grant/revoke times, and consent-text version; server authority is still rechecked before use |
-| `review_state` | Public explainer/grace, latest counted review, next-review/restart, open-session and queue-count facts; derived consistently from the complete synchronized records as fixed in data-model.md |
+| `review_state` (derived view, **not** a feed or snapshot record type) | Public explainer/grace, latest counted review, next-review/restart, open-session and queue-count facts; computed locally from the complete synchronized records as fixed in data-model.md, never persisted as a second authoritative aggregate |
 
 Records use stable entity identities, or stable scope/session keys for singleton projections, and record versions. Updates/tombstones and any materialized derived projections commit atomically with the domain change. Use the accepted public Task/Review DTOs and queue projections as the field baseline, not raw storage documents. Exclude session `applied_progress` fingerprints and private bookkeeping, server-only Undo/park clock-before snapshots, navigator usage/cost reservations, protected command deduplication/reconciliation data, secrets, and raw media. Clients retain the existing deferred behavior for Undo requiring a server-only snapshot; device-local drafts/preferences remain local. None of these exclusions permits omitting the public resume/decision/receipt/consent state above.
 
@@ -250,7 +251,7 @@ Client downloads to staging, checks all indices/counts/digests, then applies the
 
 ### Snapshot manifest and pages
 
-`POST snapshots` body `{scope_id, projection_schema_version}` returns `{snapshot_id, watermark, cursor, page_count, record_count, total_bytes, sha256, expires_at, first_page_token}`. Proposed snapshot page GET adds `scope_id` and `page_token` (the earlier `page=...` spelling is illustrative). A page returns `{snapshot_id, watermark, page_index, payload_base64, page_sha256, has_more, next_page_token}` using the same bounded byte-stream encoding as transaction transfers. The decoded stream is a canonical JSON Change array of current upserts plus required deletion-version metadata, not a replay of historic receipts. Snapshot records use deterministic `(entity_type, record_key)` ordering. The final page has `has_more:false`, `next_page_token:null`; every preceding page has both true/non-null. Resume tokens bind the immutable manifest and index.
+`POST snapshots` body `{scope_id, projection_schema_version}` returns `{snapshot_id, watermark, cursor, page_count, record_count, total_bytes, sha256, expires_at, first_page_token}`. The snapshot page GET takes `scope_id` and `page_token`. A page returns `{snapshot_id, watermark, page_index, payload_base64, page_sha256, has_more, next_page_token}` using the same bounded byte-stream encoding as transaction transfers. The decoded stream is a canonical JSON Change array of current upserts plus required deletion-version metadata, not a replay of historic receipts. Snapshot records use deterministic `(entity_type, record_key)` ordering. The final page has `has_more:false`, `next_page_token:null`; every preceding page has both true/non-null. Resume tokens bind the immutable manifest and index.
 
 A page digest is SHA-256 of its decoded bytes. Manifest digest is SHA-256 of the complete decoded canonical stream, assembled in page-index order. `record_count` counts Change objects; `total_bytes` counts decoded stream bytes, so retries are verifiable independent of base64 or HTTP compression. Digests are integrity metadata and never logged. Verify page indices, counts, total bytes, digest, generation and unexpired authorization before activation. Fresh activation uses manifest cursor/watermark and the latest live queue as §6 requires; it never treats an earlier copied outbox as current.
 
