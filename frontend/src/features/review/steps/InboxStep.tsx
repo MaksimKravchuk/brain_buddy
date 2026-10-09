@@ -74,6 +74,8 @@ interface Restore {
 /** The project form keeps each of its fields as a draft (FR-052), under its own name. */
 const PROJECT = "project";
 const PROJECT_DRAFTS = { name: "project_name", outcome: "project_outcome", action: "project_action" } as const;
+/** The open "New project…" name is typed text too (FR-052). */
+const NEW_PROJECT_DRAFT = "new_project";
 
 function unsavedText(form: Form, task: TaskResponse): boolean {
   return form.kind === "project" ? form.name !== task.title || form.outcome.trim() !== "" || form.action.trim() !== "" : form.text.trim() !== "";
@@ -141,16 +143,20 @@ export function InboxStep(): React.JSX.Element {
     const title = form === null ? drafts.load(current.id, "title") : null;
     const waitingFor = form === null ? drafts.load(current.id, "waiting") : null;
     const project = form === null ? { name: drafts.load(current.id, PROJECT_DRAFTS.name), outcome: drafts.load(current.id, PROJECT_DRAFTS.outcome), action: drafts.load(current.id, PROJECT_DRAFTS.action) } : null;
+    const newProject = drafts.load(current.id, NEW_PROJECT_DRAFT);
     if (title !== null) {
       setForm({ kind: "title", text: title });
     } else if (waitingFor !== null) {
       setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
     } else if (project !== null && Object.values(project).some((draft) => draft !== null)) {
       setForm({ kind: "project", name: project.name ?? current.title, outcome: project.outcome ?? "", action: project.action ?? "" });
+    } else if (newProject !== null) {
+      setStaged({ taskId: current.id, projectId: current.project_id, newName: newProject });
     }
   }
   useEffect(() => {
-    if (form !== null && current !== undefined && unsavedText(form, current)) {
+    const typedNewProject = staged?.taskId === draftsCheckedFor && Boolean(staged?.newName?.trim());
+    if ((form !== null && current !== undefined && unsavedText(form, current)) || (form === null && typedNewProject)) {
       run.setUnsaved(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
@@ -249,6 +255,7 @@ export function InboxStep(): React.JSX.Element {
     focusHeading.current = true;
     setProcessed((ids) => [...ids, task.id]);
     setStaged(null);
+    drafts.clear(task.id, NEW_PROJECT_DRAFT);
     closeForm(task.id, done.field);
     // The item is processed now; the count has its own pending and failure states.
     void countAction.run(
@@ -358,6 +365,8 @@ export function InboxStep(): React.JSX.Element {
       queryClient.setQueryData<ProjectResponse[]>(taskKeys.projects(getTaskCacheScope(continuation.scope.accountId)), (list) => list && [...list, created]);
       refreshProjects(continuation.scope);
       setStaged({ taskId: task.id, projectId: created.id, newName: null });
+      drafts.clear(task.id, NEW_PROJECT_DRAFT);
+      run.setUnsaved(false);
     });
   };
 
@@ -399,7 +408,8 @@ export function InboxStep(): React.JSX.Element {
         undoName: "Made a project",
         restore: { fields: { ...(title === task.title ? {} : { title: task.title }), project_id: task.project_id }, failure: "its title and project weren't put back", archive: project }
       });
-    });
+      // Part of it may have landed (the project, the new title): Retry replays the same keys and finishes it.
+    }, `Couldn't finish making “${name}” a project. Retry picks up where it stopped.`);
   };
 
   const submitWaiting = (event: FormEvent, task: TaskResponse, choice: Choice, text: string) => {
@@ -527,10 +537,19 @@ export function InboxStep(): React.JSX.Element {
                     newName={staged?.taskId === current.id ? (staged.newName ?? "") : ""}
                     busy={action.pending === "project-add"}
                     disabled={itemsDisabled}
-                    onSelect={(value) =>
-                      setStaged({ taskId: current.id, projectId: value === NEW_PROJECT ? projectOf(current) : value || null, newName: value === NEW_PROJECT ? "" : null })
-                    }
-                    onNewName={(newName) => setStaged({ taskId: current.id, projectId: projectOf(current), newName })}
+                    onSelect={(value) => {
+                      setStaged({ taskId: current.id, projectId: value === NEW_PROJECT ? projectOf(current) : value || null, newName: value === NEW_PROJECT ? "" : null });
+                      if (value !== NEW_PROJECT) {
+                        // Choosing a project instead discards the typed name.
+                        drafts.clear(current.id, NEW_PROJECT_DRAFT);
+                        run.setUnsaved(false);
+                      }
+                    }}
+                    onNewName={(newName) => {
+                      setStaged({ taskId: current.id, projectId: projectOf(current), newName });
+                      drafts.save(current.id, NEW_PROJECT_DRAFT, newName);
+                      run.setUnsaved(newName.trim() !== "");
+                    }}
                     onAdd={(event) => addProject(event, current, staged?.newName ?? "")}
                   />
                   <div role="group" aria-label="Choices" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

@@ -789,6 +789,28 @@ describe("020-FR-034 Inbox step: giving an item a project", () => {
     expect(transitionTask).toHaveBeenCalledWith("inbox_1", { action: "move", to_state: "someday", expected_revision: 4 }, expect.any(String));
   });
 
+  it("020-FR-052 a typed new project name is unsaved text: kept as a draft, back after a remount, gone once the project is added", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queue([paper]));
+    createProject.mockResolvedValueOnce(project("proj_new", "Garden"));
+    const first = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+    await user.selectOptions(select(), "New project…");
+    await user.type(screen.getByRole("textbox", { name: "New project name" }), "Garden");
+    expect(first.run.setUnsaved).toHaveBeenLastCalledWith(true);
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.new_project"))).toBe(true);
+    first.unmount();
+
+    const { run } = renderInRun(<InboxStep />);
+
+    expect(await screen.findByRole("textbox", { name: "New project name" })).toHaveValue("Garden");
+    expect(run.setUnsaved).toHaveBeenCalledWith(true);
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await waitFor(() => expect(run.setUnsaved).toHaveBeenLastCalledWith(false));
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.new_project"))).toBe(false);
+  });
+
   it("020-FR-045 a project that cannot be added says so with the Ref, and Retry adds it under the same key", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper]));
@@ -1002,7 +1024,8 @@ describe("020-FR-034 Inbox step: Make it a project", () => {
     await user.click(submit());
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't save “Make it a project”. Nothing was changed.");
+    // The project may already exist, so the message must not claim nothing changed.
+    expect(alert).toHaveTextContent("Couldn't finish making “Buy printer paper” a project. Retry picks up where it stopped.");
     expect(alert).toHaveTextContent("Ref corr_make_project");
     expect(transitionTask).not.toHaveBeenCalled();
     expect(firstAction()).toHaveValue("Measure the room");
