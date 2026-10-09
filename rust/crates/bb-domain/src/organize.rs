@@ -261,7 +261,9 @@ fn project_create(
     command: &DomainCommand,
     payload: &crate::types::ProjectCreate,
 ) -> Result<ChangeSet, DomainError> {
-    let id = project_target(command)?;
+    // A created project carries the native shape; legacy and alias IDs are
+    // only valid as references to records that already exist.
+    let id = ProjectId::parse_new(command.entity_id.as_str())?;
     if read_set.projects.contains_key(&id) {
         return Err(refuse(
             Reason::IdAlreadyExists,
@@ -384,7 +386,8 @@ fn tag_create(
     command: &DomainCommand,
     payload: &crate::types::TagCreate,
 ) -> Result<ChangeSet, DomainError> {
-    let id = tag_target(command)?;
+    // See `project_create`: only a new tag needs the native shape.
+    let id = TagId::parse_new(command.entity_id.as_str())?;
     if read_set.tags.contains_key(&id) {
         return Err(refuse(
             Reason::IdAlreadyExists,

@@ -253,11 +253,33 @@ fn ran_all(section: &str, ran: usize, expected: usize) {
     );
 }
 
-fn project_create(id: &str, name: &str) -> DomainCommand {
+/// A native ID (`<prefix>_<lowercase uuid>`) derived from a readable label, so a
+/// test can name the entity it creates and look it up again by the same label.
+fn native(prefix: &str, label: &str) -> String {
+    let hash = label.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3)
+    });
+    format!(
+        "{prefix}_00000000-0000-4000-8000-{:012x}",
+        hash & 0xffff_ffff_ffff
+    )
+}
+
+/// `project.create` for the project labelled `label` (its ID is `native`).
+fn project_create(label: &str, name: &str) -> DomainCommand {
+    project_create_with_id(&native("project", label), name)
+}
+
+fn project_create_with_id(id: &str, name: &str) -> DomainCommand {
     command("project.create", id, json!({ "name": name }), vec![])
 }
 
-fn tag_create(id: &str, name: &str) -> DomainCommand {
+/// `tag.create` for the tag labelled `label` (its ID is `native`).
+fn tag_create(label: &str, name: &str) -> DomainCommand {
+    tag_create_with_id(&native("tag", label), name)
+}
+
+fn tag_create_with_id(id: &str, name: &str) -> DomainCommand {
     command("tag.create", id, json!({ "name": name }), vec![])
 }
 
@@ -308,12 +330,12 @@ fn organize_026_fr_002_a_new_project_stores_the_servers_display_form() {
     let store = world();
     let set = accepted(store.decide(&command(
         "project.create",
-        "project_new",
+        &native("project", "project_new"),
         json!({ "name": "  Ｄｅｅｐ   work ", "color": "#123456", "desired_outcome": "  Ship it \n" }),
         vec![],
     )));
     let project = the_project(&set);
-    assert_eq!(project.id.as_str(), "project_new");
+    assert_eq!(project.id.as_str(), native("project", "project_new"));
     assert_eq!(project.name.as_str(), "Deep work");
     assert_eq!(project.color.as_ref().map(|c| c.as_str()), Some("#123456"));
     assert_eq!(
@@ -327,7 +349,7 @@ fn organize_026_fr_002_a_new_project_stores_the_servers_display_form() {
     assert!(set.effects.is_empty() && set.result.created_task_id.is_none());
     assert_eq!(
         set.affected_keys(),
-        vec![(EntityType::Project, vec!["project_new".to_owned()])]
+        vec![(EntityType::Project, vec![native("project", "project_new")])]
     );
 }
 
@@ -336,7 +358,7 @@ fn organize_026_fr_002_blank_outcomes_are_none_and_the_limit_is_one_thousand_sca
     let store = world();
     let blank = accepted(store.decide(&command(
         "project.create",
-        "project_b",
+        &native("project", "project_b"),
         json!({ "name": "B", "desired_outcome": " \n " }),
         vec![],
     )));
@@ -344,7 +366,7 @@ fn organize_026_fr_002_blank_outcomes_are_none_and_the_limit_is_one_thousand_sca
     let longest = "o".repeat(1_000);
     let kept = accepted(store.decide(&command(
         "project.create",
-        "project_c",
+        &native("project", "project_c"),
         json!({ "name": "C", "desired_outcome": longest }),
         vec![],
     )));
@@ -358,7 +380,7 @@ fn organize_026_fr_002_blank_outcomes_are_none_and_the_limit_is_one_thousand_sca
     // The type refuses a 1,001 scalar outcome before the rule runs (422 on the server).
     let err = try_command(
         "project.create",
-        "project_d",
+        &native("project", "project_d"),
         json!({ "name": "D", "desired_outcome": "o".repeat(1_001) }),
         vec![],
     )
@@ -381,7 +403,13 @@ fn organize_026_fr_002_project_names_are_unique_among_active_projects_by_normali
     }
     // An archived project's name is free again.
     accepted(store.run(&project_create("project_old2", "old")));
-    assert_eq!(store.project("project_old2").name.as_str(), "old");
+    assert_eq!(
+        store
+            .project(&native("project", "project_old2"))
+            .name
+            .as_str(),
+        "old"
+    );
     // Full case folding: ß matches SS.
     accepted(store.run(&project_create("project_s", "Straße")));
     let err = refusal(store.decide(&project_create("project_t", "STRASSE")));
@@ -408,22 +436,87 @@ fn organize_026_fr_002_blank_and_expanding_names_are_refused_with_typed_reasons(
         json!({ "name": "P", "color": "c".repeat(65) }),
         json!({ "name": "P", "unknown": 1 }),
     ] {
-        let err = try_command("project.create", "project_x", payload, vec![]).unwrap_err();
+        let err = try_command(
+            "project.create",
+            &native("project", "project_x"),
+            payload,
+            vec![],
+        )
+        .unwrap_err();
         assert_eq!(err.reason, Reason::InvalidPayload);
     }
 }
 
 #[test]
 fn organize_026_fr_008_an_id_that_exists_is_never_created_again() {
-    let store = world();
-    for existing in ["work", "old"] {
-        let err = refusal(store.decide(&project_create(existing, "Brand new")));
+    let (live, old, gone) = (
+        native("project", "live"),
+        native("project", "old"),
+        native("tag", "gone"),
+    );
+    let store = Store::new(
+        &[
+            project_json(&live, "Live", "active", 1),
+            project_json(&old, "Old", "archived", 3),
+        ],
+        &[tag_json(&gone, "Gone", "deleted", 2)],
+        &[],
+    );
+    for existing in [&live, &old] {
+        let err = refusal(store.decide(&project_create_with_id(existing, "Brand new")));
         assert_eq!(err.reason, Reason::IdAlreadyExists, "{existing}");
     }
     // A deleted tag keeps its ID: it cannot be recreated under a new name.
-    let err = refusal(store.decide(&tag_create("gone", "Reborn")));
+    let err = refusal(store.decide(&tag_create_with_id(&gone, "Reborn")));
     assert_eq!(err.reason, Reason::IdAlreadyExists);
     assert_eq!(err.field.as_deref(), Some("entity_id"));
+}
+
+#[test]
+fn organize_026_fr_008_a_created_project_or_tag_needs_a_native_id_and_legacy_ids_stay_references() {
+    let store = world();
+    let uuid = "0b0e1f30-0000-4000-8000-00000000b001";
+    let refused = |prefix: &str| {
+        [
+            "x".to_owned(),
+            format!("{prefix}_x"),
+            format!("{prefix}_abc123def456"),
+            format!("{prefix}_{}", uuid.to_uppercase()),
+            format!("other_{uuid}"),
+            format!("{prefix}_{uuid}-extra"),
+        ]
+    };
+    // Malformed and legacy-shaped IDs are never persisted as new records,
+    // whether the ID is free or already held by an existing record.
+    let held = ["work".to_owned(), "old".to_owned()];
+    for id in refused("project").iter().chain(&held) {
+        let err = refusal(store.decide(&project_create_with_id(id, "Fresh")));
+        assert_eq!(err.reason, Reason::InvalidValue, "{id}");
+        assert_eq!(err.field.as_deref(), Some("ProjectId"), "{id}");
+    }
+    let held = ["home".to_owned(), "gone".to_owned()];
+    for id in refused("tag").iter().chain(&held) {
+        let err = refusal(store.decide(&tag_create_with_id(id, "Fresh")));
+        assert_eq!(err.reason, Reason::InvalidValue, "{id}");
+        assert_eq!(err.field.as_deref(), Some("TagId"), "{id}");
+    }
+    // The same legacy IDs are still valid references to the records holding them.
+    let mut store = store;
+    accepted(store.run(&project_edit(
+        "project.update",
+        "work",
+        json!({ "desired_outcome": "Still editable" }),
+        1,
+    )));
+    accepted(store.run(&project_edit("project.archive", "other", json!({}), 4)));
+    let set = accepted(store.run(&task_tags("open", &[], &["home"], 5)));
+    assert_eq!(tag_ids(the_task(&set)), ["calls"]);
+    // A native ID is accepted.
+    let project =
+        accepted(store.decide(&project_create_with_id(&format!("project_{uuid}"), "Fresh")));
+    assert_eq!(the_project(&project).id.as_str(), format!("project_{uuid}"));
+    let tag = accepted(store.decide(&tag_create_with_id(&format!("tag_{uuid}"), "Fresh")));
+    assert_eq!(the_tag(&tag).id.as_str(), format!("tag_{uuid}"));
 }
 
 #[test]
@@ -676,13 +769,16 @@ fn organize_026_fr_002_unarchive_needs_a_free_active_name_and_a_current_revision
         assert_eq!(err.reason, Reason::UnarchiveNameInUse);
         assert_eq!(
             err.entity,
-            Some((EntityType::Project, vec!["project_again".to_owned()]))
+            Some((
+                EntityType::Project,
+                vec![native("project", "project_again")]
+            ))
         );
     }
     // Archived namesakes do not count.
     accepted(store.run(&project_edit(
         "project.archive",
-        "project_again",
+        &native("project", "project_again"),
         json!({}),
         1,
     )));
@@ -727,15 +823,18 @@ fn organize_026_fr_002_a_new_tag_drops_one_leading_at_and_is_unique_among_active
         Reason::EmptyName
     );
     assert_eq!(
-        refusal(store.decide(&tag_create("home", "Other"))).reason,
+        refusal(store.decide(&tag_create("tag_o", "Other"))).reason,
         Reason::IdAlreadyExists
     );
     // A deleted tag's name is free again.
     accepted(store.run(&tag_create("tag_g", "Gone")));
-    assert_eq!(store.tag("tag_g").state, TagState::Active);
+    assert_eq!(store.tag(&native("tag", "tag_g")).state, TagState::Active);
     // "@@x" is stored as "@x" and keyed as "x" (the server strips the prefix again).
     accepted(store.run(&tag_create("tag_at", "@@errands")));
-    assert_eq!(store.tag("tag_at").name.as_str(), "@errands");
+    assert_eq!(
+        store.tag(&native("tag", "tag_at")).name.as_str(),
+        "@errands"
+    );
     assert_eq!(
         refusal(store.decide(&tag_create("tag_y", "errands"))).reason,
         Reason::DuplicateTagName
@@ -883,12 +982,13 @@ fn organize_026_fr_002_a_repeat_tag_delete_is_accepted_and_only_bumps_the_revisi
 #[test]
 fn organize_026_fr_002_explicit_tag_changes_add_active_tags_and_remove_the_named_ones() {
     let mut store = world();
+    let errands = native("tag", "tag_new");
     accepted(store.run(&tag_create("tag_new", "Errands")));
-    let set = accepted(store.run(&task_tags("open", &["tag_new"], &["home"], 5)));
+    let set = accepted(store.run(&task_tags("open", &[errands.as_str()], &["home"], 5)));
     let task = the_task(&set);
     assert_eq!(
         tag_ids(task),
-        ["calls", "tag_new"],
+        ["calls", errands.as_str()],
         "order kept, additions follow"
     );
     assert_eq!(task.revision, Counter::from(6));
@@ -1036,7 +1136,7 @@ fn organize_026_fr_002_only_organization_commands_are_decided_here() {
     let ours = [
         command(
             "project.create",
-            "project_n",
+            &native("project", "project_n"),
             json!({ "name": "N" }),
             vec![],
         ),
@@ -1472,7 +1572,7 @@ impl Server {
 
     fn mint(&mut self, prefix: &str) -> String {
         self.minted += 1;
-        format!("{prefix}_{:012x}", self.minted)
+        format!("{prefix}_0b0e1f30-0000-4000-8000-{:012x}", self.minted)
     }
 
     fn project_body(&self, project: &Project) -> Value {
