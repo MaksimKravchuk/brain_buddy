@@ -1349,6 +1349,10 @@ class TestFlightChangesTests(unittest.TestCase):
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Test")
+        # The 120-commit test trips `git gc --auto`, which detaches and keeps
+        # writing into .git while tearDown removes it ("Directory not empty").
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
         self.commit("chore: start", {"README.md": "start\n"})
 
     def tearDown(self) -> None:
