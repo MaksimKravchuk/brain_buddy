@@ -36,7 +36,7 @@ struct SubtasksSection: View {
                     addRow
                 }
             } header: {
-                Text(header)
+                BBSectionHeader(header)
             } footer: {
                 if let errorMessage {
                     InlineProblemText(message: errorMessage)
@@ -52,18 +52,18 @@ struct SubtasksSection: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "plus")
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-                .accessibilityHidden(true)
+        Label {
             TextField("Add a subtask", text: $newTitle)
                 .focused($isAdding)
                 .submitLabel(.done)
                 .onSubmit(add)
                 .accessibilityLabel("New subtask")
+        } icon: {
+            Image(systemName: "plus")
+                .accessibilityHidden(true)
         }
-        .frame(minHeight: 44)
+        .labelStyle(.bbRow)
+        .frame(minHeight: BBMetrics.rowMinHeight)
     }
 
     private func add() {
@@ -90,6 +90,8 @@ private struct DetailSubtaskRow: View {
     @Environment(Workspace.self) private var workspace
     @State private var title: String
     @FocusState private var isEditing: Bool
+    /// The state symbol sits in the same icon column as the rows above.
+    @ScaledMetric(relativeTo: .body) private var iconColumn: CGFloat = BBMetrics.iconColumn
 
     init(taskID: TaskID, subtask: SubtaskRecord, isReadOnly: Bool, onProblem: @escaping (String?) -> Void) {
         self.taskID = taskID
@@ -102,14 +104,20 @@ private struct DetailSubtaskRow: View {
     private var isOpen: Bool { subtask.state == .open }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: BBSpacing.s3) {
             Button(action: toggle) {
+                // The symbol takes the 24 pt icon column; the padding grows the
+                // hit target to 44 pt and the negative padding below gives that
+                // width back to the layout, so the title lines up with the
+                // property rows above.
                 Image(systemName: symbol)
                     .font(.title3)
                     .foregroundStyle(isOpen ? BBColor.textTertiary : BBColor.brandText)
-                    .frame(width: 44, height: 44)
+                    .frame(width: iconColumn, height: BBMetrics.rowMinHeight)
+                    .padding(.horizontal, (BBMetrics.rowMinHeight - iconColumn) / 2)
                     .contentShape(Rectangle())
             }
+            .padding(.horizontal, -(BBMetrics.rowMinHeight - iconColumn) / 2)
             .buttonStyle(.borderless)
             .disabled(isReadOnly)
             .accessibilityLabel(subtask.title)

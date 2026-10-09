@@ -50,6 +50,9 @@ struct MoveSheet: View {
                     }
                 }
                 .pickerStyle(.inline)
+                // Scoped to the picker: the problem text below draws its own
+                // red icon and must not take the brand-coloured column.
+                .labelStyle(.bbRow)
                 if destination == .waiting {
                     WaitingForSection(text: $waitingFor)
                 }
@@ -59,6 +62,7 @@ struct MoveSheet: View {
                     }
                 }
             }
+            .bbDenseList()
             .navigationTitle("Move task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -147,7 +151,9 @@ struct InlineProblemText: View {
         Label {
             Text(message)
         } icon: {
+            // Explicit, so a `.bbRow` label style further out can't recolour it.
             Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(BBColor.dangerText)
                 .accessibilityHidden(true)
         }
         .font(.footnote)
