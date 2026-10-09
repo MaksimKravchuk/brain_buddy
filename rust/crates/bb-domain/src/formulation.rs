@@ -39,7 +39,8 @@ const MOVES_TOMORROW_WINDOW: i64 = DAY;
 const DUE_DATE_FLOOR: i64 = 7 * DAY;
 const THRESHOLD_CHANGE_FLOOR: i64 = 7 * DAY;
 const SWEEP_GAP_FLOOR: i64 = 7 * DAY;
-const ACTIVATION_GRACE: i64 = 14 * DAY;
+/// The grace after activation in which no park happens, in seconds.
+pub const ACTIVATION_GRACE: i64 = 14 * DAY;
 const REPAIR_GRACE: i64 = 14 * DAY;
 const RESTART_AGE: i64 = 28 * DAY;
 /// A task asking with at least this many stalled formulations before the

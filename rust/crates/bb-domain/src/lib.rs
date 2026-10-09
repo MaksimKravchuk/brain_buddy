@@ -21,6 +21,8 @@
 //!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
+//! * [`review_sessions`]: Review sessions (start, merged progress, finish), settings,
+//!   activation, Navigator consent, and the `ReviewState` / `ReviewQueue` reads.
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
 //! * [`types`]: the frozen value types. The rule families and the
@@ -36,5 +38,6 @@ pub mod organize;
 pub mod park;
 pub mod proposal;
 pub mod queries;
+pub mod review_sessions;
 pub mod task_rules;
 pub mod types;
