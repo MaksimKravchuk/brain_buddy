@@ -38,6 +38,8 @@ Legacy whole `tag_ids` replacement still follows its existing expected-revision 
 
 Smart Add bindings are scoped, typed, immutable and returned as content-free receipt metadata. In later envelopes, an unresolved reference is `{after_command: command_id, alias_id: proposed_id, entity_type}` instead of a guessed server ID; the server resolves it from the accepted receipt, then checks current authority/state/revision. The referenced command must also be in `depends_on`. This is separate from `after_command` revision substitution. Known legacy aliases use the migration alias table. Ordinary new create IDs are adopted unchanged.
 
+**Smart Add by-name resolution (owner decision 2026-10-09).** A `{name, proposed_id}` project or tag reference resolves to the active record with that normalized name. When legacy data holds several active namesakes, the **oldest by `(created_at, id)`** wins on the server, in Rust and in the Swift planner; equal instants fall back to the lowest id. An inactive namesake only matters when no active one exists (then the name is refused). `created_at` is a required `Instant` on the synced `project` and `tag` records (contract amendment: `ProjectResponse`/`TagResponse` gain it); there is no undated fallback, because every stored document carries it.
+
 ## Every writer enters the same boundary
 
 | Current ingress / source paths | Trusted origin and mapping |

@@ -1310,6 +1310,7 @@ def _to_project_response(
         desired_outcome=project.desired_outcome,
         archived_at=project.archived_at,
         archived_before_lossless=project.archived_before_lossless,
+        created_at=project.created_at,
     )
 
 
@@ -1324,4 +1325,5 @@ def _to_tag_response(
         state="deleted" if tag.state == "archived" else tag.state,
         revision=tag.revision,
         open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
+        created_at=tag.created_at,
     )

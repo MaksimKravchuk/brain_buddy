@@ -118,6 +118,8 @@ class ProjectResponse(StrictBaseModel):
     desired_outcome: str | None = None
     archived_at: datetime | None = None
     archived_before_lossless: bool = False
+    # Spec 026: the creation instant orders same-name Smart Add ties (oldest wins).
+    created_at: datetime
 
 
 class TagResponse(StrictBaseModel):
@@ -126,6 +128,8 @@ class TagResponse(StrictBaseModel):
     state: Literal["active", "deleted"]
     revision: int
     open_task_count: int = Field(default=0, ge=0)
+    # Spec 026: the creation instant orders same-name Smart Add ties (oldest wins).
+    created_at: datetime
 
 
 class TaskCreateRequest(StrictBaseModel):
