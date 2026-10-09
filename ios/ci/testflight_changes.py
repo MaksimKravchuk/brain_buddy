@@ -49,7 +49,9 @@ def git(*args: str) -> str:
 
 
 def changed_paths(base: str, head: str) -> list[str]:
-    return [line for line in git("diff", "--name-only", base, head).splitlines() if line]
+    # --no-renames: a source moved out of the app (into Tests/, say) must still
+    # count by its old path, which rename detection would hide.
+    return [line for line in git("diff", "--name-only", "--no-renames", base, head).splitlines() if line]
 
 
 def changes_app(base: str, head: str) -> bool:
@@ -68,7 +70,9 @@ def headline(head: str) -> str:
 
 def app_commits(base: str, head: str) -> list[str]:
     """`<short sha> <subject>` for each non-merge commit in base..head that changed the app."""
-    log = git("log", "--no-merges", "--name-only", "--format=%x00%h %s", f"{base}..{head}", "--", "ios/")
+    log = git(
+        "log", "--no-merges", "--name-only", "--no-renames", "--format=%x00%h %s", f"{base}..{head}", "--", "ios/"
+    )
     commits = []
     for entry in log.split("\x00"):
         lines = [line for line in entry.splitlines() if line.strip()]

@@ -1411,6 +1411,16 @@ class TestFlightChangesTests(unittest.TestCase):
                 head = self.commit(f"feat(ios): touch {path}", {path: "app\n"})
                 self.assertEqual(self.decide(f"{head}^", head), "true")
 
+    def test_moving_a_source_out_of_the_app_still_uploads(self) -> None:
+        self.commit("feat(ios): add a helper", {"ios/BrainBuddy/Helper.swift": "struct Helper {}\n" * 20})
+        (self.repo / "ios/BrainBuddyKit/Tests").mkdir(parents=True)
+        self.git("mv", "ios/BrainBuddy/Helper.swift", "ios/BrainBuddyKit/Tests/Helper.swift")
+        self.git("commit", "-q", "-m", "refactor(ios): move the helper to tests")
+        head = self.git("rev-parse", "HEAD")
+        self.assertEqual(self.decide(f"{head}^", head), "true")
+        notes = self.run_script("notes", "--base", f"{head}^", "--head", head, "--branch", "main")
+        self.assertIn("move the helper to tests", notes)
+
     def test_merged_pull_request_is_judged_and_described_as_a_whole(self) -> None:
         base = self.git("rev-parse", "HEAD")
         self.git("checkout", "-q", "-b", "feature")
