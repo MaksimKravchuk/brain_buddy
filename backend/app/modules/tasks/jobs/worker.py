@@ -43,7 +43,11 @@ class JobContext:
     _abandon: Callable[[], bool]
 
     def should_abandon(self) -> bool:
-        """True when the effect must stop or not start: stale fence or cancel."""
+        """True when the effect must stop or not start.
+
+        That is a stale fence, a cancellation, a lease whose expiry has passed, or
+        this worker having given up on the job at shutdown.
+        """
 
         return self._abandon()
 
@@ -128,6 +132,9 @@ class JobWorker:
         self._wake_event = threading.Event()
         #: Set when shutdown gave up waiting: heartbeats stop so leases lapse.
         self._abandon_leases = threading.Event()
+        #: Makes "is the worker stopping?" and "claim a job" one step, so a claim
+        #: can never begin after ``shutdown`` has recorded the stop.
+        self._claim_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     # --- schedules -------------------------------------------------------------
@@ -179,16 +186,29 @@ class JobWorker:
         """Claim and run at most one due job. ``False`` when nothing is due."""
 
         types = self.registry.types
-        lease = self.ledger.claim_due(
-            owner=self.owner_id,
-            types=types,
-            now=self._now(),
-            lease_for=self._lease_for,
-        )
+        with self._claim_lock:
+            if self._stop.is_set():
+                return False
+            lease = self.ledger.claim_due(
+                owner=self.owner_id,
+                types=types,
+                now=self._now(),
+                lease_for=self._lease_for,
+            )
         if lease is None:
             return False
         adapter = self.registry.get(lease.job_type)
         if adapter is None:  # pragma: no cover - claim_due filters by our types
+            return False
+        if self._stop.is_set():
+            # Stop was requested while the claim was in flight: do not start an
+            # effect during shutdown. Hand the unstarted claim back untouched.
+            if not self.ledger.release(
+                lease.job_id, fence=lease.fence, now=self._now()
+            ):
+                logger.warning(  # pragma: no cover - lease lost within microseconds
+                    "job_release_fenced type=%s job=%s", lease.job_type, lease.job_id
+                )
             return False
         stop_beat = threading.Event()
         beat = threading.Thread(
@@ -209,13 +229,28 @@ class JobWorker:
     def _execute(self, adapter: JobAdapter, lease: JobLease) -> JobOutcome:
         context = JobContext(
             lease,
-            lambda: self.ledger.should_abandon(lease.job_id, fence=lease.fence),
+            lambda: self._lost(lease),
         )
         try:
             return adapter.run(context)
         except Exception as exc:  # noqa: BLE001 - one bad job must not end the loop
             # Only the exception type is recorded: messages can carry payloads.
             return JobOutcome(safe_error=type(exc).__name__)
+
+    def _lost(self, lease: JobLease) -> bool:
+        """True once this worker may no longer start or continue the effect.
+
+        Either it gave up at shutdown (heartbeats stopped, so the lease is about
+        to lapse for another runner) or the ledger says the claim is stale,
+        cancelled or past its stored expiry -- the last is checked against the
+        clock here because expiry is only recovered when someone else claims.
+        """
+
+        if self._abandon_leases.is_set():
+            return True
+        return self.ledger.should_abandon(
+            lease.job_id, fence=lease.fence, now=self._now()
+        )
 
     def _heartbeat(self, lease: JobLease, stop: threading.Event) -> None:
         interval = self._heartbeat_every.total_seconds()
@@ -317,7 +352,7 @@ class JobWorker:
             except Exception:  # noqa: BLE001 - the ledger may be briefly busy
                 logger.exception("job_worker_pass_failed")
                 worked = False
-            if not worked:
+            if not worked and not self._stop.is_set():
                 self._wake_event.wait(self._idle_poll)
 
     def shutdown(self, timeout: float = SHUTDOWN_GRACE_SECONDS) -> bool:
@@ -328,7 +363,8 @@ class JobWorker:
         late result from this process is then refused by the fence.
         """
 
-        self._stop.set()
+        with self._claim_lock:  # waits out a claim in flight; none starts after
+            self._stop.set()
         self._wake_event.set()
         thread = self._thread
         if thread is None:

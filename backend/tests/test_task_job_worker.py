@@ -569,3 +569,203 @@ def test_026_SC_007_idle_shutdown_is_prompt_and_restartable(
 
     assert worker.start() is True
     assert worker.shutdown(timeout=WAIT) is True
+
+
+# --- stale-executor protection without another claimer ----------------------
+
+
+class ProbeAdapter(FakeAdapter):
+    """Reports ``should_abandon`` before and after the test moves the clock."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.proceed = threading.Event()
+        self.before: bool | None = None
+        self.after: bool | None = None
+
+    def run(self, context: JobContext) -> JobOutcome:
+        self.runs += 1
+        self.before = context.should_abandon()
+        self.entered.set()
+        self.proceed.wait(timeout=WAIT)
+        self.after = context.should_abandon()
+        return JobOutcome()
+
+
+def test_026_SC_007_should_abandon_once_the_lease_lapses_with_no_other_claimer(
+    ledger: JobRepository, clock: Clock
+) -> None:
+    """The heartbeat is silent and nobody ran claim_due, yet the holder is told."""
+    adapter = ProbeAdapter()
+    worker = _worker(ledger, clock, adapter, owner="lonely")
+    worker.ensure_schedules(due_now=True)
+    job = _active(ledger, adapter)
+    assert job is not None
+
+    runner = threading.Thread(target=worker.run_once)
+    runner.start()
+    assert adapter.entered.wait(WAIT)
+    clock.advance(LEASE.total_seconds() + 1)  # the real heartbeat never fires
+    adapter.proceed.set()
+    runner.join(WAIT)
+    assert not runner.is_alive()
+
+    assert (adapter.before, adapter.after) == (False, True)
+    # The ledger row was never recovered by anyone: the answer came from expiry.
+    assert adapter.runs == 1
+
+
+def test_026_SC_007_a_live_heartbeat_keeps_should_abandon_false_past_the_first_lease(
+    ledger: JobRepository, clock: Clock
+) -> None:
+    """While heartbeats extend the lease the holder is not told to stop."""
+    adapter = ProbeAdapter()
+    worker = _worker(ledger, clock, adapter, heartbeat_every=timedelta(milliseconds=10))
+    worker.ensure_schedules(due_now=True)
+    job = _active(ledger, adapter)
+    assert job is not None
+
+    runner = threading.Thread(target=worker.run_once)
+    runner.start()
+    assert adapter.entered.wait(WAIT)
+    clock.advance(LEASE.total_seconds() + 1)
+
+    def extended() -> bool:
+        record = ledger.get(job.job_id)
+        return record is not None and record.lease_until == clock() + LEASE
+
+    _wait_for(extended, "the heartbeat to extend the lease")
+    adapter.proceed.set()
+    runner.join(WAIT)
+    assert (adapter.before, adapter.after) == (False, False)
+
+
+def test_026_SC_007_shutdown_abandon_tells_the_running_job_to_stop(
+    ledger: JobRepository, clock: Clock
+) -> None:
+    """After the grace lapses the holder is told to stop even with a live lease."""
+    adapter = ProbeAdapter()
+    worker = _worker(ledger, clock, adapter, owner="old", idle_poll_seconds=0.01)
+    worker.ensure_schedules(due_now=True)
+    worker.start()
+    assert adapter.entered.wait(WAIT)
+
+    assert worker.shutdown(timeout=0.1) is False  # job outlived the grace
+    adapter.proceed.set()  # the clock never moved: the lease is still live
+    _wait_for(lambda: not worker.running, "the abandoned loop to exit")
+
+    assert (adapter.before, adapter.after) == (False, True)
+
+
+# --- shutdown and claiming are atomic ---------------------------------------
+
+
+def _hook_claim(
+    ledger: JobRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    during_claim: Callable[[], None],
+) -> dict[str, int]:
+    """Run ``during_claim`` inside the ledger's claim; count claim attempts."""
+
+    real = ledger.claim_due
+    calls = {"n": 0}
+
+    def hooked(**kwargs):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        lease = real(**kwargs)
+        during_claim()
+        return lease
+
+    monkeypatch.setattr(ledger, "claim_due", hooked)
+    return calls
+
+
+def test_026_FR_015_no_job_runs_when_stop_arrives_during_the_claim(
+    ledger: JobRepository, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A claim that completes after stop was requested is released, not run."""
+    adapter = FakeAdapter()
+    worker = _worker(ledger, clock, adapter, owner="stopping")
+    worker.ensure_schedules(due_now=True)
+    job = _active(ledger, adapter)
+    assert job is not None
+    _hook_claim(ledger, monkeypatch, worker._stop.set)
+
+    assert worker.run_once() is False
+    assert adapter.runs == 0
+
+    # The claim was handed back untouched: queued, due now, no attempt spent.
+    record = ledger.get(job.job_id)
+    assert record is not None
+    assert (record.status, record.attempts, record.run_at) == (
+        JobStatus.QUEUED,
+        0,
+        clock(),
+    )
+    monkeypatch.undo()
+    successor = _worker(ledger, clock, adapter, owner="next")
+    assert successor.run_once() is True
+    assert adapter.runs == 1
+
+
+def test_026_FR_015_loop_runs_nothing_when_stop_arrives_during_the_claim(
+    ledger: JobRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The started loop exits without executing a job claimed in the race."""
+    adapter = FakeAdapter()
+    worker = JobWorker(
+        ledger, JobRegistry([adapter]), idle_poll_seconds=60.0, owner_id="racing"
+    )
+    worker.ensure_schedules(due_now=True)
+    job = _active(ledger, adapter)
+    assert job is not None
+    _hook_claim(ledger, monkeypatch, worker._stop.set)
+
+    worker.start()
+    _wait_for(lambda: not worker.running, "the loop to stop")
+    assert adapter.runs == 0
+    record = ledger.get(job.job_id)
+    assert record is not None
+    assert (record.status, record.attempts) == (JobStatus.QUEUED, 0)
+    assert worker.shutdown(timeout=WAIT) is True
+
+
+def test_026_FR_015_stopped_worker_never_claims(
+    ledger: JobRepository, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once stop is recorded, run_once does not even touch the ledger."""
+    adapter = FakeAdapter()
+    worker = _worker(ledger, clock, adapter)
+    worker.ensure_schedules(due_now=True)
+    calls = _hook_claim(ledger, monkeypatch, lambda: None)
+
+    assert worker.shutdown() is True
+    assert worker.run_once() is False
+    assert (calls["n"], adapter.runs) == (0, 0)
+
+
+def test_026_FR_015_shutdown_waits_for_a_claim_in_flight_before_recording_stop(
+    ledger: JobRepository, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stop and claim are one atomic step: stop cannot land mid-claim."""
+    adapter = FakeAdapter()
+    worker = _worker(ledger, clock, adapter)
+    worker.ensure_schedules(due_now=True)
+    shutdown_thread = threading.Thread(target=worker.shutdown)
+    observed: dict[str, bool] = {}
+
+    def mid_claim() -> None:
+        shutdown_thread.start()
+        time.sleep(0.1)  # shutdown is now blocked on the claim lock
+        observed["stop_set_mid_claim"] = worker._stop.is_set()
+
+    calls = _hook_claim(ledger, monkeypatch, mid_claim)
+    worker.run_once()
+    shutdown_thread.join(WAIT)
+    assert not shutdown_thread.is_alive()
+
+    assert observed == {"stop_set_mid_claim": False}
+    # Whatever happened to the job that claim took, nothing claims after stop.
+    runs, claims = adapter.runs, calls["n"]
+    assert worker.run_once() is False
+    assert (adapter.runs, calls["n"]) == (runs, claims)
