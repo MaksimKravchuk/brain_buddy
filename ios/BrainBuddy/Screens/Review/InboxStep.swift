@@ -29,7 +29,8 @@ struct InboxStep: View {
         let items = inboxItems
         if let queue, !isDone, releases.isEmpty {
             InboxClarifier(
-                queue: queue, onProcessed: processed, onDone: finishProcessing, onClose: {}
+                queue: queue, onProcessed: processed, onDone: finishProcessing, showsSkipInToolbar: false,
+                onClose: {}
             )
         } else if isDone || !releases.isEmpty {
             InboxDoneContent(

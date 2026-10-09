@@ -68,17 +68,22 @@ struct InboxClarifier: View {
     private let onProcessed: ((Int) -> Void)?
     private let onDone: (() -> Void)?
     private let onClose: () -> Void
+    /// Process inbox puts Skip in its toolbar. The weekly review's Inbox step
+    /// passes false: its toolbar already has the review's own Skip (the
+    /// step), so this one stays in the decision panel.
+    private let showsSkipInToolbar: Bool
 
     /// How long taps on the decision buttons are ignored after a decision.
     private static let settleDelay: Duration = .milliseconds(300)
 
     init(
         queue: [TaskID]? = nil, onProcessed: ((Int) -> Void)? = nil, onDone: (() -> Void)? = nil,
-        onClose: @escaping () -> Void
+        showsSkipInToolbar: Bool = true, onClose: @escaping () -> Void
     ) {
         fixedQueue = queue
         self.onProcessed = onProcessed
         self.onDone = onDone
+        self.showsSkipInToolbar = showsSkipInToolbar
         self.onClose = onClose
     }
 
@@ -185,12 +190,14 @@ struct InboxClarifier: View {
             .transition(.opacity)
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    skip(item)
-                } label: {
-                    Label("Skip", systemImage: "arrow.forward")
-                        .labelStyle(.titleAndIcon)
+            if showsSkipInToolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        skip(item)
+                    } label: {
+                        Label("Skip", systemImage: "arrow.forward")
+                            .labelStyle(.titleAndIcon)
+                    }
                 }
             }
         }
@@ -371,6 +378,11 @@ struct InboxClarifier: View {
             }
             actionButton("Done — under 2 minutes", systemImage: "checkmark.circle", isFloating: isFloating) {
                 apply(.complete, to: item)
+            }
+            if !showsSkipInToolbar {
+                actionButton("Skip", systemImage: "arrow.forward", isFloating: isFloating) {
+                    skip(item)
+                }
             }
         }
     }
