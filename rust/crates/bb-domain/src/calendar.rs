@@ -322,3 +322,207 @@ pub fn days_in_month(year: u16, month: u8) -> u8 {
         _ => 31,
     }
 }
+
+/// A string that is not an RFC 3339 instant a Python `datetime` can hold: the
+/// shape is wrong, a field is out of range (including the leap second `:60`,
+/// which `datetime.fromisoformat` refuses), or the UTC result falls outside
+/// years 0001 to 9999.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidInstant;
+
+impl fmt::Display for InvalidInstant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("expected an RFC 3339 instant within years 0001 to 9999")
+    }
+}
+
+impl std::error::Error for InvalidInstant {}
+
+const MICROS_PER_SECOND: i64 = 1_000_000;
+
+/// A point in time, normalized to UTC with microsecond precision: what
+/// `from_isoformat(value)` (`backend/app/utils/time.py`) returns as an aware
+/// UTC `datetime`. The bb-protocol `Instant` is validated text with no order;
+/// this is the value the rules compare and add spans to.
+///
+/// The range is 0001-01-01T00:00:00Z through 9999-12-31T23:59:59.999999Z, like
+/// `datetime`. Where Python raises `OverflowError` for arithmetic past it, the
+/// result here clamps to the range, so every value renders and parses again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UtcInstant {
+    micros: i64,
+}
+
+impl UtcInstant {
+    /// 0001-01-01T00:00:00Z.
+    pub const EARLIEST: Self = Self {
+        micros: -62_135_596_800 * MICROS_PER_SECOND,
+    };
+    /// 9999-12-31T23:59:59.999999Z.
+    pub const LATEST: Self = Self {
+        micros: 253_402_300_800 * MICROS_PER_SECOND - 1,
+    };
+
+    /// Microseconds since the Unix epoch, clamped to the supported range.
+    #[must_use]
+    pub fn from_unix_micros_clamped(micros: i64) -> Self {
+        Self {
+            micros: micros.clamp(Self::EARLIEST.micros, Self::LATEST.micros),
+        }
+    }
+
+    /// Whole Unix seconds, clamped to the supported range.
+    #[must_use]
+    pub fn from_unix_seconds_clamped(seconds: i64) -> Self {
+        Self::from_unix_micros_clamped(seconds.saturating_mul(MICROS_PER_SECOND))
+    }
+
+    /// Microseconds since the Unix epoch.
+    #[must_use]
+    pub fn unix_micros(self) -> i64 {
+        self.micros
+    }
+
+    /// Unix seconds, rounded toward negative infinity.
+    #[must_use]
+    pub fn unix_seconds(self) -> i64 {
+        self.micros.div_euclid(MICROS_PER_SECOND)
+    }
+
+    /// This instant `micros` later (earlier when negative), clamped.
+    #[must_use]
+    pub fn plus_micros(self, micros: i64) -> Self {
+        Self::from_unix_micros_clamped(self.micros.saturating_add(micros))
+    }
+
+    /// This instant `seconds` later (earlier when negative), clamped.
+    #[must_use]
+    pub fn plus_seconds(self, seconds: i64) -> Self {
+        self.plus_micros(seconds.saturating_mul(MICROS_PER_SECOND))
+    }
+
+    /// Microseconds from `earlier` to `self`: positive when `self` is later.
+    #[must_use]
+    pub fn micros_since(self, earlier: Self) -> i64 {
+        self.micros - earlier.micros
+    }
+
+    /// Parses an RFC 3339 instant (`Z` or a numeric `±hh:mm` offset, optional
+    /// fraction) and normalizes it to UTC. A fraction past six digits is
+    /// truncated, as `datetime.fromisoformat` does.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidInstant`] for any other text.
+    pub fn parse_rfc3339(value: &str) -> Result<Self, InvalidInstant> {
+        let bytes = value.as_bytes();
+        if !value.is_ascii() || bytes.len() < 20 {
+            return Err(InvalidInstant);
+        }
+        let number = |range: std::ops::Range<usize>| -> Option<i64> {
+            bytes[range].iter().try_fold(0_i64, |acc, byte| {
+                byte.is_ascii_digit()
+                    .then(|| acc * 10 + i64::from(byte - b'0'))
+            })
+        };
+        let separators = bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && matches!(bytes[10], b'T' | b't')
+            && bytes[13] == b':'
+            && bytes[16] == b':';
+        let fields = (
+            number(0..4),
+            number(5..7),
+            number(8..10),
+            number(11..13),
+            number(14..16),
+            number(17..19),
+        );
+        let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = fields
+        else {
+            return Err(InvalidInstant);
+        };
+        if !separators || hour > 23 || minute > 59 || second > 59 {
+            return Err(InvalidInstant);
+        }
+        let date = CalendarDay::new(
+            i32::try_from(year).map_err(|_| InvalidInstant)?,
+            u32::try_from(month).map_err(|_| InvalidInstant)?,
+            u32::try_from(day).map_err(|_| InvalidInstant)?,
+        )
+        .ok_or(InvalidInstant)?;
+
+        let mut rest = &value[19..];
+        let mut micros = 0_i64;
+        if let Some(fraction) = rest.strip_prefix('.') {
+            let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+            if digits == 0 {
+                return Err(InvalidInstant);
+            }
+            let kept = &fraction[..digits.min(6)];
+            let scale = 10_i64.pow(u32::try_from(6 - kept.len()).map_err(|_| InvalidInstant)?);
+            micros = kept.parse::<i64>().map_err(|_| InvalidInstant)? * scale;
+            rest = &fraction[digits..];
+        }
+        let offset_seconds = match rest.as_bytes() {
+            [b'Z' | b'z'] => 0,
+            [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2]
+                if [h1, h2, m1, m2].iter().all(|b| b.is_ascii_digit()) =>
+            {
+                let hours = i64::from((h1 - b'0') * 10 + (h2 - b'0'));
+                let minutes = i64::from((m1 - b'0') * 10 + (m2 - b'0'));
+                if hours > 23 || minutes > 59 {
+                    return Err(InvalidInstant);
+                }
+                let magnitude = hours * 3600 + minutes * 60;
+                if *sign == b'-' { -magnitude } else { magnitude }
+            }
+            _ => return Err(InvalidInstant),
+        };
+
+        let local_seconds =
+            date.day_number() * SECONDS_PER_DAY + hour * 3600 + minute * 60 + second;
+        let total = (local_seconds - offset_seconds) * MICROS_PER_SECOND + micros;
+        if (Self::EARLIEST.micros..=Self::LATEST.micros).contains(&total) {
+            Ok(Self { micros: total })
+        } else {
+            Err(InvalidInstant)
+        }
+    }
+
+    /// The server's wire spelling: UTC with a `Z` suffix, whole seconds, and
+    /// `.ffffff` only when the microseconds are not zero (`isoformat()` as
+    /// pydantic serializes an aware `datetime`).
+    #[must_use]
+    pub fn to_rfc3339(self) -> String {
+        let seconds = self.unix_seconds();
+        let micros = self.micros.rem_euclid(MICROS_PER_SECOND);
+        let day = CalendarDay::from_day_number_clamped(seconds.div_euclid(SECONDS_PER_DAY));
+        let in_day = seconds.rem_euclid(SECONDS_PER_DAY);
+        let clock = format!(
+            "{:02}:{:02}:{:02}",
+            in_day / 3600,
+            in_day % 3600 / 60,
+            in_day % 60
+        );
+        if micros == 0 {
+            format!("{day}T{clock}Z")
+        } else {
+            format!("{day}T{clock}.{micros:06}Z")
+        }
+    }
+}
+
+impl fmt::Display for UtcInstant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_rfc3339())
+    }
+}
+
+impl FromStr for UtcInstant {
+    type Err = InvalidInstant;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse_rfc3339(value)
+    }
+}

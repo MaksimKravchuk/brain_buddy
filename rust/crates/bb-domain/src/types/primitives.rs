@@ -119,8 +119,10 @@ bounded_text! {
 
 impl DesiredOutcome {
     /// Request input: trimmed first, and blank means "no outcome" (spec 021).
+    /// Trimming is Python's `str.strip()` (`_trim_outcome`), which also strips
+    /// U+001C..U+001F; `str::trim` does not.
     pub fn from_input(value: &str) -> Result<Option<Self>, DomainError> {
-        let trimmed = value.trim();
+        let trimmed = crate::normalization::strip(value);
         if trimmed.is_empty() {
             Ok(None)
         } else {
@@ -155,6 +157,8 @@ pub struct ReasonText(String);
 
 impl ReasonText {
     pub fn new(value: &str) -> Result<Self, DomainError> {
+        // pydantic's `strip_whitespace=True` trims Unicode `White_Space` only
+        // (it keeps U+001C..U+001F), unlike Python's `str.strip()`.
         let trimmed = value.trim();
         if scalars_in(trimmed, 1, 500) {
             Ok(Self(trimmed.to_owned()))
