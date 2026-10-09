@@ -10,6 +10,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-domain"
+version = "0.1.0"
+dependencies = [
+ "bb-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bb-protocol"
 version = "0.1.0"
 dependencies = [

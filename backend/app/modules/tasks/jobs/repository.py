@@ -436,16 +436,49 @@ class JobRepository(SQLiteRepositorySupport):
                 return JobStatus.CANCELLED
             return status
 
-    def should_abandon(self, job_id: str, *, fence: int) -> bool:
-        """True when the effect must not start: stale fence or cancellation."""
+    def should_abandon(self, job_id: str, *, fence: int, now: datetime) -> bool:
+        """True when the effect must not start or continue.
+
+        That is a stale fence, a cancellation, or a lease whose stored expiry has
+        passed at ``now``. Expiry is only *recovered* lazily by the next
+        ``claim_due``, so the holder must not wait for that to learn it lost the
+        lease: another worker may reclaim the job at any moment after expiry.
+        """
 
         with self._owned_connection() as conn:
             row = conn.execute(
-                "SELECT cancel_requested FROM jobs WHERE id = ? "
+                "SELECT cancel_requested, lease_until FROM jobs WHERE id = ? "
                 "AND status = 'leased' AND fence = ?",
                 (job_id, fence),
             ).fetchone()
-        return row is None or bool(row["cancel_requested"])
+        if row is None or bool(row["cancel_requested"]):
+            return True
+        return bool(row["lease_until"] <= _to_us(now))
+
+    def release(self, job_id: str, *, fence: int, now: datetime) -> bool:
+        """Hand an unstarted claim back without consuming an attempt.
+
+        The job returns to ``queued`` due at ``now`` and the attempt taken by the
+        claim is given back, so a worker that claimed and then declined to run
+        (it was shutting down) leaves the job exactly as it found it. A stale
+        fence changes nothing and reports ``False``; a cancellation requested
+        meanwhile closes the job as ``cancelled`` instead.
+        """
+
+        with self._transaction() as conn:
+            row = self._held(conn, job_id, fence)
+            if row is None:
+                return False
+            if row["cancel_requested"]:
+                self._settle(conn, job_id, JobStatus.CANCELLED, "cancelled")
+                return True
+            conn.execute(
+                "UPDATE jobs SET status = 'queued', run_at = ?, lease_owner = NULL, "
+                "lease_until = NULL, attempts = MAX(attempts - 1, 0), "
+                "updated_at = ? WHERE id = ?",
+                (_to_us(now), _to_us(now), job_id),
+            )
+            return True
 
     # --- reads ---------------------------------------------------------------
 

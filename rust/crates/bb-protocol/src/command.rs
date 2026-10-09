@@ -170,9 +170,26 @@ fn executable(
 #[derive(Deserialize)]
 struct TagChanges {
     #[serde(default)]
-    add_tag_ids: Vec<Id>,
+    add_tag_ids: Vec<TagReference>,
     #[serde(default)]
-    remove_tag_ids: Vec<Id>,
+    remove_tag_ids: Vec<TagReference>,
+}
+
+/// A tag ID, or the immutable reference to a tag an earlier Smart Add command
+/// created or resolved (command-catalog.md "Smart Add bindings").
+#[derive(Deserialize, PartialEq, Eq, Hash)]
+#[serde(untagged)]
+enum TagReference {
+    Id(Id),
+    Alias(AliasReference),
+}
+
+#[derive(Deserialize, PartialEq, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+struct AliasReference {
+    after_command: CommandId,
+    alias_id: Id,
+    entity_type: EntityType,
 }
 
 /// Catalog-level payload constraints only; field schemas belong to the domain.

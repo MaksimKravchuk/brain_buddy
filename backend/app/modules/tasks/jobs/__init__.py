@@ -11,15 +11,20 @@ from .domain import (
     JobStatus,
 )
 from .repository import JobRepository
+from .worker import JobAdapter, JobContext, JobRegistry, JobWorker
 
 __all__ = [
     "BACKOFF_CAPS",
     "HEARTBEAT",
     "LEASE",
     "MAX_ATTEMPTS",
+    "JobAdapter",
+    "JobContext",
     "JobLease",
     "JobOutcome",
     "JobRecord",
+    "JobRegistry",
     "JobRepository",
     "JobStatus",
+    "JobWorker",
 ]
