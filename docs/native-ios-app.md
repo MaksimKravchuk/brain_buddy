@@ -21,6 +21,12 @@ off (account-less: the build's release switch) Lists keeps a non-interactive
 "coming later" row; once it is on, the row opens the Quick or Full review (full
 screen, offline too). Pass 1 adds **Process inbox** — the GTD *clarify* step,
 one inbox item at a time, fully offline — which the review's Inbox step reuses.
+Clarifying an item can also attach it to a project, existing or new ("New
+project…"), applied together with the Next, Waiting or Someday decision. It can
+instead make the item a project: you name it (pre-filled from the item's
+title), add an optional desired outcome, and the item becomes the required first
+next action, keeping its notes, tags and due date; undo puts it back in the
+Inbox and archives the project.
 
 ## What works offline
 
