@@ -19,6 +19,8 @@
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
+//! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
+//!   `task.transition`).
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
 //! * [`park`]: auto-park, the human yield and park acknowledgement over the
@@ -37,4 +39,5 @@ pub mod organize;
 pub mod park;
 pub mod proposal;
 pub mod queries;
+pub mod task_rules;
 pub mod types;
