@@ -90,7 +90,7 @@ class BrainBuddyTestClient(TestClient):
 
 
 @pytest.fixture(autouse=True)
-def _reset_login_rate_limiter() -> Generator[None, None, None]:
+def _reset_login_rate_limiter() -> Generator[None]:
     """Ensure the in-memory rate limiters don't bleed across tests."""
 
     login_rate_limiter.reset()
@@ -114,7 +114,7 @@ def _declared_label_types(item: pytest.Item) -> set[str]:
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
+def pytest_runtest_call(item: pytest.Item) -> Generator[None]:
     """Apply the deterministic Allure taxonomy to every backend test.
 
     Runs in the *call* phase so the dynamic title and the wrapping step attach to
@@ -167,9 +167,7 @@ def data_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def container(
-    data_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[Container, None, None]:
+def container(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Container]:
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "test")
     get_config.cache_clear()
@@ -330,7 +328,7 @@ def _build_authenticated_client(
 @pytest.fixture
 def api_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[TestClient, None, None]:
+) -> Generator[TestClient]:
     """A TestClient that is already signed in as the primary test user."""
 
     client, _ = _build_authenticated_client(
@@ -350,7 +348,7 @@ def api_client(
 @pytest.fixture
 def second_api_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, TestClient], None, None]:
+) -> Generator[tuple[TestClient, TestClient]]:
     """Two signed-in clients sharing the same backend, for isolation tests."""
 
     data_root = tmp_path / "shared-data"
@@ -400,7 +398,7 @@ def second_api_client(
 @pytest.fixture
 def anonymous_api_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[TestClient, None, None]:
+) -> Generator[TestClient]:
     """A TestClient with no active session — used for auth gate tests."""
 
     data_root = tmp_path / "anon-data"

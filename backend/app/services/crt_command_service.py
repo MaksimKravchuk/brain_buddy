@@ -794,7 +794,7 @@ class CrtCommandService:
         suffix = value[len(prefix) :]
         try:
             parsed = uuid.UUID(suffix)
-        except (AttributeError, ValueError):
+        except AttributeError, ValueError:
             return False
         return parsed.version == 4 and suffix == str(parsed)
 

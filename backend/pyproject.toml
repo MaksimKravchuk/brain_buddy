@@ -10,7 +10,7 @@ name = "brain-buddy-backend"
 version = "0.1.0"
 description = "Brain Buddy backend service"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14,<3.15"
 authors = [
   { name = "Brain Buddy Team" }
 ]
@@ -53,11 +53,11 @@ dev = [
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py314"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py314"
 # Vendored third-party runtimes are kept byte-for-byte against a recorded
 # sha256 provenance (spec 014 FR-017); linting them would demand edits the
 # provenance test forbids. Mirrored by the global `exclude` in
@@ -118,7 +118,7 @@ max-returns = 8
 "tests/*" = ["S101", "S105", "S106", "S608", "PLC0415", "DTZ001"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 ignore_missing_imports = true
 strict = true
 

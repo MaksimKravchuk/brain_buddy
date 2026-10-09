@@ -289,7 +289,7 @@ def _parse_retry_after(raw: str | None) -> int | None:
         return None
     try:
         seconds = int(raw.strip())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if seconds < 0 or seconds > _MAX_RETRY_AFTER_SECONDS:
         return None
@@ -671,7 +671,7 @@ class A2AClient:
         try:
             payload = json.loads(raw)
             envelope = JsonRpcResponse.model_validate(payload)
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             return A2AResult(
                 ok=False,
                 correlation_id=correlation_id,
@@ -720,7 +720,7 @@ class A2AClient:
             tasks = tuple(
                 Task.model_validate(entry) for entry in result.get("tasks", [])
             )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return A2AResult(
                 ok=False,
                 correlation_id=correlation_id,

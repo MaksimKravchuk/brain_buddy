@@ -152,6 +152,50 @@ fn primitives_026_fr_002_case_folding_is_full_folding_not_lowercase() {
 }
 
 #[test]
+fn primitives_026_fr_002_unicode_data_is_the_servers_version() {
+    // `unidata_version` is pinned to CPython's `unicodedata.unidata_version` by
+    // backend/tests/test_026_primitive_vectors.py, so a crate that moves to
+    // another Unicode release fails here until backend and crates move together.
+    let expected = text(support::primitives(), "unidata_version");
+    assert_eq!(expected, "16.0.0");
+    let (a, b, c) = unicode_normalization::UNICODE_VERSION;
+    assert_eq!(format!("{a}.{b}.{c}"), expected, "unicode-normalization");
+    let (a, b, c) = caseless::UNICODE_VERSION;
+    assert_eq!(format!("{a}.{b}.{c}"), expected, "caseless");
+    let (a, b, c) = unicode_general_category::UNICODE_VERSION;
+    assert_eq!(format!("{a}.{b}.{c}"), expected, "unicode-general-category");
+}
+
+#[test]
+fn primitives_026_fr_002_scalars_changed_after_unicode_14_agree_with_the_server() {
+    // U+1E030 (Unicode 15) gained an NFKC mapping to U+0430; U+10D50 (16) and
+    // U+A7DC (16) gained case foldings; U+11B00 (15) became punctuation. All
+    // expected values come from CPython 3.14, so a Unicode 14 table fails here.
+    assert_eq!(norm::nfkc("\u{1E030}"), "\u{430}");
+    assert_eq!(norm::casefold("\u{10D50}"), "\u{10D70}");
+    let section = cases(support::primitives(), "unicode_data");
+    let mut ran = 0;
+    for case in section {
+        let id = text(case, "id");
+        let input = text(case, "input");
+        assert_eq!(
+            norm::project_display(input),
+            text(case, "project_display"),
+            "{id}"
+        );
+        assert_eq!(norm::project_key(input), text(case, "project_key"), "{id}");
+        assert_eq!(norm::search_key(input), text(case, "search_key"), "{id}");
+        assert_eq!(
+            norm::formulation_key(input),
+            text(case, "formulation_key"),
+            "{id}"
+        );
+        ran += 1;
+    }
+    ran_all("unicode_data", ran, section.len());
+}
+
+#[test]
 fn primitives_026_fr_002_limits_count_unicode_scalars() {
     let section = cases(support::primitives(), "scalar_length");
     let mut ran = 0;

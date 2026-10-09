@@ -6,7 +6,7 @@ This is the smallest supported host-based setup for the backend and web frontend
 
 Install these with your preferred user-scoped runtime manager:
 
-- Python 3.11 with the `venv` module (selected by the repository `.python-version`)
+- Python 3.14 with the `venv` module (selected by the repository `.python-version`)
 - Node.js 20.19.0 for `frontend/` (selected by `frontend/.nvmrc`)
 - nvm, available to the shell
 - npm
@@ -21,7 +21,7 @@ The version files are guidance, not installers. For example, `pyenv` reads `.pyt
 From the repository root:
 
 ```bash
-python3 --version  # 3.11.x
+python3 --version  # 3.14.x
 python3 -m venv backend/.venv
 source backend/.venv/bin/activate
 python -m pip install -e 'backend[dev]'

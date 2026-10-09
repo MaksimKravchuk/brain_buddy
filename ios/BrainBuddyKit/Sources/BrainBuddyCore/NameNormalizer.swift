@@ -117,8 +117,9 @@ public enum NameNormalizer {
     }
 
     /// NFKC-stable scalars whose full case folding (CaseFolding.txt, status C
-    /// and F) is not their full lowercase mapping, as of Unicode 14 (the
-    /// server's Python 3.11), apart from the ranges handled above.
+    /// and F) is not their full lowercase mapping, as of Unicode 16.0.0 (the
+    /// server's Python 3.14; the set is the same as in Unicode 14, where this
+    /// table was first written), apart from the ranges handled above.
     private static let foldingExceptions: [UInt32: [UInt32]] = [
         0x00DF: [0x73, 0x73], 0x1E9E: [0x73, 0x73], 0x01F0: [0x6A, 0x30C], 0x0345: [0x3B9],
         0x0390: [0x3B9, 0x308, 0x301], 0x03B0: [0x3C5, 0x308, 0x301], 0x03C2: [0x3C3],

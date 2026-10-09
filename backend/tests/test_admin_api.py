@@ -102,7 +102,7 @@ def _teardown_admin_world(operator_client, member_client, monkeypatch) -> None:
 @pytest.fixture
 def admin_world(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, dict, TestClient, dict], None, None]:
+) -> Generator[tuple[TestClient, dict, TestClient, dict]]:
     """One app with an operator and a non-operator member.
 
     No flag stages `/admin`'s reachability any more (ADR-0019, DD-14): the

@@ -2,7 +2,6 @@
 
 import json
 import logging
-from typing import TypeVar
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ValidationError
@@ -17,10 +16,9 @@ from app.services.cli_auth import CliAuthError, CliAuthService
 
 router = APIRouter(prefix="/auth/device", tags=["CLI authorization"])
 logger = logging.getLogger(__name__)
-T = TypeVar("T", bound=BaseModel)
 
 
-async def _body(request: Request, schema: type[T]) -> T:
+async def _body[T: BaseModel](request: Request, schema: type[T]) -> T:
     if (
         request.headers.get("Content-Type", "").split(";", 1)[0].lower()
         != "application/json"
@@ -33,7 +31,7 @@ async def _body(request: Request, schema: type[T]) -> T:
         body.extend(chunk)
     try:
         return schema.model_validate(json.loads(body))
-    except (ValueError, ValidationError, TypeError):
+    except ValueError, ValidationError, TypeError:
         raise CliAuthError("invalid_request", 422) from None
 
 

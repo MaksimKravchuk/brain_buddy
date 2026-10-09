@@ -41,7 +41,7 @@ describe("020-FR-002 formulation key against the shared normalisation vectors", 
   );
 
   it("020-FR-002 folds every scalar the Python casefold table treats differently from toLowerCase", () => {
-    // Each pair is (input, Python 3.11 `formulation_key(input)`), written as
+    // Each pair is (input, Python `formulation_key(input)`), written as
     // escapes so no editor can recompose the expected decomposed sequences.
     const cases: Array<[string, string]> = [
       ["ẞ", "ss"],
@@ -77,8 +77,9 @@ describe("020-FR-002 formulation key against the shared normalisation vectors", 
     }
   });
 
-  it("020-FR-002 matches Python 3.11 casefold on every single scalar where it differs from toLowerCase", () => {
-    // Generated from Python 3.11 (Unicode 14): every NFKC-stable scalar whose
+  it("020-FR-002 matches Python 3.14 casefold on every single scalar where it differs from toLowerCase", () => {
+    // Generated from Python 3.11 (Unicode 14) and re-verified on Python 3.14
+    // (Unicode 16.0.0), where the set is identical: every NFKC-stable scalar whose
     // `casefold()` is not this engine's per-scalar `toLowerCase()`, outside the
     // Cherokee and ypogegrammeni ranges checked below. "hex:hex hex" = in:out.
     const table =
@@ -138,7 +139,7 @@ describe("020-FR-002 formulation key against the shared normalisation vectors", 
   });
 
   it("020-FR-002 treats exactly Python's NFKC-stable whitespace as a separator", () => {
-    // Python 3.11: every scalar where NFKC(c) == c and c.isspace().
+    // Python 3.14: every scalar where NFKC(c) == c and c.isspace().
     const spaces = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0x1680, 0x2028, 0x2029];
     for (const code of spaces) {
       expect(formulationKey(`a${String.fromCodePoint(code)}b`), `U+${code.toString(16)}`).toBe("a b");

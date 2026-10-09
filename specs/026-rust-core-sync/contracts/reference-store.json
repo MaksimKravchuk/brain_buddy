@@ -186,14 +186,15 @@
     "026-FR-017",
     "026-SC-001"
    ],
-   "sha256": "8885b75cea25878534b761c609b15fc63b8c8782d2ae33f6e836bfa674ac7e89",
-   "bytes": 43523,
+   "sha256": "605fcf7e397267f2ff725f121c0ed51f3d47bd17bfe8b08623d8a35d39710743",
+   "bytes": 44735,
    "schema": "brainbuddy-primitive-vectors/v1",
    "sections": {
     "name_normalization": 31,
     "search": 9,
     "whitespace": 9,
-    "scalar_length": 9
+    "scalar_length": 9,
+    "unicode_data": 4
    }
   },
   {
@@ -223,7 +224,7 @@
   {
    "id": "INS-01",
    "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift",
-   "role": "31 NameNormalizer vectors, produced by the server's own functions on Python 3.11",
+   "role": "31 NameNormalizer vectors, produced by the server's own functions (generated on Python 3.11 / Unicode 14 and unchanged on Python 3.14 / Unicode 16.0.0)",
    "folded_into": "specs/026-rust-core-sync/contracts/primitive-vectors.json#name_normalization"
   },
   {
@@ -350,14 +351,14 @@
    "id": "C-07",
    "topic": "Unicode data version",
    "languages": {
-    "python": "3.11 = Unicode 14.0 (backend/Dockerfile python:3.11-slim)",
+    "python": "3.14 = Unicode 16.0.0 (backend/Dockerfile python:3.14-slim; owner decision 2026-10-09 replaced 3.11 = Unicode 14.0)",
     "swift": "platform ICU/stdlib; folding exceptions table written for Unicode 14",
-    "rust": "unicode-normalization 0.1.25 / caseless 0.2.2 / unicode-general-category 1.1.0 = newer"
+    "rust": "unicode-normalization =0.1.24 / caseless =0.2.2 / unicode-general-category =1.1.0 = Unicode 16.0.0 (0.1.25 is Unicode 17.0.0 and is not used)"
    },
    "evidence": [
-    "exhaustive scalar comparison with Python 3.11: whitespace identical; 99 NFKC, 27 casefold and 36 punctuation differences, every one a scalar unassigned in Unicode 14"
+    "exhaustive comparison of all 1 112 064 scalars with Python 3.14 (Unicode 16.0.0): isspace, NFKC, casefold and the formulation_key punctuation step identical, zero differences; with Python 3.11 (Unicode 14) there were 99 NFKC, 27 casefold and 36 punctuation differences, every one a scalar unassigned in Unicode 14"
    ],
-   "proposed_resolution": "Equal on every Unicode 14 scalar. Differences are limited to newer characters; bump all runtimes together and record the data version with the vectors.",
+   "proposed_resolution": "Applied 2026-10-09: the server runs CPython 3.14 and the Rust crates are pinned to the same Unicode 16.0.0, so Rust and the server are equal on every scalar. primitive-vectors.json records unidata_version and unicode_data rows, pinned by backend/tests/test_026_primitive_vectors.py and rust/crates/bb-domain/tests/primitives_parity.rs. Residual: Swift still uses the platform ICU/stdlib (its folding-exception table is the same set in Unicode 14 and 16); bump all runtimes together.",
    "status": "proposed"
   },
   {
