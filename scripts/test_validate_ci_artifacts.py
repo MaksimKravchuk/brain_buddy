@@ -991,6 +991,14 @@ jobs:
       - name: Build app and widgets for the iOS Simulator
         if: env.RUN == 'true'
         run: xcodebuild build
+  rust:
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.rust }}
+    steps:
+      - name: Test
+        if: env.RUN == 'true'
+        run: cargo test --locked
   macos-app:
     runs-on: ${{ needs.changes.outputs.macos == 'true' && 'macos-26' || 'ubuntu-latest' }}
     needs: changes
@@ -1060,6 +1068,7 @@ jobs:
       - ios-kit
       - ios-app
       - macos-app
+      - rust
       - frontend
       - e2e
       - docker
@@ -1122,6 +1131,7 @@ jobs:
       - ios-kit
       - ios-app
       - macos-app
+      - rust
       - frontend
       - e2e
       - docker

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -80,9 +81,40 @@ DEDICATED_TEST_TREES = (
 # the only way to tell them apart.
 MIXED_TEST_TREES = ("frontend/src",)
 
+# The shared Rust workspace (feature 026) keeps unit tests inline in `src/` and
+# integration tests under a crate's `tests/`, so neither a filename hint nor a
+# whole-tree rule fits. A `.rs` file there is evidence when it sits in a `tests`
+# directory or declares a test (`#[test]` / `#[cfg(test)]`); other product source
+# stays out. `target/` is build output and is never read.
+RUST_WORKSPACE = "rust"
+RUST_PRUNED_DIRS = frozenset({"target", ".git"})
+RUST_TEST_MARKERS = ("#[test]", "#[cfg(test)]")
+
 TEST_TREES = DEDICATED_TEST_TREES + MIXED_TEST_TREES
 TEST_SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".swift", ".rs")
 TEST_NAME_HINTS = ("test", "spec", "__tests__")
+
+
+def iter_rust_test_files(root: Path):
+    base = root / RUST_WORKSPACE
+    if not base.is_dir():
+        return
+    for directory, subdirs, names in os.walk(base):
+        subdirs[:] = sorted(d for d in subdirs if d not in RUST_PRUNED_DIRS)
+        in_tests_dir = "tests" in Path(directory).relative_to(base).parts
+        for name in sorted(names):
+            path = Path(directory) / name
+            if path.suffix != ".rs":
+                continue
+            if in_tests_dir:
+                yield path
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if any(marker in text for marker in RUST_TEST_MARKERS):
+                yield path
 
 
 def iter_test_files(root: Path):
@@ -105,6 +137,7 @@ def iter_test_files(root: Path):
             lowered = str(path.relative_to(root)).lower()
             if any(hint in lowered for hint in TEST_NAME_HINTS):
                 yield path
+    yield from iter_rust_test_files(root)
 
 
 def requirements(spec_path: Path) -> list[str]:
