@@ -1839,10 +1839,10 @@ fn sha256_hex(data: &[u8]) -> String {
         message.push(0);
     }
     message.extend_from_slice(&(u64::try_from(data.len()).unwrap_or(u64::MAX) * 8).to_be_bytes());
-    for block in message.chunks_exact(64) {
+    for block in message.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
-        for (slot, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
-            *slot = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        for (slot, bytes) in w.iter_mut().zip(block.as_chunks::<4>().0) {
+            *slot = u32::from_be_bytes(*bytes);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
