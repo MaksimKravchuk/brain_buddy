@@ -344,7 +344,7 @@ export const apiClient = {
     return request<ProjectResponse[]>("/projects", { signal });
   },
 
-  createProject(payload: { name: string; color?: string | null }, idempotencyKey: string) {
+  createProject(payload: { name: string; color?: string | null; desired_outcome?: string | null }, idempotencyKey: string) {
     return request<ProjectResponse>("/projects", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },

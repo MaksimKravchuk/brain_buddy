@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiClient } from "../../../api/client";
 import { reviewApi, type ReviewQueue } from "../../../api/review";
-import type { TaskResponse } from "../../../api/taskTypes";
+import type { ProjectResponse, TaskResponse } from "../../../api/taskTypes";
 import { forgetRelease, readRelease, rememberRelease } from "../releaseMemory";
 import { InboxStep } from "../steps/InboxStep";
 import { lastToast, notify, renderInRun, sessionFixture, signIn, taskFixture } from "./reviewKit";
@@ -16,7 +16,7 @@ vi.mock("../../../api/review", async () => {
 });
 vi.mock("../../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../../api/client")>("../../../api/client");
-  return { ...actual, apiClient: { ...actual.apiClient, transitionTask: vi.fn(), updateTask: vi.fn(), getTask: vi.fn() } };
+  return { ...actual, apiClient: { ...actual.apiClient, transitionTask: vi.fn(), updateTask: vi.fn(), getTask: vi.fn(), listProjects: vi.fn(), createProject: vi.fn(), archiveProject: vi.fn() } };
 });
 
 const getQueue = vi.mocked(reviewApi.getQueue);
@@ -25,6 +25,9 @@ const undoBulkRelease = vi.mocked(reviewApi.undoBulkRelease);
 const transitionTask = vi.mocked(apiClient.transitionTask);
 const updateTask = vi.mocked(apiClient.updateTask);
 const getTask = vi.mocked(apiClient.getTask);
+const listProjects = vi.mocked(apiClient.listProjects);
+const createProject = vi.mocked(apiClient.createProject);
+const archiveProject = vi.mocked(apiClient.archiveProject);
 
 const inbox = (id: string, title: string, revision = 3): TaskResponse => taskFixture({ id, title, state: "inbox", revision });
 const paper = inbox("inbox_1", "Buy printer paper");
@@ -35,9 +38,19 @@ const many = (count: number) => Array.from({ length: count }, (_, index) => inbo
 
 const choice = (name: string | RegExp) => within(screen.getByRole("group", { name: "Choices" })).getByRole("button", { name });
 
+const project = (id: string, name: string, state: ProjectResponse["state"] = "active"): ProjectResponse => ({ id, name, color: null, state, revision: 2, open_task_count: 0 });
+const office = project("proj_1", "Home office");
+
 beforeEach(() => {
   window.localStorage.clear();
   signIn();
+  listProjects.mockResolvedValue([office, project("proj_old", "Old garage", "archived")]);
+  updateTask.mockImplementation(async (id, payload) => ({
+    ...taskFixture({ id }),
+    ...(payload.title ? { title: payload.title } : {}),
+    ...("project_id" in payload ? { project_id: payload.project_id } : {}),
+    revision: payload.expected_revision + 1
+  }));
   transitionTask.mockImplementation(async (id, payload) => ({
     ...taskFixture({ id }),
     state: payload.action === "complete" ? "completed" : payload.action === "cancel" ? "cancelled" : (payload.to_state ?? "inbox"),
@@ -55,12 +68,15 @@ afterEach(() => {
   transitionTask.mockReset();
   updateTask.mockReset();
   getTask.mockReset();
+  listProjects.mockReset();
+  createProject.mockReset();
+  archiveProject.mockReset();
   notify.mockReset();
   window.localStorage.clear();
 });
 
 describe("020-FR-034 Inbox step: one item at a time", () => {
-  it("020-FR-034 shows the position, the item and the six web choices in order", async () => {
+  it("020-FR-034 shows the position, the item and the web choices in order", async () => {
     getQueue.mockResolvedValueOnce(queue([paper, dentist, passport]));
     renderInRun(<InboxStep />);
 
@@ -68,7 +84,7 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     expect(screen.getByText("Item 1 of 3")).toBeInTheDocument();
     expect(screen.getByText("Is it actionable? Choose where it belongs.")).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Choices" })).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Next actions", "Waiting for…", "Someday / maybe", "DoneUnder 2 minutes? Do it now.", "Cancel", "Edit title"
+      "Next actions", "Waiting for…", "Someday / maybe", "DoneUnder 2 minutes? Do it now.", "Cancel", "Make it a project", "Edit title"
     ]);
   });
 
@@ -86,6 +102,7 @@ describe("020-FR-034 Inbox step: one item at a time", () => {
     await user.click(choice(name));
 
     expect(transitionTask).toHaveBeenCalledWith("inbox_1", { ...body, expected_revision: 3 }, expect.any(String));
+    expect(updateTask).not.toHaveBeenCalled();
     expect(await screen.findByRole("heading", { name: "Call the dentist" })).toHaveFocus();
     expect(screen.getByText("Item 2 of 3")).toBeInTheDocument();
     expect(vi.mocked(run.progress).mock.calls[0][0].body).toEqual({ inbox_processed_delta: 1, progress_id: expect.stringMatching(/^progress_/) });
@@ -687,5 +704,390 @@ describe("020-FR-030 Inbox step: more than 15 items", () => {
     expect(await screen.findByText("Inbox is empty")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Undo the release" })).not.toBeInTheDocument();
     forgetRelease("user-1");
+  });
+});
+
+describe("020-FR-034 Inbox step: giving an item a project", () => {
+  const select = () => screen.getByRole("combobox", { name: "Project" });
+
+  it("020-FR-034 lists the active projects and sends a staged one before the choice, on the revision it returned", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+
+    expect(within(select()).getAllByRole("option").map((option) => option.textContent)).toEqual(["No project", "Home office", "New project…"]);
+    expect(select()).toHaveValue("");
+    await user.selectOptions(select(), "proj_1");
+    await user.click(choice("Next actions"));
+
+    expect(updateTask).toHaveBeenCalledWith("inbox_1", { project_id: "proj_1", expected_revision: 3 }, expect.any(String));
+    expect(transitionTask).toHaveBeenCalledWith("inbox_1", { action: "move", to_state: "next", expected_revision: 4 }, expect.any(String));
+    expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(transitionTask.mock.invocationCallOrder[0]);
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    // What was staged for one item is not staged for the next.
+    expect(select()).toHaveValue("");
+  });
+
+  it("020-FR-034 the project goes with Waiting for too, and an item's own project is not sent again", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([{ ...paper, project_id: "proj_1" }, dentist]));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+
+    expect(select()).toHaveValue("proj_1");
+    await user.click(choice("Someday / maybe"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    expect(updateTask).not.toHaveBeenCalled();
+
+    await user.selectOptions(select(), "proj_1");
+    await user.click(choice("Waiting for…"));
+    await user.type(screen.getByRole("textbox", { name: "Who or what are you waiting for?" }), "Sam");
+    await user.click(screen.getByRole("button", { name: "Move to Waiting for" }));
+
+    expect(updateTask).toHaveBeenCalledWith("inbox_2", { project_id: "proj_1", expected_revision: 3 }, expect.any(String));
+    expect(transitionTask).toHaveBeenLastCalledWith("inbox_2", { action: "move", to_state: "waiting", waiting_for: "Sam", expected_revision: 4 }, expect.any(String));
+  });
+
+  it("020-FR-034 No project takes a project the item already has off it with the choice", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([{ ...paper, project_id: "proj_1" }]));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+
+    await user.selectOptions(select(), "");
+    await user.click(choice("Next actions"));
+
+    expect(updateTask).toHaveBeenCalledWith("inbox_1", { project_id: null, expected_revision: 3 }, expect.any(String));
+  });
+
+  it("020-FR-034 New project… makes the project at once and stages it for the item", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    createProject.mockResolvedValueOnce(project("proj_new", "Garden"));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+
+    await user.selectOptions(select(), "New project…");
+    expect(screen.getByRole("button", { name: "Add project" })).toBeDisabled();
+    await user.type(screen.getByRole("textbox", { name: "New project name" }), "  Garden ");
+    // The list read again after the project is made has it, as the server's does.
+    listProjects.mockResolvedValue([office, project("proj_new", "Garden")]);
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+
+    expect(createProject).toHaveBeenCalledWith({ name: "Garden" }, expect.any(String));
+    expect(updateTask).not.toHaveBeenCalled();
+    await waitFor(() => expect(select()).toHaveValue("proj_new"));
+    expect(screen.queryByRole("textbox", { name: "New project name" })).not.toBeInTheDocument();
+    await user.click(choice("Someday / maybe"));
+
+    expect(updateTask).toHaveBeenCalledWith("inbox_1", { project_id: "proj_new", expected_revision: 3 }, expect.any(String));
+    expect(transitionTask).toHaveBeenCalledWith("inbox_1", { action: "move", to_state: "someday", expected_revision: 4 }, expect.any(String));
+  });
+
+  it("020-FR-052 a typed new project name is unsaved text: kept as a draft, back after a remount, gone once the project is added", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queue([paper]));
+    createProject.mockResolvedValueOnce(project("proj_new", "Garden"));
+    const first = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+    await user.selectOptions(select(), "New project…");
+    await user.type(screen.getByRole("textbox", { name: "New project name" }), "Garden");
+    expect(first.run.setUnsaved).toHaveBeenLastCalledWith(true);
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.new_project"))).toBe(true);
+    first.unmount();
+
+    const { run } = renderInRun(<InboxStep />);
+
+    expect(await screen.findByRole("textbox", { name: "New project name" })).toHaveValue("Garden");
+    expect(run.setUnsaved).toHaveBeenCalledWith(true);
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    await waitFor(() => expect(run.setUnsaved).toHaveBeenLastCalledWith(false));
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.new_project"))).toBe(false);
+  });
+
+  it("020-FR-045 a project that cannot be added says so with the Ref, and Retry adds it under the same key", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    createProject.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_add_project")).mockResolvedValueOnce(project("proj_new", "Garden"));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+
+    await user.selectOptions(select(), "New project…");
+    await user.type(screen.getByRole("textbox", { name: "New project name" }), "Garden");
+    await user.click(screen.getByRole("button", { name: "Add project" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Ref corr_add_project");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(createProject).toHaveBeenCalledTimes(2));
+    expect(createProject.mock.calls[1][1]).toBe(createProject.mock.calls[0][1]);
+  });
+
+  it("020-FR-048 Undo puts the item's project back as it was", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+    await user.selectOptions(select(), "proj_1");
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(transitionTask).toHaveBeenLastCalledWith("inbox_1", { action: "move", to_state: "inbox", expected_revision: 5 }, expect.any(String));
+    expect(updateTask).toHaveBeenLastCalledWith("inbox_1", { project_id: null, expected_revision: 6 }, expect.any(String));
+    expect(await screen.findByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+    expect(select()).toHaveValue("");
+    expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox");
+  });
+
+  it("020-FR-048 an Undo that could not put the project back says so, and the item is back in the Inbox", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    const { run } = renderInRun(<InboxStep />);
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await screen.findByRole("option", { name: "Home office" });
+    await user.selectOptions(select(), "proj_1");
+    await user.click(choice("Next actions"));
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    updateTask.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_restore"));
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox, but its project wasn't put back.");
+    expect(await screen.findByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+    expect(vi.mocked(run.progress).mock.calls[1][0].body).toMatchObject({ inbox_processed_delta: -1 });
+  });
+});
+
+describe("020-FR-034 Inbox step: Make it a project", () => {
+  const made = project("proj_new", "Home office setup");
+  const open = async (user: ReturnType<typeof userEvent.setup>) => {
+    await screen.findByRole("heading", { name: "Buy printer paper" });
+    await user.click(choice("Make it a project"));
+  };
+  const name = () => screen.getByRole("textbox", { name: "Project name" });
+  const outcome = () => screen.getByRole("textbox", { name: "Desired outcome (optional)" });
+  const firstAction = () => screen.getByRole("textbox", { name: "First next action" });
+  const submit = () => screen.getByRole("button", { name: "Make it a project" });
+
+  beforeEach(() => {
+    createProject.mockResolvedValue(made);
+    archiveProject.mockResolvedValue({ ...made, state: "archived", revision: 3 });
+  });
+
+  it("020-FR-034 asks for the name (the item's title), an optional outcome and the first next action, which has the focus", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    const { run } = renderInRun(<InboxStep />);
+    await open(user);
+
+    expect(name()).toHaveValue("Buy printer paper");
+    expect(outcome()).toHaveValue("");
+    expect(firstAction()).toHaveFocus();
+    expect(submit()).toBeDisabled();
+    await user.type(firstAction(), "Measure the room");
+    expect(submit()).toBeEnabled();
+    expect(run.setUnsaved).toHaveBeenLastCalledWith(true);
+    await user.clear(name());
+    expect(submit()).toBeDisabled();
+    // Typing in another field does not pull the focus away from it.
+    await user.type(name(), "Home office setup");
+    expect(name()).toHaveFocus();
+    expect(createProject).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-034 creates the project, makes the item its first next action and moves it to Next actions, counted and with Undo", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    const { run } = renderInRun(<InboxStep />);
+    await open(user);
+
+    await user.clear(name());
+    await user.type(name(), "Home office setup");
+    await user.type(outcome(), "  A desk that works  ");
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+
+    expect(createProject).toHaveBeenCalledWith({ name: "Home office setup", desired_outcome: "A desk that works" }, expect.any(String));
+    expect(updateTask).toHaveBeenCalledWith("inbox_1", { title: "Measure the room", project_id: "proj_new", expected_revision: 3 }, expect.any(String));
+    expect(transitionTask).toHaveBeenCalledWith("inbox_1", { action: "move", to_state: "next", expected_revision: 4 }, expect.any(String));
+    expect(createProject.mock.invocationCallOrder[0]).toBeLessThan(updateTask.mock.invocationCallOrder[0]);
+    expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(transitionTask.mock.invocationCallOrder[0]);
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toHaveFocus();
+    expect(screen.getByText("Item 2 of 2")).toBeInTheDocument();
+    expect(vi.mocked(run.progress).mock.calls[0][0].body).toEqual({ inbox_processed_delta: 1, progress_id: expect.stringMatching(/^progress_/) });
+    expect(lastToast()[0]).toBe("“Home office setup” is now a project");
+    expect(lastToast()[1]?.action?.accessibleLabel).toBe("Undo: Made a project Buy printer paper");
+    expect(run.setUnsaved).toHaveBeenLastCalledWith(false);
+  });
+
+  it("020-FR-034 a blank outcome is not sent, and an unchanged title is not rewritten", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    renderInRun(<InboxStep />);
+    await open(user);
+
+    await user.type(outcome(), "   ");
+    await user.type(firstAction(), "Buy printer paper");
+    await user.click(submit());
+
+    await waitFor(() => expect(transitionTask).toHaveBeenCalledTimes(1));
+    expect(Object.keys(createProject.mock.calls[0][0])).toEqual(["name"]);
+    expect(updateTask.mock.calls[0][1]).toEqual({ project_id: "proj_new", expected_revision: 3 });
+    expect(await screen.findByText("1 item processed")).toBeInTheDocument();
+  });
+
+  it("020-FR-048 Undo moves the item back to the Inbox, restores its title, takes the project off it, archives the project and takes one off the count", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    const { run } = renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+    await screen.findByRole("heading", { name: "Call the dentist" });
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(transitionTask).toHaveBeenLastCalledWith("inbox_1", { action: "move", to_state: "inbox", expected_revision: 5 }, expect.any(String));
+    expect(updateTask).toHaveBeenLastCalledWith("inbox_1", { title: "Buy printer paper", project_id: null, expected_revision: 6 }, expect.any(String));
+    expect(archiveProject).toHaveBeenCalledWith("proj_new", 2, expect.any(String));
+    expect(transitionTask.mock.invocationCallOrder[1]).toBeLessThan(updateTask.mock.invocationCallOrder[1]);
+    expect(updateTask.mock.invocationCallOrder[1]).toBeLessThan(archiveProject.mock.invocationCallOrder[0]);
+    expect(await screen.findByRole("heading", { name: "Buy printer paper" })).toHaveFocus();
+    expect(screen.getByText("Item 1 of 2")).toBeInTheDocument();
+    expect(vi.mocked(run.progress).mock.calls[1][0].body).toMatchObject({ inbox_processed_delta: -1 });
+    expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox");
+  });
+
+  it("020-FR-048 Undo gives back the project an item already had before it was made a project", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([{ ...paper, project_id: "proj_1" }, dentist]));
+    renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+    await screen.findByRole("heading", { name: "Call the dentist" });
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(updateTask).toHaveBeenLastCalledWith("inbox_1", { title: "Buy printer paper", project_id: "proj_1", expected_revision: 6 }, expect.any(String));
+    expect(archiveProject).toHaveBeenCalledWith("proj_new", 2, expect.any(String));
+  });
+
+  it("020-FR-048 an Undo whose project cannot be archived says so; the item is back in the Inbox", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    archiveProject.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_archive"));
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox, but the project “Home office setup” wasn't archived.");
+    expect(await screen.findByRole("heading", { name: "Buy printer paper" })).toBeInTheDocument();
+  });
+
+  it("020-FR-048 an Undo that could not restore the title and project leaves the project alone and says so", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+    await screen.findByRole("heading", { name: "Call the dentist" });
+    updateTask.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_restore"));
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox, but its title and project weren't put back.");
+    expect(archiveProject).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-045 a Retry after the update failed reuses every key: no second project, and the item is moved once", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    updateTask.mockRejectedValueOnce(new ApiError("down", 503, null, "corr_make_project"));
+    renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+
+    const alert = await screen.findByRole("alert");
+    // The project may already exist, so the message must not claim nothing changed.
+    expect(alert).toHaveTextContent("Couldn't finish making “Buy printer paper” a project. Retry picks up where it stopped.");
+    expect(alert).toHaveTextContent("Ref corr_make_project");
+    expect(transitionTask).not.toHaveBeenCalled();
+    expect(firstAction()).toHaveValue("Measure the room");
+    await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    expect(createProject).toHaveBeenCalledTimes(2);
+    expect(createProject.mock.calls[1][1]).toBe(createProject.mock.calls[0][1]);
+    expect(updateTask.mock.calls[1][2]).toBe(updateTask.mock.calls[0][2]);
+    expect(transitionTask).toHaveBeenCalledTimes(1);
+    expect(archiveProject).not.toHaveBeenCalled();
+  });
+
+  it("020-FR-011 an item changed elsewhere stays in the Inbox, the project made for it is archived and nothing is counted", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper, dentist]));
+    updateTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "stale", detail: { resource: "task", id: "inbox_1" } }, "corr_stale_project"));
+    getTask.mockResolvedValueOnce({ ...paper, state: "someday", revision: 5 });
+    const { run } = renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+
+    await user.click(submit());
+
+    expect(await screen.findByRole("heading", { name: "Call the dentist" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Changed elsewhere" })).toHaveTextContent("“Buy printer paper” was changed on another device, so it stayed in Inbox.");
+    await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("proj_new", 2, expect.any(String)));
+    expect(transitionTask).not.toHaveBeenCalled();
+    expect(run.progress).not.toHaveBeenCalled();
+    expect(Object.keys(window.localStorage).some((key) => key.includes(".inbox_1.project_"))).toBe(false);
+  });
+
+  it("020-FR-052 Back asks about typed text, and the form's drafts go with it", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([paper]));
+    const { run } = renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(outcome(), "A desk that works");
+    expect(Object.keys(window.localStorage).some((key) => key.endsWith(".inbox_1.project_outcome"))).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(run.confirmDiscard).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("textbox", { name: "Project name" })).not.toBeInTheDocument();
+    expect(Object.keys(window.localStorage).some((key) => key.includes(".inbox_1.project_"))).toBe(false);
+    expect(run.setUnsaved).toHaveBeenLastCalledWith(false);
+  });
+
+  it("020-FR-052 the typed fields come back after a remount, the name as the title when it was not edited", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queue([paper]));
+    const first = renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(outcome(), "A desk that works");
+    await user.type(firstAction(), "Measure");
+    first.unmount();
+
+    const { run } = renderInRun(<InboxStep />);
+
+    expect(await screen.findByRole("textbox", { name: "Project name" })).toHaveValue("Buy printer paper");
+    expect(outcome()).toHaveValue("A desk that works");
+    expect(firstAction()).toHaveValue("Measure");
+    expect(run.setUnsaved).toHaveBeenCalledWith(true);
   });
 });
