@@ -139,7 +139,17 @@ def test_026_FR_015_expired_lease_is_reclaimed_with_a_new_fence(
     # Inside the lease nobody else can take it.
     assert _claim(jobs, T0 + timedelta(seconds=59), owner="w2") is None
 
-    second = _claim(jobs, T0 + timedelta(seconds=60), owner="w2")
+    # At expiry the lease returns to the queue behind full-jitter backoff
+    # (cap 1s after one attempt) rather than being re-leased in the same call.
+    assert _claim(jobs, T0 + timedelta(seconds=60), owner="w2") is None
+    requeued = jobs.get(first.job_id)
+    assert requeued is not None
+    assert (requeued.status, requeued.lease_owner, requeued.last_error) == (
+        JobStatus.QUEUED,
+        None,
+        "lease_expired",
+    )
+    second = _claim(jobs, T0 + timedelta(seconds=61), owner="w2")
     assert second is not None
     assert second.job_id == first.job_id
     assert second.fence > first.fence
@@ -165,7 +175,8 @@ def test_026_FR_015_heartbeat_extends_only_the_current_claim(
     )
     assert _claim(jobs, T0 + timedelta(seconds=119), owner="w2") is None
 
-    taken = _claim(jobs, T0 + timedelta(seconds=120), owner="w2")
+    assert _claim(jobs, T0 + timedelta(seconds=120), owner="w2") is None
+    taken = _claim(jobs, T0 + timedelta(seconds=121), owner="w2")
     assert taken is not None
     assert not jobs.heartbeat(
         lease.job_id, owner="w1", fence=lease.fence, until=T0 + timedelta(hours=1)
@@ -193,7 +204,8 @@ def test_026_SC_007_stale_executor_cannot_settle_after_reclaim(
     _schedule(jobs)
     stale = _claim(jobs, T0, owner="slow")
     assert stale is not None
-    current = _claim(jobs, T0 + LEASE, owner="fast")
+    assert _claim(jobs, T0 + LEASE, owner="fast") is None  # requeued, backing off
+    current = _claim(jobs, T0 + LEASE + timedelta(seconds=1), owner="fast")
     assert current is not None
 
     assert jobs.complete(stale.job_id, fence=stale.fence) is False
@@ -300,11 +312,13 @@ def test_026_FR_015_crash_loop_closes_after_the_attempt_budget(
     jobs: JobRepository,
 ) -> None:
     _schedule(jobs, max_attempts=2)
-    now = T0
-    for _ in range(2):
-        assert _claim(jobs, now) is not None  # worker dies without settling
-        now += LEASE
-    assert _claim(jobs, now) is None
+    assert _claim(jobs, T0) is not None  # worker dies without settling
+    now = T0 + LEASE
+    assert _claim(jobs, now) is None  # expired: requeued behind a 1s backoff
+    now += timedelta(seconds=1)
+    assert _claim(jobs, now) is not None  # second attempt, worker dies again
+    now += LEASE
+    assert _claim(jobs, now) is None  # budget used: closed, not requeued
     assert jobs.find_active(KEY) is None
     assert _schedule(jobs, run_at=now) is True  # the ledger is not wedged
     record = jobs.find_active(KEY)
@@ -327,8 +341,18 @@ def test_026_FR_015_ledger_survives_a_restart(db_path: Path) -> None:
         1,
     )
     assert reopened.ensure_scheduled(job_type=TYPE, dedup_key=KEY, run_at=T0) is False
+    assert (
+        reopened.claim_due(
+            owner="after", types=(TYPE,), now=T0 + LEASE, lease_for=LEASE
+        )
+        is None
+    )
+    # Default full jitter stays within the 1s cap after one attempt.
     reclaimed = reopened.claim_due(
-        owner="after", types=(TYPE,), now=T0 + LEASE, lease_for=LEASE
+        owner="after",
+        types=(TYPE,),
+        now=T0 + LEASE + timedelta(seconds=1),
+        lease_for=LEASE,
     )
     assert reclaimed is not None and reclaimed.fence > lease.fence
     # The pre-restart claim can no longer settle.
@@ -577,3 +601,26 @@ def test_026_FR_015_container_wires_the_ledger_onto_the_tasks_database(
     assert container.job_repository.ensure_scheduled(
         job_type=TYPE, dedup_key=KEY, run_at=T0
     )
+
+
+def test_026_FR_015_leases_that_expire_together_are_dispersed(db_path: Path) -> None:
+    caps: list[float] = []
+    delays = iter([0.25, 0.75])
+
+    def jitter(cap: float) -> float:
+        caps.append(cap)
+        return next(delays)
+
+    jobs = JobRepository(db_path, jitter=jitter)
+    _schedule(jobs, key="a")
+    _schedule(jobs, key="b")
+    assert _claim(jobs, T0, owner="crashed") is not None
+    assert _claim(jobs, T0, owner="crashed") is not None
+
+    # Both leases lapse at once; neither is re-leased in that same call.
+    assert _claim(jobs, T0 + LEASE, owner="w2") is None
+    assert caps == [1, 1]
+    first = _claim(jobs, T0 + LEASE + timedelta(seconds=0.5), owner="w2")
+    assert first is not None
+    assert _claim(jobs, T0 + LEASE + timedelta(seconds=0.5), owner="w3") is None
+    assert _claim(jobs, T0 + LEASE + timedelta(seconds=0.75), owner="w3") is not None

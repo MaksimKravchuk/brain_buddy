@@ -198,9 +198,10 @@ class JobRepository(SQLiteRepositorySupport):
     ) -> JobLease | None:
         """Atomically lease the oldest due job of ``types``, or return ``None``.
 
-        A job whose lease expired is reclaimable, unless it already used its
-        attempt budget: then it is closed as ``failed`` so a job that crashes its
-        worker every time cannot loop forever.
+        A job whose lease expired returns to ``queued`` after full-jitter
+        backoff and becomes claimable once that backoff passes, unless it
+        already used its attempt budget: then it is closed as ``failed`` so a
+        job that crashes its worker every time cannot loop forever.
         """
 
         if not types:
@@ -208,14 +209,13 @@ class JobRepository(SQLiteRepositorySupport):
         now_us = _to_us(now)
         wanted = json.dumps(list(types))
         with self._transaction() as conn:
-            self._close_expired(conn, wanted, now_us)
+            self._recover_expired(conn, wanted, now)
             row = conn.execute(
                 f"SELECT {_COLUMNS} FROM jobs "  # noqa: S608 - module constant only
                 "WHERE job_type IN (SELECT value FROM json_each(?)) AND "
-                "((status = 'queued' AND run_at <= ?) OR "
-                "(status = 'leased' AND lease_until <= ?)) "
+                "status = 'queued' AND run_at <= ? "
                 "ORDER BY run_at, id LIMIT 1",
-                (wanted, now_us, now_us),
+                (wanted, now_us),
             ).fetchone()
             if row is None:
                 return None
@@ -242,6 +242,34 @@ class JobRepository(SQLiteRepositorySupport):
                 attempt=row["attempts"] + 1,
                 max_attempts=row["max_attempts"],
                 effect_id=row["effect_id"],
+            )
+
+    def _recover_expired(
+        self, conn: sqlite3.Connection, wanted: str, now: datetime
+    ) -> None:
+        """Settle every expired lease before anything is claimed.
+
+        Cancelled and exhausted jobs are closed. The rest return to ``queued``
+        after the same full-jitter backoff as a failed attempt, so jobs whose
+        leases lapse together are dispersed instead of being reclaimed in one
+        burst on every lease boundary.
+        """
+
+        now_us = _to_us(now)
+        self._close_expired(conn, wanted, now_us)
+        expired = conn.execute(
+            "SELECT id, attempts FROM jobs WHERE status = 'leased' "
+            "AND lease_until <= ? AND job_type IN (SELECT value FROM json_each(?))",
+            (now_us, wanted),
+        ).fetchall()
+        for row in expired:
+            cap = BACKOFF_CAPS[min(max(row["attempts"], 1), len(BACKOFF_CAPS)) - 1]
+            retry_at = now + timedelta(seconds=self._jitter(cap))
+            conn.execute(
+                "UPDATE jobs SET status = 'queued', run_at = ?, lease_owner = NULL, "
+                "lease_until = NULL, last_error = 'lease_expired', updated_at = ? "
+                "WHERE id = ?",
+                (_to_us(retry_at), now_us, row["id"]),
             )
 
     @staticmethod
