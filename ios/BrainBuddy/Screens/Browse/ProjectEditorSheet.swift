@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Creates a project, or renames and recolours an existing one. Validation
 /// runs in the workspace (offline); its message is shown under the name.
+/// `onCreate` receives a created project's id (Process inbox stages it).
 struct ProjectEditorSheet: View {
     enum Mode: Identifiable, Hashable {
         case create
@@ -22,14 +23,16 @@ struct ProjectEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private let mode: Mode
+    private let onCreate: ((ProjectID) -> Void)?
     @State private var name: String
     @State private var color: String?
     @State private var hasPreparedColor: Bool
     @State private var message: String?
     @FocusState private var isNameFocused: Bool
 
-    init(mode: Mode) {
+    init(mode: Mode, onCreate: ((ProjectID) -> Void)? = nil) {
         self.mode = mode
+        self.onCreate = onCreate
         switch mode {
         case .create:
             _name = State(initialValue: "")
@@ -154,7 +157,8 @@ struct ProjectEditorSheet: View {
         do {
             switch mode {
             case .create:
-                try workspace.createProject(name: newName, color: color)
+                let id = try workspace.createProject(name: newName, color: color)
+                onCreate?(id)
             case .edit(let original):
                 guard let current = workspace.project(original.id) else {
                     throw GTDValidationError.projectNotFound

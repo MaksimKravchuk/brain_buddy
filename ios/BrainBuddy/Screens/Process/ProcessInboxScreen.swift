@@ -34,14 +34,17 @@ struct ProcessInboxScreen: View {
 
 /// The inbox is snapshotted when the view appears; items that leave the
 /// inbox meanwhile (processed elsewhere, given a project on another device)
-/// are passed over. For each item you can first add a project, tags or a due
-/// date, then decide: Next action, Waiting for… (asks who or what), Someday /
-/// maybe, Done — under 2 minutes (complete), Not needed (cancel), or Skip.
-/// Every decision is one or two workspace commands with an Undo toast that
-/// puts the item back in the Inbox exactly as it was. The toast shows above
-/// the decision buttons, never over them, and taps on the buttons are ignored
-/// for a moment after each decision so a double tap can't decide the next
-/// item too. At accessibility text sizes the buttons scroll with the item
+/// are passed over. For each item you can first add a project (an existing
+/// one or a new one), tags or a due date, then decide: Next action, Waiting
+/// for… (asks who or what), Someday / maybe, Make it a project (names the
+/// project, optionally its desired outcome, and asks for its first next
+/// action, which the item becomes), Done
+/// — under 2 minutes (complete), Not needed (cancel), or Skip. Every decision
+/// is one change with an Undo toast that puts the item back in the Inbox
+/// exactly as it was (a project made from it is archived again). The toast
+/// shows above the decision buttons, never over them, and taps on the buttons
+/// are ignored for a moment after each decision so a double tap can't decide
+/// the next item too. At accessibility text sizes the buttons scroll with the item
 /// instead of being pinned, so the item stays readable.
 ///
 /// In the weekly review (M-15) it is given the items to go through, reports
@@ -60,6 +63,8 @@ struct InboxClarifier: View {
     @State private var stage = ClarifyStage()
     @State private var isAskingWaitingFor = false
     @State private var isChoosingTags = false
+    @State private var isCreatingProject = false
+    @State private var isMakingProject = false
     /// True for a moment after each decision (the double-tap guard).
     @State private var isSettling = false
     @AccessibilityFocusState private var isTitleFocused: Bool
@@ -120,6 +125,19 @@ struct InboxClarifier: View {
         }
         .sheet(isPresented: $isChoosingTags) {
             StagedTagsSheet(selection: $stage.tags)
+        }
+        .sheet(isPresented: $isCreatingProject) {
+            // Created at once (a project alone changes no task); the item gets it with the decision.
+            ProjectEditorSheet(mode: .create) { id in
+                stage.project = .set(id)
+            }
+        }
+        .sheet(isPresented: $isMakingProject) {
+            if let item = current {
+                MakeProjectSheet(taskTitle: item.task.title) { name, outcome, firstAction in
+                    try makeProject(of: item, name: name, outcome: outcome, firstAction: firstAction)
+                }
+            }
         }
     }
 
@@ -264,8 +282,9 @@ struct InboxClarifier: View {
         let selected = stage.projectID(for: task)
         let name = selected.flatMap { workspace.project($0)?.name }
         return Menu {
-            Button("No project") { stage.project = .clear }
+            Button("New project…", systemImage: "folder.badge.plus") { isCreatingProject = true }
             Divider()
+            Button("No project") { stage.project = .clear }
             ForEach(workspace.projects()) { summary in
                 Button {
                     stage.project = .set(summary.id)
@@ -337,7 +356,7 @@ struct InboxClarifier: View {
 
     // MARK: Actions
 
-    /// The decision panel: the prompt, then five decisions in three rows.
+    /// The decision panel: the prompt, then six decisions in four rows.
     /// Floating (pinned at the bottom) they are a glass cluster; inline
     /// (scrolling with the item) they are flat content. Skip is in the toolbar.
     @ViewBuilder
@@ -375,6 +394,10 @@ struct InboxClarifier: View {
                 actionButton("Not needed", systemImage: "xmark.circle", isFloating: isFloating) {
                     apply(.cancel, to: item)
                 }
+            }
+            actionButton("Make it a project", systemImage: "folder.badge.plus", isFloating: isFloating) {
+                guard !isSettling else { return }
+                isMakingProject = true
             }
             actionButton("Done — under 2 minutes", systemImage: "checkmark.circle", isFloating: isFloating) {
                 apply(.complete, to: item)
@@ -452,6 +475,27 @@ struct InboxClarifier: View {
         }
     }
 
+    /// "Make it a project": a new project whose first Next action is the item,
+    /// titled `firstAction`, with the staged tags and due date. Throws, and
+    /// changes nothing, when the workspace refuses it (the sheet shows why).
+    private func makeProject(of item: InboxItem, name: String, outcome: String?, firstAction: String) throws {
+        let original = item.task
+        var staged = stage.changes(for: original)
+        staged.projectID = .unchanged
+        let projectID = try workspace.clarifyAsProject(
+            original.id, projectName: name, outcome: outcome, firstAction: firstAction, changes: staged
+        )
+        var changes = staged
+        changes.projectID = .set(projectID)
+        changes.title = firstAction == original.title ? .unchanged : .set(firstAction)
+        onProcessed?(1)
+        beginSettling()
+        moveCursor(to: item.index + 1)
+        toasts.show("Project created", actionTitle: "Undo") {
+            undo(original: original, changes: changes, index: item.index, createdProject: projectID)
+        }
+    }
+
     private func skip(_ item: InboxItem) {
         guard !isSettling else { return }
         beginSettling()
@@ -459,9 +503,11 @@ struct InboxClarifier: View {
         moveCursor(to: item.index + 1)
     }
 
-    /// Puts the item back in the Inbox as it was — list, project, tags and due
-    /// date — and back in front of the cursor if this screen is still open.
-    private func undo(original: TaskRecord, changes: TaskChanges, index: Int) {
+    /// Puts the item back in the Inbox as it was — list, title, project, tags
+    /// and due date — and back in front of the cursor if this screen is still
+    /// open. A project made from the item is archived again unless it has
+    /// other open tasks by now.
+    private func undo(original: TaskRecord, changes: TaskChanges, index: Int, createdProject: ProjectID? = nil) {
         let restored = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
             guard let latest = workspace.task(original.id) else { throw .taskNotFound }
             if latest.state.isTerminal {
@@ -470,12 +516,18 @@ struct InboxClarifier: View {
                 try workspace.moveTask(original.id, to: .inbox)
             }
             let revert = TaskChanges(
+                title: changes.title.isChanged ? .set(original.title) : .unchanged,
                 projectID: changes.projectID.isChanged ? setOrClear(original.projectID) : .unchanged,
                 tagIDs: changes.tagIDs.isChanged ? .set(original.tagIDs) : .unchanged,
                 dueDate: changes.dueDate.isChanged ? setOrClear(original.dueDate) : .unchanged
             )
             if revert.hasChanges {
                 try workspace.updateTask(original.id, revert)
+            }
+            if let createdProject,
+                workspace.projects().first(where: { $0.id == createdProject })?.openTaskCount == 0
+            {
+                try workspace.archiveProject(createdProject)
             }
         }
         guard restored else { return }
@@ -650,6 +702,106 @@ private struct StagedTagsSheet: View {
             .contentShape(Rectangle())
         }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// "Make it a project": the project's name (the item's title to start with),
+/// optionally its desired outcome, and its first next action, which the item
+/// becomes in Next actions.
+private struct MakeProjectSheet: View {
+    let taskTitle: String
+    let onCreate: (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var outcome = ""
+    @State private var firstAction = ""
+    @State private var message: String?
+    @FocusState private var focus: Field?
+
+    private enum Field { case name, outcome, firstAction }
+
+    init(
+        taskTitle: String,
+        onCreate: @escaping (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
+    ) {
+        self.taskTitle = taskTitle
+        self.onCreate = onCreate
+        _name = State(initialValue: taskTitle)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Project name", text: $name)
+                        .submitLabel(.next)
+                        .focused($focus, equals: .name)
+                        .onSubmit { focus = .outcome }
+                } header: {
+                    Text("Project")
+                }
+                Section {
+                    TextField("What will be true when it's done?", text: $outcome, axis: .vertical)
+                        .lineLimit(1...4)
+                        .textInputAutocapitalization(.sentences)
+                        .focused($focus, equals: .outcome)
+                        .accessibilityLabel("Desired outcome")
+                } header: {
+                    Text("Desired outcome · optional")
+                }
+                Section {
+                    TextField("What's the very next step?", text: $firstAction)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.done)
+                        .focused($focus, equals: .firstAction)
+                        .onSubmit(create)
+                        .accessibilityLabel("First next action")
+                } header: {
+                    Text("First next action")
+                } footer: {
+                    if let message {
+                        EditorValidationMessage(text: message)
+                    } else {
+                        Text("It goes to Next actions, in this project.")
+                    }
+                }
+            }
+            .navigationTitle("Make it a project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create", action: create)
+                        .disabled(trimmed(name).isEmpty || trimmed(firstAction).isEmpty)
+                }
+            }
+            .onChange(of: name) { message = nil }
+            .onChange(of: outcome) { message = nil }
+            .onChange(of: firstAction) { message = nil }
+            // The name is already there; the next step is what is missing.
+            .onAppear { focus = .firstAction }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func trimmed(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func create() {
+        let projectName = trimmed(name)
+        let action = trimmed(firstAction)
+        let desiredOutcome = trimmed(outcome)
+        guard !projectName.isEmpty, !action.isEmpty else { return }
+        do {
+            try onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action)
+            dismiss()
+        } catch {
+            message = TaskCommandRunner.message(for: error)
+        }
     }
 }
 
