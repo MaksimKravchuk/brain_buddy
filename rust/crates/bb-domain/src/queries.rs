@@ -44,8 +44,10 @@ const DEFAULT_THRESHOLD_DAYS: u32 = 14;
 
 /// Answers one task, project or tag query.
 ///
-/// The Review queries belong to the Review family and are refused here as
-/// [`Reason::InvalidValue`] on `kind`, never answered with a placeholder.
+/// The Review queries belong to the Review sessions family
+/// ([`crate::review_sessions::query`]) and are refused here as
+/// [`Reason::InvalidValue`] on `kind`, never answered with a placeholder; the
+/// dispatcher asks `review_sessions::handles_query` first.
 ///
 /// # Errors
 ///
@@ -91,23 +93,23 @@ pub fn query(
 
 // ------------------------------------------------------------------- helpers
 
-fn invalid(field: &str) -> DomainError {
+pub(crate) fn invalid(field: &str) -> DomainError {
     DomainError::field(Reason::InvalidValue, field)
 }
 
-fn not_found(entity_type: EntityType, id: &str) -> DomainError {
+pub(crate) fn not_found(entity_type: EntityType, id: &str) -> DomainError {
     DomainError::about(Reason::NotFound, entity_type, vec![id.to_owned()])
 }
 
-fn counter(value: &Counter, field: &str) -> Result<u64, DomainError> {
+pub(crate) fn counter(value: &Counter, field: &str) -> Result<u64, DomainError> {
     value.to_u64().ok_or_else(|| invalid(field))
 }
 
-fn instant(value: &Instant, field: &str) -> Result<UtcInstant, DomainError> {
+pub(crate) fn instant(value: &Instant, field: &str) -> Result<UtcInstant, DomainError> {
     UtcInstant::parse_rfc3339(value.as_str()).map_err(|_| invalid(field))
 }
 
-fn stored(error: FormulationError) -> DomainError {
+pub(crate) fn stored(error: FormulationError) -> DomainError {
     match error {
         FormulationError::InvalidField(field) => invalid(field),
         FormulationError::UnknownTimeZone(_) => {
@@ -119,7 +121,7 @@ fn stored(error: FormulationError) -> DomainError {
 
 /// The owner's clock inputs (`TaskService.clock_settings`): the stored
 /// `review_settings`, or its defaults.
-fn clock_settings(read_set: &ReadSet) -> Result<OwnerClockSettings, DomainError> {
+pub(crate) fn clock_settings(read_set: &ReadSet) -> Result<OwnerClockSettings, DomainError> {
     match &read_set.settings {
         Some(settings) => OwnerClockSettings::from_review_settings(settings),
         None => OwnerClockSettings::new(DEFAULT_THRESHOLD_DAYS, "UTC", None, None),
@@ -130,7 +132,7 @@ fn clock_settings(read_set: &ReadSet) -> Result<OwnerClockSettings, DomainError>
 /// `task_response` with its formulation projection (`formulation_view`):
 /// the clock shows only on a Next task, the park marker only on a Someday one
 /// (`TaskResponse.parked`), and the advisory instants are derived here.
-fn task_view(
+pub(crate) fn task_view(
     task: &Task,
     subtasks: Vec<SubtaskView>,
     comments: Vec<CommentView>,
@@ -157,12 +159,12 @@ fn name_key(name: &str) -> String {
 /// One position of a sort key. Every position holds the same variant for all
 /// tasks of one sort, so the derived order is Python's tuple order.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum KeyPart {
+pub(crate) enum KeyPart {
     Int(u64),
     Text(String),
 }
 
-type SortKey = Vec<KeyPart>;
+pub(crate) type SortKey = Vec<KeyPart>;
 
 /// `_PRIORITY_RANK`.
 fn priority_rank(priority: Priority) -> u64 {
@@ -182,7 +184,7 @@ fn python_isoformat(value: UtcInstant) -> String {
 }
 
 /// `TaskService._sort_key`.
-fn sort_key(task: &Task, sort: TaskSort) -> Result<SortKey, DomainError> {
+pub(crate) fn sort_key(task: &Task, sort: TaskSort) -> Result<SortKey, DomainError> {
     use KeyPart::{Int, Text};
     let id = Text(task.id.as_str().to_owned());
     let manual = || -> Result<SortKey, DomainError> {
@@ -414,7 +416,7 @@ fn base64url_decode(text: &str) -> Option<Vec<u8>> {
 
 /// `json.dumps(value, sort_keys=True, separators=(",", ":"))`, ASCII only, the
 /// bytes the server's cursor is made of.
-fn python_dumps(value: &Value) -> String {
+pub(crate) fn python_dumps(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(flag) => flag.to_string(),
