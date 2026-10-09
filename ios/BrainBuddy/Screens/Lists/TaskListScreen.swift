@@ -45,7 +45,10 @@ struct TaskListScreen: View {
             .sheet(item: $decisionCard) { target in
                 DecisionCardSheet(taskID: target.taskID)
             }
-            .navigationTitle(title)
+            .bbScreenTitle(title)
+            .modifier(
+                ListSubtitle(summary: result.isEmpty ? nil : caption(for: result, options: options))
+            )
             .toolbar { toolbarContent(result) }
             .refreshable {
                 await workspace.syncNow()
@@ -103,25 +106,15 @@ struct TaskListScreen: View {
             if case .list(.next) = destination, !result.isEmpty {
                 reviewNotes
             }
-            if !result.isEmpty {
-                captionRow(for: result, options: options)
-            }
             if case .project(let projectID) = destination {
                 ProjectStatusRow(projectID: projectID)
             }
             ForEach(result.sections) { section in
                 taskSection(section)
             }
-            if !result.isEmpty {
-                SyncStatusLabel()
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
         }
         .listStyle(.plain)
+        .bbDenseList()
         .overlay {
             if result.isEmpty {
                 if case .list(.next) = destination {
@@ -153,13 +146,31 @@ struct TaskListScreen: View {
                 NavigationLink(value: AppRoute.task(task.id)) {
                     TaskRow(task: task, showsProject: showsProject, showsList: showsList)
                 }
+                // The row carries its own affordance; the chevron would only
+                // take width from the title and its metadata.
+                .navigationLinkIndicatorVisibility(.hidden)
+                // The completion circle's 44 pt target starts near the edge.
+                .listRowInsets(Self.rowInsets)
                 .taskActions(task)
             }
         } header: {
             if let title = section.title {
-                Text(title)
+                BBSectionHeader(
+                    title, count: section.tasks.count, dotColor: projectDotColor(for: section), countsTasks: true
+                )
+                .listRowInsets(Self.headerInsets)
             }
         }
+    }
+
+    private static let rowInsets = EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 20)
+    private static let headerInsets = EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 20)
+
+    /// The project's colour for a project group, or nil for any other section
+    /// (and for "No project").
+    private func projectDotColor(for section: TaskSection) -> Color? {
+        guard case .project(let id?) = section.kind else { return nil }
+        return BBColor.project(workspace.project(id)?.color)
     }
 
     @ToolbarContentBuilder
@@ -226,14 +237,6 @@ struct TaskListScreen: View {
         }
     }
 
-    private func captionRow(for result: TaskListResult, options: ListOptions) -> some View {
-        Text(caption(for: result, options: options))
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-    }
-
     private func caption(for result: TaskListResult, options: ListOptions) -> String {
         var parts: [String] = []
         switch destination {
@@ -263,6 +266,42 @@ struct TaskListScreen: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
+    }
+}
+
+/// The line under the title: the list's summary ("14 open tasks · filtered")
+/// and the sync state in words, joined with " · ". It sits in the navigation
+/// bar instead of in two rows of the list. An empty list passes no summary
+/// and shows the sync state alone, so the line is never blank. Relative times
+/// ("Synced 2 minutes ago") refresh every 30 seconds without redrawing the list.
+private struct ListSubtitle: ViewModifier {
+    let summary: String?
+
+    @Environment(Workspace.self) private var workspace
+    /// Bumped every 30 seconds so the subtitle recomputes against the clock.
+    @State private var tick = 0
+
+    func body(content: Content) -> some View {
+        content
+            .bbScreenSubtitle(subtitle)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(30))
+                    tick &+= 1
+                }
+            }
+    }
+
+    private var subtitle: String {
+        let _ = tick
+        let sync = SyncStatusLabel.describe(
+            workspace.syncStatus,
+            pendingChanges: workspace.pendingChangeCount,
+            now: Date(),
+            deviceName: SyncStatusLabel.deviceName
+        ).text
+        guard let summary else { return sync }
+        return summary + " · " + sync
     }
 }
 

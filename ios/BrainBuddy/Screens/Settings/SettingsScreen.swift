@@ -41,8 +41,11 @@ struct SettingsScreen: View {
             // Weekly review (spec 020, M-23); shown only while it is exposed.
             ReviewSettingsSection()
             aboutSection
+            deleteAccountSection
         }
-        .navigationTitle("Settings")
+        .labelStyle(.bbRow)
+        .bbDenseList()
+        .bbScreenTitle("Settings")
         .task(id: workspace.account?.serverURL) { await loadAccountOrigin() }
         .sheet(item: $signInRequest) { request in
             SignInSheet(email: request.email, serverURL: request.serverURL)
@@ -70,23 +73,33 @@ struct SettingsScreen: View {
     @ViewBuilder private var accountSection: some View {
         if let account = workspace.account {
             Section {
-                if let name = account.displayName, !name.isEmpty {
-                    LabeledContent("Name", value: name)
+                AccountIdentityRow(
+                    name: account.displayName, email: account.email,
+                    host: Self.hostDescription(account.serverURL))
+                Button {
+                    openAccount(account, deleting: false)
+                } label: {
+                    Label("Manage account", systemImage: "person.crop.circle")
                 }
-                LabeledContent("Email", value: account.email)
-                LabeledContent("Server", value: Self.hostDescription(account.serverURL))
-                Button("Manage account") { openAccount(account, deleting: false) }
-                    .frame(minHeight: 44)
-                Button("Delete account", role: .destructive) { openAccount(account, deleting: true) }
-                    .frame(minHeight: 44)
                 if accountLinkFailed {
-                    Text("Couldn't open account settings. Use the account linked to this iPhone.")
-                        .font(BBFont.secondary)
-                    Button("Retry account links") { Task { await loadAccountOrigin() } }.frame(minHeight: 44)
+                    Label {
+                        Text("Couldn't open account settings. Use the account linked to this iPhone.")
+                            .font(BBFont.secondary)
+                    } icon: {
+                        Image(systemName: "exclamationmark.circle")
+                            .foregroundStyle(BBColor.warningText)
+                    }
+                    Button {
+                        Task { await loadAccountOrigin() }
+                    } label: {
+                        Label("Retry account links", systemImage: "arrow.clockwise")
+                    }
                 }
                 if workspace.syncStatus == .needsSignIn {
-                    Button("Sign in again") {
+                    Button {
                         signInRequest = SignInRequest(email: account.email, serverURL: account.serverURL)
+                    } label: {
+                        Label("Sign in again", systemImage: "person.crop.circle.badge.exclamationmark")
                     }
                 }
                 signOutButton
@@ -97,13 +110,41 @@ struct SettingsScreen: View {
             }
         } else {
             Section {
-                Text(localOnlyExplanation)
-                Button("Sign in") {
+                Button {
                     signInRequest = SignInRequest(email: "", serverURL: nil)
+                } label: {
+                    Label("Sign in", systemImage: "person.crop.circle.badge.plus")
                 }
             } header: {
                 Text("Account")
+            } footer: {
+                Text(localOnlyExplanation)
             }
+        }
+    }
+
+    /// Deleting the account is always available when signed in (GDPR), in a
+    /// section of its own at the bottom so it is never next to a routine row.
+    @ViewBuilder private var deleteAccountSection: some View {
+        if let account = workspace.account {
+            Section {
+                Button(role: .destructive) {
+                    openAccount(account, deleting: true)
+                } label: {
+                    destructiveLabel("Delete account", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    /// A row label whose icon is red like its text, not the brand colour that
+    /// `.bbRow` gives every other icon.
+    private func destructiveLabel(_ title: String, systemImage: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(Color.red)
         }
     }
 
@@ -112,7 +153,7 @@ struct SettingsScreen: View {
             requestSignOut()
         } label: {
             HStack {
-                Text("Sign out")
+                destructiveLabel("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                 if isSigningOut {
                     Spacer()
                     ProgressView()
@@ -157,18 +198,24 @@ struct SettingsScreen: View {
 
     private var syncSection: some View {
         Section {
-            SyncStatusLabel()
-            LabeledContent("Waiting to sync", value: Self.pendingDescription(workspace.pendingChangeCount))
-            if let lastSyncedAt {
+            syncStatusRow
+            if let lastSyncedAt = staleLastSyncedAt {
                 TimelineView(.periodic(from: .now, by: 60)) { _ in
-                    LabeledContent("Last synced", value: lastSyncedAt.formatted(.relative(presentation: .named)))
+                    valueRow(
+                        "Last synced", systemImage: "clock",
+                        value: lastSyncedAt.formatted(.relative(presentation: .named)))
                 }
             }
+            valueRow(
+                "Waiting to sync", systemImage: "arrow.up.circle",
+                value: Self.pendingDescription(workspace.pendingChangeCount))
             if let referenceID = failureReferenceID {
-                LabeledContent("Reference ID") {
+                LabeledContent {
                     Text(referenceID)
                         .font(.footnote.monospaced())
                         .textSelection(.enabled)
+                } label: {
+                    Label("Reference ID", systemImage: "number")
                 }
             }
             syncNowButton
@@ -177,6 +224,49 @@ struct SettingsScreen: View {
             }
         } header: {
             Text("Sync")
+        }
+    }
+
+    /// "Status" with the sync state in words trailing ("Synced 2 minutes
+    /// ago"), which also says when it last synced.
+    private var syncStatusRow: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let description = SyncStatusLabel.describe(
+                workspace.syncStatus,
+                pendingChanges: workspace.pendingChangeCount,
+                now: context.date,
+                deviceName: SyncStatusLabel.deviceName
+            )
+            LabeledContent {
+                Text(description.text)
+                    .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)
+            } label: {
+                Label {
+                    Text("Status")
+                } icon: {
+                    Image(systemName: description.symbolName)
+                        .foregroundStyle(description.needsAttention ? BBColor.warning : BBColor.brandText)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// When it last synced, for the states whose status text doesn't say so
+    /// (offline, failing); idle already reads "Synced 2 minutes ago".
+    private var staleLastSyncedAt: Date? {
+        switch workspace.syncStatus {
+        case .offline(let date): return date
+        case .failing(_, _, let date): return date
+        case .localOnly, .idle, .syncing, .needsSignIn: return nil
+        }
+    }
+
+    private func valueRow(_ title: String, systemImage: String, value: String) -> some View {
+        LabeledContent {
+            Text(value)
+        } label: {
+            Label(title, systemImage: systemImage)
         }
     }
 
@@ -210,14 +300,6 @@ struct SettingsScreen: View {
 
     private var isSyncing: Bool { workspace.syncStatus == .syncing }
 
-    private var lastSyncedAt: Date? {
-        switch workspace.syncStatus {
-        case .idle(let date), .offline(let date): return date
-        case .failing(_, _, let date): return date
-        case .localOnly, .syncing, .needsSignIn: return nil
-        }
-    }
-
     private var failureReferenceID: String? {
         if case .failing(_, let referenceID, _) = workspace.syncStatus { return referenceID }
         return nil
@@ -227,17 +309,10 @@ struct SettingsScreen: View {
 
     private var aboutSection: some View {
         Section {
-            LabeledContent("Version", value: Self.versionDescription)
+            valueRow("Version", systemImage: "info.circle", value: Self.versionDescription)
             if let buildLabel = Self.buildLabel {
-                LabeledContent("Build", value: buildLabel)
+                valueRow("Build", systemImage: "hammer", value: buildLabel)
             }
-            VStack(alignment: .leading, spacing: BBSpacing.s1) {
-                Text("Works offline")
-                Text(offlineExplanation)
-                    .font(BBFont.meta)
-                    .foregroundStyle(BBColor.textTertiary)
-            }
-            .accessibilityElement(children: .combine)
             if diagnostics != nil {
                 NavigationLink(value: AppRoute.performance) {
                     Label("Performance", systemImage: "gauge.with.dots.needle.33percent")
@@ -245,6 +320,8 @@ struct SettingsScreen: View {
             }
         } header: {
             Text("About")
+        } footer: {
+            Text(offlineExplanation)
         }
     }
 
@@ -356,6 +433,51 @@ struct SettingsScreen: View {
         let label = Bundle.main.infoDictionary?["BBBuildLabel"] as? String
         guard let label, !label.isEmpty else { return nil }
         return label
+    }
+}
+
+/// The signed-in account as one two-line row: the name (or email) over
+/// "email · server", with an initials circle where other rows keep their icon.
+private struct AccountIdentityRow: View {
+    let name: String?
+    let email: String
+    let host: String
+
+    @ScaledMetric(relativeTo: .body) private var avatar: CGFloat = 32
+
+    private var displayName: String {
+        name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var title: String { displayName.isEmpty ? email : displayName }
+
+    private var subtitle: String { displayName.isEmpty ? host : "\(email) · \(host)" }
+
+    private var initials: String {
+        let words = displayName.split(whereSeparator: \.isWhitespace)
+        if words.count >= 2, let first = words.first?.first, let last = words.last?.first {
+            return String([first, last]).uppercased()
+        }
+        return title.first.map { String($0).uppercased() } ?? "?"
+    }
+
+    var body: some View {
+        HStack(spacing: BBSpacing.s3) {
+            Text(initials)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(BBColor.brandText)
+                .frame(width: avatar, height: avatar)
+                .background(BBColor.brandSoft, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                Text(subtitle)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

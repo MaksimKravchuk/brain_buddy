@@ -2,8 +2,11 @@ import BrainBuddyCore
 import BrainBuddyWorkspace
 import SwiftUI
 
-/// One task in a list: completion circle, title, and one wrapping line of
-/// metadata (list, project, waiting note, subtasks, due date, priority, tags).
+/// One task in a list: completion circle, title, and the metadata (list,
+/// project, waiting note, subtasks, due date, priority, tags). The metadata
+/// sits trailing on the title's own line when both fit, which makes a one-line
+/// task a 44 pt row; otherwise (a long title, large Dynamic Type) it wraps
+/// under the title.
 ///
 /// The row is flat content on the brand raised surface; it sets its own
 /// `listRowBackground`, so inside a `List` it needs nothing else. Outside a
@@ -32,6 +35,10 @@ struct TaskRow: View {
     /// (about half the x-height), scaled with Dynamic Type.
     @ScaledMetric(relativeTo: .body) private var circleLift: CGFloat = 6
 
+    /// Space above and below the text; the 44 pt completion target sets the
+    /// height of a one-line row.
+    private static let verticalPadding: CGFloat = 6
+
     init(task: TaskRecord, showsProject: Bool = true, showsList: Bool = false) {
         self.task = task
         self.showsProject = showsProject
@@ -54,6 +61,35 @@ struct TaskRow: View {
         .listRowBackground(BBColor.surfaceRaised)
     }
 
+    /// Title and metadata: side by side when they fit on one line, otherwise
+    /// the metadata wraps under the title.
+    @ViewBuilder
+    private func content(
+        details: TaskRowDetails, openDecisionCard: OpenDecisionCardAction?, lift: CGFloat
+    ) -> some View {
+        if details.hasMetadata {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s2) {
+                    TaskRowTitle(task: task, lineLimit: 2)
+                    Spacer(minLength: BBSpacing.s2)
+                    TaskRowMetadata(details: details, openDecisionCard: openDecisionCard)
+                        .fixedSize()
+                        // Chips have no text baseline: centre them on the
+                        // title's x-height, as the completion circle is.
+                        .alignmentGuide(.firstTextBaseline) { dimensions in
+                            dimensions[VerticalAlignment.center] + lift
+                        }
+                }
+                VStack(alignment: .leading, spacing: BBSpacing.s1) {
+                    TaskRowTitle(task: task)
+                    TaskRowMetadata(details: details, openDecisionCard: openDecisionCard)
+                }
+            }
+        } else {
+            TaskRowTitle(task: task)
+        }
+    }
+
     private var row: some View {
         let marker = ReviewRowMarker.style(for: task, in: workspace)
         let details = TaskRowDetails(
@@ -66,13 +102,8 @@ struct TaskRow: View {
                 .alignmentGuide(.firstTextBaseline) { dimensions in
                     dimensions[VerticalAlignment.center] + lift
                 }
-            VStack(alignment: .leading, spacing: BBSpacing.s1) {
-                TaskRowTitle(task: task)
-                if details.hasMetadata {
-                    TaskRowMetadata(details: details, openDecisionCard: opensCard)
-                }
-            }
-            .padding(.vertical, BBSpacing.s2)
+            content(details: details, openDecisionCard: opensCard, lift: lift)
+                .padding(.vertical, Self.verticalPadding)
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
@@ -139,13 +170,14 @@ private struct ReviewMarkerButton: View {
 
 private struct TaskRowTitle: View {
     let task: TaskRecord
+    var lineLimit: Int = 3
 
     var body: some View {
         Text(task.title)
             .font(BBFont.rowTitle)
             .foregroundStyle(titleColor)
             .strikethrough(task.state.isTerminal, color: titleColor)
-            .lineLimit(3)
+            .lineLimit(lineLimit)
             .multilineTextAlignment(.leading)
     }
 

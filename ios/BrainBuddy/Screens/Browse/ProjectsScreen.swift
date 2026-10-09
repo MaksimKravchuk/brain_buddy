@@ -13,10 +13,10 @@ struct ProjectsScreen: View {
     var body: some View {
         if showsArchived {
             ArchivedProjectsList()
-                .navigationTitle("Archived projects")
+                .bbScreenTitle("Archived projects")
         } else {
             ActiveProjectsList()
-                .navigationTitle("Projects")
+                .bbScreenTitle("Projects")
         }
     }
 }
@@ -57,10 +57,12 @@ private struct ActiveProjectsList: View {
                 Section {
                     NavigationLink(value: AppRoute.archivedProjects) {
                         Label("Archived projects", systemImage: "folder.badge.minus")
+                            .labelStyle(.bbRow)
                     }
                 }
             }
         }
+        .bbDenseList()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -215,6 +217,7 @@ private struct ArchivedProjectsList: View {
                     Text("Archived projects are read-only and can't be restored. Their tasks stayed in their lists.")
                 }
             }
+            .bbDenseList()
         }
     }
 }
@@ -224,12 +227,13 @@ private struct ArchivedProjectRow: View {
     @ScaledMetric(relativeTo: .body) private var dotSize: CGFloat = 10
 
     var body: some View {
-        HStack(spacing: BBSpacing.s3) {
-            ProjectColorIndicator(hex: project.color, diameter: dotSize)
+        Label {
             Text(project.name)
                 .foregroundStyle(BBColor.textTertiary)
-            Spacer(minLength: 0)
+        } icon: {
+            ProjectColorIndicator(hex: project.color, diameter: dotSize)
         }
+        .labelStyle(.bbRow)
         .accessibilityElement(children: .combine)
     }
 }
@@ -237,27 +241,50 @@ private struct ArchivedProjectRow: View {
 // MARK: - Shared row
 
 /// A project with its colour, open count and the GTD "needs a next action"
-/// signal as words. Used here and in the Lists hub.
+/// signal as words. Used here and in the Lists hub. The colour dot sits in the
+/// icon column, so names line up with the symbol rows around them; the signal
+/// shares the name's line when it fits and drops under it otherwise.
 struct ProjectSummaryRow: View {
     let summary: ProjectSummary
     @ScaledMetric(relativeTo: .body) private var dotSize: CGFloat = 10
 
     var body: some View {
-        HStack(spacing: BBSpacing.s3) {
-            ProjectColorIndicator(hex: summary.project.color, diameter: dotSize)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(summary.project.name)
-                    .foregroundStyle(BBColor.textPrimary)
-                if summary.needsNextAction {
-                    NeedsNextActionMarker()
-                }
+        HStack(spacing: BBSpacing.s2) {
+            Label {
+                title
+            } icon: {
+                ProjectColorIndicator(hex: summary.project.color, diameter: dotSize)
             }
-            Spacer(minLength: BBSpacing.s2)
+            .labelStyle(.bbRow)
+            .frame(maxWidth: .infinity, alignment: .leading)
             // Plain slate count, the same as the Lists hub rows; nothing for zero.
             CountBadge(count: summary.openTaskCount)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
+    }
+
+    @ViewBuilder private var title: some View {
+        if summary.needsNextAction {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: BBSpacing.s2) {
+                    name
+                    Spacer(minLength: BBSpacing.s2)
+                    NeedsNextActionMarker()
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    name
+                    NeedsNextActionMarker()
+                }
+            }
+        } else {
+            name
+        }
+    }
+
+    private var name: some View {
+        Text(summary.project.name)
+            .foregroundStyle(BBColor.textPrimary)
     }
 
     private var accessibilityText: String {
@@ -276,7 +303,9 @@ private struct NeedsNextActionMarker: View {
             Image(systemName: "exclamationmark.circle")
                 .foregroundStyle(BBColor.warning)
         }
+        .labelStyle(.titleAndIcon)
         .font(BBFont.meta)
         .foregroundStyle(BBColor.textTertiary)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }

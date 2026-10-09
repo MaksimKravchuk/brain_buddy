@@ -43,7 +43,7 @@ struct CommentsSection: View {
                     composer
                 }
             } header: {
-                Text(comments.isEmpty ? "Comments" : "Comments · \(comments.count)")
+                BBSectionHeader("Comments", count: comments.isEmpty ? nil : comments.count)
             } footer: {
                 if let errorMessage {
                     InlineProblemText(message: errorMessage)
@@ -54,11 +54,17 @@ struct CommentsSection: View {
 
     private var composer: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            TextField("Add a comment", text: $newBody, axis: .vertical)
-                .lineLimit(1...8)
-                .focused($isComposing)
-                .accessibilityLabel("New comment")
-                .frame(minHeight: 44)
+            Label {
+                TextField("Add a comment", text: $newBody, axis: .vertical)
+                    .lineLimit(1...8)
+                    .focused($isComposing)
+                    .accessibilityLabel("New comment")
+            } icon: {
+                Image(systemName: "plus")
+                    .accessibilityHidden(true)
+            }
+            .labelStyle(.bbRow)
+            .frame(maxWidth: .infinity, minHeight: BBMetrics.rowMinHeight, alignment: .leading)
             if !trimmedBody.isEmpty {
                 Button("Add comment", action: add)
                     .buttonStyle(.borderless)

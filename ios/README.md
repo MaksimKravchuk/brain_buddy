@@ -153,19 +153,27 @@ is also pinned to a commit SHA (with its tag in a comment).
 `ios.yml` uploads from `main` and from feature branches.
 
 - **`main`**: it starts when CI completes on a push to `main`. If that run
-  passed and its commit changed `ios/`, it uploads that commit, so every
-  `main` build passed `ios-kit` and `ios-app` first. The commit is compared
-  with its first parent, which covers a trunk landing and a merged or
-  squashed pull request; if several commits are pushed at once only the last
-  one is checked, so dispatch the workflow for anything that missed an
-  upload.
+  passed and its commit changed the app itself, it uploads that commit, so
+  every `main` build passed `ios-kit` and `ios-app` first. "The app itself"
+  is `BrainBuddy/`, `BrainBuddyWidgets/`, `Shared/`, the kit's `Sources/`,
+  `Package.swift`/`Package.resolved` and `project.yml`, minus Markdown
+  (`ci/testflight_changes.py`); tests, docs, `ci/`, `scripts/` and the macOS
+  app alone never upload. The commit is compared with its first parent,
+  which covers a trunk landing and a merged or squashed pull request; if
+  several commits are pushed at once only the last one is checked, so
+  dispatch the workflow for anything that missed an upload.
 - **Any other branch**: nothing uploads automatically. Run the workflow on
   that branch (*Actions → iOS TestFlight → Run workflow*, pick the branch) to
   upload its head straight away, without waiting for CI, for fast feedback
   on a phone. The build carries `<branch> @ <commit>`
   in Settings → About (the `BBBuildLabel` Info.plist key, from
-  `BB_BUILD_LABEL`), and the same text plus the commit subject goes into
-  TestFlight's *What to Test* (`ci/testflight_notes.py`, best effort).
+  `BB_BUILD_LABEL`).
+- **What to Test** on every build (`ci/testflight_changes.py`, written by
+  `ci/testflight_notes.py`, best effort): `<branch> @ <commit>`, the pull
+  request title (or the commit subject), and one line per commit that
+  changed the app — on `main` since the previous `main` commit, on a branch
+  since it left `main`. It stays under Apple's 4000-character cap, and the
+  run summary shows the same text.
 - **Manual run on `main`** uploads the current `main`, whether or not it
   changed `ios/`.
 
@@ -281,7 +289,7 @@ workflow*), or land a change under `ios/`.
 4. `xcodebuild -exportArchive` with `ci/ExportOptions.plist` (the team id is
    added to a temporary copy): method `app-store-connect`, destination
    `upload`, so the export uploads the build and its symbols directly.
-5. Writes `<branch> @ <commit> — <subject>` into the build's *What to Test*
+5. Writes the change list above into the build's *What to Test*
    through the App Store Connect API (`ci/testflight_notes.py`: standard
    library and the system `openssl` only, polls up to 15 minutes for the
    build to appear; a failure only warns).
