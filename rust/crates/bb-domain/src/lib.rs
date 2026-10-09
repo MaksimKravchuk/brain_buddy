@@ -12,12 +12,15 @@
 //!   per-owner/provider/consent-version remote consent, input and time limits.
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
 //!   allow-listed command proposals applied only after explicit confirmation.
+//! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
 pub mod ai_policy;
 pub mod calendar;
+pub mod children;
 pub mod normalization;
+pub mod organize;
 pub mod proposal;
 pub mod types;
