@@ -19,6 +19,8 @@
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
+//! * [`park`]: auto-park, the human yield and park acknowledgement over the
+//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
@@ -30,5 +32,6 @@ pub mod children;
 pub mod formulation;
 pub mod normalization;
 pub mod organize;
+pub mod park;
 pub mod proposal;
 pub mod types;
