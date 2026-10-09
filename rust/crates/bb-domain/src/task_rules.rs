@@ -128,7 +128,7 @@ fn existing_task<'a>(read_set: &'a ReadSet, id: &TaskId) -> Result<&'a Task, Dom
 }
 
 /// `TaskService._waiting_for`: stripped (Python `str.strip()`) and non-blank.
-fn required_waiting_for(raw: Option<&WaitingFor>) -> Result<WaitingFor, DomainError> {
+pub fn required_waiting_for(raw: Option<&WaitingFor>) -> Result<WaitingFor, DomainError> {
     let stripped = norm::strip(raw.map_or("", WaitingFor::as_str));
     if stripped.is_empty() {
         return Err(DomainError::field(
@@ -296,6 +296,20 @@ fn task_create(
         Some(&payload.tag_ids),
         None,
     )?;
+    let task = new_task(read_set, id, payload, inputs)?;
+    Ok(applied(vec![upsert(Record::Task(task))]))
+}
+
+/// The task a creation yields once its references are settled: Waiting note,
+/// order key, first formulation. Smart Add (`crate::smart_add`) builds its task
+/// through this too, after resolving or creating the classifications it names,
+/// so both creations stay one rule.
+pub fn new_task(
+    read_set: &ReadSet,
+    id: TaskId,
+    payload: &TaskCreate,
+    inputs: &ExecutionInputs,
+) -> Result<Task, DomainError> {
     let state = payload.state.task_state();
     let waiting_for = if payload.state == OpenList::Waiting {
         Some(required_waiting_for(payload.waiting_for.as_ref())?)
@@ -342,7 +356,7 @@ fn task_create(
         );
         started.write_clock_fields(&mut task).map_err(clock_error)?;
     }
-    Ok(applied(vec![upsert(Record::Task(task))]))
+    Ok(task)
 }
 
 /// `next_order_key`: one past the highest key of the list, `0` for an empty one.
