@@ -25,6 +25,9 @@
 //!   project display), with the server's ordering and keyset cursor.
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
+//! * [`review_decisions`]: the Review decision commands (`review.decide`,
+//!   `review.undo_decision`, bulk release and its Undo) over the formulation,
+//!   park and task rules.
 //! * [`smart_add`]: the deterministic Smart Add grammar, its resolution against
 //!   the read set, and `task.smart_add` (task plus resolved or created
 //!   classifications, with the typed alias bindings).
@@ -45,6 +48,7 @@ pub mod organize;
 pub mod park;
 pub mod proposal;
 pub mod queries;
+pub mod review_decisions;
 pub mod smart_add;
 pub mod task_rules;
 pub mod types;
