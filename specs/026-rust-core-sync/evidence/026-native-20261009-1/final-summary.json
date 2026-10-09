@@ -67,5 +67,15 @@
   "provider_correlation": "One provider: OpenAI. Four gpt-6.1-sol/high sessions and two gpt-6-astra/high sessions; not six independent providers.",
   "provenance_limit": "Runtime spawn selection is recorded; no CLI/external-adapter oracle or OS-enforced read-only attestation is fabricated.",
   "prior_attempts": "Preserved unchanged; the explicit owner instruction authorizes this native panel after them and supersedes the CLI-only/campaign-cap objection for this panel only.",
-  "implementation_permission": false
+  "implementation_permission": false,
+  "protocol_quality_checklist": {
+    "assessed": 12,
+    "satisfied": 12,
+    "scope": "written requirements only",
+    "reports": [
+      "protocol-architecture.json",
+      "protocol-testability.json",
+      "protocol-ux.json"
+    ]
+  }
 }

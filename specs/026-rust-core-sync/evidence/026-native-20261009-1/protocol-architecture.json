@@ -1,0 +1,71 @@
+{
+  "role": "architecture-consistency",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "review-checklist-disposition",
+  "items": [
+    {
+      "id": "CHK001",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/runtime-ffi.md \u2014 Native runtime surface: execute/cancel",
+        "contracts/sync-v1.md \u00a7\u00a73\u20135, \u00a77 Applying Changes on Device, \u00a711 Receipts and errors",
+        "data-model.md \u2014 Local durable records and recovery"
+      ],
+      "reason": "Written contracts separate durable local success from server acceptance; accepted no-op completes from its receipt, lost delivery remains unknown, and accepted mutations retain pending intent until same-generation feed/snapshot inclusion. ACKs cannot mutate the confirmed base or jump the cursor."
+    },
+    {
+      "id": "CHK002",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/sync-v1.md \u00a7\u00a72\u20133, \u00a75 Receipts and Unknown Outcomes",
+        "contracts/command-catalog.md \u2014 Payload translation and Smart Add bindings",
+        "data-model.md \u2014 Local durable records and recovery",
+        "plan.md \u00a77 steps 5\u20136"
+      ],
+      "reason": "Immutable IDs/envelopes, explicit dependencies and receipt-based revision/alias substitution are defined. Migration retains proven legacy aliases and uncertain sends; ordinary reset preserves active epochs, explicit closure creates durable fresh intake for new work, and uncertainty is never automatically rekeyed."
+    },
+    {
+      "id": "CHK003",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/command-catalog.md \u2014 Every writer enters the same boundary; consent command and legacy writer rows",
+        "contracts/sync-v1.md \u00a74 including Legacy Navigator revoke exception; \u00a76 Review projection inventory",
+        "data-model.md \u2014 Ownership and canonical fields; Server synchronization and work records",
+        "tasks.md T025\u2013T029 and PR-28"
+      ],
+      "reason": "The catalog assigns native, legacy HTTP/CLI/MCP, Capture ports, maintenance/jobs, operator paths and purge/export to trusted ingress/ownership. Tasks and complete public native Review changes use one authoritative task transaction; other modules keep their ports and recovery contracts. The corrected legacy revoke exception retains both replay identities while publishing consent changes through that same boundary."
+    },
+    {
+      "id": "CHK004",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/sync-v1.md \u00a76 Delta Feed and Snapshot; \u00a711 Feed and oversized atomic effects and Snapshot manifest and pages",
+        "contracts/command-catalog.md \u2014 Limits and compatibility",
+        "data-model.md \u2014 Domain invariants and transitions"
+      ],
+      "reason": "Large accepted archive/tag/bulk/session effects use bounded immutable byte transfers, streaming staging and whole-transaction activation. The 500-item accepted bulk limit is retained without a 500-changed-record ceiling; legacy request limits remain supported and page limits do not permit partial domain visibility."
+    },
+    {
+      "id": "CHK005",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/sync-v1.md \u00a75 Receipts and Unknown Outcomes, \u00a76 retention paragraphs, \u00a79 restore/control-ledger policy, \u00a711 transfer invalidation",
+        "data-model.md \u2014 Retention, deletion and export",
+        "adr-draft.md \u2014 Decisions being amended and Exact amendment proposal: Retention additions",
+        "plan.md \u00a77 backup/restore paragraph; quickstart.md \u2014 Cutover and rollback drill"
+      ],
+      "reason": "Written rules preserve ordinary response content expiry at 24 hours, scoped Capture/CRT exceptions, source-specific Review snapshot expiry, and until-purge content-free dedup/bindings. Feed/snapshot/transfer copies inherit source expiry and deletion; backups have a bounded horizon, independent controls prevent resurrection, and purge cannot complete before affected restore material is retired. These are proposed requirements and governance amendments, not measured cleanup or approved retention changes."
+    },
+    {
+      "id": "CHK006",
+      "status": "satisfied",
+      "evidence": [
+        "contracts/sync-v1.md \u00a74 Server Transaction, \u00a77 Applying Changes on Device, \u00a79 Compatibility, \u00a711 authorization and SSE",
+        "contracts/runtime-ffi.md \u2014 open/subscribe/sync_now/close lifecycle",
+        "plan.md \u00a75 Server and Background Jobs; \u00a77 restore boundary; \u00a79 runtime defaults",
+        "data-model.md \u2014 Server synchronization and work records; Local durable records and recovery"
+      ],
+      "reason": "Current Identity/trusted job authority is required at ingress and retained receipt reads. Workspace/session/local-sync/server and feed/access generations fence responses, registrations, snapshots and account changes; restores reconcile independent controls behind closed access. Jobs use durable effect identity with current lease/fence checks at commit, and external unknown effects require reconciliation. Dedicated legacy revoke mapping does not weaken device IDs or caller-origin checks."
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "role": "ux-accessibility-mobile",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "review-checklist-disposition",
+  "items": [
+    {
+      "id": "CHK008",
+      "status": "satisfied",
+      "evidence": [
+        "specs/026-rust-core-sync/design.md, Screen inventory and State inventory: M-01/D-01 status, M-02/D-02 conflicts, M-03/D-03 recovery and M-04/D-04 AI each carry stable screen/state IDs and FR mappings; loading, empty, error, partial, offline and interruption outcomes are specified or explicitly justified N/A.",
+        "specs/026-rust-core-sync/design.md, M-02/D-02.08-.12 and dependent-action explanation: preserved versions/drafts, renewed approval after changes, keep/reapprove/discard dependent actions, named discard confirmation and safe focus.",
+        "specs/026-rust-core-sync/design.md, M-03/D-03.01-.13 and account-switch explanation: non-destructive reset, incomplete-import rejection, uncertain old submissions, update/read-only recovery and account-specific Cancel/export/confirmed sign-out removal with current counts.",
+        "specs/026-rust-core-sync/design.md, Affordance \u2192 requirement map; Mobile viability; Keyboard and focus: explicit FR-backed actions, answer/radio accessible labels, safe opening focus, Escape/Back and opener restoration, one-time announcements and mobile target/target-size requirements.",
+        "specs/026-rust-core-sync/design.md:106-112 and :140-141; design/sync-states.html:106-110: corrected M-04/D-04.16-.20 question/answer states specify focus, once-only save, separate save/inference failures, revision adoption, unsaved-answer warning and durable drafts.",
+        "specs/026-rust-core-sync/quickstart.md Q02/Q05/Q09/Q12 and tasks.md PR-45/46/49/59/60: planned recovery/account-isolation and native accessibility/user-journey acceptance reference those written states."
+      ],
+      "reason": "The affected UX states, account-switch choices, focus behavior and recovery outcomes are specified and traceable to requirements. The original missing clarifying-question branch was resolved in the corrected written artifacts. This satisfaction concerns planning quality; it does not attest native rendering, runtime accessibility or owner design approval."
+    },
+    {
+      "id": "CHK009",
+      "status": "satisfied",
+      "evidence": [
+        "specs/026-rust-core-sync/spec.md FR-018\u2013FR-021 and User Story 5: suitable local execution, manual continuation without AI, current recipient-specific consent, validated proposals with explicit confirmation and independent AgentRun/Task authority.",
+        "specs/026-rust-core-sync/plan.md \u00a76 AI and Agents and \u00a79 runtime defaults: deterministic/local-first policy, device/language/memory suitability, no prohibited remote fallback, distinct sync/AI permission and independent weekly_review/consent gates.",
+        "specs/026-rust-core-sync/contracts/runtime-ffi.md, AI adapter port: typed policy/proposal, current authenticated consent check, explicit command confirmation, cancellation and owner/consent generation fences; final paragraph preserves question/proposal union and once-only answer-save/rerun phases.",
+        "specs/026-rust-core-sync/design.md, M-04/D-04.01-.20: local availability/unavailability, denied/revoked consent, provider/input-version changes, stale proposal and explicit apply, truthful cancellation/interruption and corrected clarification branch. Its .12 applied state and Primary loop impact explicitly prevent automatic Task completion or conflation with AgentRun.",
+        "specs/026-rust-core-sync/contracts/command-catalog.md, Every writer enters the same boundary: suggestion calls are not Task commands; only confirmed Tasks effects enter the feed while existing consent/budget/operation contracts remain in force.",
+        "specs/026-rust-core-sync/quickstart.md Q09 and tasks.md PR-47/48/49/59/60: planned acceptance checks prohibited transmission, invalid/stale output, confirmation, revocation, cancellation, interrupted requests and AgentRun success without Task mutation."
+      ],
+      "reason": "Written local AI policy, consent denial/revocation, proposal confirmation and Task/AgentRun separation agree across the spec, design, runtime contract and planned acceptance. The clarified answer branch changes notes only through the explicit ordinary command and rechecks consent before further inference. No runtime AI capability, consent enforcement or implementation result is claimed."
+    }
+  ]
+}
