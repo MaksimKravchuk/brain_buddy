@@ -114,8 +114,11 @@ fn guarded<T>(state: &AtomicU8, work: impl FnOnce() -> Result<T, Failure>) -> Re
         let _ = state.compare_exchange(OPEN, POISONED, Ordering::AcqRel, Ordering::Acquire);
         Err(Failure::new("INTERNAL_ERROR", None))
     });
+    // A concurrent call that panicked poisons the runtime for every call still
+    // in flight: none of them may report success from an unusable runtime.
     match state.load(Ordering::Acquire) {
         CLOSED => Err(Failure::new("CANCELLED", None)),
+        POISONED => Err(Failure::new("INTERNAL_ERROR", None)),
         _ => outcome,
     }
 }
@@ -321,6 +324,17 @@ mod bridge_tests {
             Ok(7)
         });
         assert_eq!(result, Err(Failure::new("CANCELLED", None)));
+    }
+
+    #[test]
+    fn bridge_poisoning_mid_flight_fails_a_concurrent_success() {
+        let state = open_state();
+        let result = guarded(&state, || {
+            // Another thread's call panics while this one is running.
+            state.store(POISONED, Ordering::Release);
+            Ok(7)
+        });
+        assert_eq!(result, Err(Failure::new("INTERNAL_ERROR", None)));
     }
 
     #[test]
