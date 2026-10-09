@@ -34,11 +34,15 @@
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
 //! * [`types`]: the frozen value types.
+//! * [`dispatch`]: the one tested entry point that routes every catalog command
+//!   to the single family that decides it and every query to the single family
+//!   that answers it.
 
 pub mod ai_policy;
 pub mod archive;
 pub mod calendar;
 pub mod children;
+pub mod dispatch;
 pub mod formulation;
 pub mod normalization;
 pub mod organize;

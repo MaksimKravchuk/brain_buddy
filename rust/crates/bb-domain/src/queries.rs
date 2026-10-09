@@ -42,6 +42,20 @@ const MAX_LIMIT: u32 = 200;
 /// days, UTC, not activated), so no task has advisory instants.
 const DEFAULT_THRESHOLD_DAYS: u32 = 14;
 
+/// Whether this family answers the query: the task, project and tag reads.
+/// The Review reads belong to `review_sessions` (the dispatcher's claim).
+pub fn handles_query(query: &Query) -> bool {
+    matches!(
+        query,
+        Query::TaskList { .. }
+            | Query::TaskDetail { .. }
+            | Query::ListCounts {}
+            | Query::Projects { .. }
+            | Query::ProjectDisplay { .. }
+            | Query::Tags {}
+    )
+}
+
 /// Answers one task, project or tag query.
 ///
 /// The Review queries belong to the Review sessions family
