@@ -397,7 +397,7 @@ export function InboxStep(): React.JSX.Element {
         field: PROJECT,
         message: `“${name}” is now a project`,
         undoName: "Made a project",
-        restore: { fields: { ...(title === task.title ? {} : { title: task.title }), project_id: null }, failure: "its title and project weren't put back", archive: project }
+        restore: { fields: { ...(title === task.title ? {} : { title: task.title }), project_id: task.project_id }, failure: "its title and project weren't put back", archive: project }
       });
     });
   };

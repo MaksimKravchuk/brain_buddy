@@ -945,6 +945,21 @@ describe("020-FR-034 Inbox step: Make it a project", () => {
     expect(lastToast()[0]).toBe("“Buy printer paper” is back in your Inbox");
   });
 
+  it("020-FR-048 Undo gives back the project an item already had before it was made a project", async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValueOnce(queue([{ ...paper, project_id: "proj_1" }, dentist]));
+    renderInRun(<InboxStep />);
+    await open(user);
+    await user.type(firstAction(), "Measure the room");
+    await user.click(submit());
+    await screen.findByRole("heading", { name: "Call the dentist" });
+
+    await act(async () => lastToast()[1]?.action?.onAction());
+
+    expect(updateTask).toHaveBeenLastCalledWith("inbox_1", { title: "Buy printer paper", project_id: "proj_1", expected_revision: 6 }, expect.any(String));
+    expect(archiveProject).toHaveBeenCalledWith("proj_new", 2, expect.any(String));
+  });
+
   it("020-FR-048 an Undo whose project cannot be archived says so; the item is back in the Inbox", async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValueOnce(queue([paper, dentist]));
