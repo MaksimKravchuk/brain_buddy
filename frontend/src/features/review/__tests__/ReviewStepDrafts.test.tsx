@@ -17,13 +17,14 @@ vi.mock("../../../api/review", async () => {
 });
 vi.mock("../../../api/client", async () => {
   const actual = await vi.importActual<typeof import("../../../api/client")>("../../../api/client");
-  return { ...actual, apiClient: { ...actual.apiClient, listProjects: vi.fn(), createTask: vi.fn(), transitionTask: vi.fn(), updateTask: vi.fn() } };
+  return { ...actual, apiClient: { ...actual.apiClient, listProjects: vi.fn(), createProject: vi.fn(), createTask: vi.fn(), transitionTask: vi.fn(), updateTask: vi.fn() } };
 });
 
 const getQueue = vi.mocked(reviewApi.getQueue);
 const decide = vi.mocked(reviewApi.decide);
 const progress = vi.mocked(reviewApi.progress);
 const listProjects = vi.mocked(apiClient.listProjects);
+const createProject = vi.mocked(apiClient.createProject);
 const createTask = vi.mocked(apiClient.createTask);
 const transitionTask = vi.mocked(apiClient.transitionTask);
 const updateTask = vi.mocked(apiClient.updateTask);
@@ -90,6 +91,18 @@ const cases: FormCase[] = [
     save: "Move to Waiting for",
     back: "Back",
     saved: () => transitionTask.mock.calls[0]
+  },
+  {
+    name: "Inbox step: Make it a project (first next action)",
+    step: "inbox",
+    items: [paper],
+    key: "step.review_1.inbox.inbox_1.project_action",
+    trigger: "Make it a project",
+    field: () => screen.getByRole("textbox", { name: "First next action" }),
+    initial: "",
+    save: "Make it a project",
+    back: "Back",
+    saved: () => createProject.mock.calls[0]
   },
   {
     name: "Waiting step: Create a follow-up",
@@ -172,6 +185,7 @@ beforeEach(() => {
   window.localStorage.clear();
   signIn();
   listProjects.mockResolvedValue([project]);
+  createProject.mockResolvedValue(project);
   createTask.mockResolvedValue(taskFixture({ id: "t_new", title: "Saved" }));
   updateTask.mockResolvedValue({ ...paper, revision: paper.revision + 1 });
   transitionTask.mockResolvedValue({ ...paper, state: "waiting", revision: paper.revision + 1 });
@@ -182,7 +196,7 @@ afterEach(() => {
   cleanup();
   onlineManager.setOnline(true);
   vi.restoreAllMocks();
-  for (const mock of [getQueue, decide, progress, listProjects, createTask, transitionTask, updateTask]) {
+  for (const mock of [getQueue, decide, progress, listProjects, createProject, createTask, transitionTask, updateTask]) {
     mock.mockReset();
   }
   window.localStorage.clear();
