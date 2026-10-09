@@ -1337,5 +1337,135 @@ Path(prefix + "0").write_bytes(b"wrong-certificate" if wrong else b"synthetic-ce
             self.assertIn(name, readme)
         self.assertIn("CI never revokes certificates automatically", readme)
 
+
+class TestFlightChangesTests(unittest.TestCase):
+    """main uploads only app changes; What to Test lists the commits that changed the app."""
+
+    SCRIPT = REPO_ROOT / "ios/ci/testflight_changes.py"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self._tmp.name)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "test@example.com")
+        self.git("config", "user.name", "Test")
+        self.commit("chore: start", {"README.md": "start\n"})
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=self.repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def commit(self, subject: str, files: dict[str, str]) -> str:
+        for name, content in files.items():
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", subject)
+        return self.git("rev-parse", "HEAD")
+
+    def run_script(self, *args: str) -> str:
+        result = subprocess.run(
+            [sys.executable, str(self.SCRIPT), *args],
+            cwd=self.repo,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def decide(self, base: str, head: str) -> str:
+        return self.run_script("decide", "--base", base, "--head", head)
+
+    def test_only_app_paths_upload(self) -> None:
+        base = self.git("rev-parse", "HEAD")
+        not_app = {
+            "ios/BrainBuddyKit/Tests/CoreTests/ReducerTests.swift": "test\n",
+            "ios/ci/testflight_notes.py": "ci\n",
+            "ios/scripts/swift-linux.sh": "sh\n",
+            "ios/BrainBuddy/README.md": "docs\n",
+            "ios/AGENTS.md": "docs\n",
+            "macos/BrainBuddyMac/App.swift": "mac\n",
+            "backend/app/main.py": "py\n",
+        }
+        for path, content in not_app.items():
+            with self.subTest(path=path):
+                head = self.commit(f"chore: touch {path}", {path: content})
+                self.assertEqual(self.decide(f"{head}^", head), "false")
+        self.assertEqual(self.decide(base, self.git("rev-parse", "HEAD")), "false")
+
+        app = [
+            "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift",
+            "ios/BrainBuddyWidgets/InboxWidget.swift",
+            "ios/Shared/PrivacyInfo.xcprivacy",
+            "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer.swift",
+            "ios/BrainBuddyKit/Package.swift",
+            "ios/project.yml",
+        ]
+        for path in app:
+            with self.subTest(path=path):
+                head = self.commit(f"feat(ios): touch {path}", {path: "app\n"})
+                self.assertEqual(self.decide(f"{head}^", head), "true")
+
+    def test_merged_pull_request_is_judged_and_described_as_a_whole(self) -> None:
+        base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("feat(ios): compact task rows", {"ios/BrainBuddy/Components/TaskRow.swift": "row\n"})
+        self.commit("test(ios): cover the reducer", {"ios/BrainBuddyKit/Tests/T.swift": "t\n"})
+        self.commit("docs: explain rows", {"docs/rows.md": "d\n"})
+        self.commit("fix(ios): capture panel height", {"ios/BrainBuddy/Screens/Capture/CaptureSheet.swift": "c\n"})
+        self.git("checkout", "-q", "main")
+        self.git(
+            "merge", "-q", "--no-ff", "feature",
+            "-m", "Merge pull request #305 from someone/feature",
+            "-m", "iOS compact layout",
+        )
+        head = self.git("rev-parse", "HEAD")
+
+        self.assertEqual(self.decide(f"{head}^", head), "true")
+        notes = self.run_script("notes", "--base", base, "--head", head, "--branch", "main")
+        lines = notes.splitlines()
+        self.assertEqual(lines[0], f"main @ {head[:7]}")
+        self.assertEqual(lines[1], "iOS compact layout (#305)")
+        self.assertIn("Changes in the app:", lines)
+        self.assertTrue(any(line.endswith("feat(ios): compact task rows") for line in lines))
+        self.assertTrue(any(line.endswith("fix(ios): capture panel height") for line in lines))
+        self.assertNotIn("cover the reducer", notes)
+        self.assertNotIn("explain rows", notes)
+        self.assertNotIn("Merge pull request", notes)
+
+    def test_notes_say_so_when_nothing_changed_the_app_and_stay_under_apples_cap(self) -> None:
+        base = self.git("rev-parse", "HEAD")
+        head = self.commit("docs: only docs", {"docs/a.md": "a\n"})
+        notes = self.run_script("notes", "--base", base, "--head", head, "--branch", "claude/x")
+        self.assertIn("No app changes in this range.", notes)
+
+        for index in range(120):
+            head = self.commit(
+                f"feat(ios): change number {index} " + "with a long description " * 4,
+                {"ios/BrainBuddy/File.swift": f"{index}\n"},
+            )
+        notes = self.run_script("notes", "--base", base, "--head", head, "--branch", "main")
+        self.assertLessEqual(len(notes), 4000)
+        self.assertRegex(notes.splitlines()[-1], r"^…and \d+ more$")
+
+    def test_workflow_uses_the_script_for_the_decision_and_the_notes(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/ios.yml").read_text()
+        decide = workflow.split("      - name: Decide\n", 1)[1].split("\n  testflight:", 1)[0]
+        self.assertIn("ios/ci/testflight_changes.py decide", decide)
+        self.assertIn("ios/ci/testflight_changes.py notes", decide)
+        self.assertIn("notes: ${{ steps.decide.outputs.notes }}", workflow)
+        self.assertIn("fetch-depth: 0", workflow.split("  decide:", 1)[1].split("  testflight:", 1)[0])
+        notes_step = workflow.split("      - name: Write the changes into TestFlight's What to Test\n", 1)[1]
+        notes_step = notes_step.split("\n      - name:", 1)[0]
+        self.assertIn("NOTES: ${{ needs.decide.outputs.notes }}", notes_step)
+        self.assertIn('--notes "${NOTES:-', notes_step)
+        self.assertNotIn("grep -q '^ios/'", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
