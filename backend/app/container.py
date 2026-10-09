@@ -46,6 +46,8 @@ from app.modules.tasks.navigator import (
 )
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
+from app.modules.tasks.rust_adapter import RustCore
+from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.repositories import (
     CrtCommandRepository,
     FeatureFlagOverrideRepository,
@@ -452,9 +454,28 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
             "openai": OpenAIValidationProvider(),
         },
     )
+
     # The task module's one time seam (spec 020, research R21); tests replace it
     # through the ``frozen_clock`` fixture rather than patching ``utcnow``.
-    task_service = TaskService(task_repo, clock=utcnow)
+    def _rust_core_sync_for_owner(owner_id: str) -> bool:
+        """Whether ``rust_core_sync`` is effective for one owner (spec 026 T018).
+
+        Read on every task or organization write, so turning the flag off
+        returns the next command to the Python rules at once. A missing user
+        fails closed.
+        """
+
+        user = user_repo.get_by_id(owner_id)
+        if user is None:
+            return False
+        return feature_flag_service.is_effective("rust_core_sync", user)
+
+    task_service = TaskService(
+        task_repo,
+        clock=utcnow,
+        rust_facade=RustTaskFacade(RustCore(), task_repo),
+        rust_core_enabled=_rust_core_sync_for_owner,
+    )
     task_title_autocomplete_service = TaskTitleAutocompleteService(
         repository=task_repo,
         provider=build_title_completion_provider(

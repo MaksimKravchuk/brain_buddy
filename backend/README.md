@@ -2,7 +2,7 @@
 
 FastAPI service providing CRUD, validation, and versioning APIs for the Brain Buddy knowledge graph. Refer to the project root README for setup instructions.
 
-The backend wheel also ships `bb_core`, the PyO3 bridge to the shared Rust core (`rust/bindings/python`, feature 026), so building or installing it needs Rust and a C compiler. The build backend is maturin; `backend/bb_core.pyi` is the type stub for the extension and must change with `rust/bindings/python/src/lib.rs`. Python reaches it only through `app/modules/tasks/rust_adapter.py`.
+The backend wheel also ships `bb_core`, the PyO3 bridge to the shared Rust core (`rust/bindings/python`, feature 026), so building or installing it needs Rust and a C compiler. The build backend is maturin; `backend/bb_core.pyi` is the type stub for the extension and must change with `rust/bindings/python/src/lib.rs`. Python reaches it only through `app/modules/tasks/rust_adapter.py`. With the default-OFF `rust_core_sync` flag effective for an owner, `TaskService` decides task, project and tag commands (`task.create`/`update`/`transition`, `project.*`, `tag.*`) through `app/modules/tasks/rust_task_facade.py`; authorization, idempotency, repository writes and response DTOs stay in Python, and with the flag off the Python rules run unchanged.
 
 ## Configuration
 
