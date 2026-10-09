@@ -60,6 +60,44 @@ The sizing spike is not executed: neither cargo nor rustc is available on this e
 
 Correction validation: `make check-specs` passed (247 tests, one normal skip); direct v2 dependency/path validation, 34/34 requirement coverage, 57 unique task assignments, Rust/FFI product-file counts, relative Markdown links and `git diff --check` passed. These checks validate the specification, not future implementation size or timing. Exact-SHA CI and subsequent reviewer results are recorded on PR #305. Product implementation, migration, deployment and owner sign-off remain outside this documentation correction.
 
+## Requested formal review — October 9, attempt 2
+
+The owner explicitly requested the formal review after the PR corrections. The canonical [speckit-review skill](../../.specify/agent-commands/speckit-review/SKILL.md) was applied to published source commit `a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c`. Preflight passed for `026-completion-20261009-2`, with high risk and artifact digest `cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17`.
+
+All six configured read-only Codex CLI processes were launched. Each failed to connect to `wss://chatgpt.com/backend-api/codex/responses`: `HTTP CONNECT failed with status 403`. The clients fell back to HTTPS and waited for network access without producing a review. A separate credential-free HEAD request confirmed the proxy CONNECT denial. The six owned blocked processes were stopped; the harness returned failure for every role. The earlier automatic-approval execution rejection is not the blocker for this attempt: the managed environment's destination policy is.
+
+The canonical aggregation is **escalated, 0/6 completed reviews**, no findings or human sign-off. This does not mean there are no defects: no model verdict was obtained. The full process stderr remained captured until process exit, so earlier progress messages about running processes did not establish that reviewers had reached a model or read the specification.
+
+Evidence:
+
+- [Preflight context](evidence/026-completion-20261009-2/planning-context.json)
+- [Canonical summary](evidence/026-completion-20261009-2/planning-review-summary.json)
+- [Per-role execution failures and log hashes](evidence/026-completion-20261009-2/execution-failures.json)
+
+The preflight inputs remained unchanged while the hosted audits below ran; their subsequent fixes change the digest. Attempts 1 and 2 remain immutable historical evidence, both escalated with no completed canonical reviewer reports. No third canonical campaign, fallback approval, changed network route, altered gate or invented sign-off is introduced. The skill's hard two-campaign cap now applies: land the fixes and stop, retain explicit open lanes, or obtain a real complete founder-acceptance record. Enabling the required destination through the supported environment configuration would resolve a connectivity prerequisite only; it would neither reset that history nor grant approval.
+
+## Hosted content audit and finding closure — October 9
+
+After the CLI destination denial, six actual hosted read-only reviewers audited the unchanged `a060ddd` core digest `cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17`. Four used `gpt-6.1-sol`/high and two used `gpt-6-astra`/high. All share the OpenAI provider; separate sessions do not establish six independent providers/models. The [audit evidence index](evidence/hosted-review-20261009/README.md) preserves their original schema-valid reports and runtime selection metadata. These reports are not installed as canonical CLI or external-adapter results.
+
+There were eight important observations, deduplicated to six defects, and one advisory. All were corrected in the planning package:
+
+| Finding | Correction and planned evidence |
+| --- | --- |
+| Smart Add aliases disappear after 24-hour receipt redaction | Typed content-free `id_bindings` survive until purge and remain available to authorized dependency recovery. Q10/PR-50 combine lost ACK, extended offline time and renamed classification with the original dependent envelope. |
+| Selected SSE transport has no contract/server owner | The authenticated route, content-free events, per-connection authority, shared committed-counter publisher, generations, bounded queues and reconnect are specified. New PR-58 feeds PR-40; SC-004 traverses the actual stream across separate writer/stream processes. |
+| Sync errors omit accepted wrong-owner 404 semantics | Unknown and foreign resources share owner-safe 404; 403 is limited to policy failures in an authorized scope. Preauthorization errors disclose no scope/generation. Q05 and authority/API/SSE slices cover equivalence. |
+| Apple AI slice points to transcription instead of the Weekly Review journey | PR-49 owns the shared suggestion model; PR-59/60 own actual iPhone/Mac entry points and consent/proposal/apply sheets, acknowledged as proposed additions. The pilot depends on both. Their caps remain subject to measurement before boundary approval. |
+| Conflict descendants lack actionable resolution states | Added conflict .11–12 with preserve/reapprove/discard choices, exact copy, focus and interruption behavior; static mock and Q02/Q12 agree. |
+| AI cancellation/interruption lacks visible outcomes | Added AI .13–15 with truthful sent-data copy, live-request reopening, explicit retry after process loss and late-result rejection; Q09 and the mock agree. The full inventory now has 100 combinations. |
+| PR-08/10 Swift filters select nonexistent suite names (advisory) | Filters now name `ReducerProjectTests|ReducerTagTests` and `ReducerSubtaskTests|ReducerCommentTests`. Declaration inspection verifies those suites exist; actual execution remains an implementation check. |
+
+Four original reviewers performed bounded closure checks of those specific corrections. Every distinct important finding is resolved in the text, with no consequential defect reported in the fixes. The [closure reports](evidence/hosted-review-20261009/README.md#targeted-closure) bind to corrected core digest `5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99`. They are targeted rereads, not a fresh full campaign or approval of unimplemented behavior. The original `changes-required` reports remain unchanged.
+
+Current structural checks pass: 60 unique tasks/slices, 34/34 requirements, valid dependency/path map and declared product-file counts, relative Markdown links, six original report schemas, and `git diff --check`. Static HTML parsing confirms balanced tags, unique IDs, 67 explicitly typed buttons and 50 paired rows / 100 combinations. Rendering, native accessibility, timing, FFI sizing and product acceptance remain unverified. Accepted governance, all human approvals and canonical implementation permission remain pending; no task is marked implemented.
+
+`make verify-all` was attempted for these corrections. The default sandbox again prevented loopback sockets in the production-smoke unit tests. A socket-enabled rerun passed the complete `check-specs` and `validate-ci` stages, then stopped before backend lint/tests because `ruff` is not installed (`Error 127`). This is not a passing full local product suite. No production endpoint, release or migration was invoked. Exact-SHA GitHub checks for the published correction are recorded on PR #305; previous `a060ddd` CI is not evidence for this new commit.
+
 ## Historical verification — October 8
 
 Date: 2026-10-08. The subject is the documentation package, not a Rust or new-sync implementation. Product code, data, credentials, CI configuration, and production are unchanged. The owner's English-only documentation rule is recorded in `AGENTS.md`.

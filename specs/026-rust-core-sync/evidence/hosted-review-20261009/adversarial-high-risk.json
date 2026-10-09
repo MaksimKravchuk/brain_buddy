@@ -1,0 +1,43 @@
+{
+  "role": "adversarial-high-risk",
+  "verdict": "changes-required",
+  "summary": "Read-only hosted-agent adversarial audit of source commit a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c and unchanged core artifact digest cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17. One consequential retention/recovery contradiction remains: the explicit surviving receipt fields omit Smart Add identity bindings required by immutable dependent commands. Current authorization, commit ordering, ACK/feed separation, reset/live-queue activation, chunk atomicity, restore controls and stale-worker boundaries were reviewed without an additional substantiated defect. This is an actual independent hosted-agent audit, not canonical approval or replacement evidence for the six official CLI invocations that failed with network-policy CONNECT 403; the formal campaign remains escalated. Pending human approvals and unmeasured sizing/performance are disclosed gates, not findings or completed evidence.",
+  "reviewed_files": [
+    "AGENTS.md",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/approval.md",
+    "docs/decisions/0027-native-task-weekly-review-and-auto-park.md",
+    "docs/decisions/0028-modern-identity-authority.md",
+    "docs/data-retention.md",
+    "backend/app/modules/tasks/service.py"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "retention-dependent-command-recovery",
+      "description": "Retain Smart Add alias bindings after the 24-hour response deadline. The catalog makes those bindings protected content-free receipt metadata and requires later immutable commands to resolve their after_command/alias_id references from the accepted receipt. However, the normative retention whitelist and durable receipt table omit id_bindings. A supported counterexample is: device A queues Smart Add with a provisional project/tag ID and a subsequent dependent task using that alias; the server resolves Smart Add to an existing normalized-name match, commits, and its ACK is lost; A stays offline for more than 24 hours. Following the current whitelist removes the only durable alias-to-existing-ID proof. The predecessor can be reported accepted, but the dependent command cannot execute as promised. Current-state lookup cannot safely reconstruct the mapping after another device renames that classification, moves the first task, or removes its membership. Recreating or rekeying the intent would violate the immutable dependency/recovery contract. This breaks FR-004/005/010 and US1 acceptance scenario 3 under the explicitly supported extended-offline case.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:97 explicitly retains only (scope, command ID, fingerprint, outcome/code, commit_seq, result_versions) after redacting the full response; id_bindings is absent.",
+        "specs/026-rust-core-sync/data-model.md:47 lists the persisted Command receipt fields, again without identity bindings; the local identity_aliases table at line 65 is limited to proven legacy aliases and does not supply the missing server proof.",
+        "specs/026-rust-core-sync/contracts/command-catalog.md:18 requires Smart Add to return proposed-classification-ID to existing-ID bindings; line 39 requires later unresolved references to be resolved from the accepted receipt and calls those bindings content-free metadata.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:210 makes id_bindings a required terminal-receipt field, while lines 45-51 prohibit rewriting an immutable envelope and distinguish an uncertain outcome from authorized replacement.",
+        "backend/app/modules/tasks/service.py:1784-1792 and 1832-1840 establish that current supported name-only Smart Add reuses an existing project/tag after normalized-name matching, so the proposed ID need not equal the accepted ID.",
+        "specs/026-rust-core-sync/quickstart.md:56 Q10 covers response expiry and retained replay, and sync-v1.md:244 separately covers Smart Add alias reuse, but neither combines expiry/lost ACK with an alias-dependent command."
+      ],
+      "recommendation": "Add typed, scope-bound id_bindings to the explicit durable receipt schema and post-redaction whitelist, preserve them until the receipt is purged, and return/use them for authorized recovery and dependency resolution even when result_redacted is true. Keep the existing 24-hour text limit. Extend the already planned receipt/retention fault scenario with lost Smart Add ACK, more than 24 hours offline, a classification rename or task membership change, and a dependent alias command; verify that its original immutable identity still resolves without recreating any entity."
+    }
+  ],
+  "product_decisions": []
+}

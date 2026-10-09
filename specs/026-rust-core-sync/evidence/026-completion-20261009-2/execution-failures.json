@@ -1,0 +1,70 @@
+{
+  "run_id": "026-completion-20261009-2",
+  "source_commit": "a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c",
+  "artifacts_digest": "cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17",
+  "cli_version": "codex-cli 0.159.0-alpha.3",
+  "configured_model": "gpt-5.6-sol",
+  "configured_reasoning_effort": "xhigh",
+  "sandbox": "read-only",
+  "launched_lenses": 6,
+  "completed_reviews": 0,
+  "failure_kind": "managed-environment-destination-policy-denial",
+  "independent_connectivity_probe": "curl HEAD to https://chatgpt.com/backend-api/codex/responses, without credentials: CONNECT tunnel failed, response 403",
+  "termination": "After confirming the destination denial, only the six owned blocked Codex reviewer processes were stopped with SIGTERM. The harness recorded a failure for each; no review was fabricated.",
+  "failures": [
+    {
+      "role": "requirements-consistency",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "03e1acdbf400401e9023f4483b86dd6e4448c737c288fa0d5ccde9b741c73d58"
+    },
+    {
+      "role": "architecture-consistency",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "ed3372db3129c8e5066af79f5baa4b8b629b18f3eccbdb7c57305ce883f5f944"
+    },
+    {
+      "role": "testability-evidence",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "0b4d5d0a931eacadbe42c8134e6189089ff95ff78496f0c4b60062ef01b1b21a"
+    },
+    {
+      "role": "privacy-consent-security",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "1fe43df8a8c5cebc331a048061e05aec07ada49af8429245f6ac8717aad7a4f5"
+    },
+    {
+      "role": "ux-accessibility-mobile",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "16393337be202fcc1df9d5212633f4da59dfc13e5199e535316be5eb47c87449"
+    },
+    {
+      "role": "adversarial-high-risk",
+      "harness_exit_code": 1,
+      "review_produced": false,
+      "diagnostic": "Proxy connection failed: HTTP CONNECT failed with status 403",
+      "destination": "wss://chatgpt.com/backend-api/codex/responses",
+      "fallback_diagnostic": "Reconnecting... waiting for network",
+      "raw_log_sha256": "5bf50c9e6fec25a4527536da1cdcbc1da33e53aab48d3a98eedf35402e331c9e"
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "role": "requirements-consistency",
+  "verdict": "changes-required",
+  "summary": "Read-only hosted planning audit of the completed proposal at source a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c, artifact digest cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17; a read-only git diff confirmed the requested core artifacts are unchanged. All requested planning artifacts were reviewed, including all 57 slice objects; accepted/current sources were consulted only for the concrete claims below, with scoped searches rather than an exhaustive code audit. Three consequential cross-artifact gaps require technical correction. Existing pending owner design/governance/boundary acceptance is accurately disclosed and is not counted as an invented defect or a new product question. No implementation, benchmark, product acceptance or tests were run. This report is actual hosted-agent evidence, not a canonical gate pass: all six CLI reviewers failed proxy CONNECT 403, and the formal campaign remains escalated with 0/6 completed reviews.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/approval.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/verification.md",
+    "specs/026-rust-core-sync/evidence/026-completion-20261009-2/execution-failures.json",
+    "specs/020-weekly-review/spec.md",
+    "docs/decisions/0027-native-task-weekly-review-and-auto-park.md",
+    "docs/data-retention.md",
+    "backend/app/modules/tasks/navigator.py",
+    "macos/Sources/BrainBuddyMac/VoiceCapture.swift",
+    "macos/Sources/BrainBuddyMac/ProjectReviewView.swift",
+    "ios/BrainBuddy/Screens/Review/FormulationSection.swift",
+    "ios/BrainBuddy/Screens/Review/ReviewEntryScreen.swift",
+    "ios/BrainBuddy/Screens/Review/OnboardingScreen.swift",
+    "ios/BrainBuddy/Screens/Review/AutoParkExplainerSheet.swift",
+    "ios/BrainBuddy/Screens/Review/DecisionCardSheet.swift",
+    "ios/BrainBuddy/Screens/Review/SummaryStep.swift",
+    "ios/BrainBuddy/Screens/Review/DecisionForms.swift",
+    "ios/BrainBuddy/Screens/Review/WhileYouWereAwaySheet.swift",
+    "ios/BrainBuddy/Screens/Review/ProjectsStep.swift"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "receipt-retention-dependency-consistency",
+      "description": "Smart Add dependent intents require durable id_bindings, but the 24-hour receipt redaction contract excludes them from the only retained metadata. If Smart Add matches an existing normalized project/Tag, its ACK is lost, and the device is offline past 24 hours, the immutable dependent envelope references the proposed alias. The catalog requires resolving that alias from the accepted receipt, while the retained tuple no longer contains the binding. Reading current state cannot prove the original alias resolution. This leaves valid dependent local work unrecoverable despite FR-005/010 and US1 acceptance scenario 3.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/command-catalog.md:18",
+        "specs/026-rust-core-sync/contracts/command-catalog.md:39",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:97",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:210",
+        "specs/026-rust-core-sync/data-model.md:47",
+        "specs/026-rust-core-sync/spec.md:27",
+        "specs/026-rust-core-sync/spec.md:94",
+        "specs/026-rust-core-sync/spec.md:99"
+      ],
+      "recommendation": "Explicitly retain the scoped typed alias-to-entity id_bindings as content-free receipt metadata until purge and preserve them in the redacted recovery response/lookup. Align the data model and add the specific lost-ACK, post-24-hour Smart Add dependency variation to the existing recovery acceptance scenario."
+    },
+    {
+      "severity": "important",
+      "category": "convergence-plan-contract-coverage",
+      "description": "The plan selects authenticated SSE as the concrete foreground hint transport required by SC-004, but neither the enumerated sync API nor the server slice outcomes assigns its subscription endpoint, post-commit publisher or authority/generation behavior. T040 owns client transport and subscriptions only. The planned fallback permits 30-second poll spacing, so implementing the enumerated server endpoints and client polling cannot satisfy the 2-second notified convergence acceptance condition. This is missing implementation/contract coverage for a selected outcome, not a request to add an optional transport.",
+      "evidence": [
+        "specs/026-rust-core-sync/spec.md:137",
+        "specs/026-rust-core-sync/plan.md:207",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:111",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:155",
+        "specs/026-rust-core-sync/tasks.md:91",
+        "specs/026-rust-core-sync/tasks.md:93",
+        "specs/026-rust-core-sync/tasks.md:101",
+        "specs/026-rust-core-sync/tasks.md:1294",
+        "specs/026-rust-core-sync/quickstart.md:66"
+      ],
+      "recommendation": "Bind the selected authenticated SSE ingress and after-commit hint publication to a named existing server slice and its owned paths; specify the minimal content-free event, scope/current-authority and generation handling in the contract. Include an actual server-to-native hint path in the existing SC-004 check without adding APNs or changing the frozen fallback budget."
+    },
+    {
+      "severity": "important",
+      "category": "ai-acceptance-surface-mapping",
+      "description": "PR-49 claims the Apple M-04/D-04 Weekly Review consent/proposal journey, but its UI ownership contains iPhone capture/formulation-clock files and Mac VoiceCapture only. The proposal explicitly selects Weekly Review suggestions as its first AI integration. Current FormulationSection only opens the decision card; Mac VoiceCapture transcribes audio into a task draft, with no Review navigator or recipient/data consent surface. The accepted previous spec explicitly deferred navigator clients, so their existence cannot be reused as implementation evidence. No slice owns the actual Mac Review suggestion/consent surface needed to exercise D-04 or the corresponding Apple AI acceptance journey; wiring a policy adapter or voice transcription alone cannot deliver it.",
+      "evidence": [
+        "specs/026-rust-core-sync/spec.md:149",
+        "specs/026-rust-core-sync/design.md:24",
+        "specs/026-rust-core-sync/design.md:25",
+        "specs/026-rust-core-sync/design.md:89",
+        "specs/026-rust-core-sync/design.md:102",
+        "specs/026-rust-core-sync/tasks.md:147",
+        "specs/026-rust-core-sync/tasks.md:1907",
+        "specs/026-rust-core-sync/tasks.md:1923",
+        "specs/020-weekly-review/spec.md:62",
+        "ios/BrainBuddy/Screens/Review/FormulationSection.swift:15",
+        "ios/BrainBuddy/Screens/Review/FormulationSection.swift:172",
+        "macos/Sources/BrainBuddyMac/VoiceCapture.swift:43",
+        "macos/Sources/BrainBuddyMac/VoiceCapture.swift:143",
+        "macos/Sources/BrainBuddyMac/VoiceCapture.swift:152"
+      ],
+      "recommendation": "Correct the existing PR-49 ownership and prerequisites to name the actual bounded Weekly Review request/consent/proposal/apply surfaces for both Apple clients, acknowledging which are proposed additions because navigator clients were deferred. Preserve the current Weekly Review payload/confirmation policy and keep voice compatibility work distinct from this first AI acceptance journey; revise measured boundaries if necessary before approval."
+    }
+  ],
+  "product_decisions": []
+}

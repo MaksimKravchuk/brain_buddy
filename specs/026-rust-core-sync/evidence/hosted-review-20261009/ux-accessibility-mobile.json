@@ -1,0 +1,66 @@
+{
+  "role": "ux-accessibility-mobile",
+  "verdict": "changes-required",
+  "summary": "Hosted read-only planning audit of source a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c and unchanged core digest cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17. Most proposed states, FR mappings, quiet sync timing, work preservation, sign-out confirmation, focus restoration and mobile constraints are specified. Two important interaction gaps remain: dependent-command conflict resolution and visible AI cancellation/interruption outcomes. No runtime rendering, native accessibility, human sign-off or implementation acceptance is claimed. This hosted audit is supplementary evidence, not canonical gate approval; all six official CLI executions failed proxy CONNECT 403. Existing design/scope/governance acceptance remains pending in approval.md; no new product choice is escalated by this report.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/review-rubrics/ux-a11y-reviewer.md",
+    ".specify/workflows/speckit/review.schema.json",
+    ".specify/memory/constitution.md",
+    "docs/e2e-acceptance-charter.md",
+    "docs/decisions/0002-async-voice-operation-substrate.md",
+    "docs/decisions/0006-native-gtd-lifecycle-and-capability-baseline.md",
+    "specs/021-mac-sync/design.md",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/design/sync-states.html",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/intake.md",
+    "specs/026-rust-core-sync/approval.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/verification.md",
+    "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+    "macos/Sources/BrainBuddyMac/SignInSheet.swift",
+    "macos/Sources/BrainBuddyMacCore/SignInFlow.swift"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "conflict-resolution-traceability",
+      "description": "When an offline edit has later dependent actions and its predecessor is rejected, choosing the account version or replacing the predecessor requires another explicit user decision. The design says dependent actions are shown and require a decision, but specifies no numbered dependent-action state, selectable choices, confirmation copy or focus behavior. The actual M-02/D-02 composition offers only version radios, Apply choice and Copy saved edit. Consequently the required no-loss resolution journey cannot be implemented or accepted consistently: descendants either remain stranded or their disposition must be invented during implementation.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:49: rejection blocks descendants while independent commands continue.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:51: descendants are explicitly rescheduled with new IDs after known rejection/resolution.",
+        "specs/026-rust-core-sync/design.md:53 and M-02.01/D-02.01: only two version choices and Apply choice are specified.",
+        "specs/026-rust-core-sync/design.md:63: choosing the account version discards the intent and requires a decision on dependent actions.",
+        "specs/026-rust-core-sync/design.md:113: affordance map repeats the explicit-decision requirement without a dependent-action affordance.",
+        "specs/026-rust-core-sync/design/sync-states.html: conflict section M-02.01/D-02.01 describes dependent actions but renders no controls for deciding their disposition."
+      ],
+      "recommendation": "Add a stable M-02/D-02 state for a conflict with blocked descendants, mapped to FR-007/FR-010. Specify the affected-actions preview, the safe preserve/cancel path, explicit reapproval/rescheduling behavior for retained actions, and a separate clearly worded confirmation naming any actions that will be discarded. Define focus and interruption behavior for that decision and include this branch in Q02/Q12. Preserve the existing immutable-ID and uncertain-outcome rules; no broader editing feature is needed."
+    },
+    {
+      "severity": "important",
+      "category": "async-cancellation-interruption-states",
+      "description": "The M-04/D-04 suggestion flow exposes Cancel while generating and acceptance explicitly exercises cancellation before and after transmission, but the state inventory has no cancelling/cancelled outcome or copy explaining what a cancellation can still stop after a remote request starts. Its sole offline/interrupted state describes having no network and preserving a completed local draft; it does not define reopening an active request after UI closure/backgrounding, or disposition of a late result after cancellation. These are reachable transitions in the changed local/cloud adapter flow, so the UX cannot distinguish cancellation from provider failure or reliably tell the user whether processing will resume.",
+      "evidence": [
+        "specs/026-rust-core-sync/design.md:90, M-04.02/D-04.02: Preparing suggestions exposes Cancel/Continue without AI.",
+        "specs/026-rust-core-sync/design.md:93 and :95: provider failure and no-network states are specified, but active-request interruption and cancellation outcomes are absent from the twelve-state inventory.",
+        "specs/026-rust-core-sync/design.md:122: Request suggestions / Cancel maps to FR-018/019/020 without an outcome state.",
+        "specs/026-rust-core-sync/contracts/runtime-ffi.md:40: cancellation stops unsent transmissions, whereas a started remote effect follows uncertainty rules.",
+        "specs/026-rust-core-sync/quickstart.md:55, Q09: cancellation must be exercised before and after transmission.",
+        "docs/decisions/0002-async-voice-operation-substrate.md:438 and :442: cancellation and UI closure have different semantics; closing UI resumes the operation projection.",
+        ".specify/review-rubrics/ux-a11y-reviewer.md: Async lifecycle requires visible cancellation state, interruption/resume, and cancellation distinguishable from failure."
+      ],
+      "recommendation": "Extend M-04/D-04 with stable cancelling/cancelled and active-request interruption/resume states. Specify exact copy and actions before transmission, after transmission (without claiming sent content was recalled), and on reopening; state whether a late result is retained as a recoverable proposal or ignored after an explicit cancellation. Preserve task/draft data and current consent checks, distinguish cancellation from error, and map these states to FR-018/019/020 and Q09. Reuse the accepted operation behavior for voice paths rather than adding a second operation system."
+    }
+  ],
+  "product_decisions": []
+}

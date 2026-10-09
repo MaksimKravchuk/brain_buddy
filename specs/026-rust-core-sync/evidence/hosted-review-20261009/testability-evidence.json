@@ -1,0 +1,49 @@
+{
+  "role": "testability-evidence",
+  "verdict": "pass",
+  "summary": "The unchanged core planning package at source a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c (digest cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17) has proportionate, falsifiable planned acceptance evidence. All 26 FRs and 8 SCs are mapped, the dependency map is topologically valid, and every pre-pilot slice is a transitive prerequisite of PR-54 before the separate PostgreSQL stage. Existing parity/consent checks are reused, while concrete durability, authorization, recovery, FFI and migration failures receive boundary-specific verification. Hardware/performance and Rust/FFI sizing/build results are correctly unclaimed and gated before acceptance. One advisory corrects two empty-selection baseline commands; the full Apple oracle is already required elsewhere. This hosted read-only audit is not formal gate approval and does not replace the canonical campaign that completed zero lenses because of network-policy HTTP 403 failures.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/memory/constitution.md",
+    ".specify/workflows/speckit/review.schema.json",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/approval.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/verification.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/checklists/protocol-quality.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    ".github/workflows/ci.yml",
+    "ios/scripts/swift-linux.sh",
+    "ios/BrainBuddyKit/Package.swift",
+    "backend/pyproject.toml",
+    "backend/Dockerfile",
+    "Makefile",
+    "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerOrganizeTests.swift",
+    "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerChildrenTests.swift"
+  ],
+  "findings": [
+    {
+      "severity": "advisory",
+      "category": "executable-verification-command",
+      "description": "PR-08 and PR-10 use Swift test filters derived from filenames rather than the suites declared in those files. The prescribed ReducerOrganizeTests and ReducerChildrenTests filters match no existing suite/type identifier, so those two commands cannot supply their stated reused Apple baseline evidence. This is a bounded command correction: PR-02 and PR-17 already require the full BrainBuddyCoreTests oracle, so it does not establish a missing overall acceptance plan or justify duplicate tests.",
+      "evidence": [
+        "specs/026-rust-core-sync/tasks.md:476 prescribes sh ios/scripts/swift-linux.sh test --filter ReducerOrganizeTests; tasks.md:545 similarly uses ReducerChildrenTests.",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerOrganizeTests.swift:7 declares ReducerProjectTests; line 140 declares ReducerTagTests. Neither suite is named ReducerOrganizeTests.",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/ReducerChildrenTests.swift:7 declares ReducerSubtaskTests; line 72 declares ReducerCommentTests. Neither suite is named ReducerChildrenTests.",
+        "specs/026-rust-core-sync/tasks.md:15 explicitly states that zero selected tests is not evidence; PR-02/PR-17 already prescribe --filter BrainBuddyCoreTests."
+      ],
+      "recommendation": "Replace the PR-08 filters with the existing ReducerProjectTests and ReducerTagTests suites, and PR-10 with ReducerSubtaskTests and ReducerCommentTests (or an existing broader filter that includes both). Record nonzero execution when the planned checks run; no new test suite is needed."
+    }
+  ],
+  "product_decisions": []
+}
