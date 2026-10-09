@@ -132,6 +132,7 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       ios: ${{ steps.decide.outputs.ios }}
       macos: ${{ steps.decide.outputs.macos }}
+      rust: ${{ steps.decide.outputs.rust }}
       floor-backend: ${{ steps.decide.outputs.floor-backend }}
       floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
       mutation: ${{ steps.mutation_scope.outputs.mutation }}
@@ -165,6 +166,7 @@ jobs:
           frontend=true
           ios=true
           macos=true
+          rust=true
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
@@ -198,6 +200,9 @@ jobs:
                 # iPhone app, its widgets, the XcodeGen project) is not an
                 # input to the Mac and leaves this lane idle.
                 printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false
+                # The shared Rust core builds from rust/ alone, plus the frozen
+                # sync contract its codec tests read: that schema is an input.
+                printf '%s\n' "${changed}" | grep -Eq '^(rust|specs/026-rust-core-sync/contracts)/' || rust=false
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"
@@ -227,8 +232,9 @@ jobs:
             echo "frontend=${frontend}"
             echo "ios=${ios}"
             echo "macos=${macos}"
+            echo "rust=${rust}"
           } >> "$GITHUB_OUTPUT"
-          echo "backend=${backend} frontend=${frontend} ios=${ios} macos=${macos}"
+          echo "backend=${backend} frontend=${frontend} ios=${ios} macos=${macos} rust=${rust}"
 
       # The mutation gate's scope is computed separately and far more narrowly
       # than the stack filter above: ADR-0004 requirement 1 runs it only over
@@ -581,6 +587,50 @@ jobs:
       - name: Test the package
         if: env.RUN == 'true'
         run: swift test --parallel
+
+  # The shared Rust core workspace (feature 026). Format, lint and tests for
+  # every crate under rust/, on the same pinned toolchain as the CLI. Like the
+  # other stack lanes it always runs and gates its steps on RUN, so a change that
+  # leaves rust/ alone still reports success instead of "skipped" (ADR-0008).
+  rust:
+    name: Rust core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.rust }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact candidate checkout
+        working-directory: .
+        run: test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDATE_SHA"
+
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        if: env.RUN == 'true'
+        run: cargo fmt --check
+
+      - name: Lint
+        if: env.RUN == 'true'
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        if: env.RUN == 'true'
+        run: cargo test --locked
 
   # The app lane: the XcodeGen project builds the app, the widget extension and
   # the package for the simulator (unsigned), and the package tests pass on
@@ -1471,6 +1521,7 @@ jobs:
     needs:
       - cli-native
       - cli-artifacts
+      - rust
       - workflow-lint
       - secret-scan
       - changes
@@ -1691,6 +1742,7 @@ jobs:
       - allure-report
       - cli-native
       - cli-artifacts
+      - rust
     if: always()
     steps:
       - name: Require successful CI, mutation gate, Docker, E2E, and Allure report
