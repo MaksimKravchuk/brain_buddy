@@ -3,7 +3,7 @@
 **Feature**: `specs/026-rust-core-sync/`
 **Spec**: `spec.md`; this design specifies requirements FR-001–FR-026 for explicit owner sign-off.
 **Screens**: [design/sync-states.html](design/sync-states.html), one self-contained static HTML file without external resources.
-**Human sign-off**: **pending**. Production implementation has not started; the next architecture stage requires explicit design approval under `.specify/agent-commands/speckit-design/SKILL.md`.
+**Human sign-off**: design baseline **accepted by the owner on 2026-10-09**; see [approval.md](approval.md) (decision table, "Design") and its [human sign-off record](evidence/026-native-20261009-1/human-signoff.json). Rendering and native accessibility remain implementation checks. Production implementation has not started; this status line supersedes the older "pending" labels below, which describe the earlier snapshot.
 
 ## Applicability
 
@@ -188,7 +188,7 @@ Sources: accepted ADR-0006/0020/0027; `.claude/skills/brain-buddy-design/SKILL.m
 | HTML structure / local links / 44 px CSS static inspection | **pass**, repeated 2026-10-08 after alignment with spec/contract: Python HTMLParser, balanced tags, unique ids, 5 local anchors, 56 buttons with explicit type, no scripts/external resources, 44 px CSS, 8 screen IDs, FR-001–FR-026 coverage, and 45 shared rows / 90 screen-state combinations. Checked absence of a new manual reorder/delete Task flow and updated warning/migration copy. Runtime geometry/contrast/focus not checked |
 | Screenshots, browser/device rendering, runtime accessibility | **not performed**; static artifacts only |
 | Product/CI/deployment acceptance | **not performed**, outside spec-only scope |
-| Human approval | **pending**, not implementation authorization |
+| Human approval | **design baseline accepted 2026-10-09** ([approval.md](approval.md)); not implementation authorization |
 
 ## Open decisions for the human
 
