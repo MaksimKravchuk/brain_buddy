@@ -14,4 +14,5 @@
 
 pub mod calendar;
 pub mod normalization;
+pub mod organize;
 pub mod types;
