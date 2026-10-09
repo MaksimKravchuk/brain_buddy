@@ -1,0 +1,23 @@
+[package]
+name = "bb-python"
+description = "PyO3 bridge exposing the shared Rust core to the FastAPI backend (spec 026)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# `bb_core` is the Python module name; maturin ships it inside the backend wheel.
+name = "bb_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bb-protocol.workspace = true
+serde_json.workspace = true
+# abi3 keeps one wheel valid for every supported CPython (>=3.11). maturin adds
+# the extension-module link mode at build time, so `cargo test` still links libpython.
+pyo3 = { version = "=0.29.3", features = ["abi3-py311"] }
+
+[lints]
+workspace = true
