@@ -8,10 +8,12 @@
 //!   `formulation.py`).
 //! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
 //!   a calendar day distinct from an instant.
+//! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
 pub mod calendar;
+pub mod children;
 pub mod normalization;
 pub mod types;
