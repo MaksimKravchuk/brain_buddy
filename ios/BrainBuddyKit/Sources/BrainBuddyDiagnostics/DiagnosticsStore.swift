@@ -47,12 +47,14 @@ public struct DiagnosticsStore: Sendable {
         try Self.encoder.encode(log).write(to: logURL, options: .atomic)
     }
 
-    /// Stores a report under its period's end, so the same report delivered
-    /// twice is kept once, and drops the oldest beyond `reportLimit`.
+    /// Stores a report under its period's end and a digest of its bytes, so the
+    /// same report delivered twice is kept once while different reports ending
+    /// in the same second are both kept, and drops the oldest beyond `reportLimit`.
     public func saveReport(_ json: Data, kind: SystemReport.Kind, periodEnd: Date) throws {
         try createDirectory()
         let stamp = String(format: "%012lld", Int64(periodEnd.timeIntervalSince1970.rounded(.down)))
-        try json.write(to: directory.appendingPathComponent("\(kind.rawValue)-\(stamp).json"), options: .atomic)
+        let name = "\(kind.rawValue)-\(stamp)-\(Self.digest(json)).json"
+        try json.write(to: directory.appendingPathComponent(name), options: .atomic)
         for name in reportFileNames(kind).dropLast(Self.reportLimit) {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
         }
@@ -79,6 +81,16 @@ public struct DiagnosticsStore: Sendable {
     private func reportFileNames(_ kind: SystemReport.Kind) -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.filter { $0.hasPrefix("\(kind.rawValue)-") && $0.hasSuffix(".json") }.sorted()
+    }
+
+    /// 64-bit FNV-1a, as 16 hex digits: stable across launches, unlike `Hasher`.
+    static func digest(_ data: Data) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in data {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01b3
+        }
+        return String(format: "%016llx", hash)
     }
 
     private func createDirectory() throws {

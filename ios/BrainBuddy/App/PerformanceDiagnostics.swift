@@ -179,13 +179,14 @@ final class PerformanceDiagnostics {
         await saving?.value
         // Best effort, like every diagnostics write.
         try? store.clear()
+        try? FileManager.default.removeItem(at: Self.exportDirectory)
         // Queued after any save still running, so the cleared log is what stays.
         await save()
         refreshReportCounts()
     }
 
-    /// Writes the export to a temporary file named after the moment it was
-    /// made, for the share sheet.
+    /// Writes the export, named after the moment it was made, for the share
+    /// sheet. Only the latest export is kept; "Clear diagnostics" removes it.
     func exportFile() async throws -> URL {
         let snapshot = log
         let device = deviceInfo()
@@ -193,11 +194,17 @@ final class PerformanceDiagnostics {
         return try await Task.detached(priority: .userInitiated) {
             let now = Date()
             let data = try DiagnosticsExport.make(log: snapshot, reports: store.reports(), device: device, now: now)
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-                DiagnosticsExport.fileName(for: now))
+            let directory = Self.exportDirectory
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(DiagnosticsExport.fileName(for: now))
             try data.write(to: url, options: .atomic)
             return url
         }.value
+    }
+
+    nonisolated private static var exportDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("PerformanceDiagnosticsExport")
     }
 
     // MARK: Device

@@ -33,6 +33,9 @@ struct DiagnosticsStoreTests {
         try store.saveReport(first, kind: .metrics, periodEnd: Date(timeIntervalSince1970: 0))
         try store.saveReport(first, kind: .metrics, periodEnd: Date(timeIntervalSince1970: 0))
         #expect(store.reportCount(.metrics) == 1)
+        // A different report ending in the same second is kept too.
+        try store.saveReport(Data(#"{"n":-1}"#.utf8), kind: .metrics, periodEnd: Date(timeIntervalSince1970: 0.5))
+        #expect(store.reportCount(.metrics) == 2)
 
         for day in 1...DiagnosticsStore.reportLimit {
             try store.saveReport(
