@@ -43,6 +43,13 @@ jobs:
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
+      # Spec 026: the backend wheel compiles the PyO3 core bridge (maturin), so
+      # installing it needs the pinned toolchain (rust/rust-toolchain.toml).
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+
       - name: Install deterministic test dependencies
         run: |
           python -m pip install --upgrade pip

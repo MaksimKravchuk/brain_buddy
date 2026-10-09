@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/bb-client", "crates/bb-protocol"]
+members = ["bindings/python", "crates/bb-client", "crates/bb-protocol"]
 
 [workspace.package]
 version = "0.1.0"
