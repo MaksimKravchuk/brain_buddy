@@ -261,6 +261,7 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Rust core bridge",
         "PyO3 command codec and lifecycle",
     ),
+    "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",

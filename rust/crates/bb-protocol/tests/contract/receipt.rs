@@ -75,6 +75,18 @@ fn receipt_026_sc_002_rejection_and_no_op_receipts_keep_their_invariants() {
 }
 
 #[test]
+fn receipt_026_fr_022_redacted_receipt_carries_no_content() {
+    let mut redacted = golden_receipt();
+    redacted["result_redacted"] = json!(true);
+    redacted["result"] = Value::Null;
+    assert!(decode::<Receipt>(&redacted.to_string()).is_ok());
+
+    let mut leaking = redacted;
+    leaking["result"] = json!({"title": "Prepare the estimate"});
+    assert!(decode::<Receipt>(&leaking.to_string()).is_err());
+}
+
+#[test]
 fn receipt_026_fr_022_error_details_allow_only_content_free_keys() {
     let mut leaky = rejected_receipt();
     leaky["error"]["details"]["title"] = json!("Prepare the estimate");
