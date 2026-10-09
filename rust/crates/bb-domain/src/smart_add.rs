@@ -691,7 +691,9 @@ pub fn decide(
     let Command::TaskSmartAdd(payload) = &command.command else {
         return Err(DomainError::field(Reason::InvalidPayload, "type"));
     };
-    let task_id = TaskId::parse(command.entity_id.as_str())?;
+    // The created task carries the native shape; legacy and alias IDs are only
+    // valid as references to records that already exist.
+    let task_id = TaskId::parse_new(command.entity_id.as_str())?;
     if read_set.tasks.contains_key(&task_id) {
         return Err(about(
             Reason::IdAlreadyExists,
@@ -789,7 +791,10 @@ impl Plan {
                         "project",
                     ));
                 }
-                if read_set.projects.contains_key(proposed) {
+                // A created project carries the native shape; `proposed` is
+                // only an alias when the name resolves to an existing record.
+                let created_id = ProjectId::parse_new(proposed.as_str())?;
+                if read_set.projects.contains_key(&created_id) {
                     return Err(about(
                         Reason::IdAlreadyExists,
                         EntityType::Project,
@@ -798,7 +803,7 @@ impl Plan {
                     ));
                 }
                 self.created_projects.push(Project {
-                    id: proposed.clone(),
+                    id: created_id,
                     name: Name::new(display)
                         .map_err(|_| DomainError::field(Reason::TextLength, "project"))?,
                     color: None,
@@ -872,8 +877,11 @@ impl Plan {
         {
             return Ok(created.id.clone());
         }
-        if read_set.tags.contains_key(proposed)
-            || self.created_tags.iter().any(|t| &t.id == proposed)
+        // A created tag carries the native shape; `proposed` is only an alias
+        // when the name resolves to an existing record.
+        let created_id = TagId::parse_new(proposed.as_str())?;
+        if read_set.tags.contains_key(&created_id)
+            || self.created_tags.iter().any(|t| t.id == created_id)
         {
             return Err(about(
                 Reason::IdAlreadyExists,
@@ -883,12 +891,12 @@ impl Plan {
             ));
         }
         self.created_tags.push(Tag {
-            id: proposed.clone(),
+            id: created_id.clone(),
             name: Name::new(display).map_err(|_| DomainError::field(Reason::TextLength, "tags"))?,
             state: TagState::Active,
             revision: Counter::from(1),
         });
-        Ok(proposed.clone())
+        Ok(created_id)
     }
 
     /// Records `alias -> resolved` once per typed alias.

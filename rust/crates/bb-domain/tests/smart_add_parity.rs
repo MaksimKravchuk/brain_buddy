@@ -1390,12 +1390,12 @@ fn smart_add_026_fr_002_names_that_key_alike_in_one_request_are_one_new_record()
 #[test]
 fn smart_add_026_fr_002_proposed_ids_and_the_task_id_must_be_free() {
     let state = rs(
-        &[("project_taken", "Elsewhere", "active")],
-        &[("tag_taken", "elsewhere", "active")],
+        &[(P2, "Elsewhere", "active")],
+        &[(T3, "elsewhere", "active")],
     );
     let project = refusal(
         &state,
-        json!({ "title": "t", "project": { "name": "New", "proposed_id": "project_taken" } }),
+        json!({ "title": "t", "project": { "name": "New", "proposed_id": P2 } }),
     );
     assert_eq!(
         (project.reason, project.field.as_deref()),
@@ -1403,7 +1403,7 @@ fn smart_add_026_fr_002_proposed_ids_and_the_task_id_must_be_free() {
     );
     let tag = refusal(
         &state,
-        json!({ "title": "t", "tags": [ { "name": "new", "proposed_id": "tag_taken" } ] }),
+        json!({ "title": "t", "tags": [ { "name": "new", "proposed_id": T3 } ] }),
     );
     assert_eq!(tag.reason, Reason::IdAlreadyExists);
     let reused = refusal(
@@ -1418,6 +1418,82 @@ fn smart_add_026_fr_002_proposed_ids_and_the_task_id_must_be_free() {
     assert_eq!(
         refusal(&taken, json!({ "title": "t" })).reason,
         Reason::IdAlreadyExists
+    );
+}
+
+#[test]
+fn smart_add_026_fr_008_created_ids_need_the_native_shape_and_legacy_ids_stay_references() {
+    let state = rs(
+        &[("project_aaaaaaaaaaaa", "Admin", "active")],
+        &[("tag_aaaaaaaaaaaa", "errands", "active")],
+    );
+    let task = |id: &str| {
+        let payload = json!({ "title": "t" });
+        let command = try_command("task.smart_add", id, payload).expect("smart add command");
+        smart_add::decide(&state, &command, &inputs())
+    };
+    // The task: malformed and legacy-shaped IDs are never persisted.
+    for id in [
+        "x",
+        "t_new",
+        "task_abc123def456",
+        "task_00000000-0000-4000-8000-0000000000A1",
+    ] {
+        let err = task(id).expect_err(id);
+        assert_eq!(err.reason, Reason::InvalidValue, "{id}");
+        assert_eq!(err.field.as_deref(), Some("TaskId"), "{id}");
+    }
+    assert!(task(TASK).is_ok());
+
+    // A created project or tag: the same rule, for the IDs the request mints.
+    for bad in [
+        "x",
+        "project_abc123def456",
+        "tag_00000000-0000-4000-8000-000000000001",
+    ] {
+        let err = refusal(
+            &state,
+            json!({ "title": "t", "project": { "name": "New", "proposed_id": bad } }),
+        );
+        assert_eq!(err.reason, Reason::InvalidValue, "{bad}");
+        assert_eq!(err.field.as_deref(), Some("ProjectId"), "{bad}");
+    }
+    for bad in [
+        "x",
+        "tag_abc123def456",
+        "project_00000000-0000-4000-8000-000000000001",
+    ] {
+        let err = refusal(
+            &state,
+            json!({ "title": "t", "tags": [ { "name": "new", "proposed_id": bad } ] }),
+        );
+        assert_eq!(err.reason, Reason::InvalidValue, "{bad}");
+        assert_eq!(err.field.as_deref(), Some("TagId"), "{bad}");
+    }
+    // Nothing is created when the name resolves to an existing record: the
+    // proposed ID is only an alias there, and existing legacy IDs stay valid.
+    let set = ok(
+        &state,
+        json!({ "title": "t",
+                "project": { "name": "admin", "proposed_id": "project_abc123def456" },
+                "tags": [ { "name": "errands", "proposed_id": "tag_abc123def456" } ] }),
+    );
+    assert_eq!(order(&set), [EntityType::Task]);
+    let set = ok(
+        &state,
+        json!({ "title": "t", "project": { "id": "project_aaaaaaaaaaaa" },
+                "tags": [ { "id": "tag_aaaaaaaaaaaa" } ] }),
+    );
+    assert_eq!(order(&set), [EntityType::Task]);
+    // Native IDs are accepted.
+    let set = ok(
+        &state,
+        json!({ "title": "t", "project": { "name": "New", "proposed_id": P1 },
+                "tags": [ { "name": "new", "proposed_id": T1 } ] }),
+    );
+    assert_eq!(
+        order(&set),
+        [EntityType::Project, EntityType::Tag, EntityType::Task]
     );
 }
 
