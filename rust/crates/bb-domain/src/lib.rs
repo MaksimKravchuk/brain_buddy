@@ -15,6 +15,8 @@
 //!   per-owner/provider/consent-version remote consent, input and time limits.
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
 //!   allow-listed command proposals applied only after explicit confirmation.
+//! * [`park`]: auto-park, the human yield and park acknowledgement over the
+//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
@@ -26,4 +28,5 @@ pub mod children;
 pub mod normalization;
 pub mod organize;
 pub mod proposal;
+pub mod park;
 pub mod types;
