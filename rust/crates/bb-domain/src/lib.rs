@@ -19,6 +19,8 @@
 //!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
+//! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
+//!   `task.transition`).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
@@ -32,4 +34,5 @@ pub mod organize;
 pub mod proposal;
 pub mod park;
 pub mod queries;
+pub mod task_rules;
 pub mod types;
