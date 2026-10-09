@@ -2,8 +2,14 @@
 	verify-all verify-backend verify-frontend typecheck-frontend format-backend format-check-backend mutation-backend mutation-frontend \
 	mutation-gate-backend
 
+# Spec 026: installing the backend compiles the PyO3 core bridge, so it needs
+# Rust. RUSTUP_TOOLCHAIN makes that build use the version pinned in
+# rust/rust-toolchain.toml (maturin runs cargo from backend/, where rustup would
+# not find the file); it is ignored when rustup is not what provides cargo.
+RUST_TOOLCHAIN := $(shell sed -n 's/^channel = "\(.*\)"/\1/p' rust/rust-toolchain.toml)
+
 install-backend:
-	cd backend && python -m pip install -e .[dev]
+	cd backend && RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) python -m pip install -e .[dev]
 
 install-frontend:
 	cd frontend && npm install

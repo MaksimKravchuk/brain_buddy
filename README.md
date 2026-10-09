@@ -31,6 +31,8 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 - Python 3.14 with the `venv` module (see `.python-version`)
 - Node.js 20.19.0 for the web frontend (see `frontend/.nvmrc`)
 - nvm available to the shell, npm, and GNU Make
+- Rust (via `rustup`, the version pinned in `rust/rust-toolchain.toml`) and a C compiler:
+  installing the backend compiles the shared Rust core bridge (`bb_core`, feature 026)
 
 For a reproducible host setup, runtime selection, and verification commands,
 see [Local development](docs/runbooks/local-deployment.md).
