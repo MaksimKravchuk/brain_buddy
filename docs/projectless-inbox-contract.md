@@ -117,12 +117,12 @@ and pre-filled from the item's title, with an optional desired outcome; the item
 becomes the project's required first next action in Next actions and keeps its
 notes, tags and due date. Together they use `POST /projects`,
 `PATCH /api/tasks/{task_id}` and the task transition endpoint, so no API change
-is involved. Undo puts the
-item back in the Inbox as it was and archives the project it created.
+is involved. Where the clarify step offers Undo (iPhone, web), it puts the item
+back in the Inbox as it was and archives the project it created.
 
-Placement: iPhone in Process inbox and the weekly review's Inbox step (PR #308);
-Mac in Clarify Inbox; web only in the weekly review's Inbox step, behind the
-`weekly_review` flag. Mac and web are in progress.
+Placement: iPhone in Process inbox and the weekly review's Inbox step; Mac in
+Clarify Inbox; web only in the weekly review's Inbox step, behind the
+`weekly_review` flag.
 
 ## Affected implementation surfaces
 
