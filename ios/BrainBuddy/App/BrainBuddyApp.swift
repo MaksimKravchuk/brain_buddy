@@ -13,6 +13,8 @@ struct BrainBuddyApp: App {
     /// One workspace for the process; navigation and toasts are per window
     /// (`SceneRoot`), so two iPad windows don't drive each other.
     @State private var workspace: Workspace
+    /// Beta performance diagnostics; nil when the build turns them off.
+    @State private var diagnostics: PerformanceDiagnostics?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -29,6 +31,7 @@ struct BrainBuddyApp: App {
         // Widgets show the store, so every saved change refreshes them.
         workspace.didPersist = { WidgetCenter.shared.reloadAllTimelines() }
         _workspace = State(initialValue: workspace)
+        _diagnostics = State(initialValue: PerformanceDiagnostics.live())
     }
 
     var body: some Scene {
@@ -36,6 +39,8 @@ struct BrainBuddyApp: App {
             SceneRoot()
                 .modifier(WidgetReloadAfterSync())
                 .environment(workspace)
+                .environment(diagnostics)
+                .task { await diagnostics?.start() }
                 .task { await loadIfNeeded() }
                 .task { await observeExternalWrites() }
                 .task { await observeNetwork() }
@@ -65,6 +70,7 @@ struct BrainBuddyApp: App {
     private func scenePhaseChanged(to phase: ScenePhase) {
         switch phase {
         case .active:
+            diagnostics?.sceneBecameActive()
             Task {
                 if workspace.isLoaded {
                     await workspace.reloadIfChangedExternally()
@@ -76,6 +82,7 @@ struct BrainBuddyApp: App {
                 WidgetCenter.shared.reloadAllTimelines()
             }
         case .background:
+            diagnostics?.sceneEnteredBackground()
             Task {
                 await workspace.flush()
                 WidgetCenter.shared.reloadAllTimelines()

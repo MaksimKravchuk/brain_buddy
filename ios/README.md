@@ -111,7 +111,7 @@ sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
 | Path | What it is |
 |---|---|
 | `project.yml` | XcodeGen spec: targets, settings, Info.plists, entitlements, scheme |
-| `BrainBuddyKit/` | Swift package, no dependencies: `BrainBuddyCore`, `BrainBuddyPersistence`, `BrainBuddyAPI`, `BrainBuddySync`, `BrainBuddyWorkspace` |
+| `BrainBuddyKit/` | Swift package, no dependencies: `BrainBuddyCore`, `BrainBuddyPersistence`, `BrainBuddyAPI`, `BrainBuddySync`, `BrainBuddyWorkspace`, `BrainBuddyDiagnostics` |
 | `BrainBuddy/` | App target: `App/`, `DesignSystem/`, `Components/`, `Screens/`, `Intents/`, `Resources/` (asset catalog) |
 | `BrainBuddyWidgets/` | WidgetKit extension: widgets and Control Center controls, its own asset catalog |
 | `Shared/` | Compiled into both the app and the widget extension. `PrivacyInfo.xcprivacy` lives here so both bundles ship it |
@@ -358,6 +358,35 @@ data, or need a sign-in.
 - [ ] The sync status reads "Offline — N changes waiting" in words.
 - [ ] Turn the network on and sign in: local data uploads, the status reaches
       "Synced …", and the web app shows the same tasks, projects and tags.
+
+## Performance diagnostics (beta)
+
+While the app ships through TestFlight it records its own performance, so a
+report of the phone running hot comes with figures. **Settings → About →
+Performance** shows them and exports them.
+
+| Recorded | How | Arrives |
+|---|---|---|
+| CPU use of the app's process | Every 10 s in the foreground, with the screen on top (by kind: `inbox`, `task`, `capture`, never content), the thermal state and Low Power Mode. 100 % is one core busy the whole time | At once |
+| Thermal state changes | `ProcessInfo.thermalStateDidChangeNotification`, with the screen on top | At once |
+| MetricKit daily reports | CPU and GPU time, hitches, network, disk writes, foreground and background time | About once a day |
+| MetricKit diagnostic reports | CPU exceptions, hangs, excessive disk writes, crashes, with call stacks | After the event, usually at the next launch |
+
+Everything stays in the app's Caches directory (the log keeps six hours of
+foreground samples, 30 reports of each kind) until **Export diagnostics**
+shares one JSON file (`BrainBuddy-diagnostics-<UTC time>.json`) through the
+share sheet: AirDrop, Files, Mail, Messages. **Clear diagnostics** starts over,
+for example before a test session.
+
+To report heating: clear, use the app the way that warms the phone, then
+export. If no MetricKit reports arrive after a couple of days, turn on
+Settings → Privacy & Security → Analytics & Improvements → Share With App
+Developers. Stack frames from the app in diagnostic reports are addresses;
+symbolicate them with the build's dSYMs from App Store Connect.
+
+The build setting `BB_PERFORMANCE_DIAGNOSTICS` in `project.yml` turns all of
+it on (YES, every build today). Set it to NO before the first App Store
+release; then nothing is recorded and the Performance row is gone.
 
 ## Known gaps
 

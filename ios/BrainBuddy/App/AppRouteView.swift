@@ -23,6 +23,8 @@ struct AppRouteView: View {
             SyncIssuesScreen()
         case .review:
             ReviewEntryScreen()
+        case .performance:
+            PerformanceScreen()
         }
     }
 }

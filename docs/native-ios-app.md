@@ -270,6 +270,12 @@ unsynced changes. The server address defaults to
 - **Account deletion.** Signing in during the 14-day deletion grace period
   cancels the deletion, as on the web; the app says so in a notice instead
   of doing it silently.
+- **Performance diagnostics.** Beta builds record their own CPU use, thermal
+  state changes and MetricKit reports on the device (Settings → About →
+  Performance, `ios/README.md` "Performance diagnostics"). Screens are named
+  by kind, never content; nothing is sent anywhere, and the export leaves the
+  device only when the person shares it. `BB_PERFORMANCE_DIAGNOSTICS` in
+  `ios/project.yml` turns it off for the App Store.
 
 ## Interface
 

@@ -11,6 +11,8 @@ struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.openURL) private var openURL
+    /// Nil unless the build records performance diagnostics (beta builds).
+    @Environment(PerformanceDiagnostics.self) private var diagnostics: PerformanceDiagnostics?
 
     @State private var signInRequest: SignInRequest?
     @State private var isConfirmingSignOut = false
@@ -236,6 +238,11 @@ struct SettingsScreen: View {
                     .foregroundStyle(BBColor.textTertiary)
             }
             .accessibilityElement(children: .combine)
+            if diagnostics != nil {
+                NavigationLink(value: AppRoute.performance) {
+                    Label("Performance", systemImage: "gauge.with.dots.needle.33percent")
+                }
+            }
         } header: {
             Text("About")
         }
