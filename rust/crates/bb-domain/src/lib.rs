@@ -8,6 +8,7 @@
 //!   `formulation.py`).
 //! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
 //!   a calendar day distinct from an instant.
+//! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
@@ -17,7 +18,9 @@
 //!   implemented, so no module here is an empty placeholder.
 
 pub mod calendar;
+pub mod children;
 pub mod formulation;
 pub mod normalization;
+pub mod organize;
 pub mod queries;
 pub mod types;
