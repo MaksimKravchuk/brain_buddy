@@ -140,18 +140,21 @@ export function InboxStep(): React.JSX.Element {
   const [draftsCheckedFor, setDraftsCheckedFor] = useState<string | null>(null);
   if (current !== undefined && draftsCheckedFor !== current.id) {
     setDraftsCheckedFor(current.id);
-    const title = form === null ? drafts.load(current.id, "title") : null;
-    const waitingFor = form === null ? drafts.load(current.id, "waiting") : null;
-    const project = form === null ? { name: drafts.load(current.id, PROJECT_DRAFTS.name), outcome: drafts.load(current.id, PROJECT_DRAFTS.outcome), action: drafts.load(current.id, PROJECT_DRAFTS.action) } : null;
-    const newProject = drafts.load(current.id, NEW_PROJECT_DRAFT);
-    if (title !== null) {
-      setForm({ kind: "title", text: title });
-    } else if (waitingFor !== null) {
-      setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
-    } else if (project !== null && Object.values(project).some((draft) => draft !== null)) {
-      setForm({ kind: "project", name: project.name ?? current.title, outcome: project.outcome ?? "", action: project.action ?? "" });
-    } else if (newProject !== null) {
-      setStaged({ taskId: current.id, projectId: current.project_id, newName: newProject });
+    // A form already open for this item keeps what it has.
+    if (form === null) {
+      const title = drafts.load(current.id, "title");
+      const waitingFor = drafts.load(current.id, "waiting");
+      const project = { name: drafts.load(current.id, PROJECT_DRAFTS.name), outcome: drafts.load(current.id, PROJECT_DRAFTS.outcome), action: drafts.load(current.id, PROJECT_DRAFTS.action) };
+      const newProject = drafts.load(current.id, NEW_PROJECT_DRAFT);
+      if (title !== null) {
+        setForm({ kind: "title", text: title });
+      } else if (waitingFor !== null) {
+        setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
+      } else if (Object.values(project).some((draft) => draft !== null)) {
+        setForm({ kind: "project", name: project.name ?? current.title, outcome: project.outcome ?? "", action: project.action ?? "" });
+      } else if (newProject !== null) {
+        setStaged({ taskId: current.id, projectId: current.project_id, newName: newProject });
+      }
     }
   }
   useEffect(() => {
