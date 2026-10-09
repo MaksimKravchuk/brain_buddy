@@ -329,6 +329,7 @@ def test_009_FR_010_member_feature_flags_never_gain_the_admin_portal_key(
             "crt_canvas",
             "task_mcp",
             "weekly_review",
+            "rust_core_sync",
         }
 
 
