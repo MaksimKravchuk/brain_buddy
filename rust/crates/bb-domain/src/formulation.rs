@@ -632,7 +632,7 @@ pub struct DecisionInput<'a> {
     pub new_formulation_id: Option<&'a str>,
 }
 
-fn decision_allows(decision: DecisionType, state: TaskState) -> bool {
+pub(crate) fn decision_allows(decision: DecisionType, state: TaskState) -> bool {
     use DecisionType::{
         Cancel, Complete, Extend, FirstStep, FollowUp, KeepSomeday, KeepWaiting, Reformulate,
         ReturnToNext, Someday, Waiting,
@@ -1003,11 +1003,14 @@ pub fn change_time_zone(
 
 // --------------------------------------------------- the stored-record bridge
 
-fn parse_instant(value: &Instant, field: &'static str) -> Result<UtcInstant, FormulationError> {
+pub(crate) fn parse_instant(
+    value: &Instant,
+    field: &'static str,
+) -> Result<UtcInstant, FormulationError> {
     UtcInstant::parse_rfc3339(value.as_str()).map_err(|_| FormulationError::InvalidField(field))
 }
 
-fn optional_instant(
+pub(crate) fn optional_instant(
     value: Option<&Instant>,
     field: &'static str,
 ) -> Result<Option<UtcInstant>, FormulationError> {
@@ -1016,7 +1019,10 @@ fn optional_instant(
         .transpose()
 }
 
-fn wire_instant(value: UtcInstant, field: &'static str) -> Result<Instant, FormulationError> {
+pub(crate) fn wire_instant(
+    value: UtcInstant,
+    field: &'static str,
+) -> Result<Instant, FormulationError> {
     Instant::parse(value.to_rfc3339()).map_err(|_| FormulationError::InvalidField(field))
 }
 
