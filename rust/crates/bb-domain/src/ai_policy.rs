@@ -331,13 +331,16 @@ fn remote_grant(owner: &Id, remote: &RemoteFacts<'_>) -> Result<RemoteGrant, Den
     if !remote.credentials_configured {
         return Err(Denial::CredentialsMissing);
     }
-    if let Some(echo) = &remote.echoed_consent {
-        if !echo.external_processing_allowed {
-            return Err(Denial::ConsentRequired(ConsentState::Missing));
-        }
-        if &echo.provider != provider {
-            return Err(Denial::ProviderMismatch);
-        }
+    // The request must echo consent for this provider, as `_admit` requires:
+    // a missing echo is a refusal, never a pass to the stored-consent check.
+    let Some(echo) = &remote.echoed_consent else {
+        return Err(Denial::ConsentRequired(ConsentState::Missing));
+    };
+    if !echo.external_processing_allowed {
+        return Err(Denial::ConsentRequired(ConsentState::Missing));
+    }
+    if &echo.provider != provider {
+        return Err(Denial::ProviderMismatch);
     }
     match consent_state(
         remote.consents,
