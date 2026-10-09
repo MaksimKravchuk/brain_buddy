@@ -1411,3 +1411,258 @@ fn queries_026_fr_002_every_task_query_kind_is_answered_through_query() {
         ]
     );
 }
+
+// ------------------------------------------------- bounded pagination, cursor shape
+
+const ALL_SORTS: [TaskSort; 4] = [
+    TaskSort::Manual,
+    TaskSort::Due,
+    TaskSort::Priority,
+    TaskSort::Title,
+];
+
+/// A 10,000-task store with ties on every key part: a few order keys, minutes,
+/// due days and priorities shared by many tasks, a quarter of the tasks without
+/// a due date, mixed-case repeated titles, and every fifth task in another list.
+/// Returns the read set and the Inbox tasks as `(id, title, order_key, minute,
+/// due, priority rank)`.
+type Generated = (String, String, u64, u64, Option<String>, usize);
+
+fn large_store() -> (ReadSet, Vec<Generated>) {
+    const PRIORITIES: [&str; 4] = ["high", "medium", "low", "none"];
+    let mut tasks = Vec::new();
+    let mut expected = Vec::new();
+    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+    let mut roll = |modulus: u64| {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) % modulus
+    };
+    for index in 0..10_000_u64 {
+        let id = format!("t-{index:05}");
+        let title = format!(
+            "{}{}",
+            ["alpha", "Alpha", "BETA", "gamma", "Delta"][roll(5) as usize],
+            roll(40)
+        );
+        let order_key = roll(60);
+        let minute = roll(7);
+        let due = (roll(4) != 0).then(|| format!("2026-10-{:02}", 1 + roll(9)));
+        let priority = roll(4) as usize;
+        let state = if index % 5 == 0 { "next" } else { "inbox" };
+        let mut row = with(
+            task(&id, &title, state, order_key),
+            "priority",
+            json!(PRIORITIES[priority]),
+        );
+        row = with(
+            row,
+            "created_at",
+            json!(format!("2026-09-02T09:0{minute}:00Z")),
+        );
+        row = with(row, "due_date", json!(due));
+        tasks.push(row);
+        if state == "inbox" {
+            expected.push((id, title, order_key, minute, due, priority));
+        }
+    }
+    let read_set = Store {
+        tasks,
+        ..Store::default()
+    }
+    .read_set();
+    (read_set, expected)
+}
+
+/// The server's `_sort_key` order, worked out here from the generated columns.
+fn expected_order(mut rows: Vec<Generated>, sort: TaskSort) -> Vec<String> {
+    let manual = |row: &Generated| (row.2, row.3, row.0.clone());
+    rows.sort_by_cached_key(|row| match sort {
+        TaskSort::Manual => (0, String::new(), 0, manual(row)),
+        TaskSort::Due => (
+            u64::from(row.4.is_none()),
+            row.4.clone().unwrap_or_default(),
+            0,
+            manual(row),
+        ),
+        TaskSort::Priority => (row.5 as u64, String::new(), 0, manual(row)),
+        TaskSort::Title => (0, row.1.to_lowercase(), 0, (0, 0, row.0.clone())),
+    });
+    rows.into_iter().map(|row| row.0).collect()
+}
+
+#[test]
+fn queries_026_fr_009_a_ten_thousand_task_store_pages_in_full_order_for_every_sort() {
+    let (read_set, rows) = large_store();
+    assert_eq!(rows.len(), 8_000);
+    for sort in ALL_SORTS {
+        let expected = expected_order(rows.clone(), sort);
+        // A limit that divides nothing, so the last page is short.
+        let limit = 199;
+        let mut seen: Vec<String> = Vec::new();
+        let mut after: Option<String> = None;
+        let mut pages = 0;
+        loop {
+            let page = Listing::of(OpenList::Inbox)
+                .sorted(sort)
+                .limit(limit)
+                .after(after.as_deref())
+                .page(&read_set);
+            pages += 1;
+            assert!(page.items.len() <= limit as usize);
+            assert_eq!(page.counts_by_state.inbox, 8_000);
+            assert_eq!(page.counts_by_state.next, 2_000);
+            seen.extend(ids(&page.items).into_iter().map(str::to_owned));
+            assert_eq!(page.has_more, page.next_cursor.is_some());
+            if !page.has_more {
+                break;
+            }
+            after = page.next_cursor;
+        }
+        assert_eq!(pages, 41, "{sort:?}");
+        assert_eq!(seen.len(), expected.len(), "{sort:?}: no gap, no duplicate");
+        assert_eq!(
+            seen, expected,
+            "{sort:?}: the concatenated pages are the full order"
+        );
+    }
+}
+
+fn base64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let group = chunk.iter().enumerate().fold(0u32, |acc, (i, byte)| {
+            acc | (u32::from(*byte) << (16 - 8 * i))
+        });
+        for position in 0..=chunk.len() {
+            out.push(char::from(
+                ALPHABET[((group >> (18 - 6 * position)) & 0x3f) as usize],
+            ));
+        }
+    }
+    out
+}
+
+fn unbase64url(text: &str) -> Vec<u8> {
+    let value = |byte: u8| match byte {
+        b'A'..=b'Z' => byte - b'A',
+        b'a'..=b'z' => byte - b'a' + 26,
+        b'0'..=b'9' => byte - b'0' + 52,
+        b'-' => 62,
+        _ => 63,
+    };
+    let (mut acc, mut bits, mut out) = (0u32, 0u32, Vec::new());
+    for byte in text.bytes() {
+        acc = (acc << 6) | u32::from(value(byte));
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((acc >> bits) & 0xff) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    out
+}
+
+/// The server's own cursor with its `last` key replaced, filters untouched.
+fn cursor_with_last(cursor: &str, last: &[Value]) -> String {
+    let mut payload: Value = serde_json::from_slice(&unbase64url(cursor)).expect("cursor json");
+    payload["last"] = Value::Array(last.to_vec());
+    base64url(payload.to_string().as_bytes())
+}
+
+fn cursor_last(cursor: &str) -> Vec<Value> {
+    let payload: Value = serde_json::from_slice(&unbase64url(cursor)).expect("cursor json");
+    payload["last"].as_array().expect("last").clone()
+}
+
+fn assert_cursor_refused(read_set: &ReadSet, sort: TaskSort, cursor: &str, why: &str) {
+    let error = Listing::of(OpenList::Inbox)
+        .sorted(sort)
+        .limit(1)
+        .after(Some(cursor))
+        .run(read_set)
+        .expect_err(why);
+    assert_eq!(
+        (error.reason, error.field.as_deref()),
+        (Reason::InvalidValue, Some("cursor")),
+        "{sort:?}: {why}"
+    );
+}
+
+#[test]
+fn queries_026_fr_009_a_cursor_key_of_the_wrong_shape_is_refused_for_every_sort() {
+    let read_set = Store {
+        tasks: vec![
+            task("t-a", "a", "inbox", 0),
+            task("t-b", "b", "inbox", 1),
+            task("t-c", "c", "inbox", 2),
+        ],
+        ..Store::default()
+    }
+    .read_set();
+    for sort in ALL_SORTS {
+        let first = Listing::of(OpenList::Inbox)
+            .sorted(sort)
+            .limit(1)
+            .page(&read_set);
+        let cursor = first.next_cursor.expect("a cursor");
+        let last = cursor_last(&cursor);
+        // The untouched key, re-encoded, still continues the list.
+        let valid = cursor_with_last(&cursor, &last);
+        let rest = Listing::of(OpenList::Inbox)
+            .sorted(sort)
+            .limit(5)
+            .after(Some(&valid))
+            .page(&read_set);
+        assert_eq!(ids(&rest.items), ["t-b", "t-c"], "{sort:?}");
+
+        // Wrong length: shorter, longer, and a lone text part.
+        let mut shorter = last.clone();
+        shorter.pop();
+        assert_cursor_refused(
+            &read_set,
+            sort,
+            &cursor_with_last(&cursor, &shorter),
+            "shorter",
+        );
+        let mut longer = last.clone();
+        longer.push(json!("x"));
+        assert_cursor_refused(
+            &read_set,
+            sort,
+            &cursor_with_last(&cursor, &longer),
+            "longer",
+        );
+        assert_cursor_refused(
+            &read_set,
+            sort,
+            &cursor_with_last(&cursor, &[json!("x")]),
+            "lone text",
+        );
+        assert_cursor_refused(
+            &read_set,
+            sort,
+            &cursor_with_last(&cursor, &[json!(1)]),
+            "lone int",
+        );
+
+        // Wrong variant at each position: an integer for text and text for an integer.
+        for position in 0..last.len() {
+            let mut swapped = last.clone();
+            swapped[position] = if last[position].is_u64() {
+                json!("x")
+            } else {
+                json!(7)
+            };
+            assert_cursor_refused(
+                &read_set,
+                sort,
+                &cursor_with_last(&cursor, &swapped),
+                &format!("variant at position {position}"),
+            );
+        }
+    }
+}

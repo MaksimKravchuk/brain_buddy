@@ -11,6 +11,7 @@ use super::primitives::{
     ActorId, BulkId, CommentId, DecisionId, ProjectId, ProviderName, SessionId, SubtaskId, TagId,
     TaskId, ZoneName,
 };
+use super::references::{AliasRef, Dependencies, ProjectRef, TagRef};
 use super::review_commands::{
     BulkReleaseRequest, ConsentGrantRequest, ConsentRevoke, Decide, Empty, ExplainerAck,
     FormulationRef, ParksAck, SessionFinish, SessionProgress, SessionStart, SettingsUpdate,
@@ -26,21 +27,28 @@ use super::tasks::{
 };
 use super::vocabulary::{OpenList, ProjectFilter, StepCode, TaskSort, WriterOrigin};
 use bb_protocol::catalog::{CommandType, EntityType};
-use bb_protocol::command::{CommandEnvelope, Precondition};
+use bb_protocol::command::{CommandEnvelope, CommandRef, Precondition};
 use bb_protocol::receipt::Binding;
 use bb_protocol::wire::{CommandId, Counter, Id, Instant, OpenObject, RecordKey};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::hash::Hash;
 
 // ----------------------------------------------------------------------- command
 
 /// The frozen sync v1 catalog as typed payloads. `type` and `payload` mirror the
 /// envelope; the target is the envelope's `entity_id` and is carried by
 /// [`DomainCommand`].
+///
+/// `P` and `T` are the project and tag reference types of the payloads that
+/// name them. `decide` reads the default, direct IDs; [`WireCommand`] is what
+/// an envelope carries, where an earlier Smart Add alias may stand in, and
+/// [`WireCommand::resolve`] turns it into the first.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
-pub enum Command {
+pub enum Command<P = ProjectId, T = TagId> {
     #[serde(rename = "project.create")]
     ProjectCreate(ProjectCreate),
     #[serde(rename = "project.update")]
@@ -56,13 +64,13 @@ pub enum Command {
     #[serde(rename = "tag.delete")]
     TagDelete(Empty),
     #[serde(rename = "task.create")]
-    TaskCreate(TaskCreate),
+    TaskCreate(TaskCreate<P, T>),
     #[serde(rename = "task.smart_add")]
     TaskSmartAdd(SmartAdd),
     #[serde(rename = "task.update")]
-    TaskUpdate(TaskUpdate),
+    TaskUpdate(TaskUpdate<P, T>),
     #[serde(rename = "task.tags")]
-    TaskTags(TagChanges),
+    TaskTags(TagChanges<T>),
     #[serde(rename = "task.transition")]
     TaskTransition(TaskTransition),
     #[serde(rename = "subtask.create")]
@@ -103,62 +111,50 @@ pub enum Command {
     ReviewConsentRevoke(ConsentRevoke),
 }
 
-impl Command {
+/// A command as an envelope carries it: project and tag references may be
+/// Smart Add aliases awaiting a retained receipt binding.
+pub type WireCommand = Command<ProjectRef, TagRef>;
+
+impl<P, T> Command<P, T> {
     /// The catalog type. Exhaustive: a new variant must name its type here.
     pub fn command_type(&self) -> CommandType {
-        use CommandType as T;
+        use CommandType as K;
         match self {
-            Self::ProjectCreate(_) => T::ProjectCreate,
-            Self::ProjectUpdate(_) => T::ProjectUpdate,
-            Self::ProjectArchive(_) => T::ProjectArchive,
-            Self::ProjectUnarchive(_) => T::ProjectUnarchive,
-            Self::TagCreate(_) => T::TagCreate,
-            Self::TagUpdate(_) => T::TagUpdate,
-            Self::TagDelete(_) => T::TagDelete,
-            Self::TaskCreate(_) => T::TaskCreate,
-            Self::TaskSmartAdd(_) => T::TaskSmartAdd,
-            Self::TaskUpdate(_) => T::TaskUpdate,
-            Self::TaskTags(_) => T::TaskTags,
-            Self::TaskTransition(_) => T::TaskTransition,
-            Self::SubtaskCreate(_) => T::SubtaskCreate,
-            Self::SubtaskUpdate(_) => T::SubtaskUpdate,
-            Self::SubtaskTransition(_) => T::SubtaskTransition,
-            Self::CommentCreate(_) => T::CommentCreate,
-            Self::CommentUpdate(_) => T::CommentUpdate,
-            Self::ReviewDecide(_) => T::ReviewDecide,
-            Self::ReviewUndoDecision(_) => T::ReviewUndoDecision,
-            Self::ReviewAutoPark(_) => T::ReviewAutoPark,
-            Self::ReviewExplainerAck(_) => T::ReviewExplainerAck,
-            Self::ReviewSettings(_) => T::ReviewSettings,
-            Self::ReviewParksAck(_) => T::ReviewParksAck,
-            Self::ReviewSessionStart(_) => T::ReviewSessionStart,
-            Self::ReviewSessionProgress(_) => T::ReviewSessionProgress,
-            Self::ReviewSessionFinish(_) => T::ReviewSessionFinish,
-            Self::ReviewBulkRelease(_) => T::ReviewBulkRelease,
-            Self::ReviewBulkUndo(_) => T::ReviewBulkUndo,
-            Self::ReviewConsentGrant(_) => T::ReviewConsentGrant,
-            Self::ReviewConsentRevoke(_) => T::ReviewConsentRevoke,
+            Self::ProjectCreate(_) => K::ProjectCreate,
+            Self::ProjectUpdate(_) => K::ProjectUpdate,
+            Self::ProjectArchive(_) => K::ProjectArchive,
+            Self::ProjectUnarchive(_) => K::ProjectUnarchive,
+            Self::TagCreate(_) => K::TagCreate,
+            Self::TagUpdate(_) => K::TagUpdate,
+            Self::TagDelete(_) => K::TagDelete,
+            Self::TaskCreate(_) => K::TaskCreate,
+            Self::TaskSmartAdd(_) => K::TaskSmartAdd,
+            Self::TaskUpdate(_) => K::TaskUpdate,
+            Self::TaskTags(_) => K::TaskTags,
+            Self::TaskTransition(_) => K::TaskTransition,
+            Self::SubtaskCreate(_) => K::SubtaskCreate,
+            Self::SubtaskUpdate(_) => K::SubtaskUpdate,
+            Self::SubtaskTransition(_) => K::SubtaskTransition,
+            Self::CommentCreate(_) => K::CommentCreate,
+            Self::CommentUpdate(_) => K::CommentUpdate,
+            Self::ReviewDecide(_) => K::ReviewDecide,
+            Self::ReviewUndoDecision(_) => K::ReviewUndoDecision,
+            Self::ReviewAutoPark(_) => K::ReviewAutoPark,
+            Self::ReviewExplainerAck(_) => K::ReviewExplainerAck,
+            Self::ReviewSettings(_) => K::ReviewSettings,
+            Self::ReviewParksAck(_) => K::ReviewParksAck,
+            Self::ReviewSessionStart(_) => K::ReviewSessionStart,
+            Self::ReviewSessionProgress(_) => K::ReviewSessionProgress,
+            Self::ReviewSessionFinish(_) => K::ReviewSessionFinish,
+            Self::ReviewBulkRelease(_) => K::ReviewBulkRelease,
+            Self::ReviewBulkUndo(_) => K::ReviewBulkUndo,
+            Self::ReviewConsentGrant(_) => K::ReviewConsentGrant,
+            Self::ReviewConsentRevoke(_) => K::ReviewConsentRevoke,
         }
     }
+}
 
-    /// Types one payload. Unknown fields, wrong types and out-of-range values are
-    /// refused as [`Reason::InvalidPayload`], naming the offending value type
-    /// when it is one of ours; the parser's own message is dropped because it
-    /// can quote the input.
-    pub fn from_payload(
-        command_type: CommandType,
-        payload: &OpenObject,
-    ) -> Result<Self, DomainError> {
-        let tagged =
-            json!({ "type": command_type.as_str(), "payload": Value::Object(payload.clone()) });
-        let command: Self = serde_json::from_value(tagged).map_err(|e| payload_error(&e))?;
-        if command.command_type() == command_type {
-            Ok(command)
-        } else {
-            Err(DomainError::new(Reason::InvalidPayload))
-        }
-    }
-
+impl<P, T: Eq + Hash> Command<P, T> {
     /// Cross-field rules the canonical request models state structurally.
     pub fn check_shape(&self) -> Result<(), DomainError> {
         match self {
@@ -175,6 +171,90 @@ impl Command {
             },
             _ => Ok(()),
         }
+    }
+}
+
+/// Types one payload. Unknown fields, wrong types and out-of-range values are
+/// refused as [`Reason::InvalidPayload`], naming the offending value type
+/// when it is one of ours; the parser's own message is dropped because it
+/// can quote the input.
+fn decode_payload<P, T>(
+    command_type: CommandType,
+    payload: &OpenObject,
+) -> Result<Command<P, T>, DomainError>
+where
+    Command<P, T>: DeserializeOwned,
+{
+    let tagged =
+        json!({ "type": command_type.as_str(), "payload": Value::Object(payload.clone()) });
+    let command: Command<P, T> = serde_json::from_value(tagged).map_err(|e| payload_error(&e))?;
+    if command.command_type() == command_type {
+        Ok(command)
+    } else {
+        Err(DomainError::new(Reason::InvalidPayload))
+    }
+}
+
+impl Command {
+    /// Types one payload whose project and tag references are direct IDs;
+    /// an alias reference is refused here (see [`WireCommand::from_wire_payload`]).
+    pub fn from_payload(
+        command_type: CommandType,
+        payload: &OpenObject,
+    ) -> Result<Self, DomainError> {
+        decode_payload(command_type, payload)
+    }
+}
+
+impl WireCommand {
+    /// Types one payload as an envelope carries it: a project or tag
+    /// reference is a direct ID or an alias to an earlier Smart Add command.
+    pub fn from_wire_payload(
+        command_type: CommandType,
+        payload: &OpenObject,
+    ) -> Result<Self, DomainError> {
+        decode_payload(command_type, payload)
+    }
+
+    /// Replaces every alias with the ID the retained receipt bound to it, in
+    /// memory only. The envelope is untouched: a payload that cannot resolve
+    /// yet is [`Reason::DependencyPending`] and is retried unchanged.
+    pub fn resolve(
+        self,
+        dependencies: &(impl Dependencies + ?Sized),
+    ) -> Result<Command, DomainError> {
+        Ok(match self {
+            Self::TaskCreate(payload) => Command::TaskCreate(payload.resolve(dependencies)?),
+            Self::TaskUpdate(payload) => Command::TaskUpdate(payload.resolve(dependencies)?),
+            Self::TaskTags(changes) => Command::TaskTags(changes.resolve(dependencies)?),
+            Self::ProjectCreate(p) => Command::ProjectCreate(p),
+            Self::ProjectUpdate(p) => Command::ProjectUpdate(p),
+            Self::ProjectArchive(p) => Command::ProjectArchive(p),
+            Self::ProjectUnarchive(p) => Command::ProjectUnarchive(p),
+            Self::TagCreate(p) => Command::TagCreate(p),
+            Self::TagUpdate(p) => Command::TagUpdate(p),
+            Self::TagDelete(p) => Command::TagDelete(p),
+            Self::TaskSmartAdd(p) => Command::TaskSmartAdd(p),
+            Self::TaskTransition(p) => Command::TaskTransition(p),
+            Self::SubtaskCreate(p) => Command::SubtaskCreate(p),
+            Self::SubtaskUpdate(p) => Command::SubtaskUpdate(p),
+            Self::SubtaskTransition(p) => Command::SubtaskTransition(p),
+            Self::CommentCreate(p) => Command::CommentCreate(p),
+            Self::CommentUpdate(p) => Command::CommentUpdate(p),
+            Self::ReviewDecide(p) => Command::ReviewDecide(p),
+            Self::ReviewUndoDecision(p) => Command::ReviewUndoDecision(p),
+            Self::ReviewAutoPark(p) => Command::ReviewAutoPark(p),
+            Self::ReviewExplainerAck(p) => Command::ReviewExplainerAck(p),
+            Self::ReviewSettings(p) => Command::ReviewSettings(p),
+            Self::ReviewParksAck(p) => Command::ReviewParksAck(p),
+            Self::ReviewSessionStart(p) => Command::ReviewSessionStart(p),
+            Self::ReviewSessionProgress(p) => Command::ReviewSessionProgress(p),
+            Self::ReviewSessionFinish(p) => Command::ReviewSessionFinish(p),
+            Self::ReviewBulkRelease(p) => Command::ReviewBulkRelease(p),
+            Self::ReviewBulkUndo(p) => Command::ReviewBulkUndo(p),
+            Self::ReviewConsentGrant(p) => Command::ReviewConsentGrant(p),
+            Self::ReviewConsentRevoke(p) => Command::ReviewConsentRevoke(p),
+        })
     }
 }
 
@@ -211,14 +291,42 @@ pub struct DomainCommand {
     pub command: Command,
 }
 
+/// Alias lookups are valid only for a command the envelope lists in
+/// `depends_on` (command-catalog.md "Smart Add bindings").
+struct Listed<'a, D: ?Sized> {
+    dependencies: &'a D,
+    depends_on: &'a [CommandId],
+}
+
+impl<D: Dependencies + ?Sized> Dependencies for Listed<'_, D> {
+    fn edit_revision(&self, reference: &CommandRef) -> Result<Counter, DomainError> {
+        self.dependencies.edit_revision(reference)
+    }
+
+    fn binding(&self, alias: &AliasRef) -> Result<Id, DomainError> {
+        if self.depends_on.contains(&alias.after_command) {
+            self.dependencies.binding(alias)
+        } else {
+            Err(DomainError::field(Reason::InvalidPayload, "depends_on"))
+        }
+    }
+}
+
 impl DomainCommand {
-    /// Types an executable envelope. `resolve` substitutes the edit revision of
-    /// an accepted earlier command (an `after_command` precondition); `None`
-    /// means that receipt is not known yet, which is
-    /// [`Reason::DependencyPending`], never a guess.
+    /// Types an executable envelope without changing it. `dependencies` reads
+    /// the retained terminal receipts of earlier commands:
+    ///
+    /// * an `after_command` precondition takes the edit revision the receipt
+    ///   recorded for exactly the `entity_type` and `entity_id` it names;
+    /// * a Smart Add alias reference takes the entity ID the receipt bound to
+    ///   its `alias_id`.
+    ///
+    /// A receipt not known yet is [`Reason::DependencyPending`], never a
+    /// guess; a known one lacking the named result is
+    /// [`Reason::DependencyRejected`].
     pub fn from_envelope(
         envelope: &CommandEnvelope,
-        resolve: impl Fn(&CommandId) -> Option<Counter>,
+        dependencies: &(impl Dependencies + ?Sized),
     ) -> Result<Self, DomainError> {
         let stable = &envelope.envelope;
         if !envelope
@@ -234,7 +342,13 @@ impl DomainCommand {
         {
             return Err(DomainError::field(Reason::TooManyItems, "items"));
         }
-        let command = Command::from_payload(envelope.command_type, &stable.payload)?;
+        let wire = WireCommand::from_wire_payload(envelope.command_type, &stable.payload)?;
+        wire.check_shape()?;
+        let command = wire.resolve(&Listed {
+            dependencies,
+            depends_on: &stable.depends_on,
+        })?;
+        // Two references that resolve to one tag overlap only now.
         command.check_shape()?;
         let preconditions = envelope
             .preconditions
@@ -245,13 +359,13 @@ impl DomainCommand {
                     entity_id: check.entity_id.clone(),
                     edit_revision: check.edit_revision.clone(),
                 }),
-                Precondition::AfterCommand(after) => resolve(&after.after_command.command_id)
+                Precondition::AfterCommand(after) => dependencies
+                    .edit_revision(&after.after_command)
                     .map(|edit_revision| RevisionCheck {
                         entity_type: after.after_command.entity_type,
                         entity_id: after.after_command.entity_id.clone(),
                         edit_revision,
-                    })
-                    .ok_or_else(|| DomainError::new(Reason::DependencyPending)),
+                    }),
             })
             .collect::<Result<_, _>>()?;
         Ok(Self {
