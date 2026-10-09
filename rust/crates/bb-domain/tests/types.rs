@@ -5,6 +5,7 @@
 
 use bb_domain::types::*;
 use bb_protocol::command::{Decoded, decode_command};
+use bb_protocol::receipt::Receipt;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
@@ -215,7 +216,7 @@ fn types_026_fr_002_review_requests_pass_the_full_envelope_path() {
             |n| json!([{"entity_type": entity, "entity_id": TASK, "edit_revision": n.to_string()}]),
         );
         let envelope = executable(command_type, to_payload(model, &e["body"]), checks);
-        let command = DomainCommand::from_envelope(&envelope, |_| None)
+        let command = DomainCommand::from_envelope(&envelope, &NoReceipts)
             .unwrap_or_else(|err| panic!("{}: {err}", e["id"]));
         assert_eq!(command.preconditions.len(), usize::from(revision.is_some()));
         assert_eq!(command.command_type().as_str(), *command_type);
@@ -415,7 +416,7 @@ fn types_026_fr_002_sync_v1_example_envelope_becomes_a_typed_command() {
         json!({"title": "Prepare the estimate"}),
         revision,
     );
-    let command = DomainCommand::from_envelope(&envelope, |_| None).unwrap();
+    let command = DomainCommand::from_envelope(&envelope, &NoReceipts).unwrap();
     assert_eq!(command.preconditions[0].edit_revision.to_u64(), Some(17));
     assert_eq!(command.command_type(), CommandType::TaskUpdate);
     let Command::TaskUpdate(update) = &command.command else {
@@ -434,9 +435,21 @@ fn types_026_fr_002_after_command_resolves_from_a_receipt_or_waits() {
         "command_id": "01900000-0000-4000-8000-000000000000",
         "entity_type": "task", "entity_id": "task-existing-id"}}]);
     let envelope = executable("task.transition", json!({"action": "complete"}), after);
-    let pending = DomainCommand::from_envelope(&envelope, |_| None).unwrap_err();
+    let pending = DomainCommand::from_envelope(&envelope, &NoReceipts).unwrap_err();
     assert_eq!(pending.reason, Reason::DependencyPending);
-    let resolved = DomainCommand::from_envelope(&envelope, |_| Counter::parse("3").ok()).unwrap();
+    let receipt: Receipt = serde_json::from_value(json!({
+        "command_id": "01900000-0000-4000-8000-000000000000",
+        "outcome": "accepted", "has_changes": true, "result_redacted": false,
+        "result": null, "error": null, "id_bindings": [],
+        "scope_id": SETTINGS_OWNER, "server_now": "2026-10-08T10:00:01Z",
+        "server_generation": "generation-example", "commit_seq": "908",
+        "result_versions": [{"entity_type": "task", "record_key": ["task-existing-id"],
+            "record_version": "24", "edit_revision": "3"}],
+        "correlation_id": "opaque-support-reference"
+    }))
+    .unwrap();
+    let receipts = [receipt];
+    let resolved = DomainCommand::from_envelope(&envelope, receipts.as_slice()).unwrap();
     assert_eq!(resolved.preconditions[0].edit_revision.as_str(), "3");
     assert_eq!(resolved.preconditions[0].entity_type, EntityType::Task);
 }
@@ -450,7 +463,7 @@ fn types_026_fr_012_unknown_fields_and_versions_are_refused_not_executed() {
         none.clone(),
     );
     assert_eq!(
-        DomainCommand::from_envelope(&unknown, |_| None)
+        DomainCommand::from_envelope(&unknown, &NoReceipts)
             .unwrap_err()
             .reason,
         Reason::InvalidPayload
@@ -458,7 +471,7 @@ fn types_026_fr_012_unknown_fields_and_versions_are_refused_not_executed() {
     let mut future = executable("task.update", json!({"title": "x"}), none.clone());
     future.envelope.command_version = 2;
     assert_eq!(
-        DomainCommand::from_envelope(&future, |_| None)
+        DomainCommand::from_envelope(&future, &NoReceipts)
             .unwrap_err()
             .reason,
         Reason::UnsupportedCommandVersion
@@ -480,7 +493,7 @@ fn types_026_fr_002_item_ceilings_are_enforced_by_the_domain_too() {
         json!([]),
     );
     envelope.envelope.payload = object(json!({"items": vec![key; 201]}));
-    let err = DomainCommand::from_envelope(&envelope, |_| None).unwrap_err();
+    let err = DomainCommand::from_envelope(&envelope, &NoReceipts).unwrap_err();
     assert_eq!(
         (err.reason, err.field.as_deref()),
         (Reason::TooManyItems, Some("items"))
@@ -651,7 +664,7 @@ fn types_026_fr_002_domain_command_round_trips_flattened() {
         json!({"task_id": "task_1", "body": "hi"}),
         json!([]),
     );
-    let command = DomainCommand::from_envelope(&envelope, |_| None).unwrap();
+    let command = DomainCommand::from_envelope(&envelope, &NoReceipts).unwrap();
     let wire = serde_json::to_value(&command).unwrap();
     assert_eq!(wire["type"], "comment.create");
     assert_eq!(wire["payload"]["task_id"], "task_1");
