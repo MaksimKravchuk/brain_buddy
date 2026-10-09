@@ -1288,13 +1288,13 @@ impl<'a> Snapshot<'a> {
     }
 
     /// The tasks of `ids` in that order; an ID no longer held is left out.
+    /// Each ID is a keyed lookup, so a large queue stays O(ids · log tasks).
     fn pick(&self, ids: &[String]) -> Vec<&'a Task> {
         ids.iter()
             .filter_map(|id| {
-                self.read_set
-                    .tasks
-                    .values()
-                    .find(|task| task.id.as_str() == id)
+                TaskId::parse(id.as_str())
+                    .ok()
+                    .and_then(|id| self.read_set.tasks.get(&id))
             })
             .collect()
     }
