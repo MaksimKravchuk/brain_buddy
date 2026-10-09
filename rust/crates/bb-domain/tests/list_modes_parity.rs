@@ -140,14 +140,17 @@ impl Fixture {
             "id": id, "name": name, "color": null,
             "state": if archived { "archived" } else { "active" }, "revision": "1",
             "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
+            "created_at": "2026-09-01T09:00:00Z",
         }));
         id.to_owned()
     }
 
     fn tag(&mut self, name: &str, id: &str) -> String {
         self.serial += 1;
-        self.tags
-            .push(json!({ "id": id, "name": name, "state": "active", "revision": "1" }));
+        self.tags.push(json!({
+            "id": id, "name": name, "state": "active", "revision": "1",
+            "created_at": "2026-09-01T09:00:00Z",
+        }));
         id.to_owned()
     }
 
@@ -1730,6 +1733,7 @@ fn edit_project(rs: &mut ReadSet, id: &str, name: &str, state: &str, color: Opti
     *project = serde_json::from_value(json!({
         "id": id, "name": name, "color": color, "state": state, "revision": "2",
         "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
+        "created_at": "2026-09-01T09:00:00Z",
     }))
     .expect("a project");
 }
