@@ -1,7 +1,17 @@
 //! Shared Brain Buddy domain core.
 //!
-//! This crate currently exports the frozen value types ([`types`]); the rule
-//! families and the `decide`/`query` entry points land in later slices as they
-//! are implemented, so no module here is an empty placeholder.
+//! No I/O, no clocks, no random identifiers: every time and identifier a rule
+//! needs is an explicit input.
+//!
+//! * [`normalization`]: Python-compatible NFKC, whitespace, full case folding
+//!   and Unicode-scalar lengths (`backend/app/modules/tasks/repository.py`,
+//!   `formulation.py`).
+//! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
+//!   a calendar day distinct from an instant.
+//! * [`types`]: the frozen value types. The rule families and the
+//!   `decide`/`query` entry points land in later slices as they are
+//!   implemented, so no module here is an empty placeholder.
 
+pub mod calendar;
+pub mod normalization;
 pub mod types;
