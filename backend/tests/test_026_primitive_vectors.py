@@ -26,6 +26,7 @@ from app.modules.tasks.repository import (
     normalize_task_name,
 )
 from app.modules.tasks.service import TaskService
+from tests.allure_evidence import attach_json, check_equal
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VECTORS_PATH = (
@@ -56,13 +57,17 @@ def test_026_FR_002_primitive_vector_file_has_every_section() -> None:
     """No section is missing or empty, and ids are unique."""
 
     with allure.step("Check the declared sections"):
-        assert VECTORS["schema"] == "brainbuddy-primitive-vectors/v1"
         sections = ["name_normalization", "search", "whitespace", "scalar_length"]
-        assert all(VECTORS[name] for name in sections)
-        assert all(CALENDAR[name] for name in CALENDAR)
+        check_equal(
+            "vector file schema", VECTORS["schema"], "brainbuddy-primitive-vectors/v1"
+        )
+        counts = {name: len(VECTORS[name]) for name in sections}
+        counts.update({f"calendar.{name}": len(CALENDAR[name]) for name in CALENDAR})
+        attach_json("rows per section", counts)
+        assert all(counts.values()), counts
         ids = [row["id"] for name in sections for row in VECTORS[name]]
         ids += _ids(CALENDAR["local_day"]) + _ids(CALENDAR["start_instant"])
-        assert len(ids) == len(set(ids))
+        check_equal("row ids are unique", len(ids), len(set(ids)))
 
 
 @pytest.mark.parametrize(
@@ -73,10 +78,17 @@ def test_026_FR_002_name_normalization_vector(row: dict[str, Any]) -> None:
 
     value = row["input"]
     with allure.step("Run the server's name functions"):
-        assert display_project_name(value) == row["project_display"]
-        assert normalize_task_name(value) == row["project_key"]
-        assert display_tag_name(value) == row["tag_display"]
-        assert normalize_task_name(value, strip_tag_prefix=True) == row["tag_key"]
+        attach_json("input vector", row)
+        check_equal(
+            "project display", display_project_name(value), row["project_display"]
+        )
+        check_equal("project key", normalize_task_name(value), row["project_key"])
+        check_equal("tag display", display_tag_name(value), row["tag_display"])
+        check_equal(
+            "tag key",
+            normalize_task_name(value, strip_tag_prefix=True),
+            row["tag_key"],
+        )
 
 
 @pytest.mark.parametrize("row", VECTORS["search"], ids=_ids(VECTORS["search"]))
@@ -84,10 +96,17 @@ def test_026_FR_002_search_key_vector(row: dict[str, Any]) -> None:
     """Task search folds like the server's list filter does."""
 
     with allure.step("Run the server's search normalisation"):
+        attach_json("input vector", row)
         if row["input"] is not None:
-            assert TaskService._normalize_for_search(row["input"]) == row["search_key"]
-        assert TaskService._normalize_search_query(row["input"]) == (
-            row["search_query_key"]
+            check_equal(
+                "search key",
+                TaskService._normalize_for_search(row["input"]),
+                row["search_key"],
+            )
+        check_equal(
+            "search query key",
+            TaskService._normalize_search_query(row["input"]),
+            row["search_query_key"],
         )
 
 
@@ -96,8 +115,9 @@ def test_026_FR_002_whitespace_vector(row: dict[str, Any]) -> None:
     """``str.strip()`` and ``" ".join(str.split())`` are the whitespace rule."""
 
     with allure.step("Apply Python's strip and split"):
-        assert row["input"].strip() == row["stripped"]
-        assert " ".join(row["input"].split()) == row["collapsed"]
+        attach_json("input vector", row)
+        check_equal("stripped", row["input"].strip(), row["stripped"])
+        check_equal("collapsed", " ".join(row["input"].split()), row["collapsed"])
 
 
 @pytest.mark.parametrize(
@@ -108,47 +128,75 @@ def test_026_FR_002_scalar_length_vector(row: dict[str, Any]) -> None:
 
     text = row["input"]
     with allure.step("Count scalars, UTF-16 units and UTF-8 bytes"):
-        assert len(text) == row["scalars"]
-        assert len(text.encode("utf-16-le")) // 2 == row["utf16_units"]
-        assert len(text.encode("utf-8")) == row["utf8_bytes"]
-        assert (len(text) <= 500) is row["within_500"]
+        attach_json("input vector", row)
+        check_equal("scalars", len(text), row["scalars"])
+        check_equal(
+            "utf-16 units", len(text.encode("utf-16-le")) // 2, row["utf16_units"]
+        )
+        check_equal("utf-8 bytes", len(text.encode("utf-8")), row["utf8_bytes"])
+        check_equal("within 500 scalars", len(text) <= 500, row["within_500"])
 
 
 def test_026_FR_017_calendar_day_strict_iso_rows() -> None:
     """Valid rows are real dates; invalid rows are rejected by the strict rule."""
 
     with allure.step("Parse every valid row"):
-        for iso in CALENDAR["valid_iso"]:
-            assert _strict_iso(iso).isoformat() == iso
+        attach_json("valid rows", CALENDAR["valid_iso"])
+        parsed = [_strict_iso(iso).isoformat() for iso in CALENDAR["valid_iso"]]
+        check_equal("round-tripped dates", parsed, CALENDAR["valid_iso"])
     with allure.step("Reject every invalid row"):
+        attach_json("invalid rows", CALENDAR["invalid_iso"])
+        rejected: list[str] = []
         for iso in CALENDAR["invalid_iso"]:
             with pytest.raises(ValueError):
                 _strict_iso(iso)
+            rejected.append(iso)
+        check_equal("every row rejected", rejected, CALENDAR["invalid_iso"])
 
 
 def test_026_FR_017_calendar_day_arithmetic_rows() -> None:
     """Day numbers, ``add_days`` and February lengths follow ``datetime.date``."""
 
     with allure.step("Check day numbers and February"):
-        for row in CALENDAR["day_number"]:
-            assert (date.fromisoformat(row["day"]) - date(1970, 1, 1)).days == (
-                row["number"]
-            )
-        for row in CALENDAR["days_in_february"]:
-            first = date(row["year"], 3, 1)
-            assert (first - timedelta(days=1)).day == row["days"]
+        numbers = CALENDAR["day_number"]
+        check_equal(
+            "days since 1970-01-01",
+            [(date.fromisoformat(r["day"]) - date(1970, 1, 1)).days for r in numbers],
+            [r["number"] for r in numbers],
+        )
+        february = CALENDAR["days_in_february"]
+        check_equal(
+            "days in February",
+            [(date(r["year"], 3, 1) - timedelta(days=1)).day for r in february],
+            [r["days"] for r in february],
+        )
     with allure.step("Add days across months, years and 1582"):
-        for row in CALENDAR["add_days"]:
-            start = date.fromisoformat(row["start"])
-            assert (start + timedelta(days=row["days"])).isoformat() == row["expect"]
+        added = CALENDAR["add_days"]
+        check_equal(
+            "start plus days",
+            [
+                (date.fromisoformat(r["start"]) + timedelta(days=r["days"])).isoformat()
+                for r in added
+            ],
+            [r["expect"] for r in added],
+        )
     with allure.step("Clamp rows lie outside Python's date range"):
+        attach_json("clamp rows", CALENDAR["clamp"])
         for row in CALENDAR["clamp"]:
             start = date.fromisoformat(row["start"])
             limit = date.max if row["expect"] == "9999-12-31" else date.min
-            assert date.fromisoformat(row["expect"]) == limit
+            check_equal(
+                f"clamp limit for {row['start']} + {row['days']}",
+                date.fromisoformat(row["expect"]),
+                limit,
+            )
             with pytest.raises((OverflowError, ValueError)):
                 start + timedelta(days=row["days"])
-            assert limit == (date.max if row["days"] > 0 else date.min)
+            check_equal(
+                "limit follows the direction",
+                limit,
+                date.max if row["days"] > 0 else date.min,
+            )
 
 
 @pytest.mark.parametrize("row", CALENDAR["local_day"], ids=_ids(CALENDAR["local_day"]))
@@ -156,7 +204,8 @@ def test_026_FR_017_local_day_vector(row: dict[str, Any]) -> None:
     """The same instant is a different calendar day in different zones."""
 
     with allure.step("Convert the instant in its zone"):
-        assert _local_day(row["unix"], row["zone"]) == row["day"]
+        attach_json("input vector", row)
+        check_equal("local day", _local_day(row["unix"], row["zone"]), row["day"])
 
 
 @pytest.mark.parametrize(
@@ -168,8 +217,19 @@ def test_026_FR_017_start_instant_vector_matches_due_start(
     """``due_start`` is the first instant of the day, DST gaps and repeats included."""
 
     with allure.step("Resolve the day start with the server's due_start"):
+        attach_json("input vector", row)
         start = due_start(date.fromisoformat(row["day"]), row["zone"])
-        assert int((start - EPOCH) / timedelta(seconds=1)) == row["unix"]
+        check_equal(
+            "start instant", int((start - EPOCH) / timedelta(seconds=1)), row["unix"]
+        )
     with allure.step("Read the local day just before and at that instant"):
-        assert _local_day(row["unix"] - 1, row["zone"]) == row["day_before_instant"]
-        assert _local_day(row["unix"], row["zone"]) == row["day_at_instant"]
+        check_equal(
+            "day before the instant",
+            _local_day(row["unix"] - 1, row["zone"]),
+            row["day_before_instant"],
+        )
+        check_equal(
+            "day at the instant",
+            _local_day(row["unix"], row["zone"]),
+            row["day_at_instant"],
+        )

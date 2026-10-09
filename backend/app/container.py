@@ -38,6 +38,7 @@ from app.modules.agents.service import (
 )
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
+from app.modules.tasks.jobs import JobRepository
 from app.modules.tasks.navigator import (
     NavigatorLimits,
     NavigatorProvider,
@@ -136,6 +137,9 @@ class Container:
     review_service: ReviewService
     review_flow_service: ReviewFlowService
     navigator_service: NavigatorService
+    # Spec 026 PR-20: the durable job ledger shares tasks.sqlite3. Wired only;
+    # no scheduler uses it until the handoff slices.
+    job_repository: JobRepository
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -724,4 +728,5 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
         review_service=review_service,
         review_flow_service=review_flow_service,
         navigator_service=navigator_service,
+        job_repository=JobRepository(task_repo.db_path),
     )
