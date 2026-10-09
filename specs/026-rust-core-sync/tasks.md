@@ -1,6 +1,6 @@
 # Tasks: shared Rust core and custom synchronization
 
-**Status:** proposed implementation map; owner approval pending. The specification request authorizes these documents, not implementation, new UX approval, migration or deployment. No implementation task is complete. The JSON below is deliberately present for review and structural validation while its status remains `proposed`.
+**Status:** amended implementation map following the owner's October 9 requirement for atomic PRs and maximum safe parallel execution; technical baseline accepted in [approval.md](approval.md), empirical boundary approval remains conditional. The specification request authorizes these documents, not implementation, new UX approval, migration or deployment. No implementation task is complete. The JSON below is deliberately present for review and structural validation while its status remains `proposed`.
 
 **Input:** [spec.md](spec.md), [plan.md](plan.md), [design.md](design.md), [data-model.md](data-model.md), [command catalog](contracts/command-catalog.md), [sync contract](contracts/sync-v1.md), and [runtime/FFI contract](contracts/runtime-ffi.md), [quickstart acceptance procedures](quickstart.md) Q01–Q12, and [owner approval packet](approval.md).
 
@@ -22,19 +22,21 @@ Freeze shared inputs and prove safe packaging before any writer changes. Indepen
 
 - [ ] T001 Obtain actual owner acceptance of design.md, adr-draft.md, the Constitution IV command-identity exception, retention/defaults, device/load baseline, Apple dependency policy exception, and these boundaries; freeze contracts/command-catalog.md, contracts/runtime-ffi.md and contracts/sync-v1.md, generate contracts/sync-v1.schema.json and contracts/sync-v1.openapi.yaml from the same catalog, and add only the default-OFF rust_core_sync capability in backend/app/core/config.py. Record the ADR-0011 review and analyze verdict in verification.md; no approval is inferred from this checkbox. (PR-01).
 
-- [ ] T002 Reconcile the existing backend/tests/fixtures/review_formulation_vectors.json, review_flow_vectors.json and project_archive_traces.json with BrainBuddyCoreTests resources and current task/Smart Add/date tests; add a Rust test loader at rust/crates/bb-domain/tests/parity.rs and bounded synthetic reference data at contracts/reference-store.json. Freeze contracts/web-presentation-vectors.json with the shared rule version, stable source-linked cases and expected web payload/display outcomes; reuse existing Smart Add/transition examples in the Rust and web parity checks. Document accepted contradiction resolutions, field/ID/outbox inventory, scheduler/writer inventory and lower-bound device/load in verification.md. Reuse vectors rather than cloning every language test. (PR-02).
+- [ ] T002 Reconcile the existing backend/tests/fixtures/review_formulation_vectors.json, review_flow_vectors.json and project_archive_traces.json with BrainBuddyCoreTests resources and current task/Smart Add/date tests; freeze bounded synthetic reference data at contracts/reference-store.json. Freeze contracts/web-presentation-vectors.json with the shared rule version, stable source-linked cases and expected web payload/display outcomes; reuse existing Smart Add/transition examples in the Rust and web parity checks. Document accepted contradiction resolutions, field/ID/outbox inventory, scheduler/writer inventory and lower-bound device/load in verification.md. Reuse vectors rather than cloning every language test. (PR-02).
 
 - [ ] T003 Create the proposed rust/Cargo.toml workspace, bb-domain and bb-protocol manifests and lib.rs entry points; encode typed command identity, scope, generations, dependency/precondition and result envelopes in bb-protocol/src/envelope.rs. Pin the validated toolchain/bridge versions; serialization accepts only catalog forms, rejects unknown execution variants and keeps the stable receipt-recovery envelope. Register modules only when implemented, without empty future crates. (PR-03).
 
-- [ ] T004 Implement the PyO3 codec/lifecycle bridge in rust/bindings/python/src/lib.rs and backend/app/modules/tasks/rust_adapter.py; package it through the existing backend/pyproject.toml. Expose decide/query and typed errors with explicit execution inputs; release the GIL for pure CPU work, catch panics, own buffers, and release cancellation/close resources. Do not switch TaskService or load secrets into domain DTOs. (PR-04).
+- [ ] T004 Implement the PyO3 codec/lifecycle bridge in rust/bindings/python/src/lib.rs and backend/app/modules/tasks/rust_adapter.py; package it through the existing backend/pyproject.toml. Prove typed conversion/errors and lifecycle using the completed PR-06 primitives; PR-18 connects decide/query after PR-62. Use explicit execution inputs; release the GIL for pure CPU work, catch panics, own buffers, and release cancellation/close resources. Do not switch TaskService or load secrets into domain DTOs. (PR-04).
 
-- [ ] T005 Implement the coarse UniFFI bridge in rust/bindings/swift/src/lib.rs and a Foundation-only BrainBuddyRustBridge.swift facade; add the tested Linux/Apple build wiring in ios/BrainBuddyKit/Package.swift, ios/project.yml and macos/Package.swift. Produce generated sources/XCFramework as reproducible build artifacts rather than committing unrestricted generated output. Prove strict Swift concurrency, error delivery, cancellation and app/widget linking before moving rules. (PR-05).
+- [ ] T005 Implement the coarse UniFFI bridge in rust/bindings/swift/src/lib.rs and a Foundation-only BrainBuddyRustBridge.swift facade; add the tested Linux/Apple build wiring in ios/BrainBuddyKit/Package.swift, ios/project.yml and macos/Package.swift. Produce generated sources/XCFramework as reproducible build artifacts rather than committing unrestricted generated output. Prove strict Swift concurrency, error delivery, cancellation and app/widget linking using the completed primitives; PR-17 connects decide/query after PR-62. (PR-05).
+
+- [ ] T061 Freeze the accepted domain state subsets, command/query inputs, ChangeSet and typed errors in rust/crates/bb-domain/src/types.rs, reusing bb-protocol wire types; export them in src/lib.rs and verify source-linked conversions in tests/types.rs. Resolve DTO/codec sizing before boundary approval; do not add empty rule modules or change the catalog. (PR-61).
 
 ## Phase 2 — US4: consistent rules and durable background authority (P2 foundation for P1)
 
 Each pure rule family is independently checked against existing examples. The selected epoch switches only after all rules agree. Jobs are established through compatible ports before receipts/feed connect internal writers. All scheduler responsibilities from main.py are inventoried; auth dispatch remains under its existing owner, and CRT keeps its existing storage/receipt contract.
 
-- [ ] T006 [US4] Port only Python-compatible NFKC, whitespace, full casefold, Unicode-scalar limits and CalendarDay/time-zone primitives to bb-domain/src/normalization.rs and calendar.rs; run existing NameNormalizerTests, CalendarDayTests and formulation vectors via the parity loader. Make time and identifiers explicit inputs, preserving calendar-day versus instant and DST behavior. (PR-06).
+- [ ] T006 [US4] Port only Python-compatible NFKC, whitespace, full casefold, Unicode-scalar limits and CalendarDay/time-zone primitives to bb-domain/src/normalization.rs and calendar.rs; run existing NameNormalizerTests, CalendarDayTests and formulation vectors via tests/primitives_parity.rs and the shared immutable tests/support/mod.rs loader. Register only these completed primitives in src/lib.rs. Make time and identifiers explicit inputs, preserving calendar-day versus instant and DST behavior. (PR-06).
 
 - [ ] T007 [US4] Implement only task-create, edit and complete/cancel/move/reopen rule dispatch in bb-domain/src/task_rules.rs using current Reducer.swift and TaskService validation as the oracle; preserve four open lists, Waiting requirements, expected revisions and priority vocabulary. Keep catalog constraints verbatim: "task title 500, details/comment 20,000, name 500, project outcome 1,000 Unicode scalar values"; omitted/null/value PATCH semantics and decimal-string counters remain distinct. Return typed changes and errors without performing I/O. (PR-07).
 
@@ -48,7 +50,7 @@ Each pure rule family is independently checked against existing examples. The se
 
 - [ ] T012 [US4] Implement the existing pure list/order/project-display query decisions in bb-domain/src/queries.rs using Queries+List.swift, Queries+Ordering.swift and Queries+ProjectDisplay.swift. Keep SQL pagination separate, and return capabilities/actions for the current record; preserve due-day and completed-placement behavior. (PR-12).
 
-- [ ] T013 [US4] Port formulation identity, substantive-title rules, due floors, start/close/move/edit clocks and threshold classification to bb-domain/src/formulation.rs. Preserve the stalled-count scalar after leaving Next, IANA-zone instants and edit-revision distinctions from formulation.py/Formulation.swift; reuse review_formulation_vectors.json. (PR-13).
+- [ ] T013 [US4] Port formulation identity, substantive-title rules, due floors, start/close/move/edit clocks and threshold classification/evaluation-view predicates to bb-domain/src/formulation.rs. Preserve the stalled-count scalar after leaving Next, IANA-zone instants and edit-revision distinctions from formulation.py/Formulation.swift; reuse review_formulation_vectors.json. (PR-13).
 
 - [ ] T014 [US4] Port only auto-park, timely offline-decision yield, park acknowledgement and clock restoration/Undo primitives to bb-domain/src/park.rs; use ADR-0027 and existing auto-park/clock-seam tests as the oracle. Keep automatic bookkeeping distinct from a human edit revision. (PR-14).
 
@@ -56,9 +58,11 @@ Each pure rule family is independently checked against existing examples. The se
 
 - [ ] T016 [US4] Port session start/progress/finish, settings validation and Review queue/summary predicates to bb-domain/src/review_sessions.rs using review_flow_vectors.json, ReviewPlanners.swift and Queries+Review.swift. Preserve progress merge, captured-empty queues, active seconds, qualifying activity and revision rules; no generic entity CAS replaces progress merge. (PR-16).
 
-- [ ] T017 [US4] Adapt GTDReducer dispatch, Smart Add and pure queries at Reducer.swift, SmartAdd.swift and Queries.swift to the bridge for the new rule/storage epoch; introduce the bounded mapping in RustDomainFacade.swift. Retire Swift rule dispatch for that epoch; compare old/new only in tests or read-only shadow evaluation. Existing pre-cutover files continue on their compatible image until migrated; no mutation invokes both reducers. (PR-17).
+- [ ] T062 [US4] Register the completed rule modules in rust/crates/bb-domain/src/lib.rs and route decide/query through src/dispatch.rs; tests/dispatch.rs exercises the public library against the already frozen family vectors. Only module declarations and dispatch belong here; no new rules, serialization model or facade rewrite. (PR-62).
 
-- [ ] T018 [US4] Connect TaskService task/lifecycle/organization/children/Smart Add validation through rust_adapter.py and a bounded RustTaskFacade in rust_task_facade.py; keep owner authorization, protected read-set loading, existing DTO responses and repository I/O in Python. Remove these Python decisions from migrated-epoch dispatch; do not rewrite or delete the entire service.py in this slice. (PR-18).
+- [ ] T017 [US4] Adapt GTDReducer dispatch, Smart Add and pure queries at Reducer.swift, SmartAdd.swift and Queries.swift to the bridge for the new rule/storage epoch; introduce the bounded mapping in RustDomainFacade.swift and connect the completed PR-62 dispatch in rust/bindings/swift/src/lib.rs. Retire Swift rule dispatch for that epoch; compare old/new only in tests or read-only shadow evaluation. Existing pre-cutover files continue on their compatible image until migrated; no mutation invokes both reducers. (PR-17).
+
+- [ ] T018 [US4] Connect TaskService task/lifecycle/organization/children/Smart Add validation through rust_adapter.py and a bounded RustTaskFacade in rust_task_facade.py, connecting the completed PR-62 dispatch in rust/bindings/python/src/lib.rs; keep owner authorization, protected read-set loading, existing DTO responses and repository I/O in Python. Remove these Python decisions from migrated-epoch dispatch; do not rewrite or delete the entire service.py in this slice. (PR-18).
 
 - [ ] T019 [US4] Connect ReviewService, ReviewFlowService and their domain-decision calls through rust_review_facade.py; retain private snapshots, permissions, provider reservations and storage in Python. Route all migrated-epoch formulation/park/decision/session decisions to Rust, preserve legacy matching-record replay and deferred Undo ports, and make old rule calls unreachable in that dispatch. (PR-19).
 
@@ -66,11 +70,13 @@ Each pure rule family is independently checked against existing examples. The se
 
 - [ ] T021 [US4] Add jobs/execution.py and a typed execution context at the existing serialized_write/Review application ports, wired through container.py. Acquire and recheck the current job fence and current scope authority under the task writer lock, derive internal effect identity once, and reject caller-supplied writer_origin. This is an existing-port prerequisite and does not depend on sync endpoints. (PR-21).
 
-- [ ] T022 [US4] Add jobs/review_adapter.py and jobs/worker.py; hand over only the Review maintenance/auto-park responsibility from main.py through the existing compatible ports. Persist schedule identity, use the lease/fence, and disable that old scheduler responsibility only at the verified handoff. Retention stays independent of owner activity and weekly_review flags. (PR-22).
+- [ ] T022 [US4] Add jobs/review_adapter.py for the Review maintenance/auto-park responsibility through the existing compatible ports. Persist schedule identity and use the lease/fence in adapter tests; PR-64 registers it and hands over the main.py scheduler responsibility. Retention stays independent of owner activity and weekly_review flags. (PR-22).
 
-- [ ] T023 [US4] Add jobs/voice_adapter.py and jobs/privacy_adapter.py to invoke existing voice recovery/retention, account purge, relay/CRT receipt retention ports; hand off their named main.py scheduler responsibilities with durable schedule identities. Cross-module effects retain their existing recovery contract and are not falsely made one Tasks ACID transaction. Preserve unrelated auth-delivery ownership. (PR-23).
+- [ ] T023 [US4] Add jobs/voice_adapter.py and jobs/privacy_adapter.py to invoke existing voice recovery/retention, account purge, relay/CRT receipt retention ports; prepare durable schedule identities for their named responsibilities; PR-64 performs the main.py ownership handoff. Cross-module effects retain their existing recovery contract and are not falsely made one Tasks ACID transaction. Preserve unrelated auth-delivery ownership. (PR-23).
 
-- [ ] T024 [US4] Add jobs/agent_adapter.py to schedule the existing AgentObserver observation/recovery responsibility durably; hand it off in main.py and observer.py without changing the A2A lookup/retry state machine. Attach lease/fence to any Task application port; external timeout uses lookup/reconciliation and remains uncertain when proof is absent. (PR-24).
+- [ ] T024 [US4] Add jobs/agent_adapter.py to schedule the existing AgentObserver observation/recovery responsibility durably; adapt the observation port in observer.py without changing the A2A lookup/retry state machine; PR-64 registers it and hands off its main.py scheduler responsibility. Attach lease/fence to any Task application port; external timeout uses lookup/reconciliation and remains uncertain when proof is absent. (PR-24).
+
+- [ ] T064 [US4] Add the durable runner in backend/app/modules/tasks/jobs/worker.py using the PR-20 ledger and PR-21 execution context, register completed PR-22/23/24 adapters, and replace only their named main.py scheduling ownership at the verified handoff. backend/tests/test_scheduler_handoff.py proves one live owner across restart/lease expiry; preserve auth scheduling and the existing module transaction boundaries. Measure worker-loop plus scheduler-removal size before boundary approval. (PR-64).
 
 - [ ] T053 [US4] Use the explicitly versioned-vector transition in plan §7 and command-catalog.md: retain synchronous Smart Add syntax/suggestion helpers in frontend/src/features/tasks/smartAdd.ts and their actual TaskListPage.tsx composer, plus state-to-affordance display in TaskDetailPanel.tsx. Verify them against PR-02's source-linked rule-version vectors; Rust-backed server mutations remain the final authority and taskHooks.ts consumes existing HTTP success/error DTOs. Preserve capture retry/drafts and HTTP rejection behavior. No server preview/per-task-capability producer or deletion of all web presentation logic is claimed; no offline web, WASM or CRT change. (PR-53).
 
@@ -90,7 +96,9 @@ Independent user test: capture/edit offline on iPhone, terminate/reopen, reconne
 
 - [ ] T031 [US1] Add sync/router.py for device registration, command submit/result lookup and capabilities; wire it in main.py and serialize through sync/wire.py. Enforce scope capability, protocol/schema/command versions, current permissions and indistinguishable foreign/unknown-resource 404 responses, the approved request/record limits and actionable correlation IDs. Known-receipt recovery is tested before tighter execution validation. (PR-31).
 
-- [ ] T032 [US1] Add sync/delta.py and its route in router.py; encode opaque owner/access/feed-generation cursors, next_cursor/has_more and complete typed public after-images/tombstones. For a transaction exceeding the 4 MiB inline hard limit, materialize the immutable canonical Change-array stream and expose its manifest plus bounded decoded-byte chunks (≤1 MiB) through sync/transfers.py and the transaction transfer route. Chunks may cross record boundaries and never split a domain commit. Enforce only the new ingress 4 MiB limit, preserve legacy limits, impose no 500-changed-row ceiling and return RESET_REQUIRED on expiry/generation/deletion. Hints only wake pulls; PR-58 owns their server endpoint/publisher. (PR-32).
+- [ ] T032 [US1] Add sync/delta.py and its route in delta_router.py; encode opaque owner/access/feed-generation cursors, next_cursor/has_more and complete typed public after-images/tombstones. For a transaction exceeding the 4 MiB inline hard limit, materialize the immutable canonical Change-array stream and expose its manifest plus bounded decoded-byte chunks (≤1 MiB) through sync/transfers.py and the transaction transfer route. Chunks may cross record boundaries and never split a domain commit. Enforce only the new ingress 4 MiB limit, preserve legacy limits, impose no 500-changed-row ceiling and return RESET_REQUIRED on expiry/generation/deletion. Hints only wake pulls; PR-58 owns their server endpoint/publisher. Own delta_router.py and test its real APIRouter with the production authority/container dependencies; PR-63 mounts it in the application. (PR-32).
+
+- [ ] T063 [US1] Mount delta_router.py, snapshot_router.py and hints_router.py in backend/app/modules/tasks/sync/router.py; verify production app route reachability, shared authorization and capability-OFF behavior in backend/tests/test_sync_routes.py. Keep endpoint logic and its detailed tests in the owning PRs. (PR-63).
 
 - [ ] T034 [US1] Create bb-client manifest/lib.rs, update and own rust/Cargo.lock (including the new workspace package and SQLite dependencies), and add storage.rs with confirmed_records, outbox, receipts, issues, drafts, sync_meta and identity_aliases. Add WAL/write-lock and exclusive migration-lock handling in locking.rs, bounded busy timeout and protected workspace identity. First add real-process SQLite crash/full-disk/lock tests; a process-local actor alone is insufficient. (PR-34).
 
@@ -98,7 +106,7 @@ Independent user test: capture/edit offline on iPhone, terminate/reopen, reconne
 
 - [ ] T037 [US1] Implement apply_changes.rs and receipts.rs to stage/verify byte chunks (indices/counts/bytes/digests) with a streaming decoder, then atomically apply full feed transactions, source-command receipt matching, remaining replay and cursor. ACK only marks accepted_awaiting_feed and retains intent/projection; no ACK after-image writes the confirmed base or jumps the cursor. No-op/rejected receipts complete under the frozen contract. (PR-37).
 
-- [ ] T058 [US1] Add sync/hints.py and its authenticated route in sync/router.py. Observe the shared committed scope counter at most 250 ms apart for connected scopes; publish bounded/coalesced content-free SSE events after commits from any process/writer. Enforce current authority, indistinguishable owner-safe 404, generation closure, heartbeat, reconnect and disabled buffering per sync-v1 §11. Prove the actual stream across separate writer/stream processes; no process-local-only hook or new broker. (PR-58).
+- [ ] T058 [US1] Add sync/hints.py and its authenticated route in sync/hints_router.py. Observe the shared committed scope counter at most 250 ms apart for connected scopes; publish bounded/coalesced content-free SSE events after commits from any process/writer. Enforce current authority, indistinguishable owner-safe 404, generation closure, heartbeat, reconnect and disabled buffering per sync-v1 §11. Prove the actual stream across separate writer/stream processes; no process-local-only hook or new broker. Own hints_router.py and test its real APIRouter with the production authority/container dependencies; PR-63 mounts it in the application. (PR-58).
 
 - [ ] T040 [US1] Implement transport.rs and subscriptions.rs using the frozen ports: bounded send/retry/dependency scheduling, foreground/network-return pulls, the PR-58 authenticated SSE hints with immediate reconnect catch-up and fallback poll starts at most 30 seconds apart, including jitter, leaving up to 30 seconds for requests/catch-up/application within SC-004's 60-second commit-to-visible deadline. Query invalidations coalesce; credentials stay in the OS adapter, close/cancel releases subscriptions, and background application avoids main-thread I/O. (PR-40).
 
@@ -120,7 +128,7 @@ Independent test: update/import a populated store and uncertain queue, interrupt
 
 - [ ] T030 [US3] Add sync/authority.py and sync/devices.py to bind owner/device/server generation and register immutable pending-registration epoch IDs idempotently. Recheck current Identity access for reads/writes/receipt replay; closed epochs reject unseen commands but preserve authorized retained lookup. Feed/access generation never comes from caller authority claims. (PR-30).
 
-- [ ] T033 [US3] Add sync/snapshots.py and snapshot routes to materialize one consistent owner-scoped snapshot/watermark, page it immutably using the same canonical-byte chunk manifests/digests as transaction transfers and expire it at the approved TTL. Recheck authorization for each page; preserve public Review links/queues and normalize child projections. Concurrent writes, delete/retention invalidation and expired continuation never produce a silently partial base. (PR-33).
+- [ ] T033 [US3] Add sync/snapshots.py and snapshot routes to materialize one consistent owner-scoped snapshot/watermark, page it immutably using the same canonical-byte chunk manifests/digests as transaction transfers and expire it at the approved TTL. Recheck authorization for each page; preserve public Review links/queues and normalize child projections. Concurrent writes, delete/retention invalidation and expired continuation never produce a silently partial base. Own snapshot_router.py and test its real APIRouter with the production authority/container dependencies; PR-63 mounts it in the application. (PR-33).
 
 - [ ] T038 [US3] Implement snapshot.rs with staging completeness/checksum and one atomic activation under the cross-process lock. Incorporate the latest live queue/issues/drafts/intake epoch instead of an earlier copied queue; resolve accepted commands only with same-generation watermark proof and lookup every unknown outcome. Expiry/interruption restarts preserve active DB. (PR-38).
 
@@ -142,7 +150,7 @@ Independent test: update/import a populated store and uncertain queue, interrupt
 
 Independent test: suitable/unavailable local executor, on-device-only denial, authorized specific recipient, revocation, invalid proposal and cancellation. Existing consent/operation tests are reused; only policy/adapter gaps add coverage. AgentRun success remains separate from Task completion.
 
-- [ ] T047 [US5] Implement ai_policy.rs and proposal.rs in bb-domain: deterministic-first/suitable-local preference, language/capability/memory availability, recipient-specific current consent, budget/timeout/cancel and typed proposal validation against allowed catalog commands. A model response grants no capability and never applies a Task command before confirmation. (PR-47).
+- [ ] T047 [US5] Implement ai_policy.rs and proposal.rs in bb-domain: deterministic-first/suitable-local preference, language/capability/memory availability, recipient-specific current consent, budget/timeout/cancel and typed structural proposal validation against allowed catalog commands. This pure policy slice consumes frozen types, not the unfinished rule dispatcher; current-state validation still occurs at the confirmed ordinary execute boundary. A model response grants no capability and never applies a Task command before confirmation. (PR-47).
 
 - [ ] T048 [US5] Connect shared policy/proposal validation through navigator.py and voice_brain_dump/confirmation.py/task_port.py, preserving ADR-0002 operation workspace/confirmation, current provider credentials and cancellation checks. AgentRun result stays evidence/proposal; ordinary Task mutation uses the fenced shared command handler. (PR-48).
 
@@ -170,23 +178,52 @@ This stage is ordered after the accepted Apple/current-SQLite pilot. Rehearse be
 
 ## Dependencies, increments and parallel execution
 
-The JSON map is topologically ordered. Checklist phases group tasks by story and therefore intentionally show some stable task IDs out of numeric order (for example T053 in Phase 2). IDs identify slices; the JSON `depends_on` edges determine execution order. A phase heading is not permission to skip cross-story dependencies. PR-20…24 establish durable scheduler authority and fencing through existing ports; PR-25…29 then establish one aggregate/receipt/feed transaction for **all** writers. Only after those gates do PR-30…33 expose sync and PR-58 adds its SSE wake-up endpoint. PR-34…44 deliver the Apple runtime/import/workspace. Conflict/recovery UI, AI adapter and Apple suggestion sheets (PR-49/59/60), retention/restore and server-authoritative web gates all join at PR-54, the current-SQLite Apple pilot. PR-55…57 are the subsequent PostgreSQL stage.
+The JSON map is topologically ordered. Checklist phases group tasks by story and therefore intentionally show some stable task IDs out of numeric order (for example T053 in Phase 2). IDs identify slices; the JSON `depends_on` edges determine execution order. A phase heading is not permission to skip cross-story dependencies. PR-20/21 establish durable scheduler authority and fencing through existing ports; PR-22/23/24 prepare independent adapters and PR-64 hands over their scheduling ownership; PR-25…29 then establish one aggregate/receipt/feed transaction for **all** writers. Only after those gates do PR-30/31 expose sync command boundaries; PR-32/33 and PR-58 implement the remaining endpoints, mounted together by PR-63. PR-34…44 deliver the Apple runtime/import/workspace. Conflict/recovery UI, AI adapter and Apple suggestion sheets (PR-49/59/60), retention/restore and server-authoritative web gates all join at PR-54, the current-SQLite Apple pilot. PR-55…57 are the subsequent PostgreSQL stage.
 
-Concrete parallel opportunities are PR-06 (pure rules) with PR-20 (job storage), then the client-local path PR-34…39 with server transaction/API work PR-25…33 when their declared bases are merged. PR-45 and PR-46 own separate iPhone/Mac UI paths after PR-44; PR-47 pure AI policy is separate from client storage. The automatically serialized shared `src/lib.rs`, `container.py`, service, router, scheduler and verification paths in the JSON prevent accidental concurrent writers. Shared package/manifests are never implicitly claimed by two workers. Every parallel example remains subject to the exact JSON prerequisites and isolated resources.
+The complete [dependency graph](delivery-graph.md) renders every slice and every JSON edge; it is a view of this map, not a second scheduling authority. The conductor starts **every ready independent slice** up to the available worker limit, and fills a freed slot as soon as its merged prerequisites are ready; there is no whole-phase or whole-wave barrier. A ready slice has all `depends_on` slices accepted and merged, an approved/measured boundary where required, disjoint owned paths, and its own resources. Development can run in parallel; repository landing remains serialized.
+
+Rust rule PRs own their production source and separate `tests/<family>_parity.rs` runners. PR-61 first exports frozen types; PR-06 exports completed normalization/calendar primitives and the shared test loader. Each family runner compiles the **actual** source with ordinary Rust `#[path = "../src/<family>.rs"] mod <family>;`, re-exports `bb_domain::{types, normalization, calendar}` at its test-crate root, and includes already-merged dependency modules under their production names. Rule source uses those same `crate::` paths before and after PR-62 registration. There are no copied rules, missing-module declarations, code generators, pretend successful stubs or speculative sibling builds. PR-62 owns only final module registration/dispatch and proves the public library reaches every family. Existing oracles are reused; each runner owns only missing family cases and harness glue. Every relevant runner must execute nonzero cases.
+
+After PR-06, organization (08), children (10), formulation (13), AI policy (47) and Python bridge (04) can start together. Task lifecycle (07) really depends on formulation (13); Smart Add (11) needs task creation (07) and organization (08); decisions (15) need task/children/park (07/10/14). Queue/session queries consume clock facts and do not wait for unrelated decision mutations. After domain registration and bridge validation, the Apple facade (17), Python facade (18) and client storage (34) are independent. Client-local PR-34…39 runs alongside server job/receipt/API work. After PR-21, job adapters (22/23/24) run together before the bounded scheduler join (64). Web presentation parity (53) needs the completed Task facade (18), not unrelated sync endpoints or AI wiring; full real-server acceptance remains at PR-54. SSE (58) runs alongside delta (32); snapshot (33) retains the real transfer-encoding dependency on 32. PR-63 mounts the completed routers before transport (40). iPhone/Mac recovery (45/46), shared AI (49) and restore (52) can overlap once their own bases are ready; iPhone/Mac AI surfaces (59/60) then run together.
+
+Shared package manifests, lockfiles, `container.py`, services, schedulers and the client transaction/replay sequence retain their required ordering. Workers never edit shared files outside their paths or invent a dependency just to hide an unresolved write collision. A newly discovered shared edit or true prerequisite stops that part, amends the map, and passes the existing dependency/path validator before resuming.
 
 The first independently useful MVP is the complete US1 journey plus its indispensable rule/job/authority/import/recovery/conflict safeguards, accepted through PR-54 on Apple/current SQLite. Pure-library and dark-boundary slices can merge earlier because they have their own oracle/integration evidence; they do not declare US1 complete. US4 rule and job foundations necessarily precede P1 synchronization, US2/US3 complete safe recovery, and US5 closes the accepted AI boundary before full-feature pilot acceptance. New platforms are follow-on specifications, not unchecked product work hidden in this plan.
 
 Every FR-001…026 and SC-001…008 is assigned explicitly in the JSON. PR-54 is the end-to-end acceptance join, not a substitute for each preceding named guarantee. Proposed measurement defaults, target hardware and retention are frozen only with real PR-01 acceptance. The after_tasks `speckit.accept` extension hook is optional and applies after delivery; this specification session records it without inventing an implementation verdict.
 
+## Atomic PR and full-diff limits
+
+Each `T###` belongs to exactly one `PR-NN`; each PR delivers one named, independently checkable outcome and its necessary evidence. Contract foundations and dark modules may merge before exposure. Do not bundle another slice, unrelated cleanup, a broad rewrite or later platform work to fill a budget. The listed product caps remain at most 390 changed lines (repository ceiling 400); tests/docs exemptions in the repository checker do **not** exempt them from this feature's **800 total added + deleted text-line cap**. Count lockfiles and committed generated output; never split an unbuildable half of a lockfile. Binary/generated build artifacts are published by CI, not used to hide a large source diff.
+
+Before assigning a worker, check its concrete outcome, owned files, expected code **and test/documentation** size and sufficient existing checks. The Rust/FFI/runtime/AI measurements above also cover PR-61 typed values, PR-62 dispatch and PR-64 worker/handoff. Measure the committed candidate against its accepted merged base before review. Both checks below must pass; `review_budget` records the feature-specific second cap, which the existing repository product checker does not enforce. No `oversize_reason` waiver is permitted for feature 026. If either cap fails, stop, split into smaller independently testable outcomes, update task coverage/dependencies/paths/budgets, and repeat boundary review before continuing. A cap is not evidence that an unimplemented slice will fit.
+
+```bash
+# Set SLICE_BASE to the recorded accepted merged SHA and SLICE_ID to this PR-NN.
+python3 scripts/check_slice_budget.py specs/026-rust-core-sync/tasks.md "$SLICE_ID" --base "$SLICE_BASE"
+python3 - "$SLICE_BASE" <<'PY_SIZE'
+import subprocess, sys
+rows = subprocess.check_output(
+    ["git", "diff", "--numstat", "--no-renames", f"{sys.argv[1]}...HEAD"], text=True
+).splitlines()
+counts = [row.split("\t", 2)[:2] for row in rows]
+if any("-" in pair for pair in counts):
+    sys.exit("Binary additions need a separate artifact plan, not a line-count exemption")
+changed = sum(int(n) for pair in counts for n in pair)
+print(f"Full review diff: {changed}/800 added + deleted lines")
+sys.exit(0 if changed <= 800 else "Full diff exceeded: re-slice before review")
+PY_SIZE
+```
+
 ## PR-срезы
 
-The Russian heading is the required repository parser key; the map and prose are English. **Proposed; owner approval pending.** This machine-readable map is for boundary review and validation only.
+The Russian heading is the required repository parser key; the map and prose are English. **Amended proposal; empirical boundary approval remains conditional.** The owner requested this delivery refinement; [approval.md](approval.md) distinguishes it from the historically approved technical baseline. This map is not implementation permission.
 
 ```json
 {
   "schema_version": "brainbuddy-pr-slices/v2",
   "status": "proposed",
-  "approval": "owner approval pending",
+  "approval": "Technical baseline accepted; delivery amendment requested 2026-10-09; empirical boundary approval remains conditional (approval.md).",
   "slices": [
     {
       "id": "PR-01",
@@ -249,7 +286,6 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-005"
       ],
       "paths": [
-        "rust/crates/bb-domain/tests/parity.rs",
         "specs/026-rust-core-sync/contracts/reference-store.json",
         "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
         "specs/026-rust-core-sync/verification.md"
@@ -310,6 +346,73 @@ The Russian heading is the required repository parser key; the map and prose are
       "implementer": "feature-implementer"
     },
     {
+      "id": "PR-61",
+      "outcome": "Frozen domain values compile before independent rule ports",
+      "tasks": [
+        "T061"
+      ],
+      "requirements": [
+        "026-FR-002",
+        "026-FR-011",
+        "026-SC-001"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/lib.rs",
+        "rust/crates/bb-domain/src/types.rs",
+        "rust/crates/bb-domain/tests/types.rs"
+      ],
+      "depends_on": [
+        "PR-03"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test types"
+      ],
+      "acceptance": [
+        "Typed state subsets, commands, execution inputs, changes and errors use the accepted catalog/data model and existing protocol types. Golden conversion cases preserve omitted/null/value, scalar limits and decimal counters; no placeholder rule implementation or new wire contract. Complete DTO/codec sizing must fit before this boundary is approved. Preserve complete Task/Review and required private execution inputs; if these do not fit, split real contract families rather than dropping fields or substituting untyped JSON."
+      ],
+      "budget": {
+        "product_loc": 350,
+        "files": 2
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-06",
+      "outcome": "Unicode and calendar rules agree across languages",
+      "tasks": [
+        "T006"
+      ],
+      "requirements": [
+        "026-FR-002",
+        "026-FR-017",
+        "026-SC-001"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/lib.rs",
+        "rust/crates/bb-domain/src/normalization.rs",
+        "rust/crates/bb-domain/src/calendar.rs",
+        "rust/crates/bb-domain/tests/support/mod.rs",
+        "rust/crates/bb-domain/tests/primitives_parity.rs"
+      ],
+      "depends_on": [
+        "PR-02",
+        "PR-61"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test primitives_parity",
+        "sh ios/scripts/swift-linux.sh test --filter NameNormalizerTests",
+        "sh ios/scripts/swift-linux.sh test --filter CalendarDayTests"
+      ],
+      "acceptance": [
+        "Existing Unicode/DST examples agree; no recurrence feature or naive byte-length/lowercase replacement appears."
+      ],
+      "budget": {
+        "product_loc": 350,
+        "files": 3
+      },
+      "implementer": "feature-implementer"
+    },
+    {
       "id": "PR-04",
       "outcome": "Python bridge has a bounded safe lifecycle",
       "tasks": [
@@ -330,7 +433,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "backend/tests/test_rust_bridge.py"
       ],
       "depends_on": [
-        "PR-03"
+        "PR-06"
       ],
       "tests": [
         "cargo test --manifest-path rust/Cargo.toml -p bb-python bridge",
@@ -338,7 +441,8 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "acceptance": [
         "New boundary tests cover serialization, error/panic containment and repeated open/close; existing behavior remains the active writer until cutover.",
-        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded."
+        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded.",
+        "Only completed codecs/primitives cross this early bridge. No placeholder decide/query export: actual domain dispatch and its FFI checks belong to PR-17/18 after PR-62."
       ],
       "budget": {
         "product_loc": 330,
@@ -380,81 +484,12 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "acceptance": [
         "New FFI lifetime/panic/threading smoke evidence and ios-kit/ios-app/macos-app lanes pass; accepted dependency-policy exception is recorded, Linux tests keep a real compiled bridge.",
-        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded."
+        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded.",
+        "Only completed codecs/primitives cross this early bridge. No placeholder decide/query export: actual domain dispatch and its FFI checks belong to PR-17/18 after PR-62."
       ],
       "budget": {
         "product_loc": 390,
         "files": 8
-      },
-      "implementer": "feature-implementer"
-    },
-    {
-      "id": "PR-06",
-      "outcome": "Unicode and calendar rules agree across languages",
-      "tasks": [
-        "T006"
-      ],
-      "requirements": [
-        "026-FR-002",
-        "026-FR-017",
-        "026-SC-001"
-      ],
-      "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
-        "rust/crates/bb-domain/src/normalization.rs",
-        "rust/crates/bb-domain/src/calendar.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
-      ],
-      "depends_on": [
-        "PR-02",
-        "PR-03"
-      ],
-      "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain normalization",
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain calendar",
-        "sh ios/scripts/swift-linux.sh test --filter NameNormalizerTests",
-        "sh ios/scripts/swift-linux.sh test --filter CalendarDayTests"
-      ],
-      "acceptance": [
-        "Existing Unicode/DST examples agree; no recurrence feature or naive byte-length/lowercase replacement appears."
-      ],
-      "budget": {
-        "product_loc": 350,
-        "files": 3
-      },
-      "implementer": "feature-implementer"
-    },
-    {
-      "id": "PR-07",
-      "outcome": "Create, edit and lifecycle transitions have one pure decision result",
-      "tasks": [
-        "T007"
-      ],
-      "requirements": [
-        "026-FR-002",
-        "026-FR-007",
-        "026-FR-009",
-        "026-SC-001"
-      ],
-      "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
-        "rust/crates/bb-domain/src/task_rules.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
-      ],
-      "depends_on": [
-        "PR-06"
-      ],
-      "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain task_rules",
-        "cd backend && pytest tests/test_task_lifecycle_detail_api.py tests/test_task_service.py",
-        "sh ios/scripts/swift-linux.sh test --filter Reducer"
-      ],
-      "acceptance": [
-        "Existing lifecycle/Waiting/priority examples match; stale completion does not undo a later reopen."
-      ],
-      "budget": {
-        "product_loc": 380,
-        "files": 2
       },
       "implementer": "feature-implementer"
     },
@@ -471,15 +506,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/organize.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/organize_parity.rs"
       ],
       "depends_on": [
-        "PR-07"
+        "PR-06"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain organize",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test organize_parity",
         "cd backend && pytest tests/test_task_tag_project_mvp_api.py",
         "sh ios/scripts/swift-linux.sh test --filter 'ReducerProjectTests|ReducerTagTests'"
       ],
@@ -488,7 +522,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 360,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -505,15 +539,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/archive.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/archive_parity.rs"
       ],
       "depends_on": [
         "PR-08"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain archive",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test archive_parity",
         "cd backend && pytest tests/test_project_archive_lossless_api.py tests/test_project_archive_traces.py",
         "sh ios/scripts/swift-linux.sh test --filter ReducerArchiveTests"
       ],
@@ -522,7 +555,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 340,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -540,15 +573,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/children.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/children_parity.rs"
       ],
       "depends_on": [
-        "PR-09"
+        "PR-06"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain children",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test children_parity",
         "cd backend && pytest tests/test_task_api.py",
         "sh ios/scripts/swift-linux.sh test --filter 'ReducerSubtaskTests|ReducerCommentTests'"
       ],
@@ -557,7 +589,73 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 320,
-        "files": 2
+        "files": 1
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-13",
+      "outcome": "Formulation clocks preserve the accepted scalar and time semantics",
+      "tasks": [
+        "T013"
+      ],
+      "requirements": [
+        "026-FR-002",
+        "026-FR-016",
+        "026-FR-017",
+        "026-SC-001"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/formulation.rs",
+        "rust/crates/bb-domain/tests/formulation_parity.rs"
+      ],
+      "depends_on": [
+        "PR-06"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test formulation_parity",
+        "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_formulation.py",
+        "sh ios/scripts/swift-linux.sh test --filter RecordContentFormTests"
+      ],
+      "acceptance": [
+        "Accepted formulation vectors, including state outside Next and due floors, match without new revision side effects."
+      ],
+      "budget": {
+        "product_loc": 390,
+        "files": 1
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-07",
+      "outcome": "Create, edit and lifecycle transitions have one pure decision result",
+      "tasks": [
+        "T007"
+      ],
+      "requirements": [
+        "026-FR-002",
+        "026-FR-007",
+        "026-FR-009",
+        "026-SC-001"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/task_rules.rs",
+        "rust/crates/bb-domain/tests/task_rules_parity.rs"
+      ],
+      "depends_on": [
+        "PR-13"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test task_rules_parity",
+        "cd backend && pytest tests/test_task_lifecycle_detail_api.py tests/test_task_service.py",
+        "sh ios/scripts/swift-linux.sh test --filter Reducer"
+      ],
+      "acceptance": [
+        "Existing lifecycle/Waiting/priority examples match; stale completion does not undo a later reopen."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -573,15 +671,15 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/smart_add.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/smart_add_parity.rs"
       ],
       "depends_on": [
-        "PR-10"
+        "PR-07",
+        "PR-08"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain smart_add",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test smart_add_parity",
         "cd backend && pytest tests/test_task_smart_add_api.py",
         "sh ios/scripts/swift-linux.sh test --filter SmartAddParserTests"
       ],
@@ -590,7 +688,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 380,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -608,15 +706,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/queries.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/queries_parity.rs"
       ],
       "depends_on": [
-        "PR-11"
+        "PR-13"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain queries",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test queries_parity",
         "sh ios/scripts/swift-linux.sh test --filter QueriesInvariantTests",
         "sh ios/scripts/swift-linux.sh test --filter QueriesHistoryTests"
       ],
@@ -625,41 +722,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 380,
-        "files": 2
-      },
-      "implementer": "feature-implementer"
-    },
-    {
-      "id": "PR-13",
-      "outcome": "Formulation clocks preserve the accepted scalar and time semantics",
-      "tasks": [
-        "T013"
-      ],
-      "requirements": [
-        "026-FR-002",
-        "026-FR-016",
-        "026-FR-017",
-        "026-SC-001"
-      ],
-      "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
-        "rust/crates/bb-domain/src/formulation.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
-      ],
-      "depends_on": [
-        "PR-12"
-      ],
-      "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain formulation",
-        "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_formulation.py",
-        "sh ios/scripts/swift-linux.sh test --filter RecordContentFormTests"
-      ],
-      "acceptance": [
-        "Accepted formulation vectors, including state outside Next and due floors, match without new revision side effects."
-      ],
-      "budget": {
-        "product_loc": 390,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -676,15 +739,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-007"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/park.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/park_parity.rs"
       ],
       "depends_on": [
         "PR-13"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain park",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test park_parity",
         "cd backend && pytest tests/test_review_auto_park.py tests/test_review_clock_seam.py",
         "sh ios/scripts/swift-linux.sh test --filter ReducerReviewReplayTests"
       ],
@@ -693,7 +755,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 390,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -710,15 +772,16 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/review_decisions.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/review_decisions_parity.rs"
       ],
       "depends_on": [
+        "PR-07",
+        "PR-10",
         "PR-14"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain review_decisions",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test review_decisions_parity",
         "cd backend && pytest tests/test_review_decisions_api.py tests/test_review_traces.py",
         "sh ios/scripts/swift-linux.sh test --filter ReducerReviewReplayTests"
       ],
@@ -727,7 +790,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 390,
-        "files": 2
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -743,15 +806,15 @@ The Russian heading is the required repository parser key; the map and prose are
         "026-SC-001"
       ],
       "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
         "rust/crates/bb-domain/src/review_sessions.rs",
-        "rust/crates/bb-domain/tests/parity.rs"
+        "rust/crates/bb-domain/tests/review_sessions_parity.rs"
       ],
       "depends_on": [
-        "PR-15"
+        "PR-12",
+        "PR-13"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain review_sessions",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test review_sessions_parity",
         "cd backend && pytest tests/test_review_flow_vectors.py tests/test_review_flow_api.py tests/test_review_settings_api.py",
         "sh ios/scripts/swift-linux.sh test --filter ReviewPlannersTests"
       ],
@@ -760,6 +823,110 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 390,
+        "files": 1
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-20",
+      "outcome": "A durable job ledger protects leases and retry budgets",
+      "tasks": [
+        "T020"
+      ],
+      "requirements": [
+        "026-FR-015",
+        "026-FR-022",
+        "026-SC-007"
+      ],
+      "paths": [
+        "backend/app/modules/tasks/jobs/repository.py",
+        "backend/app/modules/tasks/jobs/domain.py",
+        "backend/app/modules/tasks/repository.py",
+        "backend/tests/test_task_jobs.py"
+      ],
+      "depends_on": [
+        "PR-01"
+      ],
+      "tests": [
+        "cd backend && pytest tests/test_task_jobs.py tests/test_task_repository.py"
+      ],
+      "acceptance": [
+        "New integration coverage proves restart durability, lease expiry, stale fence rejection and retry exhaustion against the actual SQLite boundary."
+      ],
+      "budget": {
+        "product_loc": 390,
+        "files": 3
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-47",
+      "outcome": "Shared AI policy validates local capability and proposal structure",
+      "tasks": [
+        "T047"
+      ],
+      "requirements": [
+        "026-FR-018",
+        "026-FR-019",
+        "026-FR-020",
+        "026-FR-021",
+        "026-SC-006"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/ai_policy.rs",
+        "rust/crates/bb-domain/src/proposal.rs",
+        "rust/crates/bb-domain/tests/ai_policy_parity.rs"
+      ],
+      "depends_on": [
+        "PR-06",
+        "PR-61"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test ai_policy_parity"
+      ],
+      "acceptance": [
+        "Only missing policy/proposal risks receive test-first coverage: prohibited fallback sends no content and invalid/unauthorized actions produce no command."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 2
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-62",
+      "outcome": "Completed rule families are reachable through one tested dispatch",
+      "tasks": [
+        "T062"
+      ],
+      "requirements": [
+        "026-FR-002",
+        "026-FR-011",
+        "026-FR-016",
+        "026-FR-018",
+        "026-SC-001"
+      ],
+      "paths": [
+        "rust/crates/bb-domain/src/lib.rs",
+        "rust/crates/bb-domain/src/dispatch.rs",
+        "rust/crates/bb-domain/tests/dispatch.rs"
+      ],
+      "depends_on": [
+        "PR-09",
+        "PR-11",
+        "PR-12",
+        "PR-15",
+        "PR-16",
+        "PR-47"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain"
+      ],
+      "acceptance": [
+        "Register only implemented modules and connect decide/query to their existing typed functions. Production-library dispatch reaches every catalog family and runs the frozen parity cases; no new rule, field translation or bulk cleanup belongs in this integration slice. Unready capability remains OFF."
+      ],
+      "budget": {
+        "product_loc": 180,
         "files": 2
       },
       "implementer": "feature-implementer"
@@ -781,22 +948,24 @@ The Russian heading is the required repository parser key; the map and prose are
         "ios/BrainBuddyKit/Sources/BrainBuddyCore/SmartAdd.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyCore/Queries.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyCore/RustDomainFacade.swift",
+        "rust/bindings/swift/src/lib.rs",
         "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RustDomainParityTests.swift"
       ],
       "depends_on": [
         "PR-05",
-        "PR-16"
+        "PR-62"
       ],
       "tests": [
         "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
         "cargo test --manifest-path rust/Cargo.toml -p bb-domain parity"
       ],
       "acceptance": [
-        "Every catalog command/query selects one normative Rust result in a migrated epoch. Budget is for dispatch/mapping, not deletion of whole legacy modules; obsolete bodies are unreachable there."
+        "Every catalog command/query selects one normative Rust result in a migrated epoch. Budget is for dispatch/mapping, not deletion of whole legacy modules; obsolete bodies are unreachable there.",
+        "The real decide/query entry points are exported through this platform binding and checked for typed conversion, errors/panic containment and applicable lifetime/concurrency behavior; a primitive-only bridge smoke is insufficient here."
       ],
       "budget": {
         "product_loc": 380,
-        "files": 4
+        "files": 5
       },
       "implementer": "feature-implementer"
     },
@@ -816,21 +985,23 @@ The Russian heading is the required repository parser key; the map and prose are
         "backend/app/modules/tasks/service.py",
         "backend/app/modules/tasks/rust_adapter.py",
         "backend/app/modules/tasks/rust_task_facade.py",
+        "rust/bindings/python/src/lib.rs",
         "backend/tests/test_rust_task_parity.py"
       ],
       "depends_on": [
         "PR-04",
-        "PR-16"
+        "PR-62"
       ],
       "tests": [
         "cd backend && pytest tests/test_rust_task_parity.py tests/test_task_service.py tests/test_task_smart_add_api.py tests/test_project_archive_lossless_api.py"
       ],
       "acceptance": [
-        "Each supported command obtains its decision from Rust once, while REST response/precondition/owner behavior is unchanged."
+        "Each supported command obtains its decision from Rust once, while REST response/precondition/owner behavior is unchanged.",
+        "The real decide/query entry points are exported through this platform binding and checked for typed conversion, errors/panic containment and applicable lifetime/concurrency behavior; a primitive-only bridge smoke is insufficient here."
       ],
       "budget": {
         "product_loc": 390,
-        "files": 3
+        "files": 4
       },
       "implementer": "feature-implementer"
     },
@@ -860,38 +1031,6 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "acceptance": [
         "All existing Review/formulation examples match under one selected rule version, with server-only data absent from core/client DTOs."
-      ],
-      "budget": {
-        "product_loc": 390,
-        "files": 3
-      },
-      "implementer": "feature-implementer"
-    },
-    {
-      "id": "PR-20",
-      "outcome": "A durable job ledger protects leases and retry budgets",
-      "tasks": [
-        "T020"
-      ],
-      "requirements": [
-        "026-FR-015",
-        "026-FR-022",
-        "026-SC-007"
-      ],
-      "paths": [
-        "backend/app/modules/tasks/jobs/repository.py",
-        "backend/app/modules/tasks/jobs/domain.py",
-        "backend/app/modules/tasks/repository.py",
-        "backend/tests/test_task_jobs.py"
-      ],
-      "depends_on": [
-        "PR-01"
-      ],
-      "tests": [
-        "cd backend && pytest tests/test_task_jobs.py tests/test_task_repository.py"
-      ],
-      "acceptance": [
-        "New integration coverage proves restart durability, lease expiry, stale fence rejection and retry exhaustion against the actual SQLite boundary."
       ],
       "budget": {
         "product_loc": 390,
@@ -936,7 +1075,7 @@ The Russian heading is the required repository parser key; the map and prose are
     },
     {
       "id": "PR-22",
-      "outcome": "One durable owner schedules auto-park and Review retention",
+      "outcome": "Review job adapter preserves existing fenced effects",
       "tasks": [
         "T022"
       ],
@@ -948,8 +1087,6 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "paths": [
         "backend/app/modules/tasks/jobs/review_adapter.py",
-        "backend/app/modules/tasks/jobs/worker.py",
-        "backend/app/main.py",
         "backend/tests/test_review_job_handoff.py"
       ],
       "depends_on": [
@@ -959,17 +1096,18 @@ The Russian heading is the required repository parser key; the map and prose are
         "cd backend && pytest tests/test_review_job_handoff.py tests/test_review_auto_park.py tests/test_review_export_purge.py"
       ],
       "acceptance": [
-        "Crash/retry/handoff coverage proves one owner for Review maintenance and no skipped flag-OFF/inactive-owner retention."
+        "Adapter crash/retry coverage preserves Review maintenance effects and flag-OFF/inactive-owner retention; integrated scheduling ownership is proved in PR-64.",
+        "This slice tests the adapter through the PR-21 execution context while the existing scheduler remains its sole live owner. PR-64 performs registration and ownership handoff; this slice must not activate a second scheduler."
       ],
       "budget": {
         "product_loc": 360,
-        "files": 3
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-23",
-      "outcome": "Voice recovery and privacy sweeps have one scheduled owner",
+      "outcome": "Voice and privacy job adapters preserve module boundaries",
       "tasks": [
         "T023"
       ],
@@ -982,28 +1120,27 @@ The Russian heading is the required repository parser key; the map and prose are
       "paths": [
         "backend/app/modules/tasks/jobs/voice_adapter.py",
         "backend/app/modules/tasks/jobs/privacy_adapter.py",
-        "backend/app/modules/tasks/jobs/worker.py",
-        "backend/app/main.py",
         "backend/tests/test_maintenance_job_handoff.py"
       ],
       "depends_on": [
-        "PR-22"
+        "PR-21"
       ],
       "tests": [
         "cd backend && pytest tests/test_maintenance_job_handoff.py tests/test_voice_brain_dump_recovery.py tests/test_brain_dump_flag_off_privacy.py tests/test_crt_receipt_retention.py"
       ],
       "acceptance": [
-        "The inventory shows one owner for each transferred cadence; existing privacy/recovery semantics pass with retries and shutdown."
+        "The adapter inventory names each cadence and existing privacy/recovery ports; retries and shutdown retain their accepted semantics. Actual scheduler ownership transfers only in PR-64.",
+        "This slice tests the adapter through the PR-21 execution context while the existing scheduler remains its sole live owner. PR-64 performs registration and ownership handoff; this slice must not activate a second scheduler."
       ],
       "budget": {
         "product_loc": 380,
-        "files": 4
+        "files": 2
       },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-24",
-      "outcome": "Agent observation preserves external-effect uncertainty",
+      "outcome": "Agent job adapter preserves lookup and uncertain outcomes",
       "tasks": [
         "T024"
       ],
@@ -1016,21 +1153,54 @@ The Russian heading is the required repository parser key; the map and prose are
       "paths": [
         "backend/app/modules/tasks/jobs/agent_adapter.py",
         "backend/app/modules/agents/observer.py",
-        "backend/app/main.py",
         "backend/tests/test_agent_job_handoff.py"
       ],
       "depends_on": [
-        "PR-23"
+        "PR-21"
       ],
       "tests": [
         "cd backend && pytest tests/test_agent_job_handoff.py tests/test_agent_a2a_client.py"
       ],
       "acceptance": [
-        "No old/new observer overlap; an expired lease cannot authorize a Task write and an unknown external effect is never reported as success."
+        "No old/new observer overlap; an expired lease cannot authorize a Task write and an unknown external effect is never reported as success.",
+        "This slice tests the adapter through the PR-21 execution context while the existing scheduler remains its sole live owner. PR-64 performs registration and ownership handoff; this slice must not activate a second scheduler."
       ],
       "budget": {
         "product_loc": 360,
-        "files": 3
+        "files": 2
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-64",
+      "outcome": "One durable worker owns each handed-off scheduler responsibility",
+      "tasks": [
+        "T064"
+      ],
+      "requirements": [
+        "026-FR-014",
+        "026-FR-015",
+        "026-SC-007"
+      ],
+      "paths": [
+        "backend/app/modules/tasks/jobs/worker.py",
+        "backend/app/main.py",
+        "backend/tests/test_scheduler_handoff.py"
+      ],
+      "depends_on": [
+        "PR-22",
+        "PR-23",
+        "PR-24"
+      ],
+      "tests": [
+        "cd backend && pytest tests/test_scheduler_handoff.py tests/test_review_job_handoff.py tests/test_maintenance_job_handoff.py tests/test_agent_job_handoff.py tests/test_task_job_authority.py"
+      ],
+      "acceptance": [
+        "Register completed adapters against the job ledger and existing execution context. Under the recorded default-OFF/storage epoch gate, switch each named scheduler exactly once; test restart/lease expiry and refusal of duplicate live owners. Auth scheduling and CRT storage/receipt ownership are unchanged. Measure full worker-loop plus old-scheduler changes before boundary approval; no effect implementation belongs in this join."
+      ],
+      "budget": {
+        "product_loc": 350,
+        "files": 2
       },
       "implementer": "feature-implementer"
     },
@@ -1054,7 +1224,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "backend/tests/test_sync_unit_of_work.py"
       ],
       "depends_on": [
-        "PR-24"
+        "PR-64"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_unit_of_work.py tests/test_task_repository.py tests/test_review_repository.py"
@@ -1302,7 +1472,7 @@ The Russian heading is the required repository parser key; the map and prose are
       "paths": [
         "backend/app/modules/tasks/sync/delta.py",
         "backend/app/modules/tasks/sync/transfers.py",
-        "backend/app/modules/tasks/sync/router.py",
+        "backend/app/modules/tasks/sync/delta_router.py",
         "backend/tests/test_sync_delta.py"
       ],
       "depends_on": [
@@ -1338,7 +1508,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "paths": [
         "backend/app/modules/tasks/sync/snapshots.py",
-        "backend/app/modules/tasks/sync/router.py",
+        "backend/app/modules/tasks/sync/snapshot_router.py",
         "backend/tests/test_sync_snapshots.py"
       ],
       "depends_on": [
@@ -1370,11 +1540,11 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "paths": [
         "backend/app/modules/tasks/sync/hints.py",
-        "backend/app/modules/tasks/sync/router.py",
+        "backend/app/modules/tasks/sync/hints_router.py",
         "backend/tests/test_sync_hints.py"
       ],
       "depends_on": [
-        "PR-33"
+        "PR-31"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_hints.py tests/test_sync_authority.py"
@@ -1385,6 +1555,39 @@ The Russian heading is the required repository parser key; the map and prose are
       "budget": {
         "product_loc": 390,
         "files": 2
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-63",
+      "outcome": "All sync routes are mounted with the same authority and OFF gate",
+      "tasks": [
+        "T063"
+      ],
+      "requirements": [
+        "026-FR-004",
+        "026-FR-011",
+        "026-FR-024",
+        "026-SC-002",
+        "026-SC-004"
+      ],
+      "paths": [
+        "backend/app/modules/tasks/sync/router.py",
+        "backend/tests/test_sync_routes.py"
+      ],
+      "depends_on": [
+        "PR-33",
+        "PR-58"
+      ],
+      "tests": [
+        "cd backend && pytest tests/test_sync_routes.py tests/test_sync_commands_api.py tests/test_sync_delta.py tests/test_sync_snapshots.py tests/test_sync_hints.py"
+      ],
+      "acceptance": [
+        "Mount the completed delta/transfer, snapshot and hint routers without reimplementing endpoint behavior. Real app route reachability, current authorization, owner-safe errors and default-OFF behavior pass before client integration."
+      ],
+      "budget": {
+        "product_loc": 120,
+        "files": 1
       },
       "implementer": "feature-implementer"
     },
@@ -1412,7 +1615,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "depends_on": [
         "PR-05",
-        "PR-16"
+        "PR-62"
       ],
       "tests": [
         "cargo test --manifest-path rust/Cargo.toml -p bb-client storage"
@@ -1621,8 +1824,7 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "depends_on": [
         "PR-39",
-        "PR-33",
-        "PR-58"
+        "PR-63"
       ],
       "tests": [
         "cargo test --manifest-path rust/Cargo.toml -p bb-client transport",
@@ -1862,40 +2064,6 @@ The Russian heading is the required repository parser key; the map and prose are
       "budget": {
         "product_loc": 390,
         "files": 4
-      },
-      "implementer": "feature-implementer"
-    },
-    {
-      "id": "PR-47",
-      "outcome": "Shared AI policy validates local capability and proposal structure",
-      "tasks": [
-        "T047"
-      ],
-      "requirements": [
-        "026-FR-018",
-        "026-FR-019",
-        "026-FR-020",
-        "026-FR-021",
-        "026-SC-006"
-      ],
-      "paths": [
-        "rust/crates/bb-domain/src/lib.rs",
-        "rust/crates/bb-domain/src/ai_policy.rs",
-        "rust/crates/bb-domain/src/proposal.rs",
-        "rust/crates/bb-domain/tests/ai_policy.rs"
-      ],
-      "depends_on": [
-        "PR-16"
-      ],
-      "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain ai_policy"
-      ],
-      "acceptance": [
-        "Only missing policy/proposal risks receive test-first coverage: prohibited fallback sends no content and invalid/unauthorized actions produce no command."
-      ],
-      "budget": {
-        "product_loc": 380,
-        "files": 3
       },
       "implementer": "feature-implementer"
     },
@@ -2175,15 +2343,14 @@ The Russian heading is the required repository parser key; the map and prose are
         "frontend/src/features/tasks/TaskDetailPanel.tsx",
         "frontend/src/api/taskHooks.ts",
         "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
-        "rust/crates/bb-domain/tests/parity.rs",
+        "rust/crates/bb-domain/tests/web_presentation.rs",
         "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx"
       ],
       "depends_on": [
-        "PR-31",
-        "PR-48"
+        "PR-18"
       ],
       "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-domain smart_add",
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain --test web_presentation",
         "cd frontend && npm run test -- src/features/tasks/__tests__/smartAdd.test.ts src/features/tasks/__tests__/TaskListPage.test.tsx src/features/tasks/__tests__/TaskDetailPanel.test.tsx"
       ],
       "acceptance": [
@@ -2376,6 +2543,11 @@ The Russian heading is the required repository parser key; the map and prose are
       },
       "implementer": "feature-implementer"
     }
-  ]
+  ],
+  "review_budget": {
+    "total_changed_lines": 800,
+    "count": "all additions plus deletions, including tests, docs, specifications, lockfiles and generated committed text",
+    "on_exceed": "stop and re-slice; oversize_reason is not an exception for feature 026"
+  }
 }
 ```

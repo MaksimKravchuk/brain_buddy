@@ -1,6 +1,6 @@
 # Brain Buddy Rust core and custom synchronization
 
-Specification accepted October 9, 2026. The owner approved the prepared scope, design, governance proposal and residual risks after six-lens review and correction closure. The [acceptance record](approval.md) and [approved review status](evidence/026-native-20261009-1/accepted-summary.json) are authoritative; earlier pending labels in the frozen reviewed documents are historical. Complex slice sizing remains mandatory before implementation. This describes an accepted specification for future implementation, not a completed migration.
+Specification accepted October 9, 2026. The owner approved the prepared scope, design, governance proposal and residual risks after six-lens review and correction closure. The [acceptance record](approval.md) preserves that decision and the [approved review status](evidence/026-native-20261009-1/accepted-summary.json) for its original digest. The owner subsequently requested the 64-PR delivery amendment: separate tasks, an explicit graph, concurrent ready workers and an 800-line full-diff cap. Earlier pending labels in unchanged baseline documents are historical. Complex slice sizing remains mandatory before implementation. This describes an accepted specification for future implementation, not a completed migration.
 
 The [historical ChatGPT Pages copy](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966) reflects the earlier proposal and has not been updated by this repository-only completion. These versioned files are authoritative.
 
@@ -15,7 +15,8 @@ Start with the requirements and technical plan. The protocol is a separate docum
 | [contracts/sync-v1.md](contracts/sync-v1.md) | Commands, receipts, dependencies, conflicts, snapshot/delta, retention, restore, and versions |
 | [design.md](design.md) | Sync status, conflict, recovery, and AI consent states |
 | [design/sync-states.html](design/sync-states.html) | Self-contained mobile and desktop mockups |
-| [tasks.md](tasks.md) | Complete proposed PR map: tasks, requirements, paths, budgets, dependencies and evidence |
+| [tasks.md](tasks.md) | 64 atomic PRs: tasks, requirements, paths, product/full-diff budgets, dependencies and evidence |
+| [delivery-graph.md](delivery-graph.md) | All 64 PRs and 94 dependency edges; start ready independent work immediately |
 | [adr-draft.md](adr-draft.md) | Narrow amendments needed to existing architecture decisions |
 | [research.md](research.md) | Current architecture and code references |
 | [data-model.md](data-model.md) | Domain projections, durable state, identity, transitions and retention |

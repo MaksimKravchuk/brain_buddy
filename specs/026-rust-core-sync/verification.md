@@ -1,6 +1,14 @@
 # Specification verification
 
-## Current owner acceptance — October 9
+## Current delivery amendment — October 9
+
+The owner requested independently reviewable PRs, an explicit dependency graph, maximum safe parallel work and no approximately 5,000-line PRs. The amended [tasks](tasks.md) preserve the technical outcome while changing delivery ownership/order: 64 unique tasks and slices, 94 edges, a complete [graph](delivery-graph.md), the existing product caps and a strict 800-line full-diff cap. Ready independent workers start immediately as merged prerequisites and slots permit. Domain families, job adapters and SSE/delta have disjoint write paths; small registration/handoff slices own shared files. The Task lifecycle/formulation, snapshot/transfer and all-writer/pilot dependencies remain explicit. Graph depth decreases from 40 to 34 topological levels; this describes dependency structure, not measured calendar duration.
+
+Only tasks.md changes within the original core artifact set. The earlier six-lens reports/sign-off still bind digest `968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623` at the original source; they are not asserted to sign the new task map. Requirements, plan, data model, design/HTML, contracts, ADR proposal and historical evidence remain unchanged. This is the owner-requested delivery refinement, with bounded independent review, not a new full planning campaign or implementation approval. Complex DTO/dispatch/worker boundaries also need measured sizing. No product task is complete.
+
+Structural validation passes: 64/64 unique task assignments, 34/34 requirement IDs, acyclic topological order, disjoint independent write paths, all product-file budgets and exact equality of the Mermaid nodes/edges to the JSON map. `make check-specs`, local links and `git diff --check` pass. Original evidence and every original review input except tasks.md remain byte-for-byte unchanged. The amended core digest and independent verdict are recorded with the publication evidence; prior exact-SHA CI does not validate this amendment.
+
+## Historical owner acceptance of the original baseline — October 9
 
 **Specification planning is complete; the planning verdict is approved.** After being shown the final [approval packet](approval.md), six-lens review, all four correction closures, the 12/12 protocol checklist, the passing [CI for 962a7fa](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/37903755079) and [Claude re-review](https://github.com/MaksimKravchuk/brain_buddy/pull/305#issuecomment-6077167835), MaksimKravchuk explicitly answered “Yes” to accepting the prepared package and residual risks of custom sync, Rust/FFI and migration. The request retained complex-slice measurements before implementation.
 
