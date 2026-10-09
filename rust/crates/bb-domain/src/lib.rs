@@ -23,6 +23,9 @@
 //!   project display), with the server's ordering and keyset cursor.
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
+//! * [`smart_add`]: the deterministic Smart Add grammar, its resolution against
+//!   the read set, and `task.smart_add` (task plus resolved or created
+//!   classifications, with the typed alias bindings).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
@@ -36,5 +39,6 @@ pub mod organize;
 pub mod park;
 pub mod proposal;
 pub mod queries;
+pub mod smart_add;
 pub mod task_rules;
 pub mod types;
