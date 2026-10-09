@@ -42,7 +42,7 @@ OPERATOR_PASSWORD = "seeded-operator-password"
 @pytest.fixture
 def reservation_world(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, dict], None, None]:
+) -> Generator[tuple[TestClient, dict]]:
     """An app whose allow-listed operator address has no account behind it."""
 
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "reservation-data"))

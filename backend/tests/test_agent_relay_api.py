@@ -123,7 +123,7 @@ def _resolver(host: str, port: int) -> list[str]:
 @pytest.fixture
 def relay_app(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[tuple[TestClient, TestClient, Container], None, None]:
+) -> Generator[tuple[TestClient, TestClient, Container]]:
     """Two signed-in clients on one app, with the relay flag on and no network."""
 
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(tmp_path / "relay-data"))

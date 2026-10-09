@@ -1,6 +1,6 @@
 //! Python-compatible text normalization.
 //!
-//! The server (CPython 3.11, Unicode 14) is the normative implementation:
+//! The server (CPython 3.14, Unicode 16.0.0) is the normative implementation:
 //! `normalize_task_name`, `display_project_name`, `display_tag_name`
 //! (`backend/app/modules/tasks/repository.py`) and `formulation_key`
 //! (`backend/app/modules/tasks/formulation.py`). The Swift port is
@@ -15,6 +15,16 @@
 //!   server's `max_length` counts Unicode scalars ([`scalar_len`]).
 //!
 //! Results are not renormalized after folding, exactly as in Python.
+//!
+//! Unicode data version: the server's `unicodedata.unidata_version` is
+//! 16.0.0, and `unicode-normalization` (NFKC), `caseless` (case folding) and
+//! `unicode-general-category` (punctuation) are pinned in `rust/Cargo.toml` to
+//! releases that carry exactly Unicode 16.0.0. They move together with the
+//! backend's Python; `tests/primitives_parity.rs` fails if a crate drifts from
+//! the vector file's `unidata_version`, which a backend test pins to the
+//! server's. `is_space` is a fixed table (Python's
+//! `isspace` follows bidirectional classes, which a crate does not expose) and
+//! was checked scalar for scalar against CPython 3.14.
 
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;

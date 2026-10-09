@@ -297,7 +297,7 @@ def _parse_completion(raw: bytes) -> NavigatorProviderResult:
     output_tokens = _token_count(usage.get("completion_tokens"))
     try:
         decoded = json.loads(body["choices"][0]["message"]["content"])
-    except (KeyError, IndexError, TypeError, ValueError):
+    except KeyError, IndexError, TypeError, ValueError:
         decoded = None
     if not isinstance(decoded, dict):
         decoded = {}

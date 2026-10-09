@@ -4,7 +4,7 @@ import Testing
 
 /// Expected values were produced by the server's own functions
 /// (`display_project_name`, `normalize_task_name`, `display_tag_name`) on
-/// Python 3.11 / Unicode 14, the backend's runtime, and are compared scalar by
+/// Python 3.14 / Unicode 16.0.0, the backend's runtime, and are compared scalar by
 /// scalar rather than with `String ==` (which is canonical equivalence).
 @Suite("Name normalization matches the server")
 struct NameNormalizerTests {

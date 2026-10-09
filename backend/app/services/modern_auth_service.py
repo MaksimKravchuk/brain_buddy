@@ -808,7 +808,7 @@ class ModernAuthService:
             if not isinstance(claims, dict):
                 raise ModernAuthError()
             return claims
-        except (AuthSecretError, ValueError, TypeError):
+        except AuthSecretError, ValueError, TypeError:
             raise ModernAuthError() from None
 
     def complete_provider(

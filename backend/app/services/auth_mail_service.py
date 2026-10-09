@@ -435,7 +435,7 @@ class AuthMailService:
                     or payload["purpose"] != selected_row["purpose"]
                 ):
                     raise AuthMailError()
-            except (AuthSecretError, ValueError, TypeError):
+            except AuthSecretError, ValueError, TypeError:
                 self._retire(conn, selected)
                 return None
             return payload, selected["id"], lease_id

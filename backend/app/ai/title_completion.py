@@ -214,7 +214,7 @@ class OpenAITitleCompletionProvider:
             decoded = json.loads(body["choices"][0]["message"]["content"])
             if not isinstance(decoded, dict):
                 raise ValueError
-        except (KeyError, IndexError, TypeError, ValueError):
+        except KeyError, IndexError, TypeError, ValueError:
             raise ValueError("provider returned an invalid response") from None
         candidates = decoded.get("candidates")
         if not isinstance(candidates, list) or not all(

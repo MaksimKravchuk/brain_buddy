@@ -925,7 +925,7 @@ class ModernAuthSettings(BaseModel):
                 len(base64.b64decode(secret.get_secret_value(), validate=True)) == 32
                 for secret in self.keyring.values()
             )
-        except (ValueError, binascii.Error):
+        except ValueError, binascii.Error:
             return False
 
     @property
@@ -954,7 +954,7 @@ class ModernAuthSettings(BaseModel):
             key = serialization.load_pem_private_key(
                 self.apple_private_key.get_secret_value().encode(), password=None
             )
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return False
         return isinstance(key, ec.EllipticCurvePrivateKey) and isinstance(
             key.curve, ec.SECP256R1
@@ -1011,7 +1011,7 @@ def _build_modern_auth_settings() -> ModernAuthSettings:
         keyring = json.loads(
             os.getenv("BRAIN_BUDDY_AUTH_KEYRING", "{}"), object_pairs_hook=unique_keys
         )
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         keyring = {}
     values = {
         name: os.getenv(f"BRAIN_BUDDY_AUTH_{name.upper()}", str(field.default))

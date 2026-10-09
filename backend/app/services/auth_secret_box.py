@@ -75,7 +75,7 @@ def _canonical(value: object) -> bytes:
         return json.dumps(
             value, sort_keys=True, ensure_ascii=True, separators=(",", ":")
         ).encode("ascii")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise AuthSecretError() from None
 
 
@@ -128,7 +128,7 @@ class AuthSecretBox:
                 key_id: base64.b64decode(secret.get_secret_value(), validate=True)
                 for key_id, secret in settings.keyring.items()
             }
-        except (ValueError, binascii.Error):
+        except ValueError, binascii.Error:
             raise AuthSecretError() from None
         return cls(keys, settings.current_key_id)
 
@@ -146,7 +146,7 @@ class AuthSecretBox:
     def _key(self, key_id: str, purpose: str) -> bytes:
         try:
             return self._keys[key_id][purpose]
-        except (KeyError, TypeError):
+        except KeyError, TypeError:
             raise AuthSecretError() from None
 
     @staticmethod
@@ -179,7 +179,7 @@ class AuthSecretBox:
             return AESGCM(self._key(key_id, "aead")).decrypt(
                 blob[:12], blob[12:], self._aad(context, key_id)
             )
-        except (AttributeError, TypeError, ValueError, binascii.Error, InvalidTag):
+        except AttributeError, TypeError, ValueError, binascii.Error, InvalidTag:
             raise AuthSecretError() from None
 
     def code_digest(
