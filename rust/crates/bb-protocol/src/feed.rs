@@ -123,6 +123,14 @@ pub struct ChangesPage {
 impl Wire for ChangesPage {
     fn validate(&self) -> Result<(), CodecError> {
         self.transactions.iter().try_for_each(Wire::validate)?;
+        // An empty page, including one that only announces an oversized
+        // transaction, never moves the cursor: advancing it past an
+        // unapplied transaction would skip that transaction for good.
+        if self.transactions.is_empty() && self.next_cursor != self.from_cursor {
+            return Err(CodecError::Invalid(
+                "an empty page must keep next_cursor at from_cursor",
+            ));
+        }
         if let Some(manifest) = &self.transaction_manifest {
             manifest.validate()?;
             if !self.transactions.is_empty() || !self.has_more {
