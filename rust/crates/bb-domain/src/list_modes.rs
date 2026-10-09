@@ -21,17 +21,25 @@
 //! bounded slice of it: one pass over the read set keeps the `limit + 1` best
 //! keys after the cursor, so a page costs O(limit) memory however large the
 //! store is, and each row's key ends in the task id, so the order is total.
+//! A section is ordered by a key computed from its own project when a row is
+//! met (looked up by id, O(log n)), never from a table over every project, so
+//! grouping adds no memory beyond the page either.
+//!
 //! The keyset cursor is the server's token format (base64url JSON of the
 //! filters that must match and the last key) whose key starts with the id of the
-//! row's section: the section is looked up again on the next page, so a
-//! renamed project cannot make the cursor skip or repeat rows. A key of the
-//! wrong shape for the mode's order is refused.
+//! row's section, then the section's order key as it was when the cursor was
+//! issued (a project's archived flag, folded name, normalized name and display
+//! name and id), then the row's key. The next page looks the section up again
+//! and refuses the cursor when its order key has since changed (the project was
+//! renamed, archived or unarchived): resuming at the section's new position
+//! would skip or repeat rows, so the client restarts from the first page
+//! instead. A section or key of the wrong shape for the mode's order is refused.
 //!
 //! Pure: `today` is the device's calendar day of `inputs.now` in
 //! `inputs.device_zone`, the same day `list_counts` uses.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::collections::{BTreeSet, BinaryHeap};
 
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
@@ -41,8 +49,8 @@ use crate::normalization;
 use crate::queries::{self, KeyPart, MAX_LIMIT, SortKey, invalid};
 use crate::types::{
     DateView, DomainError, HistoryKind, ListMode, ListModePage, ListOptions, Page, PageSection,
-    Priority, ProjectId, Query, QueryInputs, QueryResult, ReadSet, Reason, SectionKind, Task,
-    TaskSort, TaskState,
+    Priority, Project, ProjectId, ProjectState, Query, QueryInputs, QueryResult, ReadSet, Reason,
+    SectionKind, Task, TaskSort, TaskState,
 };
 
 /// Title of the section of tasks without a (known) project.
@@ -58,8 +66,9 @@ pub fn handles_query(query: &Query) -> bool {
 /// # Errors
 ///
 /// [`Reason::InvalidValue`] for a limit outside 1 to 200, a cursor that is
-/// malformed, was issued for another query, or names a section or key shape
-/// the query cannot produce, and for a stored value the rules cannot read (or
+/// malformed, was issued for another query, names a section or key shape the
+/// query cannot produce, or was issued while its project sorted elsewhere
+/// (renamed, archived or unarchived since), and for a stored value the rules cannot read (or
 /// any other query kind); [`Reason::InvalidTimeZone`] for an unknown device
 /// zone, which only the Agenda and the date views read.
 pub fn query(
@@ -205,7 +214,7 @@ fn nfc(value: &str) -> String {
 
 // -------------------------------------------------------------------- sections
 
-/// Where a row goes. Ranked by [`Plan::rank`] within one query.
+/// Where a row goes. Ordered by [`Plan::section_key`] within one query.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Section {
     /// The one unnamed section of open rows.
@@ -303,7 +312,7 @@ struct Placed {
 }
 
 /// Everything a page reads besides the tasks: the mode resolved against the
-/// options (`TaskListBuilder`) and the projects' section order.
+/// options (`TaskListBuilder`).
 struct Plan<'a> {
     read_set: &'a ReadSet,
     mode: &'a ListMode,
@@ -318,8 +327,6 @@ struct Plan<'a> {
     show_completed: bool,
     show_cancelled: bool,
     priorities: BTreeSet<Priority>,
-    /// Section rank of each project: active before archived, by `NameSortKey`.
-    project_ranks: BTreeMap<&'a ProjectId, u64>,
 }
 
 impl<'a> Plan<'a> {
@@ -368,11 +375,6 @@ impl<'a> Plan<'a> {
             show_completed,
             show_cancelled,
             priorities: options.priorities.iter().copied().collect(),
-            project_ranks: if grouped {
-                project_ranks(read_set)
-            } else {
-                BTreeMap::new()
-            },
         })
     }
 
@@ -503,23 +505,32 @@ impl<'a> Plan<'a> {
 
     // ------------------------------------------------------------------ keys
 
-    /// Position of a section: open rows and date views from 0, projects in
-    /// `NameSortKey` order, "No project" after them, then Completed and Cancelled.
-    fn rank(&self, section: &Section) -> u64 {
-        let projects = self.read_set.projects.len() as u64;
+    /// Where a section sorts: open rows and date views first, then projects in
+    /// `NameSortKey` order, "No project" after them, then Completed and
+    /// Cancelled. The key is computed from the section alone (a project from its
+    /// own record), so ordering needs no table over the projects.
+    fn section_key(&self, section: &Section) -> SortKey {
+        use KeyPart::Int;
         match section {
-            Section::Open => 0,
-            Section::Date(view) => view_index(*view),
-            Section::Project(id) => self.project_ranks.get(id).copied().unwrap_or(projects),
-            Section::NoProject => projects,
-            Section::Ended(HistoryKind::Completed) => projects + 3,
-            Section::Ended(HistoryKind::Cancelled) => projects + 4,
+            Section::Open => vec![Int(0), Int(0)],
+            Section::Date(view) => vec![Int(0), Int(view_index(*view))],
+            Section::Project(id) => {
+                let mut key = vec![Int(1)];
+                // A project section is only built for a project of the read set.
+                if let Some(project) = self.read_set.projects.get(id) {
+                    key.extend(project_order(project));
+                }
+                key
+            }
+            Section::NoProject => vec![Int(2)],
+            Section::Ended(HistoryKind::Completed) => vec![Int(3)],
+            Section::Ended(HistoryKind::Cancelled) => vec![Int(4)],
         }
     }
 
-    /// The comparison key of a row: its section's rank, then its order key.
+    /// The comparison key of a row: its section's key, then its order key.
     fn key(&self, task: &Task, section: &Section) -> Result<SortKey, DomainError> {
-        let mut key = vec![KeyPart::Int(self.rank(section))];
+        let mut key = self.section_key(section);
         key.extend(self.item_key(task)?);
         Ok(key)
     }
@@ -639,12 +650,13 @@ impl<'a> Plan<'a> {
             "cancelled" => Section::Ended(HistoryKind::Cancelled),
             other => match other.split_once(':')? {
                 ("date", view) => Section::Date(DateView::from_wire(view)?),
-                ("project", project) => self
-                    .read_set
-                    .projects
-                    .keys()
-                    .find(|candidate| candidate.as_str() == project)
-                    .map(|found| Section::Project(found.clone()))?,
+                ("project", project) => {
+                    let (known, _) = self
+                        .read_set
+                        .projects
+                        .get_key_value(&ProjectId::parse(project).ok()?)?;
+                    Section::Project(known.clone())
+                }
                 _ => return None,
             },
         };
@@ -663,24 +675,46 @@ impl<'a> Plan<'a> {
 
     // ---------------------------------------------------------------- cursors
 
-    /// The server's token format with the last row's section id in front of its
-    /// order key.
+    /// The part of a section's order key a cursor is bound to: a project's
+    /// `NameSortKey` as it stands now (everything after the class), nothing for
+    /// the fixed sections, whose order never changes.
+    fn bound_order<'k>(section: &Section, section_key: &'k [KeyPart]) -> &'k [KeyPart] {
+        match section {
+            Section::Project(_) => section_key.get(1..).unwrap_or_default(),
+            _ => &[],
+        }
+    }
+
+    /// The server's token format with the last row's section id and that
+    /// section's order key in front of the row's own order key.
     fn encode_cursor(&self, filters: &Value, last: &Candidate) -> String {
+        let section_key = self.section_key(&last.section);
         let mut key = vec![KeyPart::Text(Self::section_id(&last.section))];
-        key.extend(last.key.iter().skip(1).cloned());
+        key.extend_from_slice(Self::bound_order(&last.section, &section_key));
+        key.extend(last.key.iter().skip(section_key.len()).cloned());
         queries::encode_cursor(filters, &key)
     }
 
     /// The comparison key a cursor stands for, or a refusal when the token is
-    /// malformed, was issued for other filters, or names a section or a key
-    /// shape this query cannot produce.
+    /// malformed, was issued for other filters, names a section or a key shape
+    /// this query cannot produce, or was issued while its section sorted
+    /// elsewhere (the project was renamed, archived or unarchived), which would
+    /// skip or repeat rows.
     fn decode_cursor(&self, cursor: &str, filters: &Value) -> Result<SortKey, DomainError> {
         let refused = || invalid("cursor");
         let parts = queries::decode_cursor_key(cursor, filters)?;
-        let Some((KeyPart::Text(section), item)) = parts.split_first() else {
+        let Some((KeyPart::Text(section), rest)) = parts.split_first() else {
             return Err(refused());
         };
         let section = self.section_from_id(section).ok_or_else(refused)?;
+        let section_key = self.section_key(&section);
+        let bound = Self::bound_order(&section, &section_key);
+        let Some((issued, item)) = rest.split_at_checked(bound.len()) else {
+            return Err(refused());
+        };
+        if issued != bound {
+            return Err(refused());
+        }
         let shape = self.order.shape();
         let fits = item.len() == shape.len()
             && item
@@ -690,39 +724,24 @@ impl<'a> Plan<'a> {
         if !fits {
             return Err(refused());
         }
-        let mut key = vec![KeyPart::Int(self.rank(&section))];
+        let mut key = section_key;
         key.extend(item.iter().cloned());
         Ok(key)
     }
 }
 
-/// `NameSortKey` order of the projects: active before archived, then the
-/// diacritic-folded normalized name, the normalized name, the display name and
-/// the id. Each project's position is its section rank.
-fn project_ranks(read_set: &ReadSet) -> BTreeMap<&ProjectId, u64> {
-    let mut keyed: Vec<_> = read_set
-        .projects
-        .values()
-        .map(|project| {
-            let normalized = nfc(&normalization::project_key(project.name.as_str()));
-            (
-                (
-                    u8::from(project.state == crate::types::ProjectState::Archived),
-                    nfc(&normalization::diacritic_fold(&normalized)),
-                    normalized,
-                    nfc(project.name.as_str()),
-                    project.id.as_str().to_owned(),
-                ),
-                &project.id,
-            )
-        })
-        .collect();
-    keyed.sort();
-    keyed
-        .into_iter()
-        .zip(0u64..)
-        .map(|((_, id), rank)| (id, rank))
-        .collect()
+/// `NameSortKey` of a project, the order of grouped sections: active before
+/// archived, then the diacritic-folded normalized name, the normalized name,
+/// the display name and the id.
+fn project_order(project: &Project) -> SortKey {
+    let normalized = nfc(&normalization::project_key(project.name.as_str()));
+    vec![
+        KeyPart::Int(u64::from(project.state == ProjectState::Archived)),
+        KeyPart::Text(nfc(&normalization::diacritic_fold(&normalized))),
+        KeyPart::Text(normalized),
+        KeyPart::Text(nfc(project.name.as_str())),
+        KeyPart::Text(project.id.as_str().to_owned()),
+    ]
 }
 
 /// An instant as a non-negative integer that grows with time.

@@ -1719,62 +1719,213 @@ fn queries_026_fr_009_malformed_cursors_and_limits_are_typed_refusals() {
     }
 }
 
-#[test]
-fn queries_026_fr_009_a_renamed_project_cannot_make_a_cursor_skip_or_repeat_rows() {
-    let mut f = Fixture::default();
-    let a = f.project("Aaa", "p-a", false);
-    let b = f.project("Bbb", "p-b", false);
-    for n in 0..3 {
-        f.add(t(&format!("A{n}")).project(&a).state("completed").ended(n));
-        f.add(t(&format!("B{n}")).project(&b).state("completed").ended(n));
-    }
-    let options = json!({ "group_by_project": true });
-    let all = |rs: &ReadSet| page_through(rs, &history("completed"), &options, 2).0;
-    let before = all(&f.read_set());
-    assert_eq!(before.len(), 6);
+/// Replaces one project of a read set: the same id under another name, state
+/// or colour, as if the user had edited it between two pages.
+fn edit_project(rs: &mut ReadSet, id: &str, name: &str, state: &str, color: Option<&str>) {
+    let project = rs
+        .projects
+        .values_mut()
+        .find(|p| p.id.as_str() == id)
+        .expect("a project");
+    *project = serde_json::from_value(json!({
+        "id": id, "name": name, "color": color, "state": state, "revision": "2",
+        "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
+    }))
+    .expect("a project");
+}
 
-    // Page 1 under the old names, the rest under swapped names: the section
-    // order flips, but the cursor names section `p-a` and resumes after its
-    // row in the new order, so no row is shown twice.
+fn row_ids(page: &ListModePage) -> Vec<String> {
+    page.sections
+        .iter()
+        .flat_map(|s| s.items.iter().map(|i| i.id.as_str().to_owned()))
+        .collect()
+}
+
+/// `projects` named in order, each with three completed tasks.
+fn grouped_history(names: &[(&str, &str)]) -> ReadSet {
+    let mut f = Fixture::default();
+    for (id, name) in names {
+        let project = f.project(name, id, false);
+        for n in 0..3 {
+            f.add(
+                t(&format!("{id}-{n}"))
+                    .project(&project)
+                    .state("completed")
+                    .ended(n),
+            );
+        }
+    }
+    f.read_set()
+}
+
+#[test]
+fn queries_026_fr_009_a_cursor_is_refused_once_its_projects_order_key_changed() {
+    let options = json!({ "group_by_project": true });
+    let rs = grouped_history(&[("p-a", "Aaa"), ("p-b", "Bbb")]);
     let first = try_page(
-        &f.read_set(),
+        &rs,
         &query_of(history("completed"), options.clone(), 2, None),
         &inputs(TODAY, "UTC"),
     )
     .expect("a page");
-    let seen: Vec<_> = first
-        .sections
-        .iter()
-        .flat_map(|s| s.items.iter().map(|i| i.id.as_str().to_owned()))
-        .collect();
-    let mut renamed = f.read_set();
-    for (id, name) in [("p-a", "Zzz"), ("p-b", "Aaa")] {
-        let project = renamed
-            .projects
-            .values_mut()
-            .find(|p| p.id.as_str() == id)
-            .expect("a project");
-        *project = serde_json::from_value(json!({
-            "id": id, "name": name, "color": null, "state": "active", "revision": "2",
-            "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
-        }))
-        .unwrap();
+    let cursor = first.next_cursor.clone().expect("a cursor");
+    assert_eq!(first.sections.len(), 1, "page 1 ends inside project A");
+    assert_eq!(first.sections[0].id, "project:p-a");
+    let key = payload(&cursor)["last"].as_array().expect("last").clone();
+    assert_eq!(
+        key[..6],
+        [
+            json!("project:p-a"),
+            json!(0),
+            json!("aaa"),
+            json!("aaa"),
+            json!("Aaa"),
+            json!("p-a")
+        ],
+        "the key carries the section id and the section's order key"
+    );
+
+    // A key without the section's order key, or with a forged one, is refused
+    // by its shape or its content, not resumed.
+    let mut without = key.clone();
+    without.drain(1..6);
+    let mut forged = key.clone();
+    forged[4] = json!("Zzz");
+    let mut cut = key.clone();
+    cut.truncate(3);
+    for (what, last) in [("without", without), ("forged", forged), ("cut", cut)] {
+        let error = try_page(
+            &rs,
+            &query_of(
+                history("completed"),
+                options.clone(),
+                50,
+                Some(&with_last(&cursor, &last)),
+            ),
+            &inputs(TODAY, "UTC"),
+        )
+        .expect_err(what);
+        assert_eq!(
+            (error.reason, error.field.as_deref()),
+            (Reason::InvalidValue, Some("cursor")),
+            "{what}"
+        );
     }
-    let rest = try_page(
-        &renamed,
-        &query_of(
-            history("completed"),
-            options,
-            50,
-            first.next_cursor.as_deref(),
-        ),
+
+    // Renamed so that it now sorts after B, archived, or unarchived: each moves
+    // the section, so resuming at its new position would skip B's rows (or
+    // repeat A's). The cursor is refused and the client starts over.
+    let resume = |rs: &ReadSet, cursor: &str| {
+        try_page(
+            rs,
+            &query_of(history("completed"), options.clone(), 50, Some(cursor)),
+            &inputs(TODAY, "UTC"),
+        )
+    };
+    for (what, name, state) in [
+        ("renamed after B", "Zzz", "active"),
+        ("renamed but still before B", "Aab", "active"),
+        ("a case-only rename", "AAA", "active"),
+        ("archived", "Aaa", "archived"),
+    ] {
+        let mut changed = rs.clone();
+        edit_project(&mut changed, "p-a", name, state, None);
+        let error = resume(&changed, &cursor).expect_err(what);
+        assert_eq!(
+            (error.reason, error.field.as_deref()),
+            (Reason::InvalidValue, Some("cursor")),
+            "{what}"
+        );
+        // Starting over is answered, and lists every row once in the new order.
+        let (all, _, _) = page_through(&changed, &history("completed"), &options, 2);
+        assert_eq!(all.len(), 6, "{what}");
+    }
+    let mut unarchived = rs.clone();
+    edit_project(&mut unarchived, "p-a", "Aaa", "archived", None);
+    let archived_first = try_page(
+        &unarchived,
+        &query_of(history("completed"), options.clone(), 4, None),
         &inputs(TODAY, "UTC"),
     )
-    .expect("the cursor still names a section");
-    for section in &rest.sections {
-        for item in &section.items {
-            assert!(!seen.contains(&item.id.as_str().to_owned()), "no repeat");
+    .expect("a page");
+    let archived_cursor = archived_first.next_cursor.expect("a cursor");
+    assert_eq!(
+        archived_first.sections.last().expect("a section").id,
+        "project:p-a"
+    );
+    let error = resume(&rs, &archived_cursor).expect_err("unarchived");
+    assert_eq!(
+        (error.reason, error.field.as_deref()),
+        (Reason::InvalidValue, Some("cursor")),
+        "unarchived"
+    );
+
+    // An edit that leaves the order key alone does not disturb the cursor.
+    let mut recoloured = rs.clone();
+    edit_project(&mut recoloured, "p-a", "Aaa", "active", Some("#ff0000"));
+    let rest = resume(&recoloured, &cursor).expect("the order key is unchanged");
+    let mut all = row_ids(&first);
+    all.extend(row_ids(&rest));
+    let unpaged = row_ids(
+        &try_page(
+            &recoloured,
+            &query_of(history("completed"), options.clone(), 50, None),
+            &inputs(TODAY, "UTC"),
+        )
+        .expect("a page"),
+    );
+    assert_eq!(all, unpaged, "no row skipped or repeated");
+}
+
+#[test]
+fn queries_026_fr_009_a_rename_elsewhere_does_not_disturb_a_cursor_that_sections_ahead_of_it() {
+    let options = json!({ "group_by_project": true });
+    let rs = grouped_history(&[("p-a", "Aaa"), ("p-b", "Bbb"), ("p-c", "Ccc")]);
+    let first = try_page(
+        &rs,
+        &query_of(history("completed"), options.clone(), 2, None),
+        &inputs(TODAY, "UTC"),
+    )
+    .expect("a page");
+    assert_eq!(first.sections[0].id, "project:p-a", "page 1 ends in A");
+    let seen = row_ids(&first);
+    let cursor = first.next_cursor.clone().expect("a cursor");
+
+    // What is guaranteed: while the cursor's own section keeps its order key,
+    // projects that sort after it may be renamed, even past one another, and
+    // paging on neither skips nor repeats a row of them. (A project renamed to
+    // sort before the cursor's section is behind the cursor, as for any keyset
+    // cursor; that is not promised either way.)
+    for (rename_c, rename_b) in [
+        ("Bbc", "Bbb"),
+        ("Zzz", "Bbb"),
+        ("Ccc", "Yyy"),
+        ("Ccc", "Bbb"),
+    ] {
+        let mut changed = rs.clone();
+        edit_project(&mut changed, "p-c", rename_c, "active", None);
+        edit_project(&mut changed, "p-b", rename_b, "active", None);
+        let mut all = seen.clone();
+        let mut after = Some(cursor.clone());
+        while let Some(token) = after {
+            let page = try_page(
+                &changed,
+                &query_of(history("completed"), options.clone(), 2, Some(&token)),
+                &inputs(TODAY, "UTC"),
+            )
+            .expect("the cursor still continues");
+            all.extend(row_ids(&page));
+            after = page.next_cursor;
         }
+        let unpaged = row_ids(
+            &try_page(
+                &changed,
+                &query_of(history("completed"), options.clone(), 50, None),
+                &inputs(TODAY, "UTC"),
+            )
+            .expect("a page"),
+        );
+        assert_eq!(all, unpaged, "{rename_b}/{rename_c}");
     }
 }
 
