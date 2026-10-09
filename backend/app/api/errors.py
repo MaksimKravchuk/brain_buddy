@@ -23,12 +23,16 @@ from app.exceptions import (
     StorageUnavailableError,
     ValidationFailure,
 )
+from app.modules.tasks.rust_adapter import RustBridgeError
 from app.schemas import ErrorResponse, StaleRevisionDetail
 from app.services.auth_apple_lifecycle import AuthAppleLifecycleError
 from app.services.cli_auth import CliAuthError
 from app.services.modern_auth_service import ModernAuthError
 
 from .middleware import CORRELATION_HEADER
+
+# Bridge failures raised while the core shuts down; a retry reaches a fresh one.
+_TRANSIENT_BRIDGE_CODES = frozenset({"WORKSPACE_CLOSED", "CANCELLED"})
 
 
 def _public_validation_errors(exc: RequestValidationError) -> list[dict[str, object]]:
@@ -265,6 +269,30 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         response = JSONResponse(
             status_code=503, content=payload.model_dump(by_alias=True)
+        )
+        if correlation_id:
+            response.headers[CORRELATION_HEADER] = correlation_id
+        return response
+
+    @app.exception_handler(RustBridgeError)
+    async def handle_rust_bridge_error(
+        request: Request, exc: RustBridgeError
+    ) -> JSONResponse:
+        # Spec 026: a closed, cancelled or failed core is a server condition,
+        # never the client's input, so it must not surface as a 400.
+        correlation_id = getattr(request.state, "correlation_id", None)
+        transient = exc.code in _TRANSIENT_BRIDGE_CODES
+        payload = ErrorResponse(
+            message=(
+                "The task core is temporarily unavailable; please retry."
+                if transient
+                else "Internal task core error."
+            ),
+            reference_id=correlation_id,
+        )
+        response = JSONResponse(
+            status_code=503 if transient else 500,
+            content=payload.model_dump(by_alias=True),
         )
         if correlation_id:
             response.headers[CORRELATION_HEADER] = correlation_id

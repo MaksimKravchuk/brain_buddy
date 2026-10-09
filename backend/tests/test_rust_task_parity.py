@@ -1102,6 +1102,43 @@ def test_026_FR_014_a_bridge_failure_fails_closed_without_writing(apps: Apps) ->
         assert "Never stored" not in str(failure.value)
         assert service.task_repo.list_for_owner(owner_id=owner) == []
         assert service.task_repo.get_idempotency(owner_id=owner, key="closed-1") is None
+    with allure.step("over HTTP the closed core is a retryable 503, not a 400"):
+        response = apps.on.post(
+            "/api/tasks",
+            headers={"Idempotency-Key": "closed-2"},
+            json={"title": "Never stored either"},
+        )
+        _evidence("status", str(response.status_code))
+        assert response.status_code == 503, response.text
+        body = response.json()
+        assert body["reference_id"] == response.headers["X-Correlation-ID"]
+        assert "Never stored" not in response.text
+        assert service.task_repo.list_for_owner(owner_id=owner) == []
+
+
+def test_026_FR_014_an_internal_core_failure_is_a_500_not_a_client_error(
+    apps: Apps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade = _container(apps.on).task_service._rust_facade
+    assert facade is not None
+
+    def poisoned(*_args: object, **_kwargs: object) -> Any:
+        raise RustBridgeError("INTERNAL_ERROR", False, None)
+
+    monkeypatch.setattr(facade._core, "decide", poisoned)
+    with allure.step("a poisoned core turns a valid write into a 500"):
+        response = apps.on.post(
+            "/api/tasks",
+            headers={"Idempotency-Key": "poisoned-1"},
+            json={"title": "Valid but unserved"},
+        )
+        _evidence("status", str(response.status_code))
+        assert response.status_code == 500, response.text
+        assert response.json()["message"] == "Internal task core error."
+        assert "Valid but unserved" not in response.text
+        owner = apps.on.get("/api/account").json()["id"]
+        repo = _container(apps.on).task_service.task_repo
+        assert repo.list_for_owner(owner_id=owner) == []
 
 
 def _fresh_decision(core: RustCore, read_set: dict[str, Any], title: str) -> Any:
