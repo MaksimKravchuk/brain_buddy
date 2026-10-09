@@ -88,7 +88,9 @@ fn try_command(
     checks: Vec<Value>,
 ) -> Result<DomainCommand, DomainError> {
     match decode_command(&envelope_json(kind, entity, payload, checks)) {
-        Ok(Decoded::Executable(envelope)) => DomainCommand::from_envelope(&envelope, |_| None),
+        Ok(Decoded::Executable(envelope)) => {
+            DomainCommand::from_envelope(&envelope, &types::NoReceipts)
+        }
         other => panic!("{kind} did not decode as an executable command: {other:?}"),
     }
 }

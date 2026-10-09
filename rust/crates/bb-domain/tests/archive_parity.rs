@@ -127,7 +127,8 @@ fn project_command(kind: &str, id: &str, revision: u64) -> DomainCommand {
     .to_string();
     match decode_command(&envelope) {
         Ok(Decoded::Executable(envelope)) => {
-            DomainCommand::from_envelope(&envelope, |_| None).unwrap_or_else(|e| panic!("{e:?}"))
+            DomainCommand::from_envelope(&envelope, &types::NoReceipts)
+                .unwrap_or_else(|e| panic!("{e:?}"))
         }
         other => panic!("{kind} did not decode as an executable command: {other:?}"),
     }
