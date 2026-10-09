@@ -56,6 +56,9 @@ fn feed_026_fr_004_changes_page_round_trips() {
     empty["transactions"] = json!([]);
     empty["next_cursor"] = empty["from_cursor"].clone();
     assert!(decode::<ChangesPage>(&empty.to_string()).is_ok());
+    let mut empty_but_advanced = empty;
+    empty_but_advanced["next_cursor"] = json!("cursor-1");
+    assert!(decode::<ChangesPage>(&empty_but_advanced.to_string()).is_err());
 }
 
 #[test]
@@ -96,10 +99,16 @@ fn feed_026_fr_006_oversized_transaction_manifest_stands_alone() {
     let mut page = changes_page();
     page["transactions"] = json!([]);
     page["has_more"] = json!(true);
+    page["next_cursor"] = page["from_cursor"].clone();
     page["transaction_manifest"] = manifest();
     assert_keys_match_schema("TransferManifest", &page["transaction_manifest"]);
     let decoded: ChangesPage = decode(&page.to_string()).unwrap();
     assert_eq!(serde_json::to_value(&decoded).unwrap(), page);
+
+    // The cursor stays put until the announced transaction is applied.
+    let mut advanced = page.clone();
+    advanced["next_cursor"] = json!("cursor-2");
+    assert!(decode::<ChangesPage>(&advanced.to_string()).is_err());
 
     let mut inline_too = page.clone();
     inline_too["transactions"] = changes_page()["transactions"].clone();

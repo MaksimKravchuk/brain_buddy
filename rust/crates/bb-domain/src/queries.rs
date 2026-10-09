@@ -19,7 +19,7 @@
 //! server's own keyset token (`_encode_cursor`), so a page can continue across
 //! the HTTP and local paths for an equal query.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use bb_protocol::catalog::EntityType;
 use bb_protocol::wire::{Counter, Instant};
@@ -279,41 +279,50 @@ pub fn task_list(
     let after = page
         .after
         .as_deref()
-        .map(|cursor| decode_cursor(cursor, &filters))
+        .map(|cursor| decode_cursor(cursor, &filters, sort))
         .transpose()?;
 
-    let scoped: Vec<&Task> = read_set
-        .tasks
-        .values()
-        .filter(|task| {
-            project_id.is_none_or(|id| task.project_id.as_ref() == Some(id))
-                && tag_id.is_none_or(|id| task.tag_ids.contains(id))
-                && (!unassigned || task.project_id.is_none())
-        })
-        .collect();
-    let counts_by_state = open_counts(&scoped);
-
-    let mut keyed = scoped
-        .into_iter()
-        .filter(|task| task.state == list.task_state())
-        .map(|task| Ok((sort_key(task, sort)?, task)))
-        .collect::<Result<Vec<_>, DomainError>>()?;
-    keyed.sort_by(|a, b| a.0.cmp(&b.0));
-    if let Some(last) = &after {
-        keyed.retain(|(key, _)| key > last);
-    }
+    // One pass over the read set: count every open list in scope, and keep only
+    // the `limit + 1` smallest keys of the requested list after the cursor, so a
+    // page costs O(limit) memory however large the store is.
     let limit = usize::try_from(page.limit).unwrap_or(usize::MAX);
+    let keep = limit.saturating_add(1);
+    let mut counts_by_state = TaskCounts::default();
+    let mut best: BinaryHeap<Candidate> =
+        BinaryHeap::with_capacity(keep.min(MAX_LIMIT as usize + 1));
+    for task in read_set.tasks.values().filter(|task| {
+        project_id.is_none_or(|id| task.project_id.as_ref() == Some(id))
+            && tag_id.is_none_or(|id| task.tag_ids.contains(id))
+            && (!unassigned || task.project_id.is_none())
+    }) {
+        count_open(&mut counts_by_state, task);
+        if task.state != list.task_state() {
+            continue;
+        }
+        let key = sort_key(task, sort)?;
+        if after.as_ref().is_some_and(|last| &key <= last) {
+            continue;
+        }
+        if best.len() == keep && best.peek().is_some_and(|worst| key >= worst.key) {
+            continue;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(Candidate { key, task });
+    }
+    let mut keyed = best.into_sorted_vec();
     let has_more = keyed.len() > limit;
     keyed.truncate(limit);
     let next_cursor = keyed
         .last()
         .filter(|_| has_more)
-        .map(|(key, _)| encode_cursor(&filters, key));
+        .map(|candidate| encode_cursor(&filters, &candidate.key));
 
     let settings = clock_settings(read_set)?;
     let items = keyed
         .iter()
-        .map(|(_, task)| task_view(task, Vec::new(), Vec::new(), &settings))
+        .map(|candidate| task_view(candidate.task, Vec::new(), Vec::new(), &settings))
         .collect::<Result<_, _>>()?;
     Ok(TaskListResult {
         items,
@@ -323,19 +332,43 @@ pub fn task_list(
     })
 }
 
-/// `TaskService._open_counts` over tasks already scoped by project and tag.
-fn open_counts(tasks: &[&Task]) -> TaskCounts {
-    let mut counts = TaskCounts::default();
-    for task in tasks {
-        match task.state {
-            TaskState::Inbox => counts.inbox += 1,
-            TaskState::Next => counts.next += 1,
-            TaskState::Waiting => counts.waiting += 1,
-            TaskState::Someday => counts.someday += 1,
-            TaskState::Completed | TaskState::Cancelled => {}
-        }
+/// A task in the page selection: ordered by its sort key alone (the key ends in
+/// the task id, so keys are unique within one owner's read set).
+struct Candidate<'a> {
+    key: SortKey,
+    task: &'a Task,
+}
+
+impl PartialEq for Candidate<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
     }
-    counts
+}
+
+impl Eq for Candidate<'_> {}
+
+impl PartialOrd for Candidate<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Candidate<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
+/// One task's share of `TaskService._open_counts`, over tasks already scoped by
+/// project and tag.
+fn count_open(counts: &mut TaskCounts, task: &Task) {
+    match task.state {
+        TaskState::Inbox => counts.inbox += 1,
+        TaskState::Next => counts.next += 1,
+        TaskState::Waiting => counts.waiting += 1,
+        TaskState::Someday => counts.someday += 1,
+        TaskState::Completed | TaskState::Cancelled => {}
+    }
 }
 
 // ------------------------------------------------------------------- cursors
@@ -441,9 +474,26 @@ fn encode_cursor(filters: &Value, last: &SortKey) -> String {
     base64url_encode(python_dumps(&payload).as_bytes())
 }
 
+/// Whether each position of `key` has the variant `sort` produces there
+/// (`true` for an integer position, `false` for a text one); see [`sort_key`].
+fn has_sort_shape(key: &[KeyPart], sort: TaskSort) -> bool {
+    let shape: &[bool] = match sort {
+        TaskSort::Manual => &[true, false, false],
+        TaskSort::Due => &[true, false, true, false, false],
+        TaskSort::Priority => &[true, true, false, false],
+        TaskSort::Title => &[false, false],
+    };
+    key.len() == shape.len()
+        && key
+            .iter()
+            .zip(shape)
+            .all(|(part, is_int)| matches!(part, KeyPart::Int(_)) == *is_int)
+}
+
 /// `TaskService._decode_cursor`: the last sort key, or a refusal when the token
-/// is malformed or was issued for other filters.
-fn decode_cursor(cursor: &str, filters: &Value) -> Result<SortKey, DomainError> {
+/// is malformed, was issued for other filters, or holds a key of another shape
+/// than `sort` produces (which would order before or after every task).
+fn decode_cursor(cursor: &str, filters: &Value, sort: TaskSort) -> Result<SortKey, DomainError> {
     let refused = || invalid("cursor");
     let bytes = base64url_decode(cursor).ok_or_else(refused)?;
     let payload: Value = serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -455,14 +505,20 @@ fn decode_cursor(cursor: &str, filters: &Value) -> Result<SortKey, DomainError> 
         .and_then(Value::as_array)
         .filter(|parts| !parts.is_empty())
         .ok_or_else(refused)?;
-    last.iter()
+    let key = last
+        .iter()
         .map(|part| match part {
             Value::String(text) => Some(KeyPart::Text(text.clone())),
             Value::Number(number) => number.as_u64().map(KeyPart::Int),
             _ => None,
         })
         .map(|part| part.ok_or_else(refused))
-        .collect()
+        .collect::<Result<SortKey, _>>()?;
+    if has_sort_shape(&key, sort) {
+        Ok(key)
+    } else {
+        Err(refused())
+    }
 }
 
 // ---------------------------------------------------------------- the detail
