@@ -1,6 +1,9 @@
 [build-system]
-requires = ["hatchling>=1.21"]
-build-backend = "hatchling.build"
+# Spec 026 (T004): the wheel also carries the PyO3 bridge ``bb_core``, compiled
+# from ../rust/bindings/python. Building the backend therefore needs the pinned
+# Rust toolchain (rust/rust-toolchain.toml) and a C compiler.
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
 
 [project]
 name = "brain-buddy-backend"
@@ -91,6 +94,12 @@ ignore = [
 # Ceilings set to the current worst function in `app`, so nothing fails today
 # and nothing may get worse. Lower them as the outliers are refactored -- the
 # same ratchet idea applied to complexity rather than coverage.
+# ``bb_core`` is the compiled Rust extension; its type stub (``bb_core.pyi``)
+# sits in this directory only so maturin ships it, which would otherwise make
+# isort treat the module as first-party.
+[tool.ruff.lint.isort]
+known-third-party = ["bb_core"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 23
 
@@ -268,8 +277,11 @@ pytest_add_cli_args = ["-c", "mutmut_pytest.ini"]
 also_copy = ["mutmut_pytest.ini"]
 mutate_only_covered_lines = true
 
-[tool.hatch.build.targets.wheel]
-packages = ["app"]
-
-[tool.hatch.build.targets.sdist]
-include = ["app", "README.md", "pyproject.toml"]
+# ``bb_core`` is a pure-Rust abi3 module (one wheel for every CPython >= 3.11);
+# ``app`` is the ordinary Python package shipped beside it. ``locked`` makes the
+# build fail rather than silently rewrite rust/Cargo.lock.
+[tool.maturin]
+manifest-path = "../rust/bindings/python/Cargo.toml"
+module-name = "bb_core"
+python-packages = ["app"]
+locked = true

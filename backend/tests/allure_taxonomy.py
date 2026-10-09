@@ -260,6 +260,12 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "auth_provider_service": (EPIC_AUTH, "Modern authentication", "Provider proofs"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
     "ownership": (EPIC_AUTH, "Ownership", "Per-user data isolation"),
+    # Spec 026 (T004): the PyO3 bridge to the shared Rust core.
+    "rust_bridge": (
+        EPIC_TASKS,
+        "Rust core bridge",
+        "PyO3 command codec and lifecycle",
+    ),
     "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_job_worker": (
         EPIC_TASKS,

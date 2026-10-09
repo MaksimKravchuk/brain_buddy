@@ -11,6 +11,8 @@ Install these with your preferred user-scoped runtime manager:
 - nvm, available to the shell
 - npm
 - GNU Make
+- Rust installed through `rustup`, with the toolchain pinned in `rust/rust-toolchain.toml`
+  (currently 1.99.0; the workspace minimum is 1.89), and a C compiler (`gcc`/`clang`)
 
 The version files are guidance, not installers. For example, `pyenv` reads `.python-version`, while the required `nvm use` reads the `.nvmrc` in the current directory.
 
@@ -29,6 +31,15 @@ nvm use
 npm ci
 cd ..
 ```
+
+Installing the backend builds the PyO3 bridge `bb_core` from `rust/bindings/python`
+with maturin, so the first install takes about a minute longer than a pure-Python one.
+`make install-backend` selects the pinned toolchain for you; a bare `pip install` uses
+your default toolchain, so either run `rustup toolchain install 1.99.0` and
+`RUSTUP_TOOLCHAIN=1.99.0 pip install ...` or accept any toolchain at or above 1.89 for
+local work. After editing Rust code, re-run the install to rebuild the extension
+(`pip install -e` does not recompile on import). CI and the Docker image always build
+with the pinned version.
 
 Do not add provider keys for the default local path. AI providers and externally relayed agents stay disabled without credentials.
 
