@@ -32,6 +32,10 @@ use types::{
 
 const NOW: &str = "2026-10-09T12:00:00Z";
 const LATER: &str = "2026-10-09T13:30:00Z";
+/// IDs a created task carries are native-shaped (`task_<lowercase uuid>`).
+const NEW_TASK: &str = "task_0b0e1f30-0000-4000-8000-00000000a001";
+const EXTRA_TASK: &str = "task_0b0e1f30-0000-4000-8000-00000000a002";
+const VECTOR_TASK: &str = "task_0b0e1f30-0000-4000-8000-00000000a003";
 const FORM_A: &str = "form_0b0e1f30-0000-4000-8000-00000000000a";
 const FORM_B: &str = "form_0b0e1f30-0000-4000-8000-00000000000b";
 const FORM_C: &str = "form_0b0e1f30-0000-4000-8000-00000000000c";
@@ -340,7 +344,7 @@ fn world() -> Store {
 #[test]
 fn task_rules_026_fr_002_this_family_decides_exactly_the_three_task_lifecycle_commands() {
     let ours = [
-        create("t_new", json!({"title": "A"})),
+        create(NEW_TASK, json!({"title": "A"})),
         update("t_inbox", json!({"details": "d"}), 2),
         transition("t_inbox", json!({"action": "complete"}), 2),
     ];
@@ -396,12 +400,12 @@ fn task_rules_026_fr_002_decide_is_pure_and_time_is_only_an_input() {
 #[test]
 fn task_rules_026_fr_002_a_new_task_has_the_server_defaults() {
     let store = world();
-    let set = accepted(store.decide(&create("t_new", json!({"title": "  Call Bob  "}))));
+    let set = accepted(store.decide(&create(NEW_TASK, json!({"title": "  Call Bob  "}))));
     assert_eq!(set.outcome, ChangeOutcome::Applied);
     let task = the_task(&set);
     // Verbatim: the server neither trims nor collapses a title.
     assert_eq!(task.title.as_str(), "  Call Bob  ");
-    assert_eq!(task.id.as_str(), "t_new");
+    assert_eq!(task.id.as_str(), NEW_TASK);
     assert_eq!(task.state, TaskState::Inbox);
     assert_eq!(task.priority, types::Priority::None);
     assert_eq!(task.details, None);
@@ -419,7 +423,7 @@ fn task_rules_026_fr_002_a_new_task_has_the_server_defaults() {
 #[test]
 fn task_rules_026_fr_002_a_new_task_keeps_every_field_it_was_given() {
     let set = accepted(world().decide(&create(
-        "t_new",
+        NEW_TASK,
         json!({
             "title": "Plan", "details": "", "state": "someday",
             "project_id": "project_live", "tag_ids": ["tag_home", "tag_work"],
@@ -446,7 +450,7 @@ fn task_rules_026_fr_002_a_new_task_keeps_every_field_it_was_given() {
 fn task_rules_026_fr_002_waiting_needs_a_trimmed_note_and_other_lists_drop_one() {
     let store = world();
     let set = accepted(store.decide(&create(
-        "t_new",
+        NEW_TASK,
         json!({"title": "Reply", "state": "waiting", "waiting_for": " \u{1c}Landlord \t"}),
     )));
     let task = the_task(&set);
@@ -460,7 +464,7 @@ fn task_rules_026_fr_002_waiting_needs_a_trimmed_note_and_other_lists_drop_one()
         json!({"title": "Reply", "state": "waiting", "waiting_for": null}),
         json!({"title": "Reply", "state": "waiting", "waiting_for": " \n\u{a0}"}),
     ] {
-        let error = refusal(store.decide(&create("t_new", payload)));
+        let error = refusal(store.decide(&create(NEW_TASK, payload)));
         assert_eq!(error.reason, Reason::WaitingForRequired);
         assert_eq!(error.field.as_deref(), Some("waiting_for"));
     }
@@ -468,7 +472,7 @@ fn task_rules_026_fr_002_waiting_needs_a_trimmed_note_and_other_lists_drop_one()
     for list in ["inbox", "next", "someday"] {
         let set = accepted(store.decide_with(
             &create(
-                "t_new",
+                NEW_TASK,
                 json!({"title": "Reply", "state": list, "waiting_for": "Bob"}),
             ),
             NOW,
@@ -498,30 +502,61 @@ fn task_rules_026_fr_002_the_order_key_is_one_past_the_last_of_the_same_list() {
         if list == "waiting" {
             payload["waiting_for"] = json!("Bob");
         }
-        let set = accepted(store.decide_with(&create("t_new", payload), NOW, &[FORM_A]));
+        let set = accepted(store.decide_with(&create(NEW_TASK, payload), NOW, &[FORM_A]));
         assert_eq!(the_task(&set).order_key.as_str(), expected, "{list}");
         seen.push(list);
     }
     ran_all("lists", seen.len(), 4);
     // Closed tasks do not count and an empty list starts at zero.
     let empty = Store::new(&[], &[], &[task_json("t_done", "completed", 1)]);
-    let set = accepted(empty.decide(&create("t_new", json!({"title": "X"}))));
+    let set = accepted(empty.decide(&create(NEW_TASK, json!({"title": "X"}))));
     assert_eq!(the_task(&set).order_key.as_str(), "0");
 }
 
 #[test]
 fn task_rules_026_fr_008_an_id_that_exists_is_never_created_again() {
-    let store = world();
-    let error = refusal(store.decide(&create("t_inbox", json!({"title": "Again"}))));
+    let store = Store::new(&[], &[], &[task_json(NEW_TASK, "inbox", 2)]);
+    let error = refusal(store.decide(&create(NEW_TASK, json!({"title": "Again"}))));
     assert_eq!(error.reason, Reason::IdAlreadyExists);
     assert_eq!(error.field.as_deref(), Some("entity_id"));
-    assert_eq!(store.task("t_inbox").title.as_str(), "Task t_inbox");
+    assert_eq!(
+        store.task(NEW_TASK).title.as_str(),
+        format!("Task {NEW_TASK}")
+    );
+}
+
+#[test]
+fn task_rules_026_fr_008_a_created_task_needs_a_native_id_and_legacy_ids_stay_references() {
+    let store = world();
+    let payload = || json!({"title": "Fresh"});
+    // Malformed and legacy-shaped IDs are never persisted as new tasks, whether
+    // the ID is free or already held by an existing record.
+    let refused = [
+        "x",
+        "t_new",
+        "t_inbox",
+        "task_abc123def456",
+        "task_0B0E1F30-0000-4000-8000-00000000A001",
+        "project_0b0e1f30-0000-4000-8000-00000000a001",
+        "task_0b0e1f30-0000-4000-8000-00000000a001-extra",
+    ];
+    for id in refused {
+        let error = refusal(store.decide(&create(id, payload())));
+        assert_eq!(error.reason, Reason::InvalidValue, "{id}");
+        assert_eq!(error.field.as_deref(), Some("TaskId"), "{id}");
+    }
+    // The same legacy ID is still a valid reference to the record that holds it.
+    let set = accepted(store.decide(&update("t_inbox", json!({"title": "Still editable"}), 2)));
+    assert_eq!(the_task(&set).id.as_str(), "t_inbox");
+    // A native ID is accepted.
+    let set = accepted(store.decide(&create(NEW_TASK, payload())));
+    assert_eq!(the_task(&set).id.as_str(), NEW_TASK);
 }
 
 #[test]
 fn task_rules_026_fr_002_creation_checks_references_in_the_service_order() {
     let store = world();
-    let reason = |payload: Value| refusal(store.decide(&create("t_new", payload)));
+    let reason = |payload: Value| refusal(store.decide(&create(NEW_TASK, payload)));
     let error = reason(json!({"title": "X", "project_id": "project_missing"}));
     assert_eq!(error.reason, Reason::NotFound);
     assert_eq!(
@@ -557,7 +592,7 @@ fn task_rules_026_fr_002_creation_checks_references_in_the_service_order() {
 #[test]
 fn task_rules_026_fr_002_source_captures_need_the_adapters_capture_validation() {
     let error = refusal(world().decide(&create(
-        "t_new",
+        NEW_TASK,
         json!({"title": "X", "source_capture_ids": ["capture-1"]}),
     )));
     assert_eq!(error.reason, Reason::InvalidValue);
@@ -569,7 +604,7 @@ fn task_rules_026_fr_002_a_task_created_in_next_starts_its_formulation() {
     let store = world();
     let asked = accepted(store.decide_with(
         &create(
-            "t_new",
+            NEW_TASK,
             json!({"title": "X", "state": "next", "new_formulation_id": FORM_B}),
         ),
         NOW,
@@ -585,7 +620,7 @@ fn task_rules_026_fr_002_a_task_created_in_next_starts_its_formulation() {
     assert!(clock.extended_at.is_none() && clock.extension_reason.is_none());
     assert!(clock.park_floor_at.is_none());
     let minted = accepted(store.decide_with(
-        &create("t_new", json!({"title": "X", "state": "next"})),
+        &create(NEW_TASK, json!({"title": "X", "state": "next"})),
         NOW,
         &[FORM_A],
     ));
@@ -598,11 +633,11 @@ fn task_rules_026_fr_002_a_task_created_in_next_starts_its_formulation() {
             .as_str(),
         FORM_A
     );
-    let error = refusal(store.decide(&create("t_new", json!({"title": "X", "state": "next"}))));
+    let error = refusal(store.decide(&create(NEW_TASK, json!({"title": "X", "state": "next"}))));
     assert_eq!(error.reason, Reason::FormulationIdRequired);
     // Only a task created in Next gets a clock.
     let inbox = accepted(store.decide(&create(
-        "t_new",
+        NEW_TASK,
         json!({"title": "X", "new_formulation_id": FORM_B}),
     )));
     assert!(the_task(&inbox).formulation.is_none());
@@ -611,7 +646,7 @@ fn task_rules_026_fr_002_a_task_created_in_next_starts_its_formulation() {
 #[test]
 fn task_rules_026_fr_002_catalog_limits_count_unicode_scalars_not_bytes() {
     let emoji = |count: usize| "\u{1F600}".repeat(count);
-    let make = |payload: Value| try_command("task.create", "t_new", payload, vec![]);
+    let make = |payload: Value| try_command("task.create", NEW_TASK, payload, vec![]);
     let mut ran = 0;
     for (name, ok, too_long) in [
         (
@@ -1549,7 +1584,7 @@ fn clock_to(task: &Task) -> Value {
 
 /// A public task whose clock facts are the vector's `before`.
 fn task_from_clock(before: &Value) -> Value {
-    let mut row = task_json("t_vec", before["state"].as_str().expect("a state"), 1);
+    let mut row = task_json(VECTOR_TASK, before["state"].as_str().expect("a state"), 1);
     row["title"] = before["title"].clone();
     row["revision"] = json!(before["revision"].as_u64().expect("revision").to_string());
     row["due_date"] = before["due_date"].clone();
@@ -1592,7 +1627,7 @@ const VECTOR_EVENTS: [&str; 5] = [
 ];
 
 fn vector_command(event: &Value, state: &str, revision: u64) -> DomainCommand {
-    let id = "t_vec";
+    let id = VECTOR_TASK;
     let new_id = event.get("new_formulation_id").and_then(Value::as_str);
     match text(event, "type") {
         "create_in_next" => {
@@ -1686,7 +1721,7 @@ fn task_rules_026_fr_001_formulation_vectors_hold_through_the_task_commands() {
             panic!("{id}: the task commands have no refusal named {code}");
         }
         accepted(result);
-        let after = clock_to(store.task("t_vec"));
+        let after = clock_to(store.task(VECTOR_TASK));
         let mut expected = before.clone();
         for (key, value) in vector["expect"].as_object().expect("expect") {
             expected[key] = value.clone();
@@ -2242,9 +2277,10 @@ fn task_rules_026_fr_002_created_reference_tasks_continue_each_owners_order_keys
                 .iter()
                 .map(|t| t.order_key.to_u64().unwrap())
                 .max();
-            let set = accepted(
-                store.decide(&create("t_extra", json!({"title": "Extra", "state": list}))),
-            );
+            let set = accepted(store.decide(&create(
+                EXTRA_TASK,
+                json!({"title": "Extra", "state": list}),
+            )));
             let want = highest.map_or(0, |h| h + 1);
             assert_eq!(
                 the_task(&set).order_key.to_u64(),
