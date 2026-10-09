@@ -2,7 +2,8 @@
  * M-15 Inbox to zero on the web (D-03 "Inbox step"): one item at a time with
  * the web choices, an Undo after each (FR-048) that also takes the item off the
  * run's count, and for a long Inbox the three FR-030 choices, the last of which
- * releases the remainder to Someday with an Undo until the step is left.
+ * releases the remainder to Someday with an Undo until the step is left. An item
+ * can also be given a project with its choice, or be made into one.
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -13,11 +14,14 @@ import { describeReviewError, newIdempotencyKey, newProgressAttempt, withReferen
 import type { ReviewQueue } from "../../../api/review";
 import { applyReviewTask, refreshAfterReviewWrite, settleForAccount, useReviewQueue } from "../../../api/reviewHooks";
 import type { ReviewContinuation } from "../../../api/reviewHooks";
-import type { OpenTaskState, TaskResponse, TaskTransitionRequest } from "../../../api/taskTypes";
+import { getTaskCacheScope, taskKeys, useProjects } from "../../../api/taskHooks";
+import type { OpenTaskState, ProjectResponse, TaskResponse, TaskTransitionRequest, TaskUpdateRequest } from "../../../api/taskTypes";
 import { useShellToast } from "../../../components/shell/shellToast";
 import { sameWording } from "../formulation";
 import { plural } from "../plural";
 import { useReviewDrafts } from "../useReviewDrafts";
+import { MakeProjectForm, NEW_PROJECT, ProjectPicker } from "./InboxProjectParts";
+import type { ProjectDraft } from "./InboxProjectParts";
 import { buttonClass, fieldClass, FailureBanner, primaryButtonClass, QueueGate } from "./stepParts";
 import { useReviewRun, useTrackedWrite } from "./reviewRun";
 import { useBulkRelease } from "./useBulkRelease";
@@ -53,7 +57,27 @@ const CHOICES: Choice[] = [
 ];
 
 type Plan = { limit: number; release: boolean };
-type Form = { kind: "waiting"; choice: Choice; text: string } | { kind: "title"; text: string };
+type Form = { kind: "waiting"; choice: Choice; text: string } | { kind: "title"; text: string } | ({ kind: "project" } & ProjectDraft);
+
+/** The project staged for one item with its next choice; `newName` is the open "New project…" field. */
+type Staged = { taskId: string; projectId: string | null; newName: string | null };
+
+/** What Undo also puts back after a choice that changed the item's project or title, or made a project. */
+interface Restore {
+  fields: Pick<TaskUpdateRequest, "title" | "project_id">;
+  /** What could not be put back, for Undo's message. */
+  failure: string;
+  /** A project made for the item: archived again by Undo. */
+  archive?: ProjectResponse;
+}
+
+/** The project form keeps each of its fields as a draft (FR-052), under its own name. */
+const PROJECT = "project";
+const PROJECT_DRAFTS = { name: "project_name", outcome: "project_outcome", action: "project_action" } as const;
+
+function unsavedText(form: Form, task: TaskResponse): boolean {
+  return form.kind === "project" ? form.name !== task.title || form.outcome.trim() !== "" || form.action.trim() !== "" : form.text.trim() !== "";
+}
 
 export function InboxStep(): React.JSX.Element {
   const run = useReviewRun();
@@ -71,6 +95,8 @@ export function InboxStep(): React.JSX.Element {
   const [latest, setLatest] = useState<Readonly<Record<string, TaskResponse>>>({});
   const [form, setForm] = useState<Form | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [staged, setStaged] = useState<Staged | null>(null);
+  const projects = useProjects();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const fieldRef = useRef<HTMLInputElement>(null);
   const focusHeading = useRef(false);
@@ -96,11 +122,16 @@ export function InboxStep(): React.JSX.Element {
     }
   }, [current?.id]);
 
+  // Once per form opened, not per keystroke: a project form has several fields.
+  const formKind = form?.kind ?? null;
   useEffect(() => {
-    if (form) {
+    if (formKind !== null) {
       fieldRef.current?.focus();
     }
-  }, [form]);
+  }, [formKind]);
+
+  /** The project staged for an item (nothing staged: the one it has); it is the current item's alone. */
+  const projectOf = (task: TaskResponse) => (staged?.taskId === task.id ? staged.projectId : task.project_id);
 
   // Text typed before a reload or a closed tab comes back in its form (FR-052), once per item shown:
   // a form the person closes must not reopen on its own.
@@ -109,14 +140,17 @@ export function InboxStep(): React.JSX.Element {
     setDraftsCheckedFor(current.id);
     const title = form === null ? drafts.load(current.id, "title") : null;
     const waitingFor = form === null ? drafts.load(current.id, "waiting") : null;
+    const project = form === null ? { name: drafts.load(current.id, PROJECT_DRAFTS.name), outcome: drafts.load(current.id, PROJECT_DRAFTS.outcome), action: drafts.load(current.id, PROJECT_DRAFTS.action) } : null;
     if (title !== null) {
       setForm({ kind: "title", text: title });
     } else if (waitingFor !== null) {
       setForm({ kind: "waiting", choice: CHOICES.find((entry) => entry.needsWaitingFor) as Choice, text: waitingFor });
+    } else if (project !== null && Object.values(project).some((draft) => draft !== null)) {
+      setForm({ kind: "project", name: project.name ?? current.title, outcome: project.outcome ?? "", action: project.action ?? "" });
     }
   }
   useEffect(() => {
-    if (form !== null && form.text.trim() !== "") {
+    if (form !== null && current !== undefined && unsavedText(form, current)) {
       run.setUnsaved(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a restored form is unsaved text before anything is typed; typing reports itself.
@@ -125,7 +159,9 @@ export function InboxStep(): React.JSX.Element {
   /** The form is over, saved or discarded: so is its draft. */
   const closeForm = (taskId: string, field: string) => {
     setForm(null);
-    drafts.clear(taskId, field);
+    for (const name of field === PROJECT ? Object.values(PROJECT_DRAFTS) : [field]) {
+      drafts.clear(taskId, name);
+    }
     run.setUnsaved(false);
   };
 
@@ -136,7 +172,7 @@ export function InboxStep(): React.JSX.Element {
    * reworded does the review leave it as it is there and drop its form (FR-011,
    * FR-052).
    */
-  const reconcileStale = async (task: TaskResponse, choice: Choice, continuation: ReviewContinuation, staleError: unknown) => {
+  const reconcileStale = async (task: TaskResponse, field: string, continuation: ReviewContinuation, staleError: unknown) => {
     const fresh = await apiClient.getTask(task.id).catch(() => null);
     if (!continuation.stillCurrent()) {
       return;
@@ -155,7 +191,7 @@ export function InboxStep(): React.JSX.Element {
       return;
     }
     setStale((ids) => [...ids, task.id]);
-    closeForm(task.id, choice.id);
+    closeForm(task.id, field);
     setNotice(`“${task.title}” was changed on another device, so it stayed in Inbox.`);
   };
 
@@ -166,70 +202,106 @@ export function InboxStep(): React.JSX.Element {
    * progress id, so the replay is counted once (FR-048, FR-011).
    */
   const choose = (choice: Choice, task: TaskResponse, waitingFor?: string) => {
+    // Every key is made before the first send, so a Retry replays the same requests.
     const key = newIdempotencyKey();
+    const projectKey = newIdempotencyKey();
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: 1 });
-    const willFinish = handled.size + 1 >= limit;
-    const remaining = items.filter((item) => !handled.has(item.id) && item.id !== task.id);
+    // A project staged for the item goes in first; the move then follows the update's revision.
+    const projectId = projectOf(task);
+    const reassign = projectId !== task.project_id;
     setNotice(null);
     void action.run(choice.id, choice.label, async (continuation) => {
       let moved: TaskResponse;
       try {
-        moved = await apiClient.transitionTask(task.id, choice.request(task, waitingFor), key);
+        const ready = reassign ? await apiClient.updateTask(task.id, { project_id: projectId, expected_revision: task.revision }, projectKey) : task;
+        moved = await apiClient.transitionTask(task.id, choice.request(ready, waitingFor), key);
       } catch (error) {
         if (describeReviewError(error).kind !== "stale") {
           throw error;
         }
-        await reconcileStale(task, choice, continuation, error);
+        await reconcileStale(task, choice.id, continuation, error);
         return;
       }
-      // Only the person who pressed it may have the count sent for them.
-      if (!continuation.stillCurrent()) {
-        return;
-      }
-      applyReviewTask(queryClient, moved, continuation.scope);
-      focusHeading.current = true;
-      setProcessed((ids) => [...ids, task.id]);
-      closeForm(task.id, choice.id);
-      // The item is processed now; the count has its own pending and failure states.
-      void countAction.run(
-        "count",
-        "Update the Inbox count",
-        async (counting) => {
-          await run.progress(count);
-          if (!counting.stillCurrent()) {
-            return;
-          }
-          // Undo is offered once the count is in, so it takes off what was added.
-          notify(`“${task.title}” ${choice.toast}`, {
-            action: { label: "Undo", accessibleLabel: `Undo: ${choice.undoName} ${task.title}`, onAction: () => void track(() => undoChoice(task, moved)) }
-          });
-          // Its own pending and failure states; a Retry of this count reaches it too.
-          if (willFinish && plan?.release && remaining.length > 0) {
-            void bulk.release(
-              remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
-              "Couldn't release the rest of your Inbox. Nothing was moved."
-            );
-          }
-        },
-        `“${task.title}” ${choice.toast}, but the processed count didn't go up.`
-      );
+      finishProcessed(task, moved, continuation, count, {
+        field: choice.id,
+        message: `“${task.title}” ${choice.toast}`,
+        undoName: choice.undoName,
+        restore: reassign ? { fields: { project_id: task.project_id }, failure: "its project wasn't put back" } : undefined
+      });
     });
+  };
+
+  /** The item is out of the Inbox: shown as processed, counted, and Undo offered. */
+  const finishProcessed = (
+    task: TaskResponse,
+    moved: TaskResponse,
+    continuation: ReviewContinuation,
+    count: ReturnType<typeof newProgressAttempt>,
+    done: { field: string; message: string; undoName: string; restore?: Restore }
+  ) => {
+    // Only the person who pressed it may have the count sent for them.
+    if (!continuation.stillCurrent()) {
+      return;
+    }
+    const willFinish = handled.size + 1 >= limit;
+    const remaining = items.filter((item) => !handled.has(item.id) && item.id !== task.id);
+    applyReviewTask(queryClient, moved, continuation.scope);
+    focusHeading.current = true;
+    setProcessed((ids) => [...ids, task.id]);
+    setStaged(null);
+    closeForm(task.id, done.field);
+    // The item is processed now; the count has its own pending and failure states.
+    void countAction.run(
+      "count",
+      "Update the Inbox count",
+      async (counting) => {
+        await run.progress(count);
+        if (!counting.stillCurrent()) {
+          return;
+        }
+        // Undo is offered once the count is in, so it takes off what was added.
+        notify(done.message, {
+          action: { label: "Undo", accessibleLabel: `Undo: ${done.undoName} ${task.title}`, onAction: () => void track(() => undoChoice(task, moved, done.restore)) }
+        });
+        // Its own pending and failure states; a Retry of this count reaches it too.
+        if (willFinish && plan?.release && remaining.length > 0) {
+          void bulk.release(
+            remaining.map((item) => ({ task_id: item.id, expected_revision: item.revision })),
+            "Couldn't release the rest of your Inbox. Nothing was moved."
+          );
+        }
+      },
+      `${done.message}, but the processed count didn't go up.`
+    );
   };
 
   /**
    * Back to the Inbox, and one off the run's count (FR-048). The two writes are
    * separate: once the item is back in the Inbox it is shown again whatever
    * happens to the count, and a count that did not go down is retried alone
-   * under the same progress id.
+   * under the same progress id. A choice that also changed the item's project or
+   * title has them put back once it is in the Inbox (and a project made for it
+   * archived): what then fails is said, and the item is back in the Inbox anyway.
    */
-  const undoChoice = async (task: TaskResponse, moved: TaskResponse) => {
-    const settled = await settleForAccount(() =>
-      apiClient.transitionTask(
+  const undoChoice = async (task: TaskResponse, moved: TaskResponse, restore?: Restore) => {
+    const settled = await settleForAccount(async () => {
+      const back = await apiClient.transitionTask(
         task.id,
         { action: moved.state === "completed" || moved.state === "cancelled" ? "reopen" : "move", to_state: "inbox", expected_revision: moved.revision },
         newIdempotencyKey()
-      )
-    );
+      );
+      if (restore === undefined) {
+        return { task: back, failure: null };
+      }
+      let restored: TaskResponse;
+      try {
+        restored = await apiClient.updateTask(task.id, { ...restore.fields, expected_revision: back.revision }, newIdempotencyKey());
+      } catch {
+        return { task: back, failure: restore.failure };
+      }
+      const archived = restore.archive ? await apiClient.archiveProject(restore.archive.id, restore.archive.revision, newIdempotencyKey()).then(() => true, () => false) : true;
+      return { task: restored, failure: archived ? null : `the project “${restore.archive?.name}” wasn't archived` };
+    });
     if (settled === null) {
       return;
     }
@@ -237,11 +309,15 @@ export function InboxStep(): React.JSX.Element {
       notify(withReference("Couldn't undo. Nothing was changed.", describeReviewError(settled.error).referenceId));
       return;
     }
-    applyReviewTask(queryClient, settled.value, settled.scope);
+    const { task: back, failure } = settled.value;
+    applyReviewTask(queryClient, back, settled.scope);
     focusHeading.current = true;
-    setLatest((tasks) => ({ ...tasks, [task.id]: settled.value }));
+    setLatest((tasks) => ({ ...tasks, [task.id]: back }));
     setProcessed((ids) => ids.filter((id) => id !== task.id));
-    notify(`“${task.title}” is back in your Inbox`);
+    if (restore?.archive) {
+      refreshProjects(settled.scope);
+    }
+    notify(`“${task.title}” is back in your Inbox${failure ? `, but ${failure}.` : ""}`);
     const count = newProgressAttempt(run.session.id, { inbox_processed_delta: -1 });
     void countAction.run(
       "undo-count",
@@ -264,6 +340,65 @@ export function InboxStep(): React.JSX.Element {
       applyReviewTask(queryClient, updated, continuation.scope);
       setLatest((tasks) => ({ ...tasks, [task.id]: updated }));
       closeForm(task.id, "title");
+    });
+  };
+
+  const refreshProjects = (scope: ReviewContinuation["scope"]) =>
+    void queryClient.invalidateQueries({ queryKey: taskKeys.projects(getTaskCacheScope(scope.accountId)) });
+
+  /** "New project…": made at once (a project alone changes no task); the item gets it with its choice. */
+  const addProject = (event: FormEvent, task: TaskResponse, name: string) => {
+    event.preventDefault();
+    const key = newIdempotencyKey();
+    void action.run("project-add", "Add project", async (continuation) => {
+      const created = await apiClient.createProject({ name: name.trim() }, key);
+      if (!continuation.stillCurrent()) {
+        return;
+      }
+      queryClient.setQueryData<ProjectResponse[]>(taskKeys.projects(getTaskCacheScope(continuation.scope.accountId)), (list) => list && [...list, created]);
+      refreshProjects(continuation.scope);
+      setStaged({ taskId: task.id, projectId: created.id, newName: null });
+    });
+  };
+
+  /**
+   * "Make it a project": the project, the item as its first next action, and the move to Next
+   * actions are three writes in order, each under its own key made before the first send, so a
+   * Retry replays what already landed (never a second project). A choice the server refuses as
+   * stale leaves the item in the Inbox and archives the project made for it.
+   */
+  const submitProject = (event: FormEvent, task: TaskResponse, draft: ProjectDraft) => {
+    event.preventDefault();
+    const name = draft.name.trim();
+    const outcome = draft.outcome.trim();
+    const title = draft.action.trim();
+    const keys = { project: newIdempotencyKey(), update: newIdempotencyKey(), move: newIdempotencyKey(), archive: newIdempotencyKey() };
+    const count = newProgressAttempt(run.session.id, { inbox_processed_delta: 1 });
+    setNotice(null);
+    void action.run(PROJECT, "Make it a project", async (continuation) => {
+      const project = await apiClient.createProject({ name, ...(outcome ? { desired_outcome: outcome } : {}) }, keys.project);
+      let moved: TaskResponse;
+      try {
+        const titled = await apiClient.updateTask(task.id, { ...(title === task.title ? {} : { title }), project_id: project.id, expected_revision: task.revision }, keys.update);
+        moved = await apiClient.transitionTask(task.id, { action: "move", to_state: "next", expected_revision: titled.revision }, keys.move);
+      } catch (error) {
+        if (describeReviewError(error).kind !== "stale") {
+          throw error;
+        }
+        await reconcileStale(task, PROJECT, continuation, error);
+        if (continuation.stillCurrent()) {
+          await apiClient.archiveProject(project.id, project.revision, keys.archive).catch(() => undefined);
+          refreshProjects(continuation.scope);
+        }
+        return;
+      }
+      refreshProjects(continuation.scope);
+      finishProcessed(task, moved, continuation, count, {
+        field: PROJECT,
+        message: `“${name}” is now a project`,
+        undoName: "Made a project",
+        restore: { fields: { ...(title === task.title ? {} : { title: task.title }), project_id: null }, failure: "its title and project weren't put back", archive: project }
+      });
     });
   };
 
@@ -343,7 +478,23 @@ export function InboxStep(): React.JSX.Element {
               <p className="m-0 -mt-2 text-xs text-slate-500">Is it actionable? Choose where it belongs.</p>
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
               {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
-              {form ? (
+              {form?.kind === "project" ? (
+                <MakeProjectForm
+                  draft={form}
+                  actionRef={fieldRef}
+                  busy={action.pending !== null}
+                  disabled={itemsDisabled}
+                  onChange={(next) => {
+                    setForm({ kind: "project", ...next });
+                    drafts.save(current.id, PROJECT_DRAFTS.name, next.name, current.title);
+                    drafts.save(current.id, PROJECT_DRAFTS.outcome, next.outcome);
+                    drafts.save(current.id, PROJECT_DRAFTS.action, next.action);
+                    run.setUnsaved(unsavedText({ kind: "project", ...next }, current));
+                  }}
+                  onBack={() => run.confirmDiscard(() => closeForm(current.id, PROJECT))}
+                  onSubmit={(event) => submitProject(event, current, form)}
+                />
+              ) : form ? (
                 <form className="flex flex-col gap-2" onSubmit={(event) => (form.kind === "title" ? saveTitle(event, current, form.text) : submitWaiting(event, current, form.choice, form.text))}>
                   <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
                     {form.kind === "title" ? "Title" : "Who or what are you waiting for?"}
@@ -369,23 +520,40 @@ export function InboxStep(): React.JSX.Element {
                   </div>
                 </form>
               ) : (
-                <div role="group" aria-label="Choices" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                  {CHOICES.map((choice) => (
-                    <button
-                      key={choice.id}
-                      type="button"
-                      disabled={itemsDisabled}
-                      className={`${buttonClass} flex flex-col items-start text-left`}
-                      onClick={() => (choice.needsWaitingFor ? setForm({ kind: "waiting", choice, text: "" }) : choose(choice, current))}
-                    >
-                      {action.pending === choice.id ? "Saving…" : choice.label}
-                      {choice.sub ? <span className="text-xs font-normal text-slate-500">{choice.sub}</span> : null}
+                <>
+                  <ProjectPicker
+                    projects={(projects.data ?? []).filter((project) => project.state === "active")}
+                    value={staged?.taskId === current.id && staged.newName !== null ? NEW_PROJECT : (projectOf(current) ?? "")}
+                    newName={staged?.taskId === current.id ? (staged.newName ?? "") : ""}
+                    busy={action.pending === "project-add"}
+                    disabled={itemsDisabled}
+                    onSelect={(value) =>
+                      setStaged({ taskId: current.id, projectId: value === NEW_PROJECT ? projectOf(current) : value || null, newName: value === NEW_PROJECT ? "" : null })
+                    }
+                    onNewName={(newName) => setStaged({ taskId: current.id, projectId: projectOf(current), newName })}
+                    onAdd={(event) => addProject(event, current, staged?.newName ?? "")}
+                  />
+                  <div role="group" aria-label="Choices" className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    {CHOICES.map((choice) => (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        disabled={itemsDisabled}
+                        className={`${buttonClass} flex flex-col items-start text-left`}
+                        onClick={() => (choice.needsWaitingFor ? setForm({ kind: "waiting", choice, text: "" }) : choose(choice, current))}
+                      >
+                        {action.pending === choice.id ? "Saving…" : choice.label}
+                        {choice.sub ? <span className="text-xs font-normal text-slate-500">{choice.sub}</span> : null}
+                      </button>
+                    ))}
+                    <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "project", name: current.title, outcome: "", action: "" })}>
+                      Make it a project
                     </button>
-                  ))}
-                  <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
-                    Edit title
-                  </button>
-                </div>
+                    <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "title", text: current.title })}>
+                      Edit title
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </>
