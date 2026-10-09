@@ -211,7 +211,7 @@ def test_026_SC_007_stale_executor_cannot_settle_after_reclaim(
     assert jobs.complete(stale.job_id, fence=stale.fence) is False
     assert jobs.fail(stale.job_id, fence=stale.fence, safe_error="x", now=T0) is False
     assert jobs.mark_uncertain(stale.job_id, fence=stale.fence) is False
-    assert jobs.should_abandon(stale.job_id, fence=stale.fence) is True
+    assert jobs.should_abandon(stale.job_id, fence=stale.fence, now=T0) is True
     record = jobs.get(stale.job_id)
     # Nothing the stale holder did changed the live claim.
     assert record is not None
@@ -221,7 +221,7 @@ def test_026_SC_007_stale_executor_cannot_settle_after_reclaim(
         current.fence,
     )
 
-    assert jobs.should_abandon(current.job_id, fence=current.fence) is False
+    assert jobs.should_abandon(current.job_id, fence=current.fence, now=T0) is False
     assert jobs.complete(current.job_id, fence=current.fence) is True
     # A result cannot be accepted twice, nor a settled job failed afterwards.
     assert jobs.complete(current.job_id, fence=current.fence) is False
@@ -238,8 +238,87 @@ def test_026_SC_007_unknown_job_and_wrong_fence_are_refused(
     assert lease is not None
     assert jobs.complete("missing", fence=lease.fence) is False
     assert jobs.complete(lease.job_id, fence=lease.fence + 1) is False
-    assert jobs.should_abandon("missing", fence=1) is True
+    assert jobs.should_abandon("missing", fence=1, now=T0) is True
     assert jobs.get("missing") is None
+
+
+def test_026_FR_015_should_abandon_once_the_stored_lease_has_expired(
+    jobs: JobRepository,
+) -> None:
+    _schedule(jobs)
+    lease = _claim(jobs, T0)
+    assert lease is not None
+
+    # No other worker has run claim_due, so the row is still 'leased' with the
+    # old fence -- but the holder has lost the right to start an effect.
+    assert jobs.should_abandon(lease.job_id, fence=lease.fence, now=T0) is False
+    just_before = T0 + LEASE - timedelta(microseconds=1)
+    assert (
+        jobs.should_abandon(lease.job_id, fence=lease.fence, now=just_before) is False
+    )
+    assert jobs.should_abandon(lease.job_id, fence=lease.fence, now=T0 + LEASE) is True
+    record = jobs.get(lease.job_id)
+    assert record is not None and record.status is JobStatus.LEASED  # still lazy
+
+
+def test_026_SC_007_heartbeat_keeps_should_abandon_false_past_the_first_lease(
+    jobs: JobRepository,
+) -> None:
+    _schedule(jobs)
+    lease = _claim(jobs, T0, owner="w1")
+    assert lease is not None
+    assert jobs.heartbeat(
+        lease.job_id, owner="w1", fence=lease.fence, until=T0 + 2 * LEASE
+    )
+
+    later = T0 + LEASE + timedelta(seconds=1)
+    assert jobs.should_abandon(lease.job_id, fence=lease.fence, now=later) is False
+    assert (
+        jobs.should_abandon(lease.job_id, fence=lease.fence, now=T0 + 2 * LEASE) is True
+    )
+
+
+def test_026_FR_015_release_returns_an_unstarted_claim_without_an_attempt(
+    jobs: JobRepository,
+) -> None:
+    _schedule(jobs)
+    lease = _claim(jobs, T0, owner="w1")
+    assert lease is not None and lease.attempt == 1
+
+    assert jobs.release(lease.job_id, fence=lease.fence + 1, now=T0) is False
+    held = jobs.get(lease.job_id)
+    assert held is not None and held.status is JobStatus.LEASED
+
+    assert jobs.release(lease.job_id, fence=lease.fence, now=T0) is True
+    record = jobs.get(lease.job_id)
+    assert record is not None
+    assert (record.status, record.attempts, record.run_at, record.lease_owner) == (
+        JobStatus.QUEUED,
+        0,
+        T0,
+        None,
+    )
+    # Immediately claimable again, with a fresh fence, as the first attempt.
+    again = _claim(jobs, T0, owner="w2")
+    assert again is not None
+    assert (again.job_id, again.attempt) == (lease.job_id, 1)
+    assert again.fence > lease.fence
+    # The released claim can no longer settle or release anything.
+    assert jobs.release(lease.job_id, fence=lease.fence, now=T0) is False
+    assert jobs.complete(lease.job_id, fence=lease.fence) is False
+
+
+def test_026_FR_015_release_honours_a_cancellation_requested_meanwhile(
+    jobs: JobRepository,
+) -> None:
+    _schedule(jobs)
+    lease = _claim(jobs, T0)
+    assert lease is not None
+    jobs.cancel(lease.job_id)
+
+    assert jobs.release(lease.job_id, fence=lease.fence, now=T0) is True
+    record = jobs.get(lease.job_id)
+    assert record is not None and record.status is JobStatus.CANCELLED
 
 
 # --- retry budget -----------------------------------------------------------
@@ -441,7 +520,7 @@ def test_026_FR_015_cancel_stops_queued_and_refuses_running_results(
     lease = _claim(jobs)
     assert lease is not None
     assert jobs.cancel(lease.job_id) is JobStatus.LEASED
-    assert jobs.should_abandon(lease.job_id, fence=lease.fence) is True
+    assert jobs.should_abandon(lease.job_id, fence=lease.fence, now=T0) is True
     assert jobs.complete(lease.job_id, fence=lease.fence) is False
     record = jobs.get(lease.job_id)
     assert record is not None and record.status is JobStatus.CANCELLED
