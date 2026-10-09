@@ -12,12 +12,14 @@
 //!   uniqueness, active references, archive and tag deletion).
 //! * [`archive`]: archive membership, legacy marker restoration and the
 //!   project listing over it.
+//! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
 pub mod archive;
 pub mod calendar;
+pub mod children;
 pub mod normalization;
 pub mod organize;
 pub mod types;
