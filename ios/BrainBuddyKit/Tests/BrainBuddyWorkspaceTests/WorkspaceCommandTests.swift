@@ -306,6 +306,41 @@ import Testing
         #expect(workspace.state == before && workspace.unpersisted.isEmpty)
     }
 
+    @Test("Clarifying an Inbox item as a project makes it the project's first Next action, or changes nothing")
+    func clarifyAsProjectCreatesTheProjectAndTheFirstAction() async throws {
+        let workspace = await loadedWorkspace()
+        let tag = try workspace.createTag(name: "work")
+        let item = try workspace.capture(CaptureDraft(text: "Collect user interviews"))
+
+        let projectID = try workspace.clarifyAsProject(
+            item, projectName: "Collect user interviews", firstAction: "Email Anna for three contacts",
+            changes: TaskChanges(tagIDs: .set([tag]))
+        )
+
+        #expect(workspace.project(projectID)?.name == "Collect user interviews")
+        let task = try #require(workspace.task(item))
+        #expect(task.title == "Email Anna for three contacts" && task.state == .next)
+        #expect(task.projectID == projectID && task.tagIDs == [tag])
+        #expect(workspace.projects().first { $0.id == projectID }?.needsNextAction == false)
+
+        // Keeping the item's own title as the first action leaves the title alone.
+        let other = try workspace.capture(CaptureDraft(text: "Call the plumber"))
+        let second = try workspace.clarifyAsProject(other, projectName: "Fix the leak", firstAction: "Call the plumber")
+        #expect(workspace.task(other)?.title == "Call the plumber" && workspace.task(other)?.projectID == second)
+
+        // A taken name or a blank first action refuses the whole change.
+        let third = try workspace.capture(CaptureDraft(text: "Plan the trip"))
+        expectRejected(.duplicateProjectName("Fix the leak"), in: workspace) {
+            _ = try workspace.clarifyAsProject(third, projectName: "fix the leak", firstAction: "Pick dates")
+        }
+        expectRejected(.emptyTitle, in: workspace) {
+            _ = try workspace.clarifyAsProject(third, projectName: "Trip", firstAction: "")
+        }
+        expectRejected(.taskNotFound, in: workspace) {
+            _ = try workspace.clarifyAsProject("missing", projectName: "Trip", firstAction: "Pick dates")
+        }
+    }
+
     // MARK: Tags
 
     @Test func createTagAddsATagAndRejectsADuplicateName() async throws {

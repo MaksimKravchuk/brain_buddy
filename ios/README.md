@@ -350,7 +350,10 @@ data, or need a sign-in.
       creates the task, the new tag and the new project; the preview shows
       what will be created before saving.
 - [ ] Process inbox: clarify each item to Next, Waiting (asks who or what),
-      Someday, a project, or complete it, one at a time.
+      Someday, a project, or complete it, one at a time. "Make it a project"
+      names the project and asks for the first next action; Undo puts the
+      item back and archives the project. The Project chip can also create a
+      new project.
 - [ ] Move between lists, complete (the undo toast reopens into the previous
       list), cancel, and reopen from Completed / Cancelled into a chosen list.
 - [ ] Edit title, notes, due date, priority, project, tags and waiting-for;

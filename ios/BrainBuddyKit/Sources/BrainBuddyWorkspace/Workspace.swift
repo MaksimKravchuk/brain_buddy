@@ -363,6 +363,26 @@ public final class Workspace {
         try perform(.setProjectOutcome(project: id, outcome: outcome))
     }
 
+    /// Clarifies an Inbox item as a project, as one change: creates the project, makes the item its
+    /// first Next action under the title `firstAction`, with `changes` (tags, due date) applied too.
+    /// Pass `projectName` and `firstAction` trimmed, as every client does.
+    @discardableResult
+    public func clarifyAsProject(
+        _ id: TaskID, projectName: String, firstAction: String, changes: TaskChanges = TaskChanges()
+    ) throws(GTDValidationError) -> ProjectID {
+        guard let task = state.tasks[id] else { throw .taskNotFound }
+        let projectID = ProjectID(Self.rawID(makeID()))
+        var changes = changes
+        changes.projectID = .set(projectID)
+        changes.title = firstAction == task.title ? .unchanged : .set(firstAction)
+        try perform([
+            .createProject(.init(projectID: projectID, name: projectName)),
+            .updateTask(.init(taskID: id, changes: changes)),
+            .transitionTask(.init(taskID: id, action: .move, toList: .next)),
+        ])
+        return projectID
+    }
+
     /// Applies `commands` in order as one change: all of them are validated on a scratch state and
     /// queued together, or none is and the reason is thrown. For flows that are several commands
     /// to the person (clarify an Inbox item as a project, follow up a Waiting item). The server still
