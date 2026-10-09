@@ -26,6 +26,8 @@
 //! * [`review_decisions`]: the Review decision commands (`review.decide`,
 //!   `review.undo_decision`, bulk release and its Undo) over the formulation,
 //!   park and task rules.
+//! * [`review_sessions`]: Review sessions (start, merged progress, finish), settings,
+//!   activation, Navigator consent, and the `ReviewState` / `ReviewQueue` reads.
 //! * [`smart_add`]: the deterministic Smart Add grammar, its resolution against
 //!   the read set, and `task.smart_add` (task plus resolved or created
 //!   classifications, with the typed alias bindings).
@@ -44,6 +46,7 @@ pub mod park;
 pub mod proposal;
 pub mod queries;
 pub mod review_decisions;
+pub mod review_sessions;
 pub mod smart_add;
 pub mod task_rules;
 pub mod types;
