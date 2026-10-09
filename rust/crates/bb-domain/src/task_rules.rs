@@ -279,7 +279,9 @@ fn task_create(
     payload: &TaskCreate,
     inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
-    let id = TaskId::parse(command.entity_id.as_str())?;
+    // A created task carries the native shape; legacy and alias IDs are only
+    // valid as references to records that already exist.
+    let id = TaskId::parse_new(command.entity_id.as_str())?;
     if read_set.tasks.contains_key(&id) {
         return Err(refuse(
             Reason::IdAlreadyExists,
