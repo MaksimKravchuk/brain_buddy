@@ -16,7 +16,7 @@ use std::fmt;
 use std::fs::{self, DirBuilder, Permissions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
@@ -132,17 +132,23 @@ impl Store {
                 .mode(0o700)
                 .create(directory)?;
         }
+        // A store that does not exist yet is bootstrapped by exactly one
+        // process: switching a fresh file to WAL needs SQLite's exclusive
+        // lock, which concurrent first openers would otherwise race for and
+        // lose with an immediate BUSY that no busy timeout retries.
+        if is_uninitialised(path)? {
+            let exclusive =
+                MigrationLock::acquire(path, LockMode::Exclusive, options.busy_timeout)?;
+            let _exclusive = exclusive.ok_or(StoreError::Busy)?;
+            if is_uninitialised(path)? {
+                create_owner_only(path)?;
+                let mut conn = connect(options, false)?;
+                migrate(&mut conn, &options.workspace_id)?;
+            }
+        }
         let shared = MigrationLock::acquire(path, LockMode::Shared, options.busy_timeout)?;
         let shared = shared.ok_or(StoreError::Busy)?;
-        // Created owner-only before SQLite opens it, so the WAL and shared
-        // memory files it derives from this one are never group/world readable.
-        fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(path)?;
-        fs::set_permissions(path, Permissions::from_mode(0o600))?;
+        create_owner_only(path)?;
         let mut conn = connect(options, false)?;
         let found = user_version(&conn)?;
         let status = if found > SCHEMA_VERSION {
@@ -230,6 +236,29 @@ fn connect(options: &OpenOptions, read_only: bool) -> Result<Connection, StoreEr
     #[cfg(target_vendor = "apple")]
     conn.pragma_update(None, "checkpoint_fullfsync", true)?;
     Ok(conn)
+}
+
+/// True when the store file is missing or empty, i.e. SQLite has never
+/// written its header.
+fn is_uninitialised(path: &Path) -> Result<bool, StoreError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.len() == 0),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Creates the file owner-only before SQLite opens it, so the WAL and shared
+/// memory files SQLite derives from it are never group/world readable.
+fn create_owner_only(path: &Path) -> Result<(), StoreError> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)?;
+    fs::set_permissions(path, Permissions::from_mode(0o600))?;
+    Ok(())
 }
 
 fn user_version(conn: &Connection) -> Result<i64, StoreError> {
