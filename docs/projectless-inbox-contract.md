@@ -107,6 +107,23 @@ state. That behavior remains intentional: formerly assigned `inbox`-state tasks
 re-enter Inbox, while `next`, `waiting`, `someday`, completed, and cancelled tasks
 remain in their existing lifecycle states.
 
+## Clarifying an item as a project
+
+Clarifying an Inbox item can take it out of the Inbox in two ways, and every
+client offers both. Attaching it to a project (an existing one, or a new one
+created with "New project…") is applied together with its Next, Waiting or
+Someday decision. Making it a project creates the project, named by the user
+and pre-filled from the item's title, with an optional desired outcome; the item
+becomes the project's required first next action in Next actions and keeps its
+notes, tags and due date. Together they use `POST /projects`,
+`PATCH /api/tasks/{task_id}` and the task transition endpoint, so no API change
+is involved. Undo puts the
+item back in the Inbox as it was and archives the project it created.
+
+Placement: iPhone in Process inbox and the weekly review's Inbox step (PR #308);
+Mac in Clarify Inbox; web only in the weekly review's Inbox step, behind the
+`weekly_review` flag. Mac and web are in progress.
+
 ## Affected implementation surfaces
 
 | Surface | Required implementation |
