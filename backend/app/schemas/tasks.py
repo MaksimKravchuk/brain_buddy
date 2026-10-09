@@ -118,6 +118,10 @@ class ProjectResponse(StrictBaseModel):
     desired_outcome: str | None = None
     archived_at: datetime | None = None
     archived_before_lossless: bool = False
+    # Spec 026: the creation instant orders same-name Smart Add ties (oldest wins).
+    # Optional in the schema so the addition stays backward-compatible
+    # (docs/api-compatibility.md); this server always fills it.
+    created_at: datetime | None = None
 
 
 class TagResponse(StrictBaseModel):
@@ -126,6 +130,9 @@ class TagResponse(StrictBaseModel):
     state: Literal["active", "deleted"]
     revision: int
     open_task_count: int = Field(default=0, ge=0)
+    # Spec 026: the creation instant orders same-name Smart Add ties (oldest wins).
+    # Optional in the schema for backward compatibility; this server always fills it.
+    created_at: datetime | None = None
 
 
 class TaskCreateRequest(StrictBaseModel):

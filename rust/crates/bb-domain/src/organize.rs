@@ -55,11 +55,11 @@ pub fn decide(
     inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
     match &command.command {
-        Command::ProjectCreate(payload) => project_create(read_set, command, payload),
+        Command::ProjectCreate(payload) => project_create(read_set, command, payload, inputs),
         Command::ProjectUpdate(payload) => project_update(read_set, command, payload),
         Command::ProjectArchive(_) => project_archive(read_set, command, inputs),
         Command::ProjectUnarchive(_) => project_unarchive(read_set, command),
-        Command::TagCreate(payload) => tag_create(read_set, command, payload),
+        Command::TagCreate(payload) => tag_create(read_set, command, payload, inputs),
         Command::TagUpdate(payload) => tag_update(read_set, command, payload),
         Command::TagDelete(_) => tag_delete(read_set, command, inputs),
         Command::TaskTags(changes) => task_tags(read_set, command, changes, inputs),
@@ -151,7 +151,8 @@ fn patched<T: Clone>(current: &Option<T>, patch: &Patch<T>) -> Option<T> {
 // ------------------------------------------------------------- name uniqueness
 
 /// The active project, other than `other`, whose key equals `name`'s. The
-/// lowest ID wins when legacy data holds several, so the refusal is stable.
+/// oldest wins when legacy data holds several, by `(created_at, id)` like the
+/// Swift planner and the server's Smart Add, so the answer is stable.
 #[must_use]
 pub fn active_project_named<'a>(
     read_set: &'a ReadSet,
@@ -159,21 +160,31 @@ pub fn active_project_named<'a>(
     other: &ProjectId,
 ) -> Option<&'a Project> {
     let key = norm::project_key(name);
-    read_set.projects.values().find(|project| {
-        &project.id != other
-            && project.state == ProjectState::Active
-            && norm::project_key(project.name.as_str()) == key
-    })
+    read_set
+        .projects
+        .values()
+        .filter(|project| {
+            &project.id != other
+                && project.state == ProjectState::Active
+                && norm::project_key(project.name.as_str()) == key
+        })
+        .min_by_key(|project| project.age_key())
 }
 
 /// The active tag, other than `other`, whose key equals `name`'s (`name` is in
-/// stored display form).
+/// stored display form). The oldest wins, as for [`active_project_named`].
 #[must_use]
 pub fn active_tag_named<'a>(read_set: &'a ReadSet, name: &str, other: &TagId) -> Option<&'a Tag> {
     let key = norm::tag_key(name);
-    read_set.tags.values().find(|tag| {
-        &tag.id != other && tag.state == TagState::Active && norm::tag_key(tag.name.as_str()) == key
-    })
+    read_set
+        .tags
+        .values()
+        .filter(|tag| {
+            &tag.id != other
+                && tag.state == TagState::Active
+                && norm::tag_key(tag.name.as_str()) == key
+        })
+        .min_by_key(|tag| tag.age_key())
 }
 
 fn project_clash(existing: &Project, reason: Reason) -> DomainError {
@@ -260,6 +271,7 @@ fn project_create(
     read_set: &ReadSet,
     command: &DomainCommand,
     payload: &crate::types::ProjectCreate,
+    inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
     // A created project carries the native shape; legacy and alias IDs are
     // only valid as references to records that already exist.
@@ -285,6 +297,7 @@ fn project_create(
         desired_outcome: payload.desired_outcome.clone(),
         archived_at: None,
         archived_before_lossless: false,
+        created_at: inputs.now.clone(),
     };
     Ok(applied(vec![upsert(Record::Project(project))]))
 }
@@ -385,6 +398,7 @@ fn tag_create(
     read_set: &ReadSet,
     command: &DomainCommand,
     payload: &crate::types::TagCreate,
+    inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
     // See `project_create`: only a new tag needs the native shape.
     let id = TagId::parse_new(command.entity_id.as_str())?;
@@ -405,6 +419,7 @@ fn tag_create(
         name,
         state: TagState::Active,
         revision: Counter::from(1),
+        created_at: inputs.now.clone(),
     };
     Ok(applied(vec![upsert(Record::Tag(tag))]))
 }
