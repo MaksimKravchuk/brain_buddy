@@ -25,7 +25,9 @@ use super::tasks::{
     SubtaskTransition, SubtaskUpdate, Tag, TagChanges, TagCreate, TagUpdate, Task, TaskCreate,
     TaskTransition, TaskUpdate,
 };
-use super::vocabulary::{OpenList, ProjectFilter, StepCode, TaskSort, WriterOrigin};
+use super::vocabulary::{
+    DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort, WriterOrigin,
+};
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{CommandEnvelope, CommandRef, Precondition};
 use bb_protocol::receipt::Binding;
@@ -643,6 +645,50 @@ pub enum Query {
         step: StepCode,
         session_id: Option<SessionId>,
     },
+    /// A native list mode (History, Agenda, a date view, Search): sectioned
+    /// rows in the Apple kit's order, one bounded page at a time.
+    ListMode {
+        mode: ListMode,
+        #[serde(default)]
+        options: ListOptions,
+        page: Page,
+    },
+}
+
+/// The destinations of `GTDQueries.list` that the server's `GET /tasks` has no
+/// equivalent for (`Destination` in `Queries.swift`). The open lists, projects
+/// and tags stay [`Query::TaskList`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ListMode {
+    /// Completed or cancelled tasks, most recent first.
+    History { kind: HistoryKind },
+    /// Open dated tasks as Overdue, Today and Upcoming sections.
+    Agenda {},
+    /// One of the agenda's sections on its own.
+    DateView { view: DateView },
+    /// Title and notes, NFKC and case- and diacritic-insensitive, all states.
+    Search { text: String },
+}
+
+/// `ListOptions` of `Queries.swift`; every field is optional on the wire.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ListOptions {
+    pub sort: TaskSort,
+    /// One section per project (name order, archived last, "No project" last)
+    /// for open tasks. Ignored by the agenda; History groups its own rows.
+    pub group_by_project: bool,
+    /// Append completed tasks in the mode's range as a section. Search always
+    /// includes them; History ignores it.
+    pub show_completed: bool,
+    /// As `show_completed`, for cancelled tasks.
+    pub show_cancelled: bool,
+    /// A set: empty means every priority, repeats mean nothing.
+    pub priorities: Vec<Priority>,
+    /// Narrow to tasks carrying this tag. A tag the read set lacks matches
+    /// nothing; it is not an error.
+    pub tag_filter: Option<TagId>,
 }
 
 /// The explicit facts a query reads besides the state.
