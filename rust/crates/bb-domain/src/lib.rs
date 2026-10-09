@@ -23,6 +23,9 @@
 //!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
+//! * [`smart_add`]: the deterministic Smart Add grammar, its resolution against
+//!   the read set, and `task.smart_add` (task plus resolved or created
+//!   classifications, with the typed alias bindings).
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
 //! * [`types`]: the frozen value types.
@@ -37,5 +40,6 @@ pub mod organize;
 pub mod park;
 pub mod proposal;
 pub mod queries;
+pub mod smart_add;
 pub mod task_rules;
 pub mod types;
