@@ -35,6 +35,9 @@ frontend/allure-results/
 frontend/playwright-report/
 frontend/test-results/
 
+# Rust build output (shared core workspace)
+rust/target/
+
 # Editors and misc
 .idea/
 .vscode/

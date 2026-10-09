@@ -1,0 +1,5 @@
+# Same pin as cli/rust-toolchain.toml and the CI jobs; bump them together.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
