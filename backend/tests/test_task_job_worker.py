@@ -318,6 +318,8 @@ def test_026_SC_007_stale_holder_is_fenced_after_reclaim(
     assert worker_b.run_once() is False  # lease still live
 
     clock.advance(LEASE.total_seconds() + 1)  # A's heartbeat never fired
+    assert worker_b.run_once() is False  # expired lease requeued behind backoff
+    clock.advance(1)  # pinned full jitter: 1s cap after one attempt
     assert worker_b.run_once() is True
     assert b_adapter.runs == 1
 
@@ -537,7 +539,10 @@ def test_026_SC_007_shutdown_is_bounded_and_leaves_the_lease_reclaimable(
     # Past the lease, a new runner reclaims it; the old result is then fenced.
     clock.advance(LEASE.total_seconds())
     successor = FakeAdapter()
-    assert _worker(ledger, clock, successor, owner="new").run_once() is True
+    new_runner = _worker(ledger, clock, successor, owner="new")
+    assert new_runner.run_once() is False  # expired lease requeued behind backoff
+    clock.advance(1)  # pinned full jitter: 1s cap after one attempt
+    assert new_runner.run_once() is True
     adapter.release.set()
     _wait_for(lambda: not worker.running, "the abandoned loop to exit")
     assert adapter.abandoned_while_running is True
