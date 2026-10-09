@@ -14,6 +14,7 @@ tests drive one scripted journey through two otherwise identical apps and prove
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from collections.abc import Callable, Generator
@@ -27,15 +28,26 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.container import Container
-from app.exceptions import ValidationFailure
+from app.exceptions import ConflictError, ValidationFailure
 from app.modules.tasks.domain import (
     ClockBeforeDocument,
     TaskDocument,
     TaskParkDocument,
 )
 from app.modules.tasks.review_domain import ReviewParkAckDocument
-from app.modules.tasks.rust_adapter import RustBridgeError, RustCore
-from app.modules.tasks.rust_task_facade import _envelope, _inputs
+from app.modules.tasks.rust_adapter import (
+    Decision,
+    DomainRefusal,
+    RustBridgeError,
+    RustCore,
+)
+from app.modules.tasks.rust_task_facade import (
+    RustTaskFacade,
+    _envelope,
+    _inputs,
+    _parse_instant,
+    _refused,
+)
 from app.schemas.tasks import TaskCreateRequest
 
 from .conftest import (
@@ -742,15 +754,107 @@ def _tags(r: Run) -> None:
     p("GET", "/tags", "list tags")
 
 
-def _seed_parked(client: TestClient) -> str:
-    """A parked Someday task and its park acknowledgement, straight in the store."""
+def _edges(r: Run) -> None:
+    """Refusal order, a stored review setting and parked tasks: the rarer arms."""
+
+    p, post, patch = r.call, "POST", "PATCH"
+    absent_project, absent_tag = "project_000000000000", "tag_000000000000"
+    p(post, "/projects", "edge project", bind="garden", body={"name": "Garden"})
+    p(post, "/tags", "edge tag", bind="work", body={"name": "Work"})
+    p(
+        post,
+        "/tasks",
+        "edge task in next",
+        bind="t",
+        body=lambda r: {
+            "title": "Plan trip",
+            "state": "next",
+            "tag_ids": [r.alias["work"]],
+        },
+    )
+    p(
+        patch,
+        "/tasks/{t}",
+        "null title and null priority",
+        body=lambda r: {
+            "title": None,
+            "priority": None,
+            "expected_revision": r.rev("t"),
+        },
+    )
+    p(
+        patch,
+        "/tasks/{t}",
+        "null title before an unknown project",
+        body=lambda r: {
+            "title": None,
+            "project_id": absent_project,
+            "expected_revision": r.rev("t"),
+        },
+    )
+    p(
+        patch,
+        "/tasks/{t}",
+        "duplicate tags before an unknown tag",
+        body=lambda r: {
+            "tag_ids": [absent_tag, absent_tag],
+            "expected_revision": r.rev("t"),
+        },
+    )
+    p(
+        patch,
+        "/tasks/{t}",
+        "substantive title with a client formulation",
+        body=lambda r: {
+            "title": "Plan the whole summer trip",
+            "new_formulation_id": CLIENT_FORMULATION.replace("5b0f", "7b0f"),
+            "expected_revision": r.rev("t"),
+        },
+    )
+    # The review clock settings are stored lazily; once they are, every task
+    # decision reads them.
+    p("GET", "/review/state", "review state stores the settings")
+    p(
+        patch,
+        "/tasks/{t}",
+        "update with stored review settings",
+        body=lambda r: {"details": "Book trains", "expected_revision": r.rev("t")},
+    )
+    p(
+        post,
+        "/tasks/{t}/transitions",
+        "move with stored review settings",
+        body=lambda r: {
+            "action": "move",
+            "to_state": "someday",
+            "expected_revision": r.rev("t"),
+        },
+    )
+    p(
+        patch,
+        "/tasks/task_seedparked01",
+        "update a parked task keeps its park",
+        body={"details": "still parked", "expected_revision": 4},
+    )
+    p(
+        post,
+        "/tasks/task_seedparked02/transitions",
+        "return a parked task without its acknowledgement",
+        body={"action": "move", "to_state": "next", "expected_revision": 4},
+    )
+
+
+def _seed_parked(
+    client: TestClient, task_id: str = "task_seedparked01", *, ack: bool = True
+) -> str:
+    """A parked Someday task (and, unless ``ack`` is off, its park ack) in the store."""
 
     owner = client.get("/api/account").json()["id"]
     repo = _container(client).task_service.task_repo
     at = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
     repo.create(
         TaskDocument(
-            id="task_seedparked01",
+            id=task_id,
             owner_id=owner,
             title="Parked",
             state="someday",
@@ -769,17 +873,18 @@ def _seed_parked(client: TestClient) -> str:
             ),
         )
     )
-    repo.save_park_ack(
-        ReviewParkAckDocument(
-            owner_id=owner,
-            task_id="task_seedparked01",
-            formulation_id=SEED_FORMULATION,
-            parked_at=at,
-            from_revision=3,
-            source="sweep",
+    if ack:
+        repo.save_park_ack(
+            ReviewParkAckDocument(
+                owner_id=owner,
+                task_id=task_id,
+                formulation_id=SEED_FORMULATION,
+                parked_at=at,
+                from_revision=3,
+                source="sweep",
+            )
         )
-    )
-    return "task_seedparked01"
+    return task_id
 
 
 def _without_owner(document: Any) -> Any:
@@ -820,9 +925,7 @@ class Apps:
 
 
 @pytest.fixture
-def apps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[Apps, None, None]:
+def apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Apps]:
     clients = []
     for subdir in ("parity-off", "parity-on"):
         client, _ = _build_authenticated_client(
@@ -1087,3 +1190,165 @@ def test_026_FR_024_core_refusal_is_a_value_not_an_exception() -> None:
         assert refused.change_set is None and refused.refusal is not None
         assert refused.refusal.reason == "invalid_value"
         _evidence("refusal", refused.refusal.reason)
+
+
+def test_026_FR_014_refusal_order_and_stored_state_edges_match_the_python_rules(
+    apps: Apps, caplog: pytest.LogCaptureFixture
+) -> None:
+    for client, clock in ((apps.off, apps.clocks[0]), (apps.on, apps.clocks[1])):
+        _seed_parked(client)
+        _seed_parked(client, "task_seedparked02", ack=False)
+        clock.set(datetime(2026, 10, 9, 14, 2, tzinfo=UTC))
+    off = _run(apps.off, apps.clocks[0], lambda: 0)
+    on = _run(apps.on, apps.clocks[1], lambda: apps.on_decisions[0])
+    with caplog.at_level(logging.WARNING, logger="app.modules.tasks.review"):
+        with allure.step("run the edge journey with rust_core_sync OFF"):
+            _edges(off)
+            _evidence("OFF outcomes", [(o.label, o.status) for o in off.outcomes])
+        caplog.clear()
+        with allure.step("run the same journey with rust_core_sync ON"):
+            _edges(on)
+            _evidence("ON outcomes", [(o.label, o.status) for o in on.outcomes])
+        unrecorded = [
+            r.getMessage() for r in caplog.records if "park_return_unrecorded" in r.msg
+        ]
+    with allure.step("every status and body is identical"):
+        assert len(off.outcomes) == len(on.outcomes) > 10
+        for expected, actual in zip(off.outcomes, on.outcomes, strict=True):
+            assert (actual.label, actual.status, actual.body) == (
+                expected.label,
+                expected.status,
+                expected.body,
+            )
+        _evidence("compared", f"{len(on.outcomes)} requests")
+    with allure.step("a refusal is reported in the order Python reports it"):
+        by_label = {o.label: o for o in on.outcomes}
+        assert by_label["null title and null priority"].status == 400
+        assert "title" in str(by_label["null title and null priority"].body)
+        assert by_label["null title before an unknown project"].status == 400
+        assert "title" in str(by_label["null title before an unknown project"].body)
+        assert by_label["duplicate tags before an unknown tag"].status == 400
+        assert "duplicates" in str(
+            by_label["duplicate tags before an unknown tag"].body
+        )
+        _evidence(
+            "statuses",
+            {label: outcome.status for label, outcome in by_label.items()},
+        )
+    with allure.step("a stored setting and a parked task are decided by the core"):
+        assert all(
+            by_label[label].status == 200
+            for label in (
+                "update with stored review settings",
+                "move with stored review settings",
+                "update a parked task keeps its park",
+                "return a parked task without its acknowledgement",
+            )
+        )
+        assert by_label["update a parked task keeps its park"].body["state"] == (
+            "someday"
+        )
+        assert len(unrecorded) == 1 and "task_seedparked02" in unrecorded[0]
+        _evidence("warning", unrecorded)
+    assert all(o.decisions == 0 for o in off.outcomes)
+
+
+def _upsert(entity_type: str, value: dict[str, Any]) -> dict[str, Any]:
+    return {"operation": "upsert", "entity_type": entity_type, "value": value}
+
+
+def test_026_FR_016_a_park_ack_change_is_applied_only_to_a_stored_acknowledgement() -> (
+    None
+):
+    at = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    stored = ReviewParkAckDocument(
+        owner_id="owner-1",
+        task_id="task_seedparked01",
+        formulation_id=SEED_FORMULATION,
+        parked_at=at,
+        from_revision=3,
+        source="sweep",
+    )
+    change_set = {
+        "outcome": "changed",
+        "changes": [_upsert("review_park_ack", {"returned_at": None})],
+    }
+    decision = Decision(change_set=change_set, refusal=None)
+    now = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    with allure.step("with a stored acknowledgement the core's instant is applied"):
+        applied = RustTaskFacade._decode(decision, "owner-1", now, {}, stored)
+        assert [ack.returned_at for ack in applied.park_acks] == [None]
+        assert applied.park_acks[0].task_id == stored.task_id
+        assert _parse_instant("2026-10-09T14:02:00Z") == datetime(
+            2026, 10, 9, 14, 2, tzinfo=UTC
+        )
+        _evidence("acks", [ack.model_dump(mode="json") for ack in applied.park_acks])
+    with allure.step("without a stored acknowledgement the change is not invented"):
+        ignored = RustTaskFacade._decode(decision, "owner-1", now, {}, None)
+        assert ignored.park_acks == [] and ignored.tasks == []
+        _evidence("acks", "none")
+
+
+def test_026_FR_024_a_tombstone_from_the_core_is_refused_not_applied() -> None:
+    tombstone = Decision(
+        change_set={
+            "outcome": "changed",
+            "changes": [{"operation": "delete", "entity_type": "task", "value": {}}],
+        },
+        refusal=None,
+    )
+    with allure.step("none of these commands may delete, so a tombstone is refused"):
+        with pytest.raises(ValidationFailure) as refused:
+            RustTaskFacade._decode(
+                tombstone, "owner-1", datetime(2026, 10, 9, tzinfo=UTC), {}
+            )
+        _evidence("detail", refused.value.detail)
+        assert refused.value.detail == {"reason": "unexpected_tombstone"}
+
+
+def test_026_FR_024_core_refusals_keep_the_errors_the_rest_adapter_always_raised() -> (
+    None
+):
+    now = datetime(2026, 10, 9, 12, 0, tzinfo=UTC)
+    task_id = "task_5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d12"
+    with RustCore() as core:
+        created = _fresh_decision(core, {}, "Taken")
+        assert created.change_set is not None
+        stored = created.change_set["changes"][0]["value"]
+        with allure.step("creating over an existing id is a conflict naming the id"):
+            again = core.decide(
+                {"tasks": {task_id: stored}},
+                _envelope("task.create", task_id, {"title": "Again"}, now, None),
+                _inputs(now, "owner-1"),
+            )
+            assert again.refusal is not None
+            error = _refused(again.refusal)
+            _evidence("refusal", [again.refusal.reason, str(error)])
+            assert again.refusal.reason == "id_already_exists"
+            assert isinstance(error, ConflictError)
+            assert task_id in str(error)
+        with allure.step("a refusal without a legacy message keeps its reason"):
+            invalid = core.decide(
+                {},
+                _envelope(
+                    "task.create", "task-legacy-shape", {"title": "x"}, now, None
+                ),
+                _inputs(now, "owner-1"),
+            )
+            assert invalid.refusal is not None
+            error = _refused(invalid.refusal)
+            _evidence("refusal", [invalid.refusal.reason, str(error)])
+            assert isinstance(error, ValidationFailure)
+            assert error.detail == {
+                "reason": "invalid_value",
+                "field": invalid.refusal.field,
+            }
+        with allure.step("an unrecognised reason is a generic validation failure"):
+            odd = DomainRefusal("reason_from_a_newer_core", "title", None, None)
+            error = _refused(odd)
+            assert isinstance(error, ValidationFailure)
+            assert error.detail == {
+                "reason": "reason_from_a_newer_core",
+                "field": "title",
+            }
+            _evidence("detail", error.detail)
