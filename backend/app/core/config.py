@@ -80,6 +80,10 @@ class AppEnvironment(str, Enum):
 # review reads, the navigator and the sweep's exposure part, while writes that
 # finish work a client already queued stay accepted when it is off.
 #
+# ``rust_core_sync`` (spec 026) is reserved for the native sync core. It is
+# runtime-managed, defaults OFF, and nothing reads it yet: adding the row
+# changes no behaviour until a later slice wires a reader.
+#
 # Runtime-manageable subset (spec 010, DD-1, DD-15, DD-16, superseded
 # 2026-08-15): ``voice_brain_dump``, ``mobile_task_classification`` and
 # ``external_agent_relay`` are managed exclusively by the SQLite-backed
@@ -104,6 +108,7 @@ KNOWN_FEATURE_FLAGS: tuple[str, ...] = (
     "crt_canvas",
     "task_mcp",
     "weekly_review",
+    "rust_core_sync",
 )
 
 # Every flag name ``BRAIN_BUDDY_FEATURE_FLAGS`` may configure. There is no
