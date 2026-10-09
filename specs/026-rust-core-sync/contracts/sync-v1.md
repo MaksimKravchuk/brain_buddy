@@ -114,11 +114,11 @@ Proposed API:
 | --- | --- |
 | `POST /api/sync/v1/devices` | Register a device epoch for the current owner |
 | `POST /api/sync/v1/commands` | One command; terminal receipt or retryable error |
-| `GET /api/sync/v1/commands/{id}` | Owner-scoped result lookup |
+| `GET /api/sync/v1/commands/{id}?scope_id=...` | Owner-scoped result lookup |
 | `POST /api/sync/v1/snapshots` | Create a stable snapshot and watermark |
 | `GET /api/sync/v1/snapshots/{id}?scope_id=...&page_token=...` | Next page of the immutable snapshot (§11) |
 | `GET /api/sync/v1/transactions/{transfer_id}?page_token=...` | Next byte page of an oversized transaction transfer (§11) |
-| `GET /api/sync/v1/changes?cursor=...&limit=...` | Complete change transactions after the cursor |
+| `GET /api/sync/v1/changes?scope_id=...&cursor=...&limit=...` | Complete change transactions after the cursor |
 | `GET /api/sync/v1/capabilities?scope_id=...` | Protocol/schema/command versions, limits, and reset policy |
 | `GET /api/sync/v1/hints?scope_id=...` | Authenticated SSE wake-ups; §11 defines events and authority checks |
 
@@ -211,7 +211,7 @@ Capabilities returns `{protocol_versions, command_versions:[{type, supported_ver
 
 ### Receipts and errors
 
-A terminal receipt contains `{command_id, outcome:"accepted"|"rejected", has_changes, commit_seq:counter|null, result_versions:Version[], id_bindings:Binding[], result_redacted:boolean, result:object|null, error:Error|null}` plus common response fields. `Version` is `{entity_type, record_key, record_version, edit_revision?}`; `Binding` is `{entity_type, alias_id, entity_id}` for Smart Add resolutions. Accepted with changes requires a commit sequence; rejection and accepted no-op have `has_changes:false`, `commit_seq:null`. A no-op may still reference unchanged result versions. There is no ambiguity between a no-op and an ACK whose feed is delayed. Rejection has an error, accepted has none. `result_redacted:true` means content is unavailable, **not** that acceptance is uncertain.
+A terminal receipt contains `{command_id, outcome:"accepted"|"rejected", has_changes, commit_seq:counter|null, result_versions:Version[], id_bindings:Binding[], result_redacted:boolean, result:object|null, error:Error|null}` plus common response fields. `Version` is `{entity_type, record_key, record_version, edit_revision?}`; `Binding` is `{entity_type, alias_id, entity_id}` for Smart Add resolutions. Accepted with changes requires a commit sequence; rejection and accepted no-op have `has_changes:false`, `commit_seq:null`. A no-op may still reference unchanged result versions. There is no ambiguity between a no-op and an ACK whose feed is delayed. Rejection has an error, accepted has none. `result_redacted:true` means content is unavailable, **not** that acceptance is uncertain; a redacted receipt always has `result:null`.
 
 Command POST returns HTTP 200 with a terminal receipt, including domain rejections; legacy endpoints keep their original statuses. Lookup is scope-selected (`GET commands/{id}?scope_id=...`) and returns HTTP 200 `{status:"terminal", receipt}` or `{status:"pending"|"not_found", command_id}` plus common response fields. The scope is authorized first: unknown/foreign scope IDs return the same `RESOURCE_NOT_FOUND` 404. Within an authorized scope, a command ID belonging to another scope is indistinguishable from an unknown ID (`status:"not_found"`); it does not expose another owner's command existence. Pending/not-found are observations only; no automatic new command ID follows either.
 
