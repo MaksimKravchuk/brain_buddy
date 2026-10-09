@@ -37,6 +37,7 @@ use crate::types::{
     Project, ProjectId, ProjectState, ReadSet, Reason, Record, ResultRefs, SmartAdd, Tag, TagId,
     TagState, TaskCreate, TaskId, Title, WaitingFor,
 };
+use bb_protocol::wire::Instant;
 use unicode_general_category::{GeneralCategory, get_general_category};
 
 /// Whether this family decides `command`.
@@ -466,22 +467,22 @@ fn resolve_project(
     if key.is_empty() {
         return (None, Some(DomainError::field(Reason::EmptyName, "name")));
     }
-    // Ties go to the lowest ID, the order the read set keeps. The server
-    // does the same: it scans `projects` through its `(owner_id, id)` key and
-    // takes the first namesake. The Swift planner orders by `(createdAt, id)`,
-    // but the read set carries no creation time, so that tie-break is not
-    // reproducible here (spec 026 PR-11 review).
+    // Ties go to the oldest namesake by `(created_at, id)`: the Swift planner's
+    // order and, since the 2026-10-09 owner decision, the server's. The exact
+    // key is tried before the legacy spelling, each over the whole set.
     let active = read_set
         .projects
         .values()
         .filter(|p| p.state == ProjectState::Active);
     let found = active
         .clone()
-        .find(|p| norm::project_key(p.name.as_str()) == key)
+        .filter(|p| norm::project_key(p.name.as_str()) == key)
+        .min_by_key(|p| p.age_key())
         .or_else(|| {
             active
                 .clone()
-                .find(|p| legacy_project_key(p.name.as_str()) == key)
+                .filter(|p| legacy_project_key(p.name.as_str()) == key)
+                .min_by_key(|p| p.age_key())
         });
     if let Some(record) = found {
         return (Some(existing_project(record)), None);
@@ -491,7 +492,8 @@ fn resolve_project(
     if let Some(archived) = read_set
         .projects
         .values()
-        .find(|p| p.state == ProjectState::Archived && norm::project_key(p.name.as_str()) == key)
+        .filter(|p| p.state == ProjectState::Archived && norm::project_key(p.name.as_str()) == key)
+        .min_by_key(|p| p.age_key())
     {
         let problem = about(
             Reason::ProjectNotActive,
@@ -549,11 +551,13 @@ fn resolve_tags(
         }
         let found = active
             .clone()
-            .find(|t| norm::tag_key(t.name.as_str()) == key)
+            .filter(|t| norm::tag_key(t.name.as_str()) == key)
+            .min_by_key(|t| t.age_key())
             .or_else(|| {
                 active
                     .clone()
-                    .find(|t| legacy_tag_key(t.name.as_str()) == key)
+                    .filter(|t| legacy_tag_key(t.name.as_str()) == key)
+                    .min_by_key(|t| t.age_key())
             });
         if let Some(record) = found {
             if !seen_ids.contains(&&record.id) {
@@ -714,10 +718,10 @@ pub fn decide(
     let mut plan = Plan::default();
     let project_id = match &payload.project {
         None => None,
-        Some(reference) => Some(plan.project(read_set, reference)?),
+        Some(reference) => Some(plan.project(read_set, reference, &inputs.now)?),
     };
     for reference in &payload.tags {
-        plan.tag(read_set, reference)?;
+        plan.tag(read_set, reference, &inputs.now)?;
     }
 
     let create = TaskCreate {
@@ -768,6 +772,7 @@ impl Plan {
         &mut self,
         read_set: &ReadSet,
         reference: &ClassificationRef<ProjectId>,
+        now: &Instant,
     ) -> Result<ProjectId, DomainError> {
         let (name, proposed) = match reference {
             ClassificationRef::Existing { id } => {
@@ -785,9 +790,14 @@ impl Plan {
                 active.id.clone()
             } else {
                 let key = norm::project_key(&display);
-                if let Some(inactive) = read_set.projects.values().find(|p| {
-                    p.state != ProjectState::Active && norm::project_key(p.name.as_str()) == key
-                }) {
+                if let Some(inactive) = read_set
+                    .projects
+                    .values()
+                    .filter(|p| {
+                        p.state != ProjectState::Active && norm::project_key(p.name.as_str()) == key
+                    })
+                    .min_by_key(|p| p.age_key())
+                {
                     return Err(about(
                         Reason::ProjectNotActive,
                         EntityType::Project,
@@ -816,6 +826,7 @@ impl Plan {
                     desired_outcome: None,
                     archived_at: None,
                     archived_before_lossless: false,
+                    created_at: now.clone(),
                 });
                 proposed.clone()
             };
@@ -834,6 +845,7 @@ impl Plan {
         &mut self,
         read_set: &ReadSet,
         reference: &ClassificationRef<TagId>,
+        now: &Instant,
     ) -> Result<(), DomainError> {
         let resolved = match reference {
             ClassificationRef::Existing { id } => {
@@ -841,7 +853,7 @@ impl Plan {
                 id.clone()
             }
             ClassificationRef::ByName { name, proposed_id } => {
-                let resolved = self.tag_by_name(read_set, name, proposed_id)?;
+                let resolved = self.tag_by_name(read_set, name, proposed_id, now)?;
                 self.bind(
                     EntityType::Tag,
                     proposed_id.as_str(),
@@ -862,6 +874,7 @@ impl Plan {
         read_set: &ReadSet,
         name: &Name,
         proposed: &TagId,
+        now: &Instant,
     ) -> Result<TagId, DomainError> {
         let display = norm::tag_display(name.as_str());
         if display.is_empty() {
@@ -874,7 +887,8 @@ impl Plan {
         if let Some(inactive) = read_set
             .tags
             .values()
-            .find(|t| t.state != TagState::Active && norm::tag_key(t.name.as_str()) == key)
+            .filter(|t| t.state != TagState::Active && norm::tag_key(t.name.as_str()) == key)
+            .min_by_key(|t| t.age_key())
         {
             return Err(about(
                 Reason::TagNotActive,
@@ -909,6 +923,7 @@ impl Plan {
             name: Name::new(display).map_err(|_| DomainError::field(Reason::TextLength, "tags"))?,
             state: TagState::Active,
             revision: Counter::from(1),
+            created_at: now.clone(),
         });
         Ok(created_id)
     }

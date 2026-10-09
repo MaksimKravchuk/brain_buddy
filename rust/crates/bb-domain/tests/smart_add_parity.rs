@@ -108,12 +108,12 @@ fn project_json(id: &str, name: &str, state: &str) -> Value {
         "id": id, "name": name, "color": null, "state": state, "revision": "2",
         "desired_outcome": null,
         "archived_at": if state == "archived" { json!("2026-09-01T09:00:00Z") } else { Value::Null },
-        "archived_before_lossless": false
+        "archived_before_lossless": false, "created_at": "2026-09-01T09:00:00Z"
     })
 }
 
 fn tag_json(id: &str, name: &str, state: &str) -> Value {
-    json!({ "id": id, "name": name, "state": state, "revision": "1" })
+    json!({ "id": id, "name": name, "state": state, "revision": "1", "created_at": "2026-09-01T09:00:00Z" })
 }
 
 fn task_json(id: &str, state: &str, order_key: &str) -> Value {
@@ -150,6 +150,23 @@ fn rs(projects: &[(&str, &str, &str)], tags: &[(&str, &str, &str)]) -> ReadSet {
         .map(|p| project_json(p.0, p.1, p.2))
         .collect();
     let tags: Vec<Value> = tags.iter().map(|t| tag_json(t.0, t.1, t.2)).collect();
+    read_set_of(&projects, &tags, &[])
+}
+
+/// Projects and tags as `(id, name, state, created_at)` rows.
+fn rs_dated(projects: &[(&str, &str, &str, &str)], tags: &[(&str, &str, &str, &str)]) -> ReadSet {
+    let dated = |mut row: Value, created_at: &str| {
+        row["created_at"] = json!(created_at);
+        row
+    };
+    let projects: Vec<Value> = projects
+        .iter()
+        .map(|p| dated(project_json(p.0, p.1, p.2), p.3))
+        .collect();
+    let tags: Vec<Value> = tags
+        .iter()
+        .map(|t| dated(tag_json(t.0, t.1, t.2), t.3))
+        .collect();
     read_set_of(&projects, &tags, &[])
 }
 
@@ -668,7 +685,7 @@ fn smart_add_026_fr_002_legacy_sigils_resolve_but_exact_names_win() {
         matches!(&exact.tags[0], Classification::Existing { id, .. } if id.as_str() == "t-2-exact")
     );
 
-    // Legacy-only ties go to the lowest ID (the read set carries no creation time).
+    // Legacy-only ties: equal creation instants fall back to the lowest ID.
     let tie = rs(
         &[],
         &[
@@ -1731,29 +1748,28 @@ fn smart_add_026_fr_002_a_project_alias_binds_once_to_its_resolved_project() {
 }
 
 #[test]
-fn smart_add_026_fr_002_same_name_ties_go_to_the_lowest_id_like_the_server() {
-    // Inserted newest-id first: the server scans its `(owner_id, id)` key, so
-    // the lowest id wins, and the read set (no creation time) agrees. The Swift
-    // planner's `(createdAt, id)` order cannot be reproduced without a creation
-    // time on the record.
-    let state = rs(
+fn smart_add_026_fr_002_same_name_ties_go_to_the_oldest_by_created_at_then_id() {
+    // Creation order is the reverse of id order and of insertion order: the
+    // Swift planner's `(createdAt, id)` and the server's pick (owner decision,
+    // 2026-10-09). A lowest-id pick would answer `project_a` / `tag_a`.
+    let state = rs_dated(
         &[
-            ("project_c", "Launch", "active"),
-            ("project_a", "launch", "active"),
-            ("project_b", "LAUNCH", "active"),
+            ("project_a", "Launch", "active", "2026-09-03T09:00:00Z"),
+            ("project_c", "launch", "active", "2026-09-02T09:00:00Z"),
+            ("project_b", "LAUNCH", "active", "2026-09-01T09:00:00Z"),
         ],
         &[
-            ("tag_c", "Focus", "active"),
-            ("tag_a", "focus", "active"),
-            ("tag_b", "FOCUS", "active"),
+            ("tag_a", "Focus", "active", "2026-09-03T09:00:00Z"),
+            ("tag_c", "focus", "active", "2026-09-02T09:00:00Z"),
+            ("tag_b", "FOCUS", "active", "2026-09-01T09:00:00Z"),
         ],
     );
 
     let plan = resolve(&state, &Draft::new("Plan @Launch #Focus"));
     assert!(
-        matches!(&plan.project, Some(Classification::Existing { id, .. }) if id.as_str() == "project_a")
+        matches!(&plan.project, Some(Classification::Existing { id, .. }) if id.as_str() == "project_b")
     );
-    assert!(matches!(&plan.tags[0], Classification::Existing { id, .. } if id.as_str() == "tag_a"));
+    assert!(matches!(&plan.tags[0], Classification::Existing { id, .. } if id.as_str() == "tag_b"));
 
     let set = ok(
         &state,
@@ -1766,10 +1782,150 @@ fn smart_add_026_fr_002_same_name_ties_go_to_the_lowest_id_like_the_server() {
     let task = landed(&set).task;
     assert_eq!(
         task.project_id.as_ref().map(ProjectId::as_str),
-        Some("project_a")
+        Some("project_b")
     );
     assert_eq!(
         task.tag_ids.iter().map(TagId::as_str).collect::<Vec<_>>(),
-        ["tag_a"]
+        ["tag_b"]
     );
+    assert_eq!(
+        set.result.id_bindings,
+        [
+            binding(EntityType::Project, P1, "project_b"),
+            binding(EntityType::Tag, T1, "tag_b"),
+        ]
+    );
+}
+
+#[test]
+fn smart_add_026_fr_002_creation_instants_compare_as_instants_and_equal_ones_fall_back_to_the_id() {
+    // `+02:00` 10:30 is 08:30Z: older than 09:00Z although it sorts later as
+    // text. Fractions count. Equal instants fall back to the lowest id.
+    let state = rs_dated(
+        &[
+            ("project_a", "Launch", "active", "2026-09-01T09:00:00Z"),
+            ("project_b", "launch", "active", "2026-09-01T10:30:00+02:00"),
+            (
+                "project_c",
+                "Sprint",
+                "active",
+                "2026-09-01T09:00:00.000002Z",
+            ),
+            (
+                "project_d",
+                "sprint",
+                "active",
+                "2026-09-01T09:00:00.000001Z",
+            ),
+            ("project_f", "Ship", "active", "2026-09-01T09:00:00Z"),
+            ("project_e", "ship", "active", "2026-09-01T11:00:00+02:00"),
+        ],
+        &[],
+    );
+    let picked = |input: &str| match resolve(&state, &Draft::new(input)).project {
+        Some(Classification::Existing { id, .. }) => id.as_str().to_owned(),
+        other => panic!("not an existing project: {other:?}"),
+    };
+    assert_eq!(picked("Plan @Launch"), "project_b");
+    assert_eq!(picked("Plan @Sprint"), "project_d");
+    assert_eq!(picked("Plan @Ship"), "project_e");
+}
+
+#[test]
+fn smart_add_026_fr_002_only_active_namesakes_compete_and_age_orders_the_rest() {
+    // An older archived or deleted namesake neither wins nor blocks an active one.
+    let state = rs_dated(
+        &[
+            ("project_a", "Launch", "archived", "2026-09-01T09:00:00Z"),
+            ("project_b", "launch", "active", "2026-09-05T09:00:00Z"),
+        ],
+        &[
+            ("tag_a", "focus", "deleted", "2026-09-01T09:00:00Z"),
+            ("tag_b", "Focus", "active", "2026-09-05T09:00:00Z"),
+        ],
+    );
+    let plan = resolve(&state, &Draft::new("Plan @launch #focus"));
+    assert!(
+        matches!(&plan.project, Some(Classification::Existing { id, .. }) if id.as_str() == "project_b")
+    );
+    assert!(plan.problem.is_none());
+    assert!(matches!(&plan.tags[0], Classification::Existing { id, .. } if id.as_str() == "tag_b"));
+
+    let set = ok(
+        &state,
+        json!({
+            "title": "t",
+            "project": { "name": "Launch", "proposed_id": P1 },
+            "tags": [ { "name": "focus", "proposed_id": T1 } ]
+        }),
+    );
+    let task = landed(&set).task;
+    assert_eq!(
+        task.project_id.as_ref().map(ProjectId::as_str),
+        Some("project_b")
+    );
+    assert_eq!(
+        task.tag_ids.iter().map(TagId::as_str).collect::<Vec<_>>(),
+        ["tag_b"]
+    );
+
+    // With no active namesake the oldest inactive one is the one named.
+    let inactive = rs_dated(
+        &[
+            ("project_a", "Launch", "archived", "2026-09-03T09:00:00Z"),
+            ("project_b", "launch", "archived", "2026-09-01T09:00:00Z"),
+        ],
+        &[
+            ("tag_a", "focus", "deleted", "2026-09-03T09:00:00Z"),
+            ("tag_b", "Focus", "deleted", "2026-09-01T09:00:00Z"),
+        ],
+    );
+    let project_error = refusal(
+        &inactive,
+        json!({ "title": "t", "project": { "name": "Launch", "proposed_id": P1 } }),
+    );
+    assert_eq!(project_error.reason, Reason::ProjectNotActive);
+    assert_eq!(
+        project_error.entity,
+        Some((EntityType::Project, vec!["project_b".to_owned()]))
+    );
+    let tag_error = refusal(
+        &inactive,
+        json!({ "title": "t", "tags": [ { "name": "focus", "proposed_id": T1 } ] }),
+    );
+    assert_eq!(tag_error.reason, Reason::TagNotActive);
+    assert_eq!(
+        tag_error.entity,
+        Some((EntityType::Tag, vec!["tag_b".to_owned()]))
+    );
+}
+
+#[test]
+fn smart_add_026_fr_002_created_projects_and_tags_are_stamped_with_the_input_time() {
+    let set = ok(
+        &ReadSet::default(),
+        json!({
+            "title": "t",
+            "project": { "name": "Fresh", "proposed_id": P1 },
+            "tags": [ { "name": "fresh", "proposed_id": T1 } ]
+        }),
+    );
+    let created = landed(&set);
+    assert_eq!(created.projects[0].created_at.as_str(), NOW);
+    assert_eq!(created.tags[0].created_at.as_str(), NOW);
+}
+
+#[test]
+fn smart_add_026_fr_002_a_record_without_created_at_does_not_load() {
+    // Swift's `createdAt` is not optional; neither is this field. A projection
+    // that omits it is refused at the boundary, never defaulted to "oldest".
+    for rows in [
+        json!({ "projects": { "p": {
+            "id": "p", "name": "Launch", "color": null, "state": "active", "revision": "1",
+            "desired_outcome": null, "archived_at": null, "archived_before_lossless": false
+        } } }),
+        json!({ "tags": { "t": { "id": "t", "name": "x", "state": "active", "revision": "1" } } }),
+    ] {
+        assert!(serde_json::from_value::<ReadSet>(rows).is_err());
+    }
 }

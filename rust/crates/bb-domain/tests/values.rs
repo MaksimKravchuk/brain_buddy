@@ -442,11 +442,12 @@ fn record_samples() -> Vec<(EntityType, Value)> {
             EntityType::Project,
             json!({"id": "project_1", "name": "Flat", "color": null,
             "state": "active", "revision": "1", "desired_outcome": null, "archived_at": null,
-            "archived_before_lossless": false}),
+            "archived_before_lossless": false, "created_at": "2026-09-01T09:00:00Z"}),
         ),
         (
             EntityType::Tag,
-            json!({"id": "tag_1", "name": "@home", "state": "active", "revision": "1"}),
+            json!({"id": "tag_1", "name": "@home", "state": "active", "revision": "1",
+            "created_at": "2026-09-01T09:00:00Z"}),
         ),
         (
             EntityType::Subtask,

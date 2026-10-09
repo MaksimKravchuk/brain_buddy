@@ -243,12 +243,13 @@ fn reference_read_set(owner: &str) -> ReadSet {
             "state": row["state"], "revision": counter(&row, "revision"),
             "desired_outcome": row["desired_outcome"], "archived_at": row["archived_at"],
             "archived_before_lossless": row["archived_before_lossless"],
+            "created_at": row["created_at"],
         })
     });
     let tags = mine("tags").into_iter().map(|row| {
         json!({
             "id": row["id"], "name": row["name"], "state": row["state"],
-            "revision": counter(&row, "revision"),
+            "revision": counter(&row, "revision"), "created_at": row["created_at"],
         })
     });
     let tasks = mine("tasks").into_iter().map(|row| {

@@ -74,6 +74,28 @@ review_logger = logging.getLogger("app.modules.tasks.review")
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
 
+
+def _smart_add_namesake[Namesake: (ProjectDocument, TagDocument)](
+    records: Iterable[Namesake], normalized_name: str
+) -> tuple[Namesake | None, bool]:
+    """Pick the record a Smart Add name resolves to.
+
+    Returns ``(active, has_inactive)``. When several active records share the
+    normalized name the OLDEST wins, ordered by ``(created_at, id)`` -- the order
+    the Swift planner and the Rust Smart Add rule use (spec 026 owner decision,
+    2026-10-09). ``created_at`` is required on both documents, so there is no
+    undated fallback. An inactive namesake only matters when no active one
+    exists: the caller then refuses instead of creating a second record.
+    """
+
+    namesakes = sorted(
+        (record for record in records if record.normalized_name == normalized_name),
+        key=lambda record: (record.created_at, record.id),
+    )
+    active = next((record for record in namesakes if record.state == "active"), None)
+    return active, bool(namesakes) and active is None
+
+
 FORMULATION_SETTINGS_FIELD = "formulation_settings"
 """Key of the settings snapshot inside a stored ``TaskDocument`` response body."""
 
@@ -1777,12 +1799,13 @@ class TaskService:
             return project, None
         name = display_project_name(ref.name or "")
         normalized = normalize_task_name(name)
-        for existing in self.task_repo.list_projects_for_owner(owner_id=owner_id):
-            if existing.normalized_name != normalized:
-                continue
-            if existing.state != "active":
-                raise ValidationFailure("Task project must be active.")
+        existing, has_inactive = _smart_add_namesake(
+            self.task_repo.list_projects_for_owner(owner_id=owner_id), normalized
+        )
+        if existing is not None:
             return existing, None
+        if has_inactive:
+            raise ValidationFailure("Task project must be active.")
         now = self.clock()
         project = ProjectDocument(
             id=generate_id("project"),
@@ -1824,14 +1847,15 @@ class TaskService:
             return tag, None
         name = display_tag_name(ref.name or "")
         normalized = normalize_task_name(name, strip_tag_prefix=True)
-        for existing in self.task_repo.list_tags_for_owner(owner_id=owner_id):
-            if existing.normalized_name != normalized:
-                continue
-            if existing.state != "active":
-                raise ValidationFailure(
-                    "Task contexts must be active; task tags must be active."
-                )
+        existing, has_inactive = _smart_add_namesake(
+            self.task_repo.list_tags_for_owner(owner_id=owner_id), normalized
+        )
+        if existing is not None:
             return existing, None
+        if has_inactive:
+            raise ValidationFailure(
+                "Task contexts must be active; task tags must be active."
+            )
         now = self.clock()
         tag = TagDocument(
             id=generate_id("tag"),

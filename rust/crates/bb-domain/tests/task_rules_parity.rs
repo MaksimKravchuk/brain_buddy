@@ -130,12 +130,12 @@ fn project_json(id: &str, name: &str, state: &str) -> Value {
         "id": id, "name": name, "color": null, "state": state, "revision": "2",
         "desired_outcome": null,
         "archived_at": if state == "archived" { json!("2026-09-01T09:00:00Z") } else { Value::Null },
-        "archived_before_lossless": false
+        "archived_before_lossless": false, "created_at": "2026-09-01T09:00:00Z"
     })
 }
 
 fn tag_json(id: &str, name: &str, state: &str) -> Value {
-    json!({ "id": id, "name": name, "state": state, "revision": "1" })
+    json!({ "id": id, "name": name, "state": state, "revision": "1", "created_at": "2026-09-01T09:00:00Z" })
 }
 
 fn task_json(id: &str, state: &str, revision: u64) -> Value {
@@ -2084,13 +2084,14 @@ fn owner_store(owner: &str) -> Store {
                 "id": p["id"], "name": p["name"], "color": p["color"], "state": p["state"],
                 "revision": revision(p), "desired_outcome": p["desired_outcome"],
                 "archived_at": p["archived_at"],
-                "archived_before_lossless": p["archived_before_lossless"]
+                "archived_before_lossless": p["archived_before_lossless"],
+                "created_at": p["created_at"]
             })
         })
         .collect();
     let tags: Vec<Value> = of_owner("tags")
         .iter()
-        .map(|t| json!({ "id": t["id"], "name": t["name"], "state": t["state"], "revision": revision(t) }))
+        .map(|t| json!({ "id": t["id"], "name": t["name"], "state": t["state"], "revision": revision(t), "created_at": t["created_at"] }))
         .collect();
     let tasks: Vec<Value> = of_owner("tasks").iter().map(public_task).collect();
     Store::new(&projects, &tags, &tasks).with_settings(&settings_json(
