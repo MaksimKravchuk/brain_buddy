@@ -1,0 +1,58 @@
+{
+  "role": "privacy-consent-security",
+  "verdict": "changes-required",
+  "summary": "Independent read-only hosted-agent planning audit of source a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c and artifact digest cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17. One important contract gap remains: the new sync error contract does not preserve explicit wrong-owner 404 semantics. The proposal otherwise states current recipient-specific consent, separate sync/AI authority, owner/session-generation isolation, source-bounded payload-copy retention, export exclusions, purge of new stores and recoverable backups, fail-closed restore/revocation reconciliation, and content-free diagnostics. These are planned controls, not verified implementation. Existing pending owner/design/governance/boundary decisions remain pending; this audit introduces no additional product choice. This JSON is hosted-agent audit evidence, not a canonical planning gate pass: the six CLI reviewer executions produced zero reports after proxy CONNECT 403 failures and the formal campaign remains escalated. No implementation, build, repository mutation, or production verification was performed.",
+  "reviewed_files": [
+    "AGENTS.md",
+    ".specify/review-rubrics/security-privacy-reviewer.md",
+    ".specify/workflows/speckit/review.schema.json",
+    ".specify/memory/constitution.md",
+    "docs/auth.md",
+    "docs/data-retention.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0002-async-voice-operation-substrate.md",
+    "docs/decisions/0008-verified-trunk-serial-landing.md",
+    "docs/decisions/0026-crt-revision-and-idempotency-protocol.md",
+    "docs/decisions/0027-native-task-weekly-review-and-auto-park.md",
+    "docs/decisions/0028-modern-identity-authority.md",
+    "docs/decisions/0030-pre-launch-narrow-ask-class.md",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/approval.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/verification.md",
+    "specs/026-rust-core-sync/evidence/026-completion-20261009-2/execution-failures.json",
+    "backend/app/api/tasks.py",
+    "backend/app/modules/tasks/navigator.py",
+    "backend/app/modules/tasks/repository.py",
+    "backend/app/modules/tasks/service.py",
+    "backend/app/services/account_service.py",
+    "backend/tests/test_task_owner_isolation.py"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "ownership-and-authorization",
+      "description": "The normative sync error table provides ACCESS_DENIED/403, but never specifies the accepted indistinguishable 404 behavior for a caller supplying another owner's scope, device, snapshot, or transaction-transfer identifier. Receipt lookup alone says it must not expose another owner's command existence; that does not define the other new resource paths or distinguish resource ownership failure from the advertised 403 policy error. A straightforward implementation of the listed authorization failure could therefore reveal that a foreign identifier exists instead of treating it as absent. This is an explicit contract omission, not evidence that any unimplemented endpoint currently leaks data.",
+      "evidence": [
+        "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md:569-571: all reads, transitions, references, media and list queries are owner-scoped; wrong owner receives 404.",
+        "docs/auth.md:23: wrong-owner 404 rather than 403 prevents resource-existence probing.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:212-218: non-disclosure is stated for command lookup, while the general error table specifies ACCESS_DENIED/403 and has no owner-safe not-found mapping.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:113-121 and 232-242: new scope-selected device/snapshot/change and transaction-transfer/page paths require a shared ownership-error contract.",
+        "backend/app/modules/tasks/repository.py:748-766 and backend/tests/test_task_owner_isolation.py:51-55: the existing task lookup filters by owner and raises NotFoundError for another owner's task.",
+        "specs/026-rust-core-sync/quickstart.md:51: Q05 requires cross-owner IDs to reveal no content but does not assert missing-versus-foreign response equivalence."
+      ],
+      "recommendation": "Specify a single owner-safe resource-not-found response for unknown and foreign scope/device/snapshot/transfer IDs before any resource metadata is returned, preserving ADR-0001's 404 rule. Limit ACCESS_DENIED/403 to explicitly defined failures that do not disclose foreign-resource existence. Preserve command lookup's owner-scoped not_found semantics within an already-authorized scope. Add the unknown-versus-foreign response equivalence to the existing Q05/PR-30\u201333 authority checks; no new product decision or expanded feature is needed."
+    }
+  ],
+  "product_decisions": []
+}

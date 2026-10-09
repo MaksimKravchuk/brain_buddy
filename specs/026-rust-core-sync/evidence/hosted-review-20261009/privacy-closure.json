@@ -1,0 +1,26 @@
+{
+  "review_type": "targeted-hosted-agent-closure-check",
+  "role": "privacy-consent-security",
+  "base_commit": "a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c",
+  "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "subject": "Uncommitted specification corrections against the base commit; digest supplied by coordinating agent.",
+  "original_category": "ownership-and-authorization",
+  "original_finding": "Missing explicit owner-safe 404 semantics in the new sync error contract.",
+  "status": "resolved",
+  "summary": "The planning-contract omission is closed. Foreign and unknown resource identifiers now receive the same owner-safe 404; 403 is restricted to policy failures within an already-authorized scope. Preauthorization errors disclose no resource scope or generation. Receipt lookup preserves indistinguishable not_found inside an authorized scope. SSE checks authority independently for each connection and closes on revocation. The existing isolation acceptance procedure and named implementation tasks now cover these distinctions. No consequential privacy regression was found in this correction.",
+  "reviewed_files": [
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/tasks.md"
+  ],
+  "evidence": [
+    "specs/026-rust-core-sync/contracts/sync-v1.md:201: preauthorization errors contain only error and correlation_id, with no resource scope/generation metadata.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:213: scope authorization precedes receipt lookup; unknown/foreign scopes use the same 404 and foreign/unknown command IDs within an authorized scope use the same not_found observation.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:220-221: RESOURCE_NOT_FOUND defines equal unknown/foreign scope/device/snapshot/transfer responses; ACCESS_DENIED is limited to authorized-scope policy failures.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:233-235: SSE applies the same owner-safe 404, keeps credentials out of URLs, rechecks each connection before events, and closes on revocation/purge/capability or generation changes.",
+    "specs/026-rust-core-sync/quickstart.md:51: Q05 explicitly compares unknown/foreign responses and checks receipt-scope non-disclosure.",
+    "specs/026-rust-core-sync/tasks.md:91,1242,1381: PR-31 implementation and PR-30/PR-58 acceptance require owner-safe responses and SSE authority/revocation behavior."
+  ],
+  "consequential_regressions": [],
+  "limitations": "Targeted document closure only. No implementation, runtime security tests, build, repository edit, GitHub action, or fresh canonical campaign was performed. This is not a canonical gate approval and does not change the escalated CLI campaign or pending owner approvals."
+}

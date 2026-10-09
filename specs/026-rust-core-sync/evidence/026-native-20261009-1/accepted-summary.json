@@ -1,0 +1,48 @@
+{
+  "run_id": "026-native-20261009-1",
+  "status": "approved",
+  "stage": "specification",
+  "risk": "high",
+  "execution_route": "owner-authorized-native-codex-subagents",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "approved_source_commit": "962a7fa8372ac48d9af1edc4e2130f16afb896da",
+  "human_signoff": {
+    "approved_by": "MaksimKravchuk",
+    "approved_on": "2026-10-09",
+    "run_id": "026-native-20261009-1",
+    "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+    "rationale": "The repository owner approved the prepared specification and residual risks of custom synchronization, Rust/FFI and migration after the six-lens review, correction closure and Claude re-review. Acceptance retains measured sizing before complex slice implementation, staged Apple/SQLite then PostgreSQL delivery, and the existing migration, runtime verification and release gates."
+  },
+  "approval_source": "owner-acceptance.json",
+  "completed_lenses": 6,
+  "required_lenses": 6,
+  "missing_roles": [],
+  "technical_review_status": "complete-all-reported-findings-resolved",
+  "remaining_technical_findings": [],
+  "protocol_quality_criteria_satisfied": 12,
+  "supersedes": {
+    "record": "final-summary.json",
+    "fields": [
+      "planning_gate_verdict",
+      "planning_gate_reason",
+      "human_signoff"
+    ],
+    "previous_status": "escalated",
+    "reason": "The formerly missing named-human residual-risk acceptance has now been explicitly given and validated against this run and unchanged artifact digest."
+  },
+  "review_basis": "The original full-review reports, five original-author targeted closures and checklist dispositions remain unchanged. This records their completion plus actual human acceptance; it is not a new model review, an overwritten reviewer verdict or a claimed CLI/adapter oracle.",
+  "implementation_started": false,
+  "retained_conditions": [
+    "Measure complete Rust/FFI, runtime/SQLite and AI slice deltas before their implementation boundary approval; include Cargo.lock and revise any over-budget boundary.",
+    "Enact accepted governance amendments through PR-01; no existing Constitution or ADR is silently rewritten by this record.",
+    "Execute future runtime, native accessibility, parity, recovery, privacy and acceptance checks; a written criterion is not a measured result.",
+    "Migration, cutover, landing and release retain their separate repository gates; this specification-only request performs none of them."
+  ],
+  "records_sha256": {
+    "human-signoff.json": "205209ca175eb3a9fa0e6ad5b428db24093f22344f9a6bb1bd82659428b84a30",
+    "owner-acceptance.json": "e353bcc96243945fce40244a9820d86ae0fa1595a71b7ef547e41f0eb4c1a3c8",
+    "final-summary.json": "80a3b7e2f15350264e0c8a5253711444f62de8fbfaa5a40331efa5b3a715bc2a",
+    "corrected-artifacts.json": "4fe339d8b34605413b0d611291e9387382530bba8c06520499d7f4909c02fadf",
+    "evidence-sha256.json": "6333442e3be0f2dbe1e9085d6df51b95bfcb16971724126ce9c45d8c2926e37b"
+  }
+}

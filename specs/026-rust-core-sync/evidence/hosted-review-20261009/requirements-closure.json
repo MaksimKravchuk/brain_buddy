@@ -1,0 +1,73 @@
+{
+  "role": "requirements-consistency",
+  "review_type": "targeted-closure-check",
+  "base_commit": "a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c",
+  "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "digest_provenance": "Supplied correction digest; checked the relevant correction diff and current line-numbered text, without recomputing the canonical manifest.",
+  "summary": "All three original requirements-consistency findings are resolved in the planning artifacts. No consequential remaining defect was found in these specific fixes. This checks proposal consistency and planned acceptance coverage only; it is not a fresh full review campaign or formal approval. Human approvals, boundary sizing, runtime/build/performance evidence and implementation acceptance remain pending. The canonical CLI campaign remains escalated following CONNECT 403 failures.",
+  "reviewed_files": [
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/quickstart.md"
+  ],
+  "closures": [
+    {
+      "original_finding_category": "receipt-retention-dependency-consistency",
+      "status": "resolved",
+      "assessment": "The redaction tuple now explicitly retains typed scope-bound id_bindings until purge, including redacted replay/lookup and server dependency resolution. It preserves the original target ID after rename, membership changes or deletion without retaining classification names or reconstructing aliases. The data model agrees, and Q10 plus PR-50 explicitly require the lost-ACK/>24-hour immutable dependency scenario.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:97",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:197",
+        "specs/026-rust-core-sync/data-model.md:47",
+        "specs/026-rust-core-sync/tasks.md:135",
+        "specs/026-rust-core-sync/tasks.md:2070",
+        "specs/026-rust-core-sync/quickstart.md:56"
+      ],
+      "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99"
+    },
+    {
+      "original_finding_category": "convergence-plan-contract-coverage",
+      "status": "resolved",
+      "assessment": "The contract now defines the authenticated hints route, content-free event envelope, initial catch-up, committed shared-counter watcher across writer/stream processes, bounded coalescing, current authority and generation closure. PR-58 owns the server route/publisher; PR-40 depends on PR-58 and owns consumption. The plan agrees and SC-004 explicitly measures actual cross-process unbuffered SSE commit-to-visible convergence rather than a synthetic wake-up. Proposed timing remains an implementation gate rather than a measured claim.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:120",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:233",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:235",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:237",
+        "specs/026-rust-core-sync/plan.md:209",
+        "specs/026-rust-core-sync/tasks.md:101",
+        "specs/026-rust-core-sync/tasks.md:103",
+        "specs/026-rust-core-sync/tasks.md:1358",
+        "specs/026-rust-core-sync/tasks.md:1623",
+        "specs/026-rust-core-sync/quickstart.md:66"
+      ],
+      "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99"
+    },
+    {
+      "original_finding_category": "ai-acceptance-surface-mapping",
+      "status": "resolved",
+      "assessment": "The plan/design now explicitly acknowledge deferred native navigator clients as proposed additions. PR-49 owns the shared request/consent/proposal/apply model; PR-59 owns the iPhone DecisionCardSheet entry and suggestion sheet; PR-60 owns the Mac task-detail entry, sheet and model exposure. Both consume the current Weekly Review capability/payload/eligibility and explicit confirmation path, and the pilot depends on both native surface slices. Voice transcription is no longer used as a substitute for the accepted suggestion journey.",
+      "evidence": [
+        "specs/026-rust-core-sync/plan.md:137",
+        "specs/026-rust-core-sync/design.md:24",
+        "specs/026-rust-core-sync/design.md:25",
+        "specs/026-rust-core-sync/design.md:109",
+        "specs/026-rust-core-sync/design.md:111",
+        "specs/026-rust-core-sync/tasks.md:149",
+        "specs/026-rust-core-sync/tasks.md:151",
+        "specs/026-rust-core-sync/tasks.md:153",
+        "specs/026-rust-core-sync/tasks.md:1946",
+        "specs/026-rust-core-sync/tasks.md:1983",
+        "specs/026-rust-core-sync/tasks.md:2018",
+        "specs/026-rust-core-sync/tasks.md:2237",
+        "specs/026-rust-core-sync/quickstart.md:55"
+      ],
+      "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99"
+    }
+  ],
+  "remaining_fix_defects": [],
+  "limits": "Read-only targeted textual closure check. No repository changes, product execution, runtime tests, benchmark, rendered UX or formal gate aggregation performed. Unrelated correction claims were not independently graded."
+}

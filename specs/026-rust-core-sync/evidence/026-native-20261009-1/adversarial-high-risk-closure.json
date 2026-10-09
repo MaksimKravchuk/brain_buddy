@@ -1,0 +1,21 @@
+{
+  "run_id": "026-native-20261009-1",
+  "reviewer": "adversarial-high-risk",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "targeted-finding-closure",
+  "resolved": true,
+  "evidence": [
+    "Original finding reviewed from /tmp/026-native-20261009-1/adversarial-high-risk.json; the original report remains unchanged.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:57-59 now explicitly narrows the legacy mapping exception to Navigator revoke, resolves its collision identity before ordinary mismatch rejection under current authorization and the owner lock, preserves the original receipt, and atomically commits revocation plus the dedicated receipt and feed changes.",
+    "sync-v1.md:59 requires stable identity across legacy transports, replay of a known revoke without cancelling a newer grant, lost-response retry safety, weekly_review OFF availability, and unchanged strict mismatch rejection for all other legacy commands and all device-originated IDs. It also forbids caller-selected writer origin from granting this namespace.",
+    "contracts/command-catalog.md:35,45; data-model.md:47; plan.md:146; tasks.md:87 consistently carry the same bounded exception and retained original/dedicated receipt relationship.",
+    "sync-v1.md:195 and quickstart.md:53 explicitly require grant(K) -> revoke(K) and grant(K) -> revoke(K) -> grant(K2) -> retry revoke(K), including flag OFF, exactly one feed publication, original receipt survival and preservation of the newer grant.",
+    "tasks.md PR-28 tests/acceptance at lines 1165-1169 adds the existing Navigator suite and requires the collision cases through the migrated adapter. The required behavior agrees with specs/020-weekly-review/contracts/http.md:696-708 and the previously inspected implementation/tests at backend/app/modules/tasks/navigator.py:890-930 and backend/tests/test_review_navigator.py:1271-1306."
+  ],
+  "remaining_findings": [],
+  "caveats": [
+    "This closes the original specification contradiction and checks its direct replay/authority regressions only; it is not a fresh full audit of the corrected package.",
+    "No implementation, build, product test or network action was performed. Planned migrated-adapter behavior remains to be demonstrated by implementation evidence.",
+    "Owner design/governance/slice/risk approval, empirical sizing and release acceptance remain separate gates."
+  ]
+}

@@ -35,3 +35,8 @@ Audit baseline: `3b5967f5bc01abae43cb0fc143d8c038cd5c8b0d`. Relevant decisions: 
 The package contains testable requirements, a component diagram, a sync algorithm covering conflicts and crash recovery, shared-logic boundaries, a migration strategy, UI states, and acceptance criteria. Assumptions are separate from owner decisions. The artifacts pass the repository spec check and substantive review; product tests and sign-off are not represented as complete.
 
 A separate assessment was not started because the user had already compared alternatives and chosen a direction. Repeating the interview is unnecessary to record known requirements. Formal UX, review, and PR-slice gates remain prerequisites for implementation; this package has Draft status.
+
+
+## Completion request, 2026-10-09
+
+The owner asked to finish the specification fully under Spec Kit and repository rules, referencing the already merged PR #304. Work continues from its main commit `c16daecd13247e35fea280bd9322c8a4b09dabb1`. This is authority to complete the planning package and prepare a reviewable follow-up; it is not a new implementation or deployment request. New technical proposals and exact human gates are consolidated in `approval.md` without inventing owner answers.

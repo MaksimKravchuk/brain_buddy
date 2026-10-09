@@ -1,0 +1,51 @@
+{
+  "role": "testability-evidence",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "review-checklist-disposition",
+  "items": [
+    {
+      "id": "CHK007",
+      "status": "satisfied",
+      "evidence": [
+        "spec.md, SC-003/004/007 and Assumptions",
+        "quickstart.md, Acceptance environment and evidence; Performance procedure; Cutover and rollback drill steps 3\u20135",
+        "plan.md, \u00a77 Migration Without Parallel Sources of Truth and \u00a78 Validation and Operations"
+      ],
+      "reason": "Written acceptance fixes reference iPhone 11/iOS 26 and MacBook Air M1/8 GB/macOS 26, Release workload and at least 1,000 operations over five runs, p95<=50 ms and no UI stall>=100 ms; it separately specifies 100 two-client batches, actual cross-process SSE, p95<=2 s, the <=60 s dropped-hint deadline and <=30 s poll-start bound. Recovery uses the synthetic reference workload, observable state/receipt/queue comparisons, stopped access and fail-closed reconciliation, with timed RPO<=24 h/RTO<=4 h and explicit lost-commit accounting. Missing hardware, failed recovery or exceeded targets blocks expansion. These are falsifiable planned conditions, not measurements."
+    },
+    {
+      "id": "CHK010",
+      "status": "satisfied",
+      "evidence": [
+        "tasks.md, Paths and budgets; Rust/FFI boundary feasibility; Dependencies, increments and parallel execution; PR-\u0441\u0440\u0435\u0437\u044b JSON PR-20\u201334, PR-44, PR-50\u201360",
+        "plan.md, \u00a77 steps 4\u20137 and \u00a79 Concrete rollout and runtime defaults",
+        "quickstart.md, Q01\u2013Q12 and Cutover and rollback drill"
+      ],
+      "reason": "All 26 FRs and eight SCs have explicit slice assignments, named owned paths, checks and bounded caps. The pilot PR-54 dependency closure includes durable job fencing PR-20\u201324, complete writer/receipt/feed/authority PR-25\u201333, native import/account isolation, retention/export/restore, SSE and both Apple suggestion surfaces. PostgreSQL PR-55\u201357 follows accepted pilot evidence. The corrected PR-34 owns Cargo.lock, has six declared product files, and requires actual runtime/SQLite sizing before approval; it introduces no unordered shared-lockfile owner. Caps remain contingent on measurement rather than asserted feasibility."
+    },
+    {
+      "id": "CHK011",
+      "status": "satisfied",
+      "evidence": [
+        "research.md, Current architecture and decision rationale; Completion decisions, 2026-10-09",
+        "spec.md, Status; Assumptions; Clarifications",
+        "plan.md, Technical Context; Project Structure",
+        "tasks.md, Paths and budgets and Rust/FFI boundary feasibility",
+        "quickstart.md, Status; Reused behavioral baseline; Acceptance environment and evidence"
+      ],
+      "reason": "Current Swift/FastAPI/store behavior is attributed to named repository sources and existing normative vectors; proposed Rust crates, endpoints, facades and fault suites are expressly identified as future additions. Apple/server plus compatibility is the first boundary; Android/Windows/Linux shells require later specifications. Existing checks are baseline evidence, while native rendering, bridge/runtime/AI sizing, toolchain proof and hardware timings remain unverified gates. The original review inspected relevant actual declarations and sources without running product tests."
+    },
+    {
+      "id": "CHK012",
+      "status": "satisfied",
+      "evidence": [
+        "approval.md, owner-decision table and final two paragraphs",
+        "adr-draft.md, Status; Decisions being amended; Acceptance conditions; Exact amendment proposal",
+        "tasks.md, Prerequisites and Phase 1 T001",
+        "verification.md, current and historical evidence distinctions",
+        "spec.md, Status and Clarifications"
+      ],
+      "reason": "Rust/custom-sync direction and document-review authorization are separated from scope/SC acceptance, UX sign-off, governance/privacy amendments, measured slice approval and human residual-risk sign-off. Proposed Constitution/dependency/retention changes do not claim acceptance; ASK persistence/cutover authorization and exact-SHA implementation/release/production evidence remain later gates. Written technical completeness and this checklist disposition do not certify sizing, implemented behavior, human approval or product acceptance."
+    }
+  ]
+}

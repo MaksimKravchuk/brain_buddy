@@ -1,0 +1,19 @@
+{
+  "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "derived_risk": "high",
+  "feature_dir": "/workspace/brain-buddy-026-spec/specs/026-rust-core-sync",
+  "project_root": "/workspace/brain-buddy-026-spec",
+  "review_artifacts": [
+    "spec.md",
+    "plan.md",
+    "design.md",
+    "tasks.md",
+    "research.md",
+    "data-model.md",
+    "quickstart.md",
+    "checklists/requirements.md",
+    "contracts/command-catalog.md",
+    "contracts/runtime-ffi.md",
+    "contracts/sync-v1.md"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "role": "architecture-consistency",
+  "check_type": "targeted-finding-closure",
+  "baseline_commit": "a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c",
+  "core_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "original_category": "contracts-and-delivery-ownership",
+  "status": "resolved",
+  "summary": "The original SSE contract and server-ownership gap is resolved in the proposal. The endpoint and event envelope are enumerated; committed-counter observation covers separate writer processes; each connection rechecks authority and generations; bounded lifecycle/reconnect semantics are specified. PR-58 owns server publication and PR-40 consumes it with an explicit dependency. PR-54 transitively depends on PR-58 and requires the actual cross-process SSE path for SC-004. No performance measurement or implementation success is asserted.",
+  "evidence": [
+    "specs/026-rust-core-sync/contracts/sync-v1.md:120 enumerates GET /api/sync/v1/hints?scope_id=... in the normative route catalog.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:233 defines authenticated text/event-stream transport, no-store/unbuffered headers, content-free scope_changed envelope and an initial subscribe-race event.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:235 defines the <=250 ms shared committed-counter watcher, all-process/all-origin coverage, rollback exclusion, per-connection current authority/generation checks, coalescing, slow-client behavior, heartbeat and bounded connection lifetime.",
+    "specs/026-rust-core-sync/contracts/sync-v1.md:237 defines immediate reconnect pulls, bounded backoff, unchanged fallback polling and real cross-process SC-004 validation; explicitly labels watcher timing a proposed bound, not measured evidence.",
+    "specs/026-rust-core-sync/plan.md:209 names the concrete endpoint, PR-58 server owner and all-process shared-counter mechanism.",
+    "specs/026-rust-core-sync/tasks.md:101 gives T058 the server endpoint/publisher and separate-process stream checks; PR-58 at line 1358 owns sync/hints.py, sync/router.py and test_sync_hints.py and depends on PR-33.",
+    "specs/026-rust-core-sync/tasks.md:103 gives T040 client SSE consumption/reconnect work; PR-40 dependency at line 1622 includes PR-58. Parsed dependency graph confirms PR-54 transitively includes PR-58.",
+    "specs/026-rust-core-sync/quickstart.md:49 retains Q03 request/response/hint-loss and crash/reorder faults; sync-v1.md:237 explicitly binds Q03 to actual separate writer/stream process validation.",
+    "specs/026-rust-core-sync/quickstart.md:66 requires the actual authenticated endpoint with separate writer/stream processes, unbuffered delivery and measured p95 <=2 seconds; synthetic wakes alone are insufficient."
+  ],
+  "reviewed_files": [
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/quickstart.md"
+  ],
+  "limitations": "Targeted closure of the original finding only, not a new full review campaign, canonical gate verdict, owner approval or measured implementation acceptance. Original canonical campaign execution remains escalated after proxy 403 failures."
+}

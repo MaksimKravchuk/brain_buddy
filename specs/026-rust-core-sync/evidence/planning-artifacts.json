@@ -1,0 +1,19 @@
+{
+  "run_id": "026-completion-20261009-1",
+  "base_sha": "c16daecd13247e35fea280bd9322c8a4b09dabb1",
+  "artifacts_digest": "bab3218b53c9a4c475eb3e37d6fc8e03f98b7cc740bb25a5a3deba672550df7c",
+  "review_artifacts": [
+    "spec.md",
+    "plan.md",
+    "design.md",
+    "tasks.md",
+    "research.md",
+    "data-model.md",
+    "quickstart.md",
+    "checklists/requirements.md",
+    "contracts/command-catalog.md",
+    "contracts/runtime-ffi.md",
+    "contracts/sync-v1.md"
+  ],
+  "status": "preflight-passed; reviewer execution blocked by automatic approval review"
+}

@@ -1,0 +1,59 @@
+{
+  "role": "adversarial-high-risk",
+  "verdict": "changes-required",
+  "summary": "The current proposal explicitly addresses the earlier Smart Add binding-retention, SSE, ownership-disclosure, dependent-action and AI lifecycle gaps. Its immutable-command, ACK/feed, snapshot/live-queue, generation, worker-fence and restore safeguards are specified as future requirements, not tested implementation. One consequential contradiction remains: the generic legacy replay mapping rejects a colliding consent revoke that the accepted privacy contract requires to succeed. Owner approvals, empirical sizing and implementation acceptance remain separate disclosed gates; this review supplies none of them.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/agent-commands/speckit-review/SKILL.md",
+    ".specify/workflows/speckit/review.schema.json",
+    ".specify/workflows/runs/026-native-20261009-1/planning-context.json",
+    "scripts/spec_kit_planning_review.py",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/design/sync-states.html",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/approval.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0002-async-voice-operation-substrate.md",
+    "docs/decisions/0020-rtm-parity-priority-and-archive-semantics.md",
+    "docs/decisions/0027-native-task-weekly-review-and-auto-park.md",
+    "docs/decisions/0028-modern-identity-authority.md",
+    "docs/data-retention.md",
+    "specs/020-weekly-review/contracts/http.md",
+    "backend/app/modules/tasks/repository.py",
+    "backend/app/modules/tasks/service.py",
+    "backend/app/modules/tasks/navigator.py",
+    "backend/app/repositories/sqlite.py",
+    "backend/app/services/account_service.py",
+    "backend/tests/test_review_navigator.py",
+    "ios/BrainBuddyKit/Sources/BrainBuddySync/SyncEngine+Push.swift",
+    "ios/BrainBuddyKit/Sources/BrainBuddyPersistence/FileDocumentStore.swift",
+    "ios/BrainBuddyKit/Sources/BrainBuddyCore/Outbox.swift"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "privacy revocation / legacy replay compatibility",
+      "description": "Preserve the accepted consent-revocation collision exception before routing Navigator through the generic legacy receipt boundary. A supported client may grant cloud consent using key K and then revoke using the same K. The accepted endpoint deliberately returns 204, revokes all grants, preserves the original grant receipt, and records a separate deterministic revoke receipt. Sync v1 instead mandates one legacy receipt per (owner, key), forbids an operation-specific replay namespace, and rejects changed content before execution. Applied to PR-28, that rule returns an idempotency conflict without revoking consent, leaving subsequent cloud requests authorized after a revocation that must succeed. The current proposal simultaneously promises legacy response/error and owner-wide revoke compatibility, so the implementation contract is contradictory.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:57 requires one durable command receipt for the legacy (owner_id, idempotency_key) identity and prohibits changing the replay namespace when the operation changes; :60 rejects the same command ID with changed content and executes nothing.",
+        "specs/026-rust-core-sync/tasks.md:87 (T028 / PR-28) explicitly routes Navigator consent-grant and owner-wide-revoke through this shared command boundary. contracts/command-catalog.md:35 promises the current owner-wide revoke semantics; spec.md FR-014/019/024 require legacy compatibility and current consent.",
+        "specs/020-weekly-review/contracts/http.md:696-708 explicitly distinguishes grant conflicts from revocation: a key another command already stored must still revoke, preserve that record, and store a separate replayable revoke result.",
+        "backend/app/modules/tasks/navigator.py:890-930 implements the exception by checking the collision receipt before revoking and storing the result under _revoke_collision_key when the original key is occupied.",
+        "backend/tests/test_review_navigator.py:1271-1306 contains existing tests for grant(K1) then revoke(K1) succeeding and a later replay of that colliding revoke not cancelling a newer grant. These tests were inspected, not executed."
+      ],
+      "recommendation": "Document a narrow legacy Navigator revoke mapping that preserves its accepted collision identity before generic mismatch rejection, while publishing the revoke and its receipt/feed atomically through the same boundary. Preserve the original grant receipt and deterministic revoke replay so a late revoke retry cannot cancel a subsequent regrant; do not weaken ordinary command-ID mismatch rejection. Reuse the two existing collision tests through the migrated adapter and reflect the exception in the catalog/data-model mapping."
+    }
+  ],
+  "product_decisions": []
+}

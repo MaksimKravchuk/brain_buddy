@@ -1,0 +1,52 @@
+{
+  "role": "ux-accessibility-mobile",
+  "scope": "Targeted closure check of the two original hosted UX findings only; not a fresh review campaign.",
+  "source_commit": "a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c",
+  "artifact_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "original_report": "/tmp/026-hosted-review/ux-accessibility-mobile.json",
+  "summary": "Both original important findings are resolved in the proposed design and planned acceptance evidence. The additions are consistent with immutable conflict-command identities, preservation of unknown outcomes, existing voice-operation recovery, current consent checks, and the synchronous navigator limitations. No rendering, native accessibility execution, implementation acceptance, human sign-off or canonical gate approval is claimed.",
+  "canonical_gate_approval": false,
+  "runtime_verification": "Not performed; static source and planning consistency check only.",
+  "reviewed_files": [
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/design/sync-states.html",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md"
+  ],
+  "findings": [
+    {
+      "category": "conflict-resolution-traceability",
+      "status": "resolved",
+      "reason": "M-02/D-02.11 defines labeled per-action Keep for later, Review and retry, and Discard action choices. .12 explicitly names the exact actions to discard and focuses Cancel. The explanatory behavior preserves blocked descendants and drafts on closure, requires shown-version reapproval before new immutable commands, retains unavailable targets as issues, clears stale approvals, and restores focus and drafts without automatic submission. The static mock, FR map, Q02/Q12 and implementation acceptance now name the same branch.",
+      "evidence": [
+        "specs/026-rust-core-sync/design.md:61: M-02/D-02.11 states, safe initial selection, retry approval and discard gating; FR-007/FR-010.",
+        "specs/026-rust-core-sync/design.md:62: M-02/D-02.12 exact summaries, loss disclosure and initially focused Cancel.",
+        "specs/026-rust-core-sync/design.md:65: preserved blocked descendants/drafts, explicit shown-version retry, immutable replacement identities only after reconciliation, stale approval reset, focus restoration and interruption behavior.",
+        "specs/026-rust-core-sync/design.md:123: new dependent-action affordances map to FR-007/FR-010.",
+        "specs/026-rust-core-sync/design/sync-states.html:62: labeled per-action controls with Keep for later selected; :63 named discard confirmation.",
+        "specs/026-rust-core-sync/quickstart.md:48 and :58: Q02/Q12 cover preserve, reapprove, named discard and interrupted choices.",
+        "specs/026-rust-core-sync/tasks.md:111 and PR-45/PR-46 acceptance at :1819/:1857: persistent resolution drafts and Apple .11-.12 evidence are assigned.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md:49 and :51: the added behavior preserves blocked descendants and new-ID replacements without rekeying uncertain outcomes."
+      ]
+    },
+    {
+      "category": "async-cancellation-interruption-states",
+      "status": "resolved",
+      "reason": "M-04/D-04.13-.15 now distinguish stopping, cancelled and interrupted/resumed requests from failure. Copy separately describes known unsent requests and sent/uncertain requests without promising provider recall. Explicit cancellation invalidates request generation and discards late transient results while preserving Tasks and authored drafts. Closing a live request resumes it; process loss uses truthful interrupted copy and explicit Request again without automatic transmission. Consent/session checks, announcements and focus are specified, and Q09/shared-model/native-sheet tasks cover these outcomes without inventing server cancellation or a second voice-operation system.",
+      "evidence": [
+        "specs/026-rust-core-sync/design.md:103: M-04/D-04.13 stopping state, repeated-cancel disabling and durable cancellation.",
+        "specs/026-rust-core-sync/design.md:104: M-04/D-04.14 before/after-transmission copy and explicit consent-checked Request again.",
+        "specs/026-rust-core-sync/design.md:105: M-04/D-04.15 live resume versus unrecoverable process loss; no automatic retransmission.",
+        "specs/026-rust-core-sync/design.md:107: cancellation generation fencing, late-result disposition, Task/draft preservation, current owner/session/consent checks, accepted ADR-0002 voice semantics, truthful navigator limitations and outcome focus/announcement.",
+        "specs/026-rust-core-sync/design.md:132: lifecycle affordances map to FR-018/FR-019/FR-020.",
+        "specs/026-rust-core-sync/design/sync-states.html:102 through :105: stopping, unsent/sent cancellation and interrupted static variants carry matching copy/actions.",
+        "specs/026-rust-core-sync/quickstart.md:55: Q09 covers before/after transmission, active close/reopen, uncertain process loss, late cancelled result and exact .13-.15 copy.",
+        "specs/026-rust-core-sync/tasks.md:149/:151/:153 and PR-49/PR-59/PR-60 acceptance at :1962/:1997/:2033: shared request lifecycle and both native suggestion surfaces own the required evidence.",
+        "specs/026-rust-core-sync/contracts/runtime-ffi.md:40: the new copy/actions remain consistent with stopping unsent transmissions and uncertainty for a started remote effect."
+      ]
+    }
+  ],
+  "unresolved_original_findings": []
+}

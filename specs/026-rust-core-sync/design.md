@@ -1,13 +1,13 @@
 # Design: Rust core and custom sync
 
 **Feature**: `specs/026-rust-core-sync/`
-**Spec**: `spec.md`; this design is a draft for requirements FR-001–FR-026, not a claim that the clarification/design stage is complete.
+**Spec**: `spec.md`; this design specifies requirements FR-001–FR-026 for explicit owner sign-off.
 **Screens**: [design/sync-states.html](design/sync-states.html), one self-contained static HTML file without external resources.
 **Human sign-off**: **pending**. Production implementation has not started; the next architecture stage requires explicit design approval under `.specify/agent-commands/speckit-design/SKILL.md`.
 
 ## Applicability
 
-Agreed direction: a shared Rust core and custom synchronization. iOS and macOS already use `BrainBuddyKit`: this replaces the internal implementation while preserving existing behavior, rather than creating a second independent task engine. This design covers only states of the existing sync row, Sync settings / popover, existing resolution card, and AI settings. A new task workspace, navigation, a fifth GTD list, autonomous agents, and new onboarding are outside the design.
+Agreed direction: a shared Rust core and custom synchronization. iOS and macOS already use `BrainBuddyKit`: this replaces the internal implementation while preserving existing behavior, rather than creating a second independent task engine. This design covers only states of the existing sync row, Sync settings / popover, existing resolution card, and the proposed bounded Weekly Review suggestion/consent sheets and AI settings. A new task workspace, navigation, a fifth GTD list, autonomous agents, and new onboarding are outside the design.
 
 Explanatory notes and all product copy are in English. D- denotes desktop/macOS; M- denotes iPhone. Web preserves existing online workflows (FR-024); the desktop mock introduces neither offline web nor a new web sync panel. AI consent also applies to the existing web flow, without a new page.
 
@@ -21,16 +21,16 @@ Explanatory notes and all product copy are in English. D- denotes desktop/macOS;
 | D-02 | Mac, detail sheet from Sync issues | Resolve conflict | Compare conflicting versions and confirm the resolution | FR-007, FR-008 |
 | M-03 | iPhone, existing Sync settings / sheets | Recover sync | Resume/reset, upgrade, migration, and account switching without losing pending edits | FR-010, FR-011, FR-012, FR-013, FR-022 |
 | D-03 | Mac, existing popover / sheets | Recover sync | Same behavior; migration file and safe recovery | FR-010, FR-011, FR-012, FR-013, FR-022 |
-| M-04 | iPhone, existing review card / AI settings | AI choice, consent and proposal | On-device policy, separate cloud consent, and explicit apply only | FR-016, FR-018, FR-019, FR-020, FR-022 |
-| D-04 | Mac, existing review card / AI settings | AI choice, consent and proposal | Same authority/privacy sequence; existing web consent is equivalent | FR-016, FR-018, FR-019, FR-020, FR-022, FR-024 |
+| M-04 | iPhone, proposed suggestion sheet from existing Review decision card / AI settings | AI choice, consent and proposal | On-device policy, separate cloud consent, and explicit apply only | FR-016, FR-018, FR-019, FR-020, FR-022 |
+| D-04 | Mac, proposed Weekly Review suggestion sheet from existing task detail / AI settings | AI choice, consent and proposal | Same authority/privacy sequence; existing web consent is equivalent | FR-016, FR-018, FR-019, FR-020, FR-022, FR-024 |
 
-All eight screens are represented in HTML. The paired tables below define the same states for **each** listed ID: 45 shared rows, 90 screen-state combinations, including explicitly justified N/A states. A state key combines the screen ID and suffix, for example `M-02.04`. Do not renumber IDs after approval. HTML shows key compositions and static variants; it is not a working sync simulator.
+All eight screens are represented in HTML. The paired tables below define the same states for **each** listed ID: 55 shared rows, 110 screen-state combinations, including explicitly justified N/A states. A state key combines the screen ID and suffix, for example `M-02.04`. Do not renumber IDs after approval. HTML shows key compositions and static variants; it is not a working sync simulator.
 
 ## State inventory
 
 ### M-01 / D-01 — Sync status (11 states per screen)
 
-Preserve the approved quiet status text and timings from `specs/021-mac-sync/design.md`: indicator after 1 s, minimum duration 0.5 s; online waiting suffix after 10 s; persistent transport failure after 60 s. Immediate auth/version errors are not hidden by this delay. Sync never blocks an allowed local command. Priority: unsupported version → session ended → issues → persistent failure → offline → waiting → synced. All reasons are available in details.
+Preserve the approved quiet status text and timings from `specs/021-mac-sync/design.md`: indicator after 1 s, minimum duration 0.5 s; online waiting suffix after 10 s; persistent transport failure after 60 s. The failure indicator measures persistent transport failure; it is separate from the ≤30-second active polling interval and SC-004's ≤60-second commit-to-visible deadline. Immediate auth/version errors are not hidden by this delay. Sync never blocks an allowed local command. Priority: unsupported version → session ended → issues → persistent failure → offline → waiting → synced. All reasons are available in details.
 
 | suffix / state | trigger | visible result and English copy | FR refs |
 |---|---|---|---|
@@ -46,7 +46,7 @@ Preserve the approved quiet status text and timings from `specs/021-mac-sync/des
 | .10 unsupported version | protocol/store version unknown | “Update needed to sync”; Open recovery. Stop incompatible exchange; store is read-only only if its format cannot be opened safely | FR-012 |
 | .11 recovery complete | replay/pull/reset completed successfully | “Synced just now”; no success modal or repeated Task/receipt | FR-004, FR-005, FR-010 |
 
-### M-02 / D-02 — Resolve conflict (9 states per screen)
+### M-02 / D-02 — Resolve conflict (11 states per screen; .10 remains reserved)
 
 | suffix / state | trigger | visible result and English copy | FR refs |
 |---|---|---|---|
@@ -58,9 +58,11 @@ Preserve the approved quiet status text and timings from `specs/021-mac-sync/des
 | .06 partial failure | other tasks synced; this one remains unresolved | “Other changes synced. Both versions are saved.”; unrelated tasks remain available | FR-006, FR-007 |
 | .07 offline / interrupted | choice made offline or app closed | Choice is stored durably and shown as waiting; both originals remain until the resolution is acknowledged | FR-001, FR-007, FR-010 |
 | .08 changed again | version changed after the card opened | “This task changed again. Review both versions.”; refresh the account side, preserve the user's draft; require explicit apply again | FR-007 |
+| .11 blocked dependent actions | a rejected intent has later actions | “2 later actions need your decision”; show action summaries in dependency order. For each: “Keep for later” (safe initial selection), “Review and retry”, or “Discard action”; Apply is disabled until any retry preview is explicitly approved and any discard confirmed | FR-007, FR-010 |
+| .12 confirm discard | one or more later actions selected for discard | “Discard these 2 saved actions?”; list their exact action summaries; “They will not be sent. Other saved actions will be kept.”; Cancel / Discard 2 actions; Cancel is initially focused | FR-007, FR-010 |
 | .09 deleted elsewhere | server deletion of an existing deletable entity conflicts with a local edit | “This item was deleted on another device. Your edit is saved in this issue.”; Copy saved edit, “Keep item deleted”; **no automatic reopen/create** | FR-007, FR-008 |
 
-The title example's resolution creates a normal title command against the displayed current version; other fields are not replaced with an old snapshot. Under FR-007/contract v1, a conservative whole-entity conflict is allowed: the preview must show all differing fields rather than promise automatic field merging. Choosing the account version explicitly discards the intent and requires a decision on dependent actions. Manual text rewriting has not been added: comparison, Copy saved edit, and two explicit versions provide minimally sufficient recovery. “Keep item deleted” closes the issue only after the resolution is stored durably; the saved edit remains available in recovery/export under the retention contract and does not disappear when the sheet is simply closed. The deletion example concerns an existing deletable record, such as a comment; no new Task deletion/restoration interface is introduced. The former suffix `.10` is reserved and unused: FR-009 preserves current ordering/moves; manual reorder API and UI are outside scope.
+The title example's resolution creates a normal title command against the displayed current version; other fields are not replaced with an old snapshot. Under FR-007/contract v1, a conservative whole-entity conflict is allowed: the preview must show all differing fields rather than promise automatic field merging. Choosing the account version explicitly discards the intent and requires a decision on dependent actions. In .11, Keep for later stores descendants as visible blocked issues even after the predecessor is resolved; closing/Back/Cancel retains every original and the decision draft. Review and retry shows the resulting action and current target version for each retained descendant, with no default approval; after known rejection/reconciliation and explicit approval, atomically store replacement commands with new IDs and the approved dependency chain. Unknown outcomes are never rekeyed. An unavailable/deleted target leaves its action preserved as an issue. A version change clears the affected approval and returns to .08. Discard requires .12 before atomically recording that explicit disposition; saved recovery/export material follows existing retention. Focus moves to the dependent-actions heading, then each labeled choice/preview; discard cancellation returns to its opener, and relaunch restores the draft without submitting it. Manual text rewriting has not been added: comparison, Copy saved edit, and two explicit versions provide minimally sufficient recovery. “Keep item deleted” closes the issue only after the resolution is stored durably; the saved edit remains available in recovery/export under the retention contract and does not disappear when the sheet is simply closed. The deletion example concerns an existing deletable record, such as a Tag; no new Task deletion/restoration interface is introduced. The former suffix `.10` is reserved and unused: FR-009 preserves current ordering/moves; manual reorder API and UI are outside scope.
 
 ### M-03 / D-03 — Recover sync (13 states per screen)
 
@@ -82,7 +84,7 @@ The title example's resolution creates a normal title command against the displa
 
 Account switching uses the existing sign-out warning: the user can cancel sign-out and sync/resolve, export safely readable local data, or explicitly confirm removal of the local copy/unsynced work/issues with the exact current count. Network availability is not a condition for this confirmed sign-out; pending changes are never transferred to another owner. Export is not server acknowledgment and does not itself dismiss the warning. An account-less workspace is not implicitly assigned to another owner. Reset is not “Start fresh” and does not remove user intent; destructive sign-out is not offered as a sync remedy. Migration validates all fields, IDs, relationships, review/local-only data, and outbox in staging: activation follows full validation only; otherwise the original store remains intact and active. If the snapshot/state is incompatible, read-only recovery means saved data is available only in a safely decodable form, without inventing a promised export of an unknown binary format.
 
-### M-04 / D-04 — AI choice, consent and proposal (12 states per screen)
+### M-04 / D-04 — AI choice, consent and proposal (20 states per screen)
 
 | suffix / state | trigger | visible result and English copy | FR refs |
 |---|---|---|---|
@@ -98,6 +100,20 @@ Account switching uses the existing sign-out warning: the user can cancel sign-o
 | .10 proposal ready | validated suggestion received | “Review suggestion”; editable field; “Nothing changes until you apply”; Apply suggestion / Keep current wording | FR-020 |
 | .11 proposal stale | Task revision changed | “This task changed. Review it before applying a suggestion.”; preserve draft, reread Task, repeat explicit confirmation | FR-007, FR-020 |
 | .12 applied | explicit command committed | Card shows new text; durable Task command and existing review receipt; no automatic Task completion or AgentRun badge | FR-016, FR-020, FR-021 |
+| .13 cancelling | user selects Cancel or Continue without AI while a request is active | “Stopping suggestions…”; manual work remains available; disable repeated Cancel; durably record cancellation before releasing the local request | FR-018, FR-019, FR-020 |
+| .14 cancelled | local cancellation recorded | Before transmission: “Suggestions cancelled. Nothing was sent.” After transmission or uncertain send: “Suggestions stopped here. The provider may still finish processing data already sent. No result will be applied.”; Continue without AI / Request again (new explicit request and current consent check) | FR-018, FR-019, FR-020 |
+| .15 active request interrupted / resumed | UI closed/backgrounded or process restarted | Closing the sheet is not Cancel: reopen the same live request with “Preparing suggestions…” or its validated proposal. If the process lost the request and no existing operation result can be recovered: “Suggestions were interrupted. Nothing was applied. The provider may have received the request.”; Continue without AI / Request again; no automatic retransmission | FR-018, FR-019, FR-020 |
+| .16 clarifying question | successful navigator response has `proposals:null` and one `clarifying_question` | Show the question and labeled “Your answer” field; “Add to notes and suggest again” / “I'll write my own step”; focus the answer field, preserve its draft; do not treat a valid question as empty/error or as a title proposal | FR-016, FR-018, FR-019, FR-020 |
+| .17 saving answer / suggesting again | user confirms Add to notes and suggest again | Save an ordinary notes edit with the answer appended once; “Saving…” after 300 ms. On durable local save adopt the updated task projection; on accepted server save adopt its revision. Then rerun with current consent/input. Offline cloud: “Answer saved on this device. Connect to get cloud suggestions.” | FR-001, FR-016, FR-019, FR-020 |
+| .18 answer not saved | notes edit fails or is rejected | “Couldn't add your answer to the notes. Your answer is saved here.”; safe reference ID for server failure, Retry, or existing conflict resolution for stale notes; keep the answer field, never submit inference as if the edit succeeded | FR-007, FR-020, FR-023 |
+| .19 answer saved, suggestion failed | notes edit succeeded but subsequent inference failed/cancelled | Show the saved answer in notes; “Your answer was saved. Suggestions aren't available.” plus the applicable reference/reason; “Try suggestions again” / manual continuation. Retry only inference, never append the answer again | FR-016, FR-019, FR-020, FR-023 |
+| .20 leave with unsaved answer | Back/Close with a typed unsubmitted answer | “Discard your answer? It hasn't been added to the notes.”; “Keep editing” initially focused / “Discard”. Cancel or process interruption keeps the draft; only explicit Discard removes it; return focus to the answer opener | FR-010, FR-020 |
+
+This branch adopts 020-FR-021 and its M-05/M-07/D-02 answer-save/rerun behavior for both new native sheets. A task answer is an explicit ordinary notes edit, with no formulation-clock change; no AI response itself mutates the task. Persist the answer's stable notes-command ID and current phase so lost ACKs, relaunch and retry cannot append twice. A remote rerun waits for the edit's accepted current projection, rereads current owner/provider consent and sends the updated approved payload; a local executor may use the durable local projection. Unknown save outcomes are reconciled with the same command ID. A conflicting save keeps the answer and requires the existing shown-version decision. Repeated inference or changing a provider never repeats the notes edit. This is the task navigator branch; it introduces no empty-project workflow.
+
+Explicit cancellation invalidates the local request generation; late results are ignored and their transient content removed under the source policy, never silently revived as a proposal. Task data and user-authored drafts remain. A cancelled request is distinct from .05 failure; closing/backgrounding alone leaves it active if the runtime can continue, while process loss follows .15. Reopening rechecks owner/session/consent before displaying any recovered proposal. Existing voice paths use ADR-0002 operation IDs and cancellation/recovery semantics, not a second operation system; the synchronous navigator path does not promise server cancellation or recoverability it lacks. Announce stopping/cancelled/interrupted once through a polite live region and focus the outcome heading, then Continue without AI.
+
+Native navigator clients were deferred in spec 020. These are proposed additions within the existing task/review surfaces: iPhone `DecisionCardSheet.swift` → `ReviewSuggestionSheet.swift`, Mac task detail in `ContentView.swift` → `ReviewSuggestionSheet.swift`; no complete Mac Weekly Review workspace is presumed to exist. Both use the same capability eligibility and approved payload.
 
 The mock's cloud example is labeled **illustrative provider: OpenAI**; this neither selects a provider nor enables a new AI flow. In implementation, the name must come from the current provider configuration, and consent is stored per owner/provider/input version. For the existing review navigator, the data list comes exactly from 020-FR-019: title, notes, optional stall reason, project name, up to 20 other open task titles in that project, requested suggestion kind. Copy: “Notes are sent as written, including any names in them.” Any other AI action must show its own approved payload rather than reuse this consent by default. This design does not expand the approved AI model policy or downloadable model availability.
 
@@ -111,6 +127,7 @@ The mock's cloud example is labeled **illustrative provider: OpenAI**; this neit
 | M-01, D-01, M-03, D-03, M-04, D-04 | Copy reference ID | Opaque correlation ID only, without Task/AI/auth payload; copy failure reports an error | FR-023 |
 | M-01, D-01 | Open sync issues | Independent failed group; successful transactions remain available | FR-006, FR-007 |
 | M-02, D-02 | version radio choice + Apply choice | Explicit durable resolution against the displayed current version; discarding dependent actions requires an explicit decision | FR-007 |
+| M-02, D-02 | Keep for later / Review and retry / Discard action | Preserve blocked descendants, explicitly approve replacement intents against shown versions, or confirm the named discard; interruption never submits the decision draft | FR-007, FR-010 |
 | M-02, D-02 | Copy saved edit / Keep item deleted | Edit preserved; tombstone of an existing deletable entity not revived by replay; no new Task delete UI | FR-007, FR-008 |
 | M-03, D-03 | Rebuild synced copy / Try again | Confirmed non-destructive reset preserving pending changes/conflicts | FR-010 |
 | M-03, D-03 | Update app | Platform update route; incompatible sync/store writes stopped | FR-012 |
@@ -119,7 +136,9 @@ The mock's cloud example is labeled **illustrative provider: OpenAI**; this neit
 | M-03, D-03, M-04, D-04 | existing Export / Delete account / Revoke consent | Full privacy lifecycle; deletion requires existing confirmation | FR-022, FR-019 |
 | M-04, D-04 | on-device choice / supported model download | Approved existing availability policy | FR-018 |
 | M-04, D-04 | Allow cloud suggestions / Continue without AI | Per-owner/provider consent; declining leaves manual review available | FR-019 |
-| M-04, D-04 | Request suggestions / Cancel | Bounded proposal request, no Task command | FR-018, FR-019, FR-020 |
+| M-04, D-04 | Request suggestions / Cancel / Request again | Bounded proposal request; durable local cancellation, truthful sent-data copy and explicit retry after interruption; no Task command | FR-018, FR-019, FR-020 |
+| M-04, D-04 | Your answer / Add to notes and suggest again / Try suggestions again | Explicit once-only notes edit, then consent-checked inference; separate save and inference failures, saved revision adoption and preserved answer draft | FR-016, FR-019, FR-020, FR-023 |
+| M-04, D-04 | Keep editing / Discard unsaved answer | Warn before losing an unsubmitted answer; focus the safe choice and retain the draft on interruption | FR-010, FR-020 |
 | M-04, D-04 | edit proposal / Apply suggestion / Keep current wording | Explicit Task command only; existing review semantics preserved | FR-016, FR-020 |
 
 ### Requirements with no additional affordance
@@ -136,7 +155,7 @@ The mock's cloud example is labeled **illustrative provider: OpenAI**; this neit
 | FR-025 | App/widget multiprocess storage arbitration and atomic reads; no UI lock/engine controls needed |
 | FR-026 | Local latency/scale and non-blocking sync; benchmark evidence, no new performance dashboard |
 
-FR-001/004/005/006/008/009/010/011/012/013 also have invisible durability, convergence, dedup, transaction, tombstone, ordering, reset, isolation, and migration invariants. Displayed status alone is **not** evidence of these invariants: the future plan must assign contract/storage/replay checks. FR-016 includes exact formulation clocks, auto-park floors, yield/idempotency, receipts/Undo, and feature-flag behavior from ADR-0027; no new review controls are introduced here. The tables above cover all FRs in both directions; affordances without a requirement: **none**. Back/Cancel/navigation close only the presentation and do not remove durable intent.
+FR-001/004/005/006/008/009/010/011/012/013 also have invisible durability, convergence, dedup, transaction, tombstone, ordering, reset, isolation, and migration invariants. Displayed status alone is **not** evidence of these invariants: the plan and quickstart assign contract/storage/replay checks. FR-016 includes exact formulation clocks, auto-park floors, yield/idempotency, receipts/Undo, and feature-flag behavior from ADR-0027; no new review controls are introduced here. The tables above cover all FRs in both directions; affordances without a requirement: **none**. Back/Cancel/navigation close only the presentation and do not remove durable intent.
 
 ## Primary loop impact
 
@@ -178,3 +197,7 @@ Sources: accepted ADR-0006/0020/0027; `.claude/skills/brain-buddy-design/SKILL.m
 3. **Recovery visibility**: confirm quiet status with existing 021 timings and a separate recovery sheet only for persistent/semantic errors; migration uncertainty is shown explicitly. Migration is fully validated before activation or fails with the original intact; ordinary verified migration proceeds quietly.
 
 These decisions are draft recommendations for the shared specification. Approval of Rust + custom sync does not constitute human sign-off for these screens.
+
+On 2026-10-09 the unchanged static mock was offered for review again. Browser rendering was attempted but the default sandbox blocked Chromium startup; no new rendered-layout or native-accessibility result is asserted by that attempt. The authoritative pending decisions are consolidated in [approval.md](approval.md).
+
+The earlier hosted review added .11–12 to both conflict screens and .13–15 to both AI screens, producing 50 paired rows / 100 combinations at that revision. The user-authorized native panel then identified the existing navigator's missing clarifying-question branch; .16–20 bring the current inventory to 55 paired rows / 110 combinations. The earlier 90-state inspection above describes a previous revision. These static variants and the proposed native suggestion entry points also require human design sign-off and rendered Apple evidence; no runtime verification is inferred from the HTML edits.

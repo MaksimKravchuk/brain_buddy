@@ -1,0 +1,26 @@
+{
+  "approved_by": "MaksimKravchuk",
+  "approved_on": "2026-10-09",
+  "run_id": "026-native-20261009-1",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "approved_source_commit": "962a7fa8372ac48d9af1edc4e2130f16afb896da",
+  "source": "Explicit owner reply in this Codex conversation to the final package and residual-risk approval question.",
+  "approval_question_english": "Do you approve the prepared specification 026 package and the residual risks of custom sync, Rust/FFI and migration? The approval will be recorded in the repository. Measurements for complex slices remain mandatory before implementation.",
+  "approval_packet_url": "https://github.com/MaksimKravchuk/brain_buddy/blob/962a7fa8372ac48d9af1edc4e2130f16afb896da/specs/026-rust-core-sync/approval.md",
+  "owner_reply_original": "Да",
+  "owner_reply_english": "Yes.",
+  "approved_scope": [
+    "Product scope and written acceptance criteria SC-001–SC-008",
+    "Design baseline: eight screens and 110 screen-state combinations",
+    "Governance and privacy amendment proposal, to be enacted in the governance slice before conflicting implementation",
+    "60-slice delivery baseline subject to the already specified measured-sizing prerequisites",
+    "Residual risks of custom sync, Rust/FFI and migration, including the disclosed review provenance"
+  ],
+  "retained_conditions": [
+    "Measure complete Rust/FFI, runtime/SQLite and AI slice deltas before their implementation boundary approval; include Cargo.lock and revise any over-budget boundary.",
+    "Enact accepted governance amendments through PR-01; no existing Constitution or ADR is silently rewritten by this record.",
+    "Execute future runtime, native accessibility, parity, recovery, privacy and acceptance checks; a written criterion is not a measured result.",
+    "Migration, cutover, landing and release retain their separate repository gates; this specification-only request performs none of them."
+  ],
+  "source_approval_packet_sha256": "d2e183544c41c937784e1d91fe304daace9be86d72321e77e2aec26a95415595"
+}

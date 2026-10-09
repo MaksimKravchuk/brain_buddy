@@ -1,0 +1,64 @@
+# Command and writer catalog
+
+Status: proposed sync v1 names, using current accepted request semantics. This is the migration coverage map, not evidence these routes/crates already exist. Current baselines: `backend/app/schemas/tasks.py`, `schemas/review.py`, `modules/tasks/{service,review_service,review_flow,navigator}.py`; Apple `ios/BrainBuddyKit/Sources/BrainBuddyCore/{Commands,SmartAdd,Review}.swift` and `BrainBuddySync/`. Keep existing HTTP response bodies/statuses in legacy adapters.
+
+## Payload translation
+
+Each command uses sync-v1 §3's immutable envelope. Payload fields retain the referenced canonical request schema except: creation IDs are required up front; concurrency moves from `expected_revision` into typed preconditions; numeric revisions become decimal strings. `entity_id` names the primary target (new ID for creation; scope ID for owner singletons). For child operations `payload.task_id` always names the parent. Optional PATCH fields distinguish omitted (unchanged), null (clear where allowed) and value (set). Unknown fields are rejected for execution; replay parsing still follows sync-v1 §4 before mutable validation.
+
+For normal revision-required commands use the target's domain revision or an `after_command` reference. Do not use the parent task revision for a child's revision check. Creation requires absent scoped ID plus canonical reference/uniqueness checks. All related read sets (parent/reference state, normalized names, memberships, Undo dependencies) are loaded under the owner lock. Result versions cover every changed replicated row; projections without a domain revision omit `edit_revision`.
+
+| Proposed command | Existing command/request baseline | Concurrency and atomic effects |
+| --- | --- | --- |
+| `project.create` | `create_project` / `ProjectCreateRequest` | Supplied project ID; active-name uniqueness. |
+| `project.update` | `update_project` / `ProjectUpdateRequest`; Apple setProjectOutcome | Project revision; same patch supports desired outcome. |
+| `project.archive`, `project.unarchive` | Corresponding TaskService methods / `ExpectedRevisionRequest` | Project revision; retain accepted member/task revision and archive-history behavior. |
+| `tag.create`, `tag.update`, `tag.delete` | create_tag/update_tag/delete_tag / Tag requests | Create uniqueness; update/delete tag revision. Deletion removes every affected membership in one transaction. |
+| `task.create` | `create_task_result` / `TaskCreateRequest` | Supplied task ID; reference validation and formulation ID when needed. |
+| `task.smart_add` | `smart_add_task` / `SmartAddTaskCreateRequest` | One task plus atomic resolve/create classification; payload adds task ID, formulation ID when needed, and proposed IDs for each name-only project/tag reference. Existing match uses its ID; receipt returns `id_bindings` from proposed classification IDs to resolved IDs. A future dependent intent references the binding by creating command/alias, never rewrites an immutable envelope after acceptance. Names still use canonical normalization. |
+| `task.update` | `update_task_result` / `TaskUpdateRequest` | Task revision; lifecycle is not a patch. New sync excludes whole-collection `tag_ids` edits (see below). |
+| `task.tags` | Existing task tag-membership edit | Payload `add_tag_ids`, `remove_tag_ids` (unique, disjoint); task revision, active additions, explicit removals. One Task update, not a new product feature. |
+| `task.transition` | `transition_task_result` / `TaskTransitionRequest` | Task revision; move/complete/reopen/cancel and explicit destination; preserve intervening transitions. |
+| `subtask.create`, `subtask.update`, `subtask.transition` | TaskSubtask request types / corresponding TaskService methods | Create with parent + supplied child ID; update/transition check child revision. |
+| `comment.create`, `comment.update` | TaskComment request types / corresponding TaskService methods | Create with parent + supplied child ID; update checks comment revision; actor is server-derived. |
+| `review.decide` | `ReviewService.decide` / `DecisionRequest` | Same task/formulation/decision/session/follow-up fields, including client decision time and expected task revision. Preserve ADR-0027 auto-park yield before ordinary stale refusal. |
+| `review.undo_decision` | `undo_decision` / `UndoDecisionRequest` | Expected task revision plus current follow-up/children/Undo eligibility; task/decision/receipt/session/follow-up deletion atomic. |
+| `review.auto_park` | `auto_park` / `AutoParkRequest` | Formulation, current server time/floors, no generic revision precondition. Applied false is an accepted no-op. |
+| `review.explainer_ack` | `acknowledge_explainer` / `ExplainerAcknowledgeRequest` | First acknowledgement/activation; activation clocks and settings publish together. |
+| `review.settings` | `update_settings` / `ReviewSettingsUpdateRequest` | Settings revision; preserve clock-floor bookkeeping without invented task edit-revision increments. |
+| `review.parks_ack` | `acknowledge_parks` / `ParkAcknowledgeRequest` | Existing ≤200 keys, unknown/foreign ignored identically, no task CAS. |
+| `review.session_start` | `ReviewFlowService.start_session` / `SessionStartRequest` | Supplied session ID; accepted replace-open behavior updates old/new sessions atomically. |
+| `review.session_progress` | `progress_session` / `SessionProgressRequest` | Supplied `progress_id`; exactly-once delta/monotonic step merge, no revision CAS. Queue capture preserves null versus empty. |
+| `review.session_finish` | `finish_session` / `SessionFinishRequest` | Existing session-state and qualifying-activity rules. |
+| `review.bulk_release` | `bulk_release` / `BulkReleaseRequest` | Supplied bulk ID; ≤500 requested items with their own expected revisions. Stale/ineligible items are skipped, accepted subset and metadata commit once. |
+| `review.bulk_undo` | `undo_bulk_release` | Existing per-item current-state/Undo rules; content-free Undo result replay. |
+| `review.consent_grant`, `review.consent_revoke` | `NavigatorService.grant_consent/revoke_consent` | Grant uses `NavigatorConsentGrantRequest`. Revoke preserves current owner-wide revoke semantics and the legacy key-collision exception in sync-v1 §4; the Apple provider label must not silently narrow it. Never regrant from a replay after revocation. |
+
+Legacy whole `tag_ids` replacement still follows its existing expected-revision check under lock; the adapter computes the explicit add/remove difference against that checked base in the same transaction. New native edits with several field changes and tag membership changes use **one** `task.update` payload with optional `tag_changes: {add_tag_ids, remove_tag_ids}`; the standalone `task.tags` is the same reducer restricted to that field. This retains one user gesture/one command rather than splitting an atomic edit.
+
+Smart Add bindings are scoped, typed, immutable and returned as content-free receipt metadata. In later envelopes, an unresolved reference is `{after_command: command_id, alias_id: proposed_id, entity_type}` instead of a guessed server ID; the server resolves it from the accepted receipt, then checks current authority/state/revision. The referenced command must also be in `depends_on`. This is separate from `after_command` revision substitution. Known legacy aliases use the migration alias table. Ordinary new create IDs are adopted unchanged.
+
+## Every writer enters the same boundary
+
+| Current ingress / source paths | Trusted origin and mapping |
+| --- | --- |
+| New Apple runtime sync | `device`; registered device/epoch required for unseen commands only. Core + durable client runtime owns offline validation/queue. |
+| Web/old Apple REST, CLI, HTTP MCP: `backend/app/api/{tasks,review,review_flow,review_navigator,mcp}.py`, `cli/`, `frontend/src/` | `legacy`; existing authenticated actor and `(owner_id, Idempotency-Key)` map to one persisted receipt identity **across transports**. Original operation and payload are checked for reuse conflicts after lookup, except the accepted legacy Navigator revoke maps a colliding key to its stable dedicated revoke-effect identity while preserving the original receipt (sync-v1 §4). No fake device epoch. |
+| Capture/Organize task port: `backend/app/workflows/voice_brain_dump/task_port.py` and its workflow service | Trusted application origin; `TaskService.create_native_inbox_task` keeps its existing commit child/effect identity and until-purge recovery exception. Feed publication is atomic with the Tasks effect; cross-module operation completion remains ADR-0002 reconciliation. |
+| Maintenance: `ReviewService.run_maintenance_sweep`, `run_review_retention`, `run_auto_park_sweep`, `ReviewFlowService.close_idle_sessions`, currently scheduled by `backend/app/main.py` | `job`; durable job/effect identity + current fence. Auto-park keeps `auto-park:<task>:<formulation>:<from_revision>`. Settings floors, clock repair, idle close and retention each publish all public changes under the common transaction. Internal control fields are not accepted from a public envelope. |
+| Account deletion/export: `backend/app/services/account_service.py` | Identity/account authority through Tasks' purge/export port, with tasks/Review/feed/receipts/jobs/transfer objects included. Purge is a control operation, not a client task-delete command; restore points are retired before successful purge completion. |
+| Test/operator paths: `backend/app/cli.py` including review seed/sweep | Production-authorized mutations use the same boundary; test-only direct setup must be isolated to test data and cannot remain a production bypass. |
+
+A writer-origin string in client JSON grants nothing. New write paths must reuse an existing catalog command or add a contract before execution. No sync pilot can run while a live domain writer still bypasses receipt/feed/fence handling. Navigator suggestion/reserve/settle, title completion, Capture media and A2A observation are not task commands: only their confirmed Tasks effect goes into this feed; their own consent, budget and operation contracts remain in force.
+
+## Limits and compatibility
+
+Keep canonical field limits (task title 500, details/comment 20,000, name 500, project outcome 1,000 Unicode scalar values) and per-request limits (bulk release 500, park acknowledgment 200). HTTP bytes are not character counts. New v1 ingress has a published execution byte ceiling, but already-supported legacy requests must not become unexecutable because a new feed page/record limit is smaller than their atomic effect. Large transaction transfer in sync-v1 §11 preserves those commands, including many-task archive/tag-delete/activation. No domain transaction is partially accepted merely to fit a page.
+
+Task deletion, manual reorder, recurrence, sharing, CRT writes and autonomous task completion are absent. Future platforms consume these same commands in separate delivery stages.
+
+## Web presentation adapter during the first stage
+
+PR-53 uses the versioned-vector transition in plan §7. The existing Smart Add composer still sends the accepted structured `SmartAddTaskCreateRequest` (title/project/tags); its synchronous syntax/chip/suggestion helpers and state-based affordance labels are presentation adapters. They grant no permission and do not override the Rust-backed server's domain validation, revision checks or established HTTP errors. Preserve existing capture retry, input draft and stale-response handling in `TaskListPage.tsx`, `TaskDetailPanel.tsx` and `taskHooks.ts`. There is no new raw-input preview or allowed-actions endpoint, and sync capabilities are protocol/storage metadata only.
+
+PR-02 freezes synthetic `contracts/web-presentation-vectors.json` with a rule-version marker, stable case IDs, existing test-source references, inputs and expected normalized structured payload/display outcome. Reuse accepted Smart Add and transition examples; Rust parity and the existing web suites consume the same expected cases. PR-53 proves this bounded adapter matches the selected server rule version and handles existing HTTP rejection responses truthfully. A mismatch blocks that cutover until corrected; versioning is test/build evidence, not an authorization token or a new client API. The pilot does not claim these presentation helpers have been deleted or compiled to WASM.

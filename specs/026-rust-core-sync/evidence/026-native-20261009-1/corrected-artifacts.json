@@ -1,0 +1,20 @@
+{
+  "run_id": "026-native-20261009-1",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "sha256": {
+    "spec.md": "daa4134a789c66fb659964e22f6edd342b1d59e1321186110d9ad86ff2e82480",
+    "plan.md": "eb086b1c1a49df0909b4e2d9492172261b14d6a09a3091aaa65f4bf36f220402",
+    "design.md": "69f3f3ec2871c6b51de4e58accfc9423dee7f8caa2b234ac8df6df654a6a4583",
+    "tasks.md": "c4f4bb6529f722e9dc74394d94fc303f86c898b724d05a40d96a435c58eeae89",
+    "research.md": "0934919a8fc1e6972e95bd591cbbef6e22e6698ae93146b241569c170b9044d3",
+    "data-model.md": "a17c19edf86e3326d172cf6c1ad97e6082e79b62fc1893c43584127bee1ca2c5",
+    "quickstart.md": "ba3874e29165e3a8d5b45fe7691068826f72b6fd422f0ef5b307ae08b8b18264",
+    "checklists/requirements.md": "21b7a89e42e8e48b6d19b32b53997a9f1ef6a341a72283268d866574cbeb10ee",
+    "contracts/command-catalog.md": "14b29b97f2cae7cc4ef2d12d1675b61abf2f1fe50d2aee17e0e7990c412ecc25",
+    "contracts/runtime-ffi.md": "13ab38dd81e1f920d0c7434d835f207e8b923e3c6253017ef40dd79ca8a3e22c",
+    "contracts/sync-v1.md": "4e399567c3c136fc344a6c8c4ac2feb794c44ddbb26eb5ddec180873d8904162",
+    "design/sync-states.html": "fc6b8b237f5f2c0681f8412f61f59de45336b883d8fdd0615da34c4811e66e66",
+    "approval.md": "d2e183544c41c937784e1d91fe304daace9be86d72321e77e2aec26a95415595",
+    "adr-draft.md": "a008f9f4df6050afbf825815a0971123532c1590f0c23985713af10356642934"
+  }
+}

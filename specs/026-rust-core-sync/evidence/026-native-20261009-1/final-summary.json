@@ -1,0 +1,81 @@
+{
+  "run_id": "026-native-20261009-1",
+  "execution_route": "native-codex-subagents",
+  "method_authorized_by_owner": true,
+  "initial_source_commit": "7866bae27152da40b7c9c97f5e7a6c63870b48de",
+  "initial_artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "corrected_artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "completed_lenses": 6,
+  "required_lenses": 6,
+  "missing_roles": [],
+  "initial_verdict": "technical-changes-required",
+  "initial_important_observations": 5,
+  "distinct_important_findings": 4,
+  "finding_dispositions": [
+    {
+      "id": "N1",
+      "finding": "Undefined web decision producer and omitted composer integration",
+      "roles": [
+        "requirements-consistency"
+      ],
+      "status": "resolved",
+      "correction": "Choose the already-permitted versioned-vector presentation transition; own the vector source and actual TaskListPage consumer."
+    },
+    {
+      "id": "N2",
+      "finding": "Generic legacy receipt mapping could reject accepted consent revocation",
+      "roles": [
+        "architecture-consistency",
+        "adversarial-high-risk"
+      ],
+      "status": "resolved",
+      "correction": "Preserve the narrow deterministic collision-revoke mapping and original receipt, newer grants on retry, shared transaction/feed and flag-OFF availability."
+    },
+    {
+      "id": "N3",
+      "finding": "PR-34 omits Cargo.lock from paths and product budget",
+      "roles": [
+        "testability-evidence"
+      ],
+      "status": "resolved",
+      "correction": "Own Cargo.lock, count six product files and require complete measured runtime/SQLite sizing before boundary approval."
+    },
+    {
+      "id": "N4",
+      "finding": "Native AI sheets omit the accepted clarifying-question response branch",
+      "roles": [
+        "ux-accessibility-mobile"
+      ],
+      "status": "resolved",
+      "correction": "Add M/D-04.16–20 and shared-model/UI ownership for answer save, once-only command identity, revision/consent-aware inference and distinct retry/draft states."
+    }
+  ],
+  "targeted_closure_reports": [
+    "requirements-consistency-closure.json",
+    "architecture-consistency-closure.json",
+    "testability-evidence-closure.json",
+    "ux-accessibility-mobile-closure.json",
+    "adversarial-high-risk-closure.json"
+  ],
+  "remaining_technical_findings": [],
+  "technical_review_status": "complete-all-reported-findings-resolved",
+  "closure_scope": "Five original reviewers checked their corrections and direct regressions at the corrected digest; privacy had no original finding. This is targeted closure, not a second full six-lens review or an implementation test.",
+  "planning_gate_verdict": "escalated",
+  "planning_gate_reason": "High-risk content requires actual named-human residual-risk sign-off; no such sign-off is recorded. This is not missing-review or CLI-provenance escalation.",
+  "human_signoff": null,
+  "new_product_decisions": [],
+  "provider_correlation": "One provider: OpenAI. Four gpt-6.1-sol/high sessions and two gpt-6-astra/high sessions; not six independent providers.",
+  "provenance_limit": "Runtime spawn selection is recorded; no CLI/external-adapter oracle or OS-enforced read-only attestation is fabricated.",
+  "prior_attempts": "Preserved unchanged; the explicit owner instruction authorizes this native panel after them and supersedes the CLI-only/campaign-cap objection for this panel only.",
+  "implementation_permission": false,
+  "protocol_quality_checklist": {
+    "assessed": 12,
+    "satisfied": 12,
+    "scope": "written requirements only",
+    "reports": [
+      "protocol-architecture.json",
+      "protocol-testability.json",
+      "protocol-ux.json"
+    ]
+  }
+}
