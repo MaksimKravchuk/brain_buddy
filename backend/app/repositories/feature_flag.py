@@ -88,6 +88,7 @@ MANAGED_FLAGS: tuple[str, ...] = (
     "crt_canvas",
     "task_mcp",
     "weekly_review",
+    "rust_core_sync",
 )
 OPTIONAL_MANAGED_FLAGS: tuple[str, ...] = ("cli_auth",)
 """The runtime-manageable flags after ADR-0019 and later inventory ADRs.
@@ -105,6 +106,7 @@ _POST_ADR_0019_DEFAULT_OFF_FLAGS: tuple[str, ...] = (
     "crt_canvas",
     "task_mcp",
     "weekly_review",
+    "rust_core_sync",
 )
 
 _LEGACY_JSON_MANAGED_FLAGS: frozenset[str] = frozenset(

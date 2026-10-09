@@ -369,6 +369,7 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
         "crt_canvas",
         "task_mcp",
         "weekly_review",
+        "rust_core_sync",
     }
     assert overlay.flags["task_title_autocomplete"].mode is FlagMode.OFF
 
@@ -855,6 +856,7 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
         "crt_canvas",
         "task_mcp",
         "weekly_review",
+        "rust_core_sync",
     }
 
     _sqlite_repo(tmp_path)
