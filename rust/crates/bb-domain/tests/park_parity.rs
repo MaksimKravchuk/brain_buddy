@@ -1399,4 +1399,16 @@ fn park_026_fr_016_a_stored_park_row_round_trips_and_its_public_form_drops_priva
             .get("private")
             .is_none()
     );
+
+    // A private revision the rule cannot hold is refused, never read back as a
+    // public row that would silently drop the private facts on the next write.
+    let mut wide = serde_json::to_value(&stored).expect("json");
+    wide["private"]["from_revision"] = json!("18446744073709551616");
+    let wide: bb_domain::types::ParkAck = serde_json::from_value(wide).expect("a wire-valid row");
+    assert_eq!(
+        ParkRow::from_ack(&wide),
+        Err(FormulationError::InvalidField(
+            "park_ack.private.from_revision"
+        ))
+    );
 }
