@@ -1,10 +1,12 @@
 //! PyO3 bridge from the FastAPI backend to the shared Rust core (spec 026, T004).
 //!
-//! This crate is the Python module `bb_core`. Today it exposes the completed
-//! `bb-protocol` command-envelope codec and nothing else: domain rule dispatch
-//! (`decide`/`query`, runtime-ffi.md "Pure core") arrives once the rule crate
-//! exists, and it will be added as further [`Runtime`] methods that go through
-//! the same [`guarded`] seam. No call here claims to evaluate a business rule.
+//! This crate is the Python module `bb_core`. It exposes the `bb-protocol`
+//! command-envelope codec and, since T018, the shared rule dispatch
+//! (`bb_domain::dispatch::decide_envelope` / `query`, runtime-ffi.md "Pure
+//! core") as [`Runtime::decide`] and [`Runtime::query`]. Both go through the
+//! same [`guarded`] seam and cross as JSON bytes: read set, envelope, retained
+//! receipts and execution inputs in; a typed outcome out. An expected domain
+//! refusal is a value (`{"status": "refused", ...}`), never a [`BridgeError`].
 //!
 //! Boundary rules (contracts/runtime-ffi.md):
 //! * every call copies its input into owned Rust values, then releases the GIL
@@ -19,12 +21,17 @@ use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Once};
 
+use bb_domain::dispatch;
+use bb_domain::types::{DomainError, ExecutionInputs, Query, QueryInputs, QueryResult, ReadSet};
 use bb_protocol::command::{self, Decoded, Unsupported};
+use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CodecError, PROTOCOL_VERSION};
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 create_exception!(
     bb_core,
@@ -121,6 +128,73 @@ fn guarded<T>(state: &AtomicU8, work: impl FnOnce() -> Result<T, Failure>) -> Re
         POISONED => Err(Failure::new("INTERNAL_ERROR", None)),
         _ => outcome,
     }
+}
+
+/// What `decide` returns across the boundary: a change set or a typed refusal.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum Decision {
+    Changed {
+        change_set: bb_domain::types::ChangeSet,
+    },
+    Refused {
+        error: DomainError,
+    },
+}
+
+/// What `query` returns across the boundary.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum Answer {
+    Answered { result: Box<QueryResult> },
+    Refused { error: DomainError },
+}
+
+/// Parses one JSON input; the failure names the argument, never its content.
+fn parse_json<T: DeserializeOwned>(data: &[u8], field: &'static str) -> Result<T, Failure> {
+    serde_json::from_slice(data).map_err(|_| Failure::new("INVALID_REQUEST", Some(field)))
+}
+
+fn to_json<T: Serialize>(value: &T) -> Result<Vec<u8>, Failure> {
+    serde_json::to_vec(value).map_err(|_| Failure::new("INTERNAL_ERROR", None))
+}
+
+/// Decide one executable command envelope against an owned read set.
+fn decide_envelope(
+    read_set: &[u8],
+    envelope: &[u8],
+    receipts: &[u8],
+    inputs: &[u8],
+) -> Result<Vec<u8>, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let receipts: Vec<Receipt> = parse_json(receipts, "receipts")?;
+    let inputs: ExecutionInputs = parse_json(inputs, "execution_inputs")?;
+    let json = std::str::from_utf8(envelope).map_err(|_| Failure::new("INVALID_REQUEST", None))?;
+    let envelope = match command::decode_command(json)? {
+        Decoded::Executable(envelope) => envelope,
+        Decoded::Unsupported { .. } => {
+            return Err(Failure::new("UPGRADE_REQUIRED", Some("command_type")));
+        }
+    };
+    to_json(
+        &match dispatch::decide_envelope(&read_set, &envelope, receipts.as_slice(), &inputs) {
+            Ok(change_set) => Decision::Changed { change_set },
+            Err(error) => Decision::Refused { error },
+        },
+    )
+}
+
+/// Answer one query over an owned read set.
+fn answer_query(read_set: &[u8], query: &[u8], inputs: &[u8]) -> Result<Vec<u8>, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let query: Query = parse_json(query, "query")?;
+    let inputs: QueryInputs = parse_json(inputs, "query_inputs")?;
+    to_json(&match dispatch::query(&read_set, &query, &inputs) {
+        Ok(result) => Answer::Answered {
+            result: Box::new(result),
+        },
+        Err(error) => Answer::Refused { error },
+    })
 }
 
 /// A decoded command envelope; every value is owned by this object.
@@ -248,6 +322,43 @@ impl Runtime {
         let state = Arc::clone(&self.state);
         let decoded = py.detach(move || guarded(&state, || decode_command(&owned)))?;
         Ok(decoded)
+    }
+
+    /// Decide one command envelope (runtime-ffi.md "Pure core"): JSON bytes in,
+    /// a `Decision` as JSON bytes out. The pure rule work runs without the GIL
+    /// on copies of every argument.
+    fn decide<'py>(
+        &self,
+        py: Python<'py>,
+        read_set: &[u8],
+        envelope: &[u8],
+        receipts: &[u8],
+        inputs: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let (read_set, envelope) = (read_set.to_vec(), envelope.to_vec());
+        let (receipts, inputs) = (receipts.to_vec(), inputs.to_vec());
+        let state = Arc::clone(&self.state);
+        let out = py.detach(move || {
+            guarded(&state, || {
+                decide_envelope(&read_set, &envelope, &receipts, &inputs)
+            })
+        })?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// Answer one query: JSON bytes in, an `Answer` as JSON bytes out.
+    fn query<'py>(
+        &self,
+        py: Python<'py>,
+        read_set: &[u8],
+        query: &[u8],
+        inputs: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let (read_set, query, inputs) = (read_set.to_vec(), query.to_vec(), inputs.to_vec());
+        let state = Arc::clone(&self.state);
+        let out =
+            py.detach(move || guarded(&state, || answer_query(&read_set, &query, &inputs)))?;
+        Ok(PyBytes::new(py, &out))
     }
 }
 
@@ -404,5 +515,72 @@ mod bridge_tests {
         let failure = decode_command(bad_id.as_bytes()).err().expect("rejected");
         assert_eq!(failure.code, "INVALID_REQUEST");
         assert!(!format!("{failure:?}").contains(secret));
+    }
+
+    const TASK_ID: &str = "task_5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d12";
+    const INPUTS: &str = r#"{
+        "rule_version": 1, "now": "2026-10-09T12:00:00Z", "time_zone": "UTC",
+        "origin": "legacy", "actor_id": "owner-1", "authoritative": true,
+        "allocated_ids": [],
+        "policy": {"weekly_review": false, "navigator_provider": null,
+                   "navigator_available": false, "consent_text_version": 1}
+    }"#;
+
+    fn create_envelope(entity_id: &str) -> String {
+        COMMAND.replace("\"task-1\"", &format!("\"{entity_id}\""))
+    }
+
+    fn decide_json(read_set: &str, envelope: &str) -> Result<serde_json::Value, Failure> {
+        decide_envelope(
+            read_set.as_bytes(),
+            envelope.as_bytes(),
+            b"[]",
+            INPUTS.as_bytes(),
+        )
+        .map(|out| serde_json::from_slice(&out).expect("json"))
+    }
+
+    #[test]
+    fn bridge_decides_a_command_into_an_owned_change_set() {
+        let out = decide_json("{}", &create_envelope(TASK_ID)).expect("decides");
+        assert_eq!(out["status"], "changed");
+        let change = &out["change_set"]["changes"][0];
+        assert_eq!(change["value"]["id"], TASK_ID);
+        assert_eq!(change["value"]["revision"], "1");
+    }
+
+    #[test]
+    fn bridge_reports_a_domain_refusal_as_a_value() {
+        // A legacy-shaped ID is not a native new ID: the rule refuses, the bridge does not fail.
+        let out = decide_json("{}", &create_envelope("task-1")).expect("decides");
+        assert_eq!(out["status"], "refused");
+        assert_eq!(out["error"]["reason"], "invalid_value");
+    }
+
+    #[test]
+    fn bridge_maps_bad_decide_inputs_without_content() {
+        let failure =
+            decide_json("{\"tasks\": 7}", &create_envelope(TASK_ID)).expect_err("rejected");
+        assert_eq!(failure, Failure::new("INVALID_REQUEST", Some("read_set")));
+        let unsupported = COMMAND.replace("task.create", "task.from_the_future");
+        let failure = decide_json("{}", &unsupported).expect_err("rejected");
+        assert_eq!(
+            failure,
+            Failure::new("UPGRADE_REQUIRED", Some("command_type"))
+        );
+    }
+
+    #[test]
+    fn bridge_answers_a_query_over_an_owned_read_set() {
+        let query_inputs = r#"{"now": "2026-10-09T12:00:00Z", "device_zone": "UTC",
+            "policy": {"weekly_review": false, "navigator_provider": null,
+                       "navigator_available": false, "consent_text_version": 1}}"#;
+        let out =
+            answer_query(b"{}", br#"{"kind": "tags"}"#, query_inputs.as_bytes()).expect("answers");
+        let out: serde_json::Value = serde_json::from_slice(&out).expect("json");
+        assert_eq!(out["status"], "answered");
+        let failure = answer_query(b"{}", br#"{"kind": "nope"}"#, query_inputs.as_bytes())
+            .expect_err("rejected");
+        assert_eq!(failure, Failure::new("INVALID_REQUEST", Some("query")));
     }
 }

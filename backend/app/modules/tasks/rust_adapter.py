@@ -1,9 +1,9 @@
 """Typed facade over the PyO3 core bridge (spec 026, T004).
 
-Only the completed ``bb-protocol`` command codec crosses the bridge today.
-``TaskService`` does not call it: the existing Python rules stay the active
-writer until decide/query are connected by a later slice, which adds methods to
-:class:`RustCore` beside :meth:`RustCore.decode_command`.
+The ``bb-protocol`` command codec and, since T018, the shared rule dispatch
+(:meth:`RustCore.decide`, :meth:`RustCore.query`) cross the bridge as owned JSON
+bytes. ``TaskService`` reaches them only through ``RustTaskFacade`` while the
+``rust_core_sync`` flag is on; with it off the Python rules stay the writer.
 
 Bridge failures arrive as ``bb_core.BridgeError(code, retryable, field)`` and
 carry no payload text. They are translated here into the application's own
@@ -13,10 +13,11 @@ a log or a response.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Final, Self, TypeVar
+from typing import Any, Final, Self, TypeVar
 
 import bb_core
 
@@ -117,3 +118,81 @@ class RustCore:
             unsupported_reason=decoded.unsupported_reason,
             wire=decoded.to_bytes(),
         )
+
+    def decide(
+        self,
+        read_set: Mapping[str, Any],
+        envelope: Mapping[str, Any],
+        inputs: Mapping[str, Any],
+        receipts: list[Mapping[str, Any]] | None = None,
+    ) -> Decision:
+        """Decide one command envelope against an owned read set.
+
+        An expected domain refusal is returned as ``Decision.refusal``; only a
+        bridge failure (closed, cancelled, internal, malformed input) raises.
+        """
+        out = self._call(
+            self._runtime.decide,
+            _encode(read_set),
+            _encode(envelope),
+            _encode(receipts or []),
+            _encode(inputs),
+        )
+        body = json.loads(out)
+        if body["status"] == "changed":
+            return Decision(change_set=body["change_set"], refusal=None)
+        return Decision(change_set=None, refusal=_refusal(body["error"]))
+
+    def query(
+        self,
+        read_set: Mapping[str, Any],
+        query: Mapping[str, Any],
+        inputs: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Answer one typed query; a refusal raises ``ValidationFailure``."""
+        out = self._call(
+            self._runtime.query,
+            _encode(read_set),
+            _encode(query),
+            _encode(inputs),
+        )
+        body = json.loads(out)
+        if body["status"] != "answered":
+            raise ValidationFailure(
+                "Query refused.", {"reason": body["error"]["reason"]}
+            )
+        result: dict[str, Any] = body["result"]
+        return result
+
+
+def _encode(value: object) -> bytes:
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+@dataclass(frozen=True, slots=True)
+class DomainRefusal:
+    """A typed domain refusal; ``reason`` is a stable code, never input text."""
+
+    reason: str
+    field: str | None
+    entity: tuple[str, list[str]] | None
+    current_revision: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class Decision:
+    """Exactly one of a change set (plain JSON values) or a refusal."""
+
+    change_set: dict[str, Any] | None
+    refusal: DomainRefusal | None
+
+
+def _refusal(error: Mapping[str, Any]) -> DomainRefusal:
+    entity = error.get("entity")
+    revision = error.get("current_revision")
+    return DomainRefusal(
+        reason=error["reason"],
+        field=error.get("field"),
+        entity=None if entity is None else (entity[0], list(entity[1])),
+        current_revision=None if revision is None else int(revision),
+    )

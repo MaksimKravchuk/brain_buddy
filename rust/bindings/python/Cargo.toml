@@ -13,7 +13,9 @@ name = "bb_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+bb-domain.workspace = true
 bb-protocol.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 # abi3 keeps one wheel valid for every supported CPython (>=3.11). maturin adds
 # the extension-module link mode at build time, so `cargo test` still links libpython.
