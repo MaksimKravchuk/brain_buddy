@@ -209,7 +209,7 @@ class CrtCommandRepository(SQLiteRepositorySupport, BaseRepository):
         for row in rows:
             try:
                 pending.append(self._from_row(row))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 # Leave malformed rows pending for an operator/forward fix;
                 # one bad row must not block independent reconciliation.
                 continue

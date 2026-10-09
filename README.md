@@ -28,7 +28,7 @@ See [Product direction: executable next actions](docs/product-direction.md) for 
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11 with the `venv` module (see `.python-version`)
+- Python 3.14 with the `venv` module (see `.python-version`)
 - Node.js 20.19.0 for the web frontend (see `frontend/.nvmrc`)
 - nvm available to the shell, npm, and GNU Make
 

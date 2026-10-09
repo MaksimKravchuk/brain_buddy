@@ -139,7 +139,7 @@ class TreeRepository(BaseRepository):
         )
 
     @contextmanager
-    def _exclusive_tree_lock(self, tree_id: str) -> Generator[None, None, None]:
+    def _exclusive_tree_lock(self, tree_id: str) -> Generator[None]:
         """Serialize read-check-write transactions for one persisted tree."""
 
         lock_dir = ensure_directory(self.resolve(".locks"))

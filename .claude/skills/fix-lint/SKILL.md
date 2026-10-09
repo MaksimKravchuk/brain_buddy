@@ -29,7 +29,7 @@ ruff rule G004                    # what a code means, with examples
 ## Ruff: the enabled families
 
 Configured in `backend/pyproject.toml` under `[tool.ruff.lint]`. Line length 88,
-target py311.
+target py314.
 
 | Family | Covers | Usual fix |
 |---|---|---|
@@ -111,7 +111,7 @@ That determines what to do when you trip one:
 
 ## Black
 
-`black --check app tests` in `make lint-backend`; 88 columns, py311 target.
+`black --check app tests` in `make lint-backend`; 88 columns, py314 target.
 Never hand-format to satisfy it, and never hand-wrap for `E501` — that code is
 ignored precisely because black owns line breaking. Fix order is `ruff check
 --fix` then `black app tests`, since ruff's rewrites still need formatting.

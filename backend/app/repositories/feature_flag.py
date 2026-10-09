@@ -323,7 +323,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
             return True
         try:
             self._prepare()
-        except (sqlite3.Error, OSError, ManagedFlagMigrationError):
+        except sqlite3.Error, OSError, ManagedFlagMigrationError:
             return False
         return True
 
@@ -450,7 +450,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
             try:
                 FlagMode(row["mode"])
                 raw_cohort = json.loads(row["selected_users"])
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except TypeError, ValueError, json.JSONDecodeError:
                 return
             if not isinstance(raw_cohort, list):
                 return
@@ -503,7 +503,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         try:
             text = self._legacy_document_path.read_text(encoding="utf-8")
             payload = json.loads(text)
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return {}
         return payload if isinstance(payload, dict) else {}
 
@@ -564,7 +564,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
         try:
             with self._owned_connection() as conn:
                 overlay = self._load(conn)
-        except (sqlite3.Error, OSError):
+        except sqlite3.Error, OSError:
             return self._note_degraded(_REASON_UNREADABLE)
         if overlay.degraded:
             return self._note_degraded(_REASON_INVALID_MODE)
@@ -587,7 +587,7 @@ class FeatureFlagOverrideRepository(BaseRepository):
             try:
                 mode = FlagMode(row["mode"])
                 raw_cohort = json.loads(row["selected_users"])
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 return RuntimeOverlay(degraded=True, flags={})
             if not isinstance(raw_cohort, list) or not all(
                 isinstance(item, str) for item in raw_cohort

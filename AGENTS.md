@@ -218,7 +218,7 @@ It had accumulated fifteen near-identical lines naming four features that no
 longer exist under `specs/` — pruned 2026-08-13. Prune again rather than letting
 it grow; this is a summary, not an append-only log.
 
-- Backend: Python 3.11, FastAPI, Pydantic, pytest. Layered `app/api/` ->
+- Backend: Python 3.14, FastAPI, Pydantic, pytest. Layered `app/api/` ->
   `app/services/` -> `app/repositories/`, wired in `app/container.py`.
 - Frontend: TypeScript (strict), React, Vite, Zustand, React Query, Tailwind;
   Vitest + Testing Library, Playwright for e2e.

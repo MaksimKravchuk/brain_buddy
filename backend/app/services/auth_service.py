@@ -354,7 +354,7 @@ class AuthService:
                 post_check = self.user_repo.get_by_id(user.id)
                 if post_check is None or post_check.deletion_requested_at is not None:
                     raise InvalidCredentialsError()
-        except (NotFoundError, ConflictError):
+        except NotFoundError, ConflictError:
             # Purged between the credential check and the write — the
             # account is gone; behave like any bad credential.
             raise InvalidCredentialsError() from None

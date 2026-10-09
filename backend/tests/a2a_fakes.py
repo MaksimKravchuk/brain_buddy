@@ -444,7 +444,7 @@ class DripFeedingAgent:
                         self.wfile.flush()
                         agent.bytes_sent += 1
                         time.sleep(agent.interval_seconds)
-                except (BrokenPipeError, ConnectionResetError, ValueError):
+                except BrokenPipeError, ConnectionResetError, ValueError:
                     # The client closed the stream, which is the whole point.
                     return
 

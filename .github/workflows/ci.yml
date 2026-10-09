@@ -340,7 +340,7 @@ jobs:
         if: env.RUN == 'true'
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
@@ -870,7 +870,7 @@ jobs:
         if: env.RUN == 'true' && github.event_name == 'pull_request'
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: base/backend/pyproject.toml
 
@@ -964,7 +964,7 @@ jobs:
         if: env.RUN == 'true'
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
@@ -1326,7 +1326,7 @@ jobs:
       - name: Set up Python for the isolated modern auth browser fixture
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
@@ -1420,7 +1420,7 @@ jobs:
       - name: Set up native Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
         with:

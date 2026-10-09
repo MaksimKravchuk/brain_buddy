@@ -9,7 +9,7 @@
 # listens on loopback is only reachable from inside that namespace, and patching
 # the bind address would make this a fixture of our own rather than the
 # reference runtime FR-017 asks for.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

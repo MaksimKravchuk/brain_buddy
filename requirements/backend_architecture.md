@@ -1,7 +1,7 @@
 # Brain Buddy Backend Architecture
 
 ## Stack & Tooling
-- **Framework**: FastAPI (Python 3.11) for async-friendly endpoints and automatic OpenAPI generation.
+- **Framework**: FastAPI (Python 3.14) for async-friendly endpoints and automatic OpenAPI generation.
 - **Server Runner**: Uvicorn with reload during development.
 - **Data Models**: Pydantic v2 to validate requests/responses and map to storage layer.
 - **Persistence**: Filesystem repository writing JSON artifacts as defined in `data_model.md`.

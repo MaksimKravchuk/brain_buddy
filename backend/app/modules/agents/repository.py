@@ -183,7 +183,7 @@ def _decoded_payload(raw: str) -> dict[str, Any] | None:
 
     try:
         payload = json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -200,7 +200,7 @@ def _bumped_revision(payload: Mapping[str, Any]) -> int:
 
     try:
         current = int(payload.get("revision", 1))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         current = 1
     return min(max(current, 1), 2_147_483_646) + 1
 
@@ -848,7 +848,7 @@ class AgentRepository(BaseRepository):
             for row in rows:
                 try:
                     AgentConnectionDocument.model_validate(json.loads(row["payload"]))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
                 else:
                     continue
@@ -1876,7 +1876,7 @@ class AgentRepository(BaseRepository):
 
         try:
             return self._model(row, AgentRunDocument)
-        except (ValidationError, RepositoryError):
+        except ValidationError, RepositoryError:
             logger.warning(
                 "agent_retention_skipped_unparseable_row owner_id=%s run_id=%s "
                 "correlation_id=%s",
@@ -2099,7 +2099,7 @@ class AgentRepository(BaseRepository):
         for row in connection_rows:
             try:
                 payload = json.loads(row["payload"])
-            except (TypeError, json.JSONDecodeError):
+            except TypeError, json.JSONDecodeError:
                 unreadable += 1
                 continue
             if not isinstance(payload, dict):

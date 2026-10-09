@@ -20,7 +20,7 @@ from app.core.config import AppConfig, ModernAuthSettings, get_config
 @pytest.fixture(autouse=True)
 def isolated_auth_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Generator[None, None, None]:
+) -> Generator[None]:
     for name in os.environ:
         if name.startswith("BRAIN_BUDDY_AUTH_"):
             monkeypatch.delenv(name)

@@ -256,7 +256,7 @@ class AuthAppleLifecycle:
                     key_id = self.secret_box.current_key_id
                 finally:
                     payload.clear()
-            except (AuthSecretError, ValueError, TypeError):
+            except AuthSecretError, ValueError, TypeError:
                 status = "failed"
             if status != "pending":
                 sealed = key_id = None
@@ -325,7 +325,7 @@ class AuthAppleLifecycle:
                     continue
                 try:
                     payload = self._open(job, "apple_cleanup")
-                except (AuthSecretError, ValueError, TypeError):
+                except AuthSecretError, ValueError, TypeError:
                     self._retire(connection, job["id"], "failed")
                     continue
                 lease_id = uuid.uuid4().hex
@@ -440,7 +440,7 @@ class AuthAppleLifecycle:
             raise AuthAppleLifecycleError(
                 exc.code, 400 if exc.code == "invalid_proof" else 503
             ) from None
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             raise AuthAppleLifecycleError("invalid_proof", 400) from None
         digest = hashlib.sha256(
             f"{_NAMESPACE}\0{_ISSUER}\0{event.jti}".encode()
