@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use bb_domain::calendar::CalendarDay;
-use serde_json::Value;
+use bb_domain::types::{ChangeSet, DomainChange, ReadSet, Record};
+use serde_json::{Value, json};
 
 /// The repository root: `rust/crates/bb-domain` is three levels below it.
 pub fn repo_root() -> PathBuf {
@@ -91,6 +92,96 @@ pub fn int(case: &Value, key: &str) -> i64 {
     case.get(key)
         .and_then(Value::as_i64)
         .unwrap_or_else(|| panic!("case {case} has no integer {key:?}"))
+}
+
+/// The valid stand-in for the oracle's `form_a` (formulation ids are checked).
+pub const VECTOR_FORMULATION: &str = "form_00000000000a";
+
+/// The `ReadSet` JSON the server holds for one `auto_park` vector of the
+/// formulation oracle: the vector's task (`before`) under `task_id`, and its
+/// owner settings with an effective evaluation a minute before `now`, so no
+/// sweep gap floors the park (the convention of the park traces).
+pub fn auto_park_read_set(vector: &Value, task_id: &str) -> Value {
+    let before: Value = serde_json::from_str(
+        &vector["before"]
+            .to_string()
+            .replace("form_a", VECTOR_FORMULATION),
+    )
+    .expect("a vector task");
+    let parked = before["parked"].as_object().map(|park| {
+        let was = &park["clock_before"];
+        json!({
+            "at": park["at"], "formulation_id": park["formulation_id"],
+            "private": {
+                "from_revision": park["from_revision"].to_string(),
+                "clock_before": {
+                    "formulation_id": park["formulation_id"],
+                    "started_at": was["started_at"], "extended_at": was["extended_at"],
+                    "extension_reason": was["extension_reason"],
+                    "park_floor_at": was["park_floor_at"],
+                    "stalled_before": was["stalled_before"],
+                },
+            },
+        })
+    });
+    let formulation = before["formulation_started_at"].as_str().map(|started| {
+        json!({
+            "id": before["formulation_id"], "started_at": started,
+            "extended_at": before["formulation_extended_at"],
+            "extension_reason": before["formulation_extension_reason"],
+            "park_floor_at": before["formulation_park_floor_at"],
+        })
+    });
+    let settings = &vector["settings"];
+    let last_sweep = bb_domain::calendar::UtcInstant::parse_rfc3339(text(vector, "now"))
+        .expect("a vector instant")
+        .plus_seconds(-60)
+        .to_rfc3339();
+    json!({
+        "tasks": { task_id: {
+            "id": task_id, "title": before["title"], "details": null,
+            "state": before["state"], "project_id": null, "tag_ids": [],
+            "due_date": before["due_date"], "priority": "none", "waiting_for": null,
+            "waiting_since": null, "order_key": "3", "source_capture_ids": [],
+            "created_at": "2026-09-01T09:00:00Z", "updated_at": "2026-09-02T09:00:00Z",
+            "completed_at": null, "cancelled_at": null,
+            "revision": before["revision"].to_string(),
+            "consecutive_stalled_formulations": before["consecutive_stalled_formulations"],
+            "formulation": formulation, "parked": parked,
+        }},
+        "settings": {
+            "threshold_days": settings["threshold_days"], "review_weekday": 5,
+            "review_time": "16:00", "time_zone": settings["time_zone"],
+            "onboarded_at": null, "activated_at": settings["activated_at"],
+            "owner_park_floor_at": settings["owner_park_floor_at"], "revision": "2",
+            "private": { "last_effective_sweep_at": last_sweep, "threshold_changed_at": null },
+        },
+    })
+}
+
+/// The read set after a change set committed: every upserted task, settings or
+/// park row replaces its stored row (the other record kinds are not touched by
+/// the park commands).
+pub fn commit(read_set: &ReadSet, set: &ChangeSet) -> ReadSet {
+    let mut next = read_set.clone();
+    for change in &set.changes {
+        match change {
+            DomainChange::Upsert(Record::Task(task)) => {
+                next.tasks.insert(task.id.clone(), task.clone());
+            }
+            DomainChange::Upsert(Record::ReviewSettings(settings)) => {
+                next.settings = Some(settings.clone());
+            }
+            DomainChange::Upsert(Record::ReviewParkAck(ack)) => {
+                next.park_acks.retain(|stored| {
+                    (&stored.task_id, &stored.formulation_id) != (&ack.task_id, &ack.formulation_id)
+                });
+                next.park_acks.push(ack.clone());
+            }
+            other => panic!("not a park change: {other:?}"),
+        }
+    }
+    next
 }
 
 /// A `YYYY-MM-DDTHH:MM:SSZ` instant as Unix seconds.
