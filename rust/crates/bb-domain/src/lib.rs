@@ -8,6 +8,10 @@
 //!   `formulation.py`).
 //! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
 //!   a calendar day distinct from an instant.
+//! * [`ai_policy`]: the pure AI route policy: local suitability, on-device-only,
+//!   per-owner/provider/consent-version remote consent, input and time limits.
+//! * [`proposal`]: navigator output validation, notes reduction and inert,
+//!   allow-listed command proposals applied only after explicit confirmation.
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
@@ -17,10 +21,12 @@
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
+pub mod ai_policy;
 pub mod calendar;
 pub mod children;
 pub mod formulation;
 pub mod normalization;
 pub mod organize;
 pub mod park;
+pub mod proposal;
 pub mod types;
