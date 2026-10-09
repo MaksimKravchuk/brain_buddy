@@ -11,7 +11,8 @@
 //!   whose `handles` claims it.
 //! * [`query`] routes a [`Query`] to the one family whose `handles_query`
 //!   claims it. The Review reads belong to `review_sessions` and are asked
-//!   before `queries`, which refuses them.
+//!   before `queries`, which refuses them; the native list modes belong to
+//!   `list_modes`.
 //!
 //! Ownership is read from each family's own `handles`/`handles_query`, never
 //! restated here, so a family cannot change what it accepts without the
@@ -29,7 +30,8 @@ use crate::types::{
     QueryInputs, QueryResult, ReadSet, Reason,
 };
 use crate::{
-    children, organize, park, queries, review_decisions, review_sessions, smart_add, task_rules,
+    children, list_modes, organize, park, queries, review_decisions, review_sessions, smart_add,
+    task_rules,
 };
 use bb_protocol::command::CommandEnvelope;
 
@@ -81,6 +83,9 @@ impl CommandFamily {
 /// A rule family that answers queries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum QueryFamily {
+    /// The native list modes: History, Agenda, date views and Search
+    /// ([`list_modes`]).
+    ListModes,
     /// Task, project and tag reads ([`queries`]).
     Queries,
     /// `ReviewState` and `ReviewQueue` ([`review_sessions`]).
@@ -90,12 +95,13 @@ pub enum QueryFamily {
 impl QueryFamily {
     /// Every family that answers queries, in dispatch order (the Review reads
     /// are claimed before `queries` sees them).
-    pub const ALL: [Self; 2] = [Self::ReviewSessions, Self::Queries];
+    pub const ALL: [Self; 3] = [Self::ReviewSessions, Self::ListModes, Self::Queries];
 
     /// The family's own claim on a query.
     pub fn handles(self, query: &Query) -> bool {
         match self {
             Self::Queries => queries::handles_query(query),
+            Self::ListModes => list_modes::handles_query(query),
             Self::ReviewSessions => review_sessions::handles_query(query),
         }
     }
@@ -112,11 +118,12 @@ pub enum QueryKind {
     Tags,
     ReviewState,
     ReviewQueue,
+    ListMode,
 }
 
 impl QueryKind {
     /// Every query kind of the catalog.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::TaskList,
         Self::TaskDetail,
         Self::ListCounts,
@@ -125,6 +132,7 @@ impl QueryKind {
         Self::Tags,
         Self::ReviewState,
         Self::ReviewQueue,
+        Self::ListMode,
     ];
 
     /// The wire spelling of `Query`'s `kind` tag.
@@ -138,6 +146,7 @@ impl QueryKind {
             Self::Tags => "tags",
             Self::ReviewState => "review_state",
             Self::ReviewQueue => "review_queue",
+            Self::ListMode => "list_mode",
         }
     }
 }
@@ -153,6 +162,7 @@ pub fn query_kind(query: &Query) -> QueryKind {
         Query::Tags {} => QueryKind::Tags,
         Query::ReviewState {} => QueryKind::ReviewState,
         Query::ReviewQueue { .. } => QueryKind::ReviewQueue,
+        Query::ListMode { .. } => QueryKind::ListMode,
     }
 }
 
@@ -258,6 +268,7 @@ pub fn query(
 ) -> Result<QueryResult, DomainError> {
     match query_owner(query)? {
         QueryFamily::ReviewSessions => review_sessions::query(read_set, query, inputs),
+        QueryFamily::ListModes => list_modes::query(read_set, query, inputs),
         QueryFamily::Queries => queries::query(read_set, query, inputs),
     }
 }

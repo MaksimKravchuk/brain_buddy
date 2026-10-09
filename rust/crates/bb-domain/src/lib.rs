@@ -24,6 +24,8 @@
 //!   and the `review.auto_park` / `review.parks_ack` commands that wrap them.
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
+//! * [`list_modes`]: the native list modes (History, Agenda, date views, Search)
+//!   in the Apple kit's sections and order, paged with a keyset cursor.
 //! * [`review_decisions`]: the Review decision commands (`review.decide`,
 //!   `review.undo_decision`, bulk release and its Undo) over the formulation,
 //!   park and task rules.
@@ -45,6 +47,7 @@ pub mod calendar;
 pub mod children;
 pub mod dispatch;
 pub mod formulation;
+pub mod list_modes;
 pub mod normalization;
 pub mod organize;
 pub mod park;

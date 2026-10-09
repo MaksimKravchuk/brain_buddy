@@ -10,6 +10,25 @@ Status: **frozen-v1** (2026-10-09, PR-01; ADR-0031) first-launch Apple/Python co
 
 `query(consistent_state, query, now, device_zone, policy)` reuses canonical list/order/Review rules. Normalization and date math use the parity vectors; no new platform copy of a reducer is permitted. A synced client lacking private server snapshots can queue a valid intent and show its existing deferred state, but cannot fabricate a successful Undo/yield projection.
 
+## Query kinds
+
+`query` takes one typed `Query`, tagged by `kind`, and answers one `QueryResult` tagged the same way (`bb-domain` `Query`/`QueryResult`, `dispatch::QueryKind`). Every kind has exactly one owning rule family; a kind no family claims is a typed refusal, never a placeholder.
+
+| `kind` | Reads | Owner |
+| --- | --- | --- |
+| `task_list` | one open list (the server's `GET /tasks?state=`): sort, project/tag scope, keyset page, `counts_by_state` | `queries` |
+| `task_detail`, `list_counts`, `projects`, `project_display`, `tags` | detail with children, badge counts, project and tag summaries | `queries` |
+| `review_state`, `review_queue` | native Review reads (weekly-review flag gated) | `review_sessions` |
+| `list_mode` | **amended 2026-10-09**: the native list modes below | `list_modes` |
+
+`list_mode` (owner decision 2026-10-09: the Apple client's extra destinations become shared queries, so every client reuses them) is `{kind: "list_mode", mode, options?, page}`:
+
+- `mode` is `{type: "history", kind: "completed"|"cancelled"}`, `{type: "agenda"}`, `{type: "date_view", view: "overdue"|"today"|"upcoming"}` or `{type: "search", text}`.
+- `options` (all optional) is `{sort: manual|due|priority|title, group_by_project, show_completed, show_cancelled, priorities[], tag_filter}`, `ListOptions` of the Apple kit. Unknown members are refused.
+- `page` is `{limit: 1..200, after}`. The result is `{sections: [{id, title, kind: {type: open|project|date_view|completed|cancelled, ...}, items: TaskView[]}], open_count, next_cursor, has_more}`: the rows of the whole result in section order, one bounded page of it. A section a page starts inside repeats its `id`. `open_count` counts the whole result. Memory is O(limit) for any store size.
+- The cursor is the `task_list` token format (base64url JSON of the filters it must match and the last key) whose key starts with the id of the last row's section, so a renamed project cannot make it skip or repeat rows. Another mode, option, filter or device day, an unknown section or a key of the wrong shape is refused as `invalid_value` on `cursor`. The Agenda and date views read `now` and `device_zone` for the day; History and Search do not.
+- The Apple kit is normative for these modes (`GTDQueries.list`, `Queries+List.swift`, `Queries+Ordering.swift`), which decides register entries C-05 and C-06 of `reference-store.json` for them only: Search and title order fold diacritics as well as case, a search query collapses White_Space (not Python's class), and grouped sections follow `NameSortKey` (diacritic-folded name, archived last, "No project" last). `task_list`, `projects` and `tags` keep the server's rules. The kit's per-list placement of completed tasks (`lastOpenList`, local knowledge that is not replicated) is not part of `list_mode`.
+
 ## Native runtime surface
 
 The Swift facade owns one runtime handle per open workspace. Shared app-group paths and the migration/writer locks, not a single Swift actor alone, coordinate app/widget/intents. Credentials remain in the platform secure store/HTTP adapter. Call names below describe typed semantics, not a prescribed C-style ABI.
