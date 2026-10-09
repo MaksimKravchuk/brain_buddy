@@ -15,6 +15,7 @@ vocab! {
         InvalidPayload => "invalid_payload",
         UnsupportedCommandVersion => "unsupported_command_version",
         DependencyPending => "dependency_pending",
+        DependencyRejected => "dependency_rejected",
         IncompleteReadSet => "incomplete_read_set",
         RevisionConflict => "revision_conflict",
         EntityDeleted => "entity_deleted",
