@@ -16,7 +16,7 @@ use bb_domain::dispatch::{
     query_kind, query_owner, unowned,
 };
 use bb_domain::types::*;
-use bb_domain::{children, organize, queries, review_decisions, review_sessions};
+use bb_domain::{children, organize, park, queries, review_decisions, review_sessions};
 use bb_domain::{smart_add, task_rules};
 use bb_protocol::command::{CommandEnvelope, Decoded, decode_command};
 use bb_protocol::receipt::Receipt;
@@ -31,8 +31,12 @@ const REF_TASK: &str = "da6395c2-8e67-527b-be6d-4b5673d9e756";
 // ----------------------------------------------------------------------- harness
 
 fn exec(allocated: &[&str]) -> ExecutionInputs {
+    exec_at(NOW, allocated)
+}
+
+fn exec_at(now: &str, allocated: &[&str]) -> ExecutionInputs {
     serde_json::from_value(json!({
-        "rule_version": 1, "now": NOW, "time_zone": "UTC", "origin": "device",
+        "rule_version": 1, "now": now, "time_zone": "UTC", "origin": "device",
         "actor_id": "actor-example", "authoritative": true, "allocated_ids": allocated,
         "policy": {
             "weekly_review": true, "navigator_provider": null,
@@ -211,13 +215,6 @@ fn sample_queries() -> Vec<Query> {
     .collect()
 }
 
-/// The catalog commands no family decides yet. `review.auto_park` and
-/// `review.parks_ack` have their primitives in `park` (T014) but no command
-/// `decide` in any completed family (T015 and T016 own decisions, sessions,
-/// settings and consent), so the dispatch refuses them rather than invent a
-/// rule here.
-const UNOWNED: [&str; 2] = ["review.auto_park", "review.parks_ack"];
-
 // ------------------------------------------------------------------- the oracle data
 
 /// The reference store's rows for one owner, as the `ReadSet` the runtime loads.
@@ -344,6 +341,56 @@ fn review_read_set() -> ReadSet {
     .expect("the review read set")
 }
 
+/// A Next task whose formulation started 29 days before `NOW` (`park_due`), an
+/// activated owner whose last effective evaluation was a minute ago (no sweep
+/// gap), and two unseen park rows (one already seen).
+const PARK_TASK: &str = "task_00000000-0000-4000-8000-0000000000c1";
+const PARK_FORM: &str = "form_0b0e1f30-0000-4000-8000-0000000000c1";
+const ROW_A: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000c2",
+    "form_0b0e1f30-0000-4000-8000-0000000000c2",
+);
+const ROW_B: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000c3",
+    "form_0b0e1f30-0000-4000-8000-0000000000c3",
+);
+const ROW_SEEN: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000c4",
+    "form_0b0e1f30-0000-4000-8000-0000000000c4",
+);
+
+fn park_read_set() -> ReadSet {
+    let ack = |(task, form): (&str, &str), seen: Option<&str>| {
+        json!({
+            "task_id": task, "formulation_id": form, "parked_at": "2026-10-08T09:00:00Z",
+            "seen_at": seen, "returned_at": null,
+            "private": { "from_revision": "3", "source": "sweep" },
+        })
+    };
+    serde_json::from_value(json!({
+        "tasks": { PARK_TASK: {
+            "id": PARK_TASK, "title": "Call Bob", "details": null, "state": "next",
+            "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+            "waiting_for": null, "waiting_since": null, "order_key": "3",
+            "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
+            "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,
+            "revision": "4", "consecutive_stalled_formulations": 0,
+            "formulation": { "id": PARK_FORM, "started_at": "2026-09-10T09:00:00Z",
+                "extended_at": null, "extension_reason": null, "park_floor_at": null },
+            "parked": null,
+        }},
+        "settings": {
+            "threshold_days": 14, "review_weekday": 5, "review_time": "16:00",
+            "time_zone": "UTC", "onboarded_at": null, "activated_at": "2026-08-01T00:00:00Z",
+            "owner_park_floor_at": null, "revision": "2",
+            "private": { "last_effective_sweep_at": "2026-10-09T11:59:00Z",
+                         "threshold_changed_at": null },
+        },
+        "park_acks": [ack(ROW_A, None), ack(ROW_B, None), ack(ROW_SEEN, Some("2026-10-08T10:00:00Z"))],
+    }))
+    .expect("the park read set")
+}
+
 // ------------------------------------------------------------------ ownership
 
 #[test]
@@ -365,58 +412,46 @@ fn dispatch_026_fr_002_the_samples_cover_every_catalog_command_and_query_kind() 
 
 #[test]
 fn dispatch_026_fr_002_every_catalog_command_has_the_owner_the_table_names() {
-    use CommandFamily::{Children, Organize, ReviewDecisions, ReviewSessions, SmartAdd, TaskRules};
-    let table: [(&str, Option<CommandFamily>); 30] = [
-        ("project.create", Some(Organize)),
-        ("project.update", Some(Organize)),
-        ("project.archive", Some(Organize)),
-        ("project.unarchive", Some(Organize)),
-        ("tag.create", Some(Organize)),
-        ("tag.update", Some(Organize)),
-        ("tag.delete", Some(Organize)),
-        ("task.create", Some(TaskRules)),
-        ("task.smart_add", Some(SmartAdd)),
-        ("task.update", Some(TaskRules)),
-        ("task.tags", Some(Organize)),
-        ("task.transition", Some(TaskRules)),
-        ("subtask.create", Some(Children)),
-        ("subtask.update", Some(Children)),
-        ("subtask.transition", Some(Children)),
-        ("comment.create", Some(Children)),
-        ("comment.update", Some(Children)),
-        ("review.decide", Some(ReviewDecisions)),
-        ("review.undo_decision", Some(ReviewDecisions)),
-        ("review.auto_park", None),
-        ("review.explainer_ack", Some(ReviewSessions)),
-        ("review.settings", Some(ReviewSessions)),
-        ("review.parks_ack", None),
-        ("review.session_start", Some(ReviewSessions)),
-        ("review.session_progress", Some(ReviewSessions)),
-        ("review.session_finish", Some(ReviewSessions)),
-        ("review.bulk_release", Some(ReviewDecisions)),
-        ("review.bulk_undo", Some(ReviewDecisions)),
-        ("review.consent_grant", Some(ReviewSessions)),
-        ("review.consent_revoke", Some(ReviewSessions)),
+    use CommandFamily::{
+        Children, Organize, Park, ReviewDecisions, ReviewSessions, SmartAdd, TaskRules,
+    };
+    let table: [(&str, CommandFamily); 30] = [
+        ("project.create", Organize),
+        ("project.update", Organize),
+        ("project.archive", Organize),
+        ("project.unarchive", Organize),
+        ("tag.create", Organize),
+        ("tag.update", Organize),
+        ("tag.delete", Organize),
+        ("task.create", TaskRules),
+        ("task.smart_add", SmartAdd),
+        ("task.update", TaskRules),
+        ("task.tags", Organize),
+        ("task.transition", TaskRules),
+        ("subtask.create", Children),
+        ("subtask.update", Children),
+        ("subtask.transition", Children),
+        ("comment.create", Children),
+        ("comment.update", Children),
+        ("review.decide", ReviewDecisions),
+        ("review.undo_decision", ReviewDecisions),
+        ("review.auto_park", Park),
+        ("review.explainer_ack", ReviewSessions),
+        ("review.settings", ReviewSessions),
+        ("review.parks_ack", Park),
+        ("review.session_start", ReviewSessions),
+        ("review.session_progress", ReviewSessions),
+        ("review.session_finish", ReviewSessions),
+        ("review.bulk_release", ReviewDecisions),
+        ("review.bulk_undo", ReviewDecisions),
+        ("review.consent_grant", ReviewSessions),
+        ("review.consent_revoke", ReviewSessions),
     ];
     let samples = sample_commands();
     assert_eq!(table.len(), samples.len());
     for (wire, expected) in table {
-        let command = &samples[wire];
-        match expected {
-            Some(family) => assert_eq!(command_owner(command), Ok(family), "{wire}"),
-            None => assert_eq!(command_owner(command), Err(unowned()), "{wire}"),
-        }
+        assert_eq!(command_owner(&samples[wire]), Ok(expected), "{wire}");
     }
-    let none: BTreeSet<&str> = table
-        .iter()
-        .filter(|(_, owner)| owner.is_none())
-        .map(|(wire, _)| *wire)
-        .collect();
-    assert_eq!(
-        none,
-        BTreeSet::from(UNOWNED),
-        "the unowned commands are named"
-    );
 }
 
 #[test]
@@ -431,14 +466,10 @@ fn dispatch_026_fr_002_no_command_is_claimed_by_two_families() {
             "{wire} is claimed by {} families: {claims:?}",
             claims.len()
         );
-        assert_eq!(
-            claims.is_empty(),
-            UNOWNED.contains(wire),
-            "{wire}: only the named commands are unowned"
-        );
+        assert_eq!(claims.len(), 1, "{wire}: no catalog command is unowned");
         owned += claims.len();
     }
-    assert_eq!(owned, 28, "every other command has its one owner");
+    assert_eq!(owned, 30, "every catalog command has its one owner");
     // A family is never asked about a command it does not name.
     for family in CommandFamily::ALL {
         let claimed = samples.values().filter(|c| family.handles(c)).count();
@@ -634,16 +665,162 @@ fn dispatch_026_fr_016_review_sessions_settings_and_consent_reach_their_family()
 }
 
 #[test]
-fn dispatch_026_fr_002_a_command_no_family_owns_is_refused_not_decided() {
-    let read_set = reference_read_set(OWNER_A);
-    for (wire, payload) in sample_payloads() {
-        if !UNOWNED.contains(&wire) {
-            continue;
+fn dispatch_026_fr_013_auto_park_reaches_the_park_family() {
+    let read_set = park_read_set();
+    let parked = command(
+        "review.auto_park",
+        PARK_TASK,
+        json!({ "formulation_id": PARK_FORM }),
+        vec![],
+    );
+    let routed = accepted(dispatch::decide(&read_set, &parked, &exec(&[])));
+    assert_eq!(routed.result.applied, Some(true));
+    assert_eq!(
+        entity_types(&routed),
+        BTreeSet::from(["review_park_ack", "review_settings", "task"])
+    );
+    assert_eq!(
+        Ok(routed.clone()),
+        park::decide(&read_set, &parked, &exec(&[])),
+        "the routed answer is the family's own"
+    );
+    // Through the envelope path: typed, then routed to the same family.
+    let wire = envelope(
+        "review.auto_park",
+        PARK_TASK,
+        json!({ "formulation_id": PARK_FORM }),
+        json!([]),
+    );
+    assert_eq!(
+        dispatch::decide_envelope(&read_set, &wire, &NoReceipts, &exec(&[])),
+        Ok(routed.clone())
+    );
+
+    // A formulation the task no longer holds is an accepted `applied: false`.
+    let other = command(
+        "review.auto_park",
+        PARK_TASK,
+        json!({ "formulation_id": "form_0b0e1f30-0000-4000-8000-0000000000ff" }),
+        vec![],
+    );
+    let declined = accepted(dispatch::decide(&read_set, &other, &exec(&[])));
+    assert_eq!(declined.result.applied, Some(false));
+    assert!(
+        !entity_types(&declined).contains("task"),
+        "no task is written"
+    );
+    assert_eq!(Ok(declined), park::decide(&read_set, &other, &exec(&[])));
+
+    // A replay over the committed state changes nothing.
+    let after = support::commit(&read_set, &routed);
+    let replay = accepted(dispatch::decide(&after, &parked, &exec(&[])));
+    assert_eq!(replay.outcome, ChangeOutcome::NoOp);
+    assert_eq!(replay.result.applied, Some(false));
+    assert!(replay.changes.is_empty());
+}
+
+#[test]
+fn dispatch_026_fr_013_the_oracle_auto_park_vectors_hold_through_the_dispatch() {
+    let mut ran = 0;
+    for vector in cases(support::formulation(), "transitions")
+        .iter()
+        .filter(|vector| vector["event"]["type"] == "auto_park")
+    {
+        let id = text(vector, "id");
+        let read_set: ReadSet =
+            serde_json::from_value(support::auto_park_read_set(vector, "task_vector"))
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let inputs = exec_at(text(vector, "now"), &[]);
+        let parked = command(
+            "review.auto_park",
+            "task_vector",
+            json!({ "formulation_id": support::VECTOR_FORMULATION }),
+            vec![],
+        );
+        let routed = dispatch::decide(&read_set, &parked, &inputs);
+        assert_eq!(routed, park::decide(&read_set, &parked, &inputs), "{id}");
+        let set = accepted(routed);
+        let task = set.changes.iter().find_map(|change| match change {
+            DomainChange::Upsert(Record::Task(task)) => Some(task),
+            _ => None,
+        });
+        if vector["expect"]["applied"] == json!(false) {
+            assert_eq!(set.result.applied, Some(false), "{id}");
+            assert!(task.is_none(), "{id}: a declined park writes no task");
+        } else {
+            assert_eq!(set.result.applied, Some(true), "{id}");
+            let task = task.unwrap_or_else(|| panic!("{id}: no parked task"));
+            assert_eq!(task.state, TaskState::Someday, "{id}");
+            let revision = vector["expect"]["revision"].as_u64().expect("a revision");
+            assert_eq!(task.revision, Counter::from(revision), "{id}");
+            assert!(task.formulation.is_none(), "{id}: the clock is closed");
         }
-        let envelope = envelope(wire, REF_TASK, payload, json!([]));
-        let refusal = dispatch::decide_envelope(&read_set, &envelope, &NoReceipts, &exec(&[]))
-            .expect_err("an unowned command is refused");
-        assert_eq!(refusal, unowned(), "{wire}");
+        ran += 1;
+    }
+    assert_eq!(ran, 7, "every auto_park vector ran");
+}
+
+#[test]
+fn dispatch_026_fr_015_parks_ack_reaches_the_park_family() {
+    let read_set = park_read_set();
+    let key = |(task, form): (&str, &str)| json!({ "task_id": task, "formulation_id": form });
+    let ack = command(
+        "review.parks_ack",
+        "scope-example",
+        json!({ "items": [key(ROW_A), key(ROW_A), key(ROW_SEEN),
+            key(("task_unknown", ROW_A.1))] }),
+        vec![],
+    );
+    let routed = accepted(dispatch::decide(&read_set, &ack, &exec(&[])));
+    assert_eq!(entity_types(&routed), BTreeSet::from(["review_park_ack"]));
+    assert_eq!(
+        routed.changes.len(),
+        1,
+        "marked once; seen and unknown skipped"
+    );
+    assert_eq!(
+        Ok(routed.clone()),
+        park::decide(&read_set, &ack, &exec(&[]))
+    );
+
+    // Idempotent by state: the committed rows mark nothing the second time.
+    let after = support::commit(&read_set, &routed);
+    let again = accepted(dispatch::decide(
+        &after,
+        &ack,
+        &exec_at("2026-10-09T12:05:00Z", &[]),
+    ));
+    assert_eq!(again, ChangeSet::no_op());
+
+    // An empty request is an accepted no-op.
+    let empty = command(
+        "review.parks_ack",
+        "scope-example",
+        json!({ "items": [] }),
+        vec![],
+    );
+    assert_eq!(
+        dispatch::decide(&read_set, &empty, &exec(&[])),
+        Ok(ChangeSet::no_op())
+    );
+}
+
+#[test]
+fn dispatch_026_fr_002_no_catalog_command_is_unowned_and_a_foreign_one_is_refused_alike() {
+    let read_set = reference_read_set(OWNER_A);
+    // The unowned refusal is no longer reachable by a catalog command ...
+    for (wire, command) in sample_commands() {
+        assert!(command_owner(&command).is_ok(), "{wire}");
+    }
+    // ... and is the very refusal a family gives a command of another family.
+    let foreign = command("tag.delete", REF_TASK, json!({}), vec![]);
+    for family_refusal in [
+        park::decide(&read_set, &foreign, &exec(&[])),
+        review_sessions::decide(&read_set, &foreign, &exec(&[])),
+        review_decisions::decide(&read_set, &foreign, &exec(&[])),
+    ] {
+        let refusal = family_refusal.expect_err("a foreign command is refused");
+        assert_eq!(refusal, unowned());
         assert_eq!(refusal.reason, Reason::InvalidPayload);
         assert_eq!(refusal.field.as_deref(), Some("type"));
     }

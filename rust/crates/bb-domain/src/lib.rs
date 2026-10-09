@@ -20,7 +20,8 @@
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
 //!   allow-listed command proposals applied only after explicit confirmation.
 //! * [`park`]: auto-park, the human yield and park acknowledgement over the
-//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
+//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision),
+//!   and the `review.auto_park` / `review.parks_ack` commands that wrap them.
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
 //! * [`review_decisions`]: the Review decision commands (`review.decide`,

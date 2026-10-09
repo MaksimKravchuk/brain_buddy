@@ -18,7 +18,8 @@
 //! dispatch following. A command or query no family claims, or that more than
 //! one claims, is an explicit refusal ([`unowned`]); neither case panics. The
 //! tests assert that every command type and query kind of the frozen catalog
-//! has exactly one owner, and name the types that have none yet.
+//! has exactly one owner, so the refusal is only ever reached by a command
+//! outside the catalog.
 //!
 //! Pure: no clock, I/O or randomness. Every fact a rule needs arrives in the
 //! read set and the inputs.
@@ -28,7 +29,7 @@ use crate::types::{
     QueryInputs, QueryResult, ReadSet, Reason,
 };
 use crate::{
-    children, organize, queries, review_decisions, review_sessions, smart_add, task_rules,
+    children, organize, park, queries, review_decisions, review_sessions, smart_add, task_rules,
 };
 use bb_protocol::command::CommandEnvelope;
 
@@ -39,6 +40,8 @@ pub enum CommandFamily {
     Children,
     /// Projects, tags and `task.tags` ([`organize`]).
     Organize,
+    /// `review.auto_park` and `review.parks_ack` ([`park`]).
+    Park,
     /// Review decisions, Undo and bulk release ([`review_decisions`]).
     ReviewDecisions,
     /// Review sessions, settings, activation and consent ([`review_sessions`]).
@@ -51,9 +54,10 @@ pub enum CommandFamily {
 
 impl CommandFamily {
     /// Every family that decides commands, in dispatch order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Children,
         Self::Organize,
+        Self::Park,
         Self::ReviewDecisions,
         Self::ReviewSessions,
         Self::SmartAdd,
@@ -65,6 +69,7 @@ impl CommandFamily {
         match self {
             Self::Children => children::handles(command),
             Self::Organize => organize::handles(command),
+            Self::Park => park::handles(command),
             Self::ReviewDecisions => review_decisions::handles(command),
             Self::ReviewSessions => review_sessions::handles(command),
             Self::SmartAdd => smart_add::handles(command),
@@ -232,6 +237,7 @@ pub fn decide(
     match command_owner(&command.command)? {
         CommandFamily::Children => children::decide(read_set, command, inputs),
         CommandFamily::Organize => organize::decide(read_set, command, inputs),
+        CommandFamily::Park => park::decide(read_set, command, inputs),
         CommandFamily::ReviewDecisions => review_decisions::decide(read_set, command, inputs),
         CommandFamily::ReviewSessions => review_sessions::decide(read_set, command, inputs),
         CommandFamily::SmartAdd => smart_add::decide(read_set, command, inputs),
