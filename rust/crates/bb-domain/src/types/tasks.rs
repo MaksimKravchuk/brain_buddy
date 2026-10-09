@@ -142,6 +142,15 @@ fn no_priority() -> Priority {
     Priority::None
 }
 
+// `Default` for these would demand `P: Default`; an absent reference is empty.
+fn no_ref<R>() -> Option<R> {
+    None
+}
+
+fn no_refs<R>() -> Vec<R> {
+    Vec::new()
+}
+
 /// `project.create`: the project ID is the envelope's `entity_id`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,18 +195,22 @@ pub struct TagUpdate {
 
 /// `task.create`: the task ID is the envelope's `entity_id`. State and
 /// priority default as the canonical request does (`inbox`, `none`).
+///
+/// `P` and `T` are the project and tag reference types: direct IDs once
+/// resolved (the default, what `decide` reads), [`ProjectRef`] and [`TagRef`]
+/// as they arrive on the wire, where an earlier Smart Add alias may stand in.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TaskCreate {
+pub struct TaskCreate<P = ProjectId, T = TagId> {
     pub title: Title,
     #[serde(default)]
     pub details: Option<Details>,
     #[serde(default = "inbox")]
     pub state: OpenList,
-    #[serde(default)]
-    pub project_id: Option<ProjectId>,
-    #[serde(default)]
-    pub tag_ids: Vec<TagId>,
+    #[serde(default = "no_ref")]
+    pub project_id: Option<P>,
+    #[serde(default = "no_refs")]
+    pub tag_ids: Vec<T>,
     #[serde(default)]
     pub due_date: Option<DueDay>,
     #[serde(default = "no_priority")]
@@ -264,15 +277,25 @@ pub struct SmartAdd {
     pub new_formulation_id: Option<NewFormulationId>,
 }
 
-/// Explicit tag membership edit: unique IDs, disjoint lists.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Explicit tag membership edit: unique IDs, disjoint lists. `T` is the tag
+/// reference type (see [`TaskCreate`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct TagChanges {
-    pub add_tag_ids: Vec<TagId>,
-    pub remove_tag_ids: Vec<TagId>,
+pub struct TagChanges<T = TagId> {
+    pub add_tag_ids: Vec<T>,
+    pub remove_tag_ids: Vec<T>,
 }
 
-impl TagChanges {
+impl<T> Default for TagChanges<T> {
+    fn default() -> Self {
+        Self {
+            add_tag_ids: Vec::new(),
+            remove_tag_ids: Vec::new(),
+        }
+    }
+}
+
+impl<T: Eq + std::hash::Hash> TagChanges<T> {
     /// Whether every ID appears once across both lists.
     pub fn is_unique_and_disjoint(&self) -> bool {
         let mut seen = std::collections::HashSet::new();
@@ -285,15 +308,20 @@ impl TagChanges {
 
 /// `task.update`: lifecycle is not a patch. `title` and `priority` cannot be
 /// cleared; `details`, `project_id`, `due_date` and `waiting_for` can.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct TaskUpdate {
+/// `P` and `T` are the project and tag reference types (see [`TaskCreate`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    default,
+    deny_unknown_fields,
+    bound(deserialize = "P: Deserialize<'de>, T: Deserialize<'de>")
+)]
+pub struct TaskUpdate<P = ProjectId, T = TagId> {
     #[serde(deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
     pub title: Option<Title>,
     #[serde(skip_serializing_if = "Patch::is_unchanged")]
     pub details: Patch<Details>,
     #[serde(skip_serializing_if = "Patch::is_unchanged")]
-    pub project_id: Patch<ProjectId>,
+    pub project_id: Patch<P>,
     #[serde(skip_serializing_if = "Patch::is_unchanged")]
     pub due_date: Patch<DueDay>,
     #[serde(deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
@@ -302,9 +330,24 @@ pub struct TaskUpdate {
     pub waiting_for: Patch<WaitingFor>,
     /// One gesture, one command: tag edits ride in the same payload.
     #[serde(deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
-    pub tag_changes: Option<TagChanges>,
+    pub tag_changes: Option<TagChanges<T>>,
     #[serde(deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
     pub new_formulation_id: Option<NewFormulationId>,
+}
+
+impl<P, T> Default for TaskUpdate<P, T> {
+    fn default() -> Self {
+        Self {
+            title: None,
+            details: Patch::Unchanged,
+            project_id: Patch::Unchanged,
+            due_date: Patch::Unchanged,
+            priority: None,
+            waiting_for: Patch::Unchanged,
+            tag_changes: None,
+            new_formulation_id: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -44,7 +44,7 @@ fn values_026_fr_002_patch_distinguishes_omitted_null_and_value() {
     );
     // Nothing changed serializes to nothing: Unchanged is never written as a clear.
     assert_eq!(
-        serde_json::to_value(TaskUpdate::default()).unwrap(),
+        serde_json::to_value(TaskUpdate::<ProjectId, TagId>::default()).unwrap(),
         json!({})
     );
     assert_eq!(
