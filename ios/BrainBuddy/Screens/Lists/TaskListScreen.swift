@@ -156,7 +156,7 @@ struct TaskListScreen: View {
         } header: {
             if let title = section.title {
                 BBSectionHeader(
-                    title, count: section.tasks.count, dotColor: projectDotColor(for: section)
+                    title, count: section.tasks.count, dotColor: projectDotColor(for: section), countsTasks: true
                 )
                 .listRowInsets(Self.headerInsets)
             }
@@ -272,7 +272,7 @@ struct TaskListScreen: View {
 /// The line under the title: the list's summary ("14 open tasks · filtered")
 /// and the sync state in words, joined with " · ". It sits in the navigation
 /// bar instead of in two rows of the list. An empty list passes no summary
-/// and its empty state shows the sync state itself. Relative times
+/// and shows the sync state alone, so the line is never blank. Relative times
 /// ("Synced 2 minutes ago") refresh every 30 seconds without redrawing the list.
 private struct ListSubtitle: ViewModifier {
     let summary: String?
@@ -293,7 +293,6 @@ private struct ListSubtitle: ViewModifier {
     }
 
     private var subtitle: String {
-        guard let summary else { return "" }
         let _ = tick
         let sync = SyncStatusLabel.describe(
             workspace.syncStatus,
@@ -301,6 +300,7 @@ private struct ListSubtitle: ViewModifier {
             now: Date(),
             deviceName: SyncStatusLabel.deviceName
         ).text
+        guard let summary else { return sync }
         return summary + " · " + sync
     }
 }

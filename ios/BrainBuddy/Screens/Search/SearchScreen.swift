@@ -106,7 +106,7 @@ private struct SearchResultsView: View {
                             .taskActions(task)
                         }
                     } header: {
-                        BBSectionHeader(SearchScreen.title(for: section), count: section.tasks.count)
+                        BBSectionHeader(SearchScreen.title(for: section), count: section.tasks.count, countsTasks: true)
                     } footer: {
                         if section.id == sections.last?.id {
                             Text("Searches this \(ThisDevice.name)")

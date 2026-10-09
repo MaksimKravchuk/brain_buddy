@@ -38,7 +38,8 @@ extension View {
 /// A list section header: the 10-pt-style uppercase label, with an optional
 /// project dot or symbol before it and a count on the trailing edge.
 ///
-/// VoiceOver reads it as one header: "Website relaunch, 4".
+/// VoiceOver reads it as one header: "Website relaunch, 4 tasks" when the
+/// count is of tasks (`countsTasks`), otherwise "Comments, 2".
 struct BBSectionHeader: View {
     let title: String
     var count: Int?
@@ -47,15 +48,21 @@ struct BBSectionHeader: View {
     /// Colour for the symbol and title, for example `BBColor.dueText` on
     /// Overdue. Nil keeps the tertiary label colour.
     var tint: Color?
+    /// Speak the count as tasks ("4 tasks") rather than a bare number.
+    var countsTasks: Bool
 
     @ScaledMetric(relativeTo: .caption2) private var dotSize: CGFloat = 7
 
-    init(_ title: String, count: Int? = nil, dotColor: Color? = nil, systemImage: String? = nil, tint: Color? = nil) {
+    init(
+        _ title: String, count: Int? = nil, dotColor: Color? = nil, systemImage: String? = nil, tint: Color? = nil,
+        countsTasks: Bool = false
+    ) {
         self.title = title
         self.count = count
         self.dotColor = dotColor
         self.systemImage = systemImage
         self.tint = tint
+        self.countsTasks = countsTasks
     }
 
     var body: some View {
@@ -82,8 +89,14 @@ struct BBSectionHeader: View {
         .textCase(.uppercase)
         .tracking(0.6)
         .foregroundStyle(tint ?? BBColor.textTertiary)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private var accessibilityText: String {
+        guard let count else { return title }
+        return "\(title), \(countsTasks ? CountBadge.spokenCount(count) : "\(count)")"
     }
 }
 

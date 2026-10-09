@@ -123,6 +123,7 @@ struct CaptureSheet: View {
                 .accessibilityAddTraits(.isHeader)
             HStack {
                 Button("Close", action: close)
+                    .keyboardShortcut(.cancelAction)
                     .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget, alignment: .leading)
                     .contentShape(Rectangle())
                 Spacer(minLength: BBSpacing.s2)
@@ -225,7 +226,10 @@ struct CaptureSheet: View {
             Button("Today") { draft.dueDate = workspace.today }
             Button("Tomorrow") { draft.dueDate = workspace.today.adding(days: 1) }
             Button("Next week") { draft.dueDate = workspace.today.adding(days: 7) }
-            Button("Pick a date…") { isShowingCalendar = true }
+            Button("Pick a date…") {
+                // After the menu has closed, or the popover can lose the race.
+                Task { isShowingCalendar = true }
+            }
             if draft.dueDate != nil {
                 Divider()
                 Button("Clear due date", role: .destructive) { draft.dueDate = nil }

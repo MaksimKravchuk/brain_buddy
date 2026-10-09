@@ -256,6 +256,7 @@ struct ProjectSummaryRow: View {
                 ProjectColorIndicator(hex: summary.project.color, diameter: dotSize)
             }
             .labelStyle(.bbRow)
+            .frame(maxWidth: .infinity, alignment: .leading)
             // Plain slate count, the same as the Lists hub rows; nothing for zero.
             CountBadge(count: summary.openTaskCount)
         }

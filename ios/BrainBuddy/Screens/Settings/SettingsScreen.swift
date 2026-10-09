@@ -197,6 +197,13 @@ struct SettingsScreen: View {
     private var syncSection: some View {
         Section {
             syncStatusRow
+            if let lastSyncedAt = staleLastSyncedAt {
+                TimelineView(.periodic(from: .now, by: 60)) { _ in
+                    valueRow(
+                        "Last synced", systemImage: "clock",
+                        value: lastSyncedAt.formatted(.relative(presentation: .named)))
+                }
+            }
             valueRow(
                 "Waiting to sync", systemImage: "arrow.up.circle",
                 value: Self.pendingDescription(workspace.pendingChangeCount))
@@ -240,6 +247,16 @@ struct SettingsScreen: View {
                 }
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// When it last synced, for the states whose status text doesn't say so
+    /// (offline, failing); idle already reads "Synced 2 minutes ago".
+    private var staleLastSyncedAt: Date? {
+        switch workspace.syncStatus {
+        case .offline(let date): return date
+        case .failing(_, _, let date): return date
+        case .localOnly, .idle, .syncing, .needsSignIn: return nil
         }
     }
 

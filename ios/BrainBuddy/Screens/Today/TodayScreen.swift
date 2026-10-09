@@ -91,7 +91,8 @@ private struct AgendaSection: View {
                 title,
                 count: section.tasks.count,
                 systemImage: symbolName,
-                tint: dateView == .overdue ? BBColor.dueText : nil
+                tint: dateView == .overdue ? BBColor.dueText : nil,
+                countsTasks: true
             )
         }
     }
