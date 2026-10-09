@@ -8,7 +8,11 @@
 //! * `review_traces_tasks.json` (TR-003, TR-004, TR-006), replayed against a
 //!   small in-memory server that routes every request to the park functions and
 //!   to the formulation clock, as `ReviewService` does,
-//! * scenarios taken from `backend/tests/test_review_auto_park.py`.
+//! * scenarios taken from `backend/tests/test_review_auto_park.py`,
+//! * the command level (`park::handles` / `park::decide`, T062): the same
+//!   `auto_park` vectors replayed through `review.auto_park`, and the server
+//!   scenarios of `ReviewService.auto_park` and `acknowledge_parks` through
+//!   the change sets of `review.auto_park` and `review.parks_ack`.
 //!
 //! The family sources are compiled in place (`#[path]`) with the crate paths
 //! they use inside `bb-domain`, so this runner does not depend on how the
@@ -30,7 +34,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use bb_domain::calendar::{CalendarDay, UtcInstant};
-use bb_domain::types::{DecisionType, ParkSource, ParksAck, TaskState};
+use bb_domain::types::{
+    ChangeOutcome, ChangeSet, DecisionType, DomainChange, DomainCommand, DomainError, EntityType,
+    ExecutionInputs, ParkAck, ParkSource, ParksAck, ReadSet, Reason, Record, ResultRefs,
+    ReviewSettings, Task, TaskState,
+};
 use formulation::{
     ClockBefore, DecisionInput, FormulationError, OwnerClockSettings, ParkMarker, TaskClock,
 };
@@ -1411,4 +1419,674 @@ fn park_026_fr_016_a_stored_park_row_round_trips_and_its_public_form_drops_priva
             "park_ack.private.from_revision"
         ))
     );
+}
+
+// --------------------------------------------- the command-level family (T062)
+
+const NOW: &str = "2026-10-09T12:00:00Z";
+const TASK: &str = "task_00000000-0000-4000-8000-0000000000d1";
+const FORM: &str = "form_0b0e1f30-0000-4000-8000-0000000000d1";
+const LAST_SWEEP: &str = "2026-10-09T11:59:00Z";
+
+fn exec(now: &str, authoritative: bool, weekly_review: bool) -> ExecutionInputs {
+    serde_json::from_value(json!({
+        "rule_version": 1, "now": now, "time_zone": "UTC", "origin": "device",
+        "actor_id": "actor-example", "authoritative": authoritative, "allocated_ids": [],
+        "policy": {
+            "weekly_review": weekly_review, "navigator_provider": null,
+            "navigator_available": false, "consent_text_version": 1,
+        },
+    }))
+    .expect("execution inputs")
+}
+
+fn command_of(kind: &str, entity: &str, payload: Value, preconditions: Value) -> DomainCommand {
+    serde_json::from_value(json!({
+        "command_id": "01900000-0000-4000-8000-000000000001", "entity_id": entity,
+        "issued_at": NOW, "preconditions": preconditions, "type": kind, "payload": payload,
+    }))
+    .unwrap_or_else(|error| panic!("{kind}: {error}"))
+}
+
+fn auto_park_of(formulation_id: &str) -> DomainCommand {
+    command_of(
+        "review.auto_park",
+        TASK,
+        json!({ "formulation_id": formulation_id }),
+        json!([]),
+    )
+}
+
+fn ack_command(items: &[(&str, &str)]) -> DomainCommand {
+    let items: Vec<Value> = items
+        .iter()
+        .map(|(task, form)| json!({ "task_id": task, "formulation_id": form }))
+        .collect();
+    command_of(
+        "review.parks_ack",
+        "scope-example",
+        json!({ "items": items }),
+        json!([]),
+    )
+}
+
+fn task_row(id: &str, state: &str, formulation_started: Option<&str>, form: &str) -> Value {
+    json!({
+        "id": id, "title": "Call Bob", "details": "Ask about the lease", "state": state,
+        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "waiting_for": (state == "waiting").then_some("Bob"), "waiting_since": null,
+        "order_key": "3", "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
+        "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,
+        "revision": "4", "consecutive_stalled_formulations": 0,
+        "formulation": formulation_started.map(|started| json!({
+            "id": form, "started_at": started, "extended_at": null,
+            "extension_reason": null, "park_floor_at": null,
+        })),
+        "parked": null,
+    })
+}
+
+fn settings_row(activated: bool, last_sweep: Option<&str>) -> Value {
+    json!({
+        "threshold_days": 14, "review_weekday": 5, "review_time": "16:00", "time_zone": "UTC",
+        "onboarded_at": null, "activated_at": activated.then_some("2026-08-01T00:00:00Z"),
+        "owner_park_floor_at": null, "revision": "2",
+        "private": last_sweep.map(|at| json!({
+            "last_effective_sweep_at": at, "threshold_changed_at": null,
+        })),
+    })
+}
+
+fn read_set_of(task: Value, settings: Value, park_acks: Value) -> ReadSet {
+    serde_json::from_value(json!({
+        "tasks": { TASK: task }, "settings": settings, "park_acks": park_acks,
+    }))
+    .expect("a read set")
+}
+
+/// A Next task whose formulation started 29 days before `NOW` (`park_due`), an
+/// activated owner and, as given, the last effective evaluation.
+fn due_set(last_sweep: Option<&str>) -> ReadSet {
+    read_set_of(
+        task_row(TASK, "next", Some("2026-09-10T09:00:00Z"), FORM),
+        settings_row(true, last_sweep),
+        json!([]),
+    )
+}
+
+fn tasks_of(set: &ChangeSet) -> Vec<&Task> {
+    set.changes
+        .iter()
+        .filter_map(|change| match change {
+            DomainChange::Upsert(Record::Task(task)) => Some(task),
+            _ => None,
+        })
+        .collect()
+}
+
+fn acks_of(set: &ChangeSet) -> Vec<&ParkAck> {
+    set.changes
+        .iter()
+        .filter_map(|change| match change {
+            DomainChange::Upsert(Record::ReviewParkAck(ack)) => Some(ack),
+            _ => None,
+        })
+        .collect()
+}
+
+fn settings_of(set: &ChangeSet) -> Vec<&ReviewSettings> {
+    set.changes
+        .iter()
+        .filter_map(|change| match change {
+            DomainChange::Upsert(Record::ReviewSettings(settings)) => Some(settings),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The accepted no-op of an `applied: false` auto-park.
+fn declined_no_op() -> ChangeSet {
+    ChangeSet {
+        result: ResultRefs {
+            applied: Some(false),
+            ..ResultRefs::default()
+        },
+        ..ChangeSet::no_op()
+    }
+}
+
+#[test]
+fn park_026_fr_013_the_family_claims_exactly_its_two_commands() {
+    let decision = "decision_0b0e1f30-0000-4000-8000-0000000000d2";
+    let mut claimed = Vec::new();
+    for (kind, payload) in [
+        ("review.auto_park", json!({ "formulation_id": FORM })),
+        ("review.parks_ack", json!({ "items": [] })),
+        ("review.settings", json!({})),
+        (
+            "review.decide",
+            json!({ "decision_id": decision, "type": "complete" }),
+        ),
+        ("task.update", json!({ "title": "x" })),
+        ("tag.delete", json!({})),
+    ] {
+        let command = command_of(kind, TASK, payload, json!([]));
+        if park::handles(&command.command) {
+            claimed.push(kind);
+        }
+    }
+    assert_eq!(claimed, ["review.auto_park", "review.parks_ack"]);
+}
+
+#[test]
+fn park_026_fr_013_a_command_of_another_family_is_refused_as_invalid_payload_on_type() {
+    let read_set = due_set(Some(LAST_SWEEP));
+    for (kind, payload) in [
+        ("review.settings", json!({ "threshold_days": 21 })),
+        ("task.update", json!({ "title": "x" })),
+        ("review.bulk_undo", json!({})),
+    ] {
+        let foreign = command_of(kind, TASK, payload, json!([]));
+        assert!(!park::handles(&foreign.command), "{kind}");
+        assert_eq!(
+            park::decide(&read_set, &foreign, &exec(NOW, true, true)),
+            Err(DomainError::field(Reason::InvalidPayload, "type")),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn park_026_fr_013_the_auto_park_vectors_hold_through_the_command() {
+    let section = transitions_of("auto_park");
+    let mut ran = 0;
+    for vector in &section {
+        let id = text(vector, "id");
+        let now = text(vector, "now");
+        let read_set: ReadSet =
+            serde_json::from_value(support::auto_park_read_set(vector, "task_vector"))
+                .unwrap_or_else(|error| panic!("{id}: {error}"));
+        let command = command_of(
+            "review.auto_park",
+            "task_vector",
+            json!({ "formulation_id": support::VECTOR_FORMULATION }),
+            json!([]),
+        );
+        let set = park::decide(&read_set, &command, &exec(now, true, true))
+            .unwrap_or_else(|error| panic!("{id}: {error}"));
+        // The wrapper adds nothing to the primitive's verdict.
+        let stored = read_set.tasks.values().next().expect("the vector task");
+        let before = TaskClock::from_task(stored).expect("a clock");
+        let owner =
+            OwnerClockSettings::from_review_settings(read_set.settings.as_ref().expect("settings"))
+                .expect("settings");
+        let direct = park::device_auto_park(
+            &before,
+            &owner,
+            &DeviceParkRequest {
+                task_id: "task_vector",
+                formulation_id: support::VECTOR_FORMULATION,
+                exposed: true,
+                last_effective_sweep_at: Some(at(now).plus_seconds(-60)),
+            },
+            at(now),
+        );
+        assert_eq!(set.result.applied, Some(direct.outcome.applied()), "{id}");
+        let expect = &vector["expect"];
+        if expect.get("applied") == Some(&Value::Bool(false)) {
+            assert!(
+                tasks_of(&set).is_empty() && acks_of(&set).is_empty(),
+                "{id}"
+            );
+        } else {
+            let expected: Value = serde_json::from_str(
+                &expect
+                    .to_string()
+                    .replace("form_a", support::VECTOR_FORMULATION),
+            )
+            .expect("an expectation");
+            let [task] = tasks_of(&set)[..] else {
+                panic!("{id}: one parked task");
+            };
+            let clock = TaskClock::from_task(task).expect("a clock");
+            assert_subset(&expected, &clock_to(&clock), id);
+            let [ack] = acks_of(&set)[..] else {
+                panic!("{id}: one park row");
+            };
+            assert_eq!(
+                ack.formulation_id.as_str(),
+                support::VECTOR_FORMULATION,
+                "{id}"
+            );
+            assert_eq!(ack.seen_at, None, "{id}");
+        }
+        ran += 1;
+    }
+    ran_all("auto_park command", ran, section.len());
+}
+
+#[test]
+fn park_026_fr_013_an_applied_park_bumps_the_revision_once_and_writes_a_fresh_unseen_row() {
+    let read_set = due_set(Some(LAST_SWEEP));
+    let before = read_set.tasks.values().next().expect("a task").clone();
+    // No generic revision precondition: one that names another revision is not read.
+    let stale = command_of(
+        "review.auto_park",
+        TASK,
+        json!({ "formulation_id": FORM }),
+        json!([{ "entity_type": "task", "entity_id": TASK, "edit_revision": "99" }]),
+    );
+    let set = park::decide(&read_set, &stale, &exec(NOW, true, true)).expect("decided");
+    assert_eq!(
+        set,
+        park::decide(&read_set, &auto_park_of(FORM), &exec(NOW, true, true)).expect("decided"),
+    );
+    assert_eq!(set.outcome, ChangeOutcome::Applied);
+    assert_eq!(set.result.applied, Some(true));
+    // The server's write order: bookkeeping, the parked task, the park row.
+    assert_eq!(
+        set.affected_keys(),
+        [
+            (EntityType::ReviewSettings, vec![]),
+            (EntityType::Task, vec![TASK.to_owned()]),
+            (
+                EntityType::ReviewParkAck,
+                vec![TASK.to_owned(), FORM.to_owned()]
+            ),
+        ]
+    );
+    let [task] = tasks_of(&set)[..] else {
+        panic!("one task")
+    };
+    assert_eq!(task.state, TaskState::Someday);
+    assert_eq!(task.revision.to_u64(), Some(5), "bumped once, from 4");
+    assert_eq!(task.updated_at.as_str(), NOW);
+    assert!(task.formulation.is_none(), "the formulation is closed");
+    assert_eq!(
+        (
+            &task.title,
+            &task.details,
+            &task.order_key,
+            &task.created_at
+        ),
+        (
+            &before.title,
+            &before.details,
+            &before.order_key,
+            &before.created_at
+        ),
+        "nothing else of the task changes"
+    );
+    let marker = task.parked.as_ref().expect("a park marker");
+    assert_eq!(
+        (marker.at.as_str(), marker.formulation_id.as_str()),
+        (NOW, FORM)
+    );
+    let private = marker
+        .private
+        .as_ref()
+        .expect("the server keeps the snapshot");
+    assert_eq!(private.from_revision.to_u64(), Some(4));
+    assert_eq!(
+        private.clock_before.started_at.as_str(),
+        "2026-09-10T09:00:00Z"
+    );
+    let [ack] = acks_of(&set)[..] else {
+        panic!("one row")
+    };
+    assert_eq!(ack.parked_at.as_str(), NOW);
+    assert_eq!((&ack.seen_at, &ack.returned_at), (&None, &None));
+    let row = ack.private.as_ref().expect("private row facts");
+    assert_eq!(
+        (row.from_revision.to_u64(), row.source),
+        (Some(4), ParkSource::Device)
+    );
+    // The settings revision stays: the evaluation instant is bookkeeping.
+    let [settings] = settings_of(&set)[..] else {
+        panic!("settings")
+    };
+    assert_eq!(settings.revision.to_u64(), Some(2));
+    let note = settings.private.as_ref().expect("private bookkeeping");
+    assert_eq!(
+        note.last_effective_sweep_at.as_ref().map(|at| at.as_str()),
+        Some(NOW)
+    );
+    assert_eq!(settings.owner_park_floor_at, None, "no gap, no floor");
+}
+
+#[test]
+fn park_026_fr_013_a_park_the_server_disagrees_with_is_applied_false_and_writes_no_task() {
+    let due = due_set(Some(LAST_SWEEP));
+    let other_form = "form_0b0e1f30-0000-4000-8000-0000000000ee";
+    let fresh = read_set_of(
+        task_row(TASK, "next", Some("2026-10-08T09:00:00Z"), FORM),
+        settings_row(true, Some(LAST_SWEEP)),
+        json!([]),
+    );
+    let waiting = read_set_of(
+        task_row(TASK, "waiting", None, FORM),
+        settings_row(true, Some(LAST_SWEEP)),
+        json!([]),
+    );
+    let inactive = read_set_of(
+        task_row(TASK, "next", Some("2026-09-10T09:00:00Z"), FORM),
+        settings_row(false, Some(LAST_SWEEP)),
+        json!([]),
+    );
+    let no_settings = read_set_of(
+        task_row(TASK, "next", Some("2026-09-10T09:00:00Z"), FORM),
+        Value::Null,
+        json!([]),
+    );
+    let cases = [
+        ("another formulation", &due, auto_park_of(other_form), true),
+        ("not due yet", &fresh, auto_park_of(FORM), true),
+        ("outside Next", &waiting, auto_park_of(FORM), true),
+        ("owner not activated", &inactive, auto_park_of(FORM), true),
+        ("no settings row", &no_settings, auto_park_of(FORM), true),
+        ("flag off", &due, auto_park_of(FORM), false),
+    ];
+    for (label, read_set, command, exposed) in cases {
+        let set = park::decide(read_set, &command, &exec(NOW, true, exposed))
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(set.result.applied, Some(false), "{label}");
+        assert!(tasks_of(&set).is_empty(), "{label}: no task");
+        assert!(acks_of(&set).is_empty(), "{label}: no park row");
+    }
+    // Flag off, or an owner who never activated: no bookkeeping either, so the
+    // answer is the bare accepted no-op.
+    for (read_set, exposed) in [(&due, false), (&inactive, true), (&no_settings, true)] {
+        assert_eq!(
+            park::decide(read_set, &auto_park_of(FORM), &exec(NOW, true, exposed)),
+            Ok(declined_no_op())
+        );
+    }
+}
+
+#[test]
+fn park_026_sc_006_a_declined_park_after_a_sweep_gap_still_raises_the_owner_floor() {
+    // Flag off for 5 days, then a device park lands before the first sweep.
+    let read_set = due_set(Some("2026-10-04T12:00:00Z"));
+    let set =
+        park::decide(&read_set, &auto_park_of(FORM), &exec(NOW, true, true)).expect("decided");
+    assert_eq!(set.result.applied, Some(false));
+    assert_eq!(
+        set.outcome,
+        ChangeOutcome::Applied,
+        "the settings row changed"
+    );
+    assert!(tasks_of(&set).is_empty() && acks_of(&set).is_empty());
+    let [settings] = settings_of(&set)[..] else {
+        panic!("settings")
+    };
+    assert_eq!(
+        settings
+            .owner_park_floor_at
+            .as_ref()
+            .map(|floor| at(floor.as_str())),
+        Some(at(NOW).plus_seconds(7 * 86_400))
+    );
+    assert_eq!(
+        settings.revision.to_u64(),
+        Some(2),
+        "bookkeeping, not an edit"
+    );
+    // Without a recorded evaluation there is no earlier one: also a gap.
+    let unrecorded = due_set(None);
+    let set =
+        park::decide(&unrecorded, &auto_park_of(FORM), &exec(NOW, true, true)).expect("decided");
+    assert_eq!(set.result.applied, Some(false));
+    assert_eq!(settings_of(&set).len(), 1);
+}
+
+#[test]
+fn park_026_fr_013_a_replayed_auto_park_over_the_committed_state_is_a_no_op() {
+    let read_set = due_set(Some(LAST_SWEEP));
+    let command = auto_park_of(FORM);
+    let first = park::decide(&read_set, &command, &exec(NOW, true, true)).expect("decided");
+    assert_eq!(first.result.applied, Some(true));
+    let committed = support::commit(&read_set, &first);
+    // The same command, and a second device observing the same due park, find
+    // the task parked: an accepted no-op, never a conflict.
+    assert_eq!(
+        park::decide(&committed, &command, &exec(NOW, true, true)),
+        Ok(declined_no_op())
+    );
+    let other_device = command_of(
+        "review.auto_park",
+        TASK,
+        json!({ "formulation_id": FORM }),
+        json!([{ "entity_type": "task", "entity_id": TASK, "edit_revision": "4" }]),
+    );
+    assert_eq!(
+        park::decide(&committed, &other_device, &exec(NOW, true, true)),
+        Ok(declined_no_op())
+    );
+}
+
+#[test]
+fn park_026_fr_013_an_unknown_task_is_not_found() {
+    let read_set = due_set(Some(LAST_SWEEP));
+    let missing = "task_00000000-0000-4000-8000-0000000000d9";
+    let command = command_of(
+        "review.auto_park",
+        missing,
+        json!({ "formulation_id": FORM }),
+        json!([]),
+    );
+    assert_eq!(
+        park::decide(&read_set, &command, &exec(NOW, true, true)),
+        Err(DomainError::about(
+            Reason::NotFound,
+            EntityType::Task,
+            vec![missing.to_owned()]
+        ))
+    );
+}
+
+#[test]
+fn park_026_fr_016_a_writer_without_authority_produces_the_public_projection() {
+    let read_set = due_set(Some(LAST_SWEEP));
+    let set =
+        park::decide(&read_set, &auto_park_of(FORM), &exec(NOW, false, true)).expect("decided");
+    assert_eq!(set.result.applied, Some(true));
+    let [task] = tasks_of(&set)[..] else {
+        panic!("one task")
+    };
+    let marker = task.parked.as_ref().expect("a marker");
+    assert!(marker.private.is_none(), "no clock before, no revision");
+    assert_eq!(task, &task.public());
+    let [ack] = acks_of(&set)[..] else {
+        panic!("one row")
+    };
+    assert!(ack.private.is_none());
+    // A row that never carried the private member does not grow one.
+    let bare = due_set(None);
+    let gapped =
+        park::decide(&bare, &auto_park_of(FORM), &exec(NOW, false, true)).expect("decided");
+    assert_eq!(settings_of(&gapped).len(), 1, "the floor is public");
+    assert!(settings_of(&gapped)[0].private.is_none());
+}
+
+fn row_json(task: &str, form: &str, parked_at: &str, seen_at: Option<&str>) -> Value {
+    json!({
+        "task_id": task, "formulation_id": form, "parked_at": parked_at,
+        "seen_at": seen_at, "returned_at": null,
+        "private": { "from_revision": "3", "source": "sweep" },
+    })
+}
+
+const ROW_A: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000e1",
+    "form_0b0e1f30-0000-4000-8000-0000000000e1",
+);
+const ROW_B: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000e2",
+    "form_0b0e1f30-0000-4000-8000-0000000000e2",
+);
+const ROW_SEEN: (&str, &str) = (
+    "task_00000000-0000-4000-8000-0000000000e3",
+    "form_0b0e1f30-0000-4000-8000-0000000000e3",
+);
+
+/// Two unseen park rows and one seen, and the parked task of the first.
+fn parked_rows() -> ReadSet {
+    let mut task = task_row(ROW_A.0, "someday", None, ROW_A.1);
+    task["revision"] = json!("5");
+    let mut read_set = read_set_of(
+        task_row(TASK, "next", Some("2026-09-10T09:00:00Z"), FORM),
+        settings_row(true, Some(LAST_SWEEP)),
+        json!([
+            row_json(ROW_A.0, ROW_A.1, "2026-10-08T09:00:00Z", None),
+            row_json(ROW_B.0, ROW_B.1, "2026-10-08T09:30:00Z", None),
+            row_json(
+                ROW_SEEN.0,
+                ROW_SEEN.1,
+                "2026-10-07T09:00:00Z",
+                Some("2026-10-07T10:00:00Z")
+            ),
+        ]),
+    );
+    read_set.tasks.insert(
+        serde_json::from_value(json!(ROW_A.0)).expect("an id"),
+        serde_json::from_value(task).expect("a task"),
+    );
+    read_set
+}
+
+#[test]
+fn park_026_fr_015_the_acknowledgement_marks_each_unseen_row_once_and_ignores_unknown_keys() {
+    let read_set = parked_rows();
+    let unknown = ("task_unknown", ROW_A.1);
+    let foreign_formulation = (ROW_A.0, "form_0b0e1f30-0000-4000-8000-0000000000ff");
+    // Duplicates, an already seen row, an unknown task and a formulation the
+    // task never had: each ignored without a trace.
+    let command = ack_command(&[ROW_B, ROW_A, ROW_B, ROW_SEEN, unknown, foreign_formulation]);
+    let set = park::decide(&read_set, &command, &exec(NOW, true, true)).expect("decided");
+    assert_eq!(set.outcome, ChangeOutcome::Applied);
+    assert_eq!(set.result, ResultRefs::default());
+    assert!(set.effects.is_empty());
+    let marked: Vec<_> = acks_of(&set)
+        .iter()
+        .map(|ack| (ack.task_id.as_str(), ack.formulation_id.as_str()))
+        .collect();
+    assert_eq!(marked, [ROW_B, ROW_A], "once each, in request order");
+    for ack in acks_of(&set) {
+        assert_eq!(ack.seen_at.as_ref().map(|at| at.as_str()), Some(NOW));
+        // Only the seen mark changes: the rest of the stored row is kept.
+        let stored = read_set
+            .park_acks
+            .iter()
+            .find(|stored| stored.task_id == ack.task_id)
+            .expect("a stored row");
+        assert_eq!(
+            ack,
+            &ParkAck {
+                seen_at: ack.seen_at.clone(),
+                ..stored.clone()
+            }
+        );
+    }
+    assert_eq!(
+        set.changes.len(),
+        2,
+        "the seen and unknown keys left no trace"
+    );
+}
+
+#[test]
+fn park_026_fr_015_the_acknowledgement_never_writes_or_bumps_a_task() {
+    let read_set = parked_rows();
+    let command = ack_command(&[ROW_A, ROW_B]);
+    let set = park::decide(&read_set, &command, &exec(NOW, true, true)).expect("decided");
+    assert!(tasks_of(&set).is_empty() && settings_of(&set).is_empty());
+    assert!(
+        set.affected_keys()
+            .iter()
+            .all(|(entity, _)| *entity == EntityType::ReviewParkAck)
+    );
+    let committed = support::commit(&read_set, &set);
+    assert_eq!(committed.tasks, read_set.tasks, "no task revision moved");
+    // The generic revision precondition does not exist for this command.
+    let with_check = command_of(
+        "review.parks_ack",
+        "scope-example",
+        json!({ "items": [{ "task_id": ROW_A.0, "formulation_id": ROW_A.1 }] }),
+        json!([{ "entity_type": "task", "entity_id": ROW_A.0, "edit_revision": "1" }]),
+    );
+    let checked = park::decide(&read_set, &with_check, &exec(NOW, true, true)).expect("decided");
+    assert_eq!(acks_of(&checked).len(), 1);
+}
+
+#[test]
+fn park_026_fr_015_a_replayed_acknowledgement_over_the_committed_state_is_a_no_op() {
+    let read_set = parked_rows();
+    let command = ack_command(&[ROW_A, ROW_B]);
+    let first = park::decide(&read_set, &command, &exec(NOW, true, true)).expect("decided");
+    assert_eq!(first.changes.len(), 2);
+    let committed = support::commit(&read_set, &first);
+    for now in [NOW, "2026-10-09T12:05:00Z"] {
+        assert_eq!(
+            park::decide(&committed, &command, &exec(now, true, true)),
+            Ok(ChangeSet::no_op()),
+            "idempotent by state at {now}"
+        );
+    }
+    // An empty request is the same accepted no-op.
+    assert_eq!(
+        park::decide(&read_set, &ack_command(&[]), &exec(NOW, true, true)),
+        Ok(ChangeSet::no_op())
+    );
+}
+
+#[test]
+fn park_026_fr_015_a_park_written_after_the_acknowledgement_instant_stays_unseen() {
+    // A repeat park of a formulation (a fresh, unseen row) is not marked by an
+    // acknowledgement decided before it was parked.
+    let mut read_set = parked_rows();
+    read_set.park_acks = vec![
+        serde_json::from_value(row_json(ROW_A.0, ROW_A.1, "2026-10-09T12:30:00Z", None))
+            .expect("a row"),
+    ];
+    assert_eq!(
+        park::decide(&read_set, &ack_command(&[ROW_A]), &exec(NOW, true, true)),
+        Ok(ChangeSet::no_op())
+    );
+}
+
+#[test]
+fn park_026_fr_015_only_the_rows_a_request_names_are_read() {
+    let mut read_set = parked_rows();
+    let mut wide = row_json(ROW_B.0, ROW_B.1, "2026-10-08T09:30:00Z", None);
+    wide["private"]["from_revision"] = json!("18446744073709551616");
+    read_set.park_acks[1] = serde_json::from_value(wide).expect("a wire-valid row");
+    // An unreadable row nobody asked about cannot refuse the acknowledgement ...
+    let set =
+        park::decide(&read_set, &ack_command(&[ROW_A]), &exec(NOW, true, true)).expect("decided");
+    assert_eq!(acks_of(&set).len(), 1);
+    // ... and one that was asked about is refused, never half-marked.
+    let refusal = park::decide(
+        &read_set,
+        &ack_command(&[ROW_A, ROW_B]),
+        &exec(NOW, true, true),
+    )
+    .expect_err("an unreadable row");
+    assert_eq!(refusal.reason, Reason::InvalidValue);
+}
+
+#[test]
+fn park_026_fr_015_a_command_of_another_family_is_refused_as_invalid_payload_on_type() {
+    let read_set = parked_rows();
+    let foreign = command_of(
+        "review.session_finish",
+        "review_0b0e1f30-0000-4000-8000-0000000000e9",
+        json!({}),
+        json!([]),
+    );
+    assert!(!park::handles(&foreign.command));
+    assert_eq!(
+        park::decide(&read_set, &foreign, &exec(NOW, true, true)),
+        Err(DomainError::field(Reason::InvalidPayload, "type"))
+    );
+    assert!(park::handles(&ack_command(&[]).command));
 }

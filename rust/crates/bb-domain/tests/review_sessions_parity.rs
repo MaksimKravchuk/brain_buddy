@@ -344,7 +344,7 @@ fn try_command(
     .to_string();
     match decode_command(&envelope) {
         Ok(Decoded::Executable(envelope)) => {
-            DomainCommand::from_envelope(&envelope, &bb_domain::types::NoReceipts)
+            DomainCommand::from_envelope(&envelope, &types::NoReceipts)
         }
         other => panic!("{kind} did not decode as an executable command: {other:?}"),
     }

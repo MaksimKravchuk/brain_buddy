@@ -93,7 +93,7 @@ fn envelope_json(kind: &str, entity: &str, payload: Value) -> String {
 fn try_command(kind: &str, entity: &str, payload: Value) -> Result<DomainCommand, DomainError> {
     match decode_command(&envelope_json(kind, entity, payload)) {
         Ok(Decoded::Executable(envelope)) => {
-            DomainCommand::from_envelope(&envelope, &bb_domain::types::NoReceipts)
+            DomainCommand::from_envelope(&envelope, &types::NoReceipts)
         }
         other => panic!("{kind} did not decode as an executable command: {other:?}"),
     }

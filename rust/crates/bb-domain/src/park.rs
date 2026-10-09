@@ -24,7 +24,27 @@
 //!   it nor the revision the park was made from, so it can neither yield nor be
 //!   restored ([`FormulationError::ParkSnapshotUnavailable`]).
 
-use std::collections::BTreeSet;
+//! # Commands (026 T062)
+//!
+//! [`handles`] and [`decide`] give the primitives above the shape every other
+//! family has, for the two catalog commands that only wrap them:
+//!
+//! | Command | `entity_id` | Revision check | Rule |
+//! | --- | --- | --- | --- |
+//! | `review.auto_park` | the task | none | [`device_auto_park`]: the server re-evaluates with its own clock and settings (`inputs.policy.weekly_review` is the flag). Parked iff it agrees; anything else is `applied: false`, a success. Writes, in the server's order: the sweep-gap bookkeeping when it changed the settings row (the settings revision stays), the parked task (state, clock, `updated_at`, revision + 1) and a fresh unseen park row |
+//! | `review.parks_ack` | the owner scope | none | [`acknowledge_parks`] then [`rows_marked_seen`]: each unseen row the request names is marked seen once, at the effective instant; unknown and foreign keys are ignored identically; no task is written |
+//!
+//! `ResultRefs::applied` carries the auto-park answer. A command that changes
+//! nothing is [`ChangeSet::no_op`]-shaped, so a replay over the committed state
+//! is an accepted no-op (a parked task is no longer in Next; an acknowledged
+//! row is no longer unseen).
+//!
+//! Server-private content is written only where `inputs.authoritative`: the
+//! park marker's clock before and revision, the park row's source and revision
+//! and the settings' `last_effective_sweep_at`. A writer without it produces
+//! the public projection, which can neither yield nor be restored.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::calendar::{CalendarDay, UtcInstant};
 use crate::formulation::{
@@ -32,7 +52,10 @@ use crate::formulation::{
     TaskClock, decision_allows, parse_instant, wire_instant,
 };
 use crate::types::{
-    DecisionType, FormulationId, ParkAck, ParkAckPrivate, ParkSource, ParksAck, TaskId, TaskState,
+    ChangeOutcome, ChangeSet, Command, Counter, DecisionType, DomainChange, DomainCommand,
+    DomainError, EntityType, ExecutionInputs, FormulationId, FormulationRef, ParkAck,
+    ParkAckPrivate, ParkSource, ParksAck, ReadSet, Reason, Record, ResultRefs, ReviewSettings,
+    SettingsPrivate, Task, TaskId, TaskState,
 };
 
 /// A gap of at least this long since the last effective sweep floors parks.
@@ -666,4 +689,252 @@ pub fn show_while_away(
         WhileAwayContext::ReviewStart => true,
         WhileAwayContext::AppOpen => last_shown_day.is_none_or(|shown| today > shown),
     }
+}
+
+// ---------------------------------------------------------------------- commands
+
+/// Whether this family decides `command`.
+#[must_use]
+pub fn handles(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::ReviewAutoPark(_) | Command::ReviewParksAck(_)
+    )
+}
+
+/// Decides `review.auto_park` or `review.parks_ack` against the protected read
+/// set. Pure: time is `inputs.now`; the rows it reads are the read set.
+///
+/// A command of another family is refused as [`Reason::InvalidPayload`]
+/// (`field = "type"`); the dispatcher asks [`handles`] first.
+///
+/// # Errors
+///
+/// [`Reason::NotFound`] for an auto-park of a task the read set does not hold;
+/// [`Reason::InvalidValue`] for a stored instant, revision or row the rule
+/// cannot read.
+pub fn decide(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    match &command.command {
+        Command::ReviewAutoPark(payload) => {
+            let now = parse_instant(&inputs.now, "now").map_err(stored)?;
+            auto_park(read_set, command, payload, inputs, now)
+        }
+        Command::ReviewParksAck(payload) => {
+            let now = parse_instant(&inputs.now, "now").map_err(stored)?;
+            parks_ack(read_set, payload, now)
+        }
+        _ => Err(DomainError::field(Reason::InvalidPayload, "type")),
+    }
+}
+
+fn invalid(field: &str) -> DomainError {
+    DomainError::field(Reason::InvalidValue, field)
+}
+
+/// A stored fact the clock rule cannot read.
+fn stored(error: FormulationError) -> DomainError {
+    match error {
+        FormulationError::InvalidField(field) => invalid(field),
+        FormulationError::UnknownTimeZone(_) => {
+            DomainError::field(Reason::InvalidTimeZone, "time_zone")
+        }
+        _ => invalid("review_settings"),
+    }
+}
+
+/// The owner's clock inputs: the stored settings, or the server's defaults
+/// (14 days, UTC, not activated).
+fn owner_settings(read_set: &ReadSet) -> Result<OwnerClockSettings, DomainError> {
+    match &read_set.settings {
+        Some(settings) => OwnerClockSettings::from_review_settings(settings),
+        None => OwnerClockSettings::new(14, "UTC", None, None),
+    }
+    .map_err(stored)
+}
+
+fn upsert(record: Record) -> DomainChange {
+    DomainChange::Upsert(record)
+}
+
+/// The settings row after a sweep note: the raised owner floor and, where the
+/// writer is authoritative or the row already carries it, the effective
+/// evaluation instant. The revision stays (bookkeeping, not a settings edit).
+/// `None` when the row would not change.
+fn noted_settings(
+    row: &ReviewSettings,
+    before: &OwnerClockSettings,
+    note: &SweepNote,
+    authoritative: bool,
+) -> Result<Option<ReviewSettings>, DomainError> {
+    let mut updated = row.clone();
+    if note.settings.owner_park_floor_at() != before.owner_park_floor_at() {
+        updated.owner_park_floor_at = note
+            .settings
+            .owner_park_floor_at()
+            .map(|floor| wire_instant(floor, "owner_park_floor_at"))
+            .transpose()
+            .map_err(stored)?;
+    }
+    if updated.private.is_none() && authoritative {
+        updated.private = Some(SettingsPrivate {
+            last_effective_sweep_at: None,
+            threshold_changed_at: None,
+        });
+    }
+    if let Some(private) = updated.private.as_mut() {
+        // Only a different instant is a change: the stored spelling is kept.
+        let recorded = private
+            .last_effective_sweep_at
+            .as_ref()
+            .and_then(|at| parse_instant(at, "last_effective_sweep_at").ok());
+        if recorded != Some(note.last_effective_sweep_at) {
+            private.last_effective_sweep_at = Some(
+                wire_instant(note.last_effective_sweep_at, "last_effective_sweep_at")
+                    .map_err(stored)?,
+            );
+        }
+    }
+    Ok((updated != *row).then_some(updated))
+}
+
+/// The task as an applied park writes it (`_parked`): Someday, the clock closed
+/// with the marker, `updated_at` at the effective instant and the revision
+/// above the one the park was made from. Nothing else of the task changes.
+fn parked_task(
+    task: &Task,
+    parked: &Parked,
+    inputs: &ExecutionInputs,
+) -> Result<Task, DomainError> {
+    let mut clock = parked.clock.clone();
+    if !inputs.authoritative {
+        clock.parked = clock.parked.as_ref().map(public_marker);
+    }
+    let mut written = Task {
+        state: TaskState::Someday,
+        revision: Counter::from(clock.revision),
+        updated_at: inputs.now.clone(),
+        ..task.clone()
+    };
+    clock.write_clock_fields(&mut written).map_err(stored)?;
+    Ok(written)
+}
+
+fn auto_park(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    payload: &FormulationRef,
+    inputs: &ExecutionInputs,
+    now: UtcInstant,
+) -> Result<ChangeSet, DomainError> {
+    let task_id = TaskId::parse(command.entity_id.as_str())?;
+    let task = read_set.tasks.get(&task_id).ok_or_else(|| {
+        DomainError::about(
+            Reason::NotFound,
+            EntityType::Task,
+            vec![task_id.as_str().to_owned()],
+        )
+    })?;
+    let clock = TaskClock::from_task(task).map_err(stored)?;
+    let owner = owner_settings(read_set)?;
+    let last_effective_sweep_at = read_set
+        .settings
+        .as_ref()
+        .and_then(|row| row.private.as_ref())
+        .and_then(|private| private.last_effective_sweep_at.as_ref())
+        .map(|at| parse_instant(at, "last_effective_sweep_at"))
+        .transpose()
+        .map_err(stored)?;
+    let request = DeviceParkRequest {
+        task_id: task_id.as_str(),
+        formulation_id: payload.formulation_id.as_str(),
+        exposed: inputs.policy.weekly_review,
+        last_effective_sweep_at,
+    };
+    let device = device_auto_park(&clock, &owner, &request, now);
+    let mut changes = Vec::new();
+    // The sweep-gap bookkeeping runs first, whatever the park answers.
+    if let (Some(note), Some(row)) = (&device.sweep, &read_set.settings)
+        && let Some(updated) = noted_settings(row, &owner, note, inputs.authoritative)?
+    {
+        changes.push(upsert(Record::ReviewSettings(updated)));
+    }
+    let applied = match &device.outcome {
+        AutoPark::Applied(parked) => {
+            changes.push(upsert(Record::Task(parked_task(task, parked, inputs)?)));
+            let ack = parked.row.to_ack().map_err(stored)?;
+            let ack = if inputs.authoritative {
+                ack
+            } else {
+                ack.public()
+            };
+            changes.push(upsert(Record::ReviewParkAck(ack)));
+            true
+        }
+        AutoPark::NotApplied(_) => false,
+    };
+    Ok(ChangeSet {
+        outcome: if changes.is_empty() {
+            ChangeOutcome::NoOp
+        } else {
+            ChangeOutcome::Applied
+        },
+        changes,
+        result: ResultRefs {
+            applied: Some(applied),
+            ..ResultRefs::default()
+        },
+        effects: Vec::new(),
+    })
+}
+
+fn parks_ack(
+    read_set: &ReadSet,
+    payload: &ParksAck,
+    now: UtcInstant,
+) -> Result<ChangeSet, DomainError> {
+    // Only the rows the request names are read, so an unrelated stored row can
+    // never refuse an acknowledgement. An absent key is simply not there.
+    let mut rows: BTreeMap<(String, String), ParkRow> = BTreeMap::new();
+    for item in payload.items.as_slice() {
+        let key = (
+            item.task_id.as_str().to_owned(),
+            item.formulation_id.as_str().to_owned(),
+        );
+        if rows.contains_key(&key) {
+            continue;
+        }
+        let stored_row = read_set
+            .park_acks
+            .iter()
+            .find(|ack| ack.task_id == item.task_id && ack.formulation_id == item.formulation_id);
+        if let Some(ack) = stored_row {
+            rows.insert(key, ParkRow::from_ack(ack).map_err(stored)?);
+        }
+    }
+    let row_of = |task_id: &str, formulation_id: &str| {
+        rows.get(&(task_id.to_owned(), formulation_id.to_owned()))
+            .cloned()
+    };
+    let result = acknowledge_parks(payload, row_of, now);
+    let changes = rows_marked_seen(&result, row_of)
+        .iter()
+        .map(|row| {
+            row.to_ack()
+                .map(|ack| upsert(Record::ReviewParkAck(ack)))
+                .map_err(stored)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if changes.is_empty() {
+        return Ok(ChangeSet::no_op());
+    }
+    Ok(ChangeSet {
+        outcome: ChangeOutcome::Applied,
+        changes,
+        result: ResultRefs::default(),
+        effects: Vec::new(),
+    })
 }

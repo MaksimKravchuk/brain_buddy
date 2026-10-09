@@ -20,22 +20,29 @@
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
 //!   allow-listed command proposals applied only after explicit confirmation.
 //! * [`park`]: auto-park, the human yield and park acknowledgement over the
-//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
+//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision),
+//!   and the `review.auto_park` / `review.parks_ack` commands that wrap them.
 //! * [`queries`]: the task, project and tag reads (list, detail, counts,
 //!   project display), with the server's ordering and keyset cursor.
-//! * [`review_sessions`]: Review sessions (start, merged progress, finish), settings,
-//!   activation, Navigator consent, and the `ReviewState` / `ReviewQueue` reads.
-//! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
-//!   `task.transition`).
 //! * [`review_decisions`]: the Review decision commands (`review.decide`,
 //!   `review.undo_decision`, bulk release and its Undo) over the formulation,
 //!   park and task rules.
+//! * [`review_sessions`]: Review sessions (start, merged progress, finish), settings,
+//!   activation, Navigator consent, and the `ReviewState` / `ReviewQueue` reads.
 //! * [`smart_add`]: the deterministic Smart Add grammar, its resolution against
 //!   the read set, and `task.smart_add` (task plus resolved or created
 //!   classifications, with the typed alias bindings).
+//! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
+//!   `task.transition`).
+//! * [`types`]: the frozen value types.
+//! * [`dispatch`]: the one tested entry point that routes every catalog command
+//!   to the single family that decides it and every query to the single family
+//!   that answers it.
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
+//! * [`park`]: auto-park, the human yield and park acknowledgement over the
+//!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
@@ -44,6 +51,7 @@ pub mod ai_policy;
 pub mod archive;
 pub mod calendar;
 pub mod children;
+pub mod dispatch;
 pub mod formulation;
 pub mod normalization;
 pub mod organize;
