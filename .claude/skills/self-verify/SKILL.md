@@ -50,6 +50,11 @@ cd frontend && npx playwright install --with-deps chromium   # required before m
 
 `make test-e2e` needs a real browser.
 
+Installing the backend (`make install-backend`, `pip install -e backend[dev]`)
+compiles the Rust bridge `bb_core`, so it also needs `rustup` and a C compiler.
+After changing anything under `rust/`, re-run the install, then
+`cargo test -p bb-python bridge` from `rust/` for the bridge's own boundary tests.
+
 ## Backend
 
 ```bash

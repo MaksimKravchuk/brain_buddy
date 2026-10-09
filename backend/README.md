@@ -2,6 +2,8 @@
 
 FastAPI service providing CRUD, validation, and versioning APIs for the Brain Buddy knowledge graph. Refer to the project root README for setup instructions.
 
+The backend wheel also ships `bb_core`, the PyO3 bridge to the shared Rust core (`rust/bindings/python`, feature 026), so building or installing it needs Rust and a C compiler. The build backend is maturin; `backend/bb_core.pyi` is the type stub for the extension and must change with `rust/bindings/python/src/lib.rs`. Python reaches it only through `app/modules/tasks/rust_adapter.py`.
+
 ## Configuration
 
 Environment variables allow you to tailor local behavior:
