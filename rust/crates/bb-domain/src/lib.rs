@@ -19,6 +19,8 @@
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
+//! * [`queries`]: the task, project and tag reads (list, detail, counts,
+//!   project display), with the server's ordering and keyset cursor.
 //! * [`park`]: auto-park, the human yield and park acknowledgement over the
 //!   formulation clock (ADR-0027 precedence, bookkeeping without an edit revision).
 //! * [`types`]: the frozen value types. The rule families and the
@@ -34,4 +36,5 @@ pub mod normalization;
 pub mod organize;
 pub mod park;
 pub mod proposal;
+pub mod queries;
 pub mod types;
