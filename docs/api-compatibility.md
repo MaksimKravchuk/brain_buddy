@@ -24,8 +24,10 @@ keep its tasks' project membership (PR-03), which older clients did not expect.
 
 Spec 026 adds one more additive field (2026-10-09): `created_at` on `ProjectResponse`
 and `TagResponse`. It is the creation instant that orders same-name Smart Add ties
-(oldest wins, by `(created_at, id)`), and it is always present. Clients that ignore
-unknown response fields need no change.
+(oldest wins, by `(created_at, id)`). The OpenAPI schema declares it optional, so the
+addition stays backward-compatible for generated clients during a rollout or
+rollback, but this server always sends it. Clients that ignore unknown response
+fields need no change.
 
 **Rollback is forward-only.** Once a build of the shared kit that applies lossless
 archive locally exists (PR-04 onward), roll PR-03 forward, never back: a server that

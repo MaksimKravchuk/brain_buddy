@@ -132,8 +132,9 @@ impl Tag {
 }
 
 /// A creation instant as the server compares it (microsecond datetimes). The
-/// wire type is RFC 3339, so an unparsable value cannot occur; it would sort
-/// first.
+/// only wire-valid value this rejects is a leap second (`:60`), which no
+/// producer stamps: the server's Python `datetime` cannot represent one. Such a
+/// value would sort first.
 fn created_at_key(instant: &Instant) -> UtcInstant {
     UtcInstant::parse_rfc3339(instant.as_str()).unwrap_or(UtcInstant::EARLIEST)
 }
