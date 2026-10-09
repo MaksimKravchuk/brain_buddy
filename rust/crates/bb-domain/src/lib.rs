@@ -8,10 +8,15 @@
 //!   `formulation.py`).
 //! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
 //!   a calendar day distinct from an instant.
+//! * [`organize`]: project, tag and `task.tags` rules (normalized-name
+//!   uniqueness, active references, archive and tag deletion).
+//! * [`archive`]: archive membership, legacy marker restoration and the
+//!   project listing over it.
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
+pub mod archive;
 pub mod calendar;
 pub mod normalization;
 pub mod organize;
