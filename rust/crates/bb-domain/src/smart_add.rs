@@ -466,7 +466,11 @@ fn resolve_project(
     if key.is_empty() {
         return (None, Some(DomainError::field(Reason::EmptyName, "name")));
     }
-    // Ties go to the lowest ID, the order the read set keeps.
+    // Ties go to the lowest ID, the order the read set keeps. The server
+    // does the same: it scans `projects` through its `(owner_id, id)` key and
+    // takes the first namesake. The Swift planner orders by `(createdAt, id)`,
+    // but the read set carries no creation time, so that tie-break is not
+    // reproducible here (spec 026 PR-11 review).
     let active = read_set
         .projects
         .values()
@@ -815,7 +819,12 @@ impl Plan {
                 });
                 proposed.clone()
             };
-        self.bind(EntityType::Project, proposed.as_str(), resolved.as_str())?;
+        self.bind(
+            EntityType::Project,
+            proposed.as_str(),
+            resolved.as_str(),
+            "project",
+        )?;
         Ok(resolved)
     }
 
@@ -833,7 +842,12 @@ impl Plan {
             }
             ClassificationRef::ByName { name, proposed_id } => {
                 let resolved = self.tag_by_name(read_set, name, proposed_id)?;
-                self.bind(EntityType::Tag, proposed_id.as_str(), resolved.as_str())?;
+                self.bind(
+                    EntityType::Tag,
+                    proposed_id.as_str(),
+                    resolved.as_str(),
+                    "tags",
+                )?;
                 resolved
             }
         };
@@ -899,29 +913,41 @@ impl Plan {
         Ok(created_id)
     }
 
-    /// Records `alias -> resolved` once per typed alias.
+    /// Records `alias -> resolved` once per typed alias. Bindings are
+    /// one-to-one: an alias that already resolved to the same record is a
+    /// no-op, one that would resolve to a second record is refused as
+    /// `invalid_payload` on `field`, so a dependent command that names the
+    /// alias can never be bound to the wrong record.
     fn bind(
         &mut self,
         entity_type: EntityType,
         alias: &str,
         resolved: &str,
+        field: &str,
     ) -> Result<(), DomainError> {
         let id = |value: &str| {
             crate::types::Id::parse(value)
                 .map_err(|_| DomainError::field(Reason::InvalidValue, "id_bindings"))
         };
         let alias_id = id(alias)?;
-        if !self
+        let entity_id = id(resolved)?;
+        match self
             .bindings
             .iter()
-            .any(|b| b.entity_type == entity_type && b.alias_id == alias_id)
+            .find(|b| b.entity_type == entity_type && b.alias_id == alias_id)
         {
-            self.bindings.push(Binding {
-                entity_type,
-                alias_id,
-                entity_id: id(resolved)?,
-            });
+            Some(bound) if bound.entity_id != entity_id => {
+                Err(about(Reason::InvalidPayload, entity_type, alias, field))
+            }
+            Some(_) => Ok(()),
+            None => {
+                self.bindings.push(Binding {
+                    entity_type,
+                    alias_id,
+                    entity_id,
+                });
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
