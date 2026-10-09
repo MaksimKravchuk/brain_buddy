@@ -199,6 +199,7 @@ Each `T###` belongs to exactly one `PR-NN`; each PR delivers one named, independ
 Before assigning a worker, check its concrete outcome, owned files, expected code **and test/documentation** size and sufficient existing checks. The Rust/FFI/runtime/AI measurements above also cover PR-61 typed values, PR-62 dispatch and PR-64 worker/handoff. Measure the committed candidate against its accepted merged base before review. Both checks below must pass; `review_budget` records the feature-specific second cap, which the existing repository product checker does not enforce. No `oversize_reason` waiver is permitted for feature 026. If either cap fails, stop, split into smaller independently testable outcomes, update task coverage/dependencies/paths/budgets, and repeat boundary review before continuing. A cap is not evidence that an unimplemented slice will fit.
 
 ```bash
+set -euo pipefail
 # Set SLICE_BASE to the recorded accepted merged SHA and SLICE_ID to this PR-NN.
 python3 scripts/check_slice_budget.py specs/026-rust-core-sync/tasks.md "$SLICE_ID" --base "$SLICE_BASE"
 python3 - "$SLICE_BASE" <<'PY_SIZE'
