@@ -1,5 +1,52 @@
 # Specification verification
 
+## Completion pass — 2026-10-09
+
+Scope: finish the existing planning package from merged PR #304/main `c16daecd13247e35fea280bd9322c8a4b09dabb1`. Only files under `specs/026-rust-core-sync/` change. Accepted constitution/ADRs, application code, schemas, credentials, CI and production are untouched. No task checkbox is marked implemented.
+
+### Authored outcome
+
+Added the logical data model, exact command/writer catalog, runtime/FFI contract, concrete wire/error/transfer envelopes, planned validation guide, and 57 bounded proposed PR slices. All 26 FR and 8 SC IDs have slice coverage, each task appears exactly once, dependencies pass the structural validator, and budgets are at most 390 product lines/7 files. Budgets remain implementation caps to measure, not a claim that future code has been sized empirically.
+
+The contract completion corrected complete Review projection requirements, the stalled count outside Next, Smart Add identity aliases, and account-less merge identity. Existing large archive/tag/bulk operations use bounded immutable transfer chunks with atomic application instead of an incompatible 500-row product cap. Restore/purge metadata is bounded by recoverable restore points. The accepted legacy response, receipt-ordering, source-TTL and post-reset fresh-intent guarantees remain.
+
+### Checks and limits
+
+| Check | Current result |
+| --- | --- |
+| Official CLI version in isolated uv environment | PASS: repository-pinned `github/spec-kit@v1.0.11`, `specify version` reports 1.0.11; no installed project assets refreshed |
+| Existing-feature prerequisite / plan / tasks / checklist setup | PASS with `SPECIFY_FEATURE_DIRECTORY=specs/026-rust-core-sync`; existing plan preserved in place |
+| `make check-specs` | PASS; 247 validator tests, 246 passed and 1 normally skipped; artifact/manifests/gate checks pass |
+| Shared design authority tests | PASS, 6 tests; unchanged mock remains static design evidence |
+| Slice coverage / relative Markdown links / `git diff --check` | PASS: 34/34 FR+SC, 57 unique tasks, no broken relative links or whitespace errors |
+| `make verify-all` | Attempted; passed spec checks and reached `validate-ci`, then local production-smoke unit tests could not create sockets in the sandbox. This is not a passing full-stack result. A separate local-socket-capable `make validate-ci` rerun passed, including the local production-smoke unit tests; no production endpoint was used. |
+| HTML runtime rendering | Not verified. Default sandbox blocked Chromium startup; an allowed launch then hit the browser's local-file navigation restriction. No screenshot, geometry or native accessibility pass is claimed. |
+| Product acceptance / migration / deployment | Not run: this request produces specifications. Q01–Q12, benchmark and restore procedures are future implementation gates. |
+
+### Canonical planning review
+
+The `speckit-review` skill was read and its canonical harness used. Preflight passed for run `026-completion-20261009-1`; risk derives **high**. The [machine summary](evidence/planning-review-summary.json) and [artifact manifest](evidence/planning-artifacts.json) preserve the actual digest. Aggregation is **escalated**, with **0/6 reviewer lenses run**, no invented findings, and no human sign-off.
+
+Automatic approval review rejected launching the Codex CLI panel, first citing uncertain external disclosure and local report writes, then specifically the uncommitted additions being sent to OpenAI Codex. GitHub API confirmed the repository is public and the canonical command uses a read-only reviewer sandbox; those facts did not resolve the second rejection. The requested external review permission remains pending. No alternate reviewer or hand-written approval is substituted. Local JSON evidence writes by the harness are distinct from product edits.
+
+Once explicitly permitted, run the six configured lenses through the same skill/harness against an unchanged preflight digest, aggregate, fix confirmed defects and use at most one further campaign if necessary. Actual reviews, provider/model correlation and any degradation must be reported. Human design/governance/slice approval and the high-risk run/digest-bound sign-off are separate decisions in [approval.md](approval.md).
+
+### Cross-artifact analysis
+
+Read-only `/speckit-analyze` passes were applied to requirements, user stories, entities/transitions, plan dependencies, task coverage and constitution constraints after task generation. Structural coverage is 100% (34/34); unmapped tasks: 0; duplicate task ownership: 0; unresolved template placeholders: 0. The complete machine-readable requirement-to-task map is in tasks.md rather than duplicated here. This is author analysis, not independent review.
+
+| Finding | Classification | Disposition |
+| --- | --- | --- |
+| Coarse stages lacked implementable boundaries, owned paths and coverage | Technical completeness | Replaced with proposed v2 PR map; all-writer/fence prerequisites precede pilot, PostgreSQL follows pilot |
+| Model/API projection, alias and oversized-effect gaps | Technical contract consistency | Resolved in data-model and contracts; validation scenarios named in quickstart and slice map |
+| Constitution IV and Apple dependency policy prohibit parts of the proposed implementation until amended | Governance gate | Exact narrow proposal in adr-draft; accepted policies remain unchanged; implementation blocked pending actual acceptance |
+| New conflict/recovery UX and high-risk plan lack human sign-off | Human gate | Concrete baseline and status in approval.md; not inferred from the earlier PR merge |
+| Mandatory panel did not execute | Review evidence gate | Escalated; explicit external-service permission requested, no pass claimed |
+
+The optional after-tasks acceptance and after-analyze product-report hooks are not run: no product was implemented. A custom reviewer-owned protocol-quality checklist is supplied and remains unchecked until a reviewer evaluates it; this is distinct from the completed built-in requirements-quality checklist. The historical evidence below is retained for provenance and is not current-candidate evidence. The old ChatGPT Page was not updated by this repository task.
+
+## Historical verification — October 8
+
 Date: 2026-10-08. The subject is the documentation package, not a Rust or new-sync implementation. Product code, data, credentials, CI configuration, and production are unchanged. The owner's English-only documentation rule is recorded in `AGENTS.md`.
 
 ## Results

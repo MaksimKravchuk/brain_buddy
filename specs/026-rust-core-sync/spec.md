@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-08
 
-**Status**: Draft for discussion; the direction has been selected, but implementation and new UX decisions have not been approved.
+**Status**: Complete proposal for owner review, updated 2026-10-09. Rust and custom sync are selected; the specific design, governance amendments, and PR boundaries remain subject to the explicit decisions in [approval.md](approval.md). This is a specification, not implementation acceptance.
 
 **Input** (translated): “Rust and custom sync look promising. We need a specification for this solution.” Basis: [intake.md](intake.md). Technical design: [plan.md](plan.md), [sync-v1.md](contracts/sync-v1.md). This document defines the behavior and outcome boundary.
 
@@ -61,10 +61,10 @@ Action availability, project behavior, and Weekly Review rules are consistent ac
 
 **Acceptance Scenarios**:
 
-1. Identical inputs and the same rule version produce the same decision on command validity and the same domain result.
-2. Project archiving preserves membership and restores it according to ADR-0020; a UI change does not override the rule.
-3. Auto-park preserves all ADR-0027 constraints, including precedence of a valid offline human decision over an automatic move.
-4. Retrying a job after a failure does not create a second internal mutation; an uncertain external-effect outcome is shown as uncertain rather than successful.
+1. **Given** identical domain inputs, execution inputs, and rule version, **When** Apple and server adapters evaluate a command, **Then** validity and domain result match the same normative example.
+2. **Given** a project with member tasks, **When** it is archived and restored, **Then** membership and historical markers follow ADR-0020 on every device.
+3. **Given** an automatic park and a valid earlier offline human decision, **When** the decision arrives, **Then** ADR-0027's yield rule takes precedence without undoing an intervening manual action.
+4. **Given** a job whose worker lost its lease after submission, **When** another worker retries, **Then** an internal effect occurs once and an unprovable external outcome remains explicitly uncertain.
 
 ### User Story 5 — Use AI with a clear data boundary (Priority: P2)
 
@@ -74,10 +74,10 @@ The app uses a suitable local model when it is available and capable of the task
 
 **Acceptance Scenarios**:
 
-1. In “on-device only” mode, a missing model, insufficient memory, or an error does not cause content to be sent to the server or a provider.
-2. The recipient and transmitted data are shown for a remote request; revoking consent stops requests that have not yet started and further transmission.
-3. A model response remains a proposal. Only explicit confirmation of valid actions submits ordinary commands; invalid actions are rejected.
-4. AgentRun success alone does not complete the linked task or expand the agent's authority.
+1. **Given** “on-device only” mode, **When** a model is absent, memory is insufficient, or inference fails, **Then** no content is transmitted for inference and manual task work remains available.
+2. **Given** a remote suggestion request, **When** consent is requested, **Then** its recipient and fields are shown; revocation prevents requests that have not started and further transmission.
+3. **Given** a model response, **When** it is presented, **Then** it remains a proposal; only explicit confirmation of valid actions submits ordinary commands, and invalid output changes no task.
+4. **Given** an AgentRun success, **When** its result arrives, **Then** the linked task remains unchanged until an independently authorized Tasks command is confirmed.
 
 ### Edge Cases
 
@@ -133,12 +133,12 @@ Verify: duplicate delivery; reordered responses; a crash between a write and its
 
 - **SC-001**: All normative examples of the selected existing rules produce identical results on the server, iOS, and macOS; coverage includes the four GTD lists, lifecycle, archive, Smart Add, and review.
 - **SC-002**: Offline, crash, duplicate, and lost-response scenarios have no lost confirmed local changes or repeated accepted mutations; every rejection is accessible to the user.
-- **SC-003**: For 10,000 tasks and 100 pending changes, local writes complete at p95 ≤ 50 ms and the list remains responsive. The device at the lower bound of support is specified before implementation; measurements only on a powerful Mac do not satisfy the criterion.
+- **SC-003**: For 10,000 tasks and 100 pending changes, local writes complete at p95 ≤ 50 ms and the list remains responsive. The reference phone is iPhone 11 on iOS 26; the reference Mac is MacBook Air M1 with 8 GB on macOS 26. The release-build workload, sampling, and UI-blocking threshold are defined in [quickstart.md](quickstart.md); a faster device or simulator cannot replace the phone measurement.
 - **SC-004**: For two active clients, RTT ≤ 100 ms, no throttling, and ≤ 100 pending commands, convergence after the last accepted command takes p95 ≤ 2 s with the notification channel enabled. If a hint is lost, an update arrives within ≤ 60 s; mobile OS background restrictions are outside this promise.
 - **SC-005**: Import and restoration of the reference dataset preserve all data and relationships or stop before switching stores; uncertain submissions do not create duplicates.
 - **SC-006**: AI-consent refusal scenarios send no requests containing user content to a prohibited recipient; an invalid model response does not change tasks.
 - **SC-007**: Loss of a worker lease, job retries, and backup restoration do not result in repeated internal effects or access by another account; uncertain external effects remain visible.
-- **SC-008**: The user can understand a delay, resolve a conflict, and resume sync without editing files; existing Mac thresholds for unobtrusive status and accessibility are preserved.
+- **SC-008**: On both Apple clients, a representative user completes the status, conflict, and interrupted-recovery journeys in [quickstart.md](quickstart.md) without editing files or coaching. Every in-scope action is reachable with keyboard/VoiceOver, all displayed states match [design.md](design.md), and existing Mac status thresholds are preserved.
 
 ## Assumptions
 
@@ -146,8 +146,12 @@ The user has accepted the choice of Rust and custom sync. The iOS/macOS/backend 
 
 In the first version, the scope is the existing owner's private workspace. A device is not an owner. Sharing/assignee, a separate billing model, and E2EE are not considered agreed requirements. The current trusted-server model is preserved; if E2EE is needed, sync validation and server AI must be reconsidered before implementation.
 
-The SC-003/004 budgets and retention in the technical contract are explicit initial proposals. There is no promise of precise background cron on a phone. There is no promise that a local model is available on every supported device or for every language.
+The SC-003/004 budgets, reference devices, and retention in the technical contract are concrete proposed acceptance conditions, not measured results. They do not drop any currently supported platform. There is no promise of precise background cron on a phone or of a local model on every device/language. The first AI integration uses the existing Weekly Review suggestion capability; it adds no new model download product or general autonomous agent.
 
 ## Clarifications
 
-The requirements were reconstructed from the discussion and current accepted ADRs. No new owner answers have been invented. New screens, technical defaults, and platform order do not yet have human sign-off. This document can be reviewed in full; implementation must not begin before the mandatory design/review/PR-slice gates.
+### Session 2026-10-09
+
+- The owner requested completion of the specification under Spec Kit and repository rules. This authorizes completing and reviewing the documents, not implementing or deploying the migration.
+- First acceptance boundary: iOS ↔ server ↔ macOS, compatible existing web/CLI/MCP/Capture/Review writers, and the separate post-pilot PostgreSQL migration. Android, Windows, and Linux remain architectural consumers requiring subsequent platform specifications and acceptance; no new shell is required to pass this package.
+- Concrete recommendations replace technical placeholders. [approval.md](approval.md) separates those recommendations from actual owner answers and names the remaining human decisions. No approval has been invented.

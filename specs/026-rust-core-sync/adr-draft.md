@@ -31,3 +31,23 @@ The team maintains an FFI/build matrix and its own sync protocol. Shared rules a
 ## Acceptance conditions
 
 Acceptance requires review of the concrete [contract](contracts/sync-v1.md), UX sign-off for [design.md](design.md), validated limits, and an exact migration/rollback boundary. This draft does not authorize data deletion, production schema changes, or automatic release.
+
+## Exact amendment proposal
+
+These are proposed replacement/addition texts for the first governance slice, not changes already made to accepted policy. Reserve the next available ADR number across all refs at that time; do not reuse an occupied number.
+
+**Constitution IV**, replace its first bullet with:
+
+> Backend responses MUST include `X-Correlation-ID`. Correlation and observability IDs are labels only and never authorization or idempotency inputs. Dedicated owner-scoped command IDs MAY identify an immutable command for durable deduplication under an accepted domain contract. No client-supplied ID grants authority; replay MUST recheck current authority and reject changed command content under the same ID. Entity IDs alone do not authorize upsert or replay beyond the accepted domain contract.
+
+This narrow breaking clarification requires the constitution's version/history and sync impact report to be updated in the governance slice. Audit dependent `AGENTS.md`, `CLAUDE.md`, `.specify/templates/`, and observability/retention docs for the same distinction; do not change unrelated consent or delivery principles.
+
+**Apple dependency policy**, retain the no-third-party default with this exception:
+
+> The shared Rust domain/runtime and their audited, pinned generated Swift bindings are allowed. Their build inputs, licenses, lockfile, reproducible packaging, supported targets, and Foundation-only Linux test boundary must be reviewed. This exception does not permit arbitrary Swift packages, bundled model weights, or unrelated native dependencies.
+
+**Retention additions**, reflect in `docs/data-retention.md` and the existing privacy disclosure before rollout: ordinary task/Review full responses retain their 24-hour maximum; content-free command identity/outcome/fingerprint metadata survives only until account purge. Feed, snapshot, oversized-transaction staging and backup copies inherit source expiry/deletion, including seven-day Review recovery content, and cannot extend it. Device SQLite/outbox/issues/drafts preserve the current owner-specific sign-out, local export and legacy backup policy; no diagnostic upload is implied. Protected restore points have a maximum seven-day horizon. Purge cannot finish while a recoverable controlled backup still contains the purged owner; invalidate/erase affected restore material first. The minimal external control ledger is bounded by the last affected restore point and is not an indefinite person-linked audit log.
+
+**Architecture and legacy sync**, preserve module ownership and existing public Task/Review DTO behavior, while authorizing the narrow sync-only projection fields specified in the data model. Atomic visibility permits bounded transfer pages for a large transaction; it does not permit partial bulk/archive effects. New protocol clients use explicit conflicts; legacy clients keep their accepted concurrency behavior during the compatibility window. PostgreSQL cutover stops all task writers, preserves receipts/feed/jobs together, and follows the rollback boundary in plan §9 and quickstart.
+
+No amendment authorizes production secrets, migrations, CI changes or release by itself. [approval.md](approval.md) records the separate gates and actual approval status.

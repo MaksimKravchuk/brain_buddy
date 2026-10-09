@@ -15,11 +15,6 @@
 - [x] Shared Rust code is not used to claim that platform tests are unnecessary.
 - [x] Assumptions and unconfirmed decisions are listed explicitly.
 
-## Implementation readiness
+## Approval status is separate
 
-- [ ] Human sign-off has been obtained for the new conflict/recovery screens in design.md.
-- [ ] The proposed ADR and defaults (limits, retention, compatibility, cohort/platform order) have been accepted in the contract slice.
-- [ ] The official planning review has an admissible verdict and current digest.
-- [ ] A detailed PR-slice map has been agreed and analyze has run before coding.
-
-These outstanding approvals do not prevent completing the requested specification as a Draft, but the package must not be presented as authorization to implement. Document checks and independent findings are recorded in [verification.md](../verification.md).
+The remaining design, governance, slice-boundary and high-risk approvals are recorded in [approval.md](../approval.md), with their true pending status. They are authorization gates, not requirements-quality checkboxes or implementation results. Formal review evidence is recorded in [verification.md](../verification.md).

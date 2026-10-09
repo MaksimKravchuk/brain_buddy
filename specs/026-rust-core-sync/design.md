@@ -1,7 +1,7 @@
 # Design: Rust core and custom sync
 
 **Feature**: `specs/026-rust-core-sync/`
-**Spec**: `spec.md`; this design is a draft for requirements FR-001–FR-026, not a claim that the clarification/design stage is complete.
+**Spec**: `spec.md`; this design specifies requirements FR-001–FR-026 for explicit owner sign-off.
 **Screens**: [design/sync-states.html](design/sync-states.html), one self-contained static HTML file without external resources.
 **Human sign-off**: **pending**. Production implementation has not started; the next architecture stage requires explicit design approval under `.specify/agent-commands/speckit-design/SKILL.md`.
 
@@ -60,7 +60,7 @@ Preserve the approved quiet status text and timings from `specs/021-mac-sync/des
 | .08 changed again | version changed after the card opened | “This task changed again. Review both versions.”; refresh the account side, preserve the user's draft; require explicit apply again | FR-007 |
 | .09 deleted elsewhere | server deletion of an existing deletable entity conflicts with a local edit | “This item was deleted on another device. Your edit is saved in this issue.”; Copy saved edit, “Keep item deleted”; **no automatic reopen/create** | FR-007, FR-008 |
 
-The title example's resolution creates a normal title command against the displayed current version; other fields are not replaced with an old snapshot. Under FR-007/contract v1, a conservative whole-entity conflict is allowed: the preview must show all differing fields rather than promise automatic field merging. Choosing the account version explicitly discards the intent and requires a decision on dependent actions. Manual text rewriting has not been added: comparison, Copy saved edit, and two explicit versions provide minimally sufficient recovery. “Keep item deleted” closes the issue only after the resolution is stored durably; the saved edit remains available in recovery/export under the retention contract and does not disappear when the sheet is simply closed. The deletion example concerns an existing deletable record, such as a comment; no new Task deletion/restoration interface is introduced. The former suffix `.10` is reserved and unused: FR-009 preserves current ordering/moves; manual reorder API and UI are outside scope.
+The title example's resolution creates a normal title command against the displayed current version; other fields are not replaced with an old snapshot. Under FR-007/contract v1, a conservative whole-entity conflict is allowed: the preview must show all differing fields rather than promise automatic field merging. Choosing the account version explicitly discards the intent and requires a decision on dependent actions. Manual text rewriting has not been added: comparison, Copy saved edit, and two explicit versions provide minimally sufficient recovery. “Keep item deleted” closes the issue only after the resolution is stored durably; the saved edit remains available in recovery/export under the retention contract and does not disappear when the sheet is simply closed. The deletion example concerns an existing deletable record, such as a Tag; no new Task deletion/restoration interface is introduced. The former suffix `.10` is reserved and unused: FR-009 preserves current ordering/moves; manual reorder API and UI are outside scope.
 
 ### M-03 / D-03 — Recover sync (13 states per screen)
 
@@ -136,7 +136,7 @@ The mock's cloud example is labeled **illustrative provider: OpenAI**; this neit
 | FR-025 | App/widget multiprocess storage arbitration and atomic reads; no UI lock/engine controls needed |
 | FR-026 | Local latency/scale and non-blocking sync; benchmark evidence, no new performance dashboard |
 
-FR-001/004/005/006/008/009/010/011/012/013 also have invisible durability, convergence, dedup, transaction, tombstone, ordering, reset, isolation, and migration invariants. Displayed status alone is **not** evidence of these invariants: the future plan must assign contract/storage/replay checks. FR-016 includes exact formulation clocks, auto-park floors, yield/idempotency, receipts/Undo, and feature-flag behavior from ADR-0027; no new review controls are introduced here. The tables above cover all FRs in both directions; affordances without a requirement: **none**. Back/Cancel/navigation close only the presentation and do not remove durable intent.
+FR-001/004/005/006/008/009/010/011/012/013 also have invisible durability, convergence, dedup, transaction, tombstone, ordering, reset, isolation, and migration invariants. Displayed status alone is **not** evidence of these invariants: the plan and quickstart assign contract/storage/replay checks. FR-016 includes exact formulation clocks, auto-park floors, yield/idempotency, receipts/Undo, and feature-flag behavior from ADR-0027; no new review controls are introduced here. The tables above cover all FRs in both directions; affordances without a requirement: **none**. Back/Cancel/navigation close only the presentation and do not remove durable intent.
 
 ## Primary loop impact
 
@@ -178,3 +178,5 @@ Sources: accepted ADR-0006/0020/0027; `.claude/skills/brain-buddy-design/SKILL.m
 3. **Recovery visibility**: confirm quiet status with existing 021 timings and a separate recovery sheet only for persistent/semantic errors; migration uncertainty is shown explicitly. Migration is fully validated before activation or fails with the original intact; ordinary verified migration proceeds quietly.
 
 These decisions are draft recommendations for the shared specification. Approval of Rust + custom sync does not constitute human sign-off for these screens.
+
+On 2026-10-09 the unchanged static mock was offered for review again. Browser rendering was attempted but the default sandbox blocked Chromium startup; no new rendered-layout or native-accessibility result is asserted by that attempt. The authoritative pending decisions are consolidated in [approval.md](approval.md).

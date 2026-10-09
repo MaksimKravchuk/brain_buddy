@@ -25,3 +25,20 @@ Documentation has historical inconsistencies: the earlier iOS archive-clearing d
 Useful existing oracles include formulation JSON vectors and review trace replays, project-archive golden traces, reducer/replay/sync race tests in `ios/BrainBuddyKit/Tests/`, and backend task/review tests. New property/fault tests address specific missing protocol and migration guarantees.
 
 UniFFI/Swift/Kotlin, PyO3, C ABI, and GTK4 are proposed integration choices. Bounded build/spike checks are required before locking versions; this specification does not claim that every target toolchain already builds the shared core or that a particular local model supports Russian on every device.
+
+
+## Completion decisions, 2026-10-09
+
+Rechecked against merged main `c16daecd13247e35fea280bd9322c8a4b09dabb1`. This pass makes the existing proposal implementable; it does not claim benchmark or toolchain proof.
+
+| Decision | Rationale | Alternative and reason not selected |
+| --- | --- | --- |
+| Retain accepted public DTOs with enumerated sync projection extensions | Complete offline Review needs captured queues/history links and task clock state omitted by ordinary HTTP responses; see data-model.md | Raw storage snapshots would expose private replay/Undo bookkeeping |
+| Stream oversized transaction bodies into staging and apply atomically | Existing bulk/archive/tag operations cannot safely gain a 500-record product limit | Silent chunked application violates accepted atomic effects; an unbounded response cannot guarantee bounded memory |
+| Keep per-entity ID wire shapes and explicit alias bindings | Existing Review validation and Smart Add name reuse must remain interoperable | A universal UUID conversion breaks legacy references and can duplicate normalized projects/Tags |
+| SSE hint plus active 60-second polling | Foreground convergence has a concrete transport and a loss-tolerant fallback | APNs would add delivery/signing work without proving background scheduling promises |
+| Fix reference devices and deterministic workload in quickstart | Makes SC-003/004 falsifiable before code; no performance is claimed | Choosing a fast machine after implementation could hide a regression |
+| Seven-day maximum protected restore horizon; remove affected backups before purge completes | Restores cannot resurrect deleted owners or extend source TTLs | Indefinite owner-linked control metadata would contradict the accepted purge policy |
+| First-stage Apple/server, separate later platform specifications | Reuses current native surfaces and proves portability boundaries without inventing new application UX | Simultaneous five-client delivery would add unaccepted product scope |
+
+Binding/library versions remain engineering choices of the explicit build-proof slice, pinned before consumers depend on them. The portable FFI behavior, supported existing target matrix and failure semantics are frozen now; inability to build them rejects that slice instead of silently changing the contract.
