@@ -563,6 +563,13 @@ fn ai_policy_026_fr_019_declined_echo_provider_mismatch_and_configuration_short_
         provider: provider("anthropic"),
     });
     assert_eq!(denial(mismatch), Denial::ProviderMismatch);
+    // Current stored consent never stands in for the request's own echo.
+    let mut no_echo = remote_only();
+    no_echo.echo = None;
+    assert_eq!(
+        denial(no_echo),
+        Denial::ConsentRequired(ConsentState::Missing)
+    );
     let mut disabled = remote_only();
     disabled.provider = None;
     assert_eq!(denial(disabled), Denial::RemoteDisabled);
