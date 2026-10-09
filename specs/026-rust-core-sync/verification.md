@@ -23,6 +23,27 @@ Checks run: `python3 scripts/check_spec_kit_specs.py`, `make check-specs` and `m
 
 Still outstanding, not certified: measured sizing for the complex slices PR-03/04/05/34/49/59/60/61/62/64 (including Cargo.lock) before their boundaries are approved; the docs/data-retention.md and privacy disclosure update before rollout; no runtime, rendering or acceptance evidence exists.
 
+## PR-02 parity oracle and PR-06 primitives — October 9
+
+The oracle is frozen by reference, not copied. [reference-store.json](contracts/reference-store.json) lists the existing vector files by path, sha256, section counts, byte-identical Swift/web copies and consumers (formulation, flow and archive vectors, the Review traces and wire fixtures, the iOS legacy-import golden), names the in-source oracles whose cases moved into shared files, records the contradictions below, and carries a bounded two-owner synthetic dataset in the real stored-record shapes. [primitive-vectors.json](contracts/primitive-vectors.json) holds the 31 `NameNormalizerTests` inputs and the `CalendarDayTests` cases with expected values taken from the server functions; [web-presentation-vectors.json](contracts/web-presentation-vectors.json) (rule version `smart-add-web/1`) holds 54 parse, 20 suggestion, 15 apply and 11 name-collision cases linked to the existing `smartAdd.test.ts` titles. `backend/tests/test_026_oracle_contracts.py` and `test_026_primitive_vectors.py` verify them against the backend (including restoring the dataset into `TaskRepository`); `smartAddVectors.test.ts` runs the web file against the real helpers; `rust/crates/bb-domain/tests/primitives_parity.rs` runs the formulation, flow, primitive, reference and web files through the Rust primitives.
+
+Rust agrees with CPython 3.11 (Unicode 14) on `isspace`, NFKC, `casefold` and punctuation for every scalar assigned in Unicode 14 (exhaustive comparison; the 99 + 27 + 36 differences are all scalars unassigned there), and its day-start/day-of-instant conversion equals `zoneinfo` on 103 747 (zone, day) rows covering every transition of all 498 zones over 1900–2045 when both read the same tz data.
+
+| Id | Disagreement found (evidence in the contract files) | Proposed resolution |
+| --- | --- | --- |
+| C-01 | Sharp s: web lower-cases, Python/Swift/Rust fold to `ss` | Server rule; web optimistic only |
+| C-02 | Whitespace class: JavaScript `\s` (has U+FEFF, lacks U+0085, U+001C..1F) vs Python | Rust uses Python; Smart Add tokenization keeps the JavaScript class until the web helper goes |
+| C-03 | Length: web counts UTF-16 units, server/Swift/Rust count scalars (300 emoji refused by web, accepted by server) | Scalars everywhere |
+| C-04 | Web (and the Swift planner) strips a leading `@` before matching a project; `normalize_task_name` keeps it | Server rule |
+| C-05 | Task search: iOS folds diacritics and uses `Character.isWhitespace`, server is NFKC + casefold only | **Decision needed** |
+| C-06 | List ordering key: Python `strip().casefold()` vs Swift `NameNormalizer` + diacritic fold | **Decision needed** |
+| C-07 | Unicode data: Rust crates are newer than Python 3.11 / Unicode 14 | Equal on Unicode 14; bump together |
+| C-08 | Time zone data: server host tzdata vs bundled jiff-tzdb vs Foundation differ on pre-1970 offsets and some rule fixes | **Decision needed**: pin one release |
+| C-09 | Start of a day when a gap straddles midnight: Python/Rust use the pre-change offset, Swift the first local-day instant; only 1919 Toronto/Montreal/Nipigon/Thunder_Bay differ | Server rule |
+| C-10 | `0001-01-01`/`9999-12-31` overflow in Python, clamp in Swift/Rust | Clamp |
+
+Beyond the cross-language items, the web composer has a defect: `smartAdd.ts` `cleanTitle` builds a UTF-16-indexed removal mask but filters `Array.from(input)` (code points), so any emoji before a token corrupts the submitted title (`"Call 😀 mom #work"` becomes `"Call 😀 mom #"`; `"😀😀 @home today"` becomes `"😀😀 @hoday"`). It is frozen as a divergence in the web vectors and not fixed here.
+
 ## Current delivery amendment — October 9
 
 The owner requested independently reviewable PRs, an explicit dependency graph, maximum safe parallel work and no approximately 5,000-line PRs. The amended [tasks](tasks.md) preserve the technical outcome while changing delivery ownership/order: 64 unique tasks and slices, 94 edges, a complete [graph](delivery-graph.md), the existing product caps and a strict 800-line full-diff cap. Ready independent workers start immediately as merged prerequisites and slots permit. Domain families, job adapters and SSE/delta have disjoint write paths; small registration/handoff slices own shared files. The Task lifecycle/formulation, snapshot/transfer and all-writer/pilot dependencies remain explicit. Graph depth decreases from 40 to 34 topological levels; this describes dependency structure, not measured calendar duration.

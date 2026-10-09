@@ -1,6 +1,6 @@
 [package]
 name = "bb-domain"
-description = "Shared Brain Buddy domain core: frozen value types for the Tasks aggregate and native Review"
+description = "Shared Brain Buddy domain core: pure primitives and frozen value types for the Tasks aggregate and native Review (no I/O)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,8 +9,12 @@ publish.workspace = true
 
 [dependencies]
 bb-protocol.workspace = true
+caseless.workspace = true
+jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+unicode-general-category.workspace = true
+unicode-normalization.workspace = true
 
 [lints]
 workspace = true

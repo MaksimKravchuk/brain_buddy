@@ -1,0 +1,2491 @@
+{
+ "schema": "brainbuddy-web-presentation-vectors/v1",
+ "rule_version": "smart-add-web/1",
+ "format": "Bounded synthetic cases for the web presentation helpers that stay in the browser while the server is the domain authority (spec 026 command-catalog, web transition; tasks.md T002). rule_version names the behaviour frozen here: the grammar and resolution of frontend/src/features/tasks/smartAdd.ts under specs/003-smart-add-classification/contracts/smart-add.md. A change to that behaviour bumps it. Every case cites the existing web test it is taken from (source.file, source.test); the web suite smartAddVectors.test.ts runs this file against the real helpers. fixtures are the projects and tags the helpers resolve against (default is the fixture of smartAdd.test.ts and Swift SmartAddFixtures.webState). parse: expect is the web outcome (snake_case of SmartAddDraft); chips is smartAddChips of that draft. When a divergence is present, divergence.fields are the values the shared rules (server/Swift/Rust) produce for the same input; the web outcome is not wrong by the web suite but is not the shared rule, and PR-53 must resolve or accept each one explicitly. suggestions: expect is smartAddSuggestions(input, caret). apply_suggestion: expect is applySmartAddSuggestion or null. name_collision_probes: whether the web resolves a typed tag onto a stored tag (web_collides, run by the web suite) and whether the server's normalize_task_name(display_tag_name(typed)) equals the stored name's key (server_collides, run by backend/tests/test_026_oracle_contracts.py). agrees=false rows are real web/server disagreements, frozen here until PR-53 resolves or accepts each one.",
+ "fixtures": {
+  "default": {
+   "projects": [
+    {
+     "id": "project-launch",
+     "name": "Launch v2",
+     "state": "active"
+    },
+    {
+     "id": "project-vendor",
+     "name": "Vendor launch",
+     "state": "active"
+    },
+    {
+     "id": "project-admin",
+     "name": "Admin",
+     "state": "active"
+    }
+   ],
+   "tags": [
+    {
+     "id": "tag-work",
+     "name": "work",
+     "state": "active"
+    },
+    {
+     "id": "tag-deep",
+     "name": "deep work",
+     "state": "active"
+    },
+    {
+     "id": "tag-calls",
+     "name": "calls",
+     "state": "active"
+    }
+   ]
+  },
+  "untidy_tag": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-untidy",
+     "name": "  Deep   Work  ",
+     "state": "active"
+    }
+   ]
+  },
+  "sharp_ss": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-ss",
+     "name": "ss",
+     "state": "active"
+    }
+   ]
+  },
+  "duplicate_tags": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-z",
+     "name": "duplicate",
+     "state": "active"
+    },
+    {
+     "id": "tag-a",
+     "name": "duplicate",
+     "state": "active"
+    }
+   ]
+  },
+  "rank_exact_prefix_word_substring": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-work",
+     "name": "work",
+     "state": "active"
+    },
+    {
+     "id": "tag-deep",
+     "name": "deep work",
+     "state": "active"
+    },
+    {
+     "id": "tag-calls",
+     "name": "calls",
+     "state": "active"
+    },
+    {
+     "id": "tag-workshop",
+     "name": "workshop",
+     "state": "active"
+    },
+    {
+     "id": "tag-homework",
+     "name": "homework",
+     "state": "active"
+    }
+   ]
+  },
+  "hyphenated": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-deep-focus",
+     "name": "deep-focus",
+     "state": "active"
+    }
+   ]
+  },
+  "rank_whole_name_then_word": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-workshop",
+     "name": "workshop",
+     "state": "active"
+    },
+    {
+     "id": "tag-deep",
+     "name": "deep work",
+     "state": "active"
+    },
+    {
+     "id": "tag-coworking",
+     "name": "coworking",
+     "state": "active"
+    },
+    {
+     "id": "tag-rework",
+     "name": "rework",
+     "state": "active"
+    },
+    {
+     "id": "tag-zebra",
+     "name": "zebra-rework",
+     "state": "active"
+    }
+   ]
+  },
+  "quoted_name": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-quote",
+     "name": "a\"b",
+     "state": "active"
+    }
+   ]
+  },
+  "eleven_work_tags": {
+   "projects": [],
+   "tags": [
+    {
+     "id": "tag-a",
+     "name": "worka",
+     "state": "active"
+    },
+    {
+     "id": "tag-b",
+     "name": "workb",
+     "state": "active"
+    },
+    {
+     "id": "tag-c",
+     "name": "workc",
+     "state": "active"
+    },
+    {
+     "id": "tag-d",
+     "name": "workd",
+     "state": "active"
+    },
+    {
+     "id": "tag-e",
+     "name": "worke",
+     "state": "active"
+    },
+    {
+     "id": "tag-f",
+     "name": "workf",
+     "state": "active"
+    },
+    {
+     "id": "tag-g",
+     "name": "workg",
+     "state": "active"
+    },
+    {
+     "id": "tag-h",
+     "name": "workh",
+     "state": "active"
+    },
+    {
+     "id": "tag-i",
+     "name": "worki",
+     "state": "active"
+    },
+    {
+     "id": "tag-j",
+     "name": "workj",
+     "state": "active"
+    },
+    {
+     "id": "tag-k",
+     "name": "workk",
+     "state": "active"
+    }
+   ]
+  }
+ },
+ "parse": [
+  {
+   "id": "WP-P-001",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Draft update #work @\"Launch v2\"",
+   "expect": {
+    "clean_title": "Draft update",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": {
+     "id": "project-launch"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "Launch v2"
+    },
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-002",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Draft #work #WORK",
+   "expect": {
+    "clean_title": "Draft",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-003",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Draft @old @new",
+   "expect": {
+    "clean_title": "Draft",
+    "tags": [],
+    "project": {
+     "name": "new"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "new"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-004",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Draft (#work) today",
+   "expect": {
+    "clean_title": "Draft today",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-005",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Draft #work, today",
+   "expect": {
+    "clean_title": "Draft, today",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-006",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Discuss C# and max@example.com",
+   "expect": {
+    "clean_title": "Discuss C# and max@example.com",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-007",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Use \\#literal marker",
+   "expect": {
+    "clean_title": "Use #literal marker",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-008",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Plan #",
+   "expect": {
+    "clean_title": "Plan #",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-009",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses %s into a clean task create draft"
+   },
+   "input": "Plan @\"Launch v2",
+   "expect": {
+    "clean_title": "Plan @\"Launch v2",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-010",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "merges contextual defaults, deduplicates tags, and lets the final project win"
+   },
+   "context": {
+    "project_id": "project-launch",
+    "tag_id": "tag-work"
+   },
+   "input": "Plan #calls @Admin @\"Vendor launch\" #work",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "id": "tag-work"
+     },
+     {
+      "id": "tag-calls"
+     }
+    ],
+    "project": {
+     "id": "project-vendor"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "Vendor launch"
+    },
+    {
+     "kind": "tag",
+     "label": "work"
+    },
+    {
+     "kind": "tag",
+     "label": "calls"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-011",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "rejects completed classifications when the clean title is empty"
+   },
+   "input": "#work @launch",
+   "expect": {
+    "clean_title": "",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": {
+     "name": "launch"
+    },
+    "has_completed_tokens": true,
+    "is_valid": false
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "launch"
+    },
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-012",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "decodes quoted escapes and leaves malformed forms as literal title text"
+   },
+   "input": "Plan #\"deep \\\"work\\\"\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "deep \"work\""
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "deep \"work\""
+    }
+   ]
+  },
+  {
+   "id": "WP-P-013",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "decodes quoted escapes and leaves malformed forms as literal title text"
+   },
+   "input": "Plan #-work @\"broken\nproject\"",
+   "expect": {
+    "clean_title": "Plan #-work @\"broken project\"",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-014",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses punctuation names and wrapper cleanup while preserving unsupported quote escapes"
+   },
+   "input": "Plan [#a-b] {#a.b}",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "a-b"
+     },
+     {
+      "name": "a.b"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "a-b"
+    },
+    {
+     "kind": "tag",
+     "label": "a.b"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-015",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "parses punctuation names and wrapper cleanup while preserving unsupported quote escapes"
+   },
+   "input": "Plan #\"literal \\q\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "literal \\q"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "literal \\q"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-016",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "validates smart add draft bounds and skips preview labels for unloaded ids"
+   },
+   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #work",
+   "expect": {
+    "clean_title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": false
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-017",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "validates smart add draft bounds and skips preview labels for unloaded ids"
+   },
+   "input": "Plan #xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": false
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-018",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "matches a stored name whose own spacing and case are untidy"
+   },
+   "fixture": "untidy_tag",
+   "input": "Plan #\"deep work\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "id": "tag-untidy"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "  Deep   Work  "
+    }
+   ]
+  },
+  {
+   "id": "WP-P-019",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "strips a legacy sigil only from the front of a name"
+   },
+   "input": "Plan #\"c#sharp\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "c#sharp"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "c#sharp"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-020",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "leaves a lone backslash alone when no sigil follows it"
+   },
+   "input": "Copy from C:\\ drive",
+   "expect": {
+    "clean_title": "Copy from C:\\ drive",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-021",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ignores a quoted token with an empty name instead of classifying it"
+   },
+   "input": "Plan #\"\" today",
+   "expect": {
+    "clean_title": "Plan #\"\" today",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-022",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "treats a backslash-escaped sigil as literal text for both kinds"
+   },
+   "input": "Ping \\@nobody today",
+   "expect": {
+    "clean_title": "Ping @nobody today",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-023",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "treats a backslash-escaped sigil as literal text for both kinds"
+   },
+   "input": "Mail \\#one and \\@two",
+   "expect": {
+    "clean_title": "Mail #one and @two",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-024",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "only honours an escape that stands at a token boundary"
+   },
+   "input": "id\\#42 wins",
+   "expect": {
+    "clean_title": "id\\#42 wins",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-025",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "matches an existing name regardless of case and inner spacing"
+   },
+   "input": "Plan #\"DEEP   WORK\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "id": "tag-deep"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "deep work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-026",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "matches an existing name regardless of case and inner spacing"
+   },
+   "input": "Plan @\"  vendor   LAUNCH  \"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [],
+    "project": {
+     "id": "project-vendor"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "Vendor launch"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-027",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "normalises the display name of a tag or project it is about to create"
+   },
+   "input": "Plan #\"  New   Tag  \"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "New Tag"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "New Tag"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-028",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "normalises the display name of a tag or project it is about to create"
+   },
+   "input": "Plan @\"  Fresh   Project  \"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [],
+    "project": {
+     "name": "Fresh Project"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "Fresh Project"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-029",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "decodes an escaped backslash inside a quoted name"
+   },
+   "input": "Plan #\"back\\\\slash\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "back\\slash"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "back\\slash"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-030",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "abandons a quoted name broken by a carriage return, as it does for a newline"
+   },
+   "input": "Plan #\"broken\rname\"",
+   "expect": {
+    "clean_title": "Plan #\"broken name\"",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-031",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "stops an unquoted name at a trailing separator instead of swallowing it"
+   },
+   "input": "Ping #a- now",
+   "expect": {
+    "clean_title": "Ping - now",
+    "tags": [
+     {
+      "name": "a"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "a"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-032",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "stops an unquoted name at a trailing separator instead of swallowing it"
+   },
+   "input": "Ping #a. now",
+   "expect": {
+    "clean_title": "Ping. now",
+    "tags": [
+     {
+      "name": "a"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "a"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-033",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "removes a bracket pair only when the token is the whole of it"
+   },
+   "input": "Draft ( #work ) today",
+   "expect": {
+    "clean_title": "Draft today",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-034",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "removes a bracket pair only when the token is the whole of it"
+   },
+   "input": "( #work ) alone",
+   "expect": {
+    "clean_title": "alone",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-035",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "removes a bracket pair only when the token is the whole of it"
+   },
+   "input": "Draft (see #work) today",
+   "expect": {
+    "clean_title": "Draft (see) today",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-036",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "removes a bracket pair only when the token is the whole of it"
+   },
+   "input": "Draft (#work extra) today",
+   "expect": {
+    "clean_title": "Draft ( extra) today",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-037",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "deduplicates a tag written with and without its legacy sigil"
+   },
+   "input": "Plan #work #\"#work\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-038",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "deduplicates a tag written with and without its legacy sigil"
+   },
+   "input": "Plan #\"brand new\" #\"BRAND   NEW\"",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "brand new"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "brand new"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-039",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts a draft at the length limit and rejects the one past it"
+   },
+   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx #work",
+   "expect": {
+    "clean_title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-040",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts a draft at the length limit and rejects the one past it"
+   },
+   "input": "Plan #xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-041",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts a draft at the length limit and rejects the one past it"
+   },
+   "input": "Plan @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [],
+    "project": {
+     "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-042",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts a draft at the length limit and rejects the one past it"
+   },
+   "input": "Plan @xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [],
+    "project": {
+     "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "has_completed_tokens": true,
+    "is_valid": false
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-043",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts every name-char class in a bare unquoted name"
+   },
+   "input": "Ping #q3_a-b.c now",
+   "expect": {
+    "clean_title": "Ping now",
+    "tags": [
+     {
+      "name": "q3_a-b.c"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "q3_a-b.c"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-044",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "accepts every name-char class in a bare unquoted name"
+   },
+   "input": "Ping #café now",
+   "expect": {
+    "clean_title": "Ping now",
+    "tags": [
+     {
+      "name": "café"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "café"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-045",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "folds case downwards, so a name only equal when upper-cased stays distinct"
+   },
+   "fixture": "sharp_ss",
+   "input": "Plan #ß",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "name": "ß"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "ß"
+    }
+   ],
+   "divergence": {
+    "fields": {
+     "tags": [
+      {
+       "id": "tag-ss"
+      }
+     ]
+    },
+    "reason": "Web lower-cases (JavaScript keeps U+00DF); the server's casefold, Swift NameNormalizer (ios SmartAddWebParityTests.foldsCaseLikeTheServerSoSharpSMatchesSS) and the Rust core fold it to 'ss' and resolve to the existing tag. The web sends {name} and the server then resolves it, so the stored result is the same; only the optimistic chip differs."
+   }
+  },
+  {
+   "id": "WP-P-046",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "escapes only a sigil, leaving a boundary backslash before anything else"
+   },
+   "input": "Copy \\ drive",
+   "expect": {
+    "clean_title": "Copy \\ drive",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-047",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps the contextual project when no inline project token supersedes it"
+   },
+   "context": {
+    "project_id": "project-launch"
+   },
+   "input": "Plan #work",
+   "expect": {
+    "clean_title": "Plan",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": {
+     "id": "project-launch"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "Launch v2"
+    },
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-048",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "contract recognition examples (smart-add.md section 1; Swift contractRecognitionExamples)"
+   },
+   "input": "word,#tag",
+   "expect": {
+    "clean_title": "word,#tag",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": true
+   },
+   "chips": []
+  },
+  {
+   "id": "WP-P-049",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "contract recognition examples (smart-add.md section 1; Swift contractRecognitionExamples)"
+   },
+   "input": "word, #tag",
+   "expect": {
+    "clean_title": "word,",
+    "tags": [
+     {
+      "name": "tag"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "tag"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-050",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "contract merge example (smart-add.md section 3; Swift contractMergeExampleDraftUpdateLaunch)"
+   },
+   "input": "Draft update #work @launch",
+   "expect": {
+    "clean_title": "Draft update",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": {
+     "name": "launch"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "launch"
+    },
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  },
+  {
+   "id": "WP-P-051",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "length: web counts UTF-16 units, the server counts Unicode scalars (research finding, no web test)"
+   },
+   "input": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+   "expect": {
+    "clean_title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "tags": [],
+    "project": null,
+    "has_completed_tokens": false,
+    "is_valid": false
+   },
+   "chips": [],
+   "divergence": {
+    "fields": {
+     "is_valid": true
+    },
+    "reason": "300 emoji are 300 scalars (server max_length, Swift, Rust: valid) but 600 UTF-16 units (web title.length > 500: invalid). The web composer refuses a title the server accepts."
+   }
+  },
+  {
+   "id": "WP-P-052",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "astral characters before a token: cleanTitle indexes a UTF-16 mask with code points (research finding, no web test)"
+   },
+   "input": "Call 😀 mom #work",
+   "expect": {
+    "clean_title": "Call 😀 mom #",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ],
+   "divergence": {
+    "fields": {
+     "clean_title": "Call 😀 mom"
+    },
+    "reason": "smartAdd.ts cleanTitle builds its removal mask over UTF-16 indexes but filters Array.from(input), which iterates code points. After one astral character the mask is off by one, so the web leaves the sigil and removes the wrong characters: the composer would submit a corrupted title. Swift and the shared rule walk Unicode scalars and give the divergence value."
+   }
+  },
+  {
+   "id": "WP-P-053",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "astral characters before a token: cleanTitle indexes a UTF-16 mask with code points (research finding, no web test)"
+   },
+   "input": "😀😀 @home today",
+   "expect": {
+    "clean_title": "😀😀 @hoday",
+    "tags": [],
+    "project": {
+     "name": "home"
+    },
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "project",
+     "label": "home"
+    }
+   ],
+   "divergence": {
+    "fields": {
+     "clean_title": "😀😀 today"
+    },
+    "reason": "Same defect with two astral characters: the web title keeps the emoji pair and the corrupted text '@hoday'."
+   }
+  },
+  {
+   "id": "WP-P-054",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "astral characters after the last token are unaffected (research finding, no web test)"
+   },
+   "input": "#work 😀 later",
+   "expect": {
+    "clean_title": "😀 later",
+    "tags": [
+     {
+      "id": "tag-work"
+     }
+    ],
+    "project": null,
+    "has_completed_tokens": true,
+    "is_valid": true
+   },
+   "chips": [
+    {
+     "kind": "tag",
+     "label": "work"
+    }
+   ]
+  }
+ ],
+ "suggestions": [
+  {
+   "id": "WP-S-001",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks local suggestions and appends a non-durable create option"
+   },
+   "input": "Plan @la",
+   "caret": 8,
+   "expect": [
+    {
+     "kind": "project",
+     "label": "Launch v2",
+     "ref": {
+      "id": "project-launch"
+     },
+     "create": false
+    },
+    {
+     "kind": "project",
+     "label": "Vendor launch",
+     "ref": {
+      "id": "project-vendor"
+     },
+     "create": false
+    },
+    {
+     "kind": "project",
+     "label": "Create @la",
+     "ref": {
+      "name": "la"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-002",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "uses stable ids to order duplicate local suggestion names"
+   },
+   "fixture": "duplicate_tags",
+   "input": "Plan #dup",
+   "caret": 9,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "duplicate",
+     "ref": {
+      "id": "tag-a"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "duplicate",
+     "ref": {
+      "id": "tag-z"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "Create #dup",
+     "ref": {
+      "name": "dup"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-003",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "offers deterministic local choices for bare sigils without creating an option"
+   },
+   "input": "Plan #",
+   "caret": 6,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "calls",
+     "ref": {
+      "id": "tag-calls"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "deep work",
+     "ref": {
+      "id": "tag-deep"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "work",
+     "ref": {
+      "id": "tag-work"
+     },
+     "create": false
+    }
+   ]
+  },
+  {
+   "id": "WP-S-004",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "does not activate invalid or completed classification positions"
+   },
+   "input": "Plan word,#work",
+   "caret": 15,
+   "expect": []
+  },
+  {
+   "id": "WP-S-005",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "does not activate invalid or completed classification positions"
+   },
+   "input": "Plan @launch, next",
+   "caret": 18,
+   "expect": []
+  },
+  {
+   "id": "WP-S-006",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks exact, word-prefix, and substring matches without a duplicate create choice"
+   },
+   "input": "Plan #work",
+   "caret": 10,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "work",
+     "ref": {
+      "id": "tag-work"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "deep work",
+     "ref": {
+      "id": "tag-deep"
+     },
+     "create": false
+    }
+   ]
+  },
+  {
+   "id": "WP-S-007",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks exact, word-prefix, and substring matches without a duplicate create choice"
+   },
+   "input": "Plan @ven",
+   "caret": 9,
+   "expect": [
+    {
+     "kind": "project",
+     "label": "Vendor launch",
+     "ref": {
+      "id": "project-vendor"
+     },
+     "create": false
+    },
+    {
+     "kind": "project",
+     "label": "Create @ven",
+     "ref": {
+      "name": "ven"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-008",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks exact, word-prefix, and substring matches without a duplicate create choice"
+   },
+   "input": "Plan @dor",
+   "caret": 9,
+   "expect": [
+    {
+     "kind": "project",
+     "label": "Vendor launch",
+     "ref": {
+      "id": "project-vendor"
+     },
+     "create": false
+    },
+    {
+     "kind": "project",
+     "label": "Create @dor",
+     "ref": {
+      "name": "dor"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-009",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps incomplete quoted queries active but stops at a completed token boundary"
+   },
+   "input": "Plan @\"Ven",
+   "caret": 10,
+   "expect": [
+    {
+     "kind": "project",
+     "label": "Vendor launch",
+     "ref": {
+      "id": "project-vendor"
+     },
+     "create": false
+    },
+    {
+     "kind": "project",
+     "label": "Create @Ven",
+     "ref": {
+      "name": "Ven"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-010",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps incomplete quoted queries active but stops at a completed token boundary"
+   },
+   "input": "Plan @launch,",
+   "caret": 13,
+   "expect": []
+  },
+  {
+   "id": "WP-S-011",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps incomplete quoted queries active but stops at a completed token boundary"
+   },
+   "input": "Plan #nomatch",
+   "caret": 13,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "Create #nomatch",
+     "ref": {
+      "name": "nomatch"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-012",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks an exact name above a prefix, a word prefix, and a bare substring"
+   },
+   "fixture": "rank_exact_prefix_word_substring",
+   "input": "Plan #work",
+   "caret": 10,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "work",
+     "ref": {
+      "id": "tag-work"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workshop",
+     "ref": {
+      "id": "tag-workshop"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "deep work",
+     "ref": {
+      "id": "tag-deep"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "homework",
+     "ref": {
+      "id": "tag-homework"
+     },
+     "create": false
+    }
+   ]
+  },
+  {
+   "id": "WP-S-013",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "treats a hyphen as a word break when matching a query to a name"
+   },
+   "fixture": "hyphenated",
+   "input": "Plan #focus",
+   "caret": 11,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "deep-focus",
+     "ref": {
+      "id": "tag-deep-focus"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "Create #focus",
+     "ref": {
+      "name": "focus"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-014",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "ranks a whole-name prefix above a word prefix, and both above a bare substring"
+   },
+   "fixture": "rank_whole_name_then_word",
+   "input": "Plan #work",
+   "caret": 10,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "workshop",
+     "ref": {
+      "id": "tag-workshop"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "deep work",
+     "ref": {
+      "id": "tag-deep"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "coworking",
+     "ref": {
+      "id": "tag-coworking"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "rework",
+     "ref": {
+      "id": "tag-rework"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "zebra-rework",
+     "ref": {
+      "id": "tag-zebra"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "Create #work",
+     "ref": {
+      "name": "work"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-015",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "decodes escapes inside an in-progress quoted query"
+   },
+   "fixture": "quoted_name",
+   "input": "Plan #\"a\\\"b",
+   "caret": 11,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "a\"b",
+     "ref": {
+      "id": "tag-quote"
+     },
+     "create": false
+    }
+   ]
+  },
+  {
+   "id": "WP-S-016",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "stops looking for an active token at the nearest whitespace"
+   },
+   "input": "Plan #work more",
+   "caret": 15,
+   "expect": []
+  },
+  {
+   "id": "WP-S-017",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "activates a token that opens the input, where start-of-input is the boundary"
+   },
+   "input": "#wo",
+   "caret": 3,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "work",
+     "ref": {
+      "id": "tag-work"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "deep work",
+     "ref": {
+      "id": "tag-deep"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "Create #wo",
+     "ref": {
+      "name": "wo"
+     },
+     "create": true
+    }
+   ]
+  },
+  {
+   "id": "WP-S-018",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "stops at a completed quoted token even when punctuation runs into it"
+   },
+   "input": "Plan #\"work\",",
+   "caret": 13,
+   "expect": []
+  },
+  {
+   "id": "WP-S-019",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "closes the popup once whitespace separates the caret from an unclosed quote"
+   },
+   "input": "Plan #\"deep wo",
+   "caret": 14,
+   "expect": []
+  },
+  {
+   "id": "WP-S-020",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "caps the ranked entities at eight before appending the create option"
+   },
+   "fixture": "eleven_work_tags",
+   "input": "Plan #work",
+   "caret": 10,
+   "expect": [
+    {
+     "kind": "tag",
+     "label": "worka",
+     "ref": {
+      "id": "tag-a"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workb",
+     "ref": {
+      "id": "tag-b"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workc",
+     "ref": {
+      "id": "tag-c"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workd",
+     "ref": {
+      "id": "tag-d"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "worke",
+     "ref": {
+      "id": "tag-e"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workf",
+     "ref": {
+      "id": "tag-f"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workg",
+     "ref": {
+      "id": "tag-g"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "workh",
+     "ref": {
+      "id": "tag-h"
+     },
+     "create": false
+    },
+    {
+     "kind": "tag",
+     "label": "Create #work",
+     "ref": {
+      "name": "work"
+     },
+     "create": true
+    }
+   ]
+  }
+ ],
+ "apply_suggestion": [
+  {
+   "id": "WP-A-001",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "serializes selected suggestions back into the active token span"
+   },
+   "input": "Plan @la tomorrow",
+   "caret": 8,
+   "suggestion": {
+    "kind": "project",
+    "label": "Launch v2",
+    "ref": {
+     "id": "project-launch"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan @\"Launch v2\" tomorrow",
+    "caret": 18
+   }
+  },
+  {
+   "id": "WP-A-002",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "replaces the whole completed token when a suggestion is selected mid-token"
+   },
+   "input": "Plan @launc tomorrow",
+   "caret": 8,
+   "suggestion": {
+    "kind": "project",
+    "label": "Launch v2",
+    "ref": {
+     "id": "project-launch"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan @\"Launch v2\" tomorrow",
+    "caret": 18
+   }
+  },
+  {
+   "id": "WP-A-003",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "preserves delimiters and rejects a suggestion of the wrong classification kind"
+   },
+   "input": "Plan #ca, tomorrow",
+   "caret": 8,
+   "suggestion": {
+    "kind": "tag",
+    "label": "calls",
+    "ref": {
+     "id": "tag-calls"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #calls, tomorrow",
+    "caret": 11
+   }
+  },
+  {
+   "id": "WP-A-004",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "preserves delimiters and rejects a suggestion of the wrong classification kind"
+   },
+   "input": "Plan #ca",
+   "caret": 8,
+   "suggestion": {
+    "kind": "project",
+    "label": "Launch v2",
+    "ref": {
+     "id": "project-launch"
+    },
+    "create": false
+   },
+   "expect": null
+  },
+  {
+   "id": "WP-A-005",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "serializes legacy labels, quoted punctuation, and terminal whitespace correctly"
+   },
+   "input": "Plan #de",
+   "caret": 8,
+   "suggestion": {
+    "kind": "tag",
+    "label": "@deep work",
+    "ref": {
+     "id": "tag-deep"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #\"deep work\" ",
+    "caret": 18
+   }
+  },
+  {
+   "id": "WP-A-006",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "quotes and escapes a serialized name that is not a bare identifier"
+   },
+   "input": "Plan #q",
+   "caret": 7,
+   "suggestion": {
+    "kind": "tag",
+    "label": "say \"hi\"",
+    "ref": {
+     "name": "say \"hi\""
+    },
+    "create": true
+   },
+   "expect": {
+    "text": "Plan #\"say \\\"hi\\\"\" ",
+    "caret": 19
+   }
+  },
+  {
+   "id": "WP-A-007",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "quotes and escapes a serialized name that is not a bare identifier"
+   },
+   "input": "Plan #q",
+   "caret": 7,
+   "suggestion": {
+    "kind": "tag",
+    "label": "back\\slash",
+    "ref": {
+     "name": "back\\slash"
+    },
+    "create": true
+   },
+   "expect": {
+    "text": "Plan #\"back\\\\slash\" ",
+    "caret": 20
+   }
+  },
+  {
+   "id": "WP-A-008",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "sheds either legacy sigil from a tag label before serializing it"
+   },
+   "input": "Plan #w",
+   "caret": 7,
+   "suggestion": {
+    "kind": "tag",
+    "label": "#work",
+    "ref": {
+     "id": "tag-work"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #work ",
+    "caret": 11
+   }
+  },
+  {
+   "id": "WP-A-009",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps a digit after a separator inside a bare name"
+   },
+   "input": "Plan #a",
+   "caret": 7,
+   "suggestion": {
+    "kind": "tag",
+    "label": "a-1",
+    "ref": {
+     "name": "a-1"
+    },
+    "create": true
+   },
+   "expect": {
+    "text": "Plan #a-1 ",
+    "caret": 10
+   }
+  },
+  {
+   "id": "WP-A-010",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "separates the token from whatever text runs straight into it"
+   },
+   "input": "Plan #ca/path",
+   "caret": 8,
+   "suggestion": {
+    "kind": "tag",
+    "label": "calls",
+    "ref": {
+     "id": "tag-calls"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #calls /path",
+    "caret": 12
+   }
+  },
+  {
+   "id": "WP-A-011",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps a project label's own leading sigil out of the serialized token"
+   },
+   "input": "Plan @l",
+   "caret": 7,
+   "suggestion": {
+    "kind": "project",
+    "label": "@Launch",
+    "ref": {
+     "id": "project-launch"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan @Launch ",
+    "caret": 13
+   }
+  },
+  {
+   "id": "WP-A-012",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "keeps a project label's own leading sigil out of the serialized token"
+   },
+   "input": "Plan @l",
+   "caret": 7,
+   "suggestion": {
+    "kind": "project",
+    "label": "#Hashed",
+    "ref": {
+     "id": "project-launch"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan @\"#Hashed\" ",
+    "caret": 16
+   }
+  },
+  {
+   "id": "WP-A-013",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "adds no separator when the token already runs into one"
+   },
+   "input": "Plan #ca]",
+   "caret": 8,
+   "suggestion": {
+    "kind": "tag",
+    "label": "calls",
+    "ref": {
+     "id": "tag-calls"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #calls]",
+    "caret": 11
+   }
+  },
+  {
+   "id": "WP-A-014",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "retains an existing separator after accepting a suggestion and ignores plain text"
+   },
+   "input": "Plan #ca tomorrow",
+   "caret": 8,
+   "suggestion": {
+    "kind": "tag",
+    "label": "calls",
+    "ref": {
+     "id": "tag-calls"
+    },
+    "create": false
+   },
+   "expect": {
+    "text": "Plan #calls tomorrow",
+    "caret": 12
+   }
+  },
+  {
+   "id": "WP-A-015",
+   "source": {
+    "file": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+    "test": "retains an existing separator after accepting a suggestion and ignores plain text"
+   },
+   "input": "Plan calls",
+   "caret": 10,
+   "suggestion": {
+    "kind": "tag",
+    "label": "calls",
+    "ref": {
+     "id": "tag-calls"
+    },
+    "create": false
+   },
+   "expect": null
+  }
+ ],
+ "name_collision_probes": [
+  {
+   "id": "WP-K-001",
+   "stored_tag": "Strasse",
+   "typed_tag": "Straße",
+   "note": "sharp s folds to ss",
+   "web_collides": false,
+   "server_collides": true,
+   "agrees": false
+  },
+  {
+   "id": "WP-K-002",
+   "stored_tag": "οδος",
+   "typed_tag": "ΟΔΟΣ",
+   "note": "final sigma folds to sigma",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  },
+  {
+   "id": "WP-K-003",
+   "stored_tag": "в",
+   "typed_tag": "ᲀ",
+   "note": "Cyrillic small rounded ve folds to ve",
+   "web_collides": false,
+   "server_collides": true,
+   "agrees": false
+  },
+  {
+   "id": "WP-K-004",
+   "stored_tag": "ᾳ",
+   "typed_tag": "ᾼ",
+   "note": "Greek ypogegrammeni capital",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  },
+  {
+   "id": "WP-K-005",
+   "stored_tag": "work",
+   "typed_tag": "WORK",
+   "note": "plain case",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  },
+  {
+   "id": "WP-K-006",
+   "stored_tag": "file",
+   "typed_tag": "ﬁle",
+   "note": "NFKC ligature",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  },
+  {
+   "id": "WP-K-007",
+   "stored_tag": "home",
+   "typed_tag": "@Home",
+   "note": "one leading @ on a tag",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  },
+  {
+   "id": "WP-K-008",
+   "stored_tag": "work",
+   "typed_tag": "\u001cWork\u001f",
+   "note": "U+001C..U+001F are Python whitespace, not JavaScript \\s",
+   "web_collides": false,
+   "server_collides": true,
+   "agrees": false
+  },
+  {
+   "id": "WP-K-009",
+   "stored_tag": "work",
+   "typed_tag": "﻿work",
+   "note": "U+FEFF is JavaScript \\s, not Python whitespace",
+   "web_collides": true,
+   "server_collides": false,
+   "agrees": false
+  },
+  {
+   "id": "WP-K-010",
+   "stored_tag": "work",
+   "typed_tag": "work",
+   "note": "U+0085 is Python whitespace, not JavaScript \\s",
+   "web_collides": false,
+   "server_collides": true,
+   "agrees": false
+  },
+  {
+   "id": "WP-K-011",
+   "stored_tag": "i̇stanbul",
+   "typed_tag": "İstanbul",
+   "note": "dotted capital I",
+   "web_collides": true,
+   "server_collides": true,
+   "agrees": true
+  }
+ ]
+}

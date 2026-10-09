@@ -1,0 +1,1048 @@
+{
+ "schema": "brainbuddy-reference-store/v1",
+ "format": "Frozen parity oracle and bounded synthetic reference data for spec 026 (tasks.md T002). oracle_sources lists every existing normative file by repository path with its sha256, size, section counts, byte-identical copies and consumers; nothing is duplicated here. backend/tests/test_026_oracle_contracts.py fails when a source, a copy or this manifest drifts, so changing an oracle is an explicit, reviewed edit of its hash. in_source_oracles are tests whose examples live in code; folded_into names the shared file that now carries them. contradictions are disagreements found between the Python server, Swift, the web and Rust; they are findings, not silent choices. dataset is a synthetic two-owner store in the exact stored-record shapes of backend/app/modules/tasks/domain.py (ProjectDocument, TagDocument, TaskDocument, TaskSubtaskDocument, TaskCommentDocument): all four lists, completed and cancelled tasks, an active, a lossless-archived and a pre-lossless-archived project, a deleted tag, a parked task, extended clocks, subtasks, comments, NFKC and astral-plane text, and a second owner whose names collide with the first owner's. expected_counts and the relationship rules are what an import or restore must reproduce (026-SC-005); the 10 000-task load fixture of SC-003 is generated at test time from these shapes and is not stored.",
+ "oracle_sources": [
+  {
+   "id": "SRC-01",
+   "path": "backend/tests/fixtures/review_formulation_vectors.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json",
+    "frontend/src/features/review/__tests__/review_formulation_vectors.json"
+   ],
+   "consumers": [
+    "backend/tests/test_review_formulation_vectors.py",
+    "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/FormulationTests.swift",
+    "frontend/src/features/review/__tests__/formulation.test.ts",
+    "rust/crates/bb-domain/tests/primitives_parity.rs"
+   ],
+   "requirements": [
+    "026-FR-002",
+    "026-FR-016",
+    "026-FR-017",
+    "026-SC-001"
+   ],
+   "sha256": "211112fdf063559846f237ca56ca1f4c28ecf7093083ad14985590e5681ba838",
+   "bytes": 145965,
+   "schema": "brainbuddy-formulation-vectors/v1",
+   "sections": {
+    "normalisation": 22,
+    "classification": 62,
+    "transitions": 67,
+    "queue_order": 3
+   }
+  },
+  {
+   "id": "SRC-02",
+   "path": "backend/tests/fixtures/review_flow_vectors.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_flow_vectors.json",
+    "frontend/src/features/review/__tests__/review_flow_vectors.json"
+   ],
+   "consumers": [
+    "backend/tests/test_review_flow_vectors.py",
+    "rust/crates/bb-domain/tests/primitives_parity.rs"
+   ],
+   "requirements": [
+    "026-FR-016",
+    "026-FR-017",
+    "026-SC-001"
+   ],
+   "sha256": "d483f449c24e259e68c78743ef544ef886bf90abcb8c769e3b2a51c1aea08c58",
+   "bytes": 34660,
+   "schema": "brainbuddy-review-flow-vectors/v1",
+   "sections": {
+    "steps": 2,
+    "wins": 2,
+    "capacity": 7,
+    "waiting_queue": 1,
+    "someday_queue": 2,
+    "restart": 6,
+    "session_status": 6,
+    "idle_close": 2,
+    "qualifying_activity": 5,
+    "counted_review": 6,
+    "regularity": 3,
+    "next_review": 10,
+    "decision_queue": 1,
+    "stall_recommendation": 7,
+    "active_time": 5,
+    "while_away": 6,
+    "duplicate_filter": 3
+   }
+  },
+  {
+   "id": "SRC-03",
+   "path": "backend/tests/fixtures/review_wire_fixtures.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/Resources/review_wire_fixtures.json",
+    "frontend/src/features/review/__tests__/review_wire_fixtures.json"
+   ],
+   "consumers": [
+    "backend/tests/test_review_formulation_vectors.py"
+   ],
+   "requirements": [
+    "026-FR-002",
+    "026-SC-001"
+   ],
+   "sha256": "84b8d88ac000e1acb9c5025e0127030d1b356d5a77763bae45d09507da1360ff",
+   "bytes": 52369,
+   "schema": "brainbuddy-review-wire-fixtures/v1",
+   "sections": {
+    "entries": 61
+   }
+  },
+  {
+   "id": "SRC-04",
+   "path": "backend/tests/fixtures/review_traces_tasks.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_tasks.json"
+   ],
+   "consumers": [
+    "backend/tests/test_review_traces.py",
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTaskTraceReplayTests.swift"
+   ],
+   "requirements": [
+    "026-FR-016",
+    "026-SC-001"
+   ],
+   "sha256": "d52bb21dca060f54f878381409c53b69e444eb39f5a0f8b6660eaac09cd3d0e9",
+   "bytes": 14711,
+   "schema": "brainbuddy-review-traces/v1",
+   "sections": {
+    "traces": 7
+   }
+  },
+  {
+   "id": "SRC-05",
+   "path": "backend/tests/fixtures/review_traces_runs.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_runs.json"
+   ],
+   "consumers": [
+    "backend/tests/test_review_traces.py",
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift"
+   ],
+   "requirements": [
+    "026-FR-016",
+    "026-SC-001"
+   ],
+   "sha256": "734c4589c183bd750193beabf34e9fa41a97d2971198b13009940a504c3d689a",
+   "bytes": 19845,
+   "schema": "brainbuddy-review-traces/v1",
+   "sections": {
+    "traces": 5
+   }
+  },
+  {
+   "id": "SRC-06",
+   "path": "backend/tests/fixtures/project_archive_traces.json",
+   "copies": [
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/project_archive_traces.json"
+   ],
+   "consumers": [
+    "backend/tests/test_project_archive_traces.py",
+    "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift"
+   ],
+   "requirements": [
+    "026-FR-002",
+    "026-SC-001"
+   ],
+   "sha256": "b8f0cc1d1a0a460ca4bcf9a00d1715cadefad25ad54928d8e8a0cd05d72a0237",
+   "bytes": 14529,
+   "schema": "brainbuddy-project-archive-traces/v1",
+   "sections": {
+    "traces": 9
+   }
+  },
+  {
+   "id": "SRC-07",
+   "path": "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Resources/legacy-import-golden.json",
+   "copies": [],
+   "consumers": [
+    "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FirstSignInMergeTests.swift"
+   ],
+   "requirements": [
+    "026-FR-013",
+    "026-SC-005"
+   ],
+   "sha256": "71ec4d6f9f905ee17534dd69f62c1d896280526152398a49ad20389f859f08c5",
+   "bytes": 13569,
+   "schema": null,
+   "sections": {
+    "issues": 0,
+    "outbox": 41
+   }
+  },
+  {
+   "id": "SRC-08",
+   "path": "specs/026-rust-core-sync/contracts/primitive-vectors.json",
+   "copies": [],
+   "consumers": [
+    "backend/tests/test_026_primitive_vectors.py",
+    "rust/crates/bb-domain/tests/primitives_parity.rs"
+   ],
+   "requirements": [
+    "026-FR-002",
+    "026-FR-017",
+    "026-SC-001"
+   ],
+   "sha256": "8885b75cea25878534b761c609b15fc63b8c8782d2ae33f6e836bfa674ac7e89",
+   "bytes": 43523,
+   "schema": "brainbuddy-primitive-vectors/v1",
+   "sections": {
+    "name_normalization": 31,
+    "search": 9,
+    "whitespace": 9,
+    "scalar_length": 9
+   }
+  },
+  {
+   "id": "SRC-09",
+   "path": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+   "copies": [],
+   "consumers": [
+    "frontend/src/features/tasks/__tests__/smartAddVectors.test.ts",
+    "backend/tests/test_026_oracle_contracts.py"
+   ],
+   "requirements": [
+    "026-FR-002",
+    "026-SC-001"
+   ],
+   "sha256": "abf71465bdc416046223a8e4a8a3fc1f35834ab5d6e0730cff54afa6b613af50",
+   "bytes": 62881,
+   "schema": "brainbuddy-web-presentation-vectors/v1",
+   "sections": {
+    "parse": 54,
+    "suggestions": 20,
+    "apply_suggestion": 15,
+    "name_collision_probes": 11
+   }
+  }
+ ],
+ "in_source_oracles": [
+  {
+   "id": "INS-01",
+   "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift",
+   "role": "31 NameNormalizer vectors, produced by the server's own functions on Python 3.11",
+   "folded_into": "specs/026-rust-core-sync/contracts/primitive-vectors.json#name_normalization"
+  },
+  {
+   "id": "INS-02",
+   "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CalendarDayTests.swift",
+   "role": "CalendarDay parsing, arithmetic, zone and DST examples",
+   "folded_into": "specs/026-rust-core-sync/contracts/primitive-vectors.json#calendar"
+  },
+  {
+   "id": "INS-03",
+   "path": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+   "role": "Normative Smart Add grammar, resolution, suggestion and serialization examples (spec 003)",
+   "folded_into": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json"
+  },
+  {
+   "id": "INS-04",
+   "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddWebParityTests.swift",
+   "role": "Lockstep Swift port of INS-03 (parse and chip cases only; documents the sharp-s divergence)",
+   "folded_into": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json"
+  },
+  {
+   "id": "INS-05",
+   "path": "backend/tests/test_task_smart_add_api.py",
+   "role": "Server authority for Smart Add: create-unknown, resolve existing, dedupe, replay, strict refs, inactive refs, literal create",
+   "folded_into": null
+  }
+ ],
+ "contradictions": [
+  {
+   "id": "C-01",
+   "topic": "Sharp s and full case folding in Smart Add resolution",
+   "languages": {
+    "web": "lower-case only (U+00DF stays)",
+    "python": "casefold: ss",
+    "swift": "ss (intentional, SmartAddWebParityTests)",
+    "rust": "ss"
+   },
+   "evidence": [
+    "web-presentation-vectors.json parse.divergence (sharp s)",
+    "name_collision_probes WP-K-001, WP-K-003"
+   ],
+   "proposed_resolution": "Server rule is normative (smart-add.md: backend authoritative). Web keeps its optimistic helper until PR-53; the server re-resolves the sent name, so stored data is unaffected.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-02",
+   "topic": "Whitespace class",
+   "languages": {
+    "web": "JavaScript \\s: includes U+FEFF, excludes U+0085 and U+001C..U+001F",
+    "python": "str.isspace: the reverse",
+    "swift": "NameNormalizer follows Python; SmartAddParser deliberately follows JavaScript for token boundaries",
+    "rust": "Python (normalization::is_space)"
+   },
+   "evidence": [
+    "web-presentation-vectors.json name_collision_probes WP-K-008..010",
+    "primitive-vectors.json whitespace WS-001..009"
+   ],
+   "proposed_resolution": "Rust uses the server class for names, titles and keys. Smart Add tokenization (not part of this slice) must keep the JavaScript class until the web helper is retired.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-03",
+   "topic": "Length limits",
+   "languages": {
+    "web": "UTF-16 code units (String.length)",
+    "python": "Unicode scalars (pydantic max_length)",
+    "swift": "Unicode scalars",
+    "rust": "Unicode scalars"
+   },
+   "evidence": [
+    "web-presentation-vectors.json parse divergence (300 emoji)",
+    "primitive-vectors.json scalar_length SL-008"
+   ],
+   "proposed_resolution": "Scalars everywhere. The web composer rejects astral-heavy titles of 251..500 scalars that the server accepts; fix with PR-53 or accept.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-04",
+   "topic": "Leading @ on project names",
+   "languages": {
+    "web": "strips one leading @ before matching a project",
+    "python": "normalize_task_name keeps @ in project keys (only tags strip it)",
+    "swift": "kit planner mirrors the web when resolving; NameNormalizer.project keeps @",
+    "rust": "project_key keeps @ (server rule)"
+   },
+   "evidence": [
+    "primitive-vectors.json name_normalization NN-022..024, NN-031"
+   ],
+   "proposed_resolution": "Server rule is normative; the web strip is part of the legacy-sigil handling of the typed token, not of stored-name keys.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-05",
+   "topic": "Task search folding",
+   "languages": {
+    "python": "NFKC + casefold, no diacritic folding",
+    "swift": "NFKC + case- and diacritic-insensitive (Eclair matches eclair), Character.isWhitespace for query collapse",
+    "web": "server-side search",
+    "rust": "search_key / search_query_key follow Python"
+   },
+   "evidence": [
+    "ios Queries+Ordering.swift QueryText.fold",
+    "backend service._normalize_for_search"
+   ],
+   "proposed_resolution": "Open product decision: the shared core cannot satisfy both. Rust implements the server rule; iOS local search currently matches more than the server does.",
+   "status": "decision-needed"
+  },
+  {
+   "id": "C-06",
+   "topic": "Project and tag list ordering key",
+   "languages": {
+    "python": "name.strip().casefold() then id (no NFKC, no whitespace collapse, no @ strip)",
+    "swift": "NameNormalizer key, then diacritic-folded, then display and id",
+    "rust": "not ported in this slice"
+   },
+   "evidence": [
+    "backend service.list_projects/list_tags",
+    "ios Queries+Ordering.swift NameSortKey"
+   ],
+   "proposed_resolution": "Open: pick one ordering key before the list query moves into the core.",
+   "status": "decision-needed"
+  },
+  {
+   "id": "C-07",
+   "topic": "Unicode data version",
+   "languages": {
+    "python": "3.11 = Unicode 14.0 (backend/Dockerfile python:3.11-slim)",
+    "swift": "platform ICU/stdlib; folding exceptions table written for Unicode 14",
+    "rust": "unicode-normalization 0.1.25 / caseless 0.2.2 / unicode-general-category 1.1.0 = newer"
+   },
+   "evidence": [
+    "exhaustive scalar comparison with Python 3.11: whitespace identical; 99 NFKC, 27 casefold and 36 punctuation differences, every one a scalar unassigned in Unicode 14"
+   ],
+   "proposed_resolution": "Equal on every Unicode 14 scalar. Differences are limited to newer characters; bump all runtimes together and record the data version with the vectors.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-08",
+   "topic": "Time zone database",
+   "languages": {
+    "python": "zoneinfo over the host tzdata",
+    "swift": "Foundation TimeZone (OS tzdata)",
+    "rust": "jiff-tzdb 0.1.9 bundled"
+   },
+   "evidence": [
+    "same-data comparison: 103 747 (zone, day) rows over all 498 zones 1900..2045, 0 differences; bundled vs host tzdata differ on pre-1970 offsets and a few rule corrections (Bogota 1992, Tehran 1979, EET/WET 1977, Winnipeg 2026 in tzdata 2026c)"
+   ],
+   "proposed_resolution": "Logic is identical; data versions are not. Pin a tzdata release in server image, bridge and apps and expose it in capabilities.",
+   "status": "decision-needed"
+  },
+  {
+   "id": "C-09",
+   "topic": "Start of a day when a DST gap straddles midnight",
+   "languages": {
+    "python": "datetime(y,m,d,tzinfo=zone).astimezone(UTC), fold=0: offset before the change",
+    "swift": "first instant whose local date reaches the day (binary search)",
+    "rust": "Python rule (jiff compatible)"
+   },
+   "evidence": [
+    "only America/Toronto, Montreal, Nipigon, Thunder_Bay on 1919-03-31 (gap 23:30 to 00:30) differ across all of tzdata; every modern zone and every gap that starts at midnight agree"
+   ],
+   "proposed_resolution": "Server rule is normative; no current zone is affected.",
+   "status": "proposed"
+  },
+  {
+   "id": "C-10",
+   "topic": "Range edges",
+   "languages": {
+    "python": "OverflowError for 0001-01-01 in zones east of UTC and for 9999-12-31 west of it",
+    "swift": "clamps",
+    "rust": "total: clamps"
+   },
+   "evidence": [
+    "249 zone rows at 0001-01-01"
+   ],
+   "proposed_resolution": "Clamp; unreachable from real due dates.",
+   "status": "proposed"
+  }
+ ],
+ "dataset": {
+  "owners": [
+   "beea96a4-7827-599d-b786-571f694828ac",
+   "863e24a2-2512-59a9-8531-f435e248f118"
+  ],
+  "records": {
+   "projects": [
+    {
+     "id": "66055107-daf7-57da-95a4-8d3803adb031",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Garden",
+     "normalized_name": "garden",
+     "color": null,
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1,
+     "desired_outcome": "Vegetables by June",
+     "archived_at": null,
+     "archived_before_lossless": false
+    },
+    {
+     "id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Квартира No5",
+     "normalized_name": "квартира no5",
+     "color": null,
+     "state": "archived",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-20T10:00:00Z",
+     "schema_version": 1,
+     "revision": 3,
+     "desired_outcome": null,
+     "archived_at": "2026-09-20T10:00:00Z",
+     "archived_before_lossless": false
+    },
+    {
+     "id": "ecd232db-17cc-5f24-a604-a7be5e7f5829",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Legacy Project",
+     "normalized_name": "legacy project",
+     "color": null,
+     "state": "archived",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-05T10:00:00Z",
+     "schema_version": 1,
+     "revision": 2,
+     "desired_outcome": null,
+     "archived_at": null,
+     "archived_before_lossless": true
+    },
+    {
+     "id": "4f4a6fa6-8e51-598c-a064-36566e6b1101",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Straße",
+     "normalized_name": "strasse",
+     "color": null,
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1,
+     "desired_outcome": null,
+     "archived_at": null,
+     "archived_before_lossless": false
+    },
+    {
+     "id": "4122f462-e61e-5db5-9254-f738999af91f",
+     "owner_id": "863e24a2-2512-59a9-8531-f435e248f118",
+     "name": "Garden",
+     "normalized_name": "garden",
+     "color": null,
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1,
+     "desired_outcome": null,
+     "archived_at": null,
+     "archived_before_lossless": false
+    }
+   ],
+   "tags": [
+    {
+     "id": "a2743e5d-23a6-5732-a346-e4553015c8b3",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "work",
+     "normalized_name": "work",
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "61120289-276a-5f49-b00a-ab8e712a623f",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Deep Work",
+     "normalized_name": "deep work",
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "0a6451f3-c09d-50da-880c-97be6e77fb95",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "Home",
+     "normalized_name": "home",
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "d1c2b1e8-80b6-5984-9f11-c476cf794493",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "café",
+     "normalized_name": "café",
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "d75b0b18-664f-5cc6-81fa-beebb8738eb3",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "name": "old",
+     "normalized_name": "old",
+     "state": "deleted",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-09T09:00:00Z",
+     "schema_version": 1,
+     "revision": 2
+    },
+    {
+     "id": "63e4a04e-78fa-51bf-9d87-23cf12c91143",
+     "owner_id": "863e24a2-2512-59a9-8531-f435e248f118",
+     "name": "work",
+     "normalized_name": "work",
+     "state": "active",
+     "created_at": "2026-09-01T09:00:00Z",
+     "updated_at": "2026-09-01T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    }
+   ],
+   "tasks": [
+    {
+     "id": "47229eef-b12d-56a4-aafb-845b4696ff3d",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Call Bob",
+     "details": null,
+     "state": "inbox",
+     "project_id": null,
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "da6395c2-8e67-527b-be6d-4b5673d9e756",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Email the quote",
+     "details": "Attach the price list.\nCC the finance team.",
+     "state": "next",
+     "project_id": "4f4a6fa6-8e51-598c-a064-36566e6b1101",
+     "tag_ids": [
+      "a2743e5d-23a6-5732-a346-e4553015c8b3",
+      "61120289-276a-5f49-b00a-ab8e712a623f"
+     ],
+     "due_date": "2026-10-20",
+     "priority": "high",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [
+      "c8317db1-5dcb-5ac0-841f-b9094aea22c7"
+     ],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 4,
+     "formulation_id": "form_d95e23bb-6981-5b66-9b08-7d5f17e582d1",
+     "formulation_started_at": "2026-09-24T09:14:00Z",
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "373f88d2-6fb1-5248-9ce0-1f1f8649435b",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Plan the autumn newsletter",
+     "details": null,
+     "state": "someday",
+     "project_id": null,
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 3,
+     "formulation_id": "form_259d8544-a6ac-513f-a275-93fa7adbe787",
+     "formulation_started_at": "2026-09-01T09:00:00Z",
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 2,
+     "parked": {
+      "at": "2026-09-08T03:00:00Z",
+      "formulation_id": "form_259d8544-a6ac-513f-a275-93fa7adbe787",
+      "from_revision": 2,
+      "clock_before": {
+       "started_at": "2026-09-01T09:00:00Z",
+       "extended_at": "2026-09-04T09:00:00Z",
+       "extension_reason": "waiting for the venue",
+       "park_floor_at": "2026-09-03T09:00:00Z",
+       "stalled_before": 1
+      }
+     }
+    },
+    {
+     "id": "73210fee-9990-55e6-b61e-786466a63eff",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Reply from landlord",
+     "details": null,
+     "state": "waiting",
+     "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": "Landlord",
+     "waiting_since": "2026-09-10T09:00:00Z",
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "6476b6c3-8105-5b27-867b-a5976865f2b1",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Learn Rust",
+     "details": null,
+     "state": "someday",
+     "project_id": "66055107-daf7-57da-95a4-8d3803adb031",
+     "tag_ids": [
+      "0a6451f3-c09d-50da-880c-97be6e77fb95"
+     ],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 1,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "576d7507-f146-52d6-933e-bfa9b7db1884",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "File taxes",
+     "details": null,
+     "state": "completed",
+     "project_id": null,
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-12T15:00:00Z",
+     "completed_at": "2026-09-12T15:00:00Z",
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 2,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "19e48c9a-2de2-59b6-b646-8a1d25891506",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Call the old landlord",
+     "details": null,
+     "state": "cancelled",
+     "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-11T10:00:00Z",
+     "completed_at": null,
+     "cancelled_at": "2026-09-11T10:00:00Z",
+     "schema_version": 1,
+     "revision": 2,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "cc51f751-d76c-56aa-8841-c78ca51b172a",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Read the gas meter",
+     "details": null,
+     "state": "someday",
+     "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 2,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "96ef92eb-82a0-5cb2-9eee-169aac98be43",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Close the old account",
+     "details": null,
+     "state": "next",
+     "project_id": "ecd232db-17cc-5f24-a604-a7be5e7f5829",
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 1,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "b4d41006-dad8-51bf-a37a-e463ee5d31ac",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+     "details": "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂",
+     "state": "inbox",
+     "project_id": null,
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 1,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "2b255a85-6c5a-531d-9e19-983dd6d19b95",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "title": "Book the venue",
+     "details": null,
+     "state": "next",
+     "project_id": null,
+     "tag_ids": [
+      "d1c2b1e8-80b6-5984-9f11-c476cf794493"
+     ],
+     "due_date": "2026-12-01",
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 2,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": "form_39a0053b-d189-53dc-b021-8dcc43057325",
+     "formulation_started_at": "2026-09-01T09:00:00Z",
+     "formulation_extended_at": "2026-09-15T09:00:00Z",
+     "formulation_extension_reason": "deposit pending",
+     "formulation_park_floor_at": "2026-09-30T09:00:00Z",
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "53a221ab-eb72-57a1-9908-a939adedcc0f",
+     "owner_id": "863e24a2-2512-59a9-8531-f435e248f118",
+     "title": "Call Bob",
+     "details": null,
+     "state": "inbox",
+     "project_id": null,
+     "tag_ids": [],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    },
+    {
+     "id": "5580020f-1a52-5911-b108-c2422114ad23",
+     "owner_id": "863e24a2-2512-59a9-8531-f435e248f118",
+     "title": "Email the quote",
+     "details": null,
+     "state": "next",
+     "project_id": "4122f462-e61e-5db5-9254-f738999af91f",
+     "tag_ids": [
+      "63e4a04e-78fa-51bf-9d87-23cf12c91143"
+     ],
+     "due_date": null,
+     "priority": "none",
+     "waiting_for": null,
+     "waiting_since": null,
+     "order_key": 0,
+     "source_capture_ids": [],
+     "created_at": "2026-09-02T09:00:00Z",
+     "updated_at": "2026-09-02T09:00:00Z",
+     "completed_at": null,
+     "cancelled_at": null,
+     "schema_version": 1,
+     "revision": 1,
+     "formulation_id": null,
+     "formulation_started_at": null,
+     "formulation_extended_at": null,
+     "formulation_extension_reason": null,
+     "formulation_park_floor_at": null,
+     "consecutive_stalled_formulations": 0,
+     "parked": null
+    }
+   ],
+   "subtasks": [
+    {
+     "id": "c54587f5-788c-5a7a-86fb-c07f4a8f7b43",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "task_id": "da6395c2-8e67-527b-be6d-4b5673d9e756",
+     "title": "Draft the mail",
+     "order_key": 0,
+     "state": "completed",
+     "created_at": "2026-09-03T09:00:00Z",
+     "updated_at": "2026-09-04T09:00:00Z",
+     "completed_at": "2026-09-04T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "bcdeff19-b40c-5307-993e-d5f703e239bd",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "task_id": "da6395c2-8e67-527b-be6d-4b5673d9e756",
+     "title": "Attach the price list",
+     "order_key": 1,
+     "state": "open",
+     "created_at": "2026-09-03T09:00:00Z",
+     "updated_at": "2026-09-03T09:00:00Z",
+     "completed_at": null,
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "1fb66194-cea4-570b-ad30-de8064bd36cd",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "task_id": "47229eef-b12d-56a4-aafb-845b4696ff3d",
+     "title": "Find his number",
+     "order_key": 0,
+     "state": "cancelled",
+     "created_at": "2026-09-03T09:00:00Z",
+     "updated_at": "2026-09-05T09:00:00Z",
+     "completed_at": null,
+     "schema_version": 1,
+     "revision": 1
+    }
+   ],
+   "comments": [
+    {
+     "id": "6a5b54bc-3982-5686-b6a0-052e7458045f",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "task_id": "da6395c2-8e67-527b-be6d-4b5673d9e756",
+     "actor_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "body": "Finance wants a 5% discount line.",
+     "created_at": "2026-09-06T09:00:00Z",
+     "edited_at": "2026-09-07T09:00:00Z",
+     "schema_version": 1,
+     "revision": 1
+    },
+    {
+     "id": "d5eacd6a-b20c-5ec8-b527-73cd6c867384",
+     "owner_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "task_id": "da6395c2-8e67-527b-be6d-4b5673d9e756",
+     "actor_id": "beea96a4-7827-599d-b786-571f694828ac",
+     "body": "Спасибо 🙏",
+     "created_at": "2026-09-08T09:00:00Z",
+     "edited_at": null,
+     "schema_version": 1,
+     "revision": 1
+    }
+   ]
+  },
+  "expected_counts": {
+   "beea96a4-7827-599d-b786-571f694828ac": {
+    "projects": 4,
+    "tags": 5,
+    "tasks": 11,
+    "subtasks": 3,
+    "comments": 2,
+    "tasks_by_state": {
+     "cancelled": 1,
+     "completed": 1,
+     "inbox": 2,
+     "next": 3,
+     "someday": 3,
+     "waiting": 1
+    }
+   },
+   "863e24a2-2512-59a9-8531-f435e248f118": {
+    "projects": 1,
+    "tags": 1,
+    "tasks": 2,
+    "subtasks": 0,
+    "comments": 0,
+    "tasks_by_state": {
+     "inbox": 1,
+     "next": 1
+    }
+   }
+  },
+  "relationship_rules": [
+   "every task.project_id, task.tag_ids[*], subtask.task_id and comment.task_id names a record of the same owner",
+   "no record references another owner's id; owners share display names and normalized names without collision",
+   "archiving a project keeps its tasks and their project_id (lossless archive, ADR-0020); archived_before_lossless marks pre-feature archives",
+   "a deleted tag stays in the store and is not referenced by any task",
+   "normalized_name equals normalize_task_name(name) for projects and normalize_task_name(name, strip_tag_prefix=True) for tags",
+   "task titles are at most 500 and details at most 20 000 Unicode scalars; a parked task carries its clock_before"
+  ]
+ }
+}

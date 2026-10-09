@@ -91,6 +91,17 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "project_archive_traces": (EPIC_TASKS, "Projects", "Lossless archive"),
     "project_desired_outcome_api": (EPIC_TASKS, "Projects", "Desired outcome"),
     "client_attribution_logging": (EPIC_TASKS, "Projects", "Client attribution"),
+    # Spec 026 (shared Rust core): the parity oracle every language is held to.
+    "026_primitive_vectors": (
+        EPIC_TASKS,
+        "Shared core parity",
+        "Normalization and calendar primitives",
+    ),
+    "026_oracle_contracts": (
+        EPIC_TASKS,
+        "Shared core parity",
+        "Frozen oracle files",
+    ),
     "brain_dump_operations_api": (
         EPIC_TASKS,
         "Brain dump API",
