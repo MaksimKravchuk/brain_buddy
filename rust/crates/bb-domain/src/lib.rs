@@ -13,6 +13,8 @@
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
 //! * [`organize`]: project, tag and `task.tags` rules (normalized-name
 //!   uniqueness, active references, archive and tag deletion).
+//! * [`archive`]: archive membership, legacy marker restoration and the
+//!   project listing over it.
 //! * [`ai_policy`]: the pure AI route policy: local suitability, on-device-only,
 //!   per-owner/provider/consent-version remote consent, input and time limits.
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
@@ -23,11 +25,10 @@
 //!   project display), with the server's ordering and keyset cursor.
 //! * [`task_rules`]: the task lifecycle rules (`task.create`, `task.update`,
 //!   `task.transition`).
-//! * [`types`]: the frozen value types. The rule families and the
-//!   `decide`/`query` entry points land in later slices as they are
-//!   implemented, so no module here is an empty placeholder.
+//! * [`types`]: the frozen value types.
 
 pub mod ai_policy;
+pub mod archive;
 pub mod calendar;
 pub mod children;
 pub mod formulation;

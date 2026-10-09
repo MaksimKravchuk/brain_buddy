@@ -1,22 +1,16 @@
 //! Parity of the archive and restoration family with the server and the
 //! frozen oracle (tasks.md T009, PR-09).
 //!
-//! The runner compiles the **actual** rule source with a plain `#[path]`
-//! module, includes the already-merged organization rules under their
-//! production name (they decide `project.archive` / `project.unarchive`) and
-//! re-exports the shared crates at the test-crate root, so the rule's own
-//! `crate::` paths resolve exactly as they do in the library. Every
-//! data-driven test counts the cases it executed, so an empty or truncated
-//! section fails instead of passing vacuously.
+//! The runner exercises the rules through the library's exported
+//! `bb_domain::archive` path (with the organization rules that decide
+//! `project.archive` / `project.unarchive`), so a module the crate forgets to
+//! export fails to compile here. Every data-driven test counts the cases it
+//! executed, so an empty or truncated section fails instead of passing
+//! vacuously.
 
-#[path = "../src/archive.rs"]
-mod archive;
-#[allow(dead_code)]
-#[path = "../src/organize.rs"]
-mod organize;
 mod support;
 
-pub use bb_domain::{calendar, normalization, types};
+use bb_domain::{archive, organize, types};
 
 use bb_protocol::command::{Decoded, decode_command};
 use serde_json::{Map, Value, json};
