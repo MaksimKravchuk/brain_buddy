@@ -449,19 +449,22 @@ package final class BrainBuddyModel {
         workspace.list(.list(.inbox), options: ListOptions()).sections.flatMap(\.tasks)
     }
 
-    /// Inbox → a new project with its outcome and the item as its first Next action, as one change.
+    /// Inbox → a new project with its outcome (optional; blank is none) and the item as its first
+    /// Next action, as one change.
     @discardableResult
-    package func clarifyInboxAsProject(_ id: TaskID, projectName: String, outcome: String, firstAction: String) -> Bool {
+    package func clarifyInboxAsProject(_ id: TaskID, projectName: String, outcome: String?, firstAction: String) -> Bool {
         guard let task = workspace.task(id), task.state == .inbox, task.projectID == nil else {
             error = "Only an unassigned Inbox item can start a new project."
             return false
         }
         let projectID = ProjectID.random()
+        let trimmedOutcome = outcome?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let desiredOutcome = trimmedOutcome?.isEmpty == false ? trimmedOutcome : nil
         var changes = TaskChanges(projectID: .set(projectID))
         if firstAction != task.title { changes.title = .set(firstAction) }
         return run {
             try workspace.apply([
-                .createProject(.init(projectID: projectID, name: projectName, desiredOutcome: outcome)),
+                .createProject(.init(projectID: projectID, name: projectName, desiredOutcome: desiredOutcome)),
                 .updateTask(.init(taskID: id, changes: changes)),
                 .transitionTask(.init(taskID: id, action: .move, toList: .next)),
             ])

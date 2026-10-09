@@ -376,6 +376,56 @@ struct OfflineWorkspaceTests {
         #expect(app.model.projectOverview(projectID)?.nextAction?.id == source)
     }
 
+    @Test("021-FR-028 clarifying an Inbox item as a project without a desired outcome leaves the outcome unset")
+    func inboxClarificationAsProjectWithoutOutcome() async throws {
+        let app = await App()
+        let blank = try app.add("Plan the offsite", .inbox)
+        let missing = try app.add("Renew passports", .inbox)
+
+        #expect(app.model.clarifyInboxAsProject(blank, projectName: "Offsite", outcome: "  \n ", firstAction: "Pick dates"))
+        #expect(app.model.clarifyInboxAsProject(missing, projectName: "Passports", outcome: nil, firstAction: "Find old passports"))
+        for (id, name) in [(blank, "Offsite"), (missing, "Passports")] {
+            let task = try #require(app.workspace.task(id))
+            let projectID = try #require(task.projectID)
+            let project = try #require(app.workspace.project(projectID))
+            #expect(project.name == name && project.desiredOutcome == nil && task.state == .next)
+        }
+
+        await app.restart()
+        let reloaded = try #require(app.workspace.task(blank)?.projectID)
+        #expect(app.workspace.project(reloaded)?.desiredOutcome == nil)
+    }
+
+    @Test("021-FR-028 a project chosen while clarifying is applied together with Next, Waiting for or Someday")
+    func inboxClarificationWithStagedProject() async throws {
+        let app = await App()
+        let project = try #require(app.model.createProject("House move"))
+        let next = try app.add("Call movers", .inbox)
+        let waiting = try app.add("Quote from movers", .inbox)
+        let someday = try app.add("Build a shed", .inbox)
+        let leftAlone = try app.add("Skim the manual", .inbox)
+
+        app.model.choose(.list(.inbox))
+        #expect(app.model.loadInboxClarificationTasks().count == 4)
+        #expect(app.model.saveTask(next, changes: TaskChanges(projectID: .set(project)), moveTo: .next))
+        #expect(
+            app.model.saveTask(
+                waiting, changes: TaskChanges(projectID: .set(project), waitingFor: .set("The mover")), moveTo: .waiting
+            )
+        )
+        #expect(app.model.saveTask(someday, changes: TaskChanges(projectID: .set(project)), moveTo: .someday))
+
+        let movedNext = try #require(app.workspace.task(next))
+        #expect(movedNext.state == .next && movedNext.projectID == project)
+        let movedWaiting = try #require(app.workspace.task(waiting))
+        #expect(movedWaiting.state == .waiting && movedWaiting.projectID == project && movedWaiting.waitingFor == "The mover")
+        let movedSomeday = try #require(app.workspace.task(someday))
+        #expect(movedSomeday.state == .someday && movedSomeday.projectID == project)
+        // Items that got a project leave the Inbox; the one left alone stays, still without a project.
+        #expect(app.model.loadInboxClarificationTasks().map(\.id) == [leftAlone])
+        #expect(app.workspace.task(leftAlone)?.projectID == nil)
+    }
+
     @Test("021-FR-010 capture from a project stays in Inbox and shows in the project, offline")
     func projectCapture() async throws {
         let app = await App()
