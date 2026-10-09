@@ -36,7 +36,7 @@ use crate::types::{
 };
 
 /// `limit` is `ge=1, le=200` on the list route.
-const MAX_LIMIT: u32 = 200;
+pub(crate) const MAX_LIMIT: u32 = 200;
 
 /// Owner settings when none are stored: `ReviewSettingsDocument` defaults (14
 /// days, UTC, not activated), so no task has advisory instants.
@@ -59,7 +59,8 @@ pub fn handles_query(query: &Query) -> bool {
 /// Answers one task, project or tag query.
 ///
 /// The Review queries belong to the Review sessions family
-/// ([`crate::review_sessions::query`]) and are refused here as
+/// ([`crate::review_sessions::query`]) and the list modes to
+/// [`crate::list_modes::query`]; both are refused here as
 /// [`Reason::InvalidValue`] on `kind`, never answered with a placeholder; the
 /// dispatcher asks `review_sessions::handles_query` first.
 ///
@@ -99,7 +100,7 @@ pub fn query(
             project_display(read_set, project_id).map(QueryResult::ProjectDisplay)
         }
         Query::Tags {} => Ok(QueryResult::Tags(tags(read_set))),
-        Query::ReviewState {} | Query::ReviewQueue { .. } => {
+        Query::ReviewState {} | Query::ReviewQueue { .. } | Query::ListMode { .. } => {
             Err(DomainError::field(Reason::InvalidValue, "kind"))
         }
     }
@@ -181,7 +182,7 @@ pub(crate) enum KeyPart {
 pub(crate) type SortKey = Vec<KeyPart>;
 
 /// `_PRIORITY_RANK`.
-fn priority_rank(priority: Priority) -> u64 {
+pub(crate) fn priority_rank(priority: Priority) -> u64 {
     match priority {
         Priority::High => 0,
         Priority::Medium => 1,
@@ -478,7 +479,7 @@ fn python_string(text: &str) -> String {
 }
 
 /// `TaskService._encode_cursor`.
-fn encode_cursor(filters: &Value, last: &SortKey) -> String {
+pub(crate) fn encode_cursor(filters: &Value, last: &SortKey) -> String {
     let last: Vec<Value> = last
         .iter()
         .map(|part| match part {
@@ -510,6 +511,17 @@ fn has_sort_shape(key: &[KeyPart], sort: TaskSort) -> bool {
 /// is malformed, was issued for other filters, or holds a key of another shape
 /// than `sort` produces (which would order before or after every task).
 fn decode_cursor(cursor: &str, filters: &Value, sort: TaskSort) -> Result<SortKey, DomainError> {
+    let key = decode_cursor_key(cursor, filters)?;
+    if has_sort_shape(&key, sort) {
+        Ok(key)
+    } else {
+        Err(invalid("cursor"))
+    }
+}
+
+/// The last key of a cursor issued for exactly `filters`, whatever its shape;
+/// the caller checks the shape against the sort it pages by.
+pub(crate) fn decode_cursor_key(cursor: &str, filters: &Value) -> Result<SortKey, DomainError> {
     let refused = || invalid("cursor");
     let bytes = base64url_decode(cursor).ok_or_else(refused)?;
     let payload: Value = serde_json::from_slice(&bytes).map_err(|_| refused())?;
@@ -521,20 +533,14 @@ fn decode_cursor(cursor: &str, filters: &Value, sort: TaskSort) -> Result<SortKe
         .and_then(Value::as_array)
         .filter(|parts| !parts.is_empty())
         .ok_or_else(refused)?;
-    let key = last
-        .iter()
+    last.iter()
         .map(|part| match part {
             Value::String(text) => Some(KeyPart::Text(text.clone())),
             Value::Number(number) => number.as_u64().map(KeyPart::Int),
             _ => None,
         })
         .map(|part| part.ok_or_else(refused))
-        .collect::<Result<SortKey, _>>()?;
-    if has_sort_shape(&key, sort) {
-        Ok(key)
-    } else {
-        Err(refused())
-    }
+        .collect()
 }
 
 // ---------------------------------------------------------------- the detail

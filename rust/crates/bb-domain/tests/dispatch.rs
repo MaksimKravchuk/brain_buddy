@@ -16,7 +16,7 @@ use bb_domain::dispatch::{
     query_kind, query_owner, unowned,
 };
 use bb_domain::types::*;
-use bb_domain::{children, organize, park, queries, review_decisions, review_sessions};
+use bb_domain::{children, list_modes, organize, park, queries, review_decisions, review_sessions};
 use bb_domain::{smart_add, task_rules};
 use bb_protocol::command::{CommandEnvelope, Decoded, decode_command};
 use bb_protocol::receipt::Receipt;
@@ -209,6 +209,8 @@ fn sample_queries() -> Vec<Query> {
         json!({"kind": "tags"}),
         json!({"kind": "review_state"}),
         json!({"kind": "review_queue", "step": "wins", "session_id": null}),
+        json!({"kind": "list_mode", "mode": {"type": "agenda"}, "options": {},
+               "page": {"limit": 50, "after": null}}),
     ]
     .into_iter()
     .map(|raw| serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{raw}: {e}")))
@@ -403,7 +405,7 @@ fn dispatch_026_fr_002_the_samples_cover_every_catalog_command_and_query_kind() 
 
     let kinds: BTreeSet<QueryKind> = sample_queries().iter().map(query_kind).collect();
     let catalog: BTreeSet<QueryKind> = QueryKind::ALL.into_iter().collect();
-    assert_eq!(catalog.len(), 8);
+    assert_eq!(catalog.len(), 9);
     assert_eq!(kinds, catalog, "one sample per query kind");
     for (sample, kind) in sample_queries().iter().zip(QueryKind::ALL) {
         let tagged = serde_json::to_value(sample).expect("a query serializes");
@@ -480,7 +482,7 @@ fn dispatch_026_fr_002_no_command_is_claimed_by_two_families() {
 
 #[test]
 fn dispatch_026_fr_002_every_query_kind_has_exactly_one_owner() {
-    use QueryFamily::{Queries, ReviewSessions};
+    use QueryFamily::{ListModes, Queries, ReviewSessions};
     let expected = [
         (QueryKind::TaskList, Queries),
         (QueryKind::TaskDetail, Queries),
@@ -490,6 +492,7 @@ fn dispatch_026_fr_002_every_query_kind_has_exactly_one_owner() {
         (QueryKind::Tags, Queries),
         (QueryKind::ReviewState, ReviewSessions),
         (QueryKind::ReviewQueue, ReviewSessions),
+        (QueryKind::ListMode, ListModes),
     ];
     assert_eq!(expected.len(), QueryKind::ALL.len());
     let samples = sample_queries();
@@ -956,6 +959,65 @@ fn dispatch_026_fr_009_task_reads_over_the_oracle_store_are_the_query_familys() 
     }
     assert_eq!(details, read_set.tasks.len());
     assert!(details > 0);
+}
+
+#[test]
+fn dispatch_026_fr_009_list_modes_over_the_oracle_store_are_the_list_modes_familys() {
+    let read_set = reference_read_set(OWNER_A);
+    let inputs = query_inputs(true);
+    let mode = |mode: Value, options: Value| -> Query {
+        serde_json::from_value(json!({
+            "kind": "list_mode", "mode": mode, "options": options,
+            "page": {"limit": 50, "after": null},
+        }))
+        .expect("a list mode query")
+    };
+    let titles = |query: &Query| -> Vec<Vec<String>> {
+        let routed = dispatch::query(&read_set, query, &inputs).expect("answered");
+        assert_eq!(
+            Ok(routed.clone()),
+            list_modes::query(&read_set, query, &inputs),
+            "the routed answer is the family's own"
+        );
+        let QueryResult::ListMode(page) = routed else {
+            panic!("not a list mode page")
+        };
+        page.sections
+            .iter()
+            .map(|s| {
+                s.items
+                    .iter()
+                    .map(|i| i.title.as_str().to_owned())
+                    .collect()
+            })
+            .collect()
+    };
+
+    // The reference store's one completed and one cancelled task (owner A).
+    let completed = mode(json!({"type": "history", "kind": "completed"}), json!({}));
+    assert_eq!(query_owner(&completed), Ok(QueryFamily::ListModes));
+    assert_eq!(titles(&completed), [["File taxes"]]);
+    let cancelled = mode(json!({"type": "history", "kind": "cancelled"}), json!({}));
+    assert_eq!(titles(&cancelled), [["Call the old landlord"]]);
+    // Both dated tasks fall after 2026-10-09, by due day.
+    let agenda = mode(json!({"type": "agenda"}), json!({}));
+    assert_eq!(titles(&agenda), [["Email the quote", "Book the venue"]]);
+    let today = mode(json!({"type": "date_view", "view": "today"}), json!({}));
+    assert!(titles(&today).is_empty());
+    // Search reads every state: the open waiting task, then the cancelled one.
+    let search = mode(json!({"type": "search", "text": "LANDLORD"}), json!({}));
+    assert_eq!(
+        titles(&search),
+        [vec!["Reply from landlord"], vec!["Call the old landlord"]]
+    );
+
+    // The task queries family does not answer them: it refuses, never guesses.
+    let refusal = queries::query(&read_set, &completed, &inputs).expect_err("not its query");
+    assert_eq!(
+        (refusal.reason, refusal.field.as_deref()),
+        (Reason::InvalidValue, Some("kind"))
+    );
+    assert!(list_modes::query(&read_set, &Query::Tags {}, &inputs).is_err());
 }
 
 #[test]

@@ -143,6 +143,41 @@ pub fn search_query_key(value: Option<&str>) -> String {
     search_key(&collapse_whitespace(strip(value.unwrap_or_default())))
 }
 
+/// Nonspacing and enclosing marks: what a diacritic-insensitive comparison drops.
+fn is_mark(c: char) -> bool {
+    matches!(
+        get_general_category(c),
+        GeneralCategory::NonspacingMark | GeneralCategory::EnclosingMark
+    )
+}
+
+/// The Apple kit's `QueryText.fold`, which native search and title order use
+/// (`Queries+Ordering.swift`): NFKC, full case folding, then canonical
+/// decomposition with the combining marks dropped, recomposed. `Straße` becomes
+/// `strasse`, `Éclair` `eclair`, full-width letters ASCII, and a lone combining
+/// mark nothing. Unlike [`search_key`] (the server's rule) it ignores
+/// diacritics; it does not map letters that have no decomposition (`ø`, `ł`).
+#[must_use]
+pub fn diacritic_fold(value: &str) -> String {
+    casefold(&nfkc(value))
+        .nfd()
+        .filter(|c| !is_mark(*c))
+        .nfc()
+        .collect()
+}
+
+/// `QueryText.collapsingWhitespace`: runs of White_Space scalars (Swift's
+/// `Character.isWhitespace`, so not U+001C..U+001F) become one space, both ends
+/// trimmed.
+#[must_use]
+pub fn collapse_unicode_whitespace(value: &str) -> String {
+    value
+        .split(char::is_whitespace)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn is_punctuation(c: char) -> bool {
     matches!(
         get_general_category(c),

@@ -91,6 +91,11 @@ vocab! {
     CountedStatus { Completed => "completed", Partial => "partial" }
     TaskSort { Manual => "manual", Due => "due", Priority => "priority", Title => "title" }
     ProjectFilter { Active => "active", Archived => "archived", All => "all" }
+    /// Where an open dated task falls relative to the device's day
+    /// (`DateView` in `Queries.swift`).
+    DateView { Overdue => "overdue", Today => "today", Upcoming => "upcoming" }
+    /// The two terminal states a History screen lists (`HistoryKind`).
+    HistoryKind { Completed => "completed", Cancelled => "cancelled" }
     /// Trusted writer origin the execution boundary supplies (command-catalog.md).
     WriterOrigin {
         Device => "device", Legacy => "legacy", Application => "application", Job => "job",
@@ -123,5 +128,12 @@ impl TaskState {
 
     pub fn is_open(self) -> bool {
         self.open_list().is_some()
+    }
+}
+
+impl Default for TaskSort {
+    /// `ListOptions` defaults to the manual order.
+    fn default() -> Self {
+        Self::Manual
     }
 }

@@ -16,7 +16,7 @@ use super::primitives::{
 use super::review_state::{ReviewSession, ReviewSettings, SessionCounts};
 use super::tasks::{Comment, FormulationClock, Project, Subtask, Tag, Task};
 use super::vocabulary::{
-    ChildState, ClearStart, CountedStatus, Priority, ReceiptKind, ReviewOrigin, TaskState,
+    ChildState, ClearStart, CountedStatus, DateView, Priority, ReceiptKind, ReviewOrigin, TaskState,
 };
 use bb_protocol::wire::{Counter, Instant};
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ pub enum QueryResult {
     Tags(Vec<TagSummary>),
     ReviewState(Box<ReviewStateView>),
     ReviewQueue(QueueView),
+    ListMode(ListModePage),
 }
 
 // ----------------------------------------------------------------------- tasks
@@ -208,6 +209,48 @@ pub struct TaskListResult {
     pub next_cursor: Option<String>,
     pub has_more: bool,
     pub counts_by_state: TaskCounts,
+}
+
+/// One page of a native list mode (`TaskListResult` of the Apple kit, paged):
+/// the sections' rows in order. A section the page starts inside continues the
+/// previous page's last one under the same `id`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListModePage {
+    pub sections: Vec<PageSection>,
+    /// Open tasks in the whole result, not the page (terminal rows excluded).
+    pub open_count: u32,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+}
+
+/// The rows of one section on a page. `id` is stable across pages and
+/// recomputation: `open`, `project:<id>`, `none`, `date:<view>`, `completed`,
+/// `cancelled`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageSection {
+    pub id: String,
+    /// The header, or none for a single unnamed section.
+    pub title: Option<String>,
+    pub kind: SectionKind,
+    pub items: Vec<TaskView>,
+}
+
+/// What a section holds (`TaskSection.Kind`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SectionKind {
+    Open {},
+    /// `project_id` is none for the "No project" section.
+    Project {
+        project_id: Option<ProjectId>,
+    },
+    DateView {
+        view: DateView,
+    },
+    Completed {},
+    Cancelled {},
 }
 
 /// Global badge counts over open tasks; they ignore the screen's filters. Inbox
