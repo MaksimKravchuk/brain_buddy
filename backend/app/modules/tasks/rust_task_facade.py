@@ -181,6 +181,7 @@ def encode_project(project: ProjectDocument) -> dict[str, Any]:
         "desired_outcome": project.desired_outcome or None,
         "archived_at": _optional_instant(project.archived_at),
         "archived_before_lossless": project.archived_before_lossless,
+        "created_at": instant(project.created_at),
     }
 
 
@@ -192,6 +193,7 @@ def encode_tag(tag: TagDocument) -> dict[str, Any]:
         "name": tag.name,
         "state": state,
         "revision": str(tag.revision),
+        "created_at": instant(tag.created_at),
     }
 
 
