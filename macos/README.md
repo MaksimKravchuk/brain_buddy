@@ -9,9 +9,10 @@ anywhere until you sign in.
 It supports Inbox / Next actions / Waiting for / Someday, date views, projects and tags,
 Completed / Cancelled history, search, task completion and reopening, quick moves between the
 four GTD lists, and an inline editor with explicit Save and Discard for task fields. Inbox has a
-one-item-at-a-time clarification flow: an item can become a Next action, a Waiting item with a
-reason, a new project with its desired outcome and first Next action (one change), Someday, or
-Cancelled. Quick capture (⌃⌥⇧B) and Smart Add (`#tag`, `@project`) use the kit's capture, so a
+one-item-at-a-time clarification flow: an item can first be given a project (an existing one or a
+new one made on the spot), then become a Next action, a Waiting item with a reason, Someday, or
+Cancelled; or it can become a new project of its own, with an optional desired outcome and a first
+Next action (one change). Quick capture (⌃⌥⇧B) and Smart Add (`#tag`, `@project`) use the kit's capture, so a
 capture never waits for the network. Quick Open (⌘O) finds lists, projects, tags and tasks.
 
 Projects are archived and unarchived without changing any task's project: an archived project

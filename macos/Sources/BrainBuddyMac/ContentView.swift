@@ -2343,6 +2343,12 @@ private func validAnswer(_ value: String, limit: Int) -> Bool {
     return !trimmed.isEmpty && EditorLimits.fits(trimmed, limit)
 }
 
+/// An answer that may be empty (the project's outcome); when it is not, it must fit.
+private func validOptionalAnswer(_ value: String, limit: Int) -> Bool {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty || EditorLimits.fits(trimmed, limit)
+}
+
 private enum InboxClarificationStep {
     case decision, nextTitle, waitingReason, waitingTitle
     case projectName, projectOutcome, projectAction
@@ -2360,6 +2366,11 @@ private struct InboxClarifyView: View {
     @State private var projectName = ""
     @State private var desiredOutcome = ""
     @State private var firstAction = ""
+    /// The project chosen for the current item; applied with the decision, never at once, because
+    /// giving an Inbox item a project takes it out of the Inbox before it is clarified.
+    @State private var stagedProjectID: ProjectID?
+    @State private var showingProjectCreator = false
+    @State private var newProjectName = ""
     @State private var confirmingCancel = false
     @State private var confirmingClose = false
 
@@ -2409,9 +2420,12 @@ private struct InboxClarifyView: View {
             }
         }
         .padding(24)
-        .frame(width: 640, height: index < items.count && step == .decision ? 570 : 430)
+        .frame(width: 640, height: index < items.count && step == .decision ? 640 : 430)
         .onAppear(perform: load)
         .interactiveDismissDisabled(step != .decision)
+        // presentation-region: project creator sheet
+        .sheet(isPresented: $showingProjectCreator) { projectCreator }
+        // presentation-region-end
         // presentation-region: clarify confirmations
         .confirmationDialog("Cancel this Inbox item?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
@@ -2460,12 +2474,82 @@ private struct InboxClarifyView: View {
         .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    /// The staged project, if any, with the changes a decision already sends.
+    private func withStagedProject(_ changes: TaskChanges = TaskChanges()) -> TaskChanges {
+        var merged = changes
+        if let stagedProjectID { merged.projectID = .set(stagedProjectID) }
+        return merged
+    }
+
+    /// "No project", the active projects and "New project…". The choice is applied with Next,
+    /// Waiting for or Someday; a new project, cancelling and leaving the item ignore it.
+    private var projectMenu: some View {
+        HStack(spacing: 10) {
+            Text("Project · optional").font(.subheadline).foregroundStyle(.secondary)
+            Menu {
+                Button("No project") { stagedProjectID = nil }
+                ForEach(model.projects) { project in
+                    Button {
+                        stagedProjectID = project.id
+                    } label: {
+                        if stagedProjectID == project.id {
+                            Label(project.name, systemImage: "checkmark")
+                        } else {
+                            Text(project.name)
+                        }
+                    }
+                }
+                Divider()
+                Button("New project…") { showingProjectCreator = true }
+            } label: {
+                Text(stagedProjectID.map { model.projectLabel($0) } ?? "No project")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .accessibilityLabel("Project")
+            .accessibilityValue(stagedProjectID.map { model.projectLabel($0) } ?? "None")
+        }
+    }
+
+    private var projectCreator: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New project").font(.title2.bold())
+            TextField("Project name", text: $newProjectName)
+                .textFieldStyle(.roundedBorder)
+            if let error = model.error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    newProjectName = ""
+                    model.error = nil
+                    showingProjectCreator = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Add project") {
+                    if let id = model.createProject(newProjectName) {
+                        stagedProjectID = id
+                        newProjectName = ""
+                        showingProjectCreator = false
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 340)
+    }
+
     @ViewBuilder
     private func decisionButtons(_ item: TaskRecord) -> some View {
+        projectMenu
         Text("What is this?").font(.headline)
         VStack(alignment: .leading, spacing: 9) {
             Button("Already a concrete action → Next") {
-                if model.moveTask(item.id, to: .next) { advance() }
+                if model.saveTask(item.id, changes: withStagedProject(), moveTo: .next) { advance() }
             }
             Button("Rewrite as a Next action…") {
                 proposedTitle = item.title
@@ -2484,7 +2568,7 @@ private struct InboxClarifyView: View {
             }
             .disabled(item.projectID != nil)
             Button("Someday / maybe") {
-                if model.moveTask(item.id, to: .someday) { advance() }
+                if model.saveTask(item.id, changes: withStagedProject(), moveTo: .someday) { advance() }
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
             Button("Leave in Inbox for now") { advance() }
@@ -2517,7 +2601,10 @@ private struct InboxClarifyView: View {
                     .frame(height: 95)
                     .padding(8)
                     .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel("Desired project outcome")
+                    .accessibilityLabel("Desired project outcome, optional")
+                Text("Optional. Leave it empty to add the outcome later.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             case .projectAction:
                 TextField("First Next action", text: $firstAction)
                     .textFieldStyle(.roundedBorder)
@@ -2526,7 +2613,7 @@ private struct InboxClarifyView: View {
                 EmptyView()
             }
             if step == .projectAction {
-                Text("\(projectName) → \(desiredOutcome)")
+                Text(projectSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Existing notes, tags, date, and priority stay on the resulting Next action.")
@@ -2547,6 +2634,12 @@ private struct InboxClarifyView: View {
                 .disabled(!isValidAnswer)
             }
         }
+    }
+
+    private var projectSummary: String {
+        let name = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outcome = desiredOutcome.trimmingCharacters(in: .whitespacesAndNewlines)
+        return outcome.isEmpty ? name : "\(name) → \(outcome)"
     }
 
     private var question: String {
@@ -2576,7 +2669,7 @@ private struct InboxClarifyView: View {
         case .nextTitle, .waitingTitle: validAnswer(proposedTitle, limit: EditorLimits.title)
         case .waitingReason: validAnswer(waitingReason, limit: EditorLimits.waitingFor)
         case .projectName: validAnswer(projectName, limit: EditorLimits.name)
-        case .projectOutcome: validAnswer(desiredOutcome, limit: EditorLimits.outcome)
+        case .projectOutcome: validOptionalAnswer(desiredOutcome, limit: EditorLimits.outcome)
         case .projectAction: validAnswer(firstAction, limit: EditorLimits.title)
         }
     }
@@ -2586,6 +2679,7 @@ private struct InboxClarifyView: View {
         index = 0
         loaded = true
         step = .decision
+        stagedProjectID = nil
     }
 
     private func submit(_ item: TaskRecord) {
@@ -2595,23 +2689,26 @@ private struct InboxClarifyView: View {
             break
         case .nextTitle:
             let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let changes = title == item.title ? TaskChanges() : TaskChanges(title: .set(title))
+            let changes = withStagedProject(title == item.title ? TaskChanges() : TaskChanges(title: .set(title)))
             if model.saveTask(item.id, changes: changes, moveTo: .next) { advance() }
         case .waitingReason:
             step = .waitingTitle
         case .waitingTitle:
             let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             let reason = waitingReason.trimmingCharacters(in: .whitespacesAndNewlines)
-            let changes = TaskChanges(title: title == item.title ? .unchanged : .set(title), waitingFor: .set(reason))
+            let changes = withStagedProject(
+                TaskChanges(title: title == item.title ? .unchanged : .set(title), waitingFor: .set(reason))
+            )
             if model.saveTask(item.id, changes: changes, moveTo: .waiting) { advance() }
         case .projectName:
             step = .projectOutcome
         case .projectOutcome:
             step = .projectAction
         case .projectAction:
+            let outcome = desiredOutcome.trimmingCharacters(in: .whitespacesAndNewlines)
             if model.clarifyInboxAsProject(
                 item.id, projectName: projectName.trimmingCharacters(in: .whitespacesAndNewlines),
-                outcome: desiredOutcome.trimmingCharacters(in: .whitespacesAndNewlines),
+                outcome: outcome.isEmpty ? nil : outcome,
                 firstAction: firstAction.trimmingCharacters(in: .whitespacesAndNewlines)
             ) { advance() }
         }
@@ -2620,6 +2717,7 @@ private struct InboxClarifyView: View {
     private func advance() {
         index += 1
         step = .decision
+        stagedProjectID = nil
         model.error = nil
     }
 }
