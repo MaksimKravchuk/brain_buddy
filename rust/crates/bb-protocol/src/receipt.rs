@@ -112,6 +112,12 @@ impl Wire for Receipt {
         if self.has_changes != self.commit_seq.is_some() {
             return Err(CodecError::Invalid("commit_seq must match has_changes"));
         }
+        // Redaction means the retained content is unavailable (sync-v1 section 5).
+        if self.result_redacted && self.result.is_some() {
+            return Err(CodecError::Invalid(
+                "redacted receipt must have a null result",
+            ));
+        }
         Ok(())
     }
 }

@@ -29,6 +29,10 @@ Every implementation PR retains its declared product cap (at most 390 changed li
 
 The prior six-lens reports and named-human sign-off remain untouched and bind only their recorded baseline digest. The delivery amendment has its own bounded structural/independent review evidence in [verification.md](verification.md); it is not relabeled as another six-lens campaign or a new human sign-off. No product behavior, data/consent contract, migration authority or release permission is changed.
 
+## Owner delivery decision — October 9, implementation
+
+When implementation started, the owner directed: focus on the migration and do not drown in processes. Measured spikes had shown most complex slices exceed their caps (recorded in the implementation PRs). The slice-size caps and per-slice path lists in [tasks.md](tasks.md) therefore become advisory for feature 026; delivery proceeds as reviewable, independently tested PRs in the map's dependency order. CI, test, traceability and ASK-class landing gates are unchanged. The owner also authorized merging these PRs once CI is green and automated review findings are resolved.
+
 ## Conditions carried into implementation
 
 Measure the complex slices before approving their execution boundaries, and revise any boundary that cannot meet its cap. Enact the approved Constitution/ADR/Apple dependency and retention amendments through the governance slice with preserved history. Complete the planned implementation, runtime, design and acceptance evidence at the relevant slice and pilot gates. ASK-class migration, schema, CI, cutover, landing and release actions retain their normal exact-SHA checks and separately required authorization.

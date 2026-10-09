@@ -194,6 +194,10 @@
           "if": {"properties": {"has_changes": {"const": true}}, "required": ["has_changes"]},
           "then": {"properties": {"commit_seq": {"$ref": "#/$defs/Counter"}}},
           "else": {"properties": {"commit_seq": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"result_redacted": {"const": true}}, "required": ["result_redacted"]},
+          "then": {"properties": {"result": {"type": "null"}}}
         }
       ]
     },
