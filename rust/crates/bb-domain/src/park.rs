@@ -77,7 +77,16 @@ impl ParkRow {
             parked_at: parse_instant(&ack.parked_at, "park_ack.parked_at")?,
             seen_at: optional(ack.seen_at.as_ref(), "park_ack.seen_at")?,
             returned_at: optional(ack.returned_at.as_ref(), "park_ack.returned_at")?,
-            from_revision: private.and_then(|private| private.from_revision.to_u64()),
+            from_revision: private
+                .map(|private| {
+                    private
+                        .from_revision
+                        .to_u64()
+                        .ok_or(FormulationError::InvalidField(
+                            "park_ack.private.from_revision",
+                        ))
+                })
+                .transpose()?,
             source: private.map(|private| private.source),
         })
     }
