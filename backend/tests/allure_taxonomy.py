@@ -244,6 +244,7 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     "auth_provider_service": (EPIC_AUTH, "Modern authentication", "Provider proofs"),
     "auth_routes": (EPIC_AUTH, "Auth API", "Auth HTTP endpoints"),
     "ownership": (EPIC_AUTH, "Ownership", "Per-user data isolation"),
+    "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",
