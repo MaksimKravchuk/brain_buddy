@@ -1,0 +1,15 @@
+[package]
+name = "bb-client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Bundled SQLite: one audited amalgamation for app, widget and Linux tests.
+# Default features are off so the wasm-only backend stays out of Cargo.lock.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+
+[lints]
+workspace = true
