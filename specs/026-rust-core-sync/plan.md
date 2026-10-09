@@ -174,7 +174,7 @@ Start with a pilot on existing Apple clients. New sync is off by default for an 
 - Observability: FR-023 and signal table, no-content diagnostics, current correlation IDs. Constitution IV's broad client-ID restriction needs the narrow proposed command-identity amendment in `adr-draft.md`; The governance slice must obtain acceptance and update dependent documents before implementation. Dedicated command deduplication IDs never grant authority and remain separate from observability IDs.
 - Mobile/CRT: UI does not wait for network; background work is bounded; CRT storage/protocol remain unchanged, and performance regression is checked by the existing scenario.
 - Design: [design.md](design.md), M-01…M-04/D-01…D-04; human sign-off pending. This is why the status is proposal, not invented approval.
-- Delivery: isolated worktree; documents do not authorize product migrations. Formal five-lens review and agreed PR slices remain required before implementation.
+- Delivery: isolated worktree; documents do not authorize product migrations. Formal six-lens review (the five standard lenses plus the high-risk adversarial lens) and agreed PR slices remain required before implementation.
 
 ## Project Structure
 
@@ -204,7 +204,7 @@ The new conflict/recovery UX, narrow changes to accepted ADRs, and the proposed 
 
 The proposed scope capability is `rust_core_sync`, OFF by default. Its server value is authoritative, owner-scoped, and not an authorization grant. Existing `weekly_review` and AI consent gates still apply independently. Enable only after shared-rule parity, current job fences, all-writer receipt/feed coverage, local import, full Review projections, and the Apple conflict/recovery UX pass their slice checks. Scope enrollment records the task storage epoch and oldest compatible client/server build; unsupported clients receive the documented recovery/update path. A migrated scope cannot silently revert to a second writer when exposure is disabled.
 
-The foreground hint transport is authenticated SSE carrying only a scope change notification and generation, never task content; clients always pull to obtain authority-checked changes. Reconnect/foreground/network-return triggers and the 60-second active fallback remain mandatory. APNs is a future optimization, not a prerequisite or an additional delivery dependency for SC-004.
+The foreground hint transport is authenticated SSE carrying only a scope change notification and generation, never task content; clients always pull to obtain authority-checked changes. Reconnect/foreground/network-return triggers and active fallback polls starting at most 30 seconds apart, including jitter, remain mandatory. The separate SC-004 deadline is at most 60 seconds from server commit to visible application, including requests and catch-up; see the sync contract's scheduling rule. APNs is a future optimization, not a prerequisite or an additional delivery dependency for SC-004.
 
 Internal job defaults: a 60-second lease, heartbeat every 20 seconds, monotonic fencing generation, and at most five execution attempts with full-jitter backoff caps of 1, 5, 30, 120, and 300 seconds. A restart reuses the durable effect ID. Existing shorter privacy/Identity deadlines and bounded provider cleanup policies take precedence: this adapter cannot extend their retention or invent authority in another module. Idempotent maintenance can be scheduled again after a failed run; an uncertain external effect cannot. The job inventory in the command catalog determines ownership before old schedulers stop.
 

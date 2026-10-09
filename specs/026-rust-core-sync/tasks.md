@@ -6,9 +6,11 @@
 
 **Accepted outcome:** one normative Rust domain implementation, durable local/offline commands, receipt/feed transactions for every writer, explicit conflict/recovery, current authorization, durable fenced jobs and consent-bound AI on iOS, macOS and the server. PostgreSQL follows the accepted Apple/current-SQLite pilot as a separate stopped-writer cutover. Android, Windows and Linux require separate specifications and approved device/shell/packaging slices; they are architectural consumers, not acceptance gates or invented shells in this map. Sharing, E2EE, offline web, new recurrence/reorder/task-deletion APIs, CRT synchronization and a Rust HTTP-server rewrite remain outside this feature.
 
-**Prerequisites:** actual design/default/ADR/Constitution decisions, ADR-0011 admissible five-lens verdict and explicit human slice-boundary approval precede coding. PR-01 is the contract/approval slice, not a mechanism to approve itself. Before candidate freeze each implementation writer produces and validates the typed pre-freeze receipt with `python3 scripts/validate_pre_freeze_receipt.py <receipt> --sha <full-lowercase-sha>`. Independent review/QA, exact-SHA CI, verified landing, production release/smoke and feature acceptance are later gates under ADR-0008/0023. ASK-class cutovers require their recorded authorization; this plan grants none.
+**Prerequisites:** actual design/default/ADR/Constitution decisions, ADR-0011/0012 admissible six-lens verdict (five standard lenses plus the high-risk adversarial lens) and explicit human slice-boundary approval precede coding. PR-01 is the contract/approval slice, not a mechanism to approve itself. Before candidate freeze each implementation writer produces and validates the typed pre-freeze receipt with `python3 scripts/validate_pre_freeze_receipt.py <receipt> --sha <full-lowercase-sha>`. Independent review/QA, exact-SHA CI, verified landing, production release/smoke and feature acceptance are later gates under ADR-0008/0023. ASK-class cutovers require their recorded authorization; this plan grants none.
 
 **Paths and budgets:** existing paths were inspected at base `c16daecd13247e35fea280bd9322c8a4b09dabb1`. All `rust/` paths, the new Rust facades, `backend/app/modules/tasks/{jobs,sync}/`, generated wire artifacts and evidence files below are explicitly **proposed additions**. Existing service/reducer modules are integration points, not a request to rewrite whole files in one slice. Each rule slice ports one named rule family; facade slices change bounded dispatch/mapping and make replaced implementations unreachable for migrated epochs. Large obsolete-file deletion is optional later cleanup, not a hidden part of a 400-line budget. Pre-cutover stores remain on their compatible old image until migration; a migrated store has only the new writer/rules. No double mutation or second live authority is permitted. Budgets count added **and deleted** product lines, including manifests/build scripts/generated committed sources; documentation/tests are excluded by the current budget checker (Cargo.lock currently counts as product, so its changed lines are included). Generated bridge output must be a reproducible build artifact, not a way to hide handwritten product changes. Every candidate runs `python3 scripts/check_slice_budget.py specs/026-rust-core-sync/tasks.md PR-NN --base <accepted-base-sha>` after commit. If a measured diff cannot fit, stop and revise the proposed boundaries before implementation proceeds; do not put a stage-sized diff under a small nominal budget.
+
+**Rust/FFI boundary feasibility:** PR-03/04/05 budgets are unmeasured caps, not size evidence. Before approving these boundaries, prepare a disposable sizing spike with the selected dependency versions, complete lockfile deltas, bridge scaffolding and Linux/Apple packaging inputs. Record each spike commit/base, toolchain versions, `check_slice_budget.py` output and the planned CI-owned paths in verification.md. The spike must not wire a live writer or ship product behavior. If any diff exceeds its cap, revise the map into smaller reviewable boundaries and repeat measurement before owner approval; do not exclude Cargo.lock or generated committed sources. A successful docs-only budget check does not validate these future code sizes. No sizing spike has run in this specification session.
 
 **Testing, Principle II:** first run the sufficient existing checks named in each phase/slice. The parity oracle is existing Swift/Python golden rules, not the Rust output. Behavior-preserving ports need no duplicate test per task or language. Genuinely missing critical coverage is test-first: SQLite commit/crash/full-disk/interprocess locking; receipt/feed atomicity and all-writer authority; lease/fence handoff; ACK/feed/snapshot/generation/epoch recovery; legacy uncertain import; retention/restore of deletion/revocation; and FFI serialization/lifetime/panic/concurrency at the actual boundary. Reuse existing consent/review/archive/session/account tests and extend only gaps. Test filters must execute the named relevant cases (zero selected tests is not evidence). Every pytest/Vitest/Playwright product test retains the repository Allure taxonomy and feature-qualified requirement IDs. Affected checks run while iterating; full applicable suites run on the prepared candidate, not after every task.
 
@@ -96,7 +98,7 @@ Independent user test: capture/edit offline on iPhone, terminate/reopen, reconne
 
 - [ ] T037 [US1] Implement apply_changes.rs and receipts.rs to stage/verify byte chunks (indices/counts/bytes/digests) with a streaming decoder, then atomically apply full feed transactions, source-command receipt matching, remaining replay and cursor. ACK only marks accepted_awaiting_feed and retains intent/projection; no ACK after-image writes the confirmed base or jumps the cursor. No-op/rejected receipts complete under the frozen contract. (PR-37).
 
-- [ ] T040 [US1] Implement transport.rs and subscriptions.rs using the frozen ports: bounded send/retry/dependency scheduling, foreground/network-return pulls, notification hints and ≤60-second active polling fallback. Query invalidations coalesce; credentials stay in the OS adapter, close/cancel releases subscriptions, and background application avoids main-thread I/O. (PR-40).
+- [ ] T040 [US1] Implement transport.rs and subscriptions.rs using the frozen ports: bounded send/retry/dependency scheduling, foreground/network-return pulls, notification hints and fallback poll starts at most 30 seconds apart, including jitter, leaving up to 30 seconds for requests/catch-up/application within SC-004's 60-second commit-to-visible deadline. Query invalidations coalesce; credentials stay in the OS adapter, close/cancel releases subscriptions, and background application avoids main-thread I/O. (PR-40).
 
 - [ ] T043 [US1] Connect Workspace.swift/Workspace+Review.swift and BrainBuddySync.swift to RustWorkspaceAdapter.swift and the coarse runtime bridge execute/query/subscribe ports. Select one store/engine for the activated epoch, preserve account-less local authority and existing GTDCommand-facing UI APIs; old engine cannot write that DB. Keep cancellation and structured safe errors visible. (PR-43).
 
@@ -148,7 +150,7 @@ Independent test: suitable/unavailable local executor, on-device-only denial, au
 
 Run actual lower-bound iPhone and Mac scenarios plus the current SQLite server after every writer/worker/restore/privacy prerequisite. This is the first rollout acceptance gate. Capture exact deployed SHA, flag audience/OFF/recovery, metrics and independent acceptance; no product evidence is claimed by this documentation change.
 
-- [ ] T054 Extend the existing replay harness at bb-client/tests/protocol_faults.rs with the genuinely new protocol crash/loss/reorder/reset/restore cases from sync-v1.md §10, reusing current convergence/archive/Review traces. Execute quickstart.md Q01–Q12 and record reference-store import, iPhone 11/iOS 26 plus MacBook Air M1/8 GB/macOS 26 timings (≥1,000 operations across five runs per device, p95≤50 ms and no main-thread stall≥100 ms), 100 two-client batches (RTT≤100 ms, p95≤2 s; lost-hint fallback≤60 s), UX/AI/worker evidence and exact-SHA OFF/pilot/recovery results in evidence/apple-pilot.md and verification.md. Pilot only after every writer/fence/retention/restore gate is green; no PostgreSQL cutover here. (PR-54).
+- [ ] T054 Extend the existing replay harness at bb-client/tests/protocol_faults.rs with the genuinely new protocol crash/loss/reorder/reset/restore cases from sync-v1.md §10, reusing current convergence/archive/Review traces. Execute quickstart.md Q01–Q12 and record reference-store import, iPhone 11/iOS 26 plus MacBook Air M1/8 GB/macOS 26 timings (≥1,000 operations across five runs per device, p95≤50 ms and no main-thread stall≥100 ms), 100 two-client batches (RTT≤100 ms, p95≤2 s; lost-hint commit-to-visible≤60 s with poll starts≤30 s apart including jitter and a commit immediately after a completed poll), UX/AI/worker evidence and exact-SHA OFF/pilot/recovery results in evidence/apple-pilot.md and verification.md. Pilot only after every writer/fence/retention/restore gate is green; no PostgreSQL cutover here. (PR-54).
 
 ## Phase 8 — Separate post-pilot PostgreSQL migration
 
@@ -162,7 +164,7 @@ This stage is ordered after the accepted Apple/current-SQLite pilot. Rehearse be
 
 ## Dependencies, increments and parallel execution
 
-The map is topologically ordered; task IDs express that order, while phases group tasks by story. A phase heading is not permission to skip cross-story dependencies. PR-20…24 establish durable scheduler authority and fencing through existing ports; PR-25…29 then establish one aggregate/receipt/feed transaction for **all** writers. Only after those gates do PR-30…33 expose sync. PR-34…44 deliver the Apple runtime/import/workspace. Conflict/recovery UI, AI, retention/restore and server-authoritative web gates all join at PR-54, the current-SQLite Apple pilot. PR-55…57 are the subsequent PostgreSQL stage.
+The JSON map is topologically ordered. Checklist phases group tasks by story and therefore intentionally show some stable task IDs out of numeric order (for example T053 in Phase 2). IDs identify slices; the JSON `depends_on` edges determine execution order. A phase heading is not permission to skip cross-story dependencies. PR-20…24 establish durable scheduler authority and fencing through existing ports; PR-25…29 then establish one aggregate/receipt/feed transaction for **all** writers. Only after those gates do PR-30…33 expose sync. PR-34…44 deliver the Apple runtime/import/workspace. Conflict/recovery UI, AI, retention/restore and server-authoritative web gates all join at PR-54, the current-SQLite Apple pilot. PR-55…57 are the subsequent PostgreSQL stage.
 
 Concrete parallel opportunities are PR-06 (pure rules) with PR-20 (job storage), then the client-local path PR-34…39 with server transaction/API work PR-25…33 when their declared bases are merged. PR-45 and PR-46 own separate iPhone/Mac UI paths after PR-44; PR-47 pure AI policy is separate from client storage. The automatically serialized shared `src/lib.rs`, `container.py`, service, router, scheduler and verification paths in the JSON prevent accidental concurrent writers. Shared package/manifests are never implicitly claimed by two workers. Every parallel example remains subject to the exact JSON prerequisites and isolated resources.
 
@@ -216,7 +218,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "make validate-ci"
       ],
       "acceptance": [
-        "Recorded human decisions, admitted five-lens review, complete command catalog and validation artifacts agree; capability is OFF. ADR number 0031 is proposed and must be re-reserved if occupied before implementation."
+        "Recorded human decisions, admitted six-lens review (five standard lenses plus the high-risk adversarial lens), complete command catalog and validation artifacts agree; capability is OFF. ADR number 0031 is proposed and must be re-reserved if occupied before implementation."
       ],
       "budget": {
         "product_loc": 80,
@@ -290,7 +292,8 @@ The Russian heading is the required repository parser key; the map and prose are
         "cargo test --manifest-path rust/Cargo.toml -p bb-protocol envelope"
       ],
       "acceptance": [
-        "Catalog golden envelopes round-trip; command identity is distinct from correlation ID; unsupported execution retains a readable recovery envelope."
+        "Catalog golden envelopes round-trip; command identity is distinct from correlation ID; unsupported execution retains a readable recovery envelope.",
+        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded."
       ],
       "budget": {
         "product_loc": 350,
@@ -313,6 +316,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "rust/bindings/python/Cargo.toml",
         "rust/bindings/python/src/lib.rs",
         "rust/Cargo.toml",
+        "rust/Cargo.lock",
         "backend/pyproject.toml",
         "backend/app/modules/tasks/rust_adapter.py",
         "backend/tests/test_rust_bridge.py"
@@ -325,11 +329,12 @@ The Russian heading is the required repository parser key; the map and prose are
         "cd backend && pytest tests/test_rust_bridge.py"
       ],
       "acceptance": [
-        "New boundary tests cover serialization, error/panic containment and repeated open/close; existing behavior remains the active writer until cutover."
+        "New boundary tests cover serialization, error/panic containment and repeated open/close; existing behavior remains the active writer until cutover.",
+        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded."
       ],
       "budget": {
         "product_loc": 330,
-        "files": 5
+        "files": 6
       },
       "implementer": "feature-implementer"
     },
@@ -349,6 +354,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "rust/bindings/swift/Cargo.toml",
         "rust/bindings/swift/src/lib.rs",
         "rust/Cargo.toml",
+        "rust/Cargo.lock",
         "ios/BrainBuddyKit/Sources/BrainBuddyCore/BrainBuddyRustBridge.swift",
         "ios/BrainBuddyKit/Package.swift",
         "ios/project.yml",
@@ -365,11 +371,12 @@ The Russian heading is the required repository parser key; the map and prose are
         "swift test --package-path macos --filter MacLaunchTests"
       ],
       "acceptance": [
-        "New FFI lifetime/panic/threading smoke evidence and ios-kit/ios-app/macos-app lanes pass; accepted dependency-policy exception is recorded, Linux tests keep a real compiled bridge."
+        "New FFI lifetime/panic/threading smoke evidence and ios-kit/ios-app/macos-app lanes pass; accepted dependency-policy exception is recorded, Linux tests keep a real compiled bridge.",
+        "Boundary approval requires the recorded sizing-spike commit/base and measured product-line/file budget, including Cargo.lock and complete packaging inputs; re-slice before approval if the cap is exceeded."
       ],
       "budget": {
         "product_loc": 390,
-        "files": 7
+        "files": 8
       },
       "implementer": "feature-implementer"
     },

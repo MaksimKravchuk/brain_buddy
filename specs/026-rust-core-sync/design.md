@@ -30,7 +30,7 @@ All eight screens are represented in HTML. The paired tables below define the sa
 
 ### M-01 / D-01 — Sync status (11 states per screen)
 
-Preserve the approved quiet status text and timings from `specs/021-mac-sync/design.md`: indicator after 1 s, minimum duration 0.5 s; online waiting suffix after 10 s; persistent transport failure after 60 s. Immediate auth/version errors are not hidden by this delay. Sync never blocks an allowed local command. Priority: unsupported version → session ended → issues → persistent failure → offline → waiting → synced. All reasons are available in details.
+Preserve the approved quiet status text and timings from `specs/021-mac-sync/design.md`: indicator after 1 s, minimum duration 0.5 s; online waiting suffix after 10 s; persistent transport failure after 60 s. The failure indicator measures persistent transport failure; it is separate from the ≤30-second active polling interval and SC-004's ≤60-second commit-to-visible deadline. Immediate auth/version errors are not hidden by this delay. Sync never blocks an allowed local command. Priority: unsupported version → session ended → issues → persistent failure → offline → waiting → synced. All reasons are available in details.
 
 | suffix / state | trigger | visible result and English copy | FR refs |
 |---|---|---|---|

@@ -6,7 +6,7 @@ Scope: finish the existing planning package from merged PR #304/main `c16daecd13
 
 ### Authored outcome
 
-Added the logical data model, exact command/writer catalog, runtime/FFI contract, concrete wire/error/transfer envelopes, planned validation guide, and 57 bounded proposed PR slices. All 26 FR and 8 SC IDs have slice coverage, each task appears exactly once, dependencies pass the structural validator, and budgets are at most 390 product lines/7 files. Budgets remain implementation caps to measure, not a claim that future code has been sized empirically.
+Added the logical data model, exact command/writer catalog, runtime/FFI contract, concrete wire/error/transfer envelopes, planned validation guide, and 57 bounded proposed PR slices. All 26 FR and 8 SC IDs have slice coverage, each task appears exactly once, dependencies pass the structural validator, and budgets are at most 390 product lines/8 files. Budgets remain implementation caps to measure, not a claim that future code has been sized empirically.
 
 The contract completion corrected complete Review projection requirements, the stalled count outside Next, Smart Add identity aliases, and account-less merge identity. Existing large archive/tag/bulk operations use bounded immutable transfer chunks with atomic application instead of an incompatible 500-row product cap. Restore/purge metadata is bounded by recoverable restore points. The accepted legacy response, receipt-ordering, source-TTL and post-reset fresh-intent guarantees remain.
 
@@ -27,9 +27,9 @@ The contract completion corrected complete Review projection requirements, the s
 
 The `speckit-review` skill was read and its canonical harness used. Preflight passed for run `026-completion-20261009-1`; risk derives **high**. The [machine summary](evidence/planning-review-summary.json) and [artifact manifest](evidence/planning-artifacts.json) preserve the actual digest. Aggregation is **escalated**, with **0/6 reviewer lenses run**, no invented findings, and no human sign-off.
 
-Automatic approval review rejected launching the Codex CLI panel, first citing uncertain external disclosure and local report writes, then specifically the uncommitted additions being sent to OpenAI Codex. GitHub API confirmed the repository is public and the canonical command uses a read-only reviewer sandbox; those facts did not resolve the second rejection. The requested external review permission remains pending. No alternate reviewer or hand-written approval is substituted. Local JSON evidence writes by the harness are distinct from product edits.
+Automatic approval review rejected launching the Codex CLI panel, first citing uncertain external disclosure and local report writes, then specifically the uncommitted additions being sent to OpenAI Codex. GitHub API confirmed the repository is public and the canonical command uses a read-only reviewer sandbox; those facts did not resolve the second rejection. The owner subsequently directed review to GitHub. No further local CLI panel is requested, and no alternate reviewer or hand-written approval is substituted. Local JSON evidence writes by the harness are distinct from product edits.
 
-Once explicitly permitted, run the six configured lenses through the same skill/harness against an unchanged preflight digest, aggregate, fix confirmed defects and use at most one further campaign if necessary. Actual reviews, provider/model correlation and any degradation must be reported. Human design/governance/slice approval and the high-risk run/digest-bound sign-off are separate decisions in [approval.md](approval.md).
+The committed manifest and summary are historical evidence for their recorded digest, not a review of the later PR corrections below. A future admissible campaign must bind all six configured lenses to the current artifacts, aggregate actual findings and record provider/model correlation and any degradation. Ordinary GitHub PR reviews are not silently treated as that formal campaign. Human design/governance/slice approval and the high-risk run/digest-bound sign-off are separate decisions in [approval.md](approval.md).
 
 ### Cross-artifact analysis
 
@@ -41,9 +41,24 @@ Read-only `/speckit-analyze` passes were applied to requirements, user stories, 
 | Model/API projection, alias and oversized-effect gaps | Technical contract consistency | Resolved in data-model and contracts; validation scenarios named in quickstart and slice map |
 | Constitution IV and Apple dependency policy prohibit parts of the proposed implementation until amended | Governance gate | Exact narrow proposal in adr-draft; accepted policies remain unchanged; implementation blocked pending actual acceptance |
 | New conflict/recovery UX and high-risk plan lack human sign-off | Human gate | Concrete baseline and status in approval.md; not inferred from the earlier PR merge |
-| Mandatory panel did not execute | Review evidence gate | Escalated; explicit external-service permission requested, no pass claimed |
+| Mandatory panel did not execute | Review evidence gate | Escalated; owner selected GitHub PR review, no formal campaign pass claimed |
 
 The optional after-tasks acceptance and after-analyze product-report hooks are not run: no product was implemented. A custom reviewer-owned protocol-quality checklist is supplied and remains unchecked until a reviewer evaluates it; this is distinct from the completed built-in requirements-quality checklist. The historical evidence below is retained for provenance and is not current-candidate evidence. The old ChatGPT Page was not updated by this repository task.
+
+## PR #305 review corrections — October 9
+
+Reviewed candidate: `a24f5e8a4434a023eb3800ac5fd3a3390a504ddf`. [Codex P2](https://github.com/MaksimKravchuk/brain_buddy/pull/305#discussion_r4227075130) and [Claude review](https://github.com/MaksimKravchuk/brain_buddy/pull/305#issuecomment-6075260212) are actual GitHub reviews; Claude explicitly reports a targeted read and no local validator execution.
+
+| Finding | Resolution |
+| --- | --- |
+| A 60-second polling interval leaves no transport/application headroom for SC-004 | Active poll starts are at most 30 seconds apart including jitter; the unchanged ≤60-second end-to-end deadline includes requests, catch-up and visible application. The acceptance procedure forces a commit just after a completed poll and the longest allowed interval with all hints dropped. Spec, contract, plan, research and tasks agree. |
+| Five versus six review lenses | All current feature gates name six lenses: five standard plus the high-risk adversarial lens. Historical review evidence remains unchanged. |
+| Checklist task numbering appears out of order | The dependency section now explicitly distinguishes story-grouped checklist order from the topologically ordered JSON map and its executable dependency edges. |
+| Rust/FFI size caps lack empirical evidence | PR-04/05 now own their Cargo.lock deltas and count the extra product file. PR-03/04/05 boundary approval explicitly requires disposable sizing evidence, including complete dependency and packaging inputs; an over-budget result requires a revised map. A docs-only diff cannot demonstrate future bridge size. |
+
+The sizing spike is not executed: neither cargo nor rustc is available on this environment's PATH, and this session completes the specification, not the proposed bindings. Its result remains a visible prerequisite to approving those implementation boundaries; no empirical size pass is claimed. The existing 60-second persistent-failure UI threshold is retained and explicitly distinguished from polling and convergence timings.
+
+Correction validation: `make check-specs` passed (247 tests, one normal skip); direct v2 dependency/path validation, 34/34 requirement coverage, 57 unique task assignments, Rust/FFI product-file counts, relative Markdown links and `git diff --check` passed. These checks validate the specification, not future implementation size or timing. Exact-SHA CI and subsequent reviewer results are recorded on PR #305. Product implementation, migration, deployment and owner sign-off remain outside this documentation correction.
 
 ## Historical verification — October 8
 
