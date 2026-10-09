@@ -1,0 +1,111 @@
+{
+  "run_id": "026-native-20261009-1",
+  "source_commit": "7866bae27152da40b7c9c97f5e7a6c63870b48de",
+  "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "execution_route": "native-codex-subagents",
+  "owner_authorization": {
+    "source": "Explicit user instruction in this Codex conversation, 2026-10-09",
+    "instruction_translation": "Use Codex native subagents to conduct the review. The task is to review, not to invoke a command-line reviewer.",
+    "scope": "Authorize this native six-lens panel after the failed CLI attempts; supersede the CLI/adapter-only launch restriction and campaign-cap objection for this requested panel.",
+    "content_or_risk_approval": false
+  },
+  "risk": "high",
+  "preflight": "passed",
+  "provider_correlation": "One provider (OpenAI); four Sol and two Astra sessions, not six independent providers.",
+  "read_only_scope": "Reviewers instructed to read repository inputs and write only their own /tmp JSON output. Native tools are not attested as the CLI read-only sandbox. Repository diff/hash verification is recorded by the coordinator.",
+  "reviewers": [
+    {
+      "role": "requirements-consistency",
+      "session": "/root/native_requirements",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    },
+    {
+      "role": "architecture-consistency",
+      "session": "/root/native_architecture",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    },
+    {
+      "role": "testability-evidence",
+      "session": "/root/native_testability",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    },
+    {
+      "role": "privacy-consent-security",
+      "session": "/root/native_privacy",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    },
+    {
+      "role": "ux-accessibility-mobile",
+      "session": "/root/native_ux",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    },
+    {
+      "role": "adversarial-high-risk",
+      "session": "/root/native_adversarial",
+      "tool": "collaboration.spawn_agent",
+      "provider": "OpenAI",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "high",
+      "model_identity_evidence": "Runtime tool selection recorded by coordinator, not reviewer self-report or CLI attestation."
+    }
+  ],
+  "frozen_input_sha256": {
+    "spec.md": "daa4134a789c66fb659964e22f6edd342b1d59e1321186110d9ad86ff2e82480",
+    "plan.md": "2de4c1ffa68a4cd50cf56caba28bbe48b69025e032aff2fabbeb8e34dabf71d6",
+    "design.md": "de4cd3bf872004133b1a16f55eccc242fc48ec294ee9d66642574bcffee36914",
+    "tasks.md": "a7402b791976ea09baf5095a660c6a63af0a00b7815c02fb96f8321ba1f4820c",
+    "research.md": "0934919a8fc1e6972e95bd591cbbef6e22e6698ae93146b241569c170b9044d3",
+    "data-model.md": "13a911ae84dee71ee206d8ccb539592c1751c2ee2ee424765cff6e6eed1d75a8",
+    "quickstart.md": "237cca238a8f9f89e9a4dd98cbf4d51f757c6ffe64df750ff4d983643f2870a1",
+    "checklists/requirements.md": "21b7a89e42e8e48b6d19b32b53997a9f1ef6a341a72283268d866574cbeb10ee",
+    "contracts/command-catalog.md": "5a8bf98cec29f69070aacbe8173b7f8dfcde08c401af93508d708da118d45370",
+    "contracts/runtime-ffi.md": "0a13e4a71aba39a3811e0d9af51e88ff4fe23cda21ef7327ae9b0c0443eebe7a",
+    "contracts/sync-v1.md": "e8eb37bfb5b4228781ad8befd13b19a0dc5a567b842ac42032ce8b79f216f20c",
+    "design/sync-states.html": "48ee19889a460324a5fbb1ff50bd2b704b556499c6f3a061ebfa08a0081979b9",
+    "approval.md": "ad5d63cb1ff850c5827ebde5e5044ff10613f79b4c1721fe39363f45bc6f47fd",
+    "adr-draft.md": "a008f9f4df6050afbf825815a0971123532c1590f0c23985713af10356642934"
+  },
+  "prior_history": [
+    {
+      "run_id": "026-completion-20261009-1",
+      "execution_route": "codex-cli",
+      "status": "escalated",
+      "completed_reviews": 0,
+      "reason": "Execution approval rejection"
+    },
+    {
+      "run_id": "026-completion-20261009-2",
+      "execution_route": "codex-cli",
+      "status": "escalated",
+      "completed_reviews": 0,
+      "reason": "Proxy CONNECT 403"
+    },
+    {
+      "evidence": "hosted-review-20261009",
+      "execution_route": "native-hosted-audit",
+      "completed_reviews": 6,
+      "important_findings": 6,
+      "disposition": "Six important findings fixed in 7866bae; four targeted closure reports and Claude exact-commit review confirmed corrections."
+    }
+  ]
+}

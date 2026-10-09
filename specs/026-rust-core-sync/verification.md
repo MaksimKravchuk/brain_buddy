@@ -1,6 +1,33 @@
 # Specification verification
 
-## Completion pass — 2026-10-09
+## Current native review and closure — October 9
+
+**The requested review completed with 6/6 native Codex subagents. Four distinct important findings are corrected and independently confirmed closed.** The owner explicitly instructed the conductor to use native subagents instead of invoking a reviewer CLI. That instruction authorizes this panel after the failed CLI attempts and supersedes the CLI/adapter-only routing and campaign-cap objection for this requested panel. It does not approve content, design, residual risk or implementation. Historical CLI failure counts below are not the current review count.
+
+Run `026-native-20261009-1` passed the unchanged Spec Kit preflight at source commit `7866bae27152da40b7c9c97f5e7a6c63870b48de`, core digest `5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99`. The six required lenses used the existing rubrics and schema: requirements, architecture, testability, privacy, UX and high-risk adversarial review. Four sessions used `gpt-6.1-sol`/high and two used `gpt-6-astra`/high, all OpenAI. This is one-provider evidence, not six independent providers. Native tool selections and input hashes are recorded; no CLI/external-adapter oracle or OS-enforced read-only attestation is fabricated.
+
+The initial aggregate was `technical-changes-required`: five important observations, deduplicated to four defects; privacy passed without findings. All six original reports remain unchanged in the [evidence index](evidence/026-native-20261009-1/README.md).
+
+| Confirmed finding | Correction and closure |
+| --- | --- |
+| PR-53 depends on undefined web server decisions and omits the actual composer | Explicitly select the already-permitted versioned-vector transition. PR-02 owns synthetic rule-versioned examples; Rust/web tests share them; PR-53 owns TaskListPage and retains bounded presentation helpers while the existing HTTP server remains final domain authority. No unowned preview API or false helper-removal claim. Requirements reviewer confirmed closure. |
+| Generic legacy command-key rejection contradicts accepted consent revoke | Preserve the narrow server-derived collision-revoke identity before ordinary mismatch rejection, retain the original grant receipt, publish through the common atomic transaction/feed, and keep a retry from revoking a newer grant. Flag-OFF behavior and the existing regression tests are assigned to PR-28/Q07. Architecture and adversarial reviewers confirmed closure. |
+| PR-34 cannot own its necessary Cargo.lock change within five files | Own the lockfile, count six product files, and require complete measured runtime/SQLite sizing before boundary approval. No future LOC pass is invented. Testability reviewer confirmed closure. |
+| Native AI sheets omit the accepted clarifying-question response | Add stable M/D-04.16–20, answer focus/actions, once-only notes command and save/inference phases, revision/current-consent rerun, separate failure/retry paths and interruption-safe drafts. PR-49/59/60 and Q09 own this existing capability. UX reviewer confirmed closure. |
+
+The same five finding authors performed bounded closure and direct-regression checks at corrected core digest `968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623`. All five report resolved with no remaining finding in scope. These are targeted checks, not a second full panel or tests of unimplemented behavior. The [final summary](evidence/026-native-20261009-1/final-summary.json) records **technical review complete, all reported findings resolved**. High-risk implementation-gate status remains `escalated` solely because actual named-human residual-risk sign-off is absent; this is not a missing-review or CLI-provenance failure. The separate [owner decisions](approval.md) remain pending.
+
+Validation on the corrected planning artifacts:
+
+- `make check-specs` and `make validate-ci` passed during the socket-enabled `make verify-all` attempt. The default sandbox first blocked loopback sockets; the allowed rerun then stopped at backend lint because `ruff` is not installed. No full local product-suite pass is claimed.
+- Direct v2 map/dependency/path checks pass: 60 slices, 60 unique task assignments, 34/34 FR+SC IDs and product-file caps including PR-34's lockfile. Caps remain unmeasured future implementation boundaries.
+- All six original reports pass the repository JSON schema and `validate_review`; all five closure reports bind to the corrected digest. Original and corrected input hashes plus saved evidence hashes are included.
+- Static HTML parsing passes: balanced tags, unique IDs, five valid local anchors, 74 explicitly typed buttons, no scripts/external assets; design inventory has 55 paired rows / 110 combinations. Browser/native rendering and accessibility are not asserted.
+- Relative Markdown links and `git diff --check` pass. No implementation task is checked complete, and no accepted policy/harness/application code changed.
+
+Exact-head CI for the subsequent published commit is recorded on PR #305. The earlier passing [run for 7866bae](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/37899717042) and [Claude review](https://github.com/MaksimKravchuk/brain_buddy/pull/305#issuecomment-6076565682) apply only to that earlier source commit. Prior failed CLI attempts and their original escalation are retained below as history; the current native review method and count above supersede their former routing/cap blocker.
+
+## Historical completion pass — 2026-10-09
 
 Scope: finish the existing planning package from merged PR #304/main `c16daecd13247e35fea280bd9322c8a4b09dabb1`. Only files under `specs/026-rust-core-sync/` change. Accepted constitution/ADRs, application code, schemas, credentials, CI and production are untouched. No task checkbox is marked implemented.
 
@@ -60,7 +87,7 @@ The sizing spike is not executed: neither cargo nor rustc is available on this e
 
 Correction validation: `make check-specs` passed (247 tests, one normal skip); direct v2 dependency/path validation, 34/34 requirement coverage, 57 unique task assignments, Rust/FFI product-file counts, relative Markdown links and `git diff --check` passed. These checks validate the specification, not future implementation size or timing. Exact-SHA CI and subsequent reviewer results are recorded on PR #305. Product implementation, migration, deployment and owner sign-off remain outside this documentation correction.
 
-## Requested formal review — October 9, attempt 2
+## Historical requested CLI review — October 9, attempt 2
 
 The owner explicitly requested the formal review after the PR corrections. The canonical [speckit-review skill](../../.specify/agent-commands/speckit-review/SKILL.md) was applied to published source commit `a060ddd531753b3ed8bcd339ea8cc8a907ac6d7c`. Preflight passed for `026-completion-20261009-2`, with high risk and artifact digest `cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17`.
 
@@ -76,7 +103,7 @@ Evidence:
 
 The preflight inputs remained unchanged while the hosted audits below ran; their subsequent fixes change the digest. Attempts 1 and 2 remain immutable historical evidence, both escalated with no completed canonical reviewer reports. No third canonical campaign, fallback approval, changed network route, altered gate or invented sign-off is introduced. The skill's hard two-campaign cap now applies: land the fixes and stop, retain explicit open lanes, or obtain a real complete founder-acceptance record. Enabling the required destination through the supported environment configuration would resolve a connectivity prerequisite only; it would neither reset that history nor grant approval.
 
-## Hosted content audit and finding closure — October 9
+## Earlier hosted content audit and finding closure — October 9
 
 After the CLI destination denial, six actual hosted read-only reviewers audited the unchanged `a060ddd` core digest `cf9c1d1ce0c04793a293a38459e2567f528bb71eb89e3f8c7f5182638416fd17`. Four used `gpt-6.1-sol`/high and two used `gpt-6-astra`/high. All share the OpenAI provider; separate sessions do not establish six independent providers/models. The [audit evidence index](evidence/hosted-review-20261009/README.md) preserves their original schema-valid reports and runtime selection metadata. These reports are not installed as canonical CLI or external-adapter results.
 

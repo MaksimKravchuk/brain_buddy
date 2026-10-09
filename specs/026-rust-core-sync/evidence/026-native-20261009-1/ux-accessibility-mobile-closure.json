@@ -1,0 +1,24 @@
+{
+  "run_id": "026-native-20261009-1",
+  "reviewer": "ux-accessibility-mobile",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "targeted-finding-closure",
+  "resolved": true,
+  "evidence": [
+    "specs/026-rust-core-sync/design.md:106-112: both M-04/D-04 now define .16-.20 clarifying-question, answer-save, save failure, inference failure and unsaved-answer exit states; explicitly adopts 020-FR-021/M-05/M-07/D-02.",
+    "specs/026-rust-core-sync/design.md:106 and :110: labeled answer field and focus; safe Keep editing focus and explicit discard; interruption preserves the draft.",
+    "specs/026-rust-core-sync/design.md:107-112: ordinary once-only notes edit, stable notes-command identity and durable phase; adopt saved projection/revision; reconcile unknown save with same ID; cloud waits for accepted projection and rechecks current consent/input; inference-only retry never reappends answer.",
+    "specs/026-rust-core-sync/design.md:140-141: added question/answer, retry and unsaved-answer affordances trace to existing FRs.",
+    "specs/026-rust-core-sync/design/sync-states.html:106-110: matching .16-.20 static variants include labeled answer input and concrete save, retry, failure and discard copy; SHA-256 verified fc6b8b237f5f2c0681f8412f61f59de45336b883d8fdd0615da34c4811e66e66.",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md:44: adapter preserves the proposal/question union and durable notes-command/save-inference state with revision adoption and no duplicate append.",
+    "specs/026-rust-core-sync/tasks.md:149-153 and PR-49/59/60 acceptance: shared model and both native sheets own .16-.20; shared-model checks and planned real-iPhone/Mac evidence cover save failure/unknown outcomes, inference-only retry, revision adoption and interrupted drafts.",
+    "specs/026-rust-core-sync/quickstart.md:55 (Q09): valid question response, answer save/rerun, local-save failure, server conflict/lost ACK, inference failure after save, relaunch/retry deduplication, consent and draft preservation are explicit planned acceptance cases.",
+    "Final corrected core artifact digest verified with the repository name-NUL-content-NUL digest algorithm: 968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623; final design has a continuous .01-.20 Markdown table."
+  ],
+  "remaining_findings": [],
+  "caveats": [
+    "Targeted closure of the single original UX clarifying-question finding and its direct regressions only; this is not a fresh full audit.",
+    "Closure establishes specification completeness, not implementation or runtime behavior. Owner design approval, native rendering/accessibility evidence and planned acceptance checks remain future gates.",
+    "No repository files or original reviewer report were modified; no builds, product tests, model CLI, network or additional agents were used."
+  ]
+}

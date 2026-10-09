@@ -1,0 +1,22 @@
+{
+  "run_id": "026-native-20261009-1",
+  "reviewer": "requirements-consistency",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "targeted-finding-closure",
+  "resolved": true,
+  "evidence": [
+    "Reviewed the relevant git diff and current plan.md, contracts/command-catalog.md, tasks.md and quickstart.md for the original missing PR-53 web producer/consumer contract and direct regressions only.",
+    "specs/026-rust-core-sync/plan.md:20 and section 7 item 3 now explicitly select the existing versioned-vector transition: synchronous web presentation adapters remain; final domain authority is the Rust-backed server; existing HTTP success/error DTOs are consumed. The former promise of a new per-task capability/preview producer is removed.",
+    "specs/026-rust-core-sync/contracts/command-catalog.md, Web presentation adapter during the first stage: structured SmartAddTaskCreateRequest and synchronous syntax/chip/suggestion helpers are retained; sync capabilities remain protocol/storage metadata. Rule-version vectors have stable source-linked cases and expected payload/display outcomes, and mismatch blocks the transition.",
+    "specs/026-rust-core-sync/tasks.md T002 and PR-02 own contracts/web-presentation-vectors.json with the rule version and source/expected-output provenance. PR-11 explicitly checks those cases against the shared parser.",
+    "specs/026-rust-core-sync/tasks.md T053 and PR-53 now own the actual TaskListPage.tsx composer, smartAdd.ts, TaskDetailPanel.tsx, taskHooks.ts and Rust/web parity checks. The slice retains synchronous presentation behavior and truthful existing HTTP rejection handling, including saved drafts and retry, rather than depending on an undefined HTTP producer.",
+    "Read the current JSON slice map: PR-53 still transitively depends on PR-02 through its declared backend/rule prerequisites, so its vectors are available before that slice. Its four product UI/helper files fit the unchanged four-file cap; test files are additional declared paths under the existing test budget treatment.",
+    "specs/026-rust-core-sync/quickstart.md Q11 now checks the retained presentation helpers and actual TaskListPage composer against shared Rust vectors and exercises accepted/rejected existing HTTP writes, preserving the original FR-024 acceptance boundary."
+  ],
+  "remaining_findings": [],
+  "caveats": [
+    "This closes the original planning-contract finding through the already-allowed versioned-vector transition. It does not claim removal of all web presentation duplication.",
+    "Targeted document/source review only; no new full audit, reviewer CLI, product builds or tests were run. The original report remains unchanged.",
+    "The vectors, implementation parity, existing HTTP regression checks and actual pilot acceptance remain future evidence requirements. Content/design/risk and slice-boundary approvals remain separate."
+  ]
+}

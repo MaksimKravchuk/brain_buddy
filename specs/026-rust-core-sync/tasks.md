@@ -10,7 +10,7 @@
 
 **Paths and budgets:** existing paths were inspected at base `c16daecd13247e35fea280bd9322c8a4b09dabb1`. All `rust/` paths, the new Rust facades, `backend/app/modules/tasks/{jobs,sync}/`, generated wire artifacts and evidence files below are explicitly **proposed additions**. Existing service/reducer modules are integration points, not a request to rewrite whole files in one slice. Each rule slice ports one named rule family; facade slices change bounded dispatch/mapping and make replaced implementations unreachable for migrated epochs. Large obsolete-file deletion is optional later cleanup, not a hidden part of a 400-line budget. Pre-cutover stores remain on their compatible old image until migration; a migrated store has only the new writer/rules. No double mutation or second live authority is permitted. Budgets count added **and deleted** product lines, including manifests/build scripts/generated committed sources; documentation/tests are excluded by the current budget checker (Cargo.lock currently counts as product, so its changed lines are included). Generated bridge output must be a reproducible build artifact, not a way to hide handwritten product changes. Every candidate runs `python3 scripts/check_slice_budget.py specs/026-rust-core-sync/tasks.md PR-NN --base <accepted-base-sha>` after commit. If a measured diff cannot fit, stop and revise the proposed boundaries before implementation proceeds; do not put a stage-sized diff under a small nominal budget.
 
-**Rust/FFI boundary feasibility:** PR-03/04/05 budgets are unmeasured caps, not size evidence. Before approving these boundaries, prepare a disposable sizing spike with the selected dependency versions, complete lockfile deltas, bridge scaffolding and Linux/Apple packaging inputs. Record each spike commit/base, toolchain versions, `check_slice_budget.py` output and the planned CI-owned paths in verification.md. The spike must not wire a live writer or ship product behavior. If any diff exceeds its cap, revise the map into smaller reviewable boundaries and repeat measurement before owner approval; do not exclude Cargo.lock or generated committed sources. A successful docs-only budget check does not validate these future code sizes. The corrected AI boundary is split into shared adapter (PR-49), iPhone surface (PR-59) and Mac surface (PR-60); their proposed caps also require measurement before boundary approval, including the actual native entry points and shared model wiring. No sizing spike has run in this specification session.
+**Rust/FFI boundary feasibility:** PR-03/04/05 and the PR-34 runtime/SQLite package budgets are unmeasured caps, not size evidence. Before approving these boundaries, prepare a disposable sizing spike with the selected dependency versions, complete lockfile deltas, bridge scaffolding and Linux/Apple packaging inputs. Record each spike commit/base, toolchain versions, `check_slice_budget.py` output and the planned CI-owned paths in verification.md. The spike must not wire a live writer or ship product behavior. If any diff exceeds its cap, revise the map into smaller reviewable boundaries and repeat measurement before owner approval; do not exclude Cargo.lock or generated committed sources. A successful docs-only budget check does not validate these future code sizes. The corrected AI boundary is split into shared adapter (PR-49), iPhone surface (PR-59) and Mac surface (PR-60); their proposed caps also require measurement before boundary approval, including the actual native entry points and shared model wiring. No sizing spike has run in this specification session.
 
 **Testing, Principle II:** first run the sufficient existing checks named in each phase/slice. The parity oracle is existing Swift/Python golden rules, not the Rust output. Behavior-preserving ports need no duplicate test per task or language. Genuinely missing critical coverage is test-first: SQLite commit/crash/full-disk/interprocess locking; receipt/feed atomicity and all-writer authority; lease/fence handoff; ACK/feed/snapshot/generation/epoch recovery; legacy uncertain import; retention/restore of deletion/revocation; and FFI serialization/lifetime/panic/concurrency at the actual boundary. Reuse existing consent/review/archive/session/account tests and extend only gaps. Test filters must execute the named relevant cases (zero selected tests is not evidence). Every pytest/Vitest/Playwright product test retains the repository Allure taxonomy and feature-qualified requirement IDs. Affected checks run while iterating; full applicable suites run on the prepared candidate, not after every task.
 
@@ -22,7 +22,7 @@ Freeze shared inputs and prove safe packaging before any writer changes. Indepen
 
 - [ ] T001 Obtain actual owner acceptance of design.md, adr-draft.md, the Constitution IV command-identity exception, retention/defaults, device/load baseline, Apple dependency policy exception, and these boundaries; freeze contracts/command-catalog.md, contracts/runtime-ffi.md and contracts/sync-v1.md, generate contracts/sync-v1.schema.json and contracts/sync-v1.openapi.yaml from the same catalog, and add only the default-OFF rust_core_sync capability in backend/app/core/config.py. Record the ADR-0011 review and analyze verdict in verification.md; no approval is inferred from this checkbox. (PR-01).
 
-- [ ] T002 Reconcile the existing backend/tests/fixtures/review_formulation_vectors.json, review_flow_vectors.json and project_archive_traces.json with BrainBuddyCoreTests resources and current task/Smart Add/date tests; add a Rust test loader at rust/crates/bb-domain/tests/parity.rs and bounded synthetic reference data at contracts/reference-store.json. Document accepted contradiction resolutions, field/ID/outbox inventory, scheduler/writer inventory and lower-bound device/load in verification.md. Reuse vectors rather than cloning every language test. (PR-02).
+- [ ] T002 Reconcile the existing backend/tests/fixtures/review_formulation_vectors.json, review_flow_vectors.json and project_archive_traces.json with BrainBuddyCoreTests resources and current task/Smart Add/date tests; add a Rust test loader at rust/crates/bb-domain/tests/parity.rs and bounded synthetic reference data at contracts/reference-store.json. Freeze contracts/web-presentation-vectors.json with the shared rule version, stable source-linked cases and expected web payload/display outcomes; reuse existing Smart Add/transition examples in the Rust and web parity checks. Document accepted contradiction resolutions, field/ID/outbox inventory, scheduler/writer inventory and lower-bound device/load in verification.md. Reuse vectors rather than cloning every language test. (PR-02).
 
 - [ ] T003 Create the proposed rust/Cargo.toml workspace, bb-domain and bb-protocol manifests and lib.rs entry points; encode typed command identity, scope, generations, dependency/precondition and result envelopes in bb-protocol/src/envelope.rs. Pin the validated toolchain/bridge versions; serialization accepts only catalog forms, rejects unknown execution variants and keeps the stable receipt-recovery envelope. Register modules only when implemented, without empty future crates. (PR-03).
 
@@ -72,7 +72,7 @@ Each pure rule family is independently checked against existing examples. The se
 
 - [ ] T024 [US4] Add jobs/agent_adapter.py to schedule the existing AgentObserver observation/recovery responsibility durably; hand it off in main.py and observer.py without changing the A2A lookup/retry state machine. Attach lease/fence to any Task application port; external timeout uses lookup/reconciliation and remains uncertain when proof is absent. (PR-24).
 
-- [ ] T053 [US4] Replace only authoritative Task action/Smart Add affordance checks at frontend/src/features/tasks/smartAdd.ts and TaskDetailPanel.tsx with server decisions/capabilities from frontend/src/api/taskHooks.ts. Keep display-only formatting and preserve existing HTTP workflows; no offline web store, WASM or CRT protocol is introduced. (PR-53).
+- [ ] T053 [US4] Use the explicitly versioned-vector transition in plan §7 and command-catalog.md: retain synchronous Smart Add syntax/suggestion helpers in frontend/src/features/tasks/smartAdd.ts and their actual TaskListPage.tsx composer, plus state-to-affordance display in TaskDetailPanel.tsx. Verify them against PR-02's source-linked rule-version vectors; Rust-backed server mutations remain the final authority and taskHooks.ts consumes existing HTTP success/error DTOs. Preserve capture retry/drafts and HTTP rejection behavior. No server preview/per-task-capability producer or deletion of all web presentation logic is claimed; no offline web, WASM or CRT change. (PR-53).
 
 ## Phase 3 — US1: offline capture and convergent atomic synchronization (P1)
 
@@ -84,7 +84,7 @@ Independent user test: capture/edit offline on iPhone, terminate/reopen, reconne
 
 - [ ] T027 [US1] Add sync/command_handler.py and sync/legacy_adapter.py and route TaskService through them in container.py. Map the existing owner/idempotency-key to one receipt independently of command/transport; command/body remain conflict checks. Preserve legacy status/DTO/preconditions and deterministic new-entity identity aliases; web/CLI/MCP remain HTTP consumers. (PR-27).
 
-- [ ] T028 [US1] Add sync/review_projection.py and route ReviewService/ReviewFlowService plus Navigator consent-grant/owner-wide-revoke through the command boundary while preserving matching-record recovery after 24 hours. Emit all public settings/session/queue/decision/receipt/ack/bulk/consent upserts and tombstones with stable keys/versions; derive review-state/counts/advisory queries from that consistent base and explicit time; exclude private snapshots, applied_progress fingerprints and usage reservations. (PR-28).
+- [ ] T028 [US1] Add sync/review_projection.py and route ReviewService/ReviewFlowService plus Navigator consent-grant/owner-wide-revoke through the command boundary while preserving matching-record recovery after 24 hours. Preserve the accepted legacy consent-revoke key-collision exception before generic mismatch rejection: original receipt retained, stable dedicated revoke identity, one atomic receipt/feed effect, and no repeat revocation of a newer grant. Emit all public settings/session/queue/decision/receipt/ack/bulk/consent upserts and tombstones with stable keys/versions; derive review-state/counts/advisory queries from that consistent base and explicit time; exclude private snapshots, applied_progress fingerprints and usage reservations. (PR-28).
 
 - [ ] T029 [US1] Connect existing voice_brain_dump/task_port.py, operator/seed/sweep paths in backend/app/cli.py, agent Task ports in container.py and jobs/execution.py to the shared handler. Recheck current caller/job authority and fences at commit; retain the original Capture create_native_inbox_task until-purge exception. Inventory every route, REST/CLI/MCP/workflow/auto-park/job writer in contracts/command-catalog.md and fail a boundary audit for bypasses. (PR-29).
 
@@ -92,7 +92,7 @@ Independent user test: capture/edit offline on iPhone, terminate/reopen, reconne
 
 - [ ] T032 [US1] Add sync/delta.py and its route in router.py; encode opaque owner/access/feed-generation cursors, next_cursor/has_more and complete typed public after-images/tombstones. For a transaction exceeding the 4 MiB inline hard limit, materialize the immutable canonical Change-array stream and expose its manifest plus bounded decoded-byte chunks (≤1 MiB) through sync/transfers.py and the transaction transfer route. Chunks may cross record boundaries and never split a domain commit. Enforce only the new ingress 4 MiB limit, preserve legacy limits, impose no 500-changed-row ceiling and return RESET_REQUIRED on expiry/generation/deletion. Hints only wake pulls; PR-58 owns their server endpoint/publisher. (PR-32).
 
-- [ ] T034 [US1] Create bb-client manifest/lib.rs and storage.rs with confirmed_records, outbox, receipts, issues, drafts, sync_meta and identity_aliases. Add WAL/write-lock and exclusive migration-lock handling in locking.rs, bounded busy timeout and protected workspace identity. First add real-process SQLite crash/full-disk/lock tests; a process-local actor alone is insufficient. (PR-34).
+- [ ] T034 [US1] Create bb-client manifest/lib.rs, update and own rust/Cargo.lock (including the new workspace package and SQLite dependencies), and add storage.rs with confirmed_records, outbox, receipts, issues, drafts, sync_meta and identity_aliases. Add WAL/write-lock and exclusive migration-lock handling in locking.rs, bounded busy timeout and protected workspace identity. First add real-process SQLite crash/full-disk/lock tests; a process-local actor alone is insufficient. (PR-34).
 
 - [ ] T035 [US1] Implement execute.rs: accept the caller-stable gesture command ID, lock/reread affected records, allocate entity/dependency IDs, decide through bb-domain and save intent plus visible projection in one transaction. Local-only work requires no registered account; fresh epoch intake is durable with its first command. Dependencies refer to immutable identities, not guessed title/time matches. (PR-35).
 
@@ -146,11 +146,11 @@ Independent test: suitable/unavailable local executor, on-device-only denial, au
 
 - [ ] T048 [US5] Connect shared policy/proposal validation through navigator.py and voice_brain_dump/confirmation.py/task_port.py, preserving ADR-0002 operation workspace/confirmation, current provider credentials and cancellation checks. AgentRun result stays evidence/proposal; ordinary Task mutation uses the fenced shared command handler. (PR-48).
 
-- [ ] T049 [US5] Add Foundation-only LocalAIAdapter.swift and ReviewSuggestionModel.swift plus Workspace+ReviewAI.swift to connect shared capability policy with the first Weekly Review suggestion request/consent/proposal/apply path. Use the existing navigator endpoint/approved payload, current per-recipient consent and shown-version ordinary command path. Own request/cancellation/interruption state M-04/D-04.13–15; unavailable/insufficient-memory/error in on-device-only mode returns manual continuation with no remote request. Native navigator clients were deferred in spec 020; these are additions, not existing voice UI. Do not promise a new model engine or language. (PR-49).
+- [ ] T049 [US5] Add Foundation-only LocalAIAdapter.swift and ReviewSuggestionModel.swift plus Workspace+ReviewAI.swift to connect shared capability policy with the first Weekly Review suggestion request/consent/proposal/apply path. Use the existing navigator endpoint/approved payload, current per-recipient consent and shown-version ordinary command path. Own request/cancellation/interruption state M-04/D-04.13–15 and the accepted clarifying-question/answer-save/rerun branch .16–20 with stable notes-command identity and phase recovery; unavailable/insufficient-memory/error in on-device-only mode returns manual continuation with no remote request. Native navigator clients were deferred in spec 020; these are additions, not existing voice UI. Do not promise a new model engine or language. (PR-49).
 
-- [ ] T059 [US5] Add iPhone ReviewSuggestionSheet.swift and its entry from existing Review/DecisionCardSheet.swift. Render M-04 using PR-49's shared model: exact recipient/data consent, bounded proposal preview/edit, explicit apply against shown revision, no-result/manual continuation and .13–15 cancellation/interruption. Reuse existing review eligibility, forms and accessibility; no new Review workspace. (PR-59).
+- [ ] T059 [US5] Add iPhone ReviewSuggestionSheet.swift and its entry from existing Review/DecisionCardSheet.swift. Render M-04 using PR-49's shared model: exact recipient/data consent, bounded proposal preview/edit, explicit apply against shown revision, no-result/manual continuation, .13–15 cancellation/interruption and .16–20 clarifying-question/answer-save/rerun states. Reuse existing review eligibility, forms and accessibility; no new Review workspace. (PR-59).
 
-- [ ] T060 [US5] Add Mac ReviewSuggestionSheet.swift and a bounded entry from the existing task detail in ContentView.swift, with BrainBuddyModel.swift exposing the shared PR-49 model. Render D-04 for the same Weekly Review suggestion capability and eligibility/payload/confirmation policy; include current consent, stale proposal, cancellation/interruption and keyboard/VoiceOver behavior. VoiceCapture.swift remains transcription, not a substitute for this new suggestion surface. (PR-60).
+- [ ] T060 [US5] Add Mac ReviewSuggestionSheet.swift and a bounded entry from the existing task detail in ContentView.swift, with BrainBuddyModel.swift exposing the shared PR-49 model. Render D-04 for the same Weekly Review suggestion capability and eligibility/payload/confirmation policy; include current consent, stale proposal, cancellation/interruption, .16–20 clarifying-question/answer-save/rerun states and keyboard/VoiceOver behavior. VoiceCapture.swift remains transcription, not a substitute for this new suggestion surface. (PR-60).
 
 ## Phase 7 — Cross-story Apple pilot and acceptance
 
@@ -251,6 +251,7 @@ The Russian heading is the required repository parser key; the map and prose are
       "paths": [
         "rust/crates/bb-domain/tests/parity.rs",
         "specs/026-rust-core-sync/contracts/reference-store.json",
+        "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
         "specs/026-rust-core-sync/verification.md"
       ],
       "depends_on": [
@@ -258,10 +259,11 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "tests": [
         "cd backend && pytest tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_project_archive_traces.py tests/test_task_smart_add_api.py",
-        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests"
+        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
+        "cd frontend && npm run test -- src/features/tasks/__tests__/smartAdd.test.ts"
       ],
       "acceptance": [
-        "The source of each oracle and all missing migration fields are explicit; differences are decisions, never changed expected outputs to suit Rust."
+        "The source of each oracle and all missing migration fields are explicit; differences are decisions, never changed expected outputs to suit Rust. The retained web adapter cases have stable IDs, the shared rule version and source/expected-output provenance; they do not invent an HTTP preview capability."
       ],
       "budget": {
         "product_loc": 1,
@@ -584,7 +586,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "sh ios/scripts/swift-linux.sh test --filter SmartAddParserTests"
       ],
       "acceptance": [
-        "Accepted parser/reference/date examples match; basic capture remains independent of AI."
+        "Accepted parser/reference/date examples match; basic capture remains independent of AI. The source-linked PR-02 web presentation vectors match the shared parser as well as the existing Apple examples."
       ],
       "budget": {
         "product_loc": 380,
@@ -1161,10 +1163,10 @@ The Russian heading is the required repository parser key; the map and prose are
         "PR-27"
       ],
       "tests": [
-        "cd backend && pytest tests/test_sync_review_projection.py tests/test_review_traces.py tests/test_review_wire_fixtures.py"
+        "cd backend && pytest tests/test_sync_review_projection.py tests/test_review_traces.py tests/test_review_wire_fixtures.py tests/test_review_navigator.py"
       ],
       "acceptance": [
-        "Snapshot/delta golden projections cover complete public Review state, captured-empty queues, links and no private fields; legacy replay remains exact."
+        "Snapshot/delta golden projections cover complete public Review state, captured-empty queues, links and no private fields; legacy replay remains exact. Existing grant-key/revoke collision and late colliding-revoke replay tests pass through the migrated adapter, including weekly_review OFF; original receipt and newer grant remain intact."
       ],
       "budget": {
         "product_loc": 390,
@@ -1405,6 +1407,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "rust/crates/bb-client/src/storage.rs",
         "rust/crates/bb-client/src/locking.rs",
         "rust/Cargo.toml",
+        "rust/Cargo.lock",
         "rust/crates/bb-client/tests/storage.rs"
       ],
       "depends_on": [
@@ -1415,11 +1418,11 @@ The Russian heading is the required repository parser key; the map and prose are
         "cargo test --manifest-path rust/Cargo.toml -p bb-client storage"
       ],
       "acceptance": [
-        "New test-first durability/concurrent-process coverage proves confirmed local saves survive restart and lock/full-disk failures never report success."
+        "New test-first durability/concurrent-process coverage proves confirmed local saves survive restart and lock/full-disk failures never report success. The measured slice includes the complete workspace/SQLite Cargo.lock delta within its product-line cap; oversize stops for boundary revision before approval."
       ],
       "budget": {
         "product_loc": 390,
-        "files": 5
+        "files": 6
       },
       "implementer": "feature-implementer"
     },
@@ -1948,6 +1951,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/ReviewSuggestionModel.swift",
         "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ReviewAI.swift",
         "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/LocalAIPolicyTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/ReviewSuggestionModelTests.swift",
         "specs/026-rust-core-sync/evidence/ai-consent.md"
       ],
       "depends_on": [
@@ -1956,10 +1960,10 @@ The Russian heading is the required repository parser key; the map and prose are
         "PR-48"
       ],
       "tests": [
-        "sh ios/scripts/swift-linux.sh test --filter LocalAIPolicyTests"
+        "sh ios/scripts/swift-linux.sh test --filter 'LocalAIPolicyTests|ReviewSuggestionModelTests'"
       ],
       "acceptance": [
-        "Actual available/unavailable local-adapter journeys plus denial/revocation/cancel/invalid proposal show no prohibited transmission and no unconfirmed Task change. Lost synchronous requests become interrupted without automatic resend; explicit cancellation ignores late results; closing the UI alone retains a live request. Native surface evidence follows in PR-59/60."
+        "Actual available/unavailable local-adapter journeys plus denial/revocation/cancel/invalid proposal show no prohibited transmission and no unconfirmed Task change. Lost synchronous requests become interrupted without automatic resend; explicit cancellation ignores late results; closing the UI alone retains a live request. Native surface evidence follows in PR-59/60. Shared-model tests cover the valid clarifying-question branch, once-only answer append with stable command identity, save conflict/unknown outcome, saved revision adoption and inference-only retry; no duplicated platform state machine."
       ],
       "budget": {
         "product_loc": 390,
@@ -1994,7 +1998,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -destination generic/platform=iOS\\ Simulator CODE_SIGNING_ALLOWED=NO build"
       ],
       "acceptance": [
-        "Real-iPhone evidence covers M-04 consent denial/revocation, local availability, proposal edit/stale apply, cancelling/cancelled and active-request close/reopen/process-loss outcomes; current payload and manual continuation remain intact."
+        "Real-iPhone evidence covers M-04 consent denial/revocation, local availability, proposal edit/stale apply, cancelling/cancelled and active-request close/reopen/process-loss outcomes; current payload and manual continuation remain intact. Question/answer .16\u201320 evidence includes answer-save failure, saved-answer/inference failure, explicit retry, revision adoption and unsaved-answer close/interruption without loss or duplicate append."
       ],
       "budget": {
         "product_loc": 390,
@@ -2030,7 +2034,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "swift build --package-path macos"
       ],
       "acceptance": [
-        "Real-Mac D-04 evidence proves the bounded task-detail entry, same Weekly Review capability/payload, explicit consent/proposal/apply, request lifecycle and keyboard/VoiceOver; voice transcription is not accepted as this journey."
+        "Real-Mac D-04 evidence proves the bounded task-detail entry, same Weekly Review capability/payload, explicit consent/proposal/apply, request lifecycle and keyboard/VoiceOver; voice transcription is not accepted as this journey. Question/answer .16\u201320 evidence includes answer-save failure, saved-answer/inference failure, explicit retry, revision adoption and unsaved-answer close/interruption without loss or duplicate append."
       ],
       "budget": {
         "product_loc": 390,
@@ -2153,7 +2157,7 @@ The Russian heading is the required repository parser key; the map and prose are
     },
     {
       "id": "PR-53",
-      "outcome": "Web uses server decisions while its established workflows stay intact",
+      "outcome": "Web presentation stays compatible through versioned vectors and existing HTTP outcomes",
       "tasks": [
         "T053"
       ],
@@ -2167,19 +2171,23 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "paths": [
         "frontend/src/features/tasks/smartAdd.ts",
+        "frontend/src/features/tasks/TaskListPage.tsx",
         "frontend/src/features/tasks/TaskDetailPanel.tsx",
         "frontend/src/api/taskHooks.ts",
-        "frontend/src/features/tasks/__tests__/smartAdd.test.ts"
+        "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
+        "rust/crates/bb-domain/tests/parity.rs",
+        "frontend/src/features/tasks/__tests__/TaskListPage.test.tsx"
       ],
       "depends_on": [
         "PR-31",
         "PR-48"
       ],
       "tests": [
-        "cd frontend && npm run test -- src/features/tasks/__tests__/smartAdd.test.ts src/features/tasks/__tests__/TaskDetailPanel.test.tsx"
+        "cargo test --manifest-path rust/Cargo.toml -p bb-domain smart_add",
+        "cd frontend && npm run test -- src/features/tasks/__tests__/smartAdd.test.ts src/features/tasks/__tests__/TaskListPage.test.tsx src/features/tasks/__tests__/TaskDetailPanel.test.tsx"
       ],
       "acceptance": [
-        "Existing web task/Review/CLI/MCP behavior remains server-authoritative and CRT 200-node responsiveness retains its accepted baseline."
+        "Existing web task/Review/CLI/MCP behavior remains server-authoritative and CRT 200-node responsiveness retains its accepted baseline. The PR-02 source-linked rule-version vectors prove the retained parser/affordance adapter and actual composer agree with the shared oracle; HTTP rejections preserve drafts/retry. No per-record capabilities or raw-input preview is expected from sync capabilities, and no completed elimination of web presentation duplication is claimed."
       ],
       "budget": {
         "product_loc": 340,

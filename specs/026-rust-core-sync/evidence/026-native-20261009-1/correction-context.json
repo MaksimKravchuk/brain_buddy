@@ -1,0 +1,11 @@
+{
+  "run_id": "026-native-20261009-1",
+  "phase": "technical-corrections",
+  "source_commit": "7866bae27152da40b7c9c97f5e7a6c63870b48de",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "extra_hashes": {
+    "design/sync-states.html": "fc6b8b237f5f2c0681f8412f61f59de45336b883d8fdd0615da34c4811e66e66",
+    "approval.md": "d2e183544c41c937784e1d91fe304daace9be86d72321e77e2aec26a95415595"
+  },
+  "formatting_correction": "Removed two blank lines separating AI state rows .15 and .16 so the Markdown table renders continuously; no semantic change."
+}

@@ -1,0 +1,53 @@
+{
+  "role": "requirements-consistency",
+  "verdict": "changes-required",
+  "summary": "Reviewed the frozen proposal, all core artifacts and all 60 slice records against current integration seams. Every FR and SC has ownership outside the final acceptance join, and the six carried-forward corrections are represented in the current contracts, tasks and design. One consequential web contract/ownership gap remains. Pending owner approval, sizing, rendering and future implementation measurements are correctly disclosed prerequisites; no implementation or acceptance result is asserted.",
+  "reviewed_files": [
+    "AGENTS.md",
+    "ios/AGENTS.md",
+    ".specify/workflows/runs/026-native-20261009-1/planning-context.json",
+    ".specify/workflows/speckit/review.schema.json",
+    "scripts/spec_kit_planning_review.py",
+    ".specify/agent-commands/speckit-review/SKILL.md",
+    "specs/026-rust-core-sync/spec.md",
+    "specs/026-rust-core-sync/plan.md",
+    "specs/026-rust-core-sync/design.md",
+    "specs/026-rust-core-sync/design/sync-states.html",
+    "specs/026-rust-core-sync/tasks.md",
+    "specs/026-rust-core-sync/research.md",
+    "specs/026-rust-core-sync/data-model.md",
+    "specs/026-rust-core-sync/quickstart.md",
+    "specs/026-rust-core-sync/checklists/requirements.md",
+    "specs/026-rust-core-sync/contracts/command-catalog.md",
+    "specs/026-rust-core-sync/contracts/runtime-ffi.md",
+    "specs/026-rust-core-sync/contracts/sync-v1.md",
+    "specs/026-rust-core-sync/adr-draft.md",
+    "specs/026-rust-core-sync/approval.md",
+    "docs/decisions/0001-vnext-modular-monolith-and-workflow-contracts.md",
+    "docs/decisions/0020-rtm-parity-priority-and-archive-semantics.md",
+    "docs/decisions/0027-native-task-weekly-review-and-auto-park.md",
+    "frontend/src/features/tasks/smartAdd.ts",
+    "frontend/src/features/tasks/TaskDetailPanel.tsx",
+    "frontend/src/features/tasks/TaskListPage.tsx",
+    "frontend/src/api/taskHooks.ts",
+    "backend/app/api/tasks.py",
+    "backend/app/schemas/tasks.py"
+  ],
+  "findings": [
+    {
+      "severity": "important",
+      "category": "missing-contract-and-slice-ownership",
+      "description": "The planned web cutover has a consumer but no defined or owned producer for the server decisions it requires. When PR-53 replaces the existing Smart Add/action checks as T053 requires, neither the unchanged Task REST responses nor the proposed sync capabilities response supplies a parsed Smart Add draft or record-specific allowed actions. The current composer synchronously consumes parseSmartAdd/isValid before submission; its TaskListPage integration is also outside PR-53 write paths. Implementing the frozen map therefore requires unplanned backend/UI changes, retaining the independent rule authority that this slice promises to remove, or breaking existing capture/affordance behavior. This leaves the plan's one-rule-authority web commitment and FR-024 workflow-preservation outcome without a coherent delivery path.",
+      "evidence": [
+        "specs/026-rust-core-sync/plan.md:20 promises that web receives server decisions/capabilities; plan.md:145 allows a versioned-vector transition until duplication is removed.",
+        "specs/026-rust-core-sync/tasks.md:75 (T053) explicitly replaces authoritative Task action/Smart Add checks with server decisions through taskHooks. PR-53 at tasks.md:2155-2182 owns only smartAdd.ts, TaskDetailPanel.tsx, taskHooks.ts and a test, and depends on PR-31/48; it owns neither an HTTP producer nor the composer consumer.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md, section 11 Registration and capabilities (line 207): the capabilities shape contains protocol/command/rule/projection/storage versions, generations, scope_enabled, limits and recovery; it contains no per-record action or Smart Add preview decision. The endpoint inventory in section 6 defines no such query/preview port.",
+        "backend/app/schemas/tasks.py:168 SmartAddTaskCreateRequest accepts already-separated title/project/tags, and backend/app/api/tasks.py:764-780 executes that request and returns a created Task; it is not a raw-input preview. TaskResponse at schemas/tasks.py:281-308 contains domain fields but no allowed actions.",
+        "frontend/src/features/tasks/TaskListPage.tsx:1533 computes a synchronous draft with parseSmartAdd; lines 1557 and 1714 use draft.isValid to gate submit and the Add task button. frontend/src/features/tasks/smartAdd.ts:218-248 currently decides grammar/classification and validity. These consumers cannot obtain the planned server decision from the catalogued API.",
+        "specs/026-rust-core-sync/spec.md FR-024 and quickstart.md Q11 require preserving existing web capture/edit/archive workflows; tasks.md PR-53 claims this server-authority cutover is complete before PR-54 acceptance."
+      ],
+      "recommendation": "Choose one coherent technical path in the existing scope before approving the slice map: define the minimal read/preview decision contract, assign its backend producer and actual web consumer integration paths with dependency ownership, or explicitly retain a bounded versioned-vector transition permitted by plan section 7 and revise PR-53 to match. Preserve legacy response contracts and existing capture behavior; this does not require a new web product feature."
+    }
+  ],
+  "product_decisions": []
+}

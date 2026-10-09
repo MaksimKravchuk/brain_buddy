@@ -1,0 +1,122 @@
+{
+  "status": "technical-changes-required",
+  "risk": "high",
+  "reviewers": [
+    {
+      "role": "requirements-consistency",
+      "verdict": "changes-required",
+      "summary": "Reviewed the frozen proposal, all core artifacts and all 60 slice records against current integration seams. Every FR and SC has ownership outside the final acceptance join, and the six carried-forward corrections are represented in the current contracts, tasks and design. One consequential web contract/ownership gap remains. Pending owner approval, sizing, rendering and future implementation measurements are correctly disclosed prerequisites; no implementation or acceptance result is asserted."
+    },
+    {
+      "role": "architecture-consistency",
+      "verdict": "changes-required",
+      "summary": "The proposal preserves the Tasks/Review transaction boundary, separate Identity/CRT authority, durable command/feed recovery, and a stopped-writer PostgreSQL cutover. The Smart Add binding, authenticated cross-process SSE, resource-ownership responses, native suggestion entry points, dependent-action resolution, and AI cancellation contracts are now specified. One remaining consequential contract disagreement concerns legacy consent revocation using an already-used idempotency key. This was a read-only planning review; no build, product test, migration, sizing measurement, or human acceptance was performed."
+    },
+    {
+      "role": "testability-evidence",
+      "verdict": "changes-required",
+      "summary": "The proposal defines proportionate planned evidence for FR-001\u2013026 and SC-001\u2013008: existing golden-rule/consent/archive/import checks are reused, new durability and protocol risks have fault-boundary checks, and Apple UX, timing, all-writer/SSE convergence and restore acceptance have concrete operational procedures. Static declaration inspection confirms the corrected Swift suite filters; the pilot dependency closure includes PR-58 and PR-59/60, and declared shared paths are serialized. One deterministic slice-ownership/file-budget defect remains in PR-34. No product build or test was run; future bridge/AI sizing, hardware measurements and owner/risk acceptance remain explicit gates, not claimed results."
+    },
+    {
+      "role": "privacy-consent-security",
+      "verdict": "pass",
+      "summary": "No supported consequential privacy, consent or authorization defect found in the current proposal at 7866bae27152da40b7c9c97f5e7a6c63870b48de. The contracts require recipient-specific current consent without remote fallback, confirmed AI effects, owner/session/generation fences, indistinguishable foreign-resource responses, source-bound expiry for retained copies, export/purge coverage and fail-closed restore controls. The current Smart Add metadata, authenticated SSE and 404 corrections are present. This is a read-only planning assessment, not implementation verification or owner acceptance; the disclosed governance, design, migration and empirical acceptance prerequisites remain pending."
+    },
+    {
+      "role": "ux-accessibility-mobile",
+      "verdict": "changes-required",
+      "summary": "Reviewed the frozen proposal across all eight sync, conflict, recovery and AI surfaces, their state/affordance mappings, mobile and accessibility plans, protocol/runtime contracts, implementation slices and relevant accepted/native baselines. The dependent-action preservation/reapproval/discard and AI cancellation/interruption additions address their earlier missing states. One consequential gap remains: the new native suggestion sheets do not specify the existing navigator clarifying-question response and answer workflow. Owner design acceptance, native rendering/accessibility, sizing and implementation measurements remain disclosed future gates; this review performed no runtime verification."
+    },
+    {
+      "role": "adversarial-high-risk",
+      "verdict": "changes-required",
+      "summary": "The current proposal explicitly addresses the earlier Smart Add binding-retention, SSE, ownership-disclosure, dependent-action and AI lifecycle gaps. Its immutable-command, ACK/feed, snapshot/live-queue, generation, worker-fence and restore safeguards are specified as future requirements, not tested implementation. One consequential contradiction remains: the generic legacy replay mapping rejects a colliding consent revoke that the accepted privacy contract requires to succeed. Owner approvals, empirical sizing and implementation acceptance remain separate disclosed gates; this review supplies none of them."
+    }
+  ],
+  "technical_findings": [
+    {
+      "reviewer": "requirements-consistency",
+      "severity": "important",
+      "category": "missing-contract-and-slice-ownership",
+      "description": "The planned web cutover has a consumer but no defined or owned producer for the server decisions it requires. When PR-53 replaces the existing Smart Add/action checks as T053 requires, neither the unchanged Task REST responses nor the proposed sync capabilities response supplies a parsed Smart Add draft or record-specific allowed actions. The current composer synchronously consumes parseSmartAdd/isValid before submission; its TaskListPage integration is also outside PR-53 write paths. Implementing the frozen map therefore requires unplanned backend/UI changes, retaining the independent rule authority that this slice promises to remove, or breaking existing capture/affordance behavior. This leaves the plan's one-rule-authority web commitment and FR-024 workflow-preservation outcome without a coherent delivery path.",
+      "evidence": [
+        "specs/026-rust-core-sync/plan.md:20 promises that web receives server decisions/capabilities; plan.md:145 allows a versioned-vector transition until duplication is removed.",
+        "specs/026-rust-core-sync/tasks.md:75 (T053) explicitly replaces authoritative Task action/Smart Add checks with server decisions through taskHooks. PR-53 at tasks.md:2155-2182 owns only smartAdd.ts, TaskDetailPanel.tsx, taskHooks.ts and a test, and depends on PR-31/48; it owns neither an HTTP producer nor the composer consumer.",
+        "specs/026-rust-core-sync/contracts/sync-v1.md, section 11 Registration and capabilities (line 207): the capabilities shape contains protocol/command/rule/projection/storage versions, generations, scope_enabled, limits and recovery; it contains no per-record action or Smart Add preview decision. The endpoint inventory in section 6 defines no such query/preview port.",
+        "backend/app/schemas/tasks.py:168 SmartAddTaskCreateRequest accepts already-separated title/project/tags, and backend/app/api/tasks.py:764-780 executes that request and returns a created Task; it is not a raw-input preview. TaskResponse at schemas/tasks.py:281-308 contains domain fields but no allowed actions.",
+        "frontend/src/features/tasks/TaskListPage.tsx:1533 computes a synchronous draft with parseSmartAdd; lines 1557 and 1714 use draft.isValid to gate submit and the Add task button. frontend/src/features/tasks/smartAdd.ts:218-248 currently decides grammar/classification and validity. These consumers cannot obtain the planned server decision from the catalogued API.",
+        "specs/026-rust-core-sync/spec.md FR-024 and quickstart.md Q11 require preserving existing web capture/edit/archive workflows; tasks.md PR-53 claims this server-authority cutover is complete before PR-54 acceptance."
+      ],
+      "recommendation": "Choose one coherent technical path in the existing scope before approving the slice map: define the minimal read/preview decision contract, assign its backend producer and actual web consumer integration paths with dependency ownership, or explicitly retain a bounded versioned-vector transition permitted by plan section 7 and revise PR-53 to match. Preserve legacy response contracts and existing capture behavior; this does not require a new web product feature."
+    },
+    {
+      "reviewer": "architecture-consistency",
+      "severity": "important",
+      "category": "legacy-replay-contract",
+      "description": "The universal legacy owner/key-to-one-receipt mapping does not preserve the accepted consent-revocation collision exception. A supported legacy caller can grant consent with key K and then revoke using K: the existing contract requires a successful 204, retains the grant receipt, and records a separate replay-safe revoke effect. PR-28 moves that revoke into a boundary whose current specification maps K to the original single receipt and refuses changed operation/content. Following that mapping would reject the revoke as IDEMPOTENCY_KEY_REUSED and leave cloud consent active, violating preserved legacy behavior and FR-014/019. The catalog promises owner-wide revocation but does not define how this existing replay exception survives the conflicting general mapping.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:57 maps each legacy (owner_id, idempotency_key) to one durable receipt and forbids an operation-dependent replay namespace; :60 returns IDEMPOTENCY_KEY_REUSED without execution for different normalized content.",
+        "specs/026-rust-core-sync/contracts/command-catalog.md:46 requires one legacy receipt identity across transports with original-operation reuse checks; :35 says consent revocation preserves current owner-wide semantics.",
+        "specs/026-rust-core-sync/tasks.md:87 (T028/PR-28) routes Navigator consent grant and revoke through this command boundary.",
+        "specs/020-weekly-review/contracts/http.md:696-708 explicitly requires revoke using another command's key to succeed, keep the original receipt, and record its own replay so a later retry cannot revoke a newer grant.",
+        "backend/app/modules/tasks/navigator.py:889-940, NavigatorService.revoke_consent, implements this exception using _revoke_collision_key while preserving the original owner/key record.",
+        "backend/tests/test_review_navigator.py:1271, test_020_FR_024_a_grant_key_reused_by_a_revoke_still_revokes, requires 204 and consent_current false; :1291, test_020_FR_024_a_colliding_revoke_retry_never_revokes_a_newer_grant, preserves the later grant on retry."
+      ],
+      "recommendation": "Specify a narrow legacy consent-revoke translation exception before ordinary changed-operation conflict handling: retain the existing owner/key receipt, derive one durable revoke-effect identity consistently across legacy transports, and replay that revoke effect without changing a newer grant. Publish its consent change through the same atomic receipt/feed transaction. Keep strict changed-content rejection for ordinary legacy commands and device-originated command IDs; reuse the existing collision/retry tests when implementing PR-28."
+    },
+    {
+      "reviewer": "testability-evidence",
+      "severity": "important",
+      "category": "slice-dependency-and-budget-closure",
+      "description": "PR-34 cannot add and test the bb-client workspace crate within its declared write paths and five-product-file cap. Creating this new workspace package necessarily updates the already tracked rust/Cargo.lock to record bb-client (and any newly required SQLite dependencies). The map owns five product files but omits that lockfile. Following the required cargo test therefore leaves an undeclared sixth product file, and retaining the required pinned lockfile makes the mandatory slice-budget gate fail. This is a known missing build input, separate from unmeasured empirical bridge/AI sizes.",
+      "evidence": [
+        "specs/026-rust-core-sync/tasks.md:95 (T034 creates bb-client manifest/lib.rs and SQLite storage); tasks.md:1390\u20131422 (PR-34 owns bb-client Cargo.toml, lib.rs, storage.rs, locking.rs and rust/Cargo.toml, but no rust/Cargo.lock; budget.files is 5).",
+        "specs/026-rust-core-sync/tasks.md:11 and :17 require counting Cargo.lock as product, respecting owned write paths and running the slice budget check; tasks.md:1415 requires cargo test --manifest-path rust/Cargo.toml -p bb-client storage. PR-03/04/05 already establish the tracked shared rust/Cargo.lock.",
+        "scripts/check_slice_budget.py:24\u201339 excludes only package-lock.json, uv.lock and Package.resolved, so Cargo.lock counts as a product file; product_changes at :56\u201368 counts every changed product file and main at :112\u2013119 fails an exceeded declared cap.",
+        "cli/Cargo.toml:1\u20133 and cli/Cargo.lock:253\u2013255 show the repository Cargo lockfile records its own local package, independently of external dependency sizing."
+      ],
+      "recommendation": "Add rust/Cargo.lock to PR-34 owned paths and account for it in the product-file cap (at least six). Include its actual delta in the 390-line measurement and revise the boundary if necessary; keep the lockfile counted under the existing gate."
+    },
+    {
+      "reviewer": "ux-accessibility-mobile",
+      "severity": "important",
+      "category": "state-completeness / accepted navigator contract",
+      "description": "When a task has insufficient information for a grounded suggestion, the existing navigator can successfully return proposals:null and a clarifying_question. The proposed new M-04/D-04 sheets enumerate only proposal editing or no suitable suggestion, with no question/answer affordance or mapped answer-save/rerun states. These clients were explicitly deferred in 020, so there is no existing native question UI to inherit. Treating this valid response as empty/error would prevent the accepted answer-to-notes-and-suggest-again path, while rendering the answer as a proposal would apply the wrong task change. This violates the stated preservation of the existing Weekly Review capability and 020-FR-021 rather than requesting another AI feature.",
+      "evidence": [
+        "specs/026-rust-core-sync/design.md:94 and :100: M-04/D-04 response states specify no proposal or an editable suggestion; the complete .01-.15 inventory has no clarifying-question/answer state.",
+        "specs/026-rust-core-sync/design.md:109; specs/026-rust-core-sync/plan.md:137; specs/026-rust-core-sync/tasks.md:149-153 (T049/T059/T060): new native sheets consume the existing Weekly Review navigator capability; their native client UI did not previously exist.",
+        "specs/020-weekly-review/spec.md:312 (FR-021): a task clarification answer is appended to notes through a normal edit and the navigator runs again on the updated input.",
+        "specs/020-weekly-review/contracts/http.md:741-745: exactly one of proposals or clarifying_question is non-null; backend/app/modules/tasks/navigator.py:491-495 and :1059-1064 implement this valid response.",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/ReviewAPI.swift:846-871: the current Swift DTO explicitly decodes and validates the mutually exclusive clarifyingQuestion branch.",
+        "specs/020-weekly-review/design.md:232 and :597-601: accepted question/answer affordance, focus, answer-save failure and answer-saved/suggestion-failed states provide the reusable baseline."
+      ],
+      "recommendation": "Add stable M-04/D-04 question and answer states, or explicitly map/adopt the existing 020 M-05/M-07 question states for these new sheets. Specify the answer field and Add to notes and suggest again/manual continuation actions, preserve the answer draft, distinguish notes-save failure from a subsequent suggestion failure, adopt the newly saved task revision and retry inference without appending the answer twice. Bind this existing response branch to PR-49/59/60 and their planned acceptance evidence."
+    },
+    {
+      "reviewer": "adversarial-high-risk",
+      "severity": "important",
+      "category": "privacy revocation / legacy replay compatibility",
+      "description": "Preserve the accepted consent-revocation collision exception before routing Navigator through the generic legacy receipt boundary. A supported client may grant cloud consent using key K and then revoke using the same K. The accepted endpoint deliberately returns 204, revokes all grants, preserves the original grant receipt, and records a separate deterministic revoke receipt. Sync v1 instead mandates one legacy receipt per (owner, key), forbids an operation-specific replay namespace, and rejects changed content before execution. Applied to PR-28, that rule returns an idempotency conflict without revoking consent, leaving subsequent cloud requests authorized after a revocation that must succeed. The current proposal simultaneously promises legacy response/error and owner-wide revoke compatibility, so the implementation contract is contradictory.",
+      "evidence": [
+        "specs/026-rust-core-sync/contracts/sync-v1.md:57 requires one durable command receipt for the legacy (owner_id, idempotency_key) identity and prohibits changing the replay namespace when the operation changes; :60 rejects the same command ID with changed content and executes nothing.",
+        "specs/026-rust-core-sync/tasks.md:87 (T028 / PR-28) explicitly routes Navigator consent-grant and owner-wide-revoke through this shared command boundary. contracts/command-catalog.md:35 promises the current owner-wide revoke semantics; spec.md FR-014/019/024 require legacy compatibility and current consent.",
+        "specs/020-weekly-review/contracts/http.md:696-708 explicitly distinguishes grant conflicts from revocation: a key another command already stored must still revoke, preserve that record, and store a separate replayable revoke result.",
+        "backend/app/modules/tasks/navigator.py:890-930 implements the exception by checking the collision receipt before revoking and storing the result under _revoke_collision_key when the original key is occupied.",
+        "backend/tests/test_review_navigator.py:1271-1306 contains existing tests for grant(K1) then revoke(K1) succeeding and a later replay of that colliding revoke not cancelling a newer grant. These tests were inspected, not executed."
+      ],
+      "recommendation": "Document a narrow legacy Navigator revoke mapping that preserves its accepted collision identity before generic mismatch rejection, while publishing the revoke and its receipt/feed atomically through the same boundary. Preserve the original grant receipt and deterministic revoke replay so a late revoke retry cannot cancel a subsequent regrant; do not weaken ordinary command-ID mismatch rejection. Reuse the two existing collision tests through the migrated adapter and reflect the exception in the catalog/data-model mapping."
+    }
+  ],
+  "product_decisions": [],
+  "degraded_lenses": [],
+  "architect_action": "Resolve the technical findings and rerun the review campaign once. The cap is two campaigns. Every lens that produced evidence ran on one provider, so this panel's agreement is one vendor's opinion counted several times.",
+  "run_id": "026-native-20261009-1",
+  "artifacts_digest": "5fdcc85f0496ce9dc68716d0cfd2442a065b446bd80143df180859fff354ea99",
+  "completed_lenses": 6,
+  "required_lenses": 6,
+  "execution_route": "native-codex-subagents",
+  "execution_context": "execution-context.json",
+  "method_authorized_by_owner": true,
+  "missing_roles": [],
+  "human_signoff": null
+}

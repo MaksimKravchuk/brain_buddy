@@ -1,0 +1,19 @@
+{
+  "run_id": "026-native-20261009-1",
+  "reviewer": "architecture-consistency",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "targeted-finding-closure",
+  "resolved": true,
+  "evidence": [
+    "specs/026-rust-core-sync/contracts/sync-v1.md:57-59 now expressly scopes the sole legacy Navigator revoke collision exception, resolves the dedicated effect before generic mismatch rejection, preserves the original receipt, replays without cancelling a newer grant, and commits consent/receipt/feed atomically under current authority. weekly_review OFF remains supported; ordinary legacy and all device command IDs retain strict reuse rejection.",
+    "specs/026-rust-core-sync/contracts/command-catalog.md:35 and :46 align consent and legacy writer mapping with that precise exception.",
+    "specs/026-rust-core-sync/data-model.md:47 retains the unique dedicated revoke-effect mapping beside the unchanged ordinary legacy receipt; plan.md:146 includes the same limited exception.",
+    "specs/026-rust-core-sync/tasks.md:87 (T028), PR-28 tests/acceptance at :1164-1169, contracts/sync-v1.md:195, and quickstart.md:53 require migrated grant(K)/revoke(K), later regrant/revoke retry, original receipt preservation, one published effect, and flag-OFF validation using existing Navigator tests.",
+    "specs/020-weekly-review/contracts/http.md:696-709 and backend/app/modules/tasks/navigator.py:889-929 confirm the correction preserves the original collision and replay semantics rather than creating a new permission or generalized alternate replay namespace."
+  ],
+  "remaining_findings": [],
+  "caveats": [
+    "Targeted document closure of the original legacy-replay-contract finding and its direct regressions only; this is not a new full planning audit.",
+    "The original architecture-consistency.json is preserved. No product tests, build, implementation, migration, or human approval was performed; implementation must supply the specified migrated-adapter evidence."
+  ]
+}

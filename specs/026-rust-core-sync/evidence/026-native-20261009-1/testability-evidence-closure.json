@@ -1,0 +1,20 @@
+{
+  "run_id": "026-native-20261009-1",
+  "reviewer": "testability-evidence",
+  "artifacts_digest": "968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623",
+  "scope": "targeted-finding-closure",
+  "resolved": true,
+  "evidence": [
+    "specs/026-rust-core-sync/tasks.md:95 now explicitly assigns T034 the new workspace package and SQLite rust/Cargo.lock delta.",
+    "specs/026-rust-core-sync/tasks.md, JSON PR-34 paths/budget/acceptance: rust/Cargo.lock is an owned path; six declared product paths match budget.files=6; product_loc remains 390 and includes the complete lockfile delta.",
+    "specs/026-rust-core-sync/tasks.md:11\u201313 keeps Cargo.lock counted and requires disposable PR-34 runtime/SQLite sizing before boundary approval; oversize requires boundary revision.",
+    "specs/026-rust-core-sync/approval.md, Implementation boundaries row, includes PR-34 measured runtime/SQLite sizing and Cargo.lock before approval, with approval still pending.",
+    "Static dependency comparison: the other shared rust/Cargo.lock owners PR-03/04/05 all precede PR-34 through its existing dependency closure; adding this owned path introduces no unordered shared-lockfile writers."
+  ],
+  "remaining_findings": [],
+  "caveats": [
+    "Targeted closure of the original PR-34 ownership/file-budget finding and direct regressions only; this is not a new full audit.",
+    "No product builds or tests were run. The six-path static count does not prove the eventual 390-line bound, SQLite behavior, toolchain build, hardware performance, or acceptance.",
+    "Original testability-evidence.json remains unchanged. Owner, governance, design, slice-boundary and high-risk acceptance remain separate pending gates."
+  ]
+}
