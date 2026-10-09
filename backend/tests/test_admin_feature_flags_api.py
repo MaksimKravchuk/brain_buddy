@@ -45,8 +45,18 @@ RELAY = "external_agent_relay"
 AUTOCOMPLETE = "task_title_autocomplete"
 CRT_CANVAS = "crt_canvas"
 WEEKLY_REVIEW = "weekly_review"
+RUST_CORE_SYNC = "rust_core_sync"
 MANAGED_FLAG_NAMES = frozenset(
-    {MANAGED, OTHER_MANAGED, RELAY, AUTOCOMPLETE, CRT_CANVAS, "task_mcp", WEEKLY_REVIEW}
+    {
+        MANAGED,
+        OTHER_MANAGED,
+        RELAY,
+        AUTOCOMPLETE,
+        CRT_CANVAS,
+        "task_mcp",
+        WEEKLY_REVIEW,
+        RUST_CORE_SYNC,
+    }
 )
 
 SERVICE_LOGGER = "app.services.feature_flag_service"
@@ -401,6 +411,7 @@ def test_010_SC_001_setting_each_mode_leaves_every_other_flag_untouched(
         "crt_canvas",
         "task_mcp",
         "weekly_review",
+        "rust_core_sync",
     }
 
 
@@ -743,7 +754,7 @@ def test_010_FR_006_the_get_read_emits_one_aggregate_record_per_call(
 
     ours = [r.getMessage() for r in caplog.records if r.name == SERVICE_LOGGER]
     assert len(ours) == 1
-    assert "flags=7" in ours[0]
+    assert "flags=8" in ours[0]
     assert "resolved_accounts=1" in ours[0]
     assert [r for r in caplog.records if r.name == ADMIN_SERVICE_LOGGER] == []
 
