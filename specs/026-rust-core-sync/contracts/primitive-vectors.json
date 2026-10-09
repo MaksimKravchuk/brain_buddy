@@ -1,0 +1,1921 @@
+{
+ "schema": "brainbuddy-primitive-vectors/v1",
+ "format": "Contract for the 026 shared normalization and calendar primitives (tasks.md T002/T006). name_normalization: the inputs of ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift; every expected value is the result of the backend functions display_project_name, normalize_task_name, display_tag_name on Python 3.11 / Unicode 14 and equals what the Swift test asserts. search: TaskService._normalize_for_search / _normalize_search_query (input null is the absent query). whitespace: Python str.strip() and ' '.join(str.split()). scalar_length: Python len() (Unicode scalars, what pydantic max_length counts) next to the UTF-16 and UTF-8 lengths other runtimes would count. calendar.valid_iso/invalid_iso: strict YYYY-MM-DD with years 0001..9999. calendar.local_day: the local date of a Unix second in an IANA zone (datetime.fromtimestamp(s, zone).date()). calendar.start_instant: backend formulation.due_start(day, zone) as Unix seconds, with the local date one second before and at that instant. clamp rows saturate at 0001-01-01/9999-12-31 (Python raises OverflowError there; Swift and Rust clamp). Zone rows use only rules that are identical in every tz database release since 2018; they are not a statement about future rule changes.",
+ "name_normalization": [
+  {
+   "id": "NN-001",
+   "input": "  Deep   Work ",
+   "project_display": "Deep Work",
+   "project_key": "deep work",
+   "tag_display": "Deep Work",
+   "tag_key": "deep work"
+  },
+  {
+   "id": "NN-002",
+   "input": "Ｗｏｒｋ",
+   "project_display": "Work",
+   "project_key": "work",
+   "tag_display": "Work",
+   "tag_key": "work"
+  },
+  {
+   "id": "NN-003",
+   "input": "ﬁle",
+   "project_display": "file",
+   "project_key": "file",
+   "tag_display": "file",
+   "tag_key": "file"
+  },
+  {
+   "id": "NN-004",
+   "input": "Straße",
+   "project_display": "Straße",
+   "project_key": "strasse",
+   "tag_display": "Straße",
+   "tag_key": "strasse"
+  },
+  {
+   "id": "NN-005",
+   "input": "STRASSE",
+   "project_display": "STRASSE",
+   "project_key": "strasse",
+   "tag_display": "STRASSE",
+   "tag_key": "strasse"
+  },
+  {
+   "id": "NN-006",
+   "input": "ẞ",
+   "project_display": "ẞ",
+   "project_key": "ss",
+   "tag_display": "ẞ",
+   "tag_key": "ss"
+  },
+  {
+   "id": "NN-007",
+   "input": "ΟΔΟΣ",
+   "project_display": "ΟΔΟΣ",
+   "project_key": "οδοσ",
+   "tag_display": "ΟΔΟΣ",
+   "tag_key": "οδοσ"
+  },
+  {
+   "id": "NN-008",
+   "input": "οδος",
+   "project_display": "οδος",
+   "project_key": "οδοσ",
+   "tag_display": "οδος",
+   "tag_key": "οδοσ"
+  },
+  {
+   "id": "NN-009",
+   "input": "Ꭰᏸ",
+   "project_display": "Ꭰᏸ",
+   "project_key": "ᎠᏰ",
+   "tag_display": "Ꭰᏸ",
+   "tag_key": "ᎠᏰ"
+  },
+  {
+   "id": "NN-010",
+   "input": "ꭰᏰ",
+   "project_display": "ꭰᏰ",
+   "project_key": "ᎠᏰ",
+   "tag_display": "ꭰᏰ",
+   "tag_key": "ᎠᏰ"
+  },
+  {
+   "id": "NN-011",
+   "input": "ᾳ",
+   "project_display": "ᾳ",
+   "project_key": "αι",
+   "tag_display": "ᾳ",
+   "tag_key": "αι"
+  },
+  {
+   "id": "NN-012",
+   "input": "ᾼ",
+   "project_display": "ᾼ",
+   "project_key": "αι",
+   "tag_display": "ᾼ",
+   "tag_key": "αι"
+  },
+  {
+   "id": "NN-013",
+   "input": "ᾈx",
+   "project_display": "ᾈx",
+   "project_key": "ἀιx",
+   "tag_display": "ᾈx",
+   "tag_key": "ἀιx"
+  },
+  {
+   "id": "NN-014",
+   "input": "ǰ",
+   "project_display": "ǰ",
+   "project_key": "ǰ",
+   "tag_display": "ǰ",
+   "tag_key": "ǰ"
+  },
+  {
+   "id": "NN-015",
+   "input": "İstanbul",
+   "project_display": "İstanbul",
+   "project_key": "i̇stanbul",
+   "tag_display": "İstanbul",
+   "tag_key": "i̇stanbul"
+  },
+  {
+   "id": "NN-016",
+   "input": "\u001cWork\u001f",
+   "project_display": "Work",
+   "project_key": "work",
+   "tag_display": "Work",
+   "tag_key": "work"
+  },
+  {
+   "id": "NN-017",
+   "input": "a 　b",
+   "project_display": "a b",
+   "project_key": "a b",
+   "tag_display": "a b",
+   "tag_key": "a b"
+  },
+  {
+   "id": "NN-018",
+   "input": "a​b",
+   "project_display": "a​b",
+   "project_key": "a​b",
+   "tag_display": "a​b",
+   "tag_key": "a​b"
+  },
+  {
+   "id": "NN-019",
+   "input": "a ́b",
+   "project_display": "a ́b",
+   "project_key": "a ́b",
+   "tag_display": "a ́b",
+   "tag_key": "a ́b"
+  },
+  {
+   "id": "NN-020",
+   "input": "K",
+   "project_display": "K",
+   "project_key": "k",
+   "tag_display": "K",
+   "tag_key": "k"
+  },
+  {
+   "id": "NN-021",
+   "input": "ᲀ",
+   "project_display": "ᲀ",
+   "project_key": "в",
+   "tag_display": "ᲀ",
+   "tag_key": "в"
+  },
+  {
+   "id": "NN-022",
+   "input": "@Home",
+   "project_display": "@Home",
+   "project_key": "@home",
+   "tag_display": "Home",
+   "tag_key": "home"
+  },
+  {
+   "id": "NN-023",
+   "input": "@ home",
+   "project_display": "@ home",
+   "project_key": "@ home",
+   "tag_display": "home",
+   "tag_key": "home"
+  },
+  {
+   "id": "NN-024",
+   "input": "@@home",
+   "project_display": "@@home",
+   "project_key": "@@home",
+   "tag_display": "@home",
+   "tag_key": "@home"
+  },
+  {
+   "id": "NN-025",
+   "input": "＠Home",
+   "project_display": "@Home",
+   "project_key": "@home",
+   "tag_display": "Home",
+   "tag_key": "home"
+  },
+  {
+   "id": "NN-026",
+   "input": " @́x",
+   "project_display": "@́x",
+   "project_key": "@́x",
+   "tag_display": "́x",
+   "tag_key": "́x"
+  },
+  {
+   "id": "NN-027",
+   "input": "Ω",
+   "project_display": "Ω",
+   "project_key": "ω",
+   "tag_display": "Ω",
+   "tag_key": "ω"
+  },
+  {
+   "id": "NN-028",
+   "input": "µ",
+   "project_display": "μ",
+   "project_key": "μ",
+   "tag_display": "μ",
+   "tag_key": "μ"
+  },
+  {
+   "id": "NN-029",
+   "input": "café",
+   "project_display": "café",
+   "project_key": "café",
+   "tag_display": "café",
+   "tag_key": "café"
+  },
+  {
+   "id": "NN-030",
+   "input": "   ",
+   "project_display": "",
+   "project_key": "",
+   "tag_display": "",
+   "tag_key": ""
+  },
+  {
+   "id": "NN-031",
+   "input": "@",
+   "project_display": "@",
+   "project_key": "@",
+   "tag_display": "",
+   "tag_key": ""
+  }
+ ],
+ "search": [
+  {
+   "id": "SK-001",
+   "input": "Straße",
+   "search_key": "strasse",
+   "search_query_key": "strasse"
+  },
+  {
+   "id": "SK-002",
+   "input": "  Deep   Work ",
+   "search_key": "  deep   work ",
+   "search_query_key": "deep work"
+  },
+  {
+   "id": "SK-003",
+   "input": "ﬁle Report",
+   "search_key": "file report",
+   "search_query_key": "file report"
+  },
+  {
+   "id": "SK-004",
+   "input": "İstanbul",
+   "search_key": "i̇stanbul",
+   "search_query_key": "i̇stanbul"
+  },
+  {
+   "id": "SK-005",
+   "input": "ΟΔΟΣ",
+   "search_key": "οδοσ",
+   "search_query_key": "οδοσ"
+  },
+  {
+   "id": "SK-006",
+   "input": "ᲀ",
+   "search_key": "в",
+   "search_query_key": "в"
+  },
+  {
+   "id": "SK-007",
+   "input": "a​b",
+   "search_key": "a​b",
+   "search_query_key": "a​b"
+  },
+  {
+   "id": "SK-008",
+   "input": "\u001d\tx y",
+   "search_key": "\u001d\tx y",
+   "search_query_key": "x y"
+  },
+  {
+   "id": "SK-009",
+   "input": null,
+   "search_key": null,
+   "search_query_key": ""
+  }
+ ],
+ "whitespace": [
+  {
+   "id": "WS-001",
+   "input": "\u001d \t a b  ",
+   "stripped": "a b",
+   "collapsed": "a b"
+  },
+  {
+   "id": "WS-002",
+   "input": "  ",
+   "stripped": "",
+   "collapsed": ""
+  },
+  {
+   "id": "WS-003",
+   "input": "  a  　 b\n",
+   "stripped": "a  　 b",
+   "collapsed": "a b"
+  },
+  {
+   "id": "WS-004",
+   "input": "​",
+   "stripped": "​",
+   "collapsed": "​"
+  },
+  {
+   "id": "WS-005",
+   "input": "\u001c",
+   "stripped": "",
+   "collapsed": ""
+  },
+  {
+   "id": "WS-006",
+   "input": "﻿x﻿",
+   "stripped": "﻿x﻿",
+   "collapsed": "﻿x﻿"
+  },
+  {
+   "id": "WS-007",
+   "input": "x   y",
+   "stripped": "x   y",
+   "collapsed": "x y"
+  },
+  {
+   "id": "WS-008",
+   "input": "",
+   "stripped": "",
+   "collapsed": ""
+  },
+  {
+   "id": "WS-009",
+   "input": "x",
+   "stripped": "x",
+   "collapsed": "x"
+  }
+ ],
+ "scalar_length": [
+  {
+   "id": "SL-001",
+   "input": "abc",
+   "scalars": 3,
+   "utf16_units": 3,
+   "utf8_bytes": 3,
+   "within_500": true
+  },
+  {
+   "id": "SL-002",
+   "input": "a😀b",
+   "scalars": 3,
+   "utf16_units": 4,
+   "utf8_bytes": 6,
+   "within_500": true
+  },
+  {
+   "id": "SL-003",
+   "input": "café",
+   "scalars": 4,
+   "utf16_units": 4,
+   "utf8_bytes": 5,
+   "within_500": true
+  },
+  {
+   "id": "SL-004",
+   "input": "café",
+   "scalars": 5,
+   "utf16_units": 5,
+   "utf8_bytes": 6,
+   "within_500": true
+  },
+  {
+   "id": "SL-005",
+   "input": "🇩🇪",
+   "scalars": 2,
+   "utf16_units": 4,
+   "utf8_bytes": 8,
+   "within_500": true
+  },
+  {
+   "id": "SL-006",
+   "input": "👨‍👩‍👧",
+   "scalars": 5,
+   "utf16_units": 8,
+   "utf8_bytes": 18,
+   "within_500": true
+  },
+  {
+   "id": "SL-007",
+   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "scalars": 500,
+   "utf16_units": 500,
+   "utf8_bytes": 500,
+   "within_500": true
+  },
+  {
+   "id": "SL-008",
+   "input": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+   "scalars": 300,
+   "utf16_units": 600,
+   "utf8_bytes": 1200,
+   "within_500": true
+  },
+  {
+   "id": "SL-009",
+   "input": "",
+   "scalars": 0,
+   "utf16_units": 0,
+   "utf8_bytes": 0,
+   "within_500": true
+  }
+ ],
+ "calendar": {
+  "valid_iso": [
+   "2024-02-29",
+   "2000-02-29",
+   "1600-02-29",
+   "2026-09-29",
+   "0001-01-01",
+   "9999-12-31",
+   "2026-04-30"
+  ],
+  "invalid_iso": [
+   "2023-02-29",
+   "1900-02-29",
+   "2100-02-29",
+   "2026-04-31",
+   "2026-13-01",
+   "2026-00-10",
+   "2026-01-00",
+   "2026-01-32",
+   "0000-01-01",
+   "2026-9-29",
+   "2026-09-9",
+   "26-09-29",
+   "02026-09-29",
+   "2026/09/29",
+   "2026-09-29T00:00",
+   " 2026-09-29",
+   "2026-09-29 ",
+   "2026-09-2a",
+   "+026-09-29",
+   "-026-09-29",
+   "２０２６-09-29",
+   "٢٠٢٦-٠٩-٢٩",
+   "",
+   "2026-0929-"
+  ],
+  "days_in_february": [
+   {
+    "year": 1900,
+    "days": 28
+   },
+   {
+    "year": 2000,
+    "days": 29
+   },
+   {
+    "year": 2023,
+    "days": 28
+   },
+   {
+    "year": 2024,
+    "days": 29
+   },
+   {
+    "year": 2100,
+    "days": 28
+   },
+   {
+    "year": 2400,
+    "days": 29
+   }
+  ],
+  "day_number": [
+   {
+    "day": "1970-01-01",
+    "number": 0
+   },
+   {
+    "day": "0001-01-01",
+    "number": -719162
+   },
+   {
+    "day": "2026-10-09",
+    "number": 20735
+   },
+   {
+    "day": "9999-12-31",
+    "number": 2932896
+   }
+  ],
+  "add_days": [
+   {
+    "start": "2024-02-28",
+    "days": 1,
+    "expect": "2024-02-29"
+   },
+   {
+    "start": "2024-02-28",
+    "days": 2,
+    "expect": "2024-03-01"
+   },
+   {
+    "start": "2023-02-28",
+    "days": 1,
+    "expect": "2023-03-01"
+   },
+   {
+    "start": "2026-12-31",
+    "days": 1,
+    "expect": "2027-01-01"
+   },
+   {
+    "start": "2027-01-01",
+    "days": -1,
+    "expect": "2026-12-31"
+   },
+   {
+    "start": "2026-03-01",
+    "days": -1,
+    "expect": "2026-02-28"
+   },
+   {
+    "start": "2024-03-01",
+    "days": -1,
+    "expect": "2024-02-29"
+   },
+   {
+    "start": "2026-09-29",
+    "days": 0,
+    "expect": "2026-09-29"
+   },
+   {
+    "start": "2026-09-29",
+    "days": 365,
+    "expect": "2027-09-29"
+   },
+   {
+    "start": "2000-01-01",
+    "days": 146097,
+    "expect": "2400-01-01"
+   },
+   {
+    "start": "2026-01-31",
+    "days": 30,
+    "expect": "2026-03-02"
+   },
+   {
+    "start": "1970-01-01",
+    "days": -1,
+    "expect": "1969-12-31"
+   },
+   {
+    "start": "1582-10-15",
+    "days": -1,
+    "expect": "1582-10-14"
+   },
+   {
+    "start": "1500-02-28",
+    "days": 1,
+    "expect": "1500-03-01"
+   }
+  ],
+  "clamp": [
+   {
+    "start": "9999-12-31",
+    "days": 1,
+    "expect": "9999-12-31"
+   },
+   {
+    "start": "0001-01-01",
+    "days": -1,
+    "expect": "0001-01-01"
+   },
+   {
+    "start": "2026-09-29",
+    "days": 9223372036854775807,
+    "expect": "9999-12-31"
+   },
+   {
+    "start": "2026-09-29",
+    "days": -9223372036854775808,
+    "expect": "0001-01-01"
+   }
+  ],
+  "local_day": [
+   {
+    "id": "CD-001",
+    "unix": 1790681400,
+    "zone": "UTC",
+    "day": "2026-09-29"
+   },
+   {
+    "id": "CD-002",
+    "unix": 1790681400,
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-09-30"
+   },
+   {
+    "id": "CD-003",
+    "unix": 1790681400,
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-09-29"
+   },
+   {
+    "id": "CD-004",
+    "unix": 1790638200,
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-09-28"
+   },
+   {
+    "id": "CD-005",
+    "unix": 1790681400,
+    "zone": "Asia/Bangkok",
+    "day": "2026-09-29"
+   },
+   {
+    "id": "CD-006",
+    "unix": -14200000000,
+    "zone": "UTC",
+    "day": "1520-01-09"
+   },
+   {
+    "id": "CD-007",
+    "unix": 0,
+    "zone": "UTC",
+    "day": "1970-01-01"
+   },
+   {
+    "id": "CD-008",
+    "unix": -1,
+    "zone": "UTC",
+    "day": "1969-12-31"
+   },
+   {
+    "id": "CD-009",
+    "unix": -1,
+    "zone": "America/New_York",
+    "day": "1969-12-31"
+   }
+  ],
+  "start_instant": [
+   {
+    "id": "SI-001",
+    "zone": "UTC",
+    "day": "2026-03-29",
+    "unix": 1774742400,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-002",
+    "zone": "UTC",
+    "day": "2026-09-29",
+    "unix": 1790640000,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-003",
+    "zone": "UTC",
+    "day": "2026-11-01",
+    "unix": 1793491200,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-004",
+    "zone": "UTC",
+    "day": "2026-03-08",
+    "unix": 1772928000,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-005",
+    "zone": "UTC",
+    "day": "2024-02-29",
+    "unix": 1709164800,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-006",
+    "zone": "UTC",
+    "day": "2018-11-04",
+    "unix": 1541289600,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-007",
+    "zone": "UTC",
+    "day": "2018-02-18",
+    "unix": 1518912000,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-008",
+    "zone": "UTC",
+    "day": "2011-12-29",
+    "unix": 1325116800,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-009",
+    "zone": "UTC",
+    "day": "2011-12-30",
+    "unix": 1325203200,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-010",
+    "zone": "UTC",
+    "day": "2011-12-31",
+    "unix": 1325289600,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-011",
+    "zone": "UTC",
+    "day": "2026-04-05",
+    "unix": 1775347200,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-012",
+    "zone": "UTC",
+    "day": "2026-10-04",
+    "unix": 1791072000,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-013",
+    "zone": "UTC",
+    "day": "1582-10-15",
+    "unix": -12219292800,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-014",
+    "zone": "Europe/Berlin",
+    "day": "2026-03-29",
+    "unix": 1774738800,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-015",
+    "zone": "Europe/Berlin",
+    "day": "2026-09-29",
+    "unix": 1790632800,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-016",
+    "zone": "Europe/Berlin",
+    "day": "2026-11-01",
+    "unix": 1793487600,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-017",
+    "zone": "Europe/Berlin",
+    "day": "2026-03-08",
+    "unix": 1772924400,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-018",
+    "zone": "Europe/Berlin",
+    "day": "2024-02-29",
+    "unix": 1709161200,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-019",
+    "zone": "Europe/Berlin",
+    "day": "2018-11-04",
+    "unix": 1541286000,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-020",
+    "zone": "Europe/Berlin",
+    "day": "2018-02-18",
+    "unix": 1518908400,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-021",
+    "zone": "Europe/Berlin",
+    "day": "2011-12-29",
+    "unix": 1325113200,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-022",
+    "zone": "Europe/Berlin",
+    "day": "2011-12-30",
+    "unix": 1325199600,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-023",
+    "zone": "Europe/Berlin",
+    "day": "2011-12-31",
+    "unix": 1325286000,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-024",
+    "zone": "Europe/Berlin",
+    "day": "2026-04-05",
+    "unix": 1775340000,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-025",
+    "zone": "Europe/Berlin",
+    "day": "2026-10-04",
+    "unix": 1791064800,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-026",
+    "zone": "Europe/Berlin",
+    "day": "1582-10-15",
+    "unix": -12219296008,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-027",
+    "zone": "America/Los_Angeles",
+    "day": "2026-03-29",
+    "unix": 1774767600,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-028",
+    "zone": "America/Los_Angeles",
+    "day": "2026-09-29",
+    "unix": 1790665200,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-029",
+    "zone": "America/Los_Angeles",
+    "day": "2026-11-01",
+    "unix": 1793516400,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-030",
+    "zone": "America/Los_Angeles",
+    "day": "2026-03-08",
+    "unix": 1772956800,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-031",
+    "zone": "America/Los_Angeles",
+    "day": "2024-02-29",
+    "unix": 1709193600,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-032",
+    "zone": "America/Los_Angeles",
+    "day": "2018-11-04",
+    "unix": 1541314800,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-033",
+    "zone": "America/Los_Angeles",
+    "day": "2018-02-18",
+    "unix": 1518940800,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-034",
+    "zone": "America/Los_Angeles",
+    "day": "2011-12-29",
+    "unix": 1325145600,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-035",
+    "zone": "America/Los_Angeles",
+    "day": "2011-12-30",
+    "unix": 1325232000,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-036",
+    "zone": "America/Los_Angeles",
+    "day": "2011-12-31",
+    "unix": 1325318400,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-037",
+    "zone": "America/Los_Angeles",
+    "day": "2026-04-05",
+    "unix": 1775372400,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-038",
+    "zone": "America/Los_Angeles",
+    "day": "2026-10-04",
+    "unix": 1791097200,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-039",
+    "zone": "America/Los_Angeles",
+    "day": "1582-10-15",
+    "unix": -12219264422,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-040",
+    "zone": "Asia/Kolkata",
+    "day": "2026-03-29",
+    "unix": 1774722600,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-041",
+    "zone": "Asia/Kolkata",
+    "day": "2026-09-29",
+    "unix": 1790620200,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-042",
+    "zone": "Asia/Kolkata",
+    "day": "2026-11-01",
+    "unix": 1793471400,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-043",
+    "zone": "Asia/Kolkata",
+    "day": "2026-03-08",
+    "unix": 1772908200,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-044",
+    "zone": "Asia/Kolkata",
+    "day": "2024-02-29",
+    "unix": 1709145000,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-045",
+    "zone": "Asia/Kolkata",
+    "day": "2018-11-04",
+    "unix": 1541269800,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-046",
+    "zone": "Asia/Kolkata",
+    "day": "2018-02-18",
+    "unix": 1518892200,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-047",
+    "zone": "Asia/Kolkata",
+    "day": "2011-12-29",
+    "unix": 1325097000,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-048",
+    "zone": "Asia/Kolkata",
+    "day": "2011-12-30",
+    "unix": 1325183400,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-049",
+    "zone": "Asia/Kolkata",
+    "day": "2011-12-31",
+    "unix": 1325269800,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-050",
+    "zone": "Asia/Kolkata",
+    "day": "2026-04-05",
+    "unix": 1775327400,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-051",
+    "zone": "Asia/Kolkata",
+    "day": "2026-10-04",
+    "unix": 1791052200,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-052",
+    "zone": "Asia/Kolkata",
+    "day": "1582-10-15",
+    "unix": -12219314008,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-053",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-03-29",
+    "unix": 1774692000,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-054",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-09-29",
+    "unix": 1790589600,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-055",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-11-01",
+    "unix": 1793440800,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-056",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-03-08",
+    "unix": 1772877600,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-057",
+    "zone": "Pacific/Kiritimati",
+    "day": "2024-02-29",
+    "unix": 1709114400,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-058",
+    "zone": "Pacific/Kiritimati",
+    "day": "2018-11-04",
+    "unix": 1541239200,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-059",
+    "zone": "Pacific/Kiritimati",
+    "day": "2018-02-18",
+    "unix": 1518861600,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-060",
+    "zone": "Pacific/Kiritimati",
+    "day": "2011-12-29",
+    "unix": 1325066400,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-061",
+    "zone": "Pacific/Kiritimati",
+    "day": "2011-12-30",
+    "unix": 1325152800,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-062",
+    "zone": "Pacific/Kiritimati",
+    "day": "2011-12-31",
+    "unix": 1325239200,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-063",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-04-05",
+    "unix": 1775296800,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-064",
+    "zone": "Pacific/Kiritimati",
+    "day": "2026-10-04",
+    "unix": 1791021600,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-065",
+    "zone": "Pacific/Kiritimati",
+    "day": "1582-10-15",
+    "unix": -12219255040,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-066",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-03-29",
+    "unix": 1774782000,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-067",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-09-29",
+    "unix": 1790679600,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-068",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-11-01",
+    "unix": 1793530800,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-069",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-03-08",
+    "unix": 1772967600,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-070",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2024-02-29",
+    "unix": 1709204400,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-071",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2018-11-04",
+    "unix": 1541329200,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-072",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2018-02-18",
+    "unix": 1518951600,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-073",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2011-12-29",
+    "unix": 1325156400,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-074",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2011-12-30",
+    "unix": 1325242800,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-075",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2011-12-31",
+    "unix": 1325329200,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-076",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-04-05",
+    "unix": 1775386800,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-077",
+    "zone": "Pacific/Pago_Pago",
+    "day": "2026-10-04",
+    "unix": 1791111600,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-078",
+    "zone": "Pacific/Pago_Pago",
+    "day": "1582-10-15",
+    "unix": -12219338232,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-079",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-03-29",
+    "unix": 1774753200,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-080",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-09-29",
+    "unix": 1790650800,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-081",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-11-01",
+    "unix": 1793502000,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-082",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-03-08",
+    "unix": 1772938800,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-083",
+    "zone": "America/Sao_Paulo",
+    "day": "2024-02-29",
+    "unix": 1709175600,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-084",
+    "zone": "America/Sao_Paulo",
+    "day": "2018-11-04",
+    "unix": 1541300400,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-085",
+    "zone": "America/Sao_Paulo",
+    "day": "2018-02-18",
+    "unix": 1518922800,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-086",
+    "zone": "America/Sao_Paulo",
+    "day": "2011-12-29",
+    "unix": 1325124000,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-087",
+    "zone": "America/Sao_Paulo",
+    "day": "2011-12-30",
+    "unix": 1325210400,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-088",
+    "zone": "America/Sao_Paulo",
+    "day": "2011-12-31",
+    "unix": 1325296800,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-089",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-04-05",
+    "unix": 1775358000,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-090",
+    "zone": "America/Sao_Paulo",
+    "day": "2026-10-04",
+    "unix": 1791082800,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-091",
+    "zone": "America/Sao_Paulo",
+    "day": "1582-10-15",
+    "unix": -12219281612,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-092",
+    "zone": "America/Havana",
+    "day": "2026-03-29",
+    "unix": 1774756800,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-093",
+    "zone": "America/Havana",
+    "day": "2026-09-29",
+    "unix": 1790654400,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-094",
+    "zone": "America/Havana",
+    "day": "2026-11-01",
+    "unix": 1793505600,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-095",
+    "zone": "America/Havana",
+    "day": "2026-03-08",
+    "unix": 1772946000,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-096",
+    "zone": "America/Havana",
+    "day": "2024-02-29",
+    "unix": 1709182800,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-097",
+    "zone": "America/Havana",
+    "day": "2018-11-04",
+    "unix": 1541304000,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-098",
+    "zone": "America/Havana",
+    "day": "2018-02-18",
+    "unix": 1518930000,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-099",
+    "zone": "America/Havana",
+    "day": "2011-12-29",
+    "unix": 1325134800,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-100",
+    "zone": "America/Havana",
+    "day": "2011-12-30",
+    "unix": 1325221200,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-101",
+    "zone": "America/Havana",
+    "day": "2011-12-31",
+    "unix": 1325307600,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-102",
+    "zone": "America/Havana",
+    "day": "2026-04-05",
+    "unix": 1775361600,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-103",
+    "zone": "America/Havana",
+    "day": "2026-10-04",
+    "unix": 1791086400,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-104",
+    "zone": "America/Havana",
+    "day": "1582-10-15",
+    "unix": -12219273032,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-105",
+    "zone": "America/New_York",
+    "day": "2026-03-29",
+    "unix": 1774756800,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-106",
+    "zone": "America/New_York",
+    "day": "2026-09-29",
+    "unix": 1790654400,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-107",
+    "zone": "America/New_York",
+    "day": "2026-11-01",
+    "unix": 1793505600,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-108",
+    "zone": "America/New_York",
+    "day": "2026-03-08",
+    "unix": 1772946000,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-109",
+    "zone": "America/New_York",
+    "day": "2024-02-29",
+    "unix": 1709182800,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-110",
+    "zone": "America/New_York",
+    "day": "2018-11-04",
+    "unix": 1541304000,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-111",
+    "zone": "America/New_York",
+    "day": "2018-02-18",
+    "unix": 1518930000,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-112",
+    "zone": "America/New_York",
+    "day": "2011-12-29",
+    "unix": 1325134800,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-113",
+    "zone": "America/New_York",
+    "day": "2011-12-30",
+    "unix": 1325221200,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-114",
+    "zone": "America/New_York",
+    "day": "2011-12-31",
+    "unix": 1325307600,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-115",
+    "zone": "America/New_York",
+    "day": "2026-04-05",
+    "unix": 1775361600,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-116",
+    "zone": "America/New_York",
+    "day": "2026-10-04",
+    "unix": 1791086400,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-117",
+    "zone": "America/New_York",
+    "day": "1582-10-15",
+    "unix": -12219275038,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-118",
+    "zone": "Pacific/Apia",
+    "day": "2026-03-29",
+    "unix": 1774695600,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-119",
+    "zone": "Pacific/Apia",
+    "day": "2026-09-29",
+    "unix": 1790593200,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-120",
+    "zone": "Pacific/Apia",
+    "day": "2026-11-01",
+    "unix": 1793444400,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-121",
+    "zone": "Pacific/Apia",
+    "day": "2026-03-08",
+    "unix": 1772881200,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-122",
+    "zone": "Pacific/Apia",
+    "day": "2024-02-29",
+    "unix": 1709118000,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-123",
+    "zone": "Pacific/Apia",
+    "day": "2018-11-04",
+    "unix": 1541239200,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-124",
+    "zone": "Pacific/Apia",
+    "day": "2018-02-18",
+    "unix": 1518861600,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-125",
+    "zone": "Pacific/Apia",
+    "day": "2011-12-29",
+    "unix": 1325152800,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-126",
+    "zone": "Pacific/Apia",
+    "day": "2011-12-30",
+    "unix": 1325239200,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-127",
+    "zone": "Pacific/Apia",
+    "day": "2011-12-31",
+    "unix": 1325239200,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-128",
+    "zone": "Pacific/Apia",
+    "day": "2026-04-05",
+    "unix": 1775300400,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-129",
+    "zone": "Pacific/Apia",
+    "day": "2026-10-04",
+    "unix": 1791025200,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-130",
+    "zone": "Pacific/Apia",
+    "day": "1582-10-15",
+    "unix": -12219337984,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-131",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-03-29",
+    "unix": 1774702800,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-132",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-09-29",
+    "unix": 1790602200,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-133",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-11-01",
+    "unix": 1793451600,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-134",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-03-08",
+    "unix": 1772888400,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-135",
+    "zone": "Australia/Lord_Howe",
+    "day": "2024-02-29",
+    "unix": 1709125200,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-136",
+    "zone": "Australia/Lord_Howe",
+    "day": "2018-11-04",
+    "unix": 1541250000,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-137",
+    "zone": "Australia/Lord_Howe",
+    "day": "2018-02-18",
+    "unix": 1518872400,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-138",
+    "zone": "Australia/Lord_Howe",
+    "day": "2011-12-29",
+    "unix": 1325077200,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-139",
+    "zone": "Australia/Lord_Howe",
+    "day": "2011-12-30",
+    "unix": 1325163600,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-140",
+    "zone": "Australia/Lord_Howe",
+    "day": "2011-12-31",
+    "unix": 1325250000,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-141",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-04-05",
+    "unix": 1775307600,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-142",
+    "zone": "Australia/Lord_Howe",
+    "day": "2026-10-04",
+    "unix": 1791034200,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-143",
+    "zone": "Australia/Lord_Howe",
+    "day": "1582-10-15",
+    "unix": -12219330980,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   },
+   {
+    "id": "SI-144",
+    "zone": "Africa/Cairo",
+    "day": "2026-03-29",
+    "unix": 1774735200,
+    "day_before_instant": "2026-03-28",
+    "day_at_instant": "2026-03-29"
+   },
+   {
+    "id": "SI-145",
+    "zone": "Africa/Cairo",
+    "day": "2026-09-29",
+    "unix": 1790629200,
+    "day_before_instant": "2026-09-28",
+    "day_at_instant": "2026-09-29"
+   },
+   {
+    "id": "SI-146",
+    "zone": "Africa/Cairo",
+    "day": "2026-11-01",
+    "unix": 1793484000,
+    "day_before_instant": "2026-10-31",
+    "day_at_instant": "2026-11-01"
+   },
+   {
+    "id": "SI-147",
+    "zone": "Africa/Cairo",
+    "day": "2026-03-08",
+    "unix": 1772920800,
+    "day_before_instant": "2026-03-07",
+    "day_at_instant": "2026-03-08"
+   },
+   {
+    "id": "SI-148",
+    "zone": "Africa/Cairo",
+    "day": "2024-02-29",
+    "unix": 1709157600,
+    "day_before_instant": "2024-02-28",
+    "day_at_instant": "2024-02-29"
+   },
+   {
+    "id": "SI-149",
+    "zone": "Africa/Cairo",
+    "day": "2018-11-04",
+    "unix": 1541282400,
+    "day_before_instant": "2018-11-03",
+    "day_at_instant": "2018-11-04"
+   },
+   {
+    "id": "SI-150",
+    "zone": "Africa/Cairo",
+    "day": "2018-02-18",
+    "unix": 1518904800,
+    "day_before_instant": "2018-02-17",
+    "day_at_instant": "2018-02-18"
+   },
+   {
+    "id": "SI-151",
+    "zone": "Africa/Cairo",
+    "day": "2011-12-29",
+    "unix": 1325109600,
+    "day_before_instant": "2011-12-28",
+    "day_at_instant": "2011-12-29"
+   },
+   {
+    "id": "SI-152",
+    "zone": "Africa/Cairo",
+    "day": "2011-12-30",
+    "unix": 1325196000,
+    "day_before_instant": "2011-12-29",
+    "day_at_instant": "2011-12-30"
+   },
+   {
+    "id": "SI-153",
+    "zone": "Africa/Cairo",
+    "day": "2011-12-31",
+    "unix": 1325282400,
+    "day_before_instant": "2011-12-30",
+    "day_at_instant": "2011-12-31"
+   },
+   {
+    "id": "SI-154",
+    "zone": "Africa/Cairo",
+    "day": "2026-04-05",
+    "unix": 1775340000,
+    "day_before_instant": "2026-04-04",
+    "day_at_instant": "2026-04-05"
+   },
+   {
+    "id": "SI-155",
+    "zone": "Africa/Cairo",
+    "day": "2026-10-04",
+    "unix": 1791061200,
+    "day_before_instant": "2026-10-03",
+    "day_at_instant": "2026-10-04"
+   },
+   {
+    "id": "SI-156",
+    "zone": "Africa/Cairo",
+    "day": "1582-10-15",
+    "unix": -12219300309,
+    "day_before_instant": "1582-10-14",
+    "day_at_instant": "1582-10-15"
+   }
+  ]
+ }
+}
