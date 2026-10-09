@@ -11,6 +11,8 @@
 //! * [`formulation`]: the formulation clock rule (stored facts, advisory
 //!   instants, stalled count, transitions without revision side effects).
 //! * [`children`]: subtask and comment rules (`decide`, ordered projections).
+//! * [`organize`]: project, tag and `task.tags` rules (normalized-name
+//!   uniqueness, active references, archive and tag deletion).
 //! * [`ai_policy`]: the pure AI route policy: local suitability, on-device-only,
 //!   per-owner/provider/consent-version remote consent, input and time limits.
 //! * [`proposal`]: navigator output validation, notes reduction and inert,
@@ -27,12 +29,12 @@
 
 pub mod ai_policy;
 pub mod calendar;
-pub mod formulation;
 pub mod children;
+pub mod formulation;
 pub mod normalization;
 pub mod organize;
-pub mod proposal;
 pub mod park;
+pub mod proposal;
 pub mod queries;
 pub mod task_rules;
 pub mod types;
