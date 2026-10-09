@@ -1,6 +1,6 @@
 # Brain Buddy Rust core and custom synchronization
 
-Specification updated October 9, 2026. The user selected the architectural direction; the concrete protocol and UX are proposals for review. This describes a future implementation, not a completed migration.
+Specification accepted October 9, 2026. The owner approved the prepared scope, design, governance proposal and residual risks after six-lens review and correction closure. The [acceptance record](approval.md) and [approved review status](evidence/026-native-20261009-1/accepted-summary.json) are authoritative; earlier pending labels in the frozen reviewed documents are historical. Complex slice sizing remains mandatory before implementation. This describes an accepted specification for future implementation, not a completed migration.
 
 The [historical ChatGPT Pages copy](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966) reflects the earlier proposal and has not been updated by this repository-only completion. These versioned files are authoritative.
 

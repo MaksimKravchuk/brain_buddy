@@ -1,6 +1,16 @@
 # Specification verification
 
-## Current native review and closure — October 9
+## Current owner acceptance — October 9
+
+**Specification planning is complete; the planning verdict is approved.** After being shown the final [approval packet](approval.md), six-lens review, all four correction closures, the 12/12 protocol checklist, the passing [CI for 962a7fa](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/37903755079) and [Claude re-review](https://github.com/MaksimKravchuk/brain_buddy/pull/305#issuecomment-6077167835), MaksimKravchuk explicitly answered “Yes” to accepting the prepared package and residual risks of custom sync, Rust/FFI and migration. The request retained complex-slice measurements before implementation.
+
+The [human-signoff.json](evidence/026-native-20261009-1/human-signoff.json) record passes the existing `load_human_signoff()` validator for run `026-native-20261009-1` and unchanged core digest `968a327f01a50fb7e14ef84b1d73ab0731efbdd227d75fdeedbad5a394045623`. The exact reply, presented question, source commit and retained conditions are preserved in [owner-acceptance.json](evidence/026-native-20261009-1/owner-acceptance.json). The [accepted summary](evidence/026-native-20261009-1/accepted-summary.json) supersedes the former missing-human-sign-off escalation. Its approval follows the already authorized native route and the actual closed findings; no original reviewer report or earlier failed execution is rewritten.
+
+Only decision/status records and this reading index change. Core requirements, plan, design, tasks, HTML and ADR proposal remain identical to the reviewed and approved source. Historical pending-approval labels in those frozen inputs now defer to approval.md. The original manifest's pre-acceptance approval.md hash is verified against source commit `962a7fa`, while all frozen core hashes still match current files. The existing slice-sizing, governance-enactment, implementation evidence and release gates remain conditions on later work, not unfinished specification decisions. No task is marked implemented.
+
+Acceptance-record validation checks the current core digest, original report/closure hashes, all 12 reviewer checklist dispositions, valid current sign-off and refusal of mismatched run/digest, new decision-record hashes, relative links and Spec Kit structure. Exact-SHA CI for this metadata publication is recorded on PR #305; prior CI is evidence for its named commit only.
+
+## Native review and closure before owner acceptance — October 9
 
 **The requested review completed with 6/6 native Codex subagents. Four distinct important findings are corrected and independently confirmed closed.** The owner explicitly instructed the conductor to use native subagents instead of invoking a reviewer CLI. That instruction authorizes this panel after the failed CLI attempts and supersedes the CLI/adapter-only routing and campaign-cap objection for this requested panel. It does not approve content, design, residual risk or implementation. Historical CLI failure counts below are not the current review count.
 
