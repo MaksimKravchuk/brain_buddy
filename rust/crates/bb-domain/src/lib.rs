@@ -8,10 +8,16 @@
 //!   `formulation.py`).
 //! * [`calendar`]: [`calendar::CalendarDay`] and time-zone conversions that keep
 //!   a calendar day distinct from an instant.
+//! * [`ai_policy`]: the pure AI route policy: local suitability, on-device-only,
+//!   per-owner/provider/consent-version remote consent, input and time limits.
+//! * [`proposal`]: navigator output validation, notes reduction and inert,
+//!   allow-listed command proposals applied only after explicit confirmation.
 //! * [`types`]: the frozen value types. The rule families and the
 //!   `decide`/`query` entry points land in later slices as they are
 //!   implemented, so no module here is an empty placeholder.
 
+pub mod ai_policy;
 pub mod calendar;
 pub mod normalization;
+pub mod proposal;
 pub mod types;
