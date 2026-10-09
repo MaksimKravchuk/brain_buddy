@@ -180,17 +180,12 @@ private struct TaskDetailForm: View {
                 commitAll()
                 isDeciding = true
             }
-            statusSection
-            if task.state == .waiting {
-                waitingSection
-            }
-            notesSection
-            organizeSection
-            tagsSection
+            propertiesSection
             SubtasksSection(task: task, isReadOnly: isReadOnly)
             CommentsSection(task: task, isReadOnly: isReadOnly)
             metadataSection
         }
+        .bbDenseList()
     }
 
     private var navigationTitle: String {
@@ -212,6 +207,14 @@ private struct TaskDetailForm: View {
                 }
             }
         }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                moreMenuContent
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
+            .accessibilityLabel("More actions")
+        }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
             Button("Done") { focus = nil }
@@ -220,73 +223,126 @@ private struct TaskDetailForm: View {
 
     // MARK: Sections
 
+    /// Title and notes together, as one card.
     private var titleSection: some View {
         Section {
-            if isReadOnly {
-                Text(task.title)
-                    .font(.title3.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-            } else {
-                TextField("Title", text: $title, axis: .vertical)
-                    .font(.title3.weight(.semibold))
-                    .focused($focus, equals: .title)
-                    .submitLabel(.done)
-                    .onSubmit { focus = nil }
-                    .onChange(of: title) { _, newValue in
-                        // A title is one line: Return (or a pasted line break) ends the edit.
-                        if newValue.contains(where: \.isNewline) {
-                            title = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
-                            focus = nil
-                        }
-                    }
-                    .accessibilityLabel("Title")
-            }
+            titleField
+            notesField
         } footer: {
-            problemText(for: .title)
+            problemFooter(.title, .notes)
         }
     }
 
-    @ViewBuilder private var statusSection: some View {
-        if let list = task.openList {
-            Section("List") {
-                Label(list.title, systemImage: list.symbolName)
-                    .accessibilityLabel("In \(list.title)")
-                Menu {
-                    ForEach(OpenList.allCases.filter { $0 != list }) { target in
-                        Button {
-                            requestMove(target)
-                        } label: {
-                            Label(target == .waiting ? "\(target.title)…" : target.title, systemImage: target.symbolName)
-                        }
+    @ViewBuilder private var titleField: some View {
+        if isReadOnly {
+            Text(task.title)
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+        } else {
+            TextField("Title", text: $title, axis: .vertical)
+                .font(.title3.weight(.semibold))
+                .focused($focus, equals: .title)
+                .submitLabel(.done)
+                .onSubmit { focus = nil }
+                .onChange(of: title) { _, newValue in
+                    // A title is one line: Return (or a pasted line break) ends the edit.
+                    if newValue.contains(where: \.isNewline) {
+                        title = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
+                        focus = nil
                     }
-                } label: {
-                    Label("Move to…", systemImage: "arrow.right.circle")
                 }
-                Button(action: complete) {
-                    Label("Complete", systemImage: "checkmark.circle")
-                }
-                Button(action: cancel) {
-                    Label("Cancel task", systemImage: "xmark.circle")
-                }
+                .accessibilityLabel("Title")
+        }
+    }
+
+    @ViewBuilder private var notesField: some View {
+        if isReadOnly {
+            if let details = task.details, !details.isEmpty {
+                Text(details)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text("No notes")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         } else {
-            Section("Status") {
-                Label(terminalLine, systemImage: terminalSymbol)
-                if let previous = task.lastOpenList {
-                    Text("Previously in \(previous.title)")
-                        .foregroundStyle(.secondary)
-                }
-                Button {
-                    isReopening = true
-                } label: {
-                    Label("Reopen…", systemImage: "arrow.uturn.backward.circle")
-                }
-            }
+            TextField("Notes, links, details…", text: $notes, axis: .vertical)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1...)
+                .focused($focus, equals: .notes)
+                .accessibilityLabel("Notes")
         }
     }
 
-    private var waitingSection: some View {
+    // MARK: Properties
+
+    /// Every property on its own 44 pt row: list, waiting for, project, due
+    /// date, priority and tags.
+    private var propertiesSection: some View {
         Section {
+            listRow
+            if task.state == .waiting {
+                waitingRow
+            }
+            projectRow
+            DueDateQuickPicker(day: task.dueDate, today: workspace.today, isDisabled: isReadOnly) { day in
+                guard day != task.dueDate else { return }
+                save(.organize, TaskChanges(dueDate: setOrClear(day)))
+            }
+            .labelStyle(.bbRow)
+            priorityRow
+            tagsRow
+        } footer: {
+            propertiesFooter
+        }
+    }
+
+    /// The current list with a menu to move the task, or for a finished task
+    /// the read-only status line.
+    @ViewBuilder private var listRow: some View {
+        if let list = task.openList {
+            LabeledContent {
+                Menu {
+                    moveMenuItems(from: list)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(list.title)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: BBMetrics.rowMinHeight)
+                .accessibilityLabel("List")
+                .accessibilityValue(list.title)
+                .accessibilityHint("Moves the task to another list.")
+            } label: {
+                Label("List", systemImage: list.symbolName)
+                    .labelStyle(.bbRow)
+            }
+        } else {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(terminalLine)
+                    if let previous = task.lastOpenList {
+                        Text("Previously in \(previous.title)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } icon: {
+                Image(systemName: terminalSymbol)
+            }
+            .labelStyle(.bbRow)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var waitingRow: some View {
+        Label {
             TextField("Who or what are you waiting on?", text: $waitingFor, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($focus, equals: .waitingFor)
@@ -299,117 +355,163 @@ private struct TaskDetailForm: View {
                     }
                 }
                 .accessibilityLabel("Waiting for")
-        } header: {
-            Text("Waiting for")
-        } footer: {
-            if let message = message(for: .waitingFor) {
-                InlineProblemText(message: message)
-            } else if let since = task.waitingSince {
-                Text("Waiting since \(since.formatted(date: .abbreviated, time: .omitted))")
+        } icon: {
+            Image(systemName: "clock")
+                .accessibilityHidden(true)
+        }
+        .labelStyle(.bbRow)
+    }
+
+    private var projectRow: some View {
+        Picker(selection: $projectID) {
+            Text("No project").tag(ProjectID?.none)
+            ForEach(workspace.projects()) { summary in
+                Text(summary.project.name).tag(Optional(summary.id))
             }
+            if let archived = archivedProject {
+                // Shown so the current value reads correctly; it cannot be
+                // chosen again because archived projects take no tasks.
+                Text("\(archived.name) (archived)").tag(Optional(archived.id))
+            }
+        } label: {
+            Label("Project", systemImage: "folder")
+                .labelStyle(.bbRow)
+        }
+        .disabled(isReadOnly)
+    }
+
+    private var priorityRow: some View {
+        Picker(selection: $priority) {
+            ForEach(TaskPriority.allCases, id: \.self) { priority in
+                Text(priority.title).tag(priority)
+            }
+        } label: {
+            Label("Priority", systemImage: "flag")
+                .labelStyle(.bbRow)
+        }
+        .disabled(isReadOnly)
+    }
+
+    /// Tag pills trailing in the row; tapping it opens the tag sheet while the
+    /// task is editable.
+    @ViewBuilder private var tagsRow: some View {
+        if isReadOnly {
+            tagsRowContent
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Tags")
+                .accessibilityValue(tagsSpokenValue)
+        } else {
+            Button {
+                isEditingTags = true
+            } label: {
+                tagsRowContent
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Tags")
+            .accessibilityValue(tagsSpokenValue)
+            .accessibilityHint("Opens the tag picker.")
         }
     }
 
-    private var notesSection: some View {
-        Section {
-            if isReadOnly {
-                if let details = task.details, !details.isEmpty {
-                    Text(details)
-                        .textSelection(.enabled)
-                } else {
-                    Text("No notes")
+    private var tagsRowContent: some View {
+        HStack(alignment: .center, spacing: BBSpacing.s3) {
+            Label("Tags", systemImage: "tag")
+                .labelStyle(.bbRow)
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: true, vertical: false)
+            Group {
+                if task.tagIDs.isEmpty {
+                    Text("No tags")
                         .foregroundStyle(.secondary)
-                }
-            } else {
-                TextField("Notes, links, details…", text: $notes, axis: .vertical)
-                    .lineLimit(3...)
-                    .focused($focus, equals: .notes)
-                    .accessibilityLabel("Notes")
-            }
-        } header: {
-            Text("Notes")
-        } footer: {
-            problemText(for: .notes)
-        }
-    }
-
-    private var organizeSection: some View {
-        Section {
-            DueDateQuickPicker(day: task.dueDate, today: workspace.today, isDisabled: isReadOnly) { day in
-                guard day != task.dueDate else { return }
-                save(.organize, TaskChanges(dueDate: setOrClear(day)))
-            }
-            Picker(selection: $priority) {
-                ForEach(TaskPriority.allCases, id: \.self) { priority in
-                    Text(priority.title).tag(priority)
-                }
-            } label: {
-                Label("Priority", systemImage: "flag")
-            }
-            .disabled(isReadOnly)
-            Picker(selection: $projectID) {
-                Text("No project").tag(ProjectID?.none)
-                ForEach(workspace.projects()) { summary in
-                    Text(summary.project.name).tag(Optional(summary.id))
-                }
-                if let archived = archivedProject {
-                    // Shown so the current value reads correctly; it cannot be
-                    // chosen again because archived projects take no tasks.
-                    Text("\(archived.name) (archived)").tag(Optional(archived.id))
-                }
-            } label: {
-                Label("Project", systemImage: "folder")
-            }
-            .disabled(isReadOnly)
-        } footer: {
-            problemText(for: .organize)
-        }
-    }
-
-    private var tagsSection: some View {
-        Section {
-            if task.tagIDs.isEmpty {
-                Text("No tags")
-                    .foregroundStyle(.secondary)
-            } else {
-                WrappingChipLayout(spacing: 6) {
-                    ForEach(task.tagIDs, id: \.self) { tagID in
-                        if let tag = workspace.tag(tagID) {
-                            TagPill(name: tag.name)
+                } else {
+                    WrappingChipLayout(spacing: 6) {
+                        ForEach(task.tagIDs, id: \.self) { tagID in
+                            if let tag = workspace.tag(tagID) {
+                                TagPill(name: tag.name)
+                            }
                         }
                     }
                 }
-                .padding(.vertical, 4)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Tags: \(tagNames.joined(separator: ", "))")
             }
-            if !isReadOnly {
-                Button {
-                    isEditingTags = true
-                } label: {
-                    Label("Edit tags", systemImage: "tag")
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(minHeight: BBMetrics.rowMinHeight)
+    }
+
+    /// The waiting-since line and any rejected property change, under the section.
+    @ViewBuilder private var propertiesFooter: some View {
+        let isWaiting = task.state == .waiting
+        let fields: [DetailField] = isWaiting ? [.waitingFor, .organize, .tags] : [.organize, .tags]
+        let messages = fields.compactMap { message(for: $0) }
+        let since = isWaiting && message(for: .waitingFor) == nil ? task.waitingSince : nil
+        if !messages.isEmpty || since != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(messages, id: \.self) { message in
+                    InlineProblemText(message: message)
+                }
+                if let since {
+                    Text("Waiting since \(since.formatted(date: .abbreviated, time: .omitted))")
                 }
             }
-        } header: {
-            Text("Tags")
-        } footer: {
-            problemText(for: .tags)
         }
     }
 
-    private var metadataSection: some View {
-        Section {
-            LabeledContent("Created", value: task.createdAt.formatted(date: .abbreviated, time: .shortened))
-            LabeledContent("Updated", value: task.updatedAt.formatted(.relative(presentation: .named)))
-            if task.serverID == nil {
-                Label(
-                    workspace.account == nil ? "Saved on this device" : "Not synced yet",
-                    systemImage: "arrow.triangle.2.circlepath"
-                )
-                .foregroundStyle(.secondary)
+    // MARK: Actions menu
+
+    /// Everything the toolbar's primary button does not cover: moving, cancelling
+    /// and (for a finished task) reopening.
+    @ViewBuilder private var moreMenuContent: some View {
+        if let list = task.openList {
+            Menu {
+                moveMenuItems(from: list)
+            } label: {
+                Label("Move to…", systemImage: "arrow.right.circle")
+            }
+            Button(action: cancel) {
+                Label("Cancel task", systemImage: "xmark.circle")
+            }
+        } else {
+            Button {
+                isReopening = true
+            } label: {
+                Label("Reopen…", systemImage: "arrow.uturn.backward.circle")
             }
         }
-        .font(.footnote)
+    }
+
+    /// The lists a task can move to from `list`; Waiting asks who or what first.
+    @ViewBuilder private func moveMenuItems(from list: OpenList) -> some View {
+        ForEach(OpenList.allCases.filter { $0 != list }) { target in
+            Button {
+                requestMove(target)
+            } label: {
+                Label(target == .waiting ? "\(target.title)…" : target.title, systemImage: target.symbolName)
+            }
+        }
+    }
+
+    // MARK: Metadata
+
+    /// One quiet line instead of a Created and an Updated row.
+    private var metadataSection: some View {
+        Section {
+            Text(metadataLine)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    private var metadataLine: String {
+        var parts = [
+            "Created \(task.createdAt.formatted(date: .abbreviated, time: .shortened))",
+            "Updated \(task.updatedAt.formatted(.relative(presentation: .named)))",
+        ]
+        if task.serverID == nil {
+            parts.append(workspace.account == nil ? "Saved on this device" : "Not synced yet")
+        }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Derived values
@@ -424,8 +526,9 @@ private struct TaskDetailForm: View {
         task.state == .cancelled ? HistoryKind.cancelled.symbolName : HistoryKind.completed.symbolName
     }
 
-    private var tagNames: [String] {
-        task.tagIDs.compactMap { workspace.tag($0)?.name }
+    private var tagsSpokenValue: String {
+        let names = task.tagIDs.compactMap { workspace.tag($0)?.name }
+        return names.isEmpty ? "None" : names.joined(separator: ", ")
     }
 
     private var archivedProject: ProjectRecord? {
@@ -435,9 +538,15 @@ private struct TaskDetailForm: View {
         return project
     }
 
-    @ViewBuilder private func problemText(for field: DetailField) -> some View {
-        if let message = message(for: field) {
-            InlineProblemText(message: message)
+    /// The rejected-change messages for `fields`, stacked; nothing when there are none.
+    @ViewBuilder private func problemFooter(_ fields: DetailField...) -> some View {
+        let messages = fields.compactMap { message(for: $0) }
+        if !messages.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(messages, id: \.self) { text in
+                    InlineProblemText(message: text)
+                }
+            }
         }
     }
 
