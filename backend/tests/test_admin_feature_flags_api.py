@@ -151,9 +151,7 @@ def _teardown(world: _FlagWorld, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def world(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Generator[_FlagWorld, None, None]:
+def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[_FlagWorld]:
     """An app with an authenticated operator, member and anonymous client.
 
     There is no more `admin_portal` flag to stage one way or the other

@@ -9,7 +9,7 @@
 #
 # The plugin depends only on the standard library, so this image installs
 # nothing: whatever the E2E stack observes here is Hermes' own code paths.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

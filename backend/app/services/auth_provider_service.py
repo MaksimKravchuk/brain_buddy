@@ -282,7 +282,7 @@ class AuthProviderService:
                 if not isinstance(result, dict):
                     raise ProviderError("provider_unavailable")
                 return result
-        except (httpx.HTTPError, ValueError, TypeError):
+        except httpx.HTTPError, ValueError, TypeError:
             raise ProviderError("provider_unavailable") from None
 
     def _key_for(self, provider: Provider, kid: str) -> RSAKey:
@@ -317,7 +317,7 @@ class AuthProviderService:
                     if key_id in refreshed:
                         raise ProviderError("provider_unavailable")
                     refreshed[key_id] = RSAKey.import_key(item)
-            except (JoseError, ValueError, TypeError, KeyError):
+            except JoseError, ValueError, TypeError, KeyError:
                 raise ProviderError("provider_unavailable") from None
             self._jwks[provider] = (now + 3600, refreshed)
             if kid not in refreshed:
@@ -344,7 +344,7 @@ class AuthProviderService:
             return decoded.claims
         except ProviderError:
             raise
-        except (JoseError, ValueError, TypeError, KeyError):
+        except JoseError, ValueError, TypeError, KeyError:
             raise ProviderError() from None
 
     def _times(self, values: Mapping[str, Any], *, require_exp: bool) -> int:
@@ -475,7 +475,7 @@ class AuthProviderService:
                 key,
                 algorithms=["ES256"],
             )
-        except (JoseError, ValueError, TypeError):
+        except JoseError, ValueError, TypeError:
             raise ProviderError("method_unavailable") from None
 
     def exchange_apple(
@@ -592,5 +592,5 @@ class AuthProviderService:
                     else None
                 ),
             )
-        except (ValueError, TypeError, KeyError):
+        except ValueError, TypeError, KeyError:
             raise ProviderError() from None

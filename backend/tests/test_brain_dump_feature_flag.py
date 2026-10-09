@@ -40,7 +40,7 @@ _CONSENT_BODY = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_config_cache() -> Generator[None, None, None]:
+def _reset_config_cache() -> Generator[None]:
     get_config.cache_clear()  # type: ignore[attr-defined]
     yield
     get_config.cache_clear()  # type: ignore[attr-defined]
