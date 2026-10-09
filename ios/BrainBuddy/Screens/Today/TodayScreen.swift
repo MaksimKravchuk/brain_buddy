@@ -16,9 +16,6 @@ struct TodayScreen: View {
         let _ = dayChangeCount
         let agenda = workspace.list(.agenda)
         List {
-            TodayHeader(day: workspace.today, summary: Self.summary(of: agenda))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
             if agenda.isEmpty {
                 EmptyStateView(
                     title: "Nothing due",
@@ -26,6 +23,7 @@ struct TodayScreen: View {
                     systemImage: "calendar"
                 )
                 .frame(maxWidth: .infinity)
+                .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else {
@@ -36,7 +34,10 @@ struct TodayScreen: View {
                 }
             }
         }
-        .navigationTitle("Today")
+        .listStyle(.plain)
+        .bbDenseList()
+        .bbScreenTitle("Today")
+        .bbScreenSubtitle(subtitle(summary: Self.summary(of: agenda)))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -47,6 +48,14 @@ struct TodayScreen: View {
             }
         }
         .refreshable { await workspace.syncNow() }
+    }
+
+    /// "Friday, October 9 · 2 overdue · 3 due today": the date, then the
+    /// summary when something is due.
+    private func subtitle(summary: String?) -> String {
+        let date = workspace.today.startDate().formatted(.dateTime.weekday(.wide).month(.wide).day())
+        guard let summary else { return date }
+        return "\(date) · \(summary)"
     }
 
     /// "2 overdue · 3 due today", or nil when nothing is due.
@@ -65,27 +74,6 @@ struct TodayScreen: View {
     }
 }
 
-/// Today's date as a flat header above the sections.
-private struct TodayHeader: View {
-    let day: CalendarDay
-    let summary: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: BBSpacing.s1) {
-            Text(day.startDate(), format: .dateTime.weekday(.wide).day().month(.wide))
-                .font(BBFont.title)
-                .foregroundStyle(BBColor.textPrimary)
-            if let summary {
-                Text(summary)
-                    .font(BBFont.secondary)
-                    .foregroundStyle(BBColor.textSecondary)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
 /// One of Overdue, Today or Upcoming.
 private struct AgendaSection: View {
     let section: TaskSection
@@ -99,7 +87,12 @@ private struct AgendaSection: View {
                 .taskActions(task)
             }
         } header: {
-            AgendaSectionHeader(title: title, systemImage: symbolName, count: section.tasks.count)
+            BBSectionHeader(
+                title,
+                count: section.tasks.count,
+                systemImage: symbolName,
+                tint: dateView == .overdue ? BBColor.dueText : nil
+            )
         }
     }
 
@@ -112,26 +105,4 @@ private struct AgendaSection: View {
 
     private var title: String { section.title ?? dateView?.title ?? "Due" }
     private var symbolName: String { dateView?.symbolName ?? "calendar" }
-}
-
-private struct AgendaSectionHeader: View {
-    let title: String
-    let systemImage: String
-    let count: Int
-
-    var body: some View {
-        HStack {
-            Label(title, systemImage: systemImage)
-            Spacer(minLength: BBSpacing.s2)
-            Text(count, format: .number)
-                .monospacedDigit()
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityText)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private var accessibilityText: String {
-        count == 1 ? "\(title), 1 task" : "\(title), \(count) tasks"
-    }
 }

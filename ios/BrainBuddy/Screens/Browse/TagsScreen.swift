@@ -15,7 +15,7 @@ struct TagsScreen: View {
 
     var body: some View {
         content
-            .navigationTitle("Tags")
+            .bbScreenTitle("Tags")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -55,6 +55,7 @@ struct TagsScreen: View {
                     row(summary)
                 }
             }
+            .bbDenseList()
         }
     }
 
@@ -114,13 +115,19 @@ struct TagsScreen: View {
     }
 }
 
-/// A tag pill with its open-task count. Used here and in the Lists hub.
+/// A tag as a one-line row (`#` in the icon column, name, open-task count).
 struct TagSummaryRow: View {
     let summary: TagSummary
 
     var body: some View {
-        HStack {
-            TagPill(name: summary.tag.name)
+        HStack(spacing: BBSpacing.s2) {
+            Label {
+                Text(summary.tag.name)
+                    .foregroundStyle(BBColor.textPrimary)
+            } icon: {
+                Image(systemName: "number")
+            }
+            .labelStyle(.bbRow)
             Spacer(minLength: BBSpacing.s2)
             // Plain slate count, the same as the Lists hub rows; nothing for zero.
             CountBadge(count: summary.openTaskCount)

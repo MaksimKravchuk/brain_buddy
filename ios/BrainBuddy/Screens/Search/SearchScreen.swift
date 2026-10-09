@@ -13,7 +13,7 @@ struct SearchScreen: View {
 
     var body: some View {
         content
-            .navigationTitle("Search")
+            .bbScreenTitle("Search")
             .searchable(text: $query, prompt: "Search tasks")
             .onSubmit(of: .search) {
                 recentStorage = RecentSearches.adding(query, to: recentStorage)
@@ -55,17 +55,31 @@ private struct SearchIdleView: View {
                             select(recent)
                         } label: {
                             Label(recent, systemImage: "clock.arrow.circlepath")
+                                .labelStyle(.bbRow)
                                 .foregroundStyle(BBColor.textPrimary)
                         }
                         .accessibilityHint("Searches again")
                     }
-                    Button("Clear recent searches", role: .destructive) { clear() }
+                    Button(role: .destructive) {
+                        clear()
+                    } label: {
+                        // The icon keeps its own colour: the row style would
+                        // otherwise paint it brand blue next to red text.
+                        Label {
+                            Text("Clear recent searches")
+                        } icon: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(BBColor.dangerText)
+                        }
+                        .labelStyle(.bbRow)
+                    }
                 } header: {
-                    Text("Recent searches")
+                    BBSectionHeader("Recent searches")
                 } footer: {
                     Text("Searches this \(ThisDevice.name)")
                 }
             }
+            .bbDenseList()
         }
     }
 }
@@ -92,7 +106,7 @@ private struct SearchResultsView: View {
                             .taskActions(task)
                         }
                     } header: {
-                        Text(SearchScreen.title(for: section))
+                        BBSectionHeader(SearchScreen.title(for: section), count: section.tasks.count)
                     } footer: {
                         if section.id == sections.last?.id {
                             Text("Searches this \(ThisDevice.name)")
@@ -100,6 +114,7 @@ private struct SearchResultsView: View {
                     }
                 }
             }
+            .bbDenseList()
         }
     }
 }
