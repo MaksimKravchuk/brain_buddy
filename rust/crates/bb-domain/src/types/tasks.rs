@@ -16,6 +16,7 @@ use super::review_state::{ClockBefore, Park};
 use super::vocabulary::{
     ChildAction, ChildState, OpenList, Priority, ProjectState, TagState, TaskAction, TaskState,
 };
+use crate::calendar::UtcInstant;
 use bb_protocol::wire::{Counter, Instant};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -98,6 +99,17 @@ pub struct Project {
     pub archived_at: Option<Instant>,
     /// An archive cleared its tasks' project before archives kept memberships.
     pub archived_before_lossless: bool,
+    /// When the project was created. Required, like Swift's `createdAt`; it
+    /// orders same-name Smart Add ties (oldest wins, see [`Project::age_key`]).
+    pub created_at: Instant,
+}
+
+impl Project {
+    /// The tie-break order of same-name active projects: oldest first, then
+    /// lowest ID (`(created_at, id)`, the Swift planner's and the server's).
+    pub fn age_key(&self) -> (UtcInstant, &str) {
+        (created_at_key(&self.created_at), self.id.as_str())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +119,23 @@ pub struct Tag {
     pub name: Name,
     pub state: TagState,
     pub revision: Counter,
+    /// When the tag was created; orders same-name Smart Add ties like
+    /// [`Project::created_at`].
+    pub created_at: Instant,
+}
+
+impl Tag {
+    /// The tie-break order of same-name active tags: `(created_at, id)`.
+    pub fn age_key(&self) -> (UtcInstant, &str) {
+        (created_at_key(&self.created_at), self.id.as_str())
+    }
+}
+
+/// A creation instant as the server compares it (microsecond datetimes). The
+/// wire type is RFC 3339, so an unparsable value cannot occur; it would sort
+/// first.
+fn created_at_key(instant: &Instant) -> UtcInstant {
+    UtcInstant::parse_rfc3339(instant.as_str()).unwrap_or(UtcInstant::EARLIEST)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -94,11 +94,12 @@ fn project(id: &str, name: &str, state: &str) -> Value {
     json!({
         "id": id, "name": name, "color": null, "state": state, "revision": "1",
         "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
+        "created_at": "2026-09-01T09:00:00Z",
     })
 }
 
 fn tag(id: &str, name: &str, state: &str) -> Value {
-    json!({ "id": id, "name": name, "state": state, "revision": "1" })
+    json!({ "id": id, "name": name, "state": state, "revision": "1", "created_at": "2026-09-01T09:00:00Z" })
 }
 
 fn settings(activated_at: Option<&str>) -> Value {
@@ -285,12 +286,13 @@ fn reference_store(owner: &str) -> Store {
             "state": row["state"], "revision": counter(&row, "revision"),
             "desired_outcome": row["desired_outcome"], "archived_at": row["archived_at"],
             "archived_before_lossless": row["archived_before_lossless"],
+            "created_at": row["created_at"],
         }));
     }
     for row in mine("tags") {
         store.tags.push(json!({
             "id": row["id"], "name": row["name"], "state": row["state"],
-            "revision": counter(&row, "revision"),
+            "revision": counter(&row, "revision"), "created_at": row["created_at"],
         }));
     }
     for row in mine("tasks") {

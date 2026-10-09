@@ -257,7 +257,7 @@ fn project_json(id: &str, state: &str) -> Value {
         "id": id, "name": format!("Project {id}"), "color": null, "state": state,
         "revision": "2", "desired_outcome": null,
         "archived_at": if state == "archived" { json!("2026-09-01T09:00:00Z") } else { Value::Null },
-        "archived_before_lossless": false
+        "archived_before_lossless": false, "created_at": "2026-09-01T09:00:00Z"
     })
 }
 

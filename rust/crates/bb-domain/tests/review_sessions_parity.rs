@@ -191,6 +191,7 @@ fn project(id: &str, name: &str, state: &str) -> Value {
     json!({
         "id": id, "name": name, "color": null, "state": state, "revision": "1",
         "desired_outcome": null, "archived_at": null, "archived_before_lossless": false,
+        "created_at": "2026-09-01T09:00:00Z",
     })
 }
 
