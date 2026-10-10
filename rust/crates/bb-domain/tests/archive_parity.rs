@@ -373,7 +373,15 @@ fn archive_026_fr_002_the_state_parameter_defaults_to_active_and_refuses_anythin
         assert_eq!(archive::parse_state_filter(Some(raw)), Ok(want), "{raw}");
     }
     let mut refused = 0;
-    for raw in ["bogus", "", "ACTIVE", "Archived", " all", "active,archived"] {
+    for raw in [
+        "bogus",
+        "",
+        "ACTIVE",
+        "Archived",
+        " all",
+        "active,archived",
+        "needs_next_action",
+    ] {
         let error = archive::parse_state_filter(Some(raw)).expect_err(raw);
         assert_eq!(
             (error.reason, error.field.as_deref()),
@@ -381,7 +389,7 @@ fn archive_026_fr_002_the_state_parameter_defaults_to_active_and_refuses_anythin
         );
         refused += 1;
     }
-    ran_all("refused state values", refused, 6);
+    ran_all("refused state values", refused, 7);
 }
 
 // ------------------------------------- parity: archive retains membership (T002)

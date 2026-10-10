@@ -649,7 +649,9 @@ pub fn projects(read_set: &ReadSet, filter: ProjectFilter) -> Vec<ProjectSummary
         .values()
         .filter(|project| match filter {
             ProjectFilter::All => true,
-            ProjectFilter::Active => project.state == ProjectState::Active,
+            ProjectFilter::Active | ProjectFilter::NeedsNextAction => {
+                project.state == ProjectState::Active
+            }
             ProjectFilter::Archived => project.state == ProjectState::Archived,
         })
         .collect();
@@ -665,7 +667,25 @@ pub fn projects(read_set: &ReadSet, filter: ProjectFilter) -> Vec<ProjectSummary
                 next_action_count,
             }
         })
+        .filter(|summary| filter != ProjectFilter::NeedsNextAction || summary.needs_next_action())
         .collect()
+}
+
+/// Whole-project facts for native eligibility, including projects with no tasks.
+/// Count before selecting a page; retain no map of every project's counters.
+fn project_summary(read_set: &ReadSet, project: &Project) -> ProjectSummary {
+    let (open_task_count, next_action_count) = read_set
+        .tasks
+        .values()
+        .filter(|task| task.project_id.as_ref() == Some(&project.id) && task.state.is_open())
+        .fold((0, 0), |(open, next), task| {
+            (open + 1, next + u32::from(task.state == TaskState::Next))
+        });
+    ProjectSummary {
+        project: project.clone(),
+        open_task_count,
+        next_action_count,
+    }
 }
 
 /// `GET /tags`: active tags by `(name.strip().casefold(), id)`, with the open
@@ -724,8 +744,8 @@ pub fn project_display(
     })
 }
 
-/// Native project/tag collections select bounded keys first, then count only
-/// their rows. The order and membership are the ordinary query family's rules.
+/// Native project/tag collections retain bounded keys and count whole selected
+/// projects. Needs-next-action eligibility uses whole-project counts first.
 pub fn classification_page(
     read_set: &ReadSet,
     query: &Query,
@@ -755,9 +775,16 @@ pub fn classification_page(
         Query::Projects { filter } => {
             for project in read_set.projects.values().filter(|p| match filter {
                 ProjectFilter::All => true,
-                ProjectFilter::Active => p.state == ProjectState::Active,
+                ProjectFilter::Active | ProjectFilter::NeedsNextAction => {
+                    p.state == ProjectState::Active
+                }
                 ProjectFilter::Archived => p.state == ProjectState::Archived,
             }) {
+                if *filter == ProjectFilter::NeedsNextAction
+                    && !project_summary(read_set, project).needs_next_action()
+                {
+                    continue;
+                }
                 select(project.name.as_str(), project.id.as_str());
             }
         }

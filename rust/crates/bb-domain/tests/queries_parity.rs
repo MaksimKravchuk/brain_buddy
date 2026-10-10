@@ -875,6 +875,82 @@ fn queries_026_fr_017_inbox_count_is_projectless_but_date_counts_keep_assigned_t
 // ----------------------------------------------------------- projects and tags
 
 #[test]
+fn queries_026_fr_009_needs_next_action_uses_whole_project_counts_before_paging() {
+    let member = |id: &str, state: &str, project_id: &str| {
+        with(task(id, id, state, 0), "project_id", json!(project_id))
+    };
+    let mut tasks = vec![
+        member("t-next", "next", "p-next"),
+        member("t-waiting", "waiting", "p-waiting"),
+        member("t-inbox", "inbox", "p-waiting"),
+        member("t-someday", "someday", "p-waiting"),
+        member("t-closed", "completed", "p-waiting"),
+        member("t-someday-only", "someday", "p-someday"),
+        member("t-ended", "cancelled", "p-ended"),
+    ];
+    // A Next member outside the first 200 member rows still excludes its project.
+    tasks.extend((0..201).map(|n| member(&format!("t-hidden-{n:03}"), "waiting", "p-hidden")));
+    tasks.push(member("t-hidden-z-next", "next", "p-hidden"));
+    let read_set = Store {
+        tasks,
+        projects: vec![
+            project("p-empty", "A empty", "active"),
+            project("p-next", "B next", "active"),
+            project("p-waiting", "C waiting", "active"),
+            project("p-someday", "D someday", "active"),
+            project("p-archived", "E archived", "archived"),
+            project("p-ended", "F ended", "active"),
+            project("p-hidden", "G hidden next", "active"),
+        ],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query = serde_json::from_value(json!({
+        "kind":"projects", "filter":"needs_next_action"
+    }))
+    .unwrap();
+    let expected = projects(&read_set, ProjectFilter::NeedsNextAction);
+    assert_eq!(
+        expected
+            .iter()
+            .map(|row| (
+                row.project.id.as_str(),
+                row.open_task_count,
+                row.next_action_count
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("p-empty", 0, 0),
+            ("p-waiting", 3, 0),
+            ("p-someday", 1, 0),
+            ("p-ended", 0, 0)
+        ]
+    );
+    for limit in [1, 2, 200] {
+        let mut after = None;
+        let mut listed = Vec::new();
+        loop {
+            let (result, next) =
+                queries::classification_page(&read_set, &query, limit, after.as_deref()).unwrap();
+            let QueryResult::Projects(page) = result else {
+                panic!("projects");
+            };
+            assert!(page.len() <= limit as usize);
+            assert!(page.iter().all(|row| row.needs_next_action()));
+            listed.extend(page);
+            after = next;
+            if after.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            listed, expected,
+            "eligibility, global counters and ordering survive pagination"
+        );
+    }
+}
+
+#[test]
 fn queries_026_fr_009_reference_store_projects_and_tags_follow_the_server_order() {
     let a = reference_store(OWNER_A).read_set();
     let row = |summary: &bb_domain::types::ProjectSummary| {
