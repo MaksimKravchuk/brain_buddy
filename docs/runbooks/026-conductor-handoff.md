@@ -6,13 +6,13 @@ The authoritative plan is `specs/026-rust-core-sync/tasks.md`: the `## PR-сре
 
 ## Progress
 
-**32 of 64 slices are merged.** Merged so far:
+**33 of 64 slices are merged.** Merged so far:
 
 - **Foundation:** PR-01 to PR-06, plus PR-61
 - **Rust rules:** PR-07 to PR-16, plus PR-62
 - **Facades:** PR-17 to PR-19
 - **Durable jobs:** PR-20, PR-21 and PR-23, plus the PR-64 runner (#324)
-- **Client sync:** PR-34 to PR-39
+- **Client sync:** PR-34 to PR-39, plus PR-41 (legacy store import, #350)
 - **Other:** PR-47 (AI policy), PR-53 (web compat)
 
 ### Open PRs (all opened by this session, all stacked)
@@ -21,9 +21,8 @@ The authoritative plan is `specs/026-rust-core-sync/tasks.md`: the `## PR-сре
 |---|---|---|---|---|
 | PR-24 agent job adapters | #347 | `claude/026-agent-adapter` | main | All review threads resolved. CI running on `7d29c466` (a main merge after a taxonomy conflict). It was green on the previous head. **Merge when CI is green.** |
 | PR-22 Review job adapter | #349 | `claude/026-review-job-adapter` | main | All threads resolved. CI running on `bc542895`. **Merge when green.** |
-| PR-41 legacy store import | #350 | `claude/026-legacy-import` | main | All threads resolved. CI running on `d503fc7f`. The Swift kit compiled and passed on the previous head; the iOS and Mac app lanes still need a green run. **Merge when green.** |
-| PR-42 legacy outbox classify | #351 | `claude/026-legacy-outbox` | #350 | All threads resolved. CI running on `c0e24097`. Merge after #350, after first merging main into it. |
-| PR-64 scheduler handoff | #352 | `claude/026-scheduler-handoff` | #347 and #349 | **Two open review findings; see below.** Merge after #347 and #349. |
+| PR-42 legacy outbox classify | #351 | `claude/026-legacy-outbox` | main (its base #350 is merged) | All threads resolved. CI running on `c0e24097`. **Merge when green**, after first merging `origin/main` into it if the secret scan complains. |
+| PR-64 scheduler handoff | #352 | `claude/026-scheduler-handoff` | #347 and #349 | Both review findings are fixed in `748b1c96` and their threads resolved. CI running. Merge after #347 and #349. See the note below on the full suite. |
 
 ### In-progress slices (never pushed as PRs)
 
@@ -69,16 +68,18 @@ These are pushed as **draft WIP PRs** so nothing is lost. Each PR body lists the
 
 ## What to do next, in order
 
-1. **Merge the green PRs in stack order: #347 and #349, then #350, then #351.**
+1. **Merge the green PRs in stack order: #347, #349 and #351, then #352.**
    - Use `merge_method: merge` and the exact 40-char head SHA from `git ls-remote`.
    - Merging pre-approval: the owner pre-approved merging every slice PR, ASK-class included.
    - Before merging a stacked PR whose base has moved, merge `origin/main` into it and push. The Gitleaks secret scan fails with "could not verify a safe commit range" unless current `main` is an ancestor of the PR head.
-2. **Finish #352 (PR-64).** Two review findings are open on it:
-   - **Boot recovery ordering** (claude[bot] review). With `BRAIN_BUDDY_DURABLE_SCHEDULER` ON, `mark_interrupted_exchanges()` runs in the `agent.recover:boot` job on the worker thread after the app is serving requests. It then marks live exchanges too, because `interrupted_exchanges()` has no boot cutoff.
-     - Fix: keep the marking synchronous in `create_app()` in both modes. Pass `before_marking=` to record the per-run `agent.recover` lookup jobs, so only the lookups run on the worker.
-   - **One serial worker** (Codex P1). All five responsibilities share one `JobWorker`, so a backlog in agent observation (up to 200 runs, each up to the short-call deadline) starves voice, privacy and Review jobs.
-     - Fix: one `JobWorker` per lane (agent: observe and recover; voice; maintenance: privacy and Review) over the same ledger. Each worker claims only its own job types. Add a type filter to `claim_due` if it lacks one.
-   - Reply on both threads before pushing the fix, then resolve them.
+2. **Land #352 (PR-64).** Both review findings are fixed in `748b1c96`:
+   - **Boot recovery ordering.** `AgentRecoveryAdapter.boot_sweep()` now marks interrupted exchanges synchronously in `create_app()` before the worker starts and before any request is served, so only the per-run lookups run on the worker.
+   - **Worker lanes.** `WorkerLanes` in `worker.py` runs one `JobWorker` per lane:
+     - `maintenance`: Review and privacy;
+     - `agent`: observation and recovery;
+     - `voice`: voice, only when its cadence is above 0.
+   - **Full suite not yet run on the final code.** It was stopped at about 61% with no failures. The pre-fix run was green: 5596 passed, 98.41% coverage. CI runs the full suite. If it is red, fix it on this branch.
+   - **Budget:** `main.py` + `worker.py` come to about 390 product lines against an advisory 350, and `agent_adapter.py` is a third product file. This is acceptable under the advisory-budget decision.
    - **Owner question still open:** is the boot-time env gate `BRAIN_BUDDY_DURABLE_SCHEDULER` (default OFF, read once at startup, documented in `.env.example`) acceptable as the plan's "recorded default-OFF/storage epoch gate"? No process-level storage epoch exists yet.
 3. **Continue the in-progress slices above** (PR-25 and PR-43) from their pushed WIP branches.
 4. **Then follow the slice map.** A slice is ready when every `depends_on` entry has merged.
