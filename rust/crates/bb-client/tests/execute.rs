@@ -764,6 +764,7 @@ fn execute_026_fr_001_v1_store_upgrades_and_keeps_its_queued_work() {
             "DROP TABLE visible_records;
              ALTER TABLE outbox DROP COLUMN projection_generation;
              ALTER TABLE outbox DROP COLUMN local_result;
+             ALTER TABLE sync_meta DROP COLUMN projection_stale;
              PRAGMA user_version = 1;",
         )
         .unwrap();

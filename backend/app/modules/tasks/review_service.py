@@ -2039,10 +2039,12 @@ class ReviewService:
         """The review state of one owner at the service clock (http §5)."""
 
         now = self.clock()
-        settings = self.settings_for(owner_id)
         rust = self.rust(owner_id)
         if rust is not None:
-            return self._state_from(settings, rust.state(owner_id=owner_id, now=now))
+            # The facade reads the settings once and answers with them, so the
+            # response is derived from the one snapshot it describes.
+            return self._state_from(rust.state(owner_id=owner_id, now=now))
+        settings = self.settings_for(owner_id)
         clock_settings = settings.clock_settings()
         tasks = self.task_repo.list_for_owner(owner_id=owner_id)
         # A receipt hides its task only while the task is still at the revision
@@ -2093,13 +2095,11 @@ class ReviewService:
         )
 
     @staticmethod
-    def _state_from(
-        settings: ReviewSettingsDocument, answer: StateAnswer
-    ) -> ReviewStateView:
+    def _state_from(answer: StateAnswer) -> ReviewStateView:
         """The core's answer as this module's view of ``GET /review/state``."""
 
         return ReviewStateView(
-            settings=settings,
+            settings=answer.settings,
             explainer_seen=answer.explainer_seen,
             grace_until=answer.grace_until,
             last_counted_review_at=answer.last_counted_review_at,

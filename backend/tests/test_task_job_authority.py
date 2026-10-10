@@ -336,6 +336,42 @@ def test_026_FR_011_container_resolves_scope_authority_from_identity(
     assert titles == ["Wired"]
 
 
+def test_026_FR_011_an_owner_whose_deletion_has_begun_cannot_be_written_for(
+    container: Container,
+) -> None:
+    from app.schemas.auth import User
+
+    container.user_repo.create(
+        User(id=OWNER_A, email="authority-del@example.com", created_at=utcnow())
+    )
+    jobs = container.job_repository
+    jobs.ensure_scheduled(job_type=TYPE, dedup_key="deleting", run_at=utcnow())
+    lease = jobs.claim_due(owner="w1", types=(TYPE,), now=utcnow(), lease_for=LEASE)
+    assert lease is not None
+
+    with container.job_execution.executing(lease):
+        container.task_service.create_task(
+            TaskCreateRequest(title="Before"),
+            owner_id=OWNER_A,
+            idempotency_key="deleting-1",
+        )
+        # A purge marks the deletion first, wipes the data and removes the
+        # user last: from the mark on, no job may write for the owner.
+        container.user_repo.mutate(
+            OWNER_A,
+            lambda user: user.model_copy(update={"deletion_requested_at": utcnow()}),
+        )
+        with pytest.raises(ScopeRevokedError):
+            container.task_service.create_task(
+                TaskCreateRequest(title="During deletion"),
+                owner_id=OWNER_A,
+                idempotency_key="deleting-2",
+            )
+
+    titles = [t.title for t in container.task_repo.list_for_owner(owner_id=OWNER_A)]
+    assert titles == ["Before"]
+
+
 # --- the Review application ports -------------------------------------------
 
 
