@@ -501,3 +501,21 @@ extension RustDomainFacade {
         return shown
     }
 }
+
+
+extension RustDomainFacade {
+    public func workspaceProjectDisplayQuery(_ project: ProjectID,
+                                              bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
+        return try RustJSON.data(["kind": "project_display", "project_id": ids.project(project)])
+    }
+
+    public func workspaceProjectDisplay(from result: Data) throws -> ProjectDisplay {
+        let root = try RustJSON.object(result)
+        guard try root.string("kind") == "project_display" else { throw RustDomainError.malformedResult }
+        let value = try root.object("value")
+        return ProjectDisplay(isArchived: try value.bool("is_archived"),
+            acceptsNewTasks: try value.bool("accepts_new_tasks"),
+            showsPreLosslessLine: try value.bool("shows_pre_lossless_line"), label: try value.string("label"))
+    }
+}

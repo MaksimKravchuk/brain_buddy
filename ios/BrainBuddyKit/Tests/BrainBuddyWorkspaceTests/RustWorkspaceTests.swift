@@ -227,3 +227,56 @@ extension RustWorkspaceTests {
         try await runtime.close()
     }
 }
+
+
+extension RustWorkspaceTests {
+    @Test("026-FR-025: ProjectDisplay sees a completed membership outside the prepared task page")
+    @MainActor
+    func projectDisplayUsesWholeCanonicalMembership() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let date = Date(timeIntervalSince1970: 1_790_000_000)
+        let project = ProjectID("project_legacy_archive")
+        let ended = TaskID("task_completed_member")
+        var source = GTDState.empty
+        source.projects[project] = ProjectRecord(id: project, name: "Retained project", state: .archived,
+            createdAt: date, archivedAt: date, archivedBeforeLossless: true)
+        source.tasks[ended] = TaskRecord(id: ended, title: "Retained completed task", state: .completed,
+            projectID: project, completedAt: date, orderKey: 1, createdAt: date, updatedAt: date)
+        for index in 0..<201 {
+            let id = TaskID("task_inbox_\(index)")
+            source.tasks[id] = TaskRecord(id: id, title: "Inbox \(index)", state: .inbox,
+                orderKey: index, createdAt: date, updatedAt: date)
+        }
+        let sourceURL = directory.appendingPathComponent("document.json")
+        let database = directory.appendingPathComponent("store.sqlite3")
+        try StoreDocumentCoding.makeEncoder().encode(StoreDocument(base: source)).write(to: sourceURL)
+        let bridge = try RustBridgeRuntime()
+        _ = try await bridge.importLegacyStore(.init(workspaceID: "local", databasePath: database.path,
+            sourcePath: sourceURL.path, now: "2026-10-10T00:00:00Z"))
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: database)
+        let workspace = Workspace(store: ControlledStore(), sync: nil,
+            rust: RustWorkspaceSelection(runtime: runtime,
+                facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC"))), now: { date })
+        #expect(workspace.projectDisplayReadiness(project) == .notRequested)
+        await workspace.load()
+        await workspace.prepareProjectSummary(project)
+        await workspace.prepareList(.list(.inbox))
+        #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).count == 200)
+        #expect(workspace.state.tasks[ended] == nil)
+        #expect(GTDQueries.projectDisplay(project, in: workspace.state)?.showsPreLosslessLine == true)
+        await workspace.prepareProjectDisplay(project)
+        #expect(workspace.projectDisplayReadiness(project) == .ready)
+        let display = try #require(workspace.projectDisplay(project))
+        #expect(display.isArchived)
+        #expect(!display.acceptsNewTasks)
+        #expect(!display.showsPreLosslessLine)
+        #expect(display.label == "Retained project · archived")
+        let missing = ProjectID("project_missing")
+        await workspace.prepareProjectDisplay(missing)
+        #expect(workspace.projectDisplayReadiness(missing) == .failed("not_found"))
+        #expect(workspace.projectDisplay(missing) == nil)
+        await workspace.closeRuntime()
+    }
+}
