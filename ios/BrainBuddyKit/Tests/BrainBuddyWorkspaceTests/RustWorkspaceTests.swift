@@ -64,7 +64,7 @@ struct RustWorkspaceTests {
         await first.value
         #expect(await controlled.callCount() == 1)
         #expect(cache.page(for: query)?.collectionNextCursor == "page-two")
-        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true))
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true, projectionGeneration: 1))
         let next = Task { await cache.nextPage(query) }
         await controlled.waitForCalls(2)
         #expect(await controlled.lastCursor() == "page-two")
@@ -73,14 +73,22 @@ struct RustWorkspaceTests {
         await controlled.complete(1, generation: "1")
         await next.value
         #expect(await controlled.callCount() == 2)
-        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasPrevious: true))
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasPrevious: true, projectionGeneration: 1))
         let back = Task { await cache.previousPage(query) }
         await controlled.waitForCalls(3)
         #expect(await controlled.lastCursor() == nil)
         await controlled.complete(2, generation: "1", nextCursor: "page-two")
         await back.value
         #expect(cache.entries.count == 1)
-        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true))
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true, projectionGeneration: 1))
+        let otherQuery = Data("{\"kind\":\"projects\"}".utf8)
+        let other = Task { await cache.prepare(otherQuery) }
+        await controlled.waitForCalls(4)
+        await controlled.complete(3, generation: "2")
+        await other.value
+        #expect(cache.generationFloor == 2)
+        #expect(cache.pageState(for: otherQuery).projectionGeneration == 2)
+        #expect(cache.pageState(for: query).projectionGeneration == 1)
     }
 
     @Test("026-FR-001: a recovered prepared gesture reuses the committed receipt before any fresh ID can be minted")

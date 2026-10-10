@@ -15,11 +15,14 @@ public struct WorkspaceQueryPageState: Equatable, Sendable {
     public let readiness: WorkspaceQueryReadiness
     public let hasPrevious: Bool
     public let hasNext: Bool
+    public let projectionGeneration: UInt64?
 
-    public init(readiness: WorkspaceQueryReadiness, hasPrevious: Bool = false, hasNext: Bool = false) {
+    public init(readiness: WorkspaceQueryReadiness, hasPrevious: Bool = false, hasNext: Bool = false,
+                projectionGeneration: UInt64? = nil) {
         self.readiness = readiness
         self.hasPrevious = hasPrevious
         self.hasNext = hasNext
+        self.projectionGeneration = projectionGeneration
     }
 }
 
@@ -75,7 +78,8 @@ final class RustWorkspaceAdapter {
             return WorkspaceQueryPageState(readiness: entry.readiness)
         }
         return WorkspaceQueryPageState(readiness: .ready, hasPrevious: !entry.history.isEmpty,
-                                       hasNext: Self.nextCursor(page) != nil)
+                                       hasNext: Self.nextCursor(page) != nil,
+                                       projectionGeneration: UInt64(page.projectionGeneration))
     }
 
     func recordFailure(_ query: Data, code: String) {
