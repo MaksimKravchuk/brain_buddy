@@ -120,8 +120,8 @@ struct DecisionCardSheet: View {
         .interactiveDismissDisabled(formIsDirty)
         .onAppear(perform: recordOpenedWording)
         .task {
-            try? await workspace.prepareReviewRead(sourceRead)
-            if review == nil { await workspace.prepareTaskDetail(taskID) }
+            if let reviewRead { try? await workspace.prepareReviewRead(reviewRead) }
+            else { await workspace.prepareTaskDetail(taskID) }
             recordOpenedWording()
         }
         .onChange(of: path) { _, newPath in
@@ -144,7 +144,7 @@ struct DecisionCardSheet: View {
         } else if let task = decisionTask, !showsStale(task) {
             DecisionCardContent(
                 model: DecisionCardModel(task: task, workspace: workspace,
-                    formulation: workspace.reviewFormulation(taskID, read: sourceRead)), stallReason: $stallReason, problem: problem,
+                formulation: cardFormulation), stallReason: $stallReason, problem: problem,
                 onChoose: choose
             )
         } else {
@@ -156,14 +156,12 @@ struct DecisionCardSheet: View {
     }
 
     private var reviewReadiness: WorkspaceQueryReadiness {
-        let state = workspace.reviewReadiness(sourceRead)
-        guard state == .ready, review == nil else { return state }
+        if let reviewRead { return workspace.reviewReadiness(reviewRead) }
         return workspace.taskDetailReadiness(taskID)
     }
 
-    private var sourceRead: WorkspaceReviewRead {
-        if let review { return .queue(.decisions, review.sessionID) }
-        return .formulation(taskID)
+    private var reviewRead: WorkspaceReviewRead? {
+        review.map { .queue(.decisions, $0.sessionID) }
     }
 
     private var decisionTask: TaskRecord? {
@@ -172,7 +170,23 @@ struct DecisionCardSheet: View {
     }
 
     private func retryReads() {
-        Task { try? await workspace.prepareReviewRead(sourceRead); if review == nil { await workspace.prepareTaskDetail(taskID) }; recordOpenedWording() }
+        Task {
+            if let reviewRead { try? await workspace.prepareReviewRead(reviewRead) }
+            else { await workspace.prepareTaskDetail(taskID) }
+            recordOpenedWording()
+        }
+    }
+
+    /// The card's wording, metadata, and runtime admission proof come from
+    /// one exact rendered source page in either presentation context.
+    private var cardFormulation: RustWorkspaceFormulation? {
+        if let reviewRead { return workspace.reviewFormulation(taskID, read: reviewRead) }
+        return workspace.taskDetailFormulation(taskID)
+    }
+
+    private func cardShownTask() -> ShownTask? {
+        if let reviewRead { return workspace.reviewShownTask(taskID, read: reviewRead) }
+        return workspace.taskDetailShownTask(taskID)
     }
 
     // MARK: Staleness (FR-011)
@@ -186,8 +200,7 @@ struct DecisionCardSheet: View {
     }
 
     private func recordOpenedWording() {
-        guard opened == nil, let task = decisionTask,
-              let stamp = workspace.reviewShownTask(taskID, read: sourceRead) else { return }
+        guard opened == nil, let task = decisionTask, let stamp = cardShownTask() else { return }
         opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, task: task, stamp: stamp)
     }
 
@@ -198,12 +211,11 @@ struct DecisionCardSheet: View {
     }
 
     private var currentlyAsks: Bool {
-        workspace.reviewFormulation(taskID, read: sourceRead)?.classification.asksForDecision == true
+        cardFormulation?.classification.asksForDecision == true
     }
 
     private func decideAgain() {
-        guard let task = decisionTask,
-              let stamp = workspace.reviewShownTask(taskID, read: sourceRead) else { return }
+        guard let task = decisionTask, let stamp = cardShownTask() else { return }
         opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, task: task, stamp: stamp)
         isStale = false
         problem = nil
