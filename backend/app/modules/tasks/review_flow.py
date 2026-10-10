@@ -67,6 +67,7 @@ from .review_service import (
     SessionResultDocument,
     review_error,
 )
+from .rust_review_facade import ReviewRefused, RustReviewFacade
 from .service import serialized_write
 
 logger = logging.getLogger("app.modules.tasks.review")
@@ -219,6 +220,17 @@ class ReviewFlowService:
         )
         if record is not None:
             return SessionResultDocument.model_validate(record.response_body).session
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            return self._start_with_rust(
+                rust,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         if payload.id is not None:
             stored = self.task_repo.get_review_session(owner_id, payload.id)
             if stored is not None:
@@ -264,6 +276,45 @@ class ReviewFlowService:
         _log_run(session, event="start", outcome="applied", t0=started)
         return session
 
+    def _start_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        payload: SessionStartRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> ReviewSessionDocument:
+        """A run started by the shared core, with any open run it replaces."""
+
+        try:
+            outcome = rust.start_session(payload, owner_id=owner_id, now=self.clock())
+        except ReviewRefused as refused:
+            _log_refusal(owner_id, refused.entity_id or "-", refused.reason)
+            if refused.reason == "open_session_exists":
+                raise OpenSessionExistsError(refused.entity_id or "") from None
+            raise review_error(refused.reason) from None
+        session = outcome.session
+        if not outcome.changed:
+            _log_run(session, event="start", outcome="already_applied", t0=started)
+            return session
+        result = SessionResultDocument(session=session, replaced=outcome.replaced)
+        self.review._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=session.id,
+            response=result,
+        )
+        self.review.write_sessions(result, owner_id=owner_id)
+        for run in outcome.replaced:
+            _log_run(run, event="replaced", outcome="applied", t0=started)
+        _log_run(session, event="start", outcome="applied", t0=started)
+        return session
+
     def get_session(self, session_id: str, *, owner_id: str) -> ReviewSessionDocument:
         """The owner's run; unknown and foreign ids are the same 404."""
 
@@ -299,6 +350,18 @@ class ReviewFlowService:
         )
         if record is not None:
             return SessionResultDocument.model_validate(record.response_body).session
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            return self._progress_with_rust(
+                rust,
+                session_id,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         session = self.get_session(session_id, owner_id=owner_id)
         _require_run_steps(session, payload)
         digest = progress_digest(payload)
@@ -324,6 +387,51 @@ class ReviewFlowService:
         )
         self.review.write_sessions(result, owner_id=owner_id)
         _log_run(merged, event="progress", outcome=outcome, t0=started)
+        return merged
+
+    def _progress_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        session_id: str,
+        payload: SessionProgressRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> ReviewSessionDocument:
+        """A progress change merged by the shared core, replay-safe by id."""
+
+        try:
+            outcome = rust.progress_session(
+                session_id, payload, owner_id=owner_id, now=self.clock()
+            )
+        except ReviewRefused as refused:
+            _log_refusal(owner_id, session_id, refused.reason)
+            if refused.reason == "step_outside_run":
+                raise StepOutsideRunError(
+                    "active_seconds" if refused.field == "active_seconds" else "step"
+                ) from None
+            raise review_error(refused.reason) from None
+        merged = outcome.session
+        if outcome.changed:
+            label = "applied"
+        elif payload.progress_id in merged.applied_progress:
+            label = "already_applied"
+        else:
+            label = "ignored"
+        result = SessionResultDocument(session=merged)
+        self.review._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=session_id,
+            response=result,
+        )
+        self.review.write_sessions(result, owner_id=owner_id)
+        _log_run(merged, event="progress", outcome=label, t0=started)
         return merged
 
     def _merged(
@@ -411,6 +519,20 @@ class ReviewFlowService:
         )
         if record is not None:
             return SessionResultDocument.model_validate(record.response_body).session
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            done = rust.finish_session(
+                session_id, payload, owner_id=owner_id, now=self.clock()
+            )
+            return self._finished(
+                done.session,
+                "applied" if done.changed else "already_ended",
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         session = self.get_session(session_id, owner_id=owner_id)
         if session.status == "open":
             now = self.clock()
@@ -423,13 +545,36 @@ class ReviewFlowService:
             outcome = "applied"
         else:
             finished, outcome = session, "already_ended"
+        return self._finished(
+            finished,
+            outcome,
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            started=started,
+        )
+
+    def _finished(  # noqa: PLR0913 - the command's whole context
+        self,
+        finished: ReviewSessionDocument,
+        outcome: str,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> ReviewSessionDocument:
+        """Store and write the run a finish answers, and log it."""
+
         result = SessionResultDocument(session=finished)
         self.review._store(
             owner_id=owner_id,
             key=idempotency_key,
             command=command,
             request_hash=request_hash,
-            resource_id=session.id,
+            resource_id=finished.id,
             response=result,
         )
         self.review.write_sessions(result, owner_id=owner_id)
@@ -474,6 +619,12 @@ class ReviewFlowService:
     def queue(self, step: str, *, owner_id: str, session_id: str | None) -> QueueView:
         """``GET /review/queues/{step}`` (http §6) at the service clock."""
 
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            answer = rust.queue(
+                step, owner_id=owner_id, session_id=session_id, now=self.clock()
+            )
+            return QueueView(step, answer.items, answer.meta)
         session = (
             None
             if session_id is None
@@ -661,6 +812,17 @@ class ReviewFlowService:
         if record is not None:
             stored = BulkReleaseResultDocument.model_validate(record.response_body)
             return stored.release
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            return self._release_with_rust(
+                rust,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         expected: dict[str, int] = {}
         for item in payload.items:
             expected.setdefault(item.task_id, item.expected_revision)
@@ -677,6 +839,44 @@ class ReviewFlowService:
                 )
                 return existing
         result = self._released(payload, expected, owner_id=owner_id)
+        self.review._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=result.release.id,
+            response=result,
+        )
+        self.review.write_bulk_release(result, owner_id=owner_id)
+        _log_bulk(result.release, event="release", outcome="applied", t0=started)
+        return result.release
+
+    def _release_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        payload: BulkReleaseRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> ReviewBulkReleaseDocument:
+        """A bulk release decided by the shared core; the subset commits once."""
+
+        try:
+            outcome = rust.bulk_release(payload, owner_id=owner_id, now=self.clock())
+        except ReviewRefused as refused:
+            _log_refusal(owner_id, refused.entity_id or "-", refused.reason)
+            raise review_error(refused.reason) from None
+        if not outcome.changed:
+            _log_bulk(
+                outcome.release, event="release", outcome="already_applied", t0=started
+            )
+            return outcome.release
+        result = BulkReleaseResultDocument(
+            release=outcome.release, tasks=outcome.tasks, receipts=outcome.receipts
+        )
         self.review._store(
             owner_id=owner_id,
             key=idempotency_key,
@@ -772,6 +972,17 @@ class ReviewFlowService:
         if record is not None:
             stored = BulkUndoResultDocument.model_validate(record.response_body)
             return dict(stored.release.undo_result or {})
+        rust = self.review.rust(owner_id)
+        if rust is not None:
+            return self._undo_release_with_rust(
+                rust,
+                bulk_id,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         release = self.task_repo.get_bulk_release(owner_id, bulk_id)
         if release is None:
             raise NotFoundError("Review bulk release", bulk_id)
@@ -791,6 +1002,46 @@ class ReviewFlowService:
             command=command,
             request_hash=request_hash,
             resource_id=release.id,
+            response=result,
+        )
+        self.review.write_bulk_undo(result, owner_id=owner_id)
+        _log_bulk(result.release, event="undo", outcome="applied", t0=started)
+        return dict(result.release.undo_result or {})
+
+    def _undo_release_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        bulk_id: str,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> dict[str, Any]:
+        """A bulk-release Undo decided by the shared core."""
+
+        try:
+            outcome = rust.undo_bulk_release(
+                bulk_id, owner_id=owner_id, now=self.clock()
+            )
+        except ReviewRefused as refused:
+            _log_refusal(owner_id, bulk_id, refused.reason)
+            raise ReviewRequestError(
+                409, "undo_unavailable", "This release can no longer be undone."
+            ) from None
+        if not outcome.changed:
+            _log_bulk(
+                outcome.release, event="undo", outcome="already_undone", t0=started
+            )
+            return dict(outcome.release.undo_result or {})
+        result = BulkUndoResultDocument(release=outcome.release, tasks=outcome.tasks)
+        self.review._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=bulk_id,
             response=result,
         )
         self.review.write_bulk_undo(result, owner_id=owner_id)
