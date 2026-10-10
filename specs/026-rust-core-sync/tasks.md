@@ -196,6 +196,19 @@ Every FR-001…026 and SC-001…008 is assigned explicitly in the JSON. PR-54 is
 
 > **Owner decision, 2026-10-09 (implementation session):** the owner directed implementation to "focus on the migration, do not drown in processes". The per-slice product caps, the 800-line full-diff cap and the per-slice path lists below are **advisory for feature 026 from this date**, not merge gates. Implementation lands as reviewable, independently tested PRs that follow the dependency order of this map; each PR states the task IDs it covers. All other gates (CI, tests, Allure taxonomy, requirement coverage, ASK-class landing approval) are unchanged. See [approval.md](approval.md#owner-delivery-decision--october-9-implementation).
 
+> **Owner decision, 2026-10-10 (implementation session):** to run more slices in parallel, the owner relaxed two ordering edges that were release order rather than code dependencies.
+>
+> - **PR-41** depends on PR-39, not PR-40. Legacy JSON import into a staging store needs the merged client store, replay, snapshot and session fencing, but not transport. PR-42 uses a lookup port with test fakes until PR-40 lands. This opens the client/Apple lane (PR-41 → PR-42 → PR-43 → PR-44) alongside the server chain.
+> - **PR-55** depends on PR-25, not PR-54. The PostgreSQL adapter is written and tested against the unit of work that PR-25 freezes, but it still **lands only after the PR-54 pilot passes**. Activation, migration and cutover (PR-56, PR-57) keep their order.
+>
+> Slices that write the same files stay ordered, which takes three new edges:
+>
+> - PR-40 now depends on PR-41 and PR-42. Those two entries move ahead of PR-40 in the map, and they share `bb-client/src/lib.rs`.
+> - PR-51 now depends on PR-40.
+> - PR-56 now depends on PR-54, so migration still follows the pilot.
+>
+> All other edges, gates and merge order are unchanged.
+
 Each `T###` belongs to exactly one `PR-NN`; each PR delivers one named, independently checkable outcome and its necessary evidence. Contract foundations and dark modules may merge before exposure. Do not bundle another slice, unrelated cleanup, a broad rewrite or later platform work to fill a budget. The listed product caps remain at most 390 changed lines (repository ceiling 400); tests/docs exemptions in the repository checker do **not** exempt them from this feature's **800 total added + deleted text-line cap**. Count lockfiles and committed generated output; never split an unbuildable half of a lockfile. Binary/generated build artifacts are published by CI, not used to hide a large source diff.
 
 Before assigning a worker, check its concrete outcome, owned files, expected code **and test/documentation** size and sufficient existing checks. The Rust/FFI/runtime/AI measurements above also cover PR-61 typed values, PR-62 dispatch and PR-64 worker/handoff. Measure the committed candidate against its accepted merged base before review. Both checks below must pass; `review_budget` records the feature-specific second cap, which the existing repository product checker does not enforce. No `oversize_reason` waiver is permitted for feature 026. If either cap fails, stop, split into smaller independently testable outcomes, update task coverage/dependencies/paths/budgets, and repeat boundary review before continuing. A cap is not evidence that an unimplemented slice will fit.
@@ -1807,42 +1820,6 @@ The Russian heading is the required repository parser key; the map and prose are
       "implementer": "feature-implementer"
     },
     {
-      "id": "PR-40",
-      "outcome": "Transport drives bounded pull and subscription work",
-      "tasks": [
-        "T040"
-      ],
-      "requirements": [
-        "026-FR-004",
-        "026-FR-011",
-        "026-FR-023",
-        "026-FR-026",
-        "026-SC-004"
-      ],
-      "paths": [
-        "rust/crates/bb-client/src/lib.rs",
-        "rust/crates/bb-client/src/transport.rs",
-        "rust/crates/bb-client/src/subscriptions.rs",
-        "rust/crates/bb-client/tests/transport.rs"
-      ],
-      "depends_on": [
-        "PR-39",
-        "PR-63"
-      ],
-      "tests": [
-        "cargo test --manifest-path rust/Cargo.toml -p bb-client transport",
-        "sh ios/scripts/swift-linux.sh test --filter PeriodicSyncTickerTests"
-      ],
-      "acceptance": [
-        "Controlled transport tests exercise loss/reorder/timeouts and bounded subscribers; hints only wake pull and never assert perpetual freshness. Real PR-58 SSE open/reopen, duplicate/coalesced hints and generation closure integrate with the unchanged poll deadline."
-      ],
-      "budget": {
-        "product_loc": 380,
-        "files": 3
-      },
-      "implementer": "feature-implementer"
-    },
-    {
       "id": "PR-41",
       "outcome": "Legacy JSON imports to a verified staging store",
       "tasks": [
@@ -1863,7 +1840,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "rust/crates/bb-client/tests/import.rs"
       ],
       "depends_on": [
-        "PR-40"
+        "PR-39"
       ],
       "tests": [
         "cargo test --manifest-path rust/Cargo.toml -p bb-client import",
@@ -1911,6 +1888,44 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "budget": {
         "product_loc": 370,
+        "files": 3
+      },
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-40",
+      "outcome": "Transport drives bounded pull and subscription work",
+      "tasks": [
+        "T040"
+      ],
+      "requirements": [
+        "026-FR-004",
+        "026-FR-011",
+        "026-FR-023",
+        "026-FR-026",
+        "026-SC-004"
+      ],
+      "paths": [
+        "rust/crates/bb-client/src/lib.rs",
+        "rust/crates/bb-client/src/transport.rs",
+        "rust/crates/bb-client/src/subscriptions.rs",
+        "rust/crates/bb-client/tests/transport.rs"
+      ],
+      "depends_on": [
+        "PR-39",
+        "PR-63",
+        "PR-41",
+        "PR-42"
+      ],
+      "tests": [
+        "cargo test --manifest-path rust/Cargo.toml -p bb-client transport",
+        "sh ios/scripts/swift-linux.sh test --filter PeriodicSyncTickerTests"
+      ],
+      "acceptance": [
+        "Controlled transport tests exercise loss/reorder/timeouts and bounded subscribers; hints only wake pull and never assert perpetual freshness. Real PR-58 SSE open/reopen, duplicate/coalesced hints and generation closure integrate with the unchanged poll deadline."
+      ],
+      "budget": {
+        "product_loc": 380,
         "files": 3
       },
       "implementer": "feature-implementer"
@@ -2274,7 +2289,8 @@ The Russian heading is the required repository parser key; the map and prose are
       ],
       "depends_on": [
         "PR-42",
-        "PR-50"
+        "PR-50",
+        "PR-40"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_export_purge.py tests/test_account_export.py tests/test_review_export_purge.py",
@@ -2459,7 +2475,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "backend/tests/test_sync_postgres.py"
       ],
       "depends_on": [
-        "PR-54"
+        "PR-25"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_postgres.py"
@@ -2493,7 +2509,8 @@ The Russian heading is the required repository parser key; the map and prose are
         "specs/026-rust-core-sync/recovery.md"
       ],
       "depends_on": [
-        "PR-55"
+        "PR-55",
+        "PR-54"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_postgres_migration.py tests/test_sync_postgres.py"
