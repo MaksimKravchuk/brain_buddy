@@ -39,6 +39,7 @@ from app.modules.agents.service import (
 from app.modules.tasks import TaskRepository, TaskService
 from app.modules.tasks.autocomplete import TaskTitleAutocompleteService
 from app.modules.tasks.jobs import JobRepository
+from app.modules.tasks.jobs.execution import JobExecutionGate
 from app.modules.tasks.navigator import (
     NavigatorLimits,
     NavigatorProvider,
@@ -143,6 +144,9 @@ class Container:
     # Spec 026 PR-20: the durable job ledger shares tasks.sqlite3. Wired only;
     # no scheduler uses it until the handoff slices.
     job_repository: JobRepository
+    # Spec 026 PR-21: what a job-bound writer is checked against, under the task
+    # writer lock, before an old-compatible write (fence, then scope authority).
+    job_execution: JobExecutionGate
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -473,6 +477,7 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
 
     # One bridge runtime serves the task and the Review facades.
     rust_core = RustCore()
+    job_repository = JobRepository(task_repo.db_path)
     task_service = TaskService(
         task_repo,
         clock=utcnow,
@@ -755,5 +760,13 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
         review_service=review_service,
         review_flow_service=review_flow_service,
         navigator_service=navigator_service,
-        job_repository=JobRepository(task_repo.db_path),
+        job_repository=job_repository,
+        job_execution=JobExecutionGate(
+            job_repository,
+            # Identity is the scope authority: an owner that no longer resolves
+            # (purged, removed) or whose deletion has begun can no longer be
+            # written for by any job, so a job cannot recreate data a purge
+            # has already wiped before the user row itself is deleted.
+            owner_current=_owner_is_live,
+        ),
     )

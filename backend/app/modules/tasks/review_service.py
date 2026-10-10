@@ -40,6 +40,7 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import FormulationSettingsDocument, IdempotencyRecord, TaskDocument
+from .jobs.execution import StaleExecutorError, owner_write_lock
 from .repository import IDEMPOTENCY_RETENTION, TaskRepository
 from .review_domain import (
     REVIEW_COMMAND_PREFIXES,
@@ -1529,6 +1530,8 @@ class ReviewService:
             try:
                 nulled += self._retain(owner_id, now)
                 closed += self.idle_session_closer(owner_id, now)
+            except StaleExecutorError:
+                raise  # the job lost its claim: stop the whole run, not one owner
             except Exception as exc:  # noqa: BLE001 - one owner never stops the sweep
                 _log_owner_failure(owner_id, exc, "retention")
         return nulled, closed
@@ -1550,7 +1553,7 @@ class ReviewService:
             if any(item.clock_before is not None for item in release.released)
         ]
         nulled = 0
-        with self.task_repo.command_lock(owner_id):
+        with owner_write_lock(self.task_repo, owner_id):
             # The records hold whole result documents (titles, notes, an
             # extension reason in ``clock_before``): they go at 24 h, not 7 d.
             self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
@@ -1597,6 +1600,8 @@ class ReviewService:
                     continue
                 owners += 1
                 gap, owner_repaired, owner_parked = self._expose_owner(owner_id, now)
+            except StaleExecutorError:
+                raise  # the job lost its claim: stop the whole run, not one owner
             except Exception as exc:  # noqa: BLE001 - one owner never stops the sweep
                 _log_owner_failure(owner_id, exc, "exposure")
                 continue
@@ -1628,7 +1633,7 @@ class ReviewService:
 
     def _expose_owner(self, owner_id: str, now: datetime) -> tuple[int, int, int]:
         candidates = self.task_repo.list_next_tasks(owner_id)
-        with self.task_repo.command_lock(owner_id):
+        with owner_write_lock(self.task_repo, owner_id):
             current = self.task_repo.get_review_settings(owner_id)
             if current is None or current.activated_at is None:
                 # Purge may finish after the preliminary exposure read. Never
@@ -1655,7 +1660,7 @@ class ReviewService:
         self, owner_id: str, task_ids: list[str], *, now: datetime
     ) -> tuple[int, int]:
         repaired = parked = 0
-        with self.task_repo.command_lock(owner_id):
+        with owner_write_lock(self.task_repo, owner_id):
             self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
             for task_id in task_ids:
                 try:

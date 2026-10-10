@@ -53,6 +53,7 @@ from .domain import (
     TaskDocument,
     TaskSubtaskDocument,
 )
+from .jobs.execution import owner_write_lock, reject_caller_origin
 from .repository import (
     TaskRepository,
     display_project_name,
@@ -142,12 +143,18 @@ class SerializedWriter(Protocol):
 def serialized_write[Writer: SerializedWriter, **P, Result](
     command: Callable[Concatenate[Writer, P], Result],
 ) -> Callable[Concatenate[Writer, P], Result]:
-    """Hold the owner command lock over idempotency and resource persistence."""
+    """Hold the owner command lock over idempotency and resource persistence.
+
+    Spec 026 PR-21: a caller-supplied ``writer_origin`` is refused before the lock
+    is taken, and a bound job execution has its fence and scope authority
+    re-checked under the lock, before the idempotency lookup or any write.
+    """
 
     def wrapped(service: Writer, /, *args: P.args, **kwargs: P.kwargs) -> Result:
+        reject_caller_origin(kwargs)
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
-        with service.task_repo.command_lock(owner_id):
+        with owner_write_lock(service.task_repo, owner_id):
             service.task_repo.purge_expired_idempotency(
                 owner_id=owner_id, now=service.clock()
             )

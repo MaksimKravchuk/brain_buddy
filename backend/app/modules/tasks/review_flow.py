@@ -44,6 +44,7 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import ProjectDocument, TaskDocument
+from .jobs.execution import owner_write_lock
 from .repository import TaskRepository
 from .review_domain import (
     BulkReleasedItemDocument,
@@ -596,7 +597,7 @@ class ReviewFlowService:
         closed = 0
         if not candidates:
             return closed
-        with self.task_repo.command_lock(owner_id):
+        with owner_write_lock(self.task_repo, owner_id):
             for session_id in candidates:
                 session = self.task_repo.get_review_session(owner_id, session_id)
                 if (
