@@ -814,3 +814,64 @@ fn legacy_outbox_026_fr_013_the_statuses_and_errors_carry_no_user_text() {
     assert_eq!(error.to_string(), "LEGACY_OUTBOX_UNREADABLE");
     assert_eq!(error.field(), Some("outbox"));
 }
+
+#[test]
+fn review_unsent_conversion_requires_atomic_review_activation_first() {
+    use bb_protocol::wire::Id;
+    let lane = lane("review-conversion-order");
+    let mut source = unsent(1, &uuid(11), "");
+    source["command"] = json!({"revokeNavigatorConsent":{"provider":"openai"}});
+    let mut store = lane.imported(&document(vec![source], vec![]));
+    resolve(&mut store, NOW, nothing);
+    let entry = legacy_unsent(&mut store).unwrap().remove(0);
+    let request = ExecuteRequest {
+        command_id: entry.idempotency_key,
+        command_type: CommandType::ReviewConsentRevoke,
+        entity_id: Some(Id::parse("owner").unwrap()),
+        payload: json!({"provider":"openai"}).as_object().unwrap().clone(),
+        preconditions: vec![],
+        depends_on: vec![],
+        context: ExecuteContext {
+            now: entry.issued_at,
+            time_zone: ZoneName::new("UTC").unwrap(),
+            actor_id: ActorId::parse("device").unwrap(),
+            policy: Policy {
+                weekly_review: true,
+                navigator_provider: None,
+                navigator_available: false,
+                consent_text_version: 1,
+            },
+        },
+    };
+    assert!(matches!(
+        convert_legacy_unsent_with(
+            &mut store,
+            &mut RandomIds,
+            std::slice::from_ref(&request),
+            |_| Ok(())
+        ),
+        Err(ExecuteError::Refused(_))
+    ));
+    assert_eq!(count(&mut store, "outbox"), 0);
+    assert_eq!(legacy_unsent(&mut store).unwrap().len(), 1);
+    let capture = bb_client::capture_legacy_review(&mut store).unwrap();
+    let prepared = bb_client::PreparedLegacyReview {
+        token: capture.token,
+        read_set: bb_domain::types::ReadSet::default(),
+        aliases: vec![],
+        derived_counts: Default::default(),
+    };
+    bb_client::activate_legacy_review(&mut store, &request.context, &prepared).unwrap();
+    assert_eq!(
+        convert_legacy_unsent_with(
+            &mut store,
+            &mut RandomIds,
+            std::slice::from_ref(&request),
+            |_| Ok(())
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+    assert!(legacy_unsent(&mut store).unwrap().is_empty());
+}

@@ -581,3 +581,46 @@ fn native_open_list_uses_durable_origin_without_host_facts() {
         results[0].entity_id
     );
 }
+
+#[test]
+fn imported_presentation_carriers_are_individually_readable_and_immutable() {
+    let (workspace, options) = open("imported-draft-reads");
+    let mut store = Store::open(&options).unwrap();
+    store.write(|tx| {
+        for (id,kind,key) in [("legacy-local-review","legacy_local_review",None),("legacy-form:project:project_old","review_form_draft",Some("project:project_old")),("legacy-form:project:project_wrong","legacy_local_review",Some("project:project_wrong"))] {
+            tx.execute("INSERT INTO drafts(workspace_id,draft_id,editor_kind,record_key,fields,updated_at) VALUES ('local',?1,?2,?3,CAST(?4 AS BLOB),?5)",[id,kind,key.unwrap_or(""),"{\"text\":\"Retained editor text\"}",NOW])?;
+        }Ok(())
+    }).unwrap();
+    let local = workspace
+        .load_draft("legacy-local-review".into())
+        .unwrap()
+        .unwrap();
+    assert_eq!(local.editor_kind, "legacy_local_review");
+    let form = workspace
+        .load_draft("legacy-form:project:project_old".into())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&form.fields).unwrap()["text"],
+        "Retained editor text"
+    );
+    assert!(
+        workspace
+            .load_draft("legacy-form:project:project_wrong".into())
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        workspace
+            .load_draft("legacy-form:unknown:project_old".into())
+            .is_err()
+    );
+    assert!(workspace.load_draft("legacy-review-base".into()).is_err());
+    assert!(workspace.save_draft(local, operation()).is_err());
+    assert!(
+        workspace
+            .delete_draft(form.draft_id.clone(), operation())
+            .is_err()
+    );
+    assert!(workspace.load_draft(form.draft_id).unwrap().is_some());
+}

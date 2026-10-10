@@ -528,3 +528,76 @@ fn apple_import_026_fr_013_prepared_conversion_preserves_source_identity_and_com
     };
     assert!(results[0].replayed);
 }
+
+#[test]
+fn owned_review_activation_cancellation_and_marker_retry_share_commit_guard() {
+    use bb_swift::{
+        BridgeExecuteContext, BridgeLegacyReviewPrepared, BridgeOperation, BridgeStoreRequest,
+    };
+    use std::sync::Arc;
+    let directory = lane("review-activation");
+    fs::write(
+        directory.join("store.json"),
+        serde_json::to_vec(&document()).unwrap(),
+    )
+    .unwrap();
+    let runtime = runtime();
+    runtime.import_legacy_store(request(&directory)).unwrap();
+    let workspace = runtime
+        .open_store(BridgeStoreRequest {
+            workspace_id: "workspace-local".into(),
+            database_path: request(&directory).database_path,
+            busy_timeout_ms: 2_000,
+        })
+        .unwrap();
+    let capture = workspace.capture_legacy_review().unwrap();
+    assert!(!capture.already_active);
+    let prepare = || BridgeLegacyReviewPrepared {
+        token: capture.token.clone(),
+        read_set: serde_json::to_vec(&bb_domain::types::ReadSet::default()).unwrap(),
+        aliases: b"[]".to_vec(),
+        derived_counts: b"{\"decision_queues\":0,\"unseen_park_acks\":0}".to_vec(),
+    };
+    let context = || {
+        BridgeExecuteContext{now:NOW.into(),time_zone:"UTC".into(),actor_id:"actor-local".into(),policy:json!({"weekly_review":true,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}).to_string().into_bytes()}
+    };
+    let cancelled = Arc::new(BridgeOperation::new());
+    assert!(cancelled.cancel());
+    assert_eq!(
+        failed(
+            workspace
+                .activate_legacy_review(prepare(), context(), cancelled)
+                .unwrap_err()
+        )
+        .0,
+        "CANCELLED"
+    );
+    assert!(!workspace.capture_legacy_review().unwrap().already_active);
+    let operation = Arc::new(BridgeOperation::new());
+    let activated = workspace
+        .activate_legacy_review(prepare(), context(), operation.clone())
+        .unwrap();
+    assert!(!activated.already_active);
+    assert!(!operation.cancel());
+    assert!(
+        workspace
+            .activate_legacy_review(prepare(), context(), Arc::new(BridgeOperation::new()))
+            .unwrap()
+            .already_active
+    );
+    let cancelled = Arc::new(BridgeOperation::new());
+    cancelled.cancel();
+    assert_eq!(
+        failed(
+            workspace
+                .activate_legacy_review(prepare(), context(), cancelled)
+                .unwrap_err()
+        )
+        .0,
+        "CANCELLED"
+    );
+    assert_eq!(
+        workspace.capture_legacy_review().unwrap().token,
+        capture.token
+    );
+}

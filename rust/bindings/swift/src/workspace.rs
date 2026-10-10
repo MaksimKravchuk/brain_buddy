@@ -96,6 +96,28 @@ pub struct BridgeLegacyConversion {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyReviewCapture {
+    pub token: Vec<u8>,
+    pub review: Vec<u8>,
+    pub aliases: Vec<u8>,
+    pub source_counts: Vec<u8>,
+    pub already_active: bool,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyReviewPrepared {
+    pub token: Vec<u8>,
+    pub read_set: Vec<u8>,
+    pub aliases: Vec<u8>,
+    pub derived_counts: Vec<u8>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyReviewActivated {
+    pub projection_generation: String,
+    pub already_active: bool,
+    pub aliases: Vec<u8>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeExecuteContext {
     pub now: String,
     pub time_zone: String,
@@ -223,17 +245,30 @@ fn execute_failure(error: ExecuteError) -> Failure {
     }
 }
 
+fn owned_context(context: &BridgeExecuteContext) -> Result<ExecuteContext, Failure> {
+    let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
+    Ok(ExecuteContext {
+        now: Instant::parse(&context.now).map_err(|_| invalid("now"))?,
+        time_zone: ZoneName::new(&context.time_zone).map_err(|_| invalid("time_zone"))?,
+        actor_id: ActorId::parse(&context.actor_id).map_err(|_| invalid("actor_id"))?,
+        policy: parse_json::<Policy>(&context.policy, "policy")?,
+    })
+}
+
+fn review_failure(error: bb_client::LegacyReviewError) -> Failure {
+    Failure {
+        code: error.code(),
+        retryable: error.is_retryable(),
+        field: error.field(),
+    }
+}
+
 fn requests(
     commands: &[BridgeWorkspaceCommand],
     context: &BridgeExecuteContext,
 ) -> Result<Vec<ExecuteRequest>, Failure> {
     let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
-    let context = ExecuteContext {
-        now: Instant::parse(&context.now).map_err(|_| invalid("now"))?,
-        time_zone: ZoneName::new(&context.time_zone).map_err(|_| invalid("time_zone"))?,
-        actor_id: ActorId::parse(&context.actor_id).map_err(|_| invalid("actor_id"))?,
-        policy: parse_json::<Policy>(&context.policy, "policy")?,
-    };
+    let context = owned_context(context)?;
     commands
         .iter()
         .map(|command| {
@@ -622,6 +657,81 @@ impl BridgeWorkspace {
         operation: Arc<BridgeOperation>,
     ) -> Result<(), BridgeError> {
         Ok(self.mutate_draft(&draft_id, None, operation)?)
+    }
+
+    pub fn capture_legacy_review(&self) -> Result<BridgeLegacyReviewCapture, BridgeError> {
+        Ok(self.with_store(|store| {
+            let capture = bb_client::capture_legacy_review(store).map_err(review_failure)?;
+            Ok(BridgeLegacyReviewCapture {
+                token: to_json(&capture.token)?,
+                review: to_json(&capture.review)?,
+                aliases: to_json(&capture.aliases)?,
+                source_counts: to_json(&capture.source_counts)?,
+                already_active: capture.already_active,
+            })
+        })?)
+    }
+
+    pub fn activate_legacy_review(
+        &self,
+        prepared: BridgeLegacyReviewPrepared,
+        context: BridgeExecuteContext,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeLegacyReviewActivated, BridgeError> {
+        let prepared = bb_client::PreparedLegacyReview {
+            token: parse_json(&prepared.token, "token")?,
+            read_set: parse_json(&prepared.read_set, "read_set")?,
+            aliases: parse_json(&prepared.aliases, "aliases")?,
+            derived_counts: parse_json(&prepared.derived_counts, "derived_counts")?,
+        };
+        let context = owned_context(&context)?;
+        if operation.used.swap(true, Ordering::AcqRel) {
+            return Err(Failure::new("OPERATION_ALREADY_USED", None).into());
+        }
+        match self.state.load(Ordering::Acquire) {
+            CLOSED => return Err(Failure::new("WORKSPACE_CLOSED", None).into()),
+            POISONED => return Err(Failure::new("INTERNAL_ERROR", None).into()),
+            _ => {}
+        }
+        let mut held = self
+            .store
+            .lock()
+            .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+        let store = held
+            .as_mut()
+            .ok_or_else(|| Failure::new("WORKSPACE_CLOSED", None))?;
+        let mut arbitration = None;
+        let result = guarded(&AtomicU8::new(OPEN), || {
+            let activated =
+                bb_client::activate_legacy_review_with(store, &context, &prepared, |_| {
+                    let lock = operation.state.lock().map_err(|_| StoreError::Corrupt)?;
+                    if *lock == OperationState::Cancelled
+                        || self.state.load(Ordering::Acquire) != OPEN
+                    {
+                        return Err(bb_client::LegacyReviewError::Cancelled);
+                    }
+                    arbitration = Some(lock);
+                    Ok(())
+                })
+                .map_err(review_failure)?;
+            if let Some(lock) = &mut arbitration {
+                **lock = OperationState::Committed;
+            }
+            Ok(BridgeLegacyReviewActivated {
+                projection_generation: activated.projection_generation.to_string(),
+                already_active: activated.already_active,
+                aliases: to_json(&activated.aliases)?,
+            })
+        });
+        if result
+            .as_ref()
+            .is_err_and(|error| error.code == "INTERNAL_ERROR")
+        {
+            self.state
+                .compare_exchange(OPEN, POISONED, Ordering::AcqRel, Ordering::Acquire)
+                .ok();
+        }
+        Ok(result?)
     }
 
     pub fn records(

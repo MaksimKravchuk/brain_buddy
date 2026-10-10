@@ -1584,6 +1584,17 @@ fn last_counted_session(read_set: &ReadSet) -> Result<Option<&ReviewSession>, Do
 }
 
 fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, DomainError> {
+    let mut state = review_state_scalar(read_set, now)?;
+    state.unseen_parks = unseen_parks(read_set)?;
+    state.unseen_parks_total = u32::try_from(state.unseen_parks.len()).unwrap_or(u32::MAX);
+    state.receipts = visible_receipts(read_set, now)?;
+    Ok(state)
+}
+
+fn review_state_scalar(
+    read_set: &ReadSet,
+    now: UtcInstant,
+) -> Result<ReviewStateView, DomainError> {
     let settings = settings_or_default(read_set)?;
     let clock = OwnerClockSettings::from_review_settings(&settings).map_err(stored)?;
     let zone = parse_zone(settings.time_zone.as_str(), "time_zone")?;
@@ -1595,12 +1606,13 @@ fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, 
         moves_tomorrow += u32::from(class == FormulationClass::MovesTomorrow);
     }
 
-    let summaries = read_set
-        .sessions
-        .values()
-        .map(summary_of)
-        .collect::<Result<Vec<_>, _>>()?;
-    let last_counted_at = last_counted_review_at(&summaries);
+    let last_counted_at =
+        read_set
+            .sessions
+            .values()
+            .try_fold(None, |latest, session| -> Result<_, DomainError> {
+                Ok(latest.max(last_counted_review_at(&[summary_of(session)?])))
+            })?;
 
     let last_counted_review = last_counted_session(read_set)?.map(|session| LastCountedReview {
         session_id: session.id.clone(),
@@ -1658,12 +1670,13 @@ fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, 
         )?,
         restart_mode: restart_mode(onboarded_at, last_counted_at, now),
         open_session: open.map(|(_, session)| session.public()),
-        unseen_parks: unseen_parks(read_set)?,
+        unseen_parks: Vec::new(),
+        unseen_parks_total: 0,
         counts: ReviewStateCounts {
             asks_for_decision: asks,
             moves_tomorrow,
         },
-        receipts: visible_receipts(read_set, now)?,
+        receipts: Vec::new(),
         server_now: wire(now, "server_now")?,
         settings: settings.public(),
     })
@@ -1705,6 +1718,27 @@ fn unseen_parks(read_set: &ReadSet) -> Result<Vec<crate::types::UnseenPark>, Dom
     .collect()
 }
 
+fn visible_receipt(
+    read_set: &ReadSet,
+    receipt: &crate::types::ReviewReceipt,
+    now: UtcInstant,
+) -> Result<Option<ReceiptView>, DomainError> {
+    let unchanged = read_set
+        .tasks
+        .get(&receipt.task_id)
+        .is_some_and(|task| task.revision == receipt.task_revision);
+    if unchanged && now < instant(&receipt.hidden_until, "hidden_until")? {
+        Ok(Some(ReceiptView {
+            task_id: receipt.task_id.clone(),
+            kind: receipt.kind,
+            hidden_until: receipt.hidden_until.clone(),
+            task_revision: receipt.task_revision.clone(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Receipts that still hide their task: not expired, and the task unchanged
 /// since (data-model E5), by `(task_id, kind)`.
 fn visible_receipts(read_set: &ReadSet, now: UtcInstant) -> Result<Vec<ReceiptView>, DomainError> {
@@ -1716,17 +1750,8 @@ fn visible_receipts(read_set: &ReadSet, now: UtcInstant) -> Result<Vec<ReceiptVi
     keyed.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     let mut visible = Vec::new();
     for (_, _, receipt) in keyed {
-        let unchanged = read_set
-            .tasks
-            .get(&receipt.task_id)
-            .is_some_and(|task| task.revision == receipt.task_revision);
-        if unchanged && now < instant(&receipt.hidden_until, "hidden_until")? {
-            visible.push(ReceiptView {
-                task_id: receipt.task_id.clone(),
-                kind: receipt.kind,
-                hidden_until: receipt.hidden_until.clone(),
-                task_revision: receipt.task_revision.clone(),
-            });
+        if let Some(receipt) = visible_receipt(read_set, receipt, now)? {
+            visible.push(receipt);
         }
     }
     Ok(visible)
@@ -1801,6 +1826,115 @@ fn queue_parts<'a>(
         StepCode::Dates => dates(snapshot)?,
     };
     Ok((tasks, meta))
+}
+
+/// Scalars repeat on each page, while the combined park/receipt rows share a
+/// bounded keyset. The unseen count is global and independent of the cursor.
+pub fn native_state_page(
+    read_set: &ReadSet,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use queries::{
+        KeyPart::{Int, Text},
+        SortKey,
+    };
+    use std::collections::BinaryHeap;
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let now = instant(&inputs.now, "now")?;
+    let mut state = review_state_scalar(read_set, now)?;
+    let after: Option<SortKey> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let keep = limit as usize + 1;
+    let mut best = BinaryHeap::<SortKey>::new();
+    let mut offer = |key: SortKey| {
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            return;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    };
+    for task in read_set.tasks.values().filter(|task| task.parked.is_some()) {
+        let clock = TaskClock::from_task(task).map_err(stored)?;
+        let marker = clock.parked.as_ref().ok_or_else(|| invalid("parked"))?;
+        let ack = read_set
+            .park_acks
+            .iter()
+            .rev()
+            .find(|ack| {
+                ack.task_id == task.id && ack.formulation_id.as_str() == marker.formulation_id
+            })
+            .map(ParkRow::from_ack)
+            .transpose()
+            .map_err(stored)?;
+        if !park::unseen_parks([(task.id.as_str(), &clock)], |_, _| ack.clone()).is_empty() {
+            state.unseen_parks_total = state.unseen_parks_total.saturating_add(1);
+            offer(vec![
+                Int(0),
+                Int((marker.at.unix_micros() as u64) ^ (1u64 << 63)),
+                Text(task.id.as_str().to_owned()),
+            ]);
+        }
+    }
+    for receipt in &read_set.receipts {
+        if visible_receipt(read_set, receipt, now)?.is_some() {
+            offer(vec![
+                Int(1),
+                Text(receipt.task_id.as_str().to_owned()),
+                Text(receipt.kind.as_str().to_owned()),
+            ]);
+        }
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    for key in keys {
+        match key.as_slice() {
+            [Int(0), Int(_), Text(id)] => {
+                let id = TaskId::parse(id)?;
+                let marker = read_set
+                    .tasks
+                    .get(&id)
+                    .and_then(|task| task.parked.as_ref())
+                    .ok_or_else(|| invalid("task_id"))?;
+                state.unseen_parks.push(crate::types::UnseenPark {
+                    task_id: id,
+                    formulation_id: marker.formulation_id.clone(),
+                    parked_at: marker.at.clone(),
+                });
+            }
+            [Int(1), Text(id), Text(kind)] => {
+                let receipt = read_set
+                    .receipts
+                    .iter()
+                    .find(|receipt| receipt.task_id.as_str() == id && receipt.kind.as_str() == kind)
+                    .ok_or_else(|| invalid("receipt"))?;
+                state.receipts.push(
+                    visible_receipt(read_set, receipt, now)?.ok_or_else(|| invalid("receipt"))?,
+                );
+            }
+            _ => return Err(invalid("cursor")),
+        }
+    }
+    Ok((QueryResult::ReviewState(Box::new(state)), next))
 }
 
 /// Native queue selection keeps only `limit + 1` keys and constructs views
@@ -1893,7 +2027,7 @@ pub fn native_queue_page(
             })
             .map(Receipt::from_row)
             .transpose()?;
-        let receipts = receipt.as_ref().map(std::slice::from_ref).unwrap_or(&[]);
+        let receipts = receipt.as_slice();
         let id = Text(task.id.as_str().to_owned());
         let key = match step {
             StepCode::MindSweep | StepCode::Summary => None,
