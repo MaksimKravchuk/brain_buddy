@@ -4,8 +4,8 @@
 use crate::common::{assert_keys_match_schema, with_common};
 use bb_protocol::decode;
 use bb_protocol::feed::{
-    Change, ChangesPage, HintEvent, Operation, SnapshotManifest, SnapshotPage, SnapshotRequest,
-    Transaction, TransferManifest, TransferPage, decode_change_stream,
+    Change, ChangeStreamDecoder, ChangesPage, HintEvent, Operation, SnapshotManifest, SnapshotPage,
+    SnapshotRequest, Transaction, TransferManifest, TransferPage, decode_change_stream,
 };
 use serde_json::{Value, json};
 
@@ -197,6 +197,82 @@ fn feed_026_fr_010_assembled_change_stream_is_one_validated_array() {
     assert!(decode_change_stream(json!([bad]).to_string().as_bytes()).is_err());
     assert!(decode_change_stream(&[0xff, 0xfe]).is_err());
     assert!(decode_change_stream(b"{}").is_err());
+}
+
+/// Feeds `chunks` to the incremental decoder and finishes it.
+fn incremental(chunks: &[&[u8]]) -> Result<Vec<Change>, bb_protocol::CodecError> {
+    let mut decoder = ChangeStreamDecoder::new();
+    let mut changes = Vec::new();
+    for chunk in chunks {
+        changes.extend(decoder.push(chunk)?);
+    }
+    let count = decoder.finish()?;
+    assert_eq!(usize::try_from(count).unwrap(), changes.len());
+    Ok(changes)
+}
+
+#[test]
+fn feed_026_fr_004_incremental_change_stream_equals_the_whole_stream_at_every_split() {
+    // Brackets, braces, quotes and escapes inside strings must not confuse the
+    // record boundaries, and a split may fall anywhere, even inside a character.
+    let mut tricky = upsert("a]},{\\\"");
+    tricky["value"] = json!({"title": "} ] \" \\ é ✓ {", "nested": [{"k": [1, 2]}]});
+    let whole = json!([tricky, tombstone("b"), upsert("c")]).to_string();
+    let expected = decode_change_stream(whole.as_bytes()).unwrap();
+    assert_eq!(expected.len(), 3);
+    let bytes = whole.as_bytes();
+    for at in 0..=bytes.len() {
+        let (head, tail) = bytes.split_at(at);
+        assert_eq!(
+            incremental(&[head, tail]).unwrap(),
+            expected,
+            "split at {at}"
+        );
+    }
+    let single: Vec<&[u8]> = bytes.chunks(1).collect();
+    assert_eq!(incremental(&single).unwrap(), expected);
+    // Whitespace between records is allowed, as in the whole-stream decoder.
+    let spaced = format!(" [ \n{} ,\t{} ] \n", upsert("a"), tombstone("b"));
+    assert_eq!(incremental(&[spaced.as_bytes()]).unwrap().len(), 2);
+    assert_eq!(decode_change_stream(spaced.as_bytes()).unwrap().len(), 2);
+    assert!(incremental(&[b"[]"]).unwrap().is_empty());
+}
+
+#[test]
+fn feed_026_fr_004_incremental_change_stream_is_as_strict_as_the_whole_stream() {
+    let two = json!([upsert("a"), tombstone("b")]).to_string();
+    let mut bad_tombstone = tombstone("b");
+    bad_tombstone["value"] = json!({"x": 1});
+    let duplicate_member = r#"[{"entity_type":"task","entity_type":"task","record_key":["a"],"record_version":"1","operation":"tombstone","value":null}]"#;
+    let repeated_key = json!([upsert("a"), upsert("a")]).to_string();
+    let mut bad_utf8 = json!([upsert("a")]).to_string().into_bytes();
+    bad_utf8[40] = 0xff;
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "invalid change",
+            json!([bad_tombstone]).to_string().into_bytes(),
+        ),
+        ("duplicate member", duplicate_member.as_bytes().to_vec()),
+        ("repeated record key", repeated_key.into_bytes()),
+        ("not an array", b"{}".to_vec()),
+        ("scalar element", b"[1]".to_vec()),
+        ("trailing comma", format!("[{},]", upsert("a")).into_bytes()),
+        ("leading comma", format!("[,{}]", upsert("a")).into_bytes()),
+        (
+            "missing comma",
+            format!("[{}{}]", upsert("a"), tombstone("b")).into_bytes(),
+        ),
+        ("truncated", two.as_bytes()[..two.len() - 1].to_vec()),
+        ("trailing garbage", format!("{two} x").into_bytes()),
+        ("second array", format!("{two}[]").into_bytes()),
+        ("invalid utf-8", bad_utf8),
+        ("empty", Vec::new()),
+    ];
+    for (name, bytes) in cases {
+        assert!(incremental(&[&bytes]).is_err(), "{name}");
+        let (head, tail) = bytes.split_at(bytes.len() / 2);
+        assert!(incremental(&[head, tail]).is_err(), "{name} split");
+    }
 }
 
 #[test]
