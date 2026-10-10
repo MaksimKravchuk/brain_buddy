@@ -208,7 +208,7 @@ public struct RustStoreImporter: Sendable {
             }
             let outbox = RustOutboxImporter(runtime: runtime, databaseURL: databaseURL, workspaceID: workspaceID,
                 busyTimeoutMilliseconds: busyTimeoutMilliseconds, now: now)
-            _ = try await outbox.run()
+            if try await outbox.run().mayRun { return workspace }
             // Prepare the verified ORIGINAL sequence once, including converted
             // prefixes. Re-encoding a suffix from base loses dependency lineage.
             let original = try await Task.detached(priority: .userInitiated) {

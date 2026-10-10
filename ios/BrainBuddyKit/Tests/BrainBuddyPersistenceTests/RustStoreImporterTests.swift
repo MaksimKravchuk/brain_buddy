@@ -57,7 +57,51 @@ private func importFailure(of body: () async throws -> Void) async -> RustStoreI
 
 @Suite("Rust store import (026-FR-010, 026-FR-013, 026-FR-022, 026-FR-025, 026-SC-005)")
 struct RustStoreImporterTests {
-    @Test("201 compacted ordinary intents migrate through bounded pages and retry under their frozen context")
+    @Test("An already converted old-port import binds after actor, zone and policy changes without re-encoding known intents")
+    func alreadyConvertedOldPortKeepsOriginalKnownRequests() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let runtime = try RustBridgeRuntime()
+        let operation = PendingOperation(command: .createTask(.init(
+            taskID: TaskID("00000000-0000-4000-8000-000000080001"), title: "Original old-port intent", list: .inbox)),
+            issuedAt: Fixtures.issuedAt)
+        let document = StoreDocument(outbox: [operation])
+        try await lane.write(document)
+        let before = try Data(contentsOf: lane.legacy)
+        let importer = lane.importer(runtime: runtime)
+        let report = try await importer.run()
+        let workspace = try await runtime.openStore(workspaceID: "workspace-local", databaseURL: lane.database)
+        try await workspace.establishAccountlessFromImport(retainedSourceURL: lane.directory.appendingPathComponent(report.backupFile))
+        _ = try await RustOutboxImporter(runtime: runtime, databaseURL: lane.database, workspaceID: "workspace-local",
+            now: { Fixtures.issuedAt }).run()
+        let unsent = try await workspace.legacyUnsent()
+        let entry = try #require(unsent.first)
+        // This is a valid original minimal native create accepted by the old
+        // prepared port. Its omitted defaults need not equal a future codec's
+        // serialization, even though it creates the same task.
+        let command = RustWorkspaceCommand(commandID: entry.idempotencyKey, commandType: "task.create",
+            entityID: "task_00000000-0000-4000-8000-000000080001",
+            payload: Data(#"{"title":"Original old-port intent","state":"inbox"}"#.utf8),
+            preconditions: Data("[]".utf8), dependsOn: [])
+        let oldContext = RustWorkspaceContext(now: Fixtures.issuedAt, timeZone: "UTC", actorID: "original-device",
+            policy: Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8))
+        guard case .saved = try await workspace.convertLegacyUnsent([
+            RustWorkspaceLegacyConversion(entryID: entry.entryID, issuedAt: entry.issuedAt, command: command)
+        ], context: oldContext) else { Issue.record("Old prepared conversion refused"); return }
+        let oldKnown = try #require(try await workspace.lookupKnownBatch([command], context: oldContext)?.first)
+        try await workspace.close()
+        let changed = RustDomainFacade(runtime: runtime, context: .init(actorID: "changed-device", deviceTimeZone: "Asia/Tokyo"))
+        let prepared = try await importer.prepareAccountlessRuntime(facade: changed, reviewEnabled: true)
+        let stillKnown = try #require(try await prepared.lookupKnownBatch([command], context: oldContext)?.first)
+        #expect(stillKnown.commandID == oldKnown.commandID)
+        #expect(stillKnown.localSequence == oldKnown.localSequence)
+        #expect(stillKnown.entityID == oldKnown.entityID)
+        #expect(stillKnown.replayed)
+        #expect(try Data(contentsOf: lane.legacy) == before)
+        try await prepared.close()
+    }
+
+    @Test("201 compacted ordinary intents migrate through bounded pages and reopen after context changes")
     func migratesMoreThanOneBoundedPage() async throws {
         let lane = try LegacyLane()
         defer { removeTemporaryDirectory(lane.directory) }
@@ -81,8 +125,8 @@ struct RustStoreImporterTests {
         #expect(counts.inbox == 201)
         #expect(try Data(contentsOf: lane.legacy) == original)
         try await workspace.close()
-        // A process restart uses the entire original source and the first frozen
-        // context, including commands whose conversion markers are complete.
+        // Once the whole queue is resolved, a process restart uses verified global
+        // readiness and never re-encodes or repartitions completed source intents.
         let changedFacade = RustDomainFacade(runtime: runtime, context: .init(actorID: "changed-device", deviceTimeZone: "Asia/Tokyo"))
         let reopened = try await lane.importer(runtime: runtime).prepareAccountlessRuntime(facade: changedFacade)
         let retry = try await reopened.query(Data(#"{"kind":"list_counts"}"#.utf8), inputs: inputs)

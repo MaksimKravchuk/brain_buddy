@@ -442,52 +442,51 @@ pub struct LegacyUnsent {
     pub command: Value,
 }
 
+fn legacy_source_item(entry: &Entry) -> Result<LegacyUnsent, LegacyOutboxError> {
+    Ok(LegacyUnsent {
+        entry_id: entry.id.clone(),
+        idempotency_key: CommandId::parse(
+            entry.key.as_deref().ok_or(unreadable("idempotencyKey"))?,
+        )
+        .map_err(|_| unreadable("idempotencyKey"))?,
+        issued_at: Instant::parse(
+            entry
+                .raw
+                .get("issuedAt")
+                .and_then(Value::as_str)
+                .ok_or(unreadable("issuedAt"))?,
+        )
+        .map_err(|_| unreadable("issuedAt"))?,
+        command: entry
+            .raw
+            .get("command")
+            .cloned()
+            .ok_or(unreadable("command"))?,
+    })
+}
+
 pub fn legacy_unsent(store: &mut Store) -> Result<Vec<LegacyUnsent>, LegacyOutboxError> {
     legacy_import_marker(store)?.ok_or(LegacyOutboxError::NotImported)?;
-    let loaded = store.read(|tx| Ok(load(tx)))??;
-    let items: Vec<_> = loaded
-        .entries
-        .iter()
-        .filter(|entry| {
-            !entry.sent
-                && loaded
-                    .standings
-                    .get(&entry.id)
-                    .is_some_and(|s| s == "unsent")
-        })
-        .take(201)
-        .map(|entry| {
-            Ok(LegacyUnsent {
-                entry_id: entry.id.clone(),
-                idempotency_key: CommandId::parse(
-                    entry.key.as_deref().ok_or(unreadable("idempotencyKey"))?,
-                )
-                .map_err(|_| unreadable("idempotencyKey"))?,
-                issued_at: bb_protocol::wire::Instant::parse(
-                    entry
-                        .raw
-                        .get("issuedAt")
-                        .and_then(Value::as_str)
-                        .ok_or(unreadable("issuedAt"))?,
-                )
-                .map_err(|_| unreadable("issuedAt"))?,
-                command: entry
-                    .raw
-                    .get("command")
-                    .cloned()
-                    .ok_or(unreadable("command"))?,
-            })
-        })
-        .collect::<Result<_, _>>()?;
-    if items.len() > 200
-        || serde_json::to_vec(&items)
-            .map_err(|_| unreadable("outbox"))?
-            .len()
-            > CONVERSION_BYTES
-    {
-        return Err(unreadable("legacy_outbox_page"));
-    }
-    Ok(items)
+    store.read(|tx|Ok((|| {
+        let workspace:String=tx.query_row("SELECT workspace_id FROM sync_meta",[],|r|r.get(0))?;
+        let mut statement=tx.prepare("SELECT d.fields,r.fields FROM drafts d LEFT JOIN drafts r ON r.workspace_id=d.workspace_id AND r.editor_kind='legacy_outbox_resolution' AND r.record_key=d.record_key WHERE d.workspace_id=?1 AND d.editor_kind='legacy_outbox_entry' ORDER BY d.draft_id")?;
+        let mut rows=statement.query([workspace])?;
+        let mut items=Vec::new();
+        let mut size=2;
+        while let Some(row)=rows.next()? {
+            let bytes:Vec<u8>=row.get(0)?;
+            let entry=Entry::read(serde_json::from_slice(&bytes).map_err(|_|unreadable("outbox"))?)?;
+            let resolution:Option<Vec<u8>>=row.get(1)?;
+            let resolution:Option<Value>=resolution.map(|bytes|serde_json::from_slice(&bytes).map_err(|_|unreadable("outbox"))).transpose()?;
+            if entry.sent || resolution.as_ref().and_then(|r|r.get("standing")).and_then(Value::as_str)!=Some("unsent") {continue;}
+            if items.len()==200 {return Err(unreadable("legacy_outbox_page"));}
+            let item=legacy_source_item(&entry)?;
+            size+=serde_json::to_vec(&item).map_err(|_|unreadable("outbox"))?.len()+64;
+            if size>CONVERSION_BYTES {return Err(unreadable("legacy_outbox_page"));}
+            items.push(item);
+        }
+        Ok(items)
+    })()))?
 }
 
 /// All prepared unsent intents and their conversion markers commit together.
@@ -860,24 +859,7 @@ fn conversion_page_in(
             after_found |= after_ordinal == Some(ordinal);
             return Ok(());
         }
-        let item = LegacyUnsent {
-            entry_id: entry.id.clone(),
-            idempotency_key: CommandId::parse(entry.key.as_deref().ok_or_else(conversion_invalid)?)
-                .map_err(|_| conversion_invalid())?,
-            issued_at: Instant::parse(
-                entry
-                    .raw
-                    .get("issuedAt")
-                    .and_then(Value::as_str)
-                    .ok_or_else(conversion_invalid)?,
-            )
-            .map_err(|_| conversion_invalid())?,
-            command: entry
-                .raw
-                .get("command")
-                .cloned()
-                .ok_or_else(conversion_invalid)?,
-        };
+        let item = legacy_source_item(entry).map_err(|_| conversion_invalid())?;
         let size = conversion_json(&item)?.len() + 64;
         if size > CONVERSION_BYTES {
             return Err(conversion_invalid());
@@ -1072,6 +1054,7 @@ pub fn convert_legacy_page_with(
         let page = prepared_conversion_page(tx, &header, page_token, entry_ids, requests)?;
         let mut expected = page.items.iter().zip(requests).peekable();
         let mut blocked = false;
+        let mut unsent_started = false;
         conversion_sources(tx, &header.workspace, |_, entry, standing, _| {
             if expected
                 .peek()
@@ -1079,9 +1062,15 @@ pub fn convert_legacy_page_with(
             {
                 let (_, request) = expected.next().ok_or_else(conversion_invalid)?;
                 if standing == "converted" {
+                    if unsent_started {
+                        return Err(conversion_invalid());
+                    }
                     conversion_known(tx, &header.workspace, request)?;
-                } else if blocked {
-                    return Err(conversion_invalid());
+                } else {
+                    if blocked {
+                        return Err(conversion_invalid());
+                    }
+                    unsent_started = true;
                 }
             } else if standing == "unsent" {
                 blocked = true;

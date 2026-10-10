@@ -356,3 +356,9 @@ refuse without effects. Each write shares the existing BridgeOperation cancellat
 and commit arbitration: precommit cancellation rolls back that write; durable
 prefixes/stages remain saved after interruption. Workspace binding requires the
 whole classified outbox's `mayRun`, never a page or caller completion assertion.
+
+If classification already proves global `mayRun`, preparation skips conversion
+altogether. Earlier full-port conversions may have no frozen-context header;
+resolved work must not be re-encoded with today's actor, zone or policy merely to
+create one. Explicit supplied bounded retries still check every original
+fingerprint, and incomplete migrations still use their frozen context.
