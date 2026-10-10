@@ -58,7 +58,7 @@ struct ProjectEditorSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreating ? "Add" : "Save") { save() }
+                    Button(isCreating ? "Add" : "Save") { Task { await save() } }
                         .disabled(trimmedName.isEmpty)
                 }
             }
@@ -80,7 +80,7 @@ struct ProjectEditorSheet: View {
             TextField("Project name", text: $name)
                 .submitLabel(.done)
                 .focused($isNameFocused)
-                .onSubmit { save() }
+                .onSubmit { Task { await save() } }
         } footer: {
             if let message {
                 EditorValidationMessage(text: message)
@@ -148,26 +148,27 @@ struct ProjectEditorSheet: View {
         }
     }
 
-    private func save() {
+    @MainActor private func save() async {
         let newName = trimmedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
+        let editorID = UUID().uuidString
         do {
             switch mode {
             case .create:
-                let id = try workspace.createProject(name: newName, color: color)
+                let id = try await workspace.createProject(name: newName, color: color, editorID: editorID)
                 onCreate?(id)
             case .edit(let original):
                 guard let current = workspace.project(original.id) else {
                     throw GTDValidationError.projectNotFound
                 }
                 if newName != current.name {
-                    try workspace.renameProject(current.id, to: newName)
+                    try await workspace.renameProject(current.id, to: newName, editorID: editorID)
                 }
                 if !ProjectColorNames.same(color, current.color) {
-                    try workspace.setProjectColor(current.id, color: color)
+                    try await workspace.setProjectColor(current.id, color: color, editorID: editorID)
                 }
             }
             dismiss()

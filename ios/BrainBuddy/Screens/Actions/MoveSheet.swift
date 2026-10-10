@@ -14,6 +14,7 @@ struct MoveSheet: View {
     @State private var destination: OpenList?
     @State private var waitingFor = ""
     @State private var errorMessage: String?
+    @State private var isSaving = false
 
     /// `initialList` preselects a destination, for example Waiting for chosen
     /// from a context menu.
@@ -70,8 +71,8 @@ struct MoveSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Move", action: move)
-                        .disabled(!canMove)
+                    Button("Move") { Task { await move() } }
+                        .disabled(!canMove || isSaving)
                 }
             }
             .onChange(of: destination) { _, _ in errorMessage = nil }
@@ -79,11 +80,13 @@ struct MoveSheet: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func move() {
+    @MainActor private func move() async {
         guard let destination else { return }
-        let current = workspace.task(self.task.id) ?? self.task
+        let current = self.task
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            try await TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
             dismiss()
         } catch {
             errorMessage = error.message

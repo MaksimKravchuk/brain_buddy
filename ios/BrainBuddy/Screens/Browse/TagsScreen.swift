@@ -104,12 +104,16 @@ struct TagsScreen: View {
     }
 
     private func delete(_ tag: TagRecord) {
+        Task { await deleteDurably(tag) }
+    }
+
+    @MainActor private func deleteDurably(_ tag: TagRecord) async {
         let name = tag.name
-        let deleted = TaskCommandRunner.run(toasts) {
-            try workspace.deleteTag(tag.id)
+        let deleted = await TaskCommandRunner.run(toasts) {
+            try await workspace.deleteTag(tag.id, editorID: UUID().uuidString)
         }
-        deleteCandidate = nil
         if deleted {
+            deleteCandidate = nil
             toasts.show("Deleted #\(name)", actionTitle: nil, action: nil)
         }
     }

@@ -45,7 +45,7 @@ struct TagEditorSheet: View {
                             .autocorrectionDisabled()
                             .submitLabel(.done)
                             .focused($isNameFocused)
-                            .onSubmit { save() }
+                            .onSubmit { Task { await save() } }
                     }
                 } footer: {
                     if let message {
@@ -62,7 +62,7 @@ struct TagEditorSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreating ? "Add" : "Save") { save() }
+                    Button(isCreating ? "Add" : "Save") { Task { await save() } }
                         .disabled(cleanedName.isEmpty)
                 }
             }
@@ -84,22 +84,23 @@ struct TagEditorSheet: View {
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func save() {
+    @MainActor private func save() async {
         let newName = cleanedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
+        let editorID = UUID().uuidString
         do {
             switch mode {
             case .create:
-                try workspace.createTag(name: newName)
+                try await workspace.createTag(name: newName, editorID: editorID)
             case .rename(let original):
                 guard let current = workspace.tag(original.id) else {
                     throw GTDValidationError.tagNotFound
                 }
                 if newName != current.name {
-                    try workspace.renameTag(current.id, to: newName)
+                    try await workspace.renameTag(current.id, to: newName, editorID: editorID)
                 }
             }
             dismiss()

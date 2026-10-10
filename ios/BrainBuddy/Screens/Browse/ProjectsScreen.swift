@@ -136,21 +136,29 @@ private struct ActiveProjectsList: View {
     }
 
     private func archive(_ project: ProjectRecord) {
+        Task { await archiveDurably(project) }
+    }
+
+    @MainActor private func archiveDurably(_ project: ProjectRecord) async {
         let name = project.name
-        let archived = TaskCommandRunner.run(toasts) {
-            try workspace.archiveProject(project.id)
+        let archived = await TaskCommandRunner.run(toasts) {
+            try await workspace.archiveProject(project.id, editorID: UUID().uuidString)
         }
-        archiveCandidate = nil
         if archived {
+            archiveCandidate = nil
             toasts.show("Archived “\(name)”", actionTitle: nil, action: nil)
         }
     }
 
     private func setColor(_ color: String?, of project: ProjectRecord) {
+        Task { await setColorDurably(color, of: project) }
+    }
+
+    @MainActor private func setColorDurably(_ color: String?, of project: ProjectRecord) async {
         let current = workspace.project(project.id)?.color
         guard !ProjectColorNames.same(color, current) else { return }
-        _ = TaskCommandRunner.run(toasts) {
-            try workspace.setProjectColor(project.id, color: color)
+        _ = await TaskCommandRunner.run(toasts) {
+            try await workspace.setProjectColor(project.id, color: color, editorID: UUID().uuidString)
         }
     }
 }

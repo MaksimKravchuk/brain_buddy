@@ -352,17 +352,17 @@ private struct CompletionControl: View {
 
     private func complete() {
         guard !isCompleting else { return }
-        withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) {
-            isCompleting = true
-        }
+        isCompleting = true
         let task = task
         let workspace = workspace
         let toasts = toasts
         let pause: Duration = reduceMotion ? .milliseconds(150) : .milliseconds(300)
         Task {
             try? await Task.sleep(for: pause)
-            let completed = TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
-            if !completed { isCompleting = false }
+            let completed = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
+            if completed {
+                withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) { isCompleting = true }
+            } else { isCompleting = false }
         }
     }
 }

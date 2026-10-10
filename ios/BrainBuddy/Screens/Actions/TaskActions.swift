@@ -72,9 +72,7 @@ private struct TaskActionsModifier: ViewModifier {
     /// (or no list yet, from the swipe) opens the sheet.
     private func requestMove(_ list: OpenList?) {
         if let list, list != .waiting {
-            _ = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
-                try TaskListMover.move(task, to: list, waitingFor: nil, workspace: workspace, toasts: toasts)
-            }
+            Task { _ = await TaskCommandRunner.run(toasts) { try await TaskListMover.move(task, to: list, waitingFor: nil, workspace: workspace, toasts: toasts) } }
         } else {
             moveInitialList = list
             isMoving = true
@@ -86,11 +84,11 @@ private struct TaskActionsModifier: ViewModifier {
     }
 
     private func complete() {
-        TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
+        Task { _ = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts) }
     }
 
     private func cancel() {
-        TaskCommandRunner.cancel(task, workspace: workspace, toasts: toasts)
+        Task { _ = await TaskCommandRunner.cancel(task, workspace: workspace, toasts: toasts) }
     }
 }
 
@@ -139,14 +137,12 @@ enum TaskListMover {
     /// list it came from (restoring its waiting note when that was Waiting for).
     static func move(
         _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
-    ) throws(GTDValidationError) {
+    ) async throws {
         guard let origin = task.openList else { throw .taskNotOpen }
         let originWaitingFor = task.waitingFor
-        try workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil)
+        try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString)
         toasts.show("Moved to \(list.title)", actionTitle: "Undo") {
-            _ = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
-                try workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originWaitingFor : nil)
-            }
+            Task { _ = await TaskCommandRunner.run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originWaitingFor : nil, editorID: UUID().uuidString) } }
         }
     }
 
@@ -154,18 +150,18 @@ enum TaskListMover {
     /// which completes or cancels it again.
     static func reopen(
         _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
-    ) throws(GTDValidationError) {
+    ) async throws {
         guard task.state.isTerminal else { throw .taskNotClosed }
         let wasCancelled = task.state == .cancelled
-        try workspace.reopenTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil)
+        try await workspace.reopenTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString)
         toasts.show("Reopened in \(list.title)", actionTitle: "Undo") {
-            _ = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
+            Task { _ = await TaskCommandRunner.run(toasts) {
                 if wasCancelled {
-                    try workspace.cancelTask(task.id)
+                    try await workspace.cancelTask(task.id, editorID: UUID().uuidString)
                 } else {
-                    try workspace.completeTask(task.id)
+                    try await workspace.completeTask(task.id, editorID: UUID().uuidString)
                 }
-            }
+            } }
         }
     }
 }

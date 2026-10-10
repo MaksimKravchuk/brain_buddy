@@ -326,6 +326,10 @@ struct CaptureSheet: View {
     }
 
     private func add(keepOpen: Bool) {
+        Task { await addDurably(keepOpen: keepOpen) }
+    }
+
+    @MainActor private func addDurably(keepOpen: Bool) async {
         // A second tap while the sheet is closing would add the same task again.
         guard !isClosing else { return }
         let preview = workspace.capturePreview(draft)
@@ -335,7 +339,7 @@ struct CaptureSheet: View {
         }
         let destination = destinationName(preview)
         do {
-            try workspace.capture(draft)
+            try await workspace.capture(draft, editorID: UUID().uuidString)
         } catch {
             errorMessage = error.message
             return

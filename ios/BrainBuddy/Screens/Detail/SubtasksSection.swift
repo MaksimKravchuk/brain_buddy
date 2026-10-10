@@ -56,7 +56,7 @@ struct SubtasksSection: View {
             TextField("Add a subtask", text: $newTitle)
                 .focused($isAdding)
                 .submitLabel(.done)
-                .onSubmit(add)
+                .onSubmit { Task { await add() } }
                 .accessibilityLabel("New subtask")
         } icon: {
             Image(systemName: "plus")
@@ -66,11 +66,11 @@ struct SubtasksSection: View {
         .frame(minHeight: BBMetrics.rowMinHeight)
     }
 
-    private func add() {
+    @MainActor private func add() async {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         do {
-            try workspace.addSubtask(to: task.id, title: title)
+            try await workspace.addSubtask(to: task.id, title: title, editorID: UUID().uuidString)
             newTitle = ""
             errorMessage = nil
             // Keep the keyboard up for the next one.
@@ -156,7 +156,7 @@ private struct DetailSubtaskRow: View {
                 Menu {
                     ForEach(availableActions, id: \.self) { action in
                         Button {
-                            transition(action)
+                            Task { await transition(action) }
                         } label: {
                             Label(Self.title(for: action), systemImage: Self.symbol(for: action))
                         }
@@ -219,20 +219,20 @@ private struct DetailSubtaskRow: View {
     }
 
     private func toggle() {
-        transition(isOpen ? .complete : .reopen)
+        Task { await transition(isOpen ? .complete : .reopen) }
     }
 
-    private func transition(_ action: SubtaskTransitionAction) {
-        commitRename()
+    @MainActor private func transition(_ action: SubtaskTransitionAction) async {
+        await commitRename()
         do {
-            try workspace.transitionSubtask(subtask.id, in: taskID, action)
+            try await workspace.transitionSubtask(subtask.id, in: taskID, action, editorID: UUID().uuidString)
             onProblem(nil)
         } catch {
             onProblem(error.message)
         }
     }
 
-    private func commitRename() {
+    @MainActor private func commitRename() async {
         guard isOpen, !isReadOnly else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != subtask.title else { return }
@@ -241,7 +241,7 @@ private struct DetailSubtaskRow: View {
             return
         }
         do {
-            try workspace.renameSubtask(subtask.id, in: taskID, to: trimmed)
+            try await workspace.renameSubtask(subtask.id, in: taskID, to: trimmed, editorID: UUID().uuidString)
             title = trimmed
             onProblem(nil)
         } catch {

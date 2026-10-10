@@ -643,17 +643,15 @@ private struct TaskDetailForm: View {
             return
         }
         let current = committedTask()
-        _ = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
-            try TaskListMover.move(current, to: list, waitingFor: nil, workspace: workspace, toasts: toasts)
-        }
+        Task { _ = await TaskCommandRunner.run(toasts) { try await TaskListMover.move(current, to: list, waitingFor: nil, workspace: workspace, toasts: toasts) } }
     }
 
     private func complete() {
-        TaskCommandRunner.complete(committedTask(), workspace: workspace, toasts: toasts)
+        Task { _ = await TaskCommandRunner.complete(committedTask(), workspace: workspace, toasts: toasts) }
     }
 
     private func cancel() {
-        TaskCommandRunner.cancel(committedTask(), workspace: workspace, toasts: toasts)
+        Task { _ = await TaskCommandRunner.cancel(committedTask(), workspace: workspace, toasts: toasts) }
     }
 }
 

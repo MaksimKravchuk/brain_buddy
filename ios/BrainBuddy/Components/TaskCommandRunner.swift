@@ -15,6 +15,15 @@ import UIKit
 /// are accepted.
 @MainActor
 enum TaskCommandRunner {
+    static func run(_ toasts: ToastCenter, _ body: () async throws -> Void) async -> Bool {
+        do { try await body(); return true }
+        catch { report(error, toasts: toasts); return false }
+    }
+
+    static func attempt<Value>(_ toasts: ToastCenter, _ body: () async throws -> Value) async -> Value? {
+        do { return try await body() }
+        catch { report(error, toasts: toasts); return nil }
+    }
     /// Runs `body`; on failure shows the error's message as a toast.
     /// Returns true when `body` succeeded.
     @discardableResult
@@ -51,14 +60,10 @@ enum TaskCommandRunner {
     /// Motion), a success haptic and a "Completed" toast whose Undo reopens
     /// it into the list it came from (Waiting for keeps its note).
     @discardableResult
-    static func complete(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) -> Bool {
+    static func complete(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
         guard let origin = task.openList else { return false }
         let waitingFor = task.waitingFor
-        let completed = run(toasts) {
-            try withAnimation(transitionAnimation) {
-                try workspace.completeTask(task.id)
-            }
-        }
+        let completed = await run(toasts) { try await workspace.completeTask(task.id, editorID: UUID().uuidString) }
         guard completed else { return false }
         Haptics.success()
         toasts.show("Completed", actionTitle: "Undo") {
@@ -70,18 +75,14 @@ enum TaskCommandRunner {
     /// Cancels an open task ("won't do"), with an Undo that reopens it into
     /// the list it came from.
     @discardableResult
-    static func cancel(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) -> Bool {
+    static func cancel(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
         guard let origin = task.openList else { return false }
         let waitingFor = task.waitingFor
-        let cancelled = run(toasts) {
-            try withAnimation(transitionAnimation) {
-                try workspace.cancelTask(task.id)
-            }
-        }
+        let cancelled = await run(toasts) { try await workspace.cancelTask(task.id, editorID: UUID().uuidString) }
         guard cancelled else { return false }
         Haptics.light()
         toasts.show("Cancelled", actionTitle: "Undo") {
-            reopen(task.id, into: origin, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            Task { _ = await reopen(task.id, into: origin, waitingFor: waitingFor, workspace: workspace, toasts: toasts) }
         }
         return true
     }
@@ -91,24 +92,14 @@ enum TaskCommandRunner {
     @discardableResult
     static func move(
         _ task: TaskRecord, to list: OpenList, waitingFor: String? = nil, workspace: Workspace, toasts: ToastCenter
-    ) -> Bool {
+    ) async -> Bool {
         guard let origin = task.openList else { return false }
         let originalWaitingFor = task.waitingFor
-        let moved = run(toasts) {
-            try withAnimation(transitionAnimation) {
-                try workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil)
-            }
-        }
+        let moved = await run(toasts) { try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString) }
         guard moved else { return false }
         Haptics.light()
         toasts.show("Moved to \(list.title)", actionTitle: "Undo") {
-            run(toasts) {
-                try withAnimation(transitionAnimation) {
-                    try workspace.moveTask(
-                        task.id, to: origin, waitingFor: origin == .waiting ? originalWaitingFor : nil
-                    )
-                }
-            }
+            Task { _ = await run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originalWaitingFor : nil, editorID: UUID().uuidString) } }
         }
         return true
     }
@@ -117,11 +108,11 @@ enum TaskCommandRunner {
     /// (Next actions when that is unknown, as `ReopenSheet` preselects; Inbox
     /// when it was Waiting for and the note is gone), and says where it went.
     @discardableResult
-    static func reopen(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) -> Bool {
+    static func reopen(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
         let preferred = task.lastOpenList ?? .next
         let note = task.waitingFor?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let list: OpenList = preferred == .waiting && note.isEmpty ? .inbox : preferred
-        let reopened = reopen(task.id, into: list, waitingFor: note, workspace: workspace, toasts: toasts)
+        let reopened = await reopen(task.id, into: list, waitingFor: note, workspace: workspace, toasts: toasts)
         if reopened { toasts.show("Reopened in \(list.title)") }
         return reopened
     }
@@ -131,12 +122,8 @@ enum TaskCommandRunner {
     @discardableResult
     static func reopen(
         _ taskID: TaskID, into list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
-    ) -> Bool {
-        run(toasts) {
-            try withAnimation(transitionAnimation) {
-                try workspace.reopenTask(taskID, to: list, waitingFor: list == .waiting ? waitingFor : nil)
-            }
-        }
+    ) async -> Bool {
+        await run(toasts) { try await workspace.reopenTask(taskID, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString) }
     }
 
     // MARK: Private
