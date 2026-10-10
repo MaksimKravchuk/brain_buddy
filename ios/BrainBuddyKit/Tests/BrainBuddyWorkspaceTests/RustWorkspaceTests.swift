@@ -39,6 +39,14 @@ struct RustWorkspaceTests {
         await prepared.value
         #expect(cache.page(for: query) == nil)
         #expect(cache.readiness(for: query) == .failed("MALFORMED_QUERY_RESULT"))
+        let retry = Task { await cache.prepare(query) }
+        await controlled.waitForCalls(2)
+        #expect(cache.pageState(for: query).readiness == .loading)
+        await controlled.complete(1, generation: "2")
+        await retry.value
+        #expect(await controlled.callCount() == 2)
+        #expect(cache.page(for: query) == nil)
+        #expect(cache.readiness(for: query) == .failed("MALFORMED_QUERY_RESULT"))
     }
 
     @Test("026-FR-025: only the requested visible page crosses the bridge, with explicit navigation")
@@ -48,25 +56,31 @@ struct RustWorkspaceTests {
         let cache = RustWorkspaceAdapter(inputs: Data()) { query, inputs, cursor in
             try await controlled.answer(query, inputs: inputs, cursor: cursor)
         } didPublish: { _, _ in }
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .notRequested))
         let first = Task { await cache.prepare(query) }
         await controlled.waitForCalls(1)
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .loading))
         await controlled.complete(0, generation: "1", nextCursor: "page-two")
         await first.value
         #expect(await controlled.callCount() == 1)
         #expect(cache.page(for: query)?.collectionNextCursor == "page-two")
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true))
         let next = Task { await cache.nextPage(query) }
         await controlled.waitForCalls(2)
         #expect(await controlled.lastCursor() == "page-two")
         #expect(cache.page(for: query) == nil)
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .loading))
         await controlled.complete(1, generation: "1")
         await next.value
         #expect(await controlled.callCount() == 2)
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasPrevious: true))
         let back = Task { await cache.previousPage(query) }
         await controlled.waitForCalls(3)
         #expect(await controlled.lastCursor() == nil)
         await controlled.complete(2, generation: "1", nextCursor: "page-two")
         await back.value
         #expect(cache.entries.count == 1)
+        #expect(cache.pageState(for: query) == WorkspaceQueryPageState(readiness: .ready, hasNext: true))
     }
 
     @Test("026-FR-001: a recovered prepared gesture reuses the committed receipt before any fresh ID can be minted")

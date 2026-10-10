@@ -83,8 +83,8 @@ extension Workspace {
         return GTDQueries.derivedInstants(of: task, settings: state.review.settings, timeZone: classificationZone)
     }
 
-    public func decisionQueue() -> [TaskRecord] {
-        if isRustSelected { return rustQueue(.decisions)?.tasks ?? [] }
+    public func decisionQueue(session: ReviewSessionID? = nil) -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.decisions, session: session)?.tasks ?? [] }
         return GTDQueries.decisionQueue(in: state, now: reviewNow, timeZone: classificationZone)
     }
 
@@ -93,7 +93,12 @@ extension Workspace {
         return GTDQueries.askCount(in: state, now: reviewNow, timeZone: classificationZone)
     }
     public func unseenParks() -> [TaskRecord] {
-        if isRustSelected { return (rustReviewState?.unseenParks ?? []).compactMap { state.tasks[$0.taskID] } }
+        if isRustSelected {
+            guard reviewReadiness(.state) == .ready, let query = try? rustReviewQuery(.state), let page = rustPage(for: query),
+                  let facade = rustFacade, let review = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()),
+                  let records = records(review.unseenParks.map { .task($0.taskID) }) else { return [] }
+            return review.unseenParks.compactMap { records.tasks[$0.taskID] }
+        }
         return GTDQueries.unseenParks(in: state)
     }
 
@@ -107,23 +112,31 @@ extension Workspace {
         return state.review.server?.restartMode == true || GTDQueries.restartMode(in: state, now: reviewNow)
     }
 
-    public func wins() -> [TaskRecord] {
-        if isRustSelected { return rustQueue(.wins)?.tasks ?? [] }
+    public func wins(session: ReviewSessionID? = nil) -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.wins, session: session)?.tasks ?? [] }
         return GTDQueries.wins(in: state, now: now())
     }
-    public func capacityMirror() -> CapacityMirror {
+    public func winsCount(session: ReviewSessionID? = nil) -> Int {
+        if isRustSelected { return rustQueue(.wins, session: session)?.winsTotal ?? 0 }
+        return wins().count
+    }
+    public func restOfNext(session: ReviewSessionID? = nil) -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.restOfNext, session: session)?.tasks ?? [] }
+        return list(.list(.next)).sections.flatMap(\.tasks)
+    }
+    public func capacityMirror(session: ReviewSessionID? = nil) -> CapacityMirror {
         if isRustSelected {
-            return rustQueue(.restOfNext)?.capacity ?? CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil)
+            return rustQueue(.restOfNext, session: session)?.capacity ?? CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil)
         }
         return GTDQueries.capacityMirror(in: state, now: now())
     }
-    public func waitingDue() -> [TaskRecord] {
-        if isRustSelected { return rustQueue(.waiting)?.tasks ?? [] }
+    public func waitingDue(session: ReviewSessionID? = nil) -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.waiting, session: session)?.tasks ?? [] }
         return GTDQueries.waitingDue(in: state, now: now())
     }
-    public func somedayDue() -> SomedayQueue {
+    public func somedayDue(session: ReviewSessionID? = nil) -> SomedayQueue {
         if isRustSelected {
-            let queue = rustQueue(.someday)
+            let queue = rustQueue(.someday, session: session)
             return SomedayQueue(eligibleTotal: queue?.somedayTotal ?? 0, shown: queue?.tasks ?? [])
         }
         return GTDQueries.somedayDue(in: state, now: now())
@@ -132,8 +145,8 @@ extension Workspace {
         if isRustSelected { return rustRead(.projects) { try $0.workspaceProjects(from: $1, keeping: state, at: now()) } ?? [] }
         return GTDQueries.projectsNeedingNextAction(in: state)
     }
-    public func datesAhead() -> [DueDay] {
-        if isRustSelected { return rustQueue(.dates)?.dueDays ?? [] }
+    public func datesAhead(session: ReviewSessionID? = nil) -> [DueDay] {
+        if isRustSelected { return rustQueue(.dates, session: session)?.dueDays ?? [] }
         return GTDQueries.datesAhead(in: state, today: today)
     }
     public func lastCountedReview() -> Date? {
@@ -703,7 +716,25 @@ extension Workspace {
     }
 
     private func rustQueue(_ step: ReviewStep, session: ReviewSessionID? = nil) -> RustWorkspaceReviewQueue? {
-        rustRead(.queue(step, session)) { try $0.workspaceReviewQueue(from: $1, keeping: state, at: now()) }
+        guard let facade = rustFacade, let query = try? rustReviewQuery(.queue(step, session)), let page = rustPage(for: query) else { return nil }
+        return try? facade.workspaceReviewQueue(from: page, at: now())
+    }
+
+    public func reviewFormulation(_ id: TaskID, read: WorkspaceReviewRead) -> RustWorkspaceFormulation? {
+        guard isRustSelected else { return legacyFormulation(id) }
+        guard reviewReadiness(read) == .ready, let key = try? rustReviewQuery(read) else { return nil }
+        if case .formulation(let requested) = read {
+            guard requested == id, let page = rustPage(for: key), let facade = rustFacade else { return nil }
+            return try? facade.workspaceFormulation(from: page.result)
+        }
+        return rustQueryFormulation(id, key: key)
+    }
+
+    func legacyFormulation(_ id: TaskID) -> RustWorkspaceFormulation? {
+        guard !isRustSelected, let task = state.tasks[id], let classification = formulationClass(of: id) else { return nil }
+        return RustWorkspaceFormulation(classification: classification, derived: derivedInstants(of: id),
+            thirdStall: isThirdStall(id), extensionInstants: extensionInstants(of: id),
+            parkedAfterDays: GTDQueries.parkedAfterDays(task))
     }
 
     private func rustFormulation(_ task: TaskID) -> RustWorkspaceFormulation? {
@@ -719,45 +750,76 @@ extension Workspace {
     }
 
     public func reviewReadiness(_ read: WorkspaceReviewRead) -> WorkspaceQueryReadiness {
-        guard isRustSelected else { return .ready }
-        guard let query = try? rustReviewQuery(read) else { return .failed("WORKSPACE_NOT_READY") }
-        _ = rustPage(for: query)
-        return rustReadiness(for: query)
+        reviewPageState(read).readiness
+    }
+
+    public func reviewPageState(_ read: WorkspaceReviewRead) -> WorkspaceQueryPageState {
+        let base = rustQueryPageState { try rustReviewQuery(read) }
+        guard isRustSelected, base.readiness == .ready, case .state = read,
+              let query = try? rustReviewQuery(read), let facade = rustFacade, let page = rustPage(for: query),
+              let state = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()),
+              !state.unseenParks.isEmpty else { return base }
+        let readiness = recordsReadiness(state.unseenParks.map { .task($0.taskID) })
+        guard readiness == .ready else {
+            return WorkspaceQueryPageState(readiness: readiness == .notRequested ? .loading : readiness)
+        }
+        return base
+    }
+
+    private func requireReviewQueryReady(_ query: Data) throws {
+        guard rustReadiness(for: query) == .ready else {
+            if case .failed(let code) = rustReadiness(for: query) { throw RustBridgeError(code: code) }
+            throw RustBridgeError(code: Task.isCancelled ? "CANCELLED" : "WORKSPACE_NOT_READY")
+        }
     }
 
     public func prepareReviewRead(_ read: WorkspaceReviewRead) async throws {
         guard isRustSelected else { return }
         let query = try rustReviewQuery(read)
         await prepareRustQuery(query)
+        try requireReviewQueryReady(query)
         if case .state = read { try await hydrateShownParks(query) }
     }
 
     public func nextReviewPage(_ read: WorkspaceReviewRead) async throws {
+        guard isRustSelected else { return }
         let query = try rustReviewQuery(read)
         await rustQueries?.nextPage(query)
+        try requireReviewQueryReady(query)
         if case .state = read { try await hydrateShownParks(query) }
     }
 
     public func previousReviewPage(_ read: WorkspaceReviewRead) async throws {
+        guard isRustSelected else { return }
         let query = try rustReviewQuery(read)
         await rustQueries?.previousPage(query)
+        try requireReviewQueryReady(query)
         if case .state = read { try await hydrateShownParks(query) }
+    }
+
+    public func reviewShownTask(_ id: TaskID, read: WorkspaceReviewRead) -> ShownTask? {
+        guard isRustSelected else { return task(id).map { shownTask(of: $0) } }
+        guard reviewReadiness(read) == .ready, let query = try? rustReviewQuery(read) else { return nil }
+        if case .state = read, let page = rustPage(for: query), let facade = rustFacade,
+           let review = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()) {
+            return recordsShownTask(id, reads: review.unseenParks.map { .task($0.taskID) })
+        }
+        return rustQueryShownTask(id, key: query)
     }
 
     private func hydrateShownParks(_ query: Data) async throws {
         guard let facade = rustFacade, let page = rustPage(for: query),
               rustReadiness(for: query) == .ready else { return }
-        let review = try facade.workspaceReviewState(from: page.result, keeping: state, at: now())
-        let requests = review.unseenParks.map {
-            facade.workspaceRecordRequest("task", localID: $0.taskID.rawValue, bindings: rustIdentityBindings)
-        }
-        guard !requests.isEmpty else { rustAdoptTasks([], for: query); return }
+        let review = try facade.workspaceReviewState(from: page.result, keeping: .empty, at: now())
+        let reads: [WorkspaceRecordRead] = review.unseenParks.map { .task($0.taskID) }
+        guard !reads.isEmpty else { rustAdoptTasks([], for: query); return }
         let binding = runtimeBindingID
-        let records = try await rustReadRecords(requests)
+        let records = try await prepareRecords(reads)
         guard binding == runtimeBindingID, rustPage(for: query) == page else { return }
-        var owned = GTDState.empty
-        try facade.workspaceApplyRecords(from: records.result, requests: requests, to: &owned, at: now())
-        rustAdoptTasks(review.unseenParks.compactMap { owned.tasks[$0.taskID] }, for: query)
+        // prepareRecords owns the associated partial frames in its own answer.
+        // No old detail frame may turn these record rows into full children.
+        rustAdoptTasks(review.unseenParks.compactMap { records.tasks[$0.taskID] }, for: query,
+                       frames: [])
     }
 
     /// Called only after the lifecycle/cache generation fence has passed.
@@ -769,6 +831,10 @@ extension Workspace {
         case "review_state":
             let review = try facade.workspaceReviewState(from: page.result, keeping: state, at: now())
             rustReviewState = review
+            Task { [weak self] in
+                do { try await self?.hydrateShownParks(query) }
+                catch { self?.markRustQueryError(error) }
+            }
             rustMutateShown {
                 $0.review.settings = review.settings
                 $0.review.server = review.server

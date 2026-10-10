@@ -170,7 +170,8 @@ extension RustDomainFacade {
             "options": ["sort": options.sort.rawValue, "group_by_project": options.groupByProject,
                 "show_completed": options.showCompleted, "show_cancelled": options.showCancelled,
                 "priorities": options.priorities.map(\.rawValue).sorted(),
-                "tag_filter": ids.optional(options.tagFilter?.rawValue, prefix: "tag")],
+                "tag_filter": ids.optional(options.tagFilter?.rawValue, prefix: "tag"),
+                "search": wireNull(options.search)],
             "page": ["limit": 200, "after": wireNull(cursor)]])
     }
 
@@ -230,10 +231,13 @@ extension RustDomainFacade {
                 let id = TaskID(ids.swift(try row.string("id")))
                 return try workspaceTask(row, keeping: state.tasks[id], detail: false, at: date)
             }
-            return TaskSection(id: sectionID, title: section.optionalString("title"), kind: sectionKind, tasks: tasks)
+            return TaskSection(id: sectionID, title: section.optionalString("title"), kind: sectionKind, tasks: try workspaceFramedTasks(tasks, from: page, at: date),
+                               totalCount: try section.int("total_count"))
         }
         return RustWorkspaceListPage(generation: generation,
-            list: TaskListResult(sections: sections, openCount: try value.int("open_count")),
+            list: TaskListResult(sections: sections, openCount: try value.int("open_count"),
+                totalCount: try value.int("total_count"), completedCount: try value.int("completed_count"),
+                cancelledCount: try value.int("cancelled_count")),
             nextCursor: page.collectionNextCursor ?? value.optionalString("next_cursor"))
     }
 
@@ -259,8 +263,12 @@ extension RustDomainFacade {
             state.projects[id] = previous.projects[id]
             try applyOwned("project", value: project, to: &state, at: date, ids: ids)
             guard let record = state.projects[id] else { throw RustDomainError.malformedResult }
+            var counts: [OpenList: Int]?
+            if let values = row.optionalObject("counts_by_state") {
+                counts = try Dictionary(uniqueKeysWithValues: OpenList.allCases.map { ($0, try values.int($0.rawValue)) })
+            }
             return ProjectSummary(project: record, openTaskCount: try row.int("open_task_count"),
-                                  nextActionCount: try row.int("next_action_count"))
+                                  nextActionCount: try row.int("next_action_count"), countsByState: counts)
         }
     }
 
@@ -389,5 +397,100 @@ extension RustDomainFacade {
             return result
         }
         return try RustJSON.data(rewritten(source))
+    }
+}
+
+
+/// Native catalog order reuses the owning Rust selector.
+public enum WorkspaceTagSort: String, Hashable, Sendable {
+    case name
+    case openCount = "open_count"
+}
+
+extension RustDomainFacade {
+    public func workspaceProjectsQuery(archived: Bool = false, search: String? = nil,
+                                       projectID: ProjectID? = nil,
+                                       bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
+        return try RustJSON.data(["kind": "native_projects", "filter": projectID == nil ? (archived ? "archived" : "active") : "all",
+            "search": wireNull(search), "project_id": ids.optional(projectID?.rawValue, prefix: "project")])
+    }
+
+    public func workspaceTagsQuery(search: String? = nil, sort: WorkspaceTagSort = .name) throws -> Data {
+        try RustJSON.data(["kind": "native_tags", "search": wireNull(search), "sort": sort.rawValue])
+    }
+
+    public func workspaceFirstNextQuery(_ project: ProjectID,
+                                        bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
+        return try RustJSON.data(["kind": "task_list", "list": "next", "project_id": ids.project(project),
+            "tag_id": NSNull(), "sort": "manual", "page": ["limit": 1, "after": NSNull()]])
+    }
+
+    /// Exact rendered tasks; this never retains children from another query.
+    public func workspaceRenderedTasks(from page: RustWorkspacePage, at date: Date) throws -> [TaskRecord] {
+        let detail = try RustJSON.object(page.result).string("kind") == "task_detail"
+        let tasks = try workspaceTaskRows(from: page).map { try workspaceTask($0, keeping: nil, detail: detail, at: date) }
+        return try workspaceFramedTasks(tasks, from: page, at: date)
+    }
+
+    /// Row metadata is paired with its query's actual returned task, not host state.
+    public func workspaceTaskFormulation(_ id: TaskID, from page: RustWorkspacePage) throws -> RustWorkspaceFormulation? {
+        guard let row = try workspaceTaskRows(from: page).first(where: { try $0.string("id") == id.rawValue }),
+              let facts = row.optionalObject("formulation_state") else { return nil }
+        guard try facts.string("task_id") == id.rawValue else { throw RustDomainError.malformedResult }
+        return try workspaceFormulationValue(facts)
+    }
+
+    private func workspaceTaskRows(from page: RustWorkspacePage) throws -> [WireObject] {
+        let root = try RustJSON.object(page.result)
+        switch try root.string("kind") {
+        case "task_detail": return [try root.object("value")]
+        case "list_mode": return try root.object("value").objects("sections").flatMap { try $0.objects("items") }
+        case "task_list", "review_queue": return try root.object("value").objects("items")
+        case "restart_candidates", "auto_park_due":
+            guard let rows = root["value"] as? [WireObject] else { throw RustDomainError.malformedResult }
+            return rows
+        case "records":
+            guard let values = root["value"] as? [Any] else { throw RustDomainError.malformedResult }
+            return try values.compactMap { value in
+                guard let row = value as? WireObject, try row.string("entity_type") == "task" else { return nil }
+                return try row.object("value")
+            }
+        default: return []
+        }
+    }
+
+    func workspaceFramedTasks(_ tasks: [TaskRecord], from page: RustWorkspacePage, at date: Date) throws -> [TaskRecord] {
+        let frames = try workspaceTaskFrames(from: page)
+        return tasks.map { task in
+            var task = task
+            if let frame = frames.first(where: { $0.taskID == task.id }) {
+                task.lastOpenList = frame.lastOpenList
+                task.childrenSyncedAt = frame.childrenKnown ? date : nil
+            } else { task.childrenSyncedAt = nil }
+            return task
+        }
+    }
+
+    /// The task and frame are both decoded from this same canonical answer.
+    /// This does not mint a token for a modified or accumulated host display.
+    public func workspaceShownTask(_ id: TaskID, from page: RustWorkspacePage, at date: Date,
+                                   localChildEdits: Int = 0) throws -> ShownTask? {
+        guard var task = try workspaceRenderedTasks(from: page, at: date).first(where: { $0.id == id }) else { return nil }
+        let matching = try workspaceTaskFrames(from: page).filter { $0.taskID == id }
+        guard matching.count == 1, let frame = matching.first else { throw RustDomainError.malformedResult }
+        let token = try RustJSON.object(frame.token)
+        let subtasks = task.subtasks.sorted { ($0.orderKey, $0.id.rawValue) < ($1.orderKey, $1.id.rawValue) }.map { $0.id.rawValue }
+        let comments = task.comments.map { $0.id.rawValue }.sorted()
+        guard try token.strings("subtask_ids") == subtasks, try token.strings("comment_ids") == comments else {
+            throw RustDomainError.malformedResult
+        }
+        task.lastOpenList = frame.lastOpenList
+        task.childrenSyncedAt = frame.childrenKnown ? date : nil
+        var shown = ShownTask(task, localChildEdits: localChildEdits)
+        shown.childrenKnown = frame.childrenKnown
+        shown.runtimeAdmissionToken = frame.token
+        return shown
     }
 }

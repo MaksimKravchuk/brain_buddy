@@ -2489,6 +2489,31 @@ fn derived_view(
     })
 }
 
+/// Formulation facts for an already selected native task row. This shares the
+/// explicit formulation read's owner and frozen inputs, without another query.
+/// Hidden Review is represented explicitly rather than classifying in the host.
+pub fn task_formulation_view(
+    read_set: &ReadSet,
+    id: &TaskId,
+    inputs: &QueryInputs,
+) -> Result<crate::types::TaskFormulationView, DomainError> {
+    if !read_set.tasks.contains_key(id) {
+        return Err(DomainError::new(Reason::NotFound));
+    }
+    if !inputs.policy.weekly_review {
+        return Ok(crate::types::TaskFormulationView {
+            task_id: id.clone(),
+            class: "none".to_owned(),
+            derived: None,
+            third_stall: false,
+            extension: None,
+            parked_after_days: None,
+            unavailable_local_facts: vec!["weekly_review_unavailable".to_owned()],
+        });
+    }
+    native_formulation(read_set, id, instant(&inputs.now, "now")?)
+}
+
 fn native_formulation(
     read_set: &ReadSet,
     id: &TaskId,

@@ -10,6 +10,19 @@ public enum WorkspaceQueryReadiness: Equatable, Sendable {
     case failed(String)
 }
 
+/// Navigation belongs to one currently ready canonical page.
+public struct WorkspaceQueryPageState: Equatable, Sendable {
+    public let readiness: WorkspaceQueryReadiness
+    public let hasPrevious: Bool
+    public let hasNext: Bool
+
+    public init(readiness: WorkspaceQueryReadiness, hasPrevious: Bool = false, hasNext: Bool = false) {
+        self.readiness = readiness
+        self.hasPrevious = hasPrevious
+        self.hasNext = hasNext
+    }
+}
+
 /// Cache of owned canonical answers, not another read model. Each query holds
 /// one visible page. The inputs are frozen for that page's cursor lifetime.
 @MainActor
@@ -48,6 +61,7 @@ final class RustWorkspaceAdapter {
 
     func page(for query: Data) -> RustWorkspacePage? {
         register(query)
+        guard entries[query]?.readiness == .ready else { return nil }
         return entries[query]?.page
     }
 
@@ -55,8 +69,29 @@ final class RustWorkspaceAdapter {
         entries[query]?.readiness ?? .notRequested
     }
 
+    func pageState(for query: Data) -> WorkspaceQueryPageState {
+        guard let entry = entries[query] else { return WorkspaceQueryPageState(readiness: .notRequested) }
+        guard entry.readiness == .ready, let page = entry.page else {
+            return WorkspaceQueryPageState(readiness: entry.readiness)
+        }
+        return WorkspaceQueryPageState(readiness: .ready, hasPrevious: !entry.history.isEmpty,
+                                       hasNext: Self.nextCursor(page) != nil)
+    }
+
+    func recordFailure(_ query: Data, code: String) {
+        register(query, start: false)
+        tasks.removeValue(forKey: query)?.cancel()
+        guard var entry = entries[query] else { return }
+        clock &+= 1
+        entry.requestID = clock
+        entry.readiness = .failed(code)
+        entry.page = nil
+        entries[query] = entry
+    }
+
     func prepare(_ query: Data) async {
         register(query)
+        if let readiness = entries[query]?.readiness, case .failed = readiness { refresh(query) }
         while let task = tasks[query] {
             await task.value
             if Task.isCancelled { return }
@@ -108,7 +143,7 @@ final class RustWorkspaceAdapter {
         accessed = [:]
     }
 
-    private func register(_ key: Data) {
+    private func register(_ key: Data, start: Bool = true) {
         clock &+= 1
         accessed[key] = clock
         if entries[key] != nil { return }
@@ -118,7 +153,7 @@ final class RustWorkspaceAdapter {
             accessed.removeValue(forKey: oldest)
         }
         entries[key] = Entry(inputs: inputs)
-        refresh(key)
+        if start { refresh(key) }
     }
 
     private func refresh(_ key: Data) {
@@ -126,6 +161,7 @@ final class RustWorkspaceAdapter {
         clock &+= 1
         entry.requestID = clock
         entry.readiness = .loading
+        entry.page = nil
         entries[key] = entry
         let request = entry.requestID
         let dirtyVersion = entry.dirtyVersion

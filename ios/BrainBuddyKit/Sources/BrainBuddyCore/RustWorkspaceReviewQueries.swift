@@ -6,6 +6,17 @@ public struct RustWorkspaceFormulation: Sendable {
     public let thirdStall: Bool
     public let extensionInstants: DerivedInstants?
     public let parkedAfterDays: Int?
+    public let unavailableLocalFacts: [String]
+
+    public init(classification: FormulationClass, derived: DerivedInstants?, thirdStall: Bool,
+                extensionInstants: DerivedInstants?, parkedAfterDays: Int?, unavailableLocalFacts: [String] = []) {
+        self.classification = classification
+        self.derived = derived
+        self.thirdStall = thirdStall
+        self.extensionInstants = extensionInstants
+        self.parkedAfterDays = parkedAfterDays
+        self.unavailableLocalFacts = unavailableLocalFacts
+    }
 }
 
 public struct RustWorkspaceReviewSummary: Sendable {
@@ -36,6 +47,7 @@ public struct RustWorkspaceReviewQueue: Sendable {
     public let tasks: [TaskRecord]
     public let capacity: CapacityMirror?
     public let somedayTotal: Int?
+    public let winsTotal: Int?
     public let dueDays: [DueDay]
 }
 
@@ -131,7 +143,10 @@ extension RustDomainFacade {
     }
 
     public func workspaceFormulation(from result: Data) throws -> RustWorkspaceFormulation {
-        let value = try RustJSON.object(result).object("value")
+        try workspaceFormulationValue(RustJSON.object(result).object("value"))
+    }
+
+    func workspaceFormulationValue(_ value: WireObject) throws -> RustWorkspaceFormulation {
         guard let classification = FormulationClass(rawValue: try value.string("class")) else {
             throw RustDomainError.malformedResult
         }
@@ -143,7 +158,8 @@ extension RustDomainFacade {
         return RustWorkspaceFormulation(classification: classification,
             derived: try value.optionalObject("derived").map(derived), thirdStall: try value.bool("third_stall"),
             extensionInstants: try value.optionalObject("extension").map(derived),
-            parkedAfterDays: value["parked_after_days"] as? Int)
+            parkedAfterDays: value["parked_after_days"] as? Int,
+            unavailableLocalFacts: try value.strings("unavailable_local_facts"))
     }
 
     public func workspaceParkReturnProblem(from result: Data) throws -> ParkReturnProblem? {
@@ -201,7 +217,7 @@ extension RustDomainFacade {
             return DueDay(day: day, tasks: try row.strings("task_ids").compactMap { byID[TaskID(ids.swift($0))] })
         }
         return RustWorkspaceReviewQueue(tasks: tasks, capacity: capacity,
-            somedayTotal: meta["eligible_total"] as? Int, dueDays: days)
+            somedayTotal: meta["eligible_total"] as? Int, winsTotal: meta["count"] as? Int, dueDays: days)
     }
 
     public func workspaceTasks(from result: Data, keeping previous: GTDState, at date: Date) throws -> [TaskRecord] {
@@ -213,5 +229,14 @@ extension RustDomainFacade {
             let id = TaskID(ids.swift(try row.string("id")))
             return try workspaceTask(from: RustJSON.data(row), keeping: previous.tasks[id], detail: false, at: date)
         }
+    }
+}
+
+
+extension RustDomainFacade {
+    public func workspaceReviewQueue(from page: RustWorkspacePage, at date: Date) throws -> RustWorkspaceReviewQueue {
+        let value = try workspaceReviewQueue(from: page.result, keeping: .empty, at: date)
+        return RustWorkspaceReviewQueue(tasks: try workspaceFramedTasks(value.tasks, from: page, at: date),
+            capacity: value.capacity, somedayTotal: value.somedayTotal, winsTotal: value.winsTotal, dueDays: value.dueDays)
     }
 }

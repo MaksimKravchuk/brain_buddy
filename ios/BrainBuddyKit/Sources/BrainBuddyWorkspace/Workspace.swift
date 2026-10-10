@@ -311,7 +311,17 @@ public final class Workspace {
             do { return try facade.workspaceList(from: page, keeping: state, at: now()).list }
             catch { markRustQueryError(error); return TaskListResult(sections: [], openCount: 0) }
         }
-        return GTDQueries.list(destination, options: options, in: state, today: today)
+        var result = GTDQueries.list(destination, options: options, in: state, today: today)
+        if let search = options.search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let matches = Set(GTDQueries.list(.search(search), in: state, today: today).sections.flatMap(\.tasks).map(\.id))
+            result.sections = result.sections.compactMap { section in
+                var narrowed = section
+                narrowed.tasks = section.tasks.filter { matches.contains($0.id) }
+                return narrowed.tasks.isEmpty ? nil : narrowed
+            }
+            result.openCount = result.sections.flatMap(\.tasks).filter(\.isOpen).count
+        }
+        return result
     }
 
     public func counts() -> ListCounts {
@@ -338,23 +348,27 @@ public final class Workspace {
         guard isRustSelected, let canonical = rustIdentityBindings.first(where: { $0.entityType == "tag" && $0.localID == id.rawValue })?.canonicalID else { return nil }
         return state.tags[TagID(canonical)]
     }
-    public func projects(archived: Bool = false) -> [ProjectSummary] {
+    public func projects(archived: Bool = false, search: String? = nil) -> [ProjectSummary] {
         if isRustSelected {
-            guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active"),
+            guard let key = try? rustFacade?.workspaceProjectsQuery(archived: archived, search: search),
                   let page = rustPage(for: key), let facade = rustFacade else { return [] }
             do { return try facade.workspaceProjects(from: page.result, keeping: state, at: now()) }
             catch { markRustQueryError(error); return [] }
         }
-        return GTDQueries.projects(in: state, archived: archived)
+        let rows = GTDQueries.projects(in: state, archived: archived)
+        guard let search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return rows }
+        return rows.filter { $0.project.name.localizedStandardContains(search.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
-    public func tags() -> [TagSummary] {
+    public func tags(search: String? = nil) -> [TagSummary] {
         if isRustSelected {
-            guard let key = try? rustFacade?.workspaceReadQuery("tags"), let page = rustPage(for: key),
+            guard let key = try? rustFacade?.workspaceTagsQuery(search: search), let page = rustPage(for: key),
                   let facade = rustFacade else { return [] }
             do { return try facade.workspaceTags(from: page.result, keeping: state, at: now()) }
             catch { markRustQueryError(error); return [] }
         }
-        return GTDQueries.tags(in: state)
+        let rows = GTDQueries.tags(in: state)
+        guard let search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return rows }
+        return rows.filter { $0.tag.name.localizedStandardContains(search.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
     public func capturePreview(_ draft: CaptureDraft) -> CapturePreview {
         if isRustSelected {
@@ -783,10 +797,7 @@ public final class Workspace {
     /// call when a task detail opens.
     public func refreshTaskDetails(_ id: TaskID) async {
         if isRustSelected {
-            await prepareRustIdentities([.init(entityType: "task", localID: id.rawValue)])
-            if let key = try? rustFacade?.workspaceReadQuery("task_detail", taskID: id, bindings: rustIdentityBindings) {
-                await prepareRustQuery(key)
-            }
+            await prepareTaskDetail(id)
             return
         }
         guard let sync, account != nil else { return }
@@ -1269,8 +1280,16 @@ extension Workspace {
                     let data = try JSONSerialization.data(withJSONObject: draft, options: [.sortedKeys])
                     return try await runtime.smartAddResolve(draft: selection.facade.workspaceResolveReferences(data, runtime: runtime))
                 }
-                let canonical = try await selection.facade.workspaceResolveReferences(key, runtime: runtime)
-                return try await runtime.query(canonical, inputs: inputs, collectionAfter: cursor)
+                if root?["kind"] as? String == "records" {
+                    let requests = try Self.rustRecordRequests(from: key)
+                    return try await runtime.records(requests)
+                }
+                var request = root ?? [:]
+                let limit = request.removeValue(forKey: "_collection_limit") as? Int ?? 200
+                guard (1...200).contains(limit) else { throw RustBridgeError(code: "INVALID_QUERY_LIMIT") }
+                let wire = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+                let canonical = try await selection.facade.workspaceResolveReferences(wire, runtime: runtime)
+                return try await runtime.query(canonical, inputs: inputs, collectionLimit: UInt32(limit), collectionAfter: cursor)
             }, didPublish: { [weak self] key, page in
                 guard let self, self.runtimeBindingID == binding else { return }
                 try self.adoptRustPage(query: key, page: page)
@@ -1361,34 +1380,101 @@ extension Workspace {
     func rustReadiness(for key: Data) -> WorkspaceQueryReadiness { rustQueries?.readiness(for: key) ?? .notRequested }
     func prepareRustQuery(_ key: Data) async { await rustQueries?.prepare(key) }
 
+    func rustQueryPageState(_ build: () throws -> Data) -> WorkspaceQueryPageState {
+        guard isRustSelected else { return WorkspaceQueryPageState(readiness: .ready) }
+        guard isRustBound else { return WorkspaceQueryPageState(readiness: .notRequested) }
+        do { return rustQueries?.pageState(for: try build()) ?? WorkspaceQueryPageState(readiness: .notRequested) }
+        catch { return WorkspaceQueryPageState(readiness: .failed(Self.rustQueryCode(error))) }
+    }
+
+    private static func rustQueryCode(_ error: any Error) -> String {
+        (error as? RustBridgeError)?.code ?? "MALFORMED_QUERY_RESULT"
+    }
+
+    func prepareOwnedQuery(_ build: () throws -> Data,
+                           identities: [RustWorkspaceIdentityRequest] = []) async {
+        guard isRustSelected else { return }
+        do {
+            try await resolveRustIdentities(identities)
+            await prepareRustQuery(try build())
+        } catch {
+            if let key = try? build() { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)) }
+            markRustQueryError(error)
+        }
+    }
+
+    private func rustListKey(_ destination: Destination, options: ListOptions) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings)
+    }
+
     public func prepareList(_ destination: Destination, options: ListOptions = ListOptions()) async {
-        guard isRustSelected, let facade = rustFacade else { return }
         var refs: [RustWorkspaceIdentityRequest] = []
         if case .project(let id) = destination { refs.append(.init(entityType: "project", localID: id.rawValue)) }
         if case .tag(let id) = destination { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
         if let id = options.tagFilter { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
-        await prepareRustIdentities(refs)
-        guard let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
-        await prepareRustQuery(key)
+        await prepareOwnedQuery({ try rustListKey(destination, options: options) }, identities: refs)
     }
 
     public func listReadiness(_ destination: Destination, options: ListOptions = ListOptions()) -> WorkspaceQueryReadiness {
-        guard isRustSelected, let facade = rustFacade,
-              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return .notRequested }
-        return rustReadiness(for: key)
+        listPageState(destination, options: options).readiness
+    }
+
+    public func listPageState(_ destination: Destination, options: ListOptions = ListOptions()) -> WorkspaceQueryPageState {
+        rustQueryPageState { try rustListKey(destination, options: options) }
     }
 
     public func nextListPage(_ destination: Destination, options: ListOptions = ListOptions()) async {
-        guard let facade = rustFacade,
-              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
+        guard let key = try? rustListKey(destination, options: options) else { return }
         await rustQueries?.nextPage(key)
     }
 
     public func previousListPage(_ destination: Destination, options: ListOptions = ListOptions()) async {
-        guard let facade = rustFacade,
-              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
+        guard let key = try? rustListKey(destination, options: options) else { return }
         await rustQueries?.previousPage(key)
     }
+
+    public func listShownTask(_ id: TaskID, destination: Destination, options: ListOptions = ListOptions()) -> ShownTask? {
+        guard isRustSelected else { return list(destination, options: options).sections.flatMap(\.tasks).first { $0.id == id }.map { shownTask(of: $0) } }
+        guard let key = try? rustListKey(destination, options: options) else { return nil }
+        return rustQueryShownTask(id, key: key)
+    }
+
+    func rustQueryShownTask(_ id: TaskID, key: Data) -> ShownTask? {
+        guard let facade = rustFacade, let page = rustPage(for: key) else { return nil }
+        let raw = rustIdentityBindings.first { $0.entityType == "task" && $0.localID == id.rawValue }?.canonicalID
+        let canonical = raw.map { TaskID($0) } ?? id
+        do { return try facade.workspaceShownTask(canonical, from: page, at: now(), localChildEdits: localChildEdits[canonical] ?? 0) }
+        catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
+    }
+
+    public func listFormulation(_ id: TaskID, destination: Destination, options: ListOptions = ListOptions()) -> RustWorkspaceFormulation? {
+        guard isRustSelected else { return legacyFormulation(id) }
+        guard let key = try? rustListKey(destination, options: options) else { return nil }
+        return rustQueryFormulation(id, key: key)
+    }
+
+    public func taskDetailFormulation(_ id: TaskID) -> RustWorkspaceFormulation? {
+        guard isRustSelected else { return legacyFormulation(id) }
+        guard let key = try? rustTaskDetailKey(id) else { return nil }
+        return rustQueryFormulation(id, key: key)
+    }
+
+    func rustQueryFormulation(_ id: TaskID, key: Data) -> RustWorkspaceFormulation? {
+        guard let facade = rustFacade, let page = rustPage(for: key) else { return nil }
+        let canonical = rustIdentityBindings.first { $0.entityType == "task" && $0.localID == id.rawValue }
+            .map { TaskID($0.canonicalID) } ?? id
+        do { return try facade.workspaceTaskFormulation(canonical, from: page) }
+        catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
+    }
+
+    private func rustCountsKey() throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceReadQuery("list_counts")
+    }
+
+    public func prepareCounts() async { await prepareOwnedQuery { try rustCountsKey() } }
+    public func countsReadiness() -> WorkspaceQueryReadiness { rustQueryPageState { try rustCountsKey() }.readiness }
 
     func rustCapturePreviewKey(_ draft: CaptureDraft) throws -> Data {
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
@@ -1397,16 +1483,22 @@ extension Workspace {
     }
 
     public func prepareCapturePreview(_ draft: CaptureDraft) async {
-        do { await prepareRustQuery(try rustCapturePreviewKey(draft)) }
-        catch { markRustQueryError(error) }
+        var refs: [RustWorkspaceIdentityRequest] = []
+        if let id = draft.contextProjectID { refs.append(.init(entityType: "project", localID: id.rawValue)) }
+        if let id = draft.contextTagID { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
+        await prepareOwnedQuery({ try rustCapturePreviewKey(draft) }, identities: refs)
+    }
+
+    public func capturePreviewReadiness(_ draft: CaptureDraft) -> WorkspaceQueryReadiness {
+        rustQueryPageState { try rustCapturePreviewKey(draft) }.readiness
     }
 
     func rustMutateShown(_ mutation: (inout GTDState) -> Void) { mutation(&state) }
 
-    func rustAdoptTasks(_ tasks: [TaskRecord], for query: Data) {
+    func rustAdoptTasks(_ tasks: [TaskRecord], for query: Data, frames: [RustWorkspaceTaskFrame]? = nil) {
         rustTaskInterests[query] = Set(tasks.map(\.id))
         for var task in tasks {
-            if let frame = rustTaskFrames[task.id] {
+            if let frame = frames?.first(where: { $0.taskID == task.id }) ?? (frames == nil ? rustTaskFrames[task.id] : nil) {
                 task.lastOpenList = frame.lastOpenList
                 task.childrenSyncedAt = frame.childrenKnown ? now() : nil
             }
@@ -1442,15 +1534,27 @@ extension Workspace {
         case "task_detail":
             let task = try facade.workspaceTask(from: page.result, detail: true, at: now())
             rustAdoptTasks([task], for: query)
-        case "projects":
+        case "projects", "native_projects":
             let projects = try facade.workspaceProjects(from: page.result, keeping: state, at: now())
             rustProjectInterests[query] = Set(projects.map { $0.project.id })
             for row in projects { state.projects[row.project.id] = row.project }
             pruneRustRecords(keeping: query)
-        case "tags":
+        case "tags", "native_tags":
             let tags = try facade.workspaceTags(from: page.result, keeping: state, at: now())
             rustTagInterests[query] = Set(tags.map { $0.tag.id })
             for row in tags { state.tags[row.tag.id] = row.tag }
+            pruneRustRecords(keeping: query)
+        case "task_list":
+            rustAdoptTasks(try facade.workspaceRenderedTasks(from: page, at: now()), for: query)
+        case "records":
+            let requests = try Self.rustRecordRequests(from: query)
+            var owned = GTDState.empty
+            try facade.workspaceApplyRecords(from: page.result, requests: requests, to: &owned, at: now())
+            rustAdoptTasks(Array(owned.tasks.values), for: query)
+            rustProjectInterests[query] = Set(owned.projects.keys)
+            rustTagInterests[query] = Set(owned.tags.keys)
+            for (id, record) in owned.projects { state.projects[id] = record }
+            for (id, record) in owned.tags { state.tags[id] = record }
             pruneRustRecords(keeping: query)
         case "list_counts": _ = try facade.workspaceCounts(from: page.result)
         case "capture_preview": _ = try facade.workspaceCapturePreview(from: page.result, in: state)
@@ -1939,49 +2043,77 @@ extension Workspace {
 
 
 extension Workspace {
-    private func prepareRustIdentities(_ requests: [RustWorkspaceIdentityRequest]) async {
-        guard !requests.isEmpty, let runtime = rustRuntime else { return }
+    private func resolveRustIdentities(_ requests: [RustWorkspaceIdentityRequest]) async throws {
+        guard let runtime = rustRuntime else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        guard requests.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        guard !requests.isEmpty else { return }
         let binding = runtimeBindingID
-        do {
-            let resolved = try await runtime.resolveIdentities(requests)
-            guard binding == runtimeBindingID else { return }
-            for row in resolved {
-                rustIdentityBindings.removeAll { $0.entityType == row.entityType && $0.localID == row.localID }
-                rustIdentityBindings.append(row)
-            }
-            if rustIdentityBindings.count > 1_024 { rustIdentityBindings.removeFirst(rustIdentityBindings.count - 1_024) }
-        } catch { if binding == runtimeBindingID { markRustQueryError(error) } }
+        let resolved = try await runtime.resolveIdentities(requests)
+        guard binding == runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+        for row in resolved {
+            rustIdentityBindings.removeAll { $0.entityType == row.entityType && $0.localID == row.localID }
+            rustIdentityBindings.append(row)
+        }
+        if rustIdentityBindings.count > 1_024 { rustIdentityBindings.removeFirst(rustIdentityBindings.count - 1_024) }
     }
 
-    public func prepareProjects(archived: Bool = false) async {
-        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return }
-        await prepareRustQuery(key)
+    private func rustProjectsKey(archived: Bool, search: String? = nil, projectID: ProjectID? = nil) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceProjectsQuery(archived: archived, search: search, projectID: projectID, bindings: rustIdentityBindings)
     }
 
-    public func prepareTags() async {
-        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return }
-        await prepareRustQuery(key)
+    private func rustTagsKey(search: String? = nil, topLimit: Int? = nil) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let key = try facade.workspaceTagsQuery(search: search, sort: topLimit == nil ? .name : .openCount)
+        guard let topLimit else { return key }
+        guard (1...200).contains(topLimit), var root = try JSONSerialization.jsonObject(with: key) as? [String: Any] else {
+            throw RustBridgeError(code: "INVALID_QUERY_LIMIT")
+        }
+        root["_collection_limit"] = topLimit
+        return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
     }
 
-    public func projectsReadiness(archived: Bool = false) -> WorkspaceQueryReadiness {
-        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return .notRequested }
-        return rustReadiness(for: key)
+    public func prepareProjects(archived: Bool = false, search: String? = nil) async {
+        await prepareOwnedQuery { try rustProjectsKey(archived: archived, search: search) }
     }
-
-    public func tagsReadiness() -> WorkspaceQueryReadiness {
-        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return .notRequested }
-        return rustReadiness(for: key)
+    public func prepareTags(search: String? = nil) async { await prepareOwnedQuery { try rustTagsKey(search: search) } }
+    public func projectsReadiness(archived: Bool = false, search: String? = nil) -> WorkspaceQueryReadiness {
+        projectsPageState(archived: archived, search: search).readiness
     }
-
-    public func nextProjectsPage(archived: Bool = false) async {
-        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return }
+    public func tagsReadiness(search: String? = nil) -> WorkspaceQueryReadiness { tagsPageState(search: search).readiness }
+    public func projectsPageState(archived: Bool = false, search: String? = nil) -> WorkspaceQueryPageState {
+        rustQueryPageState { try rustProjectsKey(archived: archived, search: search) }
+    }
+    public func tagsPageState(search: String? = nil) -> WorkspaceQueryPageState { rustQueryPageState { try rustTagsKey(search: search) } }
+    public func nextProjectsPage(archived: Bool = false, search: String? = nil) async {
+        guard let key = try? rustProjectsKey(archived: archived, search: search) else { return }
         await rustQueries?.nextPage(key)
     }
-
-    public func nextTagsPage() async {
-        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return }
+    public func previousProjectsPage(archived: Bool = false, search: String? = nil) async {
+        guard let key = try? rustProjectsKey(archived: archived, search: search) else { return }
+        await rustQueries?.previousPage(key)
+    }
+    public func nextTagsPage(search: String? = nil) async {
+        guard let key = try? rustTagsKey(search: search) else { return }
         await rustQueries?.nextPage(key)
     }
+    public func previousTagsPage(search: String? = nil) async {
+        guard let key = try? rustTagsKey(search: search) else { return }
+        await rustQueries?.previousPage(key)
+    }
+    public func prepareTopTags(limit: Int = 5) async { await prepareOwnedQuery { try rustTagsKey(topLimit: limit) } }
+    public func topTagsReadiness(limit: Int = 5) -> WorkspaceQueryReadiness { rustQueryPageState { try rustTagsKey(topLimit: limit) }.readiness }
+    public func topTags(limit: Int = 5) -> [TagSummary] {
+        if !isRustSelected {
+            return Array(tags().sorted {
+                if $0.openTaskCount != $1.openTaskCount { return $0.openTaskCount > $1.openTaskCount }
+                return $0.tag.name.localizedStandardCompare($1.tag.name) == .orderedAscending
+            }.prefix(max(0, limit)))
+        }
+        guard let key = try? rustTagsKey(topLimit: limit), let page = rustPage(for: key), let facade = rustFacade else { return [] }
+        return (try? facade.workspaceTags(from: page.result, keeping: .empty, at: now())) ?? []
+    }
+
 }
 
 
@@ -2003,5 +2135,212 @@ extension Workspace {
             guard binding == runtimeBindingID else { return }
             presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_MAINTENANCE_FAILED"
         }
+    }
+}
+
+/// Exact public record identities; no table names or arbitrary composite keys.
+public enum WorkspaceRecordRead: Hashable, Sendable {
+    case task(TaskID)
+    case project(ProjectID)
+    case tag(TagID)
+
+    var identity: RustWorkspaceIdentityRequest {
+        switch self {
+        case .task(let id): .init(entityType: "task", localID: id.rawValue)
+        case .project(let id): .init(entityType: "project", localID: id.rawValue)
+        case .tag(let id): .init(entityType: "tag", localID: id.rawValue)
+        }
+    }
+}
+
+/// One bounded exact answer. Dictionary keys are the original requested IDs;
+/// each record's own ID remains the authoritative canonical identity.
+public struct WorkspaceRecordPage: Sendable {
+    public let tasks: [TaskID: TaskRecord]
+    public let projects: [ProjectID: ProjectRecord]
+    public let tags: [TagID: TagRecord]
+    public let missing: Set<WorkspaceRecordRead>
+    public let requested: Set<WorkspaceRecordRead>
+
+    public func exists(_ read: WorkspaceRecordRead) -> Bool? {
+        guard requested.contains(read) else { return nil }
+        return !missing.contains(read)
+    }
+}
+
+extension Workspace {
+    private func rustTaskDetailKey(_ id: TaskID) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceReadQuery("task_detail", taskID: id, bindings: rustIdentityBindings)
+    }
+
+    public func prepareTaskDetail(_ id: TaskID) async {
+        guard isRustSelected else { await refreshTaskDetails(id); return }
+        await prepareOwnedQuery({ try rustTaskDetailKey(id) }, identities: [.init(entityType: "task", localID: id.rawValue)])
+    }
+    public func taskDetailReadiness(_ id: TaskID) -> WorkspaceQueryReadiness { taskDetailPageState(id).readiness }
+    public func taskDetailPageState(_ id: TaskID) -> WorkspaceQueryPageState { rustQueryPageState { try rustTaskDetailKey(id) } }
+    public func taskDetail(_ id: TaskID) -> TaskRecord? {
+        guard isRustSelected else { return task(id) }
+        guard let key = try? rustTaskDetailKey(id), let page = rustPage(for: key), let facade = rustFacade else { return nil }
+        do {
+            var task = try facade.workspaceTask(from: page.result, detail: true, at: now())
+            if let frame = try facade.workspaceTaskFrames(from: page).first(where: { $0.taskID == task.id }) {
+                task.lastOpenList = frame.lastOpenList
+                task.childrenSyncedAt = frame.childrenKnown ? now() : nil
+            }
+            return task
+        } catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
+    }
+    public func nextTaskDetailPage(_ id: TaskID) async {
+        guard let key = try? rustTaskDetailKey(id) else { return }
+        await rustQueries?.nextPage(key)
+    }
+    public func previousTaskDetailPage(_ id: TaskID) async {
+        guard let key = try? rustTaskDetailKey(id) else { return }
+        await rustQueries?.previousPage(key)
+    }
+    public func taskDetailShownTask(_ id: TaskID) -> ShownTask? {
+        guard isRustSelected else { return task(id).map { shownTask(of: $0) } }
+        guard let key = try? rustTaskDetailKey(id) else { return nil }
+        return rustQueryShownTask(id, key: key)
+    }
+
+    public func prepareProjectSummary(_ id: ProjectID) async {
+        await prepareOwnedQuery({ try rustProjectsKey(archived: false, projectID: id) },
+                                identities: [.init(entityType: "project", localID: id.rawValue)])
+    }
+    public func projectSummaryReadiness(_ id: ProjectID) -> WorkspaceQueryReadiness {
+        rustQueryPageState { try rustProjectsKey(archived: false, projectID: id) }.readiness
+    }
+    public func projectSummary(_ id: ProjectID) -> ProjectSummary? {
+        if !isRustSelected {
+            guard let project = project(id), var summary = GTDQueries.projects(in: state, archived: project.state == .archived).first(where: { $0.id == id }) else { return nil }
+            let sections = GTDQueries.list(.project(id), in: state, today: today).sections
+            summary.countsByState = Dictionary(uniqueKeysWithValues: OpenList.allCases.map { list in
+                (list, sections.filter { $0.kind == .list(list) }.reduce(0) { $0 + $1.totalCount })
+            })
+            return summary
+        }
+        guard let key = try? rustProjectsKey(archived: false, projectID: id), let page = rustPage(for: key), let facade = rustFacade else { return nil }
+        return (try? facade.workspaceProjects(from: page.result, keeping: .empty, at: now()))?.first
+    }
+
+    private func rustFirstNextKey(_ id: ProjectID) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceFirstNextQuery(id, bindings: rustIdentityBindings)
+    }
+    public func prepareFirstNextAction(_ id: ProjectID) async {
+        await prepareOwnedQuery({ try rustFirstNextKey(id) }, identities: [.init(entityType: "project", localID: id.rawValue)])
+    }
+    public func firstNextActionReadiness(_ id: ProjectID) -> WorkspaceQueryReadiness { rustQueryPageState { try rustFirstNextKey(id) }.readiness }
+    public func firstNextAction(_ id: ProjectID) -> TaskRecord? {
+        if !isRustSelected {
+            return GTDQueries.list(.project(id), in: state, today: today).sections.first { $0.kind == .list(.next) }?.tasks.first
+        }
+        guard let key = try? rustFirstNextKey(id), let page = rustPage(for: key), let facade = rustFacade else { return nil }
+        return (try? facade.workspaceRenderedTasks(from: page, at: now()))?.first
+    }
+
+    private func rustRecordsKey(_ reads: [WorkspaceRecordRead]) throws -> Data {
+        guard reads.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let items: [[String: Any]] = reads.map { read in
+            let identity = read.identity
+            let request = facade.workspaceRecordRequest(identity.entityType, localID: identity.localID, bindings: rustIdentityBindings)
+            return ["entity_type": request.entityType, "record_key": request.recordKey]
+        }
+        return try JSONSerialization.data(withJSONObject: ["kind": "records", "items": items], options: [.sortedKeys])
+    }
+
+    nonisolated private static func rustRecordRequests(from key: Data) throws -> [RustWorkspaceRecordRequest] {
+        guard let root = try JSONSerialization.jsonObject(with: key) as? [String: Any],
+              let items = root["items"] as? [[String: Any]], items.count <= 200 else {
+            throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
+        }
+        return try items.map { item in
+            guard let type = item["entity_type"] as? String, ["task", "project", "tag"].contains(type),
+                  let keys = item["record_key"] as? [String], keys.count == 1 else {
+                throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
+            }
+            return RustWorkspaceRecordRequest(entityType: type, recordKey: keys)
+        }
+    }
+
+    @discardableResult
+    public func prepareRecords(_ reads: [WorkspaceRecordRead]) async throws -> WorkspaceRecordPage {
+        guard reads.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        if !isRustSelected { return legacyRecords(reads) }
+        try await resolveRustIdentities(reads.map(\.identity))
+        let key = try rustRecordsKey(reads)
+        await prepareRustQuery(key)
+        guard let page = records(reads) else {
+            if case .failed(let code) = rustReadiness(for: key) { throw RustBridgeError(code: code) }
+            throw RustBridgeError(code: Task.isCancelled ? "CANCELLED" : "WORKSPACE_NOT_READY")
+        }
+        return page
+    }
+    @discardableResult
+    public func prepareTaskRecords(_ ids: [TaskID]) async throws -> WorkspaceRecordPage {
+        try await prepareRecords(ids.map(WorkspaceRecordRead.task))
+    }
+    public func recordsReadiness(_ reads: [WorkspaceRecordRead]) -> WorkspaceQueryReadiness {
+        guard reads.count <= 200 else { return .failed("TOO_MANY_ITEMS") }
+        return rustQueryPageState { try rustRecordsKey(reads) }.readiness
+    }
+    public func recordReadiness(_ read: WorkspaceRecordRead) -> WorkspaceQueryReadiness { recordsReadiness([read]) }
+    public func recordExists(_ read: WorkspaceRecordRead) -> Bool? { records([read])?.exists(read) }
+    public func recordsShownTask(_ id: TaskID, reads: [WorkspaceRecordRead]) -> ShownTask? {
+        guard isRustSelected else { return task(id).map { shownTask(of: $0) } }
+        guard let key = try? rustRecordsKey(reads) else { return nil }
+        return rustQueryShownTask(id, key: key)
+    }
+
+    public func records(_ reads: [WorkspaceRecordRead]) -> WorkspaceRecordPage? {
+        if !isRustSelected { return reads.count <= 200 ? legacyRecords(reads) : nil }
+        guard let facade = rustFacade, let key = try? rustRecordsKey(reads), let page = rustPage(for: key) else { return nil }
+        do {
+            let requests = try Self.rustRecordRequests(from: key)
+            var owned = GTDState.empty
+            try facade.workspaceApplyRecords(from: page.result, requests: requests, to: &owned, at: now())
+            var tasks: [TaskID: TaskRecord] = [:]
+            var projects: [ProjectID: ProjectRecord] = [:]
+            var tags: [TagID: TagRecord] = [:]
+            var missing: Set<WorkspaceRecordRead> = []
+            for (index, read) in reads.enumerated() {
+                let canonical = requests[index].recordKey[0]
+                switch read {
+                case .task(let id):
+                    if var value = owned.tasks[TaskID(canonical)] {
+                        // Record reads hold only this returned child subset, never full detail.
+                        value.subtasks = []
+                        value.comments = []
+                        value.childrenSyncedAt = nil
+                        if let frame = try facade.workspaceTaskFrames(from: page).first(where: { $0.taskID == value.id }) { value.lastOpenList = frame.lastOpenList }
+                        tasks[id] = value
+                    } else { missing.insert(read) }
+                case .project(let id):
+                    if let value = owned.projects[ProjectID(canonical)] { projects[id] = value } else { missing.insert(read) }
+                case .tag(let id):
+                    if let value = owned.tags[TagID(canonical)] { tags[id] = value } else { missing.insert(read) }
+                }
+            }
+            return WorkspaceRecordPage(tasks: tasks, projects: projects, tags: tags, missing: missing, requested: Set(reads))
+        } catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
+    }
+
+    private func legacyRecords(_ reads: [WorkspaceRecordRead]) -> WorkspaceRecordPage {
+        var tasks: [TaskID: TaskRecord] = [:]
+        var projects: [ProjectID: ProjectRecord] = [:]
+        var tags: [TagID: TagRecord] = [:]
+        var missing: Set<WorkspaceRecordRead> = []
+        for read in reads {
+            switch read {
+            case .task(let id): if let value = task(id) { tasks[id] = value } else { missing.insert(read) }
+            case .project(let id): if let value = project(id) { projects[id] = value } else { missing.insert(read) }
+            case .tag(let id): if let value = tag(id) { tags[id] = value } else { missing.insert(read) }
+            }
+        }
+        return WorkspaceRecordPage(tasks: tasks, projects: projects, tags: tags, missing: missing, requested: Set(reads))
     }
 }

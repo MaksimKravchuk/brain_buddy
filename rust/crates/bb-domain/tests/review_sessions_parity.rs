@@ -2905,6 +2905,26 @@ fn review_sessions_026_fr_016_native_helpers_share_clock_and_shown_marker_rules(
     assert!(facts.third_stall);
     assert!(facts.derived.is_some());
     assert!(facts.extension.is_some());
+    let id = types::TaskId::parse("task_n001").unwrap();
+    assert_eq!(
+        bb_domain::review_sessions::task_formulation_view(&state, &id, &query_inputs(NOW, true))
+            .unwrap(),
+        facts
+    );
+    let off =
+        bb_domain::review_sessions::task_formulation_view(&state, &id, &query_inputs(NOW, false))
+            .unwrap();
+    assert_eq!(off.class, "none");
+    assert!(off.derived.is_none());
+    assert!(!off.third_stall);
+    assert_eq!(off.unavailable_local_facts, ["weekly_review_unavailable"]);
+    let pure = types::TaskView::new(state.tasks.get(&id).unwrap(), vec![], vec![]);
+    assert!(
+        serde_json::to_value(pure)
+            .unwrap()
+            .get("formulation_state")
+            .is_none()
+    );
     let (QueryResult::RestartCandidates(page), after) =
         bb_domain::review_sessions::native_task_page(
             &state,

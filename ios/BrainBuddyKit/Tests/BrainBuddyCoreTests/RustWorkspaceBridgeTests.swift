@@ -233,3 +233,53 @@ extension RustWorkspaceBridgeTests {
         try await runtime.close()
     }
 }
+
+
+extension RustWorkspaceBridgeTests {
+    @Test("026-FR-025: native whole counts and scoped catalog requests do not derive totals from loaded rows")
+    func nativeQueryMetadata() throws {
+        let facade = RustDomainFacade(runtime: try RustBridgeRuntime(), context: RustDomainContext(deviceTimeZone: "UTC"))
+        let page = RustWorkspacePage(projectionGeneration: "7", result: try RustJSON.data([
+            "kind": "list_mode", "value": ["open_count": 230, "total_count": 255,
+                "completed_count": 20, "cancelled_count": 5,
+                "sections": [["id": "open", "title": NSNull(), "kind": ["type": "open"],
+                              "items": [], "total_count": 230]], "next_cursor": "continuation"]
+        ]), collectionNextCursor: "continuation")
+        let decoded = try facade.workspaceList(from: page, keeping: .empty, at: date)
+        #expect(decoded.list.sections.first?.tasks.isEmpty == true)
+        #expect(decoded.list.sections.first?.totalCount == 230)
+        #expect(decoded.list.openCount == 230)
+        #expect(decoded.list.totalCount == 255)
+        #expect(decoded.list.completedCount == 20)
+        #expect(decoded.list.cancelledCount == 5)
+        let scoped = try RustJSON.object(facade.workspaceListQuery(.list(.next), options: ListOptions(search: "cafe")))
+        #expect(try scoped.object("options").string("search") == "cafe")
+        let project = ProjectID("project_exact")
+        let exact = try RustJSON.object(facade.workspaceProjectsQuery(projectID: project))
+        #expect(try exact.string("kind") == "native_projects")
+        #expect(try exact.string("filter") == "all")
+        #expect(try exact.string("project_id") == project.rawValue)
+        let top = try RustJSON.object(facade.workspaceTagsQuery(search: "home", sort: .openCount))
+        #expect(try top.string("kind") == "native_tags")
+        #expect(try top.string("sort") == "open_count")
+        #expect(try top.string("search") == "home")
+    }
+
+    @Test("026-FR-025: formulation metadata belongs only to its returned task and preserves unavailable facts")
+    func nativeRowFormulation() throws {
+        let facade = RustDomainFacade(runtime: try RustBridgeRuntime(), context: RustDomainContext(deviceTimeZone: "UTC"))
+        let id = TaskID("task_row")
+        let page = RustWorkspacePage(projectionGeneration: "7", result: try RustJSON.data([
+            "kind": "task_list", "value": ["items": [["id": id.rawValue, "formulation_state": [
+                "task_id": id.rawValue, "class": "none", "derived": NSNull(), "third_stall": false,
+                "extension": NSNull(), "parked_after_days": NSNull(),
+                "unavailable_local_facts": ["weekly_review_unavailable"]
+            ]]]]
+        ]))
+        let facts = try #require(facade.workspaceTaskFormulation(id, from: page))
+        #expect(facts.classification == .none)
+        #expect(facts.derived == nil)
+        #expect(facts.unavailableLocalFacts == ["weekly_review_unavailable"])
+        #expect(try facade.workspaceTaskFormulation(TaskID("task_elsewhere"), from: page) == nil)
+    }
+}

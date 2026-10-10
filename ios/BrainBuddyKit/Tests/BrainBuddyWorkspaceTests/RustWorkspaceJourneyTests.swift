@@ -122,3 +122,55 @@ extension RustWorkspaceJourneyTests {
         await workspace.closeRuntime()
     }
 }
+
+
+extension RustWorkspaceJourneyTests {
+    @Test("026-FR-025: selected readiness and same-page child proofs never use another cached query's rows")
+    @MainActor
+    func preparedPagesKeepTheirOwnFrames() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let workspace = Workspace(store: ControlledStore(), sync: nil,
+            rust: RustWorkspaceSelection(runtime: runtime,
+                facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC"))), now: { instant })
+        #expect(workspace.listReadiness(.list(.inbox)) == .notRequested)
+        #expect(workspace.countsReadiness() == .notRequested)
+        #expect(workspace.capturePreviewReadiness(CaptureDraft(text: "Pending")) == .notRequested)
+        await workspace.load()
+        let id = try await workspace.capture(CaptureDraft(text: "Owned parent"), editorID: "scene:frames:capture")
+        let child = try await workspace.addSubtask(to: id, title: "Actual child", editorID: "scene:frames:child")
+        await workspace.prepareTaskDetail(id)
+        #expect(workspace.taskDetailReadiness(id) == .ready)
+        let detailShown = try #require(workspace.taskDetailShownTask(id))
+        #expect(detailShown.childrenKnown)
+        #expect(workspace.taskDetail(id)?.subtasks.map(\.id) == [child])
+        await workspace.prepareList(.list(.inbox))
+        let listShown = try #require(workspace.listShownTask(id, destination: .list(.inbox)))
+        #expect(!listShown.childrenKnown)
+        #expect(listShown.runtimeAdmissionToken != nil)
+        #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).first?.subtasks.isEmpty == true)
+        #expect(workspace.taskDetailShownTask(id) == detailShown)
+        #expect(workspace.taskDetail(id)?.subtasks.map(\.id) == [child])
+
+        let missing = TaskID("task_missing")
+        let reads: [WorkspaceRecordRead] = [.task(id), .task(missing)]
+        let records = try await workspace.prepareRecords(reads)
+        #expect(workspace.recordsReadiness(reads) == .ready)
+        #expect(records.exists(.task(id)) == true)
+        #expect(records.exists(.task(missing)) == false)
+        #expect(records.exists(.tag(TagID("tag_unrequested"))) == nil)
+        #expect(records.tasks[id]?.subtasks.isEmpty == true)
+        #expect(records.tasks[id]?.childrenSyncedAt == nil)
+        #expect(workspace.recordsShownTask(id, reads: reads)?.childrenKnown == false)
+        #expect(workspace.taskDetailShownTask(id) == detailShown)
+        do {
+            _ = try await workspace.prepareRecords((0..<201).map { .task(TaskID("task_boundary_\($0)")) })
+            Issue.record("201 exact records must not cross the bridge")
+        } catch { #expect((error as? RustBridgeError)?.code == "TOO_MANY_ITEMS") }
+        await workspace.closeRuntime()
+        #expect(workspace.taskDetailReadiness(id) == .notRequested)
+    }
+}

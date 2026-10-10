@@ -72,6 +72,9 @@ pub struct TaskView {
     pub consecutive_stalled_formulations: u32,
     pub formulation: Option<FormulationView>,
     pub parked: Option<ParkView>,
+    /// Native page-only rule facts. Pure/HTTP task views leave this absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formulation_state: Option<TaskFormulationView>,
 }
 
 impl TaskView {
@@ -102,6 +105,7 @@ impl TaskView {
             formulation: task.formulation.as_ref().map(|clock| {
                 FormulationView::from_clock(clock, task.consecutive_stalled_formulations)
             }),
+            formulation_state: None,
             parked: task.parked.as_ref().map(|park| ParkView {
                 at: park.at.clone(),
                 formulation_id: park.formulation_id.clone(),
