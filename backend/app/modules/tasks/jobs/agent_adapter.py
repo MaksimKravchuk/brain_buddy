@@ -33,7 +33,7 @@ from typing import Protocol
 from app.utils.time import utcnow
 
 from .domain import JobOutcome
-from .execution import ExecutionRefused, JobExecutionGate
+from .execution import ExecutionRefused, JobExecution, JobExecutionGate
 from .repository import JobRepository
 from .worker import JobContext
 
@@ -69,7 +69,13 @@ class AgentObserverPort(Protocol):
         self, *, before_marking: Callable[[str, str], None] | None = ...
     ) -> list[tuple[str, str]]: ...
 
-    def resolve_interrupted_exchange(self, owner_id: str, run_id: str) -> bool: ...
+    def resolve_interrupted_exchange(
+        self,
+        owner_id: str,
+        run_id: str,
+        *,
+        keep_going: Callable[[], bool] | None = ...,
+    ) -> bool: ...
 
 
 class AgentObservationAdapter:
@@ -133,14 +139,37 @@ class AgentRecoveryAdapter:
             run_id = context.lease.payload_ref
             if run_id is None:
                 return self._sweep(context)
-            owner_id = context.lease.scope
+            return self._lookup(context, execution, run_id)
+
+    def _lookup(
+        self, context: JobContext, execution: JobExecution, run_id: str
+    ) -> JobOutcome:
+        owner_id = context.lease.scope
+
+        def authorized() -> bool:
             try:
                 self._gate.authorize(execution, owner_id)
-            except ExecutionRefused as refused:
-                return JobOutcome(safe_error=type(refused).__name__)
-            if self._observer.resolve_interrupted_exchange(owner_id, run_id):
-                return JobOutcome()
-            return JobOutcome(uncertain=True, safe_error=_DELIVERY_UNPROVEN)
+            except ExecutionRefused:
+                return False
+            return not context.should_abandon()
+
+        try:
+            self._gate.authorize(execution, owner_id)
+        except ExecutionRefused as refused:
+            return JobOutcome(safe_error=type(refused).__name__)
+        try:
+            settled = self._observer.resolve_interrupted_exchange(
+                owner_id, run_id, keep_going=authorized
+            )
+        except Exception:
+            # Authority lost during the lookup: its result was discarded before
+            # any write. Anything else is a real failure for the worker to record.
+            if authorized():
+                raise
+            return JobOutcome(safe_error=_AUTHORITY_LOST)
+        if settled:
+            return JobOutcome()
+        return JobOutcome(uncertain=True, safe_error=_DELIVERY_UNPROVEN)
 
     def _sweep(self, context: JobContext) -> JobOutcome:
         if context.should_abandon():

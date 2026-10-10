@@ -449,6 +449,38 @@ def test_026_FR_015_privacy_failure_never_starves_the_later_steps(rig: Rig) -> N
     assert rig.journal == [*PRIVACY_METHODS, *PRIVACY_METHODS]
 
 
+@pytest.mark.parametrize("kind", ["voice", "privacy"])
+def test_026_FR_022_a_failing_step_never_logs_its_exception_message(
+    rig: Rig, caplog: pytest.LogCaptureFixture, kind: str
+) -> None:
+    """A port's exception text may hold user content: logs carry type and step only."""
+
+    secret = "secret-user-content-7731"
+    failing = "recover_due_provider_leases" if kind == "voice" else "purge_due_accounts"
+    raises = {failing: RuntimeError(secret)}
+    adapter = (
+        rig.voice(raises=raises) if kind == "voice" else rig.privacy(raises=raises)
+    )
+    worker = rig.worker(adapter)
+    worker.ensure_schedules(due_now=True)
+
+    with caplog.at_level("DEBUG"):
+        worker.run_once()
+
+    assert caplog.records
+    for record in caplog.records:
+        assert secret not in record.getMessage()
+        assert secret not in repr(record.args)
+        assert record.exc_info is None and record.exc_text is None
+    step = "recover_leases" if kind == "voice" else "account_purge"
+    ours = [
+        r.getMessage() for r in caplog.records if "maintenance_step" in r.getMessage()
+    ]
+    assert len(ours) == 1
+    assert f"step={step}" in ours[0] and "error=RuntimeError" in ours[0]
+    assert f"job={adapter.job_type}" in ours[0]
+
+
 def test_026_FR_015_every_failed_privacy_step_is_named_in_the_safe_error(
     rig: Rig,
 ) -> None:

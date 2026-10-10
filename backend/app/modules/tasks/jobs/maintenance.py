@@ -23,7 +23,7 @@ from datetime import timedelta
 from typing import Literal
 
 from .domain import JobOutcome
-from .execution import ExecutionRefused, JobExecutionGate, StaleExecutorError
+from .execution import JobExecutionGate, StaleExecutorError
 from .worker import JobContext
 
 logger = logging.getLogger(__name__)
@@ -71,21 +71,28 @@ def require_positive(cadence: timedelta) -> timedelta:
     return cadence
 
 
-def _attempt(name: str, call: Callable[[], int], results: dict[str, int]) -> bool:
-    """Run one step; ``True`` when it succeeded. A stale claim re-raises."""
+def _attempt(
+    job_type: str, name: str, call: Callable[[], int], results: dict[str, int]
+) -> bool:
+    """Run one step; ``True`` when it succeeded. A stale claim re-raises.
+
+    A delegated port's exception message can carry provider or user content, so
+    a failure is logged by job type, step name and exception type only: never
+    the message, the traceback or ``exc_info``.
+    """
 
     try:
         results[name] = call()
     except StaleExecutorError:
         raise
-    except ExecutionRefused as refused:
-        # Scope authority for one owner went away mid-run; log the type only.
-        logger.warning(
-            "maintenance_step_refused step=%s error=%s", name, type(refused).__name__
+    except Exception as error:  # noqa: BLE001 - one bad step must not end the job
+        # Includes a scope refusal for one owner that went away mid-run.
+        logger.error(
+            "maintenance_step_failed job=%s step=%s error=%s",
+            job_type,
+            name,
+            type(error).__name__,
         )
-        return False
-    except Exception:  # noqa: BLE001 - one bad step must not end the job
-        logger.exception("Maintenance step %s failed", name)
         return False
     return True
 
@@ -114,9 +121,13 @@ def run_maintenance_steps(
             if context.should_abandon():
                 return JobOutcome(safe_error=ABANDONED)
             try:
-                succeeded = _attempt(name, call, results)
+                succeeded = _attempt(context.lease.job_type, name, call, results)
             except StaleExecutorError:
-                logger.warning("maintenance_stale_executor step=%s", name)
+                logger.warning(
+                    "maintenance_stale_executor job=%s step=%s",
+                    context.lease.job_type,
+                    name,
+                )
                 return JobOutcome(safe_error=STALE_EXECUTOR)
             if succeeded:
                 continue

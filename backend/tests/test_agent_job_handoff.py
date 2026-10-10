@@ -345,14 +345,12 @@ def test_026_SC_007_lost_lease_stops_the_pass_and_leaves_the_rest_due(
 
     assert outcome == JobOutcome(safe_error="authority_lost")
     assert len(rig.a2a.calls_to("GetTask")) == 1
-    unread = [
-        run_id
-        for run_id, run in before.items()
-        if rig.repo.get_run(run_id, owner_id=OWNER) == run
-    ]
-    assert len(unread) == 1
+    # The read that straddled the expiry is discarded and the second is never
+    # started: neither run is written.
+    for run_id, run in before.items():
+        assert rig.repo.get_run(run_id, owner_id=OWNER) == run
     # Nothing was consumed: the next owner of the schedule still finds it due.
-    assert observer.observe_due().claimed == 1
+    assert observer.observe_due().claimed == 2
 
 
 def test_026_SC_007_a_stopped_pass_keeps_a_pushed_wake_for_the_next_one(
@@ -597,3 +595,99 @@ def test_026_FR_015_a_stale_executor_makes_no_lookup(rig: Rig) -> None:
 
     assert outcome == JobOutcome(safe_error="StaleExecutorError")
     assert rig.a2a.calls_to("ListTasks") == []
+
+
+# --- authority lost during the network call ----------------------------------
+
+
+def lose_lease_during(
+    rig: Rig,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    wire: str,
+    answer: A2AResult,
+) -> None:
+    """The wire answers, but only after the lease has lapsed under the caller."""
+
+    rig.a2a.script(wire, answer)
+    answering = getattr(rig.a2a, method)
+
+    def slow_answer(*args: Any, **kwargs: Any) -> A2AResult:
+        rig.clock.advance(LEASE + timedelta(seconds=1))
+        result: A2AResult = answering(*args, **kwargs)
+        return result
+
+    monkeypatch.setattr(rig.a2a, method, slow_answer)
+
+
+def test_026_SC_007_a_result_read_after_the_lease_is_lost_is_discarded(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Not due: only the pushed wake makes the pass read it.
+    run_id = dispatched(rig.service, rig.a2a, rig.clock)
+    observer = rig.make_observer()
+    observer.wake(run_id)
+    before = rig.repo.get_run(run_id, owner_id=OWNER)
+    events = rig.repo.list_events(run_id, owner_id=OWNER)
+    lose_lease_during(rig, monkeypatch, "get_task", "GetTask", working("t1", run_id))
+
+    outcome = rig.run(rig.observation(observer))
+
+    assert outcome == JobOutcome(safe_error="authority_lost")
+    assert len(rig.a2a.calls_to("GetTask")) == 1
+    assert rig.repo.get_run(run_id, owner_id=OWNER) == before
+    assert rig.repo.list_events(run_id, owner_id=OWNER) == events
+    # The consumed push is handed back, so the next owner of the schedule looks.
+    assert observer.observe_due().claimed == 1
+
+
+def test_026_SC_007_a_failed_contact_after_the_lease_is_lost_writes_nothing(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = dispatched(rig.service, rig.a2a, rig.clock)
+    rig.due()
+    before = rig.repo.get_run(run_id, owner_id=OWNER)
+    lose_lease_during(
+        rig,
+        monkeypatch,
+        "get_task",
+        "GetTask",
+        A2AResult(ok=False, correlation_id="c", error_code="a2a_unreachable"),
+    )
+    adapter = rig.observation()
+
+    outcome = rig.run(adapter)
+
+    assert outcome == JobOutcome(safe_error="authority_lost")
+    assert rig.repo.get_run(run_id, owner_id=OWNER) == before
+    # Still due, so the next pass re-observes it and records the contact itself.
+    assert rig.observers[-1].observe_due().claimed == 1
+
+
+def test_026_SC_007_a_recovery_lookup_after_the_lease_is_lost_writes_nothing(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = rig.open_exchange("exchange-a")
+    worker = rig.worker(rig.recovery())
+    worker.ensure_schedules(due_now=True)
+    worker.run_once()
+    job_id = rig.lookup_job_id(run_id)
+    before = rig.repo.get_run(run_id, owner_id=OWNER)
+    audit = rig.repo.list_audit(owner_id=OWNER)
+    lose_lease_during(
+        rig,
+        monkeypatch,
+        "list_tasks",
+        "ListTasks",
+        A2AResult(ok=True, correlation_id="c", tasks=(agent_task("t-found", run_id),)),
+    )
+
+    assert worker.run_once()
+
+    assert len(rig.a2a.calls_to("ListTasks")) == 1
+    assert rig.repo.get_run(run_id, owner_id=OWNER) == before
+    assert rig.repo.list_audit(owner_id=OWNER) == audit
+    record = rig.jobs.get(job_id)
+    assert record is not None
+    assert record.status is not JobStatus.SUCCEEDED
+    assert rig.a2a.calls_to("SendMessage") == []
