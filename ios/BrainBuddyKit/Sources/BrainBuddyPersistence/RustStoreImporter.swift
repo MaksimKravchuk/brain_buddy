@@ -110,7 +110,7 @@ extension RustImportCounts {
 ///
 /// The pending operations and sync issues of the legacy file are carried whole and counted
 /// (`counts.outboxEntries`, `counts.issues`) but not converted: the workspace must not run on the
-/// Rust store until the outbox import has consumed them.
+/// Rust store until `RustOutboxImporter` has classified them (`mayRun`).
 public struct RustStoreImporter: Sendable {
     private let runtime: RustBridgeRuntime
     private let legacyFile: DocumentFile

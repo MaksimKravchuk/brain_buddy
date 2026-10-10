@@ -258,6 +258,133 @@ public struct RustLegacyImportReport: Equatable, Sendable {
     }
 }
 
+/// A server ID a retained receipt proved for a local ID of an old command (spec 026, T042).
+public struct RustLegacyAlias: Equatable, Hashable, Sendable {
+    /// The wire name of the entity type (`task`, `project`, ...).
+    public var entityType: String
+    public var oldLocalID: String
+    public var serverID: String
+
+    public init(entityType: String, oldLocalID: String, serverID: String) {
+        self.entityType = entityType
+        self.oldLocalID = oldLocalID
+        self.serverID = serverID
+    }
+
+    fileprivate var bridged: BridgeLegacyAlias {
+        BridgeLegacyAlias(entityType: entityType, oldLocalId: oldLocalID, serverId: serverID)
+    }
+}
+
+/// What the server can prove about one old send. Only a receipt for the send's own idempotency key
+/// is proof; a missing receipt, a pending one or no answer at all is `.unproven`, and a title, list or
+/// time is never evidence of anything.
+public enum RustLegacyAnswer: Equatable, Hashable, Sendable {
+    /// A retained receipt says the server did it (or it was a no-op), and the identities it proves.
+    case accepted(aliases: [RustLegacyAlias])
+    /// A retained receipt says the server refused it; `code` is its error code.
+    case rejected(code: String)
+    case unproven
+
+    fileprivate var bridged: BridgeLegacyAnswer {
+        switch self {
+        case .accepted(let aliases): .accepted(aliases: aliases.map(\.bridged))
+        case .rejected(let code): .rejected(code: code)
+        case .unproven: .unproven
+        }
+    }
+}
+
+/// One old send still to ask the server about, by the key it was made with.
+public struct RustLegacySend: Equatable, Hashable, Sendable {
+    public let entryID: String
+    public let idempotencyKey: String
+    /// The old command as the legacy file held it, JSON.
+    public let command: Data
+
+    fileprivate init(_ send: BridgeLegacySend) {
+        entryID = send.entryId
+        idempotencyKey = send.idempotencyKey
+        command = send.command
+    }
+}
+
+/// The classification of the outbox a legacy import carried (spec 026, T042).
+public struct RustLegacyOutboxRequest: Equatable, Sendable {
+    public var workspaceID: String
+    public var databasePath: String
+    /// The instant of the classification, RFC 3339: the 24-hour window ends against it.
+    public var now: String
+    public var busyTimeoutMilliseconds: UInt32
+    /// The answers already fetched, by idempotency key (case does not matter). A key without an
+    /// answer is `.unproven`.
+    public var receipts: [String: RustLegacyAnswer]
+
+    public init(
+        workspaceID: String, databasePath: String, now: String, busyTimeoutMilliseconds: UInt32 = 5_000,
+        receipts: [String: RustLegacyAnswer] = [:]
+    ) {
+        self.workspaceID = workspaceID
+        self.databasePath = databasePath
+        self.now = now
+        self.busyTimeoutMilliseconds = busyTimeoutMilliseconds
+        self.receipts = receipts
+    }
+
+    fileprivate var bridged: BridgeLegacyOutboxRequest {
+        BridgeLegacyOutboxRequest(
+            workspaceId: workspaceID, databasePath: databasePath, now: now, busyTimeoutMs: busyTimeoutMilliseconds,
+            receipts: receipts.sorted { $0.key < $1.key }.map {
+                BridgeLegacyReceipt(idempotencyKey: $0.key, answer: $0.value.bridged)
+            })
+    }
+}
+
+/// Where the legacy outbox stands. Counts only; no user text.
+public struct RustLegacyOutboxStatus: Equatable, Sendable {
+    /// Pending sends the import carried, and what became of them.
+    public let carried: UInt64
+    /// Never sent: the intent is still pending and waits to become a new command.
+    public let unsent: UInt64
+    /// Settled by a receipt for their own key.
+    public let accepted: UInt64
+    /// Refused by the server: an issue keeps the intent.
+    public let rejected: UInt64
+    /// Sent, no proof yet, and the server still keeps the key.
+    public let awaiting: UInt64
+    /// Sent, no proof, window over: an issue keeps everything, never reissued.
+    public let uncertain: UInt64
+    public let carriedIssues: UInt64
+    public let convertedIssues: UInt64
+    /// Issues of legacy origin still waiting for the user or for proof.
+    public let openIssues: UInt64
+    /// Identities receipts proved.
+    public let aliases: UInt64
+    /// Every carried entry and issue has a verdict.
+    public let classified: Bool
+    /// The Rust store may take the workspace: classified, and no untouched intent waits.
+    public let mayRun: Bool
+    /// Nothing of the old file waits on the server or the user. Never true while an uncertain
+    /// submission or an old issue exists.
+    public let fullySynced: Bool
+
+    fileprivate init(_ status: BridgeLegacyOutboxStatus) {
+        carried = status.carried
+        unsent = status.unsent
+        accepted = status.accepted
+        rejected = status.rejected
+        awaiting = status.awaiting
+        uncertain = status.uncertain
+        carriedIssues = status.carriedIssues
+        convertedIssues = status.convertedIssues
+        openIssues = status.openIssues
+        aliases = status.aliases
+        classified = status.classified
+        mayRun = status.mayRun
+        fullySynced = status.fullySynced
+    }
+}
+
 /// One bridge runtime handle. It is safe to share between tasks and threads; `close()`
 /// is final and idempotent, and later calls fail with `WORKSPACE_CLOSED`.
 public final class RustBridgeRuntime: Sendable {
@@ -352,6 +479,26 @@ public final class RustBridgeRuntime: Sendable {
         let bridged = request.bridged
         return try await offActor { (runtime: BridgeRuntime) throws -> RustLegacyImportReport in
             RustLegacyImportReport(try runtime.importLegacyStore(request: bridged))
+        }
+    }
+
+    /// The old sends a receipt lookup is still needed for, read from the Rust store (spec 026,
+    /// T042): the legacy file is not read again. Only the workspace, the path and the busy timeout
+    /// of `request` are used.
+    public func legacyOutboxSends(_ request: RustLegacyOutboxRequest) async throws -> [RustLegacySend] {
+        let bridged = request.bridged
+        return try await offActor { (runtime: BridgeRuntime) throws -> [RustLegacySend] in
+            try runtime.legacyOutboxSends(request: bridged).map(RustLegacySend.init)
+        }
+    }
+
+    /// Classifies the outbox and issues a legacy import carried, off the caller's actor: a send a
+    /// receipt proves is settled, one that may have reached the server stays an issue and is never
+    /// reissued. One transaction, or nothing; running it again is safe.
+    public func resolveLegacyOutbox(_ request: RustLegacyOutboxRequest) async throws -> RustLegacyOutboxStatus {
+        let bridged = request.bridged
+        return try await offActor { (runtime: BridgeRuntime) throws -> RustLegacyOutboxStatus in
+            RustLegacyOutboxStatus(try runtime.resolveLegacyOutbox(request: bridged))
         }
     }
 
