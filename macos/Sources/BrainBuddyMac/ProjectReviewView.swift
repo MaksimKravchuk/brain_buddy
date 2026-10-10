@@ -1,5 +1,6 @@
 import BrainBuddyCore
 import BrainBuddyMacCore
+import BrainBuddyWorkspace
 import SwiftUI
 
 /// The Project review on this Mac: one active project at a time. A decision is a mark in
@@ -21,7 +22,7 @@ struct ProjectReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review projects").font(.title2.bold())
-                    Text(loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") left · revisit after seven days" : "One project at a time")
+                    Text(loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") on this page · revisit after seven days" : "One project at a time")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -30,11 +31,43 @@ struct ProjectReviewView: View {
                     .keyboardShortcut(.cancelAction)
             }
 
-            if items.isEmpty {
+            if !loaded {
+                ProgressView("Loading projects…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.projectReviewReadiness != .ready {
+                if case .failed = model.projectReviewReadiness, model.workspace.isRustSelected {
+                    ContentUnavailableView(
+                        "Project review is unavailable",
+                        systemImage: "square.stack.3d.up.slash",
+                        description: Text("This review needs a complete project task signature. Try again after the native review query is available.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if case .failed = model.projectReviewReadiness {
+                    ContentUnavailableView {
+                        Label("Projects couldn’t load", systemImage: "exclamationmark.triangle")
+                    } actions: {
+                        Button("Retry", action: load)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView("Loading projects…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if items.isEmpty {
+                VStack(spacing: 12) {
                 ContentUnavailableView(
                     "Projects reviewed", systemImage: "checkmark.circle",
                     description: Text("Your decisions are saved on this Mac. Projects return after seven days.")
                 )
+                    if model.projectsPageState.hasNext {
+                        Button("Next projects") {
+                            Task {
+                                await model.workspace.nextProjectsPage()
+                                load()
+                            }
+                        }
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let item = items[index]
@@ -47,11 +80,18 @@ struct ProjectReviewView: View {
                     Text("\(index + 1) of \(items.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Next") {
-                        index += 1
-                        decision = nil
+                    Button(index >= items.count - 1 && model.projectsPageState.hasNext ? "Next projects" : "Next") {
+                        if index < items.count - 1 {
+                            index += 1
+                            decision = nil
+                        } else {
+                            Task {
+                                await model.workspace.nextProjectsPage()
+                                load()
+                            }
+                        }
                     }
-                    .disabled(index >= items.count - 1)
+                    .disabled(index >= items.count - 1 && !model.projectsPageState.hasNext)
                     Spacer()
                     Button("Open project to edit actions") { openProject(item.id) }
                 }
@@ -170,10 +210,13 @@ struct ProjectReviewView: View {
     }
 
     private func load() {
-        items = model.loadProjectReview()
-        index = 0
-        decision = nil
-        loaded = true
+        loaded = false
+        Task {
+            items = await model.loadProjectReview()
+            index = 0
+            decision = nil
+            loaded = true
+        }
     }
 
     private func removeCurrent() {

@@ -69,17 +69,17 @@ struct TaskEntityQuery: EntityStringQuery {
     init() {}
 
     func entities(for identifiers: [TaskEntity.ID]) async throws -> [TaskEntity] {
-        await TaskEntityLookup.entities(for: identifiers)
+        try await TaskEntityLookup.entities(for: identifiers)
     }
 
     func entities(matching string: String) async throws -> [TaskEntity] {
         guard !DeviceLock.isLocked() else { return [] }
-        return await TaskEntityLookup.search(string)
+        return try await TaskEntityLookup.search(string)
     }
 
     func suggestedEntities() async throws -> [TaskEntity] {
         guard !DeviceLock.isLocked() else { return [] }
-        return await TaskEntityLookup.suggested()
+        return try await TaskEntityLookup.suggested()
     }
 }
 
@@ -89,26 +89,43 @@ enum TaskEntityLookup {
     /// Siri and Shortcuts show short lists; keep them quick to build.
     static let limit = 50
 
-    static func entities(for identifiers: [String]) async -> [TaskEntity] {
+    static func entities(for identifiers: [String]) async throws -> [TaskEntity] {
         let workspace = await SharedWorkspace.make()
-        return identifiers.compactMap { identifier in
-            workspace.task(TaskID(identifier)).map(TaskEntity.init(record:))
+        var result: [TaskEntity] = []
+        for batch in stride(from: 0, to: identifiers.count, by: 200).map({ start in
+            Array(identifiers[start ..< min(start + 200, identifiers.count)])
+        }) {
+            let ids = batch.map(TaskID.init)
+            let page = try await workspace.prepareTaskRecords(ids)
+            result.append(contentsOf: ids.compactMap { page.tasks[$0].map(TaskEntity.init(record:)) })
         }
+        return result
     }
 
-    static func suggested() async -> [TaskEntity] {
+    static func suggested() async throws -> [TaskEntity] {
         let workspace = await SharedWorkspace.make()
-        let records = openTasks(in: workspace.list(.dateView(.overdue)))
-            + openTasks(in: workspace.list(.dateView(.today)))
-            + openTasks(in: workspace.list(.list(.next)))
+        let reads: [(Destination, ListOptions)] = [(.dateView(.overdue), ListOptions()), (.dateView(.today), ListOptions()), (.list(.next), ListOptions())]
+        var records: [TaskRecord] = []
+        for (destination, options) in reads {
+            await workspace.prepareList(destination, options: options)
+            guard workspace.listReadiness(destination, options: options) == .ready else {
+                throw TaskEntityQueryUnavailable()
+            }
+            records.append(contentsOf: openTasks(in: workspace.list(destination, options: options)))
+        }
         return entities(from: records)
     }
 
-    static func search(_ text: String) async -> [TaskEntity] {
+    static func search(_ text: String) async throws -> [TaskEntity] {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return await suggested() }
+        guard !query.isEmpty else { return try await suggested() }
         let workspace = await SharedWorkspace.make()
-        return entities(from: openTasks(in: workspace.list(.search(query))))
+        let options = ListOptions(search: query)
+        await workspace.prepareList(.search(query), options: options)
+        guard workspace.listReadiness(.search(query), options: options) == .ready else {
+            throw TaskEntityQueryUnavailable()
+        }
+        return entities(from: openTasks(in: workspace.list(.search(query), options: options)))
     }
 
     private static func openTasks(in result: TaskListResult) -> [TaskRecord] {
@@ -126,3 +143,5 @@ enum TaskEntityLookup {
         return entities
     }
 }
+
+private struct TaskEntityQueryUnavailable: Error {}

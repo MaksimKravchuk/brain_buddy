@@ -1,6 +1,7 @@
 import AppKit
 import BrainBuddyCore
 import BrainBuddyMacCore
+import BrainBuddyWorkspace
 import SwiftUI
 
 // The main window over the kit `Workspace` (spec 021, T106): every rule is the kit's, every write
@@ -143,6 +144,42 @@ extension WorkspaceView {
     static func plural(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
 }
 
+@ViewBuilder
+private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: String, retry: @escaping () -> Void) -> some View {
+    switch readiness {
+    case .ready:
+        EmptyView()
+    case .notRequested, .loading:
+        ProgressView(loading)
+    case .failed:
+        ContentUnavailableView {
+            Label("Tasks couldn’t load", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text("Try loading this list again.")
+        } actions: {
+            Button("Retry", action: retry)
+        }
+    }
+}
+
+private func reviewPageUnavailable(
+    _ title: String, systemImage: String, description: String, list: TaskList,
+    model: BrainBuddyModel, reload: @escaping () -> Void
+) -> some View {
+    VStack(spacing: 12) {
+        ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+        if model.reviewListPageState(list).hasNext {
+            Button("Next page") {
+                Task {
+                    await model.nextReviewListPage(list)
+                    reload()
+                }
+            }
+        }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+}
+
 struct WorkspaceView: View {
     @Bindable var model: BrainBuddyModel
     /// X-01 – X-04 and X-07 over this workspace; every sync surface presents through its router.
@@ -244,6 +281,12 @@ struct WorkspaceView: View {
         .focusedSceneValue(\.macSyncController, sync)
         .onAppear { quickCapture.start(model: model) }
         .onDisappear { quickCapture.stop() }
+        .task { await model.prepareVisibleQueries() }
+        .onChange(of: model.destination) { _, _ in Task { await model.prepareVisibleQueries() } }
+        .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
+        .onChange(of: model.appliedPriority) { _, _ in Task { await model.prepareVisibleQueries() } }
+        .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
+        .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
     }
 
     @ToolbarContentBuilder
@@ -309,6 +352,7 @@ struct WorkspaceView: View {
 
     private var projectsSection: some View {
         Section {
+            if model.projectsReadiness == .ready {
             ForEach(model.projects) { project in
                 sidebarButton(
                     project.name, symbol: "circle.fill", destination: .project(project.id), tint: projectTint(project.color)
@@ -319,6 +363,10 @@ struct WorkspaceView: View {
                         .disabled(!model.canArchiveProject)
                         .help("Add or clear the current task draft before archiving")
                 }
+            }
+            catalogPagination(archived: false)
+            } else {
+                querySidebarStatus(model.projectsReadiness)
             }
         } header: {
             HStack {
@@ -344,7 +392,9 @@ struct WorkspaceView: View {
     @ViewBuilder
     private var archivedProjectsSection: some View {
         let archived = model.archivedProjects
-        if !archived.isEmpty {
+        if model.archivedProjectsReadiness != .ready {
+            Section("Archived projects") { querySidebarStatus(model.archivedProjectsReadiness) }
+        } else if !archived.isEmpty {
             let expanded = model.localState.sidebar.archivedProjectsExpanded
             Section {
                 Button {
@@ -355,7 +405,7 @@ struct WorkspaceView: View {
                             .font(.caption.weight(.semibold))
                             .frame(width: 20)
                             .accessibilityHidden(true)
-                        Text("Archived projects · \(archived.count)")
+                        Text("Archived projects")
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
@@ -363,7 +413,7 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 .focusable()
-                .accessibilityLabel("Archived projects, \(archived.count), \(expanded ? "expanded" : "collapsed")")
+                .accessibilityLabel("Archived projects, \(expanded ? "expanded" : "collapsed")")
                 if expanded {
                     ForEach(archived) { project in
                         sidebarButton(project.name, symbol: "archivebox", destination: .project(project.id))
@@ -373,6 +423,7 @@ struct WorkspaceView: View {
                                 Button("Rename…") { beginRename(.project(project.id), name: project.name) }
                             }
                     }
+                    catalogPagination(archived: true)
                 }
             }
         }
@@ -380,6 +431,7 @@ struct WorkspaceView: View {
 
     private var tagsSection: some View {
         Section {
+            if model.tagsReadiness == .ready {
             ForEach(model.tags) { tag in
                 Button {
                     requestNavigation(.destination(.tag(tag.id)))
@@ -403,6 +455,10 @@ struct WorkspaceView: View {
                     .disabled(editorDirty)
                 }
             }
+            tagCatalogPagination
+            } else {
+                querySidebarStatus(model.tagsReadiness)
+            }
             Button {
                 collectionName = ""
                 addingCollection = .tag
@@ -416,6 +472,63 @@ struct WorkspaceView: View {
             .buttonStyle(.plain)
         } header: {
             Text("Tags")
+        }
+    }
+
+    @ViewBuilder
+    private func querySidebarStatus(_ readiness: WorkspaceQueryReadiness) -> some View {
+        switch readiness {
+        case .ready:
+            EmptyView()
+        case .notRequested, .loading:
+            Label("Loading…", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .failed:
+            Button("Retry loading") { Task { await model.prepareVisibleQueries() } }
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private func catalogPagination(archived: Bool) -> some View {
+        let state = archived ? model.archivedProjectsPageState : model.projectsPageState
+        if state.hasPrevious || state.hasNext {
+            HStack {
+                Button("Previous") {
+                    Task {
+                        await model.workspace.previousProjectsPage(archived: archived)
+                        model.refreshQueryPresentation()
+                    }
+                }
+                .disabled(!state.hasPrevious)
+                Button("Next") {
+                    Task {
+                        await model.workspace.nextProjectsPage(archived: archived)
+                        model.refreshQueryPresentation()
+                    }
+                }
+                .disabled(!state.hasNext)
+            }
+            .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private var tagCatalogPagination: some View {
+        let state = model.tagsPageState
+        if state.hasPrevious || state.hasNext {
+            HStack {
+                Button("Previous") {
+                    Task { await model.workspace.previousTagsPage(); model.refreshQueryPresentation() }
+                }
+                .disabled(!state.hasPrevious)
+                Button("Next") {
+                    Task { await model.workspace.nextTagsPage(); model.refreshQueryPresentation() }
+                }
+                .disabled(!state.hasNext)
+            }
+            .font(.caption)
         }
     }
 
@@ -476,6 +589,7 @@ struct WorkspaceView: View {
     ) -> some View {
         let count: Int? = {
             guard case .list(let list) = destination else { return nil }
+            guard model.countsReadiness == .ready else { return nil }
             return model.sidebarCounts.count(for: list)
         }()
         return Button {
@@ -802,7 +916,34 @@ struct WorkspaceView: View {
                     scrollTarget = nil
                 }
             }
-            .overlay { emptyState(isEmpty: onScreen.isEmpty) }
+            .overlay {
+                if model.visibleReadiness != .ready {
+                    queryState(model.visibleReadiness) { Task { await model.prepareVisibleQueries() } }
+                } else {
+                    emptyState(isEmpty: onScreen.isEmpty)
+                }
+            }
+            if model.listPageState.hasPrevious || model.listPageState.hasNext {
+                HStack {
+                    Button("Previous page") {
+                        Task {
+                            await model.workspace.previousListPage(model.destination.query, options: model.visibleListOptions)
+                            model.refreshQueryPresentation()
+                        }
+                    }
+                    .disabled(!model.listPageState.hasPrevious)
+                    Text("More results").font(.caption).foregroundStyle(.secondary)
+                    Button("Next page") {
+                        Task {
+                            await model.workspace.nextListPage(model.destination.query, options: model.visibleListOptions)
+                            model.refreshQueryPresentation()
+                        }
+                    }
+                    .disabled(!model.listPageState.hasNext)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
         }
         .frame(minWidth: 560, minHeight: 480)
         .onChange(of: orders, initial: true) { _, new in shownOrders = new }
@@ -810,6 +951,24 @@ struct WorkspaceView: View {
         .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
             guard let task, let draft = editDraft else { return }
             editDraft = draft.rebased(onto: task)
+        }
+    }
+
+    @ViewBuilder
+    private func queryState(_ readiness: WorkspaceQueryReadiness, retry: @escaping () -> Void) -> some View {
+        switch readiness {
+        case .ready:
+            EmptyView()
+        case .notRequested, .loading:
+            ProgressView("Loading tasks…")
+        case .failed:
+            ContentUnavailableView {
+                Label("Tasks couldn’t load", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text("Try loading this list again.")
+            } actions: {
+                Button("Retry", action: retry)
+            }
         }
     }
 
@@ -1041,7 +1200,7 @@ struct WorkspaceView: View {
     }
 
     private var taskCountCaption: String {
-        if model.destination.isHistory { return Self.plural(model.tasks.count, "task") }
+        if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
         let open = Self.plural(model.openTaskCount, "open task")
         return model.isArchivedProjectDestination ? "Archived project · \(open)" : open
     }
@@ -1401,6 +1560,11 @@ struct WorkspaceView: View {
 
     // MARK: Smart Add
 
+    private var capturePreviewStatus: String {
+        if case .failed = model.capturePreviewReadiness { return "Preview couldn’t load" }
+        return "Preparing preview…"
+    }
+
     private var smartAdd: some View {
         let preview = model.capturePreview
         let hasDraft = !model.draft.isEmpty
@@ -1420,24 +1584,35 @@ struct WorkspaceView: View {
             }
             if hasDraft || model.selectedList == .waiting {
                 HStack {
-                    if !preview.tokens.isEmpty, !preview.title.isEmpty {
+                    if model.capturePreviewReadiness == .ready, !preview.tokens.isEmpty, !preview.title.isEmpty {
                         Text("“\(preview.title)”")
                             .font(.caption.weight(.semibold))
                             .lineLimit(1)
                     }
-                    Text("Will save in \(model.selectedList.title)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if model.capturePreviewReadiness == .ready {
+                        Text("Will save in \(model.selectedList.title)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(capturePreviewStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
+                    if case .failed = model.capturePreviewReadiness {
+                        Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
+                    }
                     Button("Add task") { requestNavigation(.createTask) }
                         .buttonStyle(.borderedProminent)
-                        .disabled(addDisabled(preview))
+                        .disabled(model.capturePreviewReadiness != .ready || addDisabled(preview))
                 }
-                Text(previewClassification(preview))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
+                if model.capturePreviewReadiness == .ready {
+                    Text(previewClassification(preview))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if model.capturePreviewReadiness == .ready, hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
                     Text(problem)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -2455,18 +2630,18 @@ private struct InboxClarifyView: View {
                 }
                 .keyboardShortcut(.cancelAction)
             }
-            if items.isEmpty {
-                ContentUnavailableView(
-                    "Inbox is clear", systemImage: "tray",
-                    description: Text("Capture new items without classifying them first.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !loaded {
+                ProgressView("Loading Inbox…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.reviewListReadiness(.inbox) != .ready {
+                listQueryState(model.reviewListReadiness(.inbox), loading: "Loading Inbox…", retry: load)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
+                reviewPageUnavailable("Inbox is clear", systemImage: "tray",
+                    description: "Capture new items without classifying them first.", list: .inbox, model: model, reload: load)
             } else if index >= items.count {
-                ContentUnavailableView(
-                    "Clarification pass complete", systemImage: "checkmark.circle",
-                    description: Text("Items left in Inbox can be revisited later.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                reviewPageUnavailable("Clarification pass complete", systemImage: "checkmark.circle",
+                    description: "Items left in Inbox can be revisited later.", list: .inbox, model: model, reload: load)
             } else {
                 let item = items[index]
                 ScrollView {
@@ -2745,11 +2920,14 @@ private struct InboxClarifyView: View {
     }
 
     private func load() {
-        items = model.loadInboxClarificationTasks()
-        index = 0
-        loaded = true
-        step = .decision
-        stagedProjectID = nil
+        loaded = false
+        Task {
+            items = await model.loadInboxClarificationTasks()
+            index = 0
+            loaded = true
+            step = .decision
+            stagedProjectID = nil
+        }
     }
 
     private func submit(_ item: TaskRecord) {
@@ -2825,18 +3003,25 @@ private struct WaitingReviewView: View {
                 Button("Close review") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
-            if items.isEmpty {
+            if !loaded {
+                ProgressView("Loading Waiting…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if case .failed("CANONICAL_REVIEW_SIGNATURE_UNAVAILABLE") = model.reviewListReadiness(.waiting) {
                 ContentUnavailableView(
-                    "Waiting review is up to date", systemImage: "hourglass",
-                    description: Text("Reviewed items return after seven days or when their task changes.")
+                    "Waiting review is unavailable",
+                    systemImage: "hourglass",
+                    description: Text("This review needs a complete task signature. Try again after the native review query is available.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.reviewListReadiness(.waiting) != .ready {
+                listQueryState(model.reviewListReadiness(.waiting), loading: "Loading Waiting…", retry: load)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
+                reviewPageUnavailable("Waiting review is up to date", systemImage: "hourglass",
+                    description: "Reviewed items return after seven days or when their task changes.", list: .waiting, model: model, reload: load)
             } else if index >= items.count {
-                ContentUnavailableView(
-                    "Waiting review complete", systemImage: "checkmark.circle",
-                    description: Text("The items you checked remain in their chosen GTD lists.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                reviewPageUnavailable("Waiting review complete", systemImage: "checkmark.circle",
+                    description: "The items you checked remain in their chosen GTD lists.", list: .waiting, model: model, reload: load)
             } else {
                 let item = items[index]
                 card(item)
@@ -2954,10 +3139,13 @@ private struct WaitingReviewView: View {
     }
 
     private func load() {
-        items = model.loadWaitingReviewTasks()
-        index = 0
-        loaded = true
-        decision = nil
+        loaded = false
+        Task {
+            items = await model.loadWaitingReviewTasks()
+            index = 0
+            loaded = true
+            decision = nil
+        }
     }
 
     private func submit(_ item: TaskRecord, decision: WaitingReviewDecision) {
@@ -3009,18 +3197,25 @@ private struct SomedayReviewView: View {
                 Button("Close review") { dismiss() }
                     .keyboardShortcut(.cancelAction)
             }
-            if items.isEmpty {
+            if !loaded {
+                ProgressView("Loading Someday…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if case .failed("CANONICAL_REVIEW_SIGNATURE_UNAVAILABLE") = model.reviewListReadiness(.someday) {
                 ContentUnavailableView(
-                    "Someday review is up to date", systemImage: "calendar.badge.checkmark",
-                    description: Text("Reviewed items return after seven days or when their task changes.")
+                    "Someday review is unavailable",
+                    systemImage: "calendar.badge.checkmark",
+                    description: Text("This review needs a complete task signature. Try again after the native review query is available.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.reviewListReadiness(.someday) != .ready {
+                listQueryState(model.reviewListReadiness(.someday), loading: "Loading Someday…", retry: load)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
+                reviewPageUnavailable("Someday review is up to date", systemImage: "calendar.badge.checkmark",
+                    description: "Reviewed items return after seven days or when their task changes.", list: .someday, model: model, reload: load)
             } else if index >= items.count {
-                ContentUnavailableView(
-                    "Someday review complete", systemImage: "checkmark.circle",
-                    description: Text("Deferred items stay in Someday; selected next actions move to Next.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                reviewPageUnavailable("Someday review complete", systemImage: "checkmark.circle",
+                    description: "Deferred items stay in Someday; selected next actions move to Next.", list: .someday, model: model, reload: load)
             } else {
                 let item = items[index]
                 ScrollView {
@@ -3121,10 +3316,13 @@ private struct SomedayReviewView: View {
     }
 
     private func load() {
-        items = model.loadSomedayReviewTasks()
-        index = 0
-        loaded = true
-        enteringNext = false
+        loaded = false
+        Task {
+            items = await model.loadSomedayReviewTasks()
+            index = 0
+            loaded = true
+            enteringNext = false
+        }
     }
 
     private func activate(_ task: TaskRecord) {
