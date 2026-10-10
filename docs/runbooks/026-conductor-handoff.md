@@ -4,6 +4,17 @@ State on **2026-10-10 ~10:50 UTC**, when the multi-agent implementation session 
 
 The authoritative plan is `specs/026-rust-core-sync/tasks.md`: the `## PR-срезы` JSON slice map, its `depends_on` edges and the owner decision notes near the top. The rendered graph is `specs/026-rust-core-sync/delivery-graph.md`, which has 64 slices and 98 edges.
 
+## Continuation decisions — October 10
+
+The owner instructed Codex to continue implementation from this handoff, with independent agents and model routing from `AGENTS.md`, until the accepted migration is complete. Existing merge authorization and the advisory slice budgets remain in effect.
+
+- **Scheduler gate:** the owner delegated the open PR-64 decision. Keep the prepared `BRAIN_BUDDY_DURABLE_SCHEDULER` boot-time gate, default OFF. Changing it requires a process restart. This decision approves the mechanism, not feature activation or the Apple/SQLite pilot.
+- **Workspace validation:** the owner explicitly approved asynchronous saving with the existing validation errors and preservation of entered text. Callers must await durable completion before reporting success, clearing a draft, or dismissing a form. Add asynchronous throwing runtime methods; preserve legacy synchronous entry points for legacy workspaces. An observable late-error property cannot stand in for successful durable submission.
+- **Progress accounting:** the historical headline below does not agree with its enumerated slice IDs. Those IDs contain 33 completed slices before PR-24, plus the partially implemented PR-64 runner. Main `19acf48a66ef3d34855f6319c357f976d2db0295` adds PR-24 (#347), giving 34 completed slices and one partial PR-64. The scheduler handoff must merge before PR-25 can land. Partial implementation and a green review are not acceptance or release evidence.
+- **Local verification:** the restored executor now has isolated CPython 3.14.7 and Rust 1.99.0 toolchains. Backend TestClient checks need the supported network-enabled execution sandbox, including for in-process test transports. Without it, the same API fixture stalls on unchanged main; it is not a PR-25 regression.
+
+The remaining sections retain Claude's historical snapshot. Questions resolved above do not need to be asked again.
+
 ## Progress
 
 **33 of 64 slices are merged.** Merged so far:
@@ -125,4 +136,6 @@ These are pushed as **draft WIP PRs** so nothing is lost. Each PR body lists the
 
 ## Monitoring dashboard
 
-The progress dashboard is a claude.ai artifact: https://claude.ai/artifact/4hy8Zqd9vNN2RdZwLZk22E. It reads a `slices` dataset that only a Claude session with the Artifact tools can update, so another agent cannot refresh it. The table above is the source of truth from this point on.
+The current owner-private progress dashboard is https://brain-buddy-rust026-progress.alightpanda2.chatgpt.site. It reads public GitHub PRs and Actions runs every five minutes while visible, matches checks to the current PR head SHA, and exposes dependency readiness for all 64 slices. A retained baseline is clearly marked when GitHub is unavailable. Completion counts exclude the partially merged PR-64 runner until its scheduler handoff lands; slice merges do not imply pilot acceptance or a verified production release.
+
+The historical Claude artifact is https://claude.ai/artifact/4hy8Zqd9vNN2RdZwLZk22E. Only a Claude session with its Artifact tools can update that copy.
