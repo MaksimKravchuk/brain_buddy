@@ -206,8 +206,12 @@ class BulkUndoOutcome:
 
 @dataclass(frozen=True, slots=True)
 class StateAnswer:
-    """``ReviewState`` decoded: ids resolved to the stored documents."""
+    """``ReviewState`` decoded: ids resolved to the stored documents.
 
+    ``settings`` is the one snapshot the core derived the answer from.
+    """
+
+    settings: ReviewSettingsDocument
     explainer_seen: bool
     grace_until: datetime | None
     last_counted_review_at: datetime | None
@@ -1361,9 +1365,14 @@ class RustReviewFacade:
         repo = self._repo
         sessions = {s.id: s for s in repo.list_review_sessions(owner_id)}
         receipts = repo.list_review_receipts(owner_id)
+        # One read of the settings feeds the core and the answer, so a write that
+        # lands meanwhile cannot split them.
+        stored = repo.get_review_settings(owner_id)
         read_set = self._read_set(
-            owner_id, tasks=repo.list_for_owner(owner_id=owner_id), settings=True
+            owner_id, tasks=repo.list_for_owner(owner_id=owner_id)
         )
+        if stored is not None:
+            read_set["settings"] = encode_settings_private(stored)
         read_set["sessions"] = {s.id: encode_session(s) for s in sessions.values()}
         read_set["receipts"] = [encode_receipt(r) for r in receipts]
         read_set["park_acks"] = [
@@ -1374,6 +1383,9 @@ class RustReviewFacade:
         last = value["last_counted_review"]
         opened = value["open_session"]
         return StateAnswer(
+            settings=(
+                ReviewSettingsDocument(owner_id=owner_id) if stored is None else stored
+            ),
             explainer_seen=value["explainer_seen"],
             grace_until=_parse_instant(value["grace_until"]),
             last_counted_review_at=_parse_instant(value["last_counted_review_at"]),
