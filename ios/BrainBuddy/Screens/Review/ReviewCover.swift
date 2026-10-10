@@ -46,6 +46,9 @@ final class ReviewFields {
     private(set) var submittedDrafts: [DraftKey: SubmittedDraft] = [:]
     private var cleanupTasks: [DraftKey: Task<Void, Error>] = [:]
     private var draftWriters: [DraftKey: Task<Void, Never>] = [:]
+    private var discardingDrafts: Set<DraftKey> = []
+    private var discardedDrafts: Set<DraftKey> = []
+    private var draftGenerations: [DraftKey: Int] = [:]
 
     var cleaningDrafts: Set<DraftKey> { Set(cleanupTasks.keys) }
 
@@ -58,8 +61,19 @@ final class ReviewFields {
 
     func set(_ key: DraftKey, dirty isDirty: Bool, message: String? = nil) {
         guard submittedDrafts[key] == nil else { return }
-        if isDirty { dirty.insert(key) } else { dirty.remove(key) }
+        if isDirty {
+            dirty.insert(key)
+            discardedDrafts.remove(key)
+        } else {
+            dirty.remove(key)
+        }
         messages[key] = isDirty ? message : nil
+    }
+
+    func draftGeneration(for key: DraftKey) -> Int { draftGenerations[key, default: 0] }
+
+    func canPersistDraft(_ key: DraftKey) -> Bool {
+        !discardingDrafts.contains(key) && !discardedDrafts.contains(key)
     }
 
     func draftWriter(_ writer: Task<Void, Never>?, for key: DraftKey) {
@@ -89,7 +103,17 @@ final class ReviewFields {
 
     /// Discard: the drafts go with the text.
     func discard(in workspace: Workspace) async throws {
-        for key in dirty { try await workspace.discardDraft(for: key, editorID: editorID) }
+        let keys = Array(dirty)
+        for key in keys {
+            draftGenerations[key, default: 0] += 1
+            discardingDrafts.insert(key)
+        }
+        defer { discardingDrafts.subtract(keys) }
+        for key in keys {
+            if let writer = draftWriters[key] { await writer.value }
+            try await workspace.discardDraft(for: key, editorID: editorID)
+            discardedDrafts.insert(key)
+        }
         dirty = []
         messages = [:]
     }
@@ -682,8 +706,9 @@ struct ReviewDraftField: View {
             }
             .task(id: text) {
                 // Kept a moment after typing stops, and when the app leaves the foreground.
+                let generation = fields.draftGeneration(for: key)
                 try? await Task.sleep(for: .milliseconds(500))
-                guard !Task.isCancelled, hasLoaded else { return }
+                guard !Task.isCancelled, hasLoaded, fields.draftGeneration(for: key) == generation else { return }
                 await persistDraft()
             }
             .onChange(of: scenePhase) { _, phase in
@@ -726,7 +751,7 @@ struct ReviewDraftField: View {
     }
 
     @MainActor private func persistDraft() async {
-        guard hasLoaded, fields.submittedDrafts[key] == nil else { return }
+        guard hasLoaded, fields.submittedDrafts[key] == nil, fields.canPersistDraft(key) else { return }
         pendingDraftText = text
         if let draftSaveTask {
             await draftSaveTask.value
