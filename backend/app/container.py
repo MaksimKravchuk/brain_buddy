@@ -768,5 +768,9 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
             # written for by any job, so a job cannot recreate data a purge
             # has already wiped before the user row itself is deleted.
             owner_current=_owner_is_live,
+            # Retention that only deletes or nulls expired data may still run
+            # for an owner whose deletion is pending: it must not outlive its
+            # documented bound during the grace period. Purged owners are out.
+            owner_exists=lambda owner_id: user_repo.get_by_id(owner_id) is not None,
         ),
     )
