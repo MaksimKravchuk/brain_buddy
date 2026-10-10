@@ -174,7 +174,7 @@ struct ReviewCover: View {
 
     var body: some View {
         content
-            .disabled(isDiscarding)
+            .disabled(isDiscarding || isSaving)
             .bbScreenBackground()
             .toastMagicTap()
             .overlay {
@@ -408,9 +408,8 @@ struct ReviewCover: View {
     // MARK: Moving on
 
     private func attempt(_ exit: Exit) {
-        guard !isDiscarding else { return }
+        guard !isDiscarding, !isSaving else { return }
         if !fields.submittedDrafts.isEmpty {
-            guard !isSaving else { return }
             isSaving = true
             Task {
                 do {
@@ -491,7 +490,14 @@ struct ReviewCover: View {
     }
 
     private func leaveNow() {
-        Task { guard await sendActiveTime() else { return }; activity.record(.leave, at: Date()); dismiss() }
+        guard !isSaving, !isDiscarding else { return }
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            guard await sendActiveTime() else { return }
+            activity.record(.leave, at: Date())
+            dismiss()
+        }
     }
 
     private func finish(_ clearStart: ClearStart?) {
