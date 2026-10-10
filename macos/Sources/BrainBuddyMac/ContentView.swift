@@ -162,6 +162,7 @@ private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: Strin
     }
 }
 
+@MainActor
 private func reviewPageUnavailable(
     _ title: String, systemImage: String, description: String, list: TaskList,
     model: BrainBuddyModel, reload: @escaping () -> Void
@@ -1484,8 +1485,8 @@ struct WorkspaceView: View {
             }
         } onCancel: {
             select(nil)
-        } onCreateProject: { name in
-            await model.createProject(name, editorID: collectionCreateEditorID)
+        } onCreateProject: { name, editorID in
+            await model.createProject(name, editorID: editorID)
         } onEditorStateChange: { dirty, canSave in
             editorDirty = dirty
             editorCanSave = canSave
