@@ -661,7 +661,7 @@ fn apple_import_026_fr_013_prepared_conversion_preserves_source_identity_and_com
                 .unwrap_err()
         )
         .0,
-        "COMMAND_ID_REUSED"
+        "IDEMPOTENCY_KEY_REUSED"
     );
 }
 
