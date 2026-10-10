@@ -3,6 +3,8 @@
 import logging
 import os
 import threading
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI
 
@@ -19,7 +21,24 @@ from app.api.review import register_review_exception_handlers
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
+from app.modules.tasks.jobs.agent_adapter import (
+    OBSERVE_JOB_TYPE,
+    AgentObservationAdapter,
+    AgentRecoveryAdapter,
+)
+from app.modules.tasks.jobs.execution import JobExecutionGate
+from app.modules.tasks.jobs.privacy_adapter import PrivacyMaintenanceAdapter
+from app.modules.tasks.jobs.review_adapter import ReviewJobAdapter
+from app.modules.tasks.jobs.voice_adapter import VOICE_JOB_TYPE, VoiceMaintenanceAdapter
+from app.modules.tasks.jobs.worker import (
+    JobRegistry,
+    JobWorker,
+    Responsibility,
+    SchedulerHandoff,
+    SchedulerOwner,
+)
 from app.modules.tasks.review_service import ReviewSweepResult
+from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +46,27 @@ _VOICE_SWEEP_INTERVAL_SECONDS = float(
     os.getenv("BRAIN_BUDDY_VOICE_SWEEP_INTERVAL_SECONDS", "60")
 )
 
+#: Spec 026 PR-64: default OFF. Read once at boot; while it is off the legacy
+#: loops below are the sole owners of every responsibility, exactly as before.
+_DURABLE_SCHEDULER_ENV = "BRAIN_BUDDY_DURABLE_SCHEDULER"
 
-def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]:
-    """Purge authentication metadata, due accounts, relay content, and CRT receipts."""
 
+def _durable_scheduler_enabled() -> bool:
+    raw = os.getenv(_DURABLE_SCHEDULER_ENV, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _run_privacy_maintenance_sweep(
+    container: Container, handoff: SchedulerHandoff | None = None
+) -> tuple[int, int, int]:
+    """Purge authentication metadata, due accounts, relay content, and CRT receipts.
+
+    With a ``handoff`` the durable worker may own the account purge, relay and CRT
+    receipt retention and the Review sweep; those steps are then skipped here. Auth
+    cleanup and CRT command reconciliation always stay with this loop.
+    """
+
+    durable = handoff.durable if handoff is not None else (lambda _r: False)
     try:
         container.modern_auth_service.cleanup_expired_metadata()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
@@ -45,33 +81,53 @@ def _run_privacy_maintenance_sweep(container: Container) -> tuple[int, int, int]
     except Exception:  # noqa: BLE001 - coarse diagnostics never contain grant data
         logger.warning("CLI authorization cleanup deferred")
 
-    purged_accounts = 0
-    try:
-        purged_accounts = container.account_service.purge_due_accounts()
-    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.exception("Account purge sweep iteration failed")
-
-    expired_agent_runs = 0
-    try:
-        expired_agent_runs = container.agent_relay_service.run_retention_sweep()
-    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.exception("External-agent retention sweep iteration failed")
+    retained = not durable(Responsibility.PRIVACY_RETENTION)
+    purged_accounts = (
+        _isolated_step(
+            lambda: container.account_service.purge_due_accounts(),
+            "Account purge sweep iteration failed",
+        )
+        if retained
+        else 0
+    )
+    expired_agent_runs = (
+        _isolated_step(
+            lambda: container.agent_relay_service.run_retention_sweep(),
+            "External-agent retention sweep iteration failed",
+        )
+        if retained
+        else 0
+    )
 
     try:
         container.crt_command_service.reconcile_pending_commands()
     except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
         logger.exception("CRT command reconciliation sweep iteration failed")
 
-    expired_crt_receipts = 0
-    try:
-        expired_crt_receipts = container.crt_command_repo.purge_expired()
-    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
-        logger.exception("CRT command retention sweep iteration failed")
+    expired_crt_receipts = (
+        _isolated_step(
+            lambda: container.crt_command_repo.purge_expired(),
+            "CRT command retention sweep iteration failed",
+        )
+        if retained
+        else 0
+    )
 
     # Spec 020: its own block, so a review failure stops neither purge nor
     # relay retention, and the 3-tuple above stays this function's contract.
-    _run_review_maintenance_sweep(container)
+    if not durable(Responsibility.REVIEW_SWEEP):
+        _run_review_maintenance_sweep(container)
     return purged_accounts, expired_agent_runs, expired_crt_receipts
+
+
+def _isolated_step(call: Callable[[], int], failure: str) -> int:
+    """One retention step whose failure must not stop the steps after it."""
+
+    try:
+        return call()
+    except Exception:  # noqa: BLE001 - a sweep failure must not kill the loop
+        logger.exception(failure)
+        return 0
 
 
 def _run_review_maintenance_sweep(container: Container) -> ReviewSweepResult | None:
@@ -125,28 +181,34 @@ def _run_voice_maintenance_sweep(
     )
 
 
-def _run_maintenance_sweep(container: Container) -> None:
+def _run_maintenance_sweep(
+    container: Container, handoff: SchedulerHandoff | None = None
+) -> None:
     """One pass of the backend's periodic maintenance duties.
 
     Recovers due/expired provider-run leases, advances due provider runs,
     resumes operations frozen mid-commit, purges raw audio and uncommitted
     working artifacts past their configured retention, then hard-deletes
     accounts whose deletion grace period has elapsed. A single bad pass must
-    never kill the loop that calls this.
+    never kill the loop that calls this. Responsibilities the durable worker owns
+    are skipped (their first run is the worker's boot occurrence).
     """
 
     (
         purged_accounts,
         expired_agent_runs,
         expired_crt_receipts,
-    ) = _run_privacy_maintenance_sweep(container)
+    ) = _run_privacy_maintenance_sweep(container, handoff)
+    voice_counts = (0, 0, 0, 0, 0)
+    if handoff is None or not handoff.durable(Responsibility.VOICE_SWEEP):
+        voice_counts = _run_voice_maintenance_sweep(container)
     (
         recovered_leases,
         advanced_runs,
         resumed_commits,
         purged_raw_audio,
         purged_working_artifacts,
-    ) = _run_voice_maintenance_sweep(container)
+    ) = voice_counts
     if (
         recovered_leases
         or advanced_runs
@@ -197,13 +259,21 @@ def _start_voice_sweep_thread(
 
 
 def _start_privacy_maintenance_thread(
-    container: Container, stop_event: threading.Event, *, interval_seconds: float
+    container: Container,
+    stop_event: threading.Event,
+    *,
+    interval_seconds: float,
+    handoff: SchedulerHandoff | None = None,
 ) -> threading.Thread:
-    """Start the privacy scheduler on an interval independent from voice work."""
+    """Start the privacy scheduler on an interval independent from voice work.
+
+    After a handoff this loop keeps only what the worker did not take (auth
+    cleanup, CRT reconciliation).
+    """
 
     def _loop() -> None:
         while not stop_event.wait(interval_seconds):
-            _run_privacy_maintenance_sweep(container)
+            _run_privacy_maintenance_sweep(container, handoff)
 
     thread = threading.Thread(
         target=_loop, name="privacy-maintenance-sweep", daemon=True
@@ -246,6 +316,79 @@ def _start_auth_dispatch_thread(
     return thread
 
 
+def _wake_job(worker: JobWorker, job_type: str) -> Callable[[], None]:
+    """A push into the ledger that never fails the request or push that made it."""
+
+    def wake() -> None:
+        try:
+            worker.wake(job_type)
+        except Exception:  # noqa: BLE001 - the periodic occurrence still runs
+            logger.warning("Durable job wake deferred for %s", job_type)
+
+    return wake
+
+
+def _install_durable_scheduler(
+    container: Container,
+    handoff: SchedulerHandoff,
+    *,
+    voice_interval_seconds: float,
+    privacy_interval_seconds: float,
+    gate: JobExecutionGate | None = None,
+    now: Callable[[], datetime] = utcnow,
+) -> JobWorker | None:
+    """Register the completed adapters and take over their responsibilities.
+
+    ``None`` (and nothing assigned) unless the handoff is enabled. Each adapter
+    is registered and its responsibility assigned to the worker in one step, so
+    the legacy loop for it never starts. Call before any legacy loop starts: the
+    observation adapter refuses a live observer thread. Registers no effect of
+    its own; the adapters call the existing ports under the execution context.
+    """
+
+    if not handoff.enabled:
+        return None
+    gate = gate or container.job_execution
+    registry = JobRegistry()
+    owned = SchedulerOwner.DURABLE
+    privacy = timedelta(seconds=privacy_interval_seconds)
+    registry.register(ReviewJobAdapter(container.review_service, gate, cadence=privacy))
+    handoff.assign(Responsibility.REVIEW_SWEEP, owned)
+    registry.register(
+        PrivacyMaintenanceAdapter(
+            container.account_service,
+            container.agent_relay_service,
+            container.crt_command_repo,
+            gate,
+            cadence=privacy,
+        )
+    )
+    handoff.assign(Responsibility.PRIVACY_RETENTION, owned)
+    observer = container.agent_observer
+    registry.register(AgentObservationAdapter(observer, gate))
+    handoff.assign(Responsibility.AGENT_OBSERVATION, owned)
+    registry.register(
+        AgentRecoveryAdapter(observer, gate, container.job_repository, now=now)
+    )
+    handoff.assign(Responsibility.AGENT_RECOVERY, owned)
+    if voice_interval_seconds > 0:
+        registry.register(
+            VoiceMaintenanceAdapter(
+                container.voice_brain_dump_service,
+                gate,
+                cadence=timedelta(seconds=voice_interval_seconds),
+            )
+        )
+        handoff.assign(Responsibility.VOICE_SWEEP, owned)
+    worker = JobWorker(container.job_repository, registry, now=now)
+    observer.wake_listener = _wake_job(worker, OBSERVE_JOB_TYPE)
+    if handoff.durable(Responsibility.VOICE_SWEEP):
+        container.voice_brain_dump_service.runner_wake = _wake_job(
+            worker, VOICE_JOB_TYPE
+        )
+    return worker
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
     config = get_config()
@@ -261,35 +404,55 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.container = build_container(config, serve_navigator=True)
     _maybe_seed_admin(app.state.container)
-    # Retry-safe startup scan: recover any provider lease that expired while
-    # no process was running, then purge whatever raw audio/working
-    # artifacts are already due. This must run unconditionally (including in
-    # tests) since it is a one-shot, synchronous, already-tested code path.
-    _run_maintenance_sweep(app.state.container)
-
-    app.state.voice_sweep_stop_event = threading.Event()
-    app.state.voice_sweep_wake_event = threading.Event()
-    app.state.privacy_maintenance_stop_event = threading.Event()
-    app.state.container.voice_brain_dump_service.runner_wake = (
-        app.state.voice_sweep_wake_event.set
-    )
-    app.state.auth_dispatch_stop_event = threading.Event()
-    app.state.auth_dispatch_thread = None
-    app.state.voice_sweep_thread = None
-    app.state.privacy_maintenance_thread = None
     enable_test_voice_sweep = (
         os.getenv("BRAIN_BUDDY_ENABLE_VOICE_SWEEP_IN_TEST", "").strip() == "1"
     )
     background_maintenance_enabled = (
         config.environment is not AppEnvironment.TEST or enable_test_voice_sweep
     )
+    app.state.voice_sweep_stop_event = threading.Event()
+    app.state.voice_sweep_wake_event = threading.Event()
+    app.state.privacy_maintenance_stop_event = threading.Event()
+    app.state.container.voice_brain_dump_service.runner_wake = (
+        app.state.voice_sweep_wake_event.set
+    )
+    # Spec 026 PR-64. The durable worker takes over only where the background
+    # schedulers themselves run (never in the test suite's short-lived apps), and
+    # only with the gate on; every responsibility is assigned exactly one owner
+    # here, before any loop starts, and the rest stay with the legacy loops.
+    handoff = SchedulerHandoff(
+        enabled=_durable_scheduler_enabled() and background_maintenance_enabled
+    )
+    app.state.scheduler_handoff = handoff
+    app.state.durable_worker = _install_durable_scheduler(
+        app.state.container,
+        handoff,
+        voice_interval_seconds=_VOICE_SWEEP_INTERVAL_SECONDS,
+        privacy_interval_seconds=config.agent_relay.retention_sweep_interval_seconds,
+    )
+    handoff.assign_remaining_to_legacy()
+    # Retry-safe startup scan: recover any provider lease that expired while
+    # no process was running, then purge whatever raw audio/working
+    # artifacts are already due. This must run unconditionally (including in
+    # tests) since it is a one-shot, synchronous, already-tested code path.
+    # Handed-off responsibilities run as the worker's boot occurrence instead.
+    _run_maintenance_sweep(app.state.container, handoff)
+
+    app.state.auth_dispatch_stop_event = threading.Event()
+    app.state.auth_dispatch_thread = None
+    app.state.voice_sweep_thread = None
+    app.state.privacy_maintenance_thread = None
 
     if config.modern_auth.crypto_ready and background_maintenance_enabled:
         app.state.auth_dispatch_thread = _start_auth_dispatch_thread(
             app.state.container, app.state.auth_dispatch_stop_event
         )
 
-    if _VOICE_SWEEP_INTERVAL_SECONDS > 0 and background_maintenance_enabled:
+    if (
+        _VOICE_SWEEP_INTERVAL_SECONDS > 0
+        and background_maintenance_enabled
+        and not handoff.durable(Responsibility.VOICE_SWEEP)
+    ):
         # A real periodic sweep thread is only started outside tests: the
         # test suite builds many short-lived apps/repositories per process,
         # and TaskRepository.command_lock is a process-wide class lock, so a
@@ -310,12 +473,18 @@ def create_app() -> FastAPI:
         # sweeps are: the test suite builds many short-lived apps in one
         # process, and a boot-time scan over a shared, process-wide lock would
         # race unrelated tests.
-        interrupted = app.state.container.agent_observer.mark_interrupted_exchanges()
+        # With the worker owning recovery, the same marking is its boot job.
+        interrupted: list[tuple[str, str]] = []
+        if not handoff.durable(Responsibility.AGENT_RECOVERY):
+            interrupted = (
+                app.state.container.agent_observer.mark_interrupted_exchanges()
+            )
         # Started next to the maintenance thread and under the same gate: the
         # observer is the only thing that ever moves a dispatched run forward,
         # and a test suite that built many short-lived apps in one process
         # would otherwise have as many schedulers racing one another.
-        app.state.container.agent_observer.start()
+        if not handoff.durable(Responsibility.AGENT_OBSERVATION):
+            app.state.container.agent_observer.start()
         # And only now the lookups, on the observer's own pool. Each one is a
         # `ListTasks` under the short-call deadline; running them here rather
         # than above is the difference between an unreachable agent delaying one
@@ -329,11 +498,18 @@ def create_app() -> FastAPI:
             app.state.container,
             app.state.privacy_maintenance_stop_event,
             interval_seconds=config.agent_relay.retention_sweep_interval_seconds,
+            handoff=handoff,
         )
+        if app.state.durable_worker is not None:
+            # The boot sweep as occurrences the lease protects: recovery of
+            # interrupted exchanges plus a first run of every handed-off job.
+            app.state.durable_worker.ensure_schedules(due_now=True)
+            app.state.durable_worker.start()
 
     if (
         app.state.voice_sweep_thread is not None
         or app.state.privacy_maintenance_thread is not None
+        or app.state.durable_worker is not None
     ):
 
         @app.on_event("shutdown")
@@ -346,6 +522,8 @@ def create_app() -> FastAPI:
             # may be at the agent, and dropping it would leave a run nobody
             # will ever settle.
             app.state.container.agent_observer.shutdown()
+            if app.state.durable_worker is not None:
+                app.state.durable_worker.shutdown()
             if app.state.voice_sweep_thread is not None:
                 app.state.voice_sweep_thread.join(timeout=5)
             if app.state.privacy_maintenance_thread is not None:

@@ -361,8 +361,10 @@ def test_026_SC_007_the_existing_scheduler_remains_the_only_live_owner(
     assert not hasattr(container, "job_worker")
 
     text = Path(inspect.getsourcefile(main_module) or "").read_text(encoding="utf-8")
-    for forbidden in ("voice_adapter", "privacy_adapter", "JobWorker", "JobRegistry"):
-        assert forbidden not in text
+    # PR-64 registers the adapters in ``app.main`` behind the default-OFF gate,
+    # so this app (gate off) still owns nothing durable; the gated hand-over is
+    # proved in ``test_scheduler_handoff``.
+    assert api_client.app.state.durable_worker is None
     for live in ("voice-operation-sweep", "privacy-maintenance-sweep", "auth-delivery"):
         assert live in text
 
