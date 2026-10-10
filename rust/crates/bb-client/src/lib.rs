@@ -11,10 +11,14 @@
 //! detected, oversized ones staged and verified first), and receipts that
 //! settle a command but never write after-images or move the cursor. [`snapshot`]
 //! rebuilds the base from a staged, verified snapshot in one activation that
-//! keeps everything saved while it downloaded. The sync session builds on these
-//! in a later slice.
+//! keeps everything saved while it downloaded. [`sync_session`] decides which
+//! answers still count (request fences over the workspace, session, local-sync
+//! and server generations, reset, sign-out, unsupported versions) and [`epochs`]
+//! owns the durable device epoch: registered under current authority, closed
+//! without rewriting an envelope, replaced for new independent work.
 
 mod apply_changes;
+mod epochs;
 mod execute;
 mod issues;
 mod locking;
@@ -22,11 +26,16 @@ mod receipts;
 mod replay;
 mod snapshot;
 mod storage;
+mod sync_session;
 
 pub use apply_changes::{
     Applied, ApplyError, ApplyStage, FeedStep, Fence, Recovery, TransferFault, TransferProgress,
     abandon_transfer, apply_changes, apply_changes_with, apply_transfer, apply_transfer_with,
     capture_fence, sha256_hex, stage_transfer_page,
+};
+pub use epochs::{
+    Closure, EpochState, EpochView, Registered, apply_registration, close_epoch, epoch_view,
+    send_candidates,
 };
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
@@ -46,3 +55,7 @@ pub use snapshot::{
     begin_snapshot, stage_snapshot_page,
 };
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
+pub use sync_session::{
+    Authentication, EndCause, ErrorAction, Request, RequestKind, SessionBinding, SessionError,
+    SyncSession,
+};
