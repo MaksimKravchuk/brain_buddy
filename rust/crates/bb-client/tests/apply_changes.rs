@@ -2313,3 +2313,191 @@ fn base64_decode_for_test(text: &str) -> Vec<u8> {
     }
     out
 }
+
+// Native local origins use the same durable transaction and replay paths as
+// domain records; neither an ACK nor a rejected prediction becomes confirmed.
+fn local_origin(store: &mut Store, task_id: &str) -> Option<bb_domain::types::OpenList> {
+    let mut read_set = bb_domain::types::ReadSet::default();
+    for value in visible(store, "task") {
+        let task: bb_domain::types::Task = serde_json::from_value(value).unwrap();
+        read_set.tasks.insert(task.id.clone(), task);
+    }
+    bb_client::local_task_origins(store, &read_set)
+        .unwrap()
+        .get(&bb_domain::types::TaskId::parse(task_id).unwrap())
+        .copied()
+}
+
+fn transition_local(store: &mut Store, n: u64, task_id: &str, revision: &str, payload: Value) {
+    execute(
+        store,
+        &mut SeqIds(0),
+        &request(
+            cmd(n),
+            CommandType::TaskTransition,
+            Some(task_id),
+            payload,
+            vec![shown(EntityType::Task, task_id, revision)],
+        ),
+    )
+    .unwrap();
+}
+
+fn state_change(task_id: &str, state: &str, revision: u64, version: u64) -> Value {
+    let mut change = task_change(task_id, "Origin", revision, version);
+    change["value"]["state"] = json!(state);
+    change["value"]["completed_at"] = if state == "completed" {
+        json!(NOW)
+    } else {
+        Value::Null
+    };
+    change["value"]["cancelled_at"] = if state == "cancelled" {
+        json!(NOW)
+    } else {
+        Value::Null
+    };
+    change
+}
+
+#[test]
+fn local_origin_rejected_completion_and_reopen_rebuild_from_confirmed_facts() {
+    use bb_domain::types::OpenList;
+    let path = scratch("local-origin-rejections");
+    let mut store = linked(&path);
+    let task = "task-origin";
+    apply(
+        &mut store,
+        &page(
+            "cursor-0",
+            vec![transaction(
+                1,
+                &external(1),
+                vec![state_change(task, "inbox", 1, 1)],
+            )],
+            "cursor-1",
+            1,
+        ),
+    )
+    .unwrap();
+    transition_local(&mut store, 1, task, "1", json!({"action":"complete"}));
+    assert_eq!(local_origin(&mut store, task), Some(OpenList::Inbox));
+    bb_client::record_rejection(
+        &mut store,
+        &context(),
+        &cmd(1),
+        &bb_client::IssueReason::RevisionConflict,
+    )
+    .unwrap();
+    assert_eq!(local_origin(&mut store, task), None);
+    // A genuine feed transition establishes the confirmed origin.
+    apply(
+        &mut store,
+        &page(
+            "cursor-1",
+            vec![transaction(
+                2,
+                &external(2),
+                vec![state_change(task, "completed", 2, 2)],
+            )],
+            "cursor-2",
+            2,
+        ),
+    )
+    .unwrap();
+    transition_local(
+        &mut store,
+        2,
+        task,
+        "2",
+        json!({"action":"reopen","to_state":"someday"}),
+    );
+    assert_eq!(local_origin(&mut store, task), None);
+    bb_client::record_rejection(
+        &mut store,
+        &context(),
+        &cmd(2),
+        &bb_client::IssueReason::RevisionConflict,
+    )
+    .unwrap();
+    assert_eq!(local_origin(&mut store, task), Some(OpenList::Inbox));
+    drop(store);
+    assert_eq!(
+        local_origin(&mut open(&path).unwrap(), task),
+        Some(OpenList::Inbox)
+    );
+}
+
+#[test]
+fn local_origin_ack_before_feed_and_contiguous_remote_recompletion() {
+    use bb_domain::types::OpenList;
+    let path = scratch("local-origin-ack");
+    let mut store = linked(&path);
+    let task = "task-origin";
+    apply(
+        &mut store,
+        &page(
+            "cursor-0",
+            vec![transaction(
+                1,
+                &external(1),
+                vec![state_change(task, "inbox", 1, 1)],
+            )],
+            "cursor-1",
+            1,
+        ),
+    )
+    .unwrap();
+    transition_local(&mut store, 1, task, "1", json!({"action":"complete"}));
+    set_state(&mut store, 1, "sending", true);
+    let fence = capture_fence(&mut store).unwrap();
+    apply_receipt(&mut store, &context(), &fence, &accepted(&cmd(1), 2)).unwrap();
+    let confirmed_origin: Value = store
+        .read(|tx| {
+            let body: Vec<u8> = tx.query_row(
+                "SELECT fields FROM drafts WHERE editor_kind = 'runtime_task_local'",
+                [],
+                |r| r.get(0),
+            )?;
+            Ok(serde_json::from_slice::<Value>(&body).unwrap()["confirmed"].clone())
+        })
+        .unwrap();
+    assert_eq!(
+        confirmed_origin,
+        Value::Null,
+        "ACK cannot promote the prediction"
+    );
+    apply(
+        &mut store,
+        &page(
+            "cursor-1",
+            vec![
+                transaction(2, &cmd(1), vec![state_change(task, "completed", 2, 2)]),
+                transaction(3, &external(3), vec![state_change(task, "someday", 3, 3)]),
+                transaction(4, &external(4), vec![state_change(task, "completed", 4, 4)]),
+            ],
+            "cursor-4",
+            4,
+        ),
+    )
+    .unwrap();
+    assert_eq!(local_origin(&mut store, task), Some(OpenList::Someday));
+    apply(
+        &mut store,
+        &page(
+            "cursor-4",
+            vec![transaction(
+                5,
+                &external(5),
+                vec![state_change(task, "cancelled", 5, 5)],
+            )],
+            "cursor-5",
+            5,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        local_origin(&mut store, task),
+        None,
+        "terminal kind changes clear origin"
+    );
+}

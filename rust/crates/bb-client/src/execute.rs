@@ -420,6 +420,7 @@ fn run(
     }
 
     let visible = load_visible(tx, &meta.workspace_id)?;
+    let mut local_facts = crate::localfacts::load(tx, &meta.workspace_id)?;
     let entity_id = match (&request.entity_id, new_entity_prefix(request.command_type)) {
         (Some(id), _) => id.clone(),
         (None, Some(prefix)) => prefixed(ids, prefix)?,
@@ -548,8 +549,29 @@ fn run(
         )?;
     }
     hook(Stage::IntentStored, tx)?;
+    let mut local_read_set = visible.read_set.clone();
     for change in &changes.changes {
+        crate::localfacts::project(
+            &mut local_facts,
+            &local_read_set,
+            change,
+            &request.command_id,
+        );
         apply(tx, &meta.workspace_id, &request.command_id, change)?;
+        match change {
+            DomainChange::Upsert(record) => file(&mut local_read_set, record.clone()),
+            DomainChange::Tombstone {
+                entity_type,
+                record_key,
+            } => crate::replay::remove(&mut local_read_set, *entity_type, record_key),
+        }
+    }
+    let fact_writes = crate::localfacts::save(tx, &meta.workspace_id, &local_facts)?;
+    let projection_generation = projection_generation
+        + i64::from(fact_writes > 0 && changes.outcome != ChangeOutcome::Applied);
+    if fact_writes > 0 && changes.outcome != ChangeOutcome::Applied {
+        tx.execute("UPDATE outbox SET projection_generation = ?3 WHERE workspace_id = ?1 AND command_id = ?2",
+            params![meta.workspace_id, request.command_id.as_str(), projection_generation])?;
     }
     tx.execute(
         "UPDATE sync_meta SET next_local_seq = ?1, projection_generation = ?2",

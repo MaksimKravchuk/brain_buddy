@@ -1951,7 +1951,7 @@ fn verify(
     // The carriers hold exactly what the file's verbatim sections held (their
     // digests are part of the facts above) and one row per local fact.
     let carried: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM drafts WHERE workspace_id = ?1",
+        "SELECT COUNT(*) FROM drafts WHERE workspace_id = ?1 AND editor_kind != 'runtime_task_local'",
         [workspace],
         |row| row.get(0),
     )?;

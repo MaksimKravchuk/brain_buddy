@@ -134,6 +134,8 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
     let mut base = Projection::confirmed(tx, &workspace_id)?;
+    let mut local_facts = crate::localfacts::load(tx, &workspace_id)?;
+    crate::localfacts::reset_visible(&mut local_facts);
     let queue = load_queue(tx, &workspace_id)?;
     let mut results = LocalResults::new();
     for command in &queue {
@@ -217,6 +219,12 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         match decide(&base, &results, &envelope, context) {
             Ok(changes) => {
                 for change in &changes.changes {
+                    crate::localfacts::project(
+                        &mut local_facts,
+                        &base.read_set,
+                        change,
+                        &command.id,
+                    );
                     base.install(change, &command.id);
                 }
                 if !proven.contains(id) {
@@ -253,7 +261,9 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
     }
 
     issues::refresh_dependents(tx, &workspace_id)?;
-    let writes = base.save(tx, &workspace_id)?;
+    crate::localfacts::prune(tx, &workspace_id, &mut local_facts)?;
+    let writes =
+        base.save(tx, &workspace_id)? + crate::localfacts::save(tx, &workspace_id, &local_facts)?;
     let generation = generation + i64::from(writes > 0);
     // The projection is whole now, whatever state the store was upgraded from.
     tx.execute(
@@ -555,7 +565,7 @@ impl Projection {
 }
 
 /// Removes the record a tombstone names from what the rules read.
-fn remove(read_set: &mut ReadSet, entity_type: EntityType, key: &RecordKey) {
+pub(crate) fn remove(read_set: &mut ReadSet, entity_type: EntityType, key: &RecordKey) {
     let id = key.first().map_or("", String::as_str);
     let keyed = |record: Record| record.record_key() == *key;
     match entity_type {

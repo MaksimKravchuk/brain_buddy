@@ -28,6 +28,7 @@ mod execute;
 mod import;
 mod issues;
 mod legacy_outbox;
+mod localfacts;
 mod locking;
 mod receipts;
 mod replay;
@@ -84,3 +85,5 @@ pub use workspace_query::{
     resolve_workspace_identities, save_workspace_draft_with, workspace_issues_page, workspace_read,
     workspace_sync_status, workspace_watch,
 };
+
+pub use localfacts::{local_task_origins, local_task_origins_in};
