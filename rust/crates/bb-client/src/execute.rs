@@ -398,20 +398,27 @@ fn run(
 
     // What the rules resolved (a Smart Add name matched onto a queued project,
     // the tasks an archive touched) is a dependency on the command that wrote
-    // it, found by identity in the records the command changes.
-    let touched: Vec<Value> = changes
-        .changes
-        .iter()
-        .filter_map(|change| match change {
-            DomainChange::Upsert(record) => Some(json!(record)),
-            DomainChange::Tombstone { .. } => None,
-        })
-        .collect();
-    let (mut leaves, mut unused) = (Vec::new(), Vec::new());
-    touched
-        .iter()
-        .for_each(|record| collect(record, &mut leaves, &mut unused));
-    depend_on_queued(&mut stable.depends_on, &visible.pending, leaves);
+    // it, found by identity: the exact key of each record the command changes
+    // and the typed references those records hold.
+    for change in &changes.changes {
+        let key = json!(change.record_key()).to_string();
+        depend_on_key(
+            &mut stable.depends_on,
+            &visible.pending,
+            Some(change.entity_type()),
+            &key,
+        );
+        if let DomainChange::Upsert(record) = change {
+            for reference in record_references(record) {
+                depend_on_key(
+                    &mut stable.depends_on,
+                    &visible.pending,
+                    None,
+                    &key_json(reference),
+                );
+            }
+        }
+    }
     let depends_on = stable.depends_on.clone();
 
     // Decided: from here on only writes, all inside this transaction.
@@ -721,32 +728,84 @@ fn push_unique(list: &mut Vec<CommandId>, id: &CommandId) {
     }
 }
 
-/// Adds the queued command that last wrote each record the strings name.
-fn depend_on_queued<'a>(
+/// Adds the queued command that last wrote the record at `key` (of
+/// `entity_type`, when known).
+fn depend_on_key(
     depends_on: &mut Vec<CommandId>,
     pending: &HashMap<String, Vec<Pending>>,
-    names: impl IntoIterator<Item = &'a str>,
+    entity_type: Option<EntityType>,
+    key: &str,
 ) {
-    for name in names {
-        for queued in pending.get(&key_json(name)).into_iter().flatten() {
+    for queued in pending.get(key).into_iter().flatten() {
+        if entity_type.is_none_or(|kind| queued.entity_type == kind) {
             push_unique(depends_on, &queued.command);
         }
     }
 }
 
-fn collect<'a>(value: &'a Value, leaves: &mut Vec<&'a str>, after: &mut Vec<&'a str>) {
+/// The record key a shown revision of `entity_type` is stored under: the
+/// Review settings are a singleton with the empty key, every other record with
+/// an edit revision is keyed by its ID.
+fn shown_key(entity_type: EntityType, id: &str) -> String {
+    if entity_type == EntityType::ReviewSettings {
+        json!(RecordKey::new()).to_string()
+    } else {
+        key_json(id)
+    }
+}
+
+/// The payload members that name another entity. Only these are references:
+/// every other string is user text or a new value, and may equal any ID
+/// without depending on it.
+const REFERENCE_FIELDS: [&str; 7] = [
+    "project_id",
+    "tag_ids",
+    "add_tag_ids",
+    "remove_tag_ids",
+    "task_id",
+    "session_id",
+    "id",
+];
+
+/// The IDs a payload references and the commands its alias objects name.
+fn references<'a>(
+    value: &'a Value,
+    field: Option<&str>,
+    ids: &mut Vec<&'a str>,
+    after: &mut Vec<&'a str>,
+) {
     match value {
-        Value::String(text) => leaves.push(text),
-        Value::Array(items) => items.iter().for_each(|item| collect(item, leaves, after)),
+        Value::String(text) if field.is_some_and(|name| REFERENCE_FIELDS.contains(&name)) => {
+            ids.push(text);
+        }
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| references(item, field, ids, after)),
         Value::Object(map) => {
             for (key, member) in map {
                 match member {
                     Value::String(command) if key == "after_command" => after.push(command),
-                    _ => collect(member, leaves, after),
+                    _ => references(member, Some(key), ids, after),
                 }
             }
         }
         _ => {}
+    }
+}
+
+/// The IDs a changed record points at.
+fn record_references(record: &Record) -> Vec<&str> {
+    match record {
+        Record::Task(task) => task
+            .project_id
+            .iter()
+            .map(|id| id.as_str())
+            .chain(task.tag_ids.iter().map(|id| id.as_str()))
+            .collect(),
+        Record::Subtask(child) => vec![child.task_id.as_str()],
+        Record::Comment(child) => vec![child.task_id.as_str()],
+        Record::ReviewDecision(decision) => vec![decision.task_id.as_str()],
+        _ => Vec::new(),
     }
 }
 
@@ -766,7 +825,7 @@ fn wire(
         preconditions.push(match precondition {
             Precondition::Revision(shown) => {
                 let queued = pending
-                    .get(&key_json(shown.entity_id.as_str()))
+                    .get(&shown_key(shown.entity_type, shown.entity_id.as_str()))
                     .into_iter()
                     .flatten()
                     .find(|p| {
@@ -793,12 +852,13 @@ fn wire(
             }
         });
     }
-    let mut leaves = vec![entity_id.as_str()];
-    let mut after = Vec::new();
-    for member in request.payload.values() {
-        collect(member, &mut leaves, &mut after);
+    let (mut ids, mut after) = (vec![entity_id.as_str()], Vec::new());
+    for (field, member) in &request.payload {
+        references(member, Some(field), &mut ids, &mut after);
     }
-    depend_on_queued(&mut depends_on, pending, leaves);
+    for id in ids {
+        depend_on_key(&mut depends_on, pending, None, &key_json(id));
+    }
     // An alias reference names the earlier command it came from.
     for command in after {
         if let Ok(command) = CommandId::parse(command) {

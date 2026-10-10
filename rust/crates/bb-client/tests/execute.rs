@@ -801,3 +801,90 @@ fn execute_026_fr_001_read_only_recovery_store_refuses_execute() {
         }))
     );
 }
+
+#[test]
+fn execute_026_fr_001_consecutive_offline_settings_edits_chain_on_the_singleton_key() {
+    let path = scratch("settings");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let edit = |command_id, weekday: u8, revision: &str| {
+        request(
+            command_id,
+            CommandType::ReviewSettings,
+            Some("scope-a"),
+            json!({ "review_weekday": weekday }),
+            vec![shown(EntityType::ReviewSettings, "scope-a", revision)],
+        )
+    };
+
+    execute(&mut store, &mut ids, &edit(cmd(1), 2, "1")).unwrap();
+    // The settings row is a singleton stored under the empty key.
+    let revision: String = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT edit_revision FROM visible_records
+                 WHERE record_type = 'review_settings' AND record_key = '[]'",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    execute(&mut store, &mut ids, &edit(cmd(2), 3, &revision)).unwrap();
+
+    let queued = queue(&mut store);
+    assert_eq!(queued[0].envelope["preconditions"][0]["edit_revision"], "1");
+    assert_eq!(
+        queued[1].envelope["preconditions"],
+        json!([{ "after_command": {
+            "command_id": cmd(1).as_str(),
+            "entity_type": "review_settings",
+            "entity_id": "scope-a",
+        }}])
+    );
+    assert_eq!(queued[1].envelope["depends_on"], json!([cmd(1).as_str()]));
+    assert_eq!(queued[1].depends_on, [cmd(1).as_str().to_string()]);
+}
+
+#[test]
+fn execute_026_fr_001_only_typed_reference_fields_create_dependencies() {
+    let path = scratch("text");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let project = request(
+        cmd(1),
+        CommandType::ProjectCreate,
+        None,
+        json!({ "name": "Trips" }),
+        Vec::new(),
+    );
+    let project_id = execute(&mut store, &mut ids, &project)
+        .unwrap()
+        .entity_id
+        .as_str()
+        .to_string();
+
+    // User text that happens to equal a queued project's ID is just text.
+    let titled = request(
+        cmd(2),
+        CommandType::TaskCreate,
+        None,
+        json!({ "title": project_id, "details": project_id }),
+        Vec::new(),
+    );
+    execute(&mut store, &mut ids, &titled).unwrap();
+    // The same ID in a reference field is a real dependency.
+    let member = request(
+        cmd(3),
+        CommandType::TaskCreate,
+        None,
+        json!({ "title": "Pack", "project_id": project_id }),
+        Vec::new(),
+    );
+    execute(&mut store, &mut ids, &member).unwrap();
+
+    let depends: Vec<_> = queue(&mut store)
+        .into_iter()
+        .map(|q| q.depends_on)
+        .collect();
+    assert_eq!(depends, [vec![], vec![], vec![cmd(1).as_str().to_string()]]);
+}
