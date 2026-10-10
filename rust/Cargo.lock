@@ -86,7 +86,11 @@ dependencies = [
 name = "bb-client"
 version = "0.1.0"
 dependencies = [
+ "bb-domain",
+ "bb-protocol",
  "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

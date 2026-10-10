@@ -623,3 +623,33 @@ describe("smartAdd", () => {
     })).toBeNull();
   });
 });
+
+describe("026-FR-002 smartAdd matches the server's Unicode scalar rules", () => {
+  const emoji = "\u{1F600}";
+
+  it("026-FR-002 limits a title and new names by Unicode scalars, not UTF-16 units", () => {
+    const options = { projects, tags };
+
+    expect(parseSmartAdd(emoji.repeat(500), options).isValid).toBe(true);
+    expect(parseSmartAdd(emoji.repeat(501), options).isValid).toBe(false);
+    expect(parseSmartAdd(`Plan #"${"x".repeat(500)}${emoji}"`, options).isValid).toBe(false);
+    expect(parseSmartAdd(`Plan #"${emoji.repeat(500)}"`, options).isValid).toBe(true);
+    expect(parseSmartAdd(`Plan @"${emoji.repeat(501)}"`, options).isValid).toBe(false);
+  });
+
+  it("026-FR-002 removes a token after astral characters without moving the removal", () => {
+    const options = { projects, tags };
+
+    expect(parseSmartAdd(`${emoji}${emoji} later #work ${emoji} end @"Launch v2"`, options).cleanTitle).toBe(`${emoji}${emoji} later ${emoji} end`);
+    expect(parseSmartAdd(`Call ${emoji} (#work) mom`, options).cleanTitle).toBe(`Call ${emoji} mom`);
+    expect(parseSmartAdd(`${emoji} \\#literal`, options).cleanTitle).toBe(`${emoji} #literal`);
+  });
+
+  it("026-FR-002 keys names by the server's whitespace, not JavaScript's", () => {
+    const stored = [{ id: "tag-x", name: "work", state: "active" as const, revision: 1, open_task_count: 0 }];
+
+    expect(parseSmartAdd('Plan #"\u0085work\u001f"', { projects, tags: stored }).tags).toEqual([{ id: "tag-x" }]);
+    expect(parseSmartAdd('Plan #"\ufeffwork"', { projects, tags: stored }).tags).toEqual([{ name: "\ufeffwork" }]);
+    expect(parseSmartAdd('Plan #"deep\u001c\u2003 work"', { projects, tags }).tags).toEqual([{ id: "tag-deep" }]);
+  });
+});
