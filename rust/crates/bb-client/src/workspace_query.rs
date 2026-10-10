@@ -193,20 +193,30 @@ pub fn query_collection_page(
                     collection_next_cursor,
                 });
             }
-            if matches!(query, Query::ReviewQueue { .. }) {
+            if matches!(query, Query::ReviewQueue { .. } | Query::ReviewState {}) {
                 if cursor
                     .as_ref()
                     .is_some_and(|cursor| cursor.offset != 0 || cursor.key.is_none())
                 {
                     return Err(QueryError::RestartRequired);
                 }
-                let (result, next) = bb_domain::review_sessions::native_queue_page(
-                    &state,
-                    &query,
-                    inputs,
-                    collection_limit,
-                    cursor.as_ref().and_then(|cursor| cursor.key.as_deref()),
-                )
+                let after = cursor.as_ref().and_then(|cursor| cursor.key.as_deref());
+                let (result, next) = if matches!(query, Query::ReviewState {}) {
+                    bb_domain::review_sessions::native_state_page(
+                        &state,
+                        inputs,
+                        collection_limit,
+                        after,
+                    )
+                } else {
+                    bb_domain::review_sessions::native_queue_page(
+                        &state,
+                        &query,
+                        inputs,
+                        collection_limit,
+                        after,
+                    )
+                }
                 .map_err(|error| QueryError::RefusedAt {
                     error,
                     projection_generation: generation,
@@ -520,20 +530,59 @@ fn draft_id_valid(id: &str) -> bool {
     id.starts_with("runtime:") && id.len() > "runtime:".len() && id.len() <= 512
 }
 
+fn legacy_form_key_valid(key: &str) -> bool {
+    use bb_domain::types::*;
+    if key.len() > 512 || key.chars().any(char::is_control) {
+        return false;
+    }
+    let parts = key.split(':').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["project", id] => ProjectId::parse(*id).is_ok(),
+        ["form", kind, task, form] => {
+            matches!(
+                *kind,
+                "reformulate"
+                    | "first_step"
+                    | "waiting_for"
+                    | "extension_reason"
+                    | "follow_up"
+                    | "return_to_next"
+            ) && TaskId::parse(*task).is_ok()
+                && (*form == "-" || FormulationId::parse(*form).is_ok())
+        }
+        ["step", session, step, item, ..] => {
+            SessionId::parse(*session).is_ok()
+                && serde_json::from_value::<StepCode>(serde_json::Value::String((*step).to_owned()))
+                    .is_ok()
+                && !item.is_empty()
+        }
+        _ => false,
+    }
+}
+
 pub fn load_workspace_draft(
     store: &mut Store,
     id: &str,
 ) -> Result<Option<WorkspaceDraft>, QueryError> {
     use rusqlite::OptionalExtension;
-    if !draft_id_valid(id) {
+    let imported_kind = if id == "legacy-local-review" {
+        Some("legacy_local_review")
+    } else if id
+        .strip_prefix("legacy-form:")
+        .is_some_and(legacy_form_key_valid)
+    {
+        Some("review_form_draft")
+    } else if draft_id_valid(id) {
+        None
+    } else {
         return Err(QueryError::Refused(DomainError::field(
             bb_domain::types::Reason::InvalidValue,
             "draft_id",
         )));
-    }
+    };
     store.read(|tx| Ok((|| {
         type DraftColumns = (String,Option<String>,Option<String>,Option<String>,Vec<u8>,String);
-        let row:Option<DraftColumns> = tx.query_row("SELECT editor_kind,record_type,record_key,base_revision,fields,updated_at FROM drafts WHERE workspace_id=(SELECT workspace_id FROM sync_meta) AND draft_id=?1 AND editor_kind LIKE 'runtime_%'",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional().map_err(StoreError::from)?;
+        let row:Option<DraftColumns> = tx.query_row("SELECT editor_kind,record_type,record_key,base_revision,fields,updated_at FROM drafts WHERE workspace_id=(SELECT workspace_id FROM sync_meta) AND draft_id=?1 AND ((?2 IS NULL AND substr(editor_kind,1,8)='runtime_') OR (editor_kind=?2 AND (?2<>'review_form_draft' OR record_key=?3)))",rusqlite::params![id,imported_kind,id.strip_prefix("legacy-form:")],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional().map_err(StoreError::from)?;
         row.map(|(editor_kind,record_type,record_key,base_revision,fields,updated_at)| Ok(WorkspaceDraft {draft_id:id.to_owned(),editor_kind,record_type,record_key,base_revision,fields:serde_json::from_slice(&fields).map_err(|_| QueryError::Store(StoreError::Corrupt))?,updated_at})).transpose()
     })()))?
 }

@@ -710,7 +710,8 @@ fn values_026_fr_002_query_results_round_trip_by_kind() {
             "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
             "waiting_since": null, "order_key": "1", "source_capture_ids": [],
             "created_at": T0, "updated_at": T0, "completed_at": null, "cancelled_at": null,
-            "revision": "1", "subtasks": [], "comments": [], "formulation": null, "parked": null})
+            "revision": "1", "subtasks": [], "comments": [], "formulation": null, "parked": null,
+            "consecutive_stalled_formulations":0})
     };
     let project = record_samples().remove(1).1;
     let tag = record_samples().remove(2).1;

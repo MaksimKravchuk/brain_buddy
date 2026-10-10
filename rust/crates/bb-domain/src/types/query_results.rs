@@ -332,6 +332,8 @@ pub struct ReviewStateView {
     pub restart_mode: bool,
     pub open_session: Option<ReviewSession>,
     pub unseen_parks: Vec<UnseenPark>,
+    #[serde(default)]
+    pub unseen_parks_total: u32,
     pub counts: ReviewStateCounts,
     pub receipts: Vec<ReceiptView>,
     pub server_now: Instant,

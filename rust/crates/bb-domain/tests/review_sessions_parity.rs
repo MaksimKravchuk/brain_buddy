@@ -130,8 +130,10 @@ fn to_http(value: &Value) -> Value {
                 .iter()
                 // Native TaskView keeps this fact outside a running clock; HTTP fixtures predate it.
                 .filter(|(key, _)| {
-                    key.as_str() != "consecutive_stalled_formulations"
-                        || !members.contains_key("subtasks")
+                    (key.as_str() != "consecutive_stalled_formulations"
+                        || !members.contains_key("subtasks"))
+                        && (key.as_str() != "unseen_parks_total"
+                            || !members.contains_key("unseen_parks"))
                 })
                 .map(|(key, member)| {
                     let numeric =
@@ -3074,4 +3076,49 @@ fn native_review_queue_pages_match_owning_order_and_bound_metadata() {
             "{step:?}"
         );
     }
+}
+
+#[test]
+fn native_review_state_pages_bound_combined_arrays_and_keep_global_unseen_count() {
+    let mut read = ReadSet::default();
+    for n in 0..30 {
+        let id = format!("task_parked{n}");
+        let mut row = task(&id, "someday", n);
+        row["parked"] =
+            json!({"at":format!("2026-10-01T09:{n:02}:00Z"),"formulation_id":form_id(n as u32)});
+        let task: types::Task = serde_json::from_value(row).unwrap();
+        read.tasks.insert(task.id.clone(), task);
+        read.receipts.push(
+            serde_json::from_value(receipt_row(&id, "someday", 1, "2026-10-15T00:00:00Z")).unwrap(),
+        );
+    }
+    let inputs = query_inputs(NOW, true);
+    let QueryResult::ReviewState(expected) =
+        review_sessions::query(&read, &Query::ReviewState {}, &inputs).unwrap()
+    else {
+        panic!()
+    };
+    let mut after = None;
+    let mut parks = Vec::new();
+    let mut receipts = Vec::new();
+    let mut receipt_only = false;
+    loop {
+        let (answer, next) =
+            review_sessions::native_state_page(&read, &inputs, 2, after.as_deref()).unwrap();
+        let QueryResult::ReviewState(state) = answer else {
+            panic!()
+        };
+        assert!(state.unseen_parks.len() + state.receipts.len() <= 2);
+        assert_eq!(state.unseen_parks_total, 30);
+        receipt_only |= state.unseen_parks.is_empty() && !state.receipts.is_empty();
+        parks.extend(state.unseen_parks);
+        receipts.extend(state.receipts);
+        if next.is_none() {
+            break;
+        }
+        after = next;
+    }
+    assert!(receipt_only);
+    assert_eq!(parks, expected.unseen_parks);
+    assert_eq!(receipts, expected.receipts);
 }

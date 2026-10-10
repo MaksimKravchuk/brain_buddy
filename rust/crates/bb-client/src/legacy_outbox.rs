@@ -535,6 +535,16 @@ pub fn convert_legacy_prepared_with(
                 return Err(invalid());
             }
         }
+        if requests
+            .iter()
+            .any(|request| request.command_type.as_str().starts_with("review."))
+            && !crate::legacy_review::is_active_in(tx, &loaded.workspace)?
+        {
+            return Err(ExecuteError::Refused(bb_domain::types::DomainError::field(
+                bb_domain::types::Reason::InvalidPayload,
+                "legacy_review_activation",
+            )));
+        }
         let results = execute_batch_in(tx, ids, requests)?;
         for (entry, request) in entries.iter().zip(requests) {
             let fields = json!({"standing":"converted", "command_id":request.command_id,

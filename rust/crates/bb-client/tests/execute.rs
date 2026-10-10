@@ -1023,3 +1023,81 @@ fn bulk_item_after_command_uses_actual_result_and_retry_keeps_original_fingerpri
         assert_eq!(queue(&mut store).len(), queue_len);
     }
 }
+
+#[test]
+fn same_batch_bulk_skip_keeps_frozen_guard_and_dependency_without_inventing_result() {
+    use bb_protocol::command::{AfterCommandPrecondition, CommandRef};
+    let path = scratch("bulk-skip-guard");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let a = execute(&mut store, &mut ids, &create_task(cmd(80), "Release me")).unwrap();
+    let b = execute(&mut store, &mut ids, &create_task(cmd(81), "Keep next")).unwrap();
+    let moved = request(
+        cmd(82),
+        CommandType::TaskTransition,
+        Some(b.entity_id.as_str()),
+        json!({"action":"move","to_state":"next"}),
+        vec![shown(EntityType::Task, b.entity_id.as_str(), "1")],
+    );
+    execute(&mut store, &mut ids, &moved).unwrap();
+    let mut bulk = request(
+        cmd(83),
+        CommandType::ReviewBulkRelease,
+        Some("bulk_00000000-0000-4000-8000-000000000083"),
+        json!({"kind":"inbox_remainder","items":[{"task_id":a.entity_id.as_str(),"expected_revision":"1"},{"task_id":b.entity_id.as_str(),"expected_revision":"2"}]}),
+        vec![],
+    );
+    bulk.context.policy.weekly_review = true;
+    let edit = |n, target: &Id, predecessor| {
+        request(
+            cmd(n),
+            CommandType::TaskUpdate,
+            Some(target.as_str()),
+            json!({"title":"Saved editor text"}),
+            vec![Precondition::AfterCommand(AfterCommandPrecondition {
+                after_command: CommandRef {
+                    command_id: cmd(predecessor),
+                    entity_type: EntityType::Task,
+                    entity_id: target.clone(),
+                },
+            })],
+        )
+    };
+    let batch = vec![bulk, edit(84, &a.entity_id, 83), edit(85, &b.entity_id, 83)];
+    assert_eq!(
+        execute_batch(&mut store, &mut ids, &batch).unwrap().len(),
+        3
+    );
+    assert_eq!(task(&mut store, a.entity_id.as_str())["state"], "someday");
+    assert_eq!(task(&mut store, b.entity_id.as_str())["state"], "next");
+    let queued = queue(&mut store);
+    assert!(queued[5].depends_on.contains(&cmd(83).as_str().to_owned()));
+    assert_eq!(
+        queued[4].envelope["preconditions"][0]["after_command"]["command_id"],
+        cmd(83).as_str()
+    );
+    assert_eq!(
+        queued[5].envelope["preconditions"][0]["after_command"]["command_id"],
+        cmd(82).as_str()
+    );
+    assert!(
+        execute_batch(&mut store, &mut ids, &batch)
+            .unwrap()
+            .iter()
+            .all(|saved| saved.replayed)
+    );
+    assert!(matches!(
+        execute(&mut store, &mut ids, &edit(86, &b.entity_id, 83)),
+        Err(ExecuteError::Refused(_))
+    ));
+    let before = queue(&mut store).len();
+    let mut stale = batch[0].clone();
+    stale.command_id = cmd(87);
+    stale.entity_id = Some(Id::parse("bulk_00000000-0000-4000-8000-000000000087").unwrap());
+    stale.payload=json!({"kind":"inbox_remainder","items":[{"task_id":b.entity_id.as_str(),"expected_revision":"2"}]}).as_object().unwrap().clone();
+    assert!(matches!(
+        execute_batch(&mut store, &mut ids, &[stale, edit(88, &b.entity_id, 87)]),
+        Err(ExecuteError::Refused(_))
+    ));
+    assert_eq!(queue(&mut store).len(), before);
+}

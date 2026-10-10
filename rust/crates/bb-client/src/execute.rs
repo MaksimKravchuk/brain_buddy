@@ -35,7 +35,8 @@ use bb_domain::types::{
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{
-    AfterCommandPrecondition, CommandRef, Decoded, Precondition, StableEnvelope, decode_command,
+    AfterCommandPrecondition, CommandRef, Decoded, Precondition, RevisionPrecondition,
+    StableEnvelope, decode_command,
 };
 use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CommandId, Counter, Id, Instant, OpenObject, PROTOCOL_VERSION, RecordKey};
@@ -304,7 +305,16 @@ pub fn execute_with(
     request: &ExecuteRequest,
     mut hook: impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
-    store.try_write(|tx| run(tx, ids, request, None, &mut hook))
+    store.try_write(|tx| {
+        run(
+            tx,
+            ids,
+            request,
+            None,
+            &mut hook,
+            &mut BatchEvidence::default(),
+        )
+    })
 }
 
 /// Saves a UI gesture containing several catalog commands, all or nothing.
@@ -339,9 +349,10 @@ pub(crate) fn execute_batch_in(
     ids: &mut impl IdSource,
     requests: &[ExecuteRequest],
 ) -> Result<Vec<Executed>, ExecuteError> {
+    let mut evidence = BatchEvidence::default();
     requests
         .iter()
-        .map(|request| run(tx, ids, request, None, &mut |_, _| Ok(())))
+        .map(|request| run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence))
         .collect()
 }
 
@@ -353,7 +364,14 @@ pub(crate) fn execute_in(
     request: &ExecuteRequest,
     supersedes: &CommandId,
 ) -> Result<Executed, ExecuteError> {
-    run(tx, ids, request, Some(supersedes), &mut |_, _| Ok(()))
+    run(
+        tx,
+        ids,
+        request,
+        Some(supersedes),
+        &mut |_, _| Ok(()),
+        &mut BatchEvidence::default(),
+    )
 }
 
 struct Meta {
@@ -394,12 +412,60 @@ fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
     )?)
 }
 
+/// Fresh decision evidence belongs only to this atomic batch. A skipped bulk
+/// item has no produced task revision; its original effective shown guard can
+/// still protect a following edit without treating absence as a success result.
+#[derive(Default)]
+struct BatchEvidence {
+    skipped: HashMap<(String, String), Counter>,
+}
+
+fn normalize_skipped_bulk(
+    request: &ExecuteRequest,
+    evidence: &BatchEvidence,
+) -> Result<ExecuteRequest, ExecuteError> {
+    let mut normalized = request.clone();
+    if request.command_type != CommandType::TaskUpdate {
+        return Ok(normalized);
+    }
+    let mut resolved = std::collections::BTreeSet::new();
+    for precondition in &mut normalized.preconditions {
+        let Precondition::AfterCommand(after) = precondition else {
+            continue;
+        };
+        let reference = &after.after_command;
+        if reference.entity_type != EntityType::Task
+            || request.entity_id.as_ref() != Some(&reference.entity_id)
+        {
+            continue;
+        }
+        let key = (
+            reference.command_id.as_str().to_owned(),
+            reference.entity_id.as_str().to_owned(),
+        );
+        let Some(revision) = evidence.skipped.get(&key) else {
+            continue;
+        };
+        if !resolved.insert(key) {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        push_unique(&mut normalized.depends_on, &reference.command_id);
+        *precondition = Precondition::Revision(RevisionPrecondition {
+            entity_type: EntityType::Task,
+            entity_id: reference.entity_id.clone(),
+            edit_revision: revision.clone(),
+        });
+    }
+    Ok(normalized)
+}
+
 fn run(
     tx: &Transaction<'_>,
     ids: &mut impl IdSource,
     request: &ExecuteRequest,
     supersedes: Option<&CommandId>,
     hook: &mut impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
+    evidence: &mut BatchEvidence,
 ) -> Result<Executed, ExecuteError> {
     let mut meta = read_meta(tx)?;
     if meta.projection_stale {
@@ -427,7 +493,8 @@ fn run(
         (None, Some(prefix)) => prefixed(ids, prefix)?,
         (None, None) => return Err(refuse(Reason::InvalidPayload, "entity_id")),
     };
-    let (preconditions, depends_on) = wire(request, &entity_id, &visible.pending);
+    let normalized = normalize_skipped_bulk(request, evidence)?;
+    let (preconditions, depends_on) = wire(&normalized, &entity_id, &visible.pending);
     let results = load_dependencies(tx, &meta.workspace_id, &depends_on)?;
 
     let (epoch, new_epoch) = match &meta.device_epoch {
@@ -579,6 +646,31 @@ fn run(
         params![meta.next_local_seq + 1, projection_generation],
     )?;
     hook(Stage::ProjectionStored, tx)?;
+    if request.command_type == CommandType::ReviewBulkRelease
+        && changes.outcome == ChangeOutcome::Applied
+    {
+        let bulk: BulkReleaseRequest =
+            serde_json::from_value(Value::Object(stable.payload.clone()))
+                .map_err(|_| ExecuteError::Store(StoreError::Corrupt))?;
+        for skipped in &changes.result.skipped {
+            let mut items = bulk
+                .items
+                .as_slice()
+                .iter()
+                .filter(|item| item.task_id == skipped.task_id);
+            if let Some(item) = items.next()
+                && items.next().is_none()
+            {
+                evidence.skipped.insert(
+                    (
+                        request.command_id.as_str().to_owned(),
+                        item.task_id.as_str().to_owned(),
+                    ),
+                    item.expected_revision.clone(),
+                );
+            }
+        }
+    }
     Ok(Executed {
         command_id: request.command_id.clone(),
         entity_id,
@@ -648,7 +740,7 @@ fn resolved_bulk_payload(
         let revision = results.edit_revision(reference)?;
         // Limited owns its sequence and exposes only a slice; rebuild through
         // the typed constructor after replacing this exact matching item.
-        let mut items = bulk.items.as_slice().iter().cloned().collect::<Vec<_>>();
+        let mut items = bulk.items.as_slice().to_vec();
         for item in &mut items {
             if item.task_id.as_str() == reference.entity_id.as_str() {
                 item.expected_revision = revision.clone();
