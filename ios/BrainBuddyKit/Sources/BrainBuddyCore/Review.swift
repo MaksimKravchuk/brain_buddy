@@ -636,7 +636,13 @@ public struct ReviewReceipt: Hashable, Sendable, Codable {
 
     /// Hidden while not expired and the task is unchanged since.
     public func hides(_ task: TaskRecord, now: Date) -> Bool {
-        guard now < hiddenUntil else { return false }
+        now < hiddenUntil && taskIsUnchanged(task)
+    }
+
+    /// Original task correspondence, independent of the receipt's deadline.
+    /// The import codec uses this same optional-constraint rule before Rust
+    /// binds an unchanged receipt to its admitted local revision.
+    func taskIsUnchanged(_ task: TaskRecord) -> Bool {
         if let taskRevision, taskRevision != task.serverRevision { return false }
         if let taskUpdatedAt, taskUpdatedAt != task.updatedAt { return false }
         return true
