@@ -31,6 +31,7 @@ struct RustWorkspaceJourneyTests {
         #expect(workspace.counts().inbox == 1)
         _ = try await workspace.capture(CaptureDraft(text: "Project membership", list: .next, contextProjectID: project),
             editorID: "scene:journey:project-capture")
+        await workspace.prepareList(.list(.inbox))
         let key = Data([0, 255, 7])
         let marks = try await workspace.prepareReviewContentStamps(key: key, tasks: [id], projects: [project])
         #expect(workspace.reviewContentStampsReadiness(key: key, tasks: [id], projects: [project]) == .ready)
