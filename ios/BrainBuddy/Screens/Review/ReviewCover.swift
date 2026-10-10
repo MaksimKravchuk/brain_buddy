@@ -571,6 +571,9 @@ struct ReviewDraftField: View {
     @State private var problem: String?
     @State private var editorID = UUID().uuidString
     @State private var isSaving = false
+    /// The newest text requested while a durable draft write is in flight.
+    /// The active writer drains this slot after its immutable snapshot settles.
+    @State private var pendingDraftText: String?
 
     init(
         prompt: String, key: DraftKey, text: Binding<String>, fields: ReviewFields,
@@ -621,19 +624,34 @@ struct ReviewDraftField: View {
     }
 
     @MainActor private func persistDraft() async {
-        guard hasLoaded, !isSaving else { return }
+        guard hasLoaded else { return }
+        let requestedText = text
+        guard !isSaving else {
+            pendingDraftText = requestedText
+            return
+        }
         isSaving = true
-        defer { isSaving = false }
-        do {
-            if isBlank {
-                if try await workspace.draft(for: key, editorID: editorID) != nil {
-                    try await workspace.discardDraft(for: key, editorID: editorID)
+        var nextText: String? = requestedText
+        while let submittedText = nextText {
+            nextText = nil
+            do {
+                if submittedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if try await workspace.draft(for: key, editorID: editorID) != nil {
+                        try await workspace.discardDraft(for: key, editorID: editorID)
+                    }
+                } else {
+                    try await workspace.saveDraft(submittedText, for: key, editorID: editorID)
                 }
-            } else {
-                try await workspace.saveDraft(text, for: key, editorID: editorID)
+                if pendingDraftText == nil { problem = nil }
+            } catch {
+                problem = TaskCommandRunner.message(for: error)
             }
-            problem = nil
-        } catch { problem = TaskCommandRunner.message(for: error) }
+            // The save task owns this drain even if its debounce task was
+            // cancelled by newer typing. Never overlap writes for this key.
+            nextText = pendingDraftText
+            pendingDraftText = nil
+        }
+        isSaving = false
     }
 
     private var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
