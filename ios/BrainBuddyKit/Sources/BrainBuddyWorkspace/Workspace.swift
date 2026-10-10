@@ -2253,7 +2253,7 @@ extension Workspace {
     public func projectSummary(_ id: ProjectID) -> ProjectSummary? {
         if !isRustSelected {
             guard let project = project(id), var summary = GTDQueries.projects(in: state, archived: project.state == .archived).first(where: { $0.id == id }) else { return nil }
-            let sections = GTDQueries.list(.project(id), in: state, today: today).sections
+            let sections = GTDQueries.list(.project(id), options: ListOptions(), in: state, today: today).sections
             summary.countsByState = Dictionary(uniqueKeysWithValues: OpenList.allCases.map { list in
                 (list, sections.filter { $0.kind == .list(list) }.reduce(0) { $0 + $1.totalCount })
             })
@@ -2273,7 +2273,7 @@ extension Workspace {
     public func firstNextActionReadiness(_ id: ProjectID) -> WorkspaceQueryReadiness { rustQueryPageState { try rustFirstNextKey(id) }.readiness }
     public func firstNextAction(_ id: ProjectID) -> TaskRecord? {
         if !isRustSelected {
-            return GTDQueries.list(.project(id), in: state, today: today).sections.first { $0.kind == .list(.next) }?.tasks.first
+            return GTDQueries.list(.project(id), options: ListOptions(), in: state, today: today).sections.first { $0.kind == .list(.next) }?.tasks.first
         }
         guard let key = try? rustFirstNextKey(id), let page = rustPage(for: key), let facade = rustFacade else { return nil }
         return (try? facade.workspaceRenderedTasks(from: page, at: now()))?.first
@@ -2422,7 +2422,7 @@ extension Workspace {
         let found = Set(rows.map(\.id))
         return Set(ids.filter { id in
             let canonical = rustIdentityBindings.first { $0.entityType == "task" && $0.localID == id.rawValue }
-                .map { TaskID($0.canonicalID) } ?? id
+                .flatMap { $0.canonicalID }.map { TaskID($0) } ?? id
             return !found.contains(canonical)
         })
     }
