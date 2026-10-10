@@ -79,7 +79,7 @@ public struct RustDomainFacade: Sendable {
         let outcome = try RustChangeApplier.apply(
             changeSet, to: &next, before: before, at: encoded.issuedAt, ids: ids, actorID: context.actorID)
         // Replay protection of a progress change is the device's record of what it sent.
-        if case .progressSession(let progress) = command, var session = next.review.sessions[progress.sessionID] {
+        if case .review(.progressSession(let progress)) = command, var session = next.review.sessions[progress.sessionID] {
             session.appliedProgress.insert(progress.progressID)
             next.review.sessions[progress.sessionID] = session
         }

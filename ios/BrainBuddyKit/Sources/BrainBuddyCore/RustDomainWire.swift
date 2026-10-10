@@ -213,6 +213,8 @@ struct RustIDTable {
     /// Prefixed wire ID to the Swift ID it stands for.
     private(set) var created: [String: String] = [:]
 
+    init() {}
+
     mutating func new(_ raw: String, prefix: String) -> String {
         if ClientID.isValid(raw, prefix: prefix) { return raw }
         let wire = "\(prefix)_\(raw)"
