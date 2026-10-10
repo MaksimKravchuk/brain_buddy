@@ -16,7 +16,7 @@ Start with the requirements and technical plan. The protocol is a separate docum
 | [design.md](design.md) | Sync status, conflict, recovery, and AI consent states |
 | [design/sync-states.html](design/sync-states.html) | Self-contained mobile and desktop mockups |
 | [tasks.md](tasks.md) | 64 atomic PRs: tasks, requirements, paths, product/full-diff budgets, dependencies and evidence |
-| [delivery-graph.md](delivery-graph.md) | All 64 PRs and 94 dependency edges; start ready independent work immediately |
+| [delivery-graph.md](delivery-graph.md) | All 64 PRs and 98 dependency edges; start ready independent work immediately |
 | [adr-draft.md](adr-draft.md) | Narrow amendments needed to existing architecture decisions |
 | [research.md](research.md) | Current architecture and code references |
 | [data-model.md](data-model.md) | Domain projections, durable state, identity, transitions and retention |
