@@ -114,6 +114,29 @@ update; their immutable envelopes are never retrofitted. Fresh skipped bulk
 items retain their separately proven original effective guard and dependency,
 without inventing a result version or normalizing onto the skipped bulk item.
 
+A durably bound account (the existing trusted session binding: linked account,
+validated account/scope/device identities) may save an Undo whose public source,
+task revision, dependencies and original seven-day deadline pass, but whose
+server-private beforeimage is absent from the native read. The owning domain
+reports only that precise absence as `INCOMPLETE_READ_SET`, with the Undo source
+entity and `undo_snapshot`, `released_private` or `clock_before` field. Actual
+stale/expired/purged authoritative snapshots and malformed present facts remain
+refusals. Account-less/imported-but-unbound stores gain no private authority.
+
+Such a bound Undo saves its immutable intent and original fingerprint to the
+existing outbox without changing public rows, inventing result versions or
+marking a bulk release undone. Every required missing bulk beforeimage or Next
+clock holds the whole Undo, even when all public items would be skipped; only a
+stored already-undone result can answer its genuine no-op without that proof.
+Queue/status tokens invalidate even when the
+projection generation does not advance. Replay holds that exact missing-private
+case and its descendants, including never-sent intents, while independent work
+continues. An atomic batch requiring the unavailable Undo result version rolls
+back; verified receipt/feed outcomes retain their normal semantics. Known retry
+lookup precedes later expiry. An optimistic decision's absent
+`undo_available_until` is not sufficient by itself to decide whether to offer
+Undo; capability must come from the owning domain and bound runtime contract.
+
 Expected local errors include `VALIDATION_FAILED`, `STORE_BUSY`, `STORE_FULL`, `STORE_CORRUPT`, `STORE_UPGRADE_REQUIRED`, `WORKSPACE_CLOSED`, `AUTH_REQUIRED`, `CANCELLED`, `QUERY_RESTART_REQUIRED` and typed sync issues. A bounded lock timeout is retryable and never reports local save success. Panic handling rolls back a live transaction and marks the runtime unusable if safety cannot be established; reopening follows normal recovery. Platform suspension may prevent a callback but cannot invalidate a committed gesture receipt.
 
 Local Review form ports return one selected typed `{text, savedAt}` form, its

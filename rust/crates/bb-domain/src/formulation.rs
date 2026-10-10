@@ -819,12 +819,14 @@ pub fn release(
 }
 
 /// Returns a released task to its list with its stored clock, exactly.
-#[must_use]
 pub fn undo_release(
     clock: &TaskClock,
     previous_state: TaskState,
     released: Option<&ReleasedClock>,
-) -> TaskClock {
+) -> Result<TaskClock, FormulationError> {
+    if previous_state == TaskState::Next && released.is_none() {
+        return Err(FormulationError::MissingInput("clock_before"));
+    }
     let mut restored = TaskClock {
         state: Some(previous_state),
         parked: None,
@@ -838,7 +840,7 @@ pub fn undo_release(
         restored.formulation_park_floor_at = stored.park_floor_at;
         restored.consecutive_stalled_formulations = stored.stalled_before;
     }
-    bump(restored)
+    Ok(bump(restored))
 }
 
 /// Decision Undo: the snapshot at `revision + 1`, keeping the bookkeeping

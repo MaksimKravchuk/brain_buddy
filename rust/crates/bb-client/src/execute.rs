@@ -481,6 +481,47 @@ fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
     )?)
 }
 
+/// Durable account binding established by Session::start; grants only local
+/// enqueue/defer eligibility, never authority to invent server-private facts.
+pub(crate) fn bound_account(conn: &rusqlite::Connection) -> Result<bool, StoreError> {
+    let (link, account, scope, device): (String, Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT account_link_state,account_id,scope_id,device_id FROM sync_meta",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    for identity in [&account, &scope, &device].into_iter().flatten() {
+        Id::parse(identity).map_err(|_| StoreError::Corrupt)?;
+    }
+    match (link.as_str(), account, scope, device) {
+        ("linked", Some(_), Some(_), Some(_)) => Ok(true),
+        (_, _, None, None) => Ok(false), // imported account awaiting trusted binding
+        _ => Err(StoreError::Corrupt),
+    }
+}
+
+/// Exact missing-private result produced only after the Undo owner's public
+/// checks. Unrelated incomplete reads and every actual refusal stay errors.
+pub(crate) fn private_undo_missing(kind: CommandType, entity: &Id, error: &DomainError) -> bool {
+    let (expected_type, fields): (EntityType, &[&str]) = match kind {
+        CommandType::ReviewUndoDecision => (EntityType::ReviewDecision, &["undo_snapshot"]),
+        CommandType::ReviewBulkUndo => (
+            EntityType::ReviewBulkRelease,
+            &["released_private", "clock_before"],
+        ),
+        _ => return false,
+    };
+    error.reason == Reason::IncompleteReadSet
+        && error.current_revision.is_none()
+        && error
+            .field
+            .as_deref()
+            .is_some_and(|field| fields.contains(&field))
+        && error.entity.as_ref().is_some_and(|(kind, key)| {
+            *kind == expected_type && key.as_slice() == [entity.as_str()]
+        })
+}
+
 /// Fresh decision evidence belongs only to this atomic batch. A skipped bulk
 /// item has no produced task revision; its original effective shown guard can
 /// still protect a following edit without treating absence as a success result.
@@ -780,7 +821,27 @@ fn run(
         )?,
         policy: request.context.policy.clone(),
     };
-    let changes = dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)?;
+    let (changes, deferred) =
+        match dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs) {
+            Ok(changes) => (changes, false),
+            Err(error) if private_undo_missing(request.command_type, &entity_id, &error) => {
+                for dependency in &depends_on {
+                    let state: String = tx.query_row(
+                        "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
+                        params![meta.workspace_id, dependency.as_str()],
+                        |row| row.get(0),
+                    )?;
+                    if matches!(state.as_str(), "rejected" | "blocked_dependency") {
+                        return Err(refuse(Reason::DependencyRejected, "depends_on"));
+                    }
+                }
+                if !bound_account(tx)? {
+                    return Err(error.into());
+                }
+                (ChangeSet::no_op(), true)
+            }
+            Err(error) => return Err(error.into()),
+        };
     evidence.produced(request, &changes);
 
     // What the rules resolved (a Smart Add name matched onto a queued project,
@@ -863,7 +924,11 @@ fn run(
             } => crate::replay::remove(&mut local_read_set, *entity_type, record_key),
         }
     }
-    let fact_writes = crate::localfacts::save(tx, &meta.workspace_id, &local_facts)?;
+    let fact_writes = if deferred {
+        0
+    } else {
+        crate::localfacts::save(tx, &meta.workspace_id, &local_facts)?
+    };
     let projection_generation = projection_generation
         + i64::from(fact_writes > 0 && changes.outcome != ChangeOutcome::Applied);
     if fact_writes > 0 && changes.outcome != ChangeOutcome::Applied {

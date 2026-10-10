@@ -1285,3 +1285,275 @@ fn replay_026_fr_007_a_replacement_must_be_a_new_command_or_nothing_is_closed() 
     assert_eq!(superseded_by(&mut store, 2), None);
     assert_eq!(task(&mut store, &task_id).unwrap()["title"], "Theirs");
 }
+
+fn confirmed_public_decision(store: &mut Store, ids: &mut SeqIds) -> (String, String) {
+    let target = create_task(store, ids, 1, "Original Next task");
+    execute(
+        store,
+        ids,
+        &request(
+            cmd(2),
+            CommandType::TaskTransition,
+            Some(&target),
+            json!({"action":"move","to_state":"next"}),
+            vec![shown(EntityType::Task, &target, "1")],
+        ),
+    )
+    .unwrap();
+    let decision = format!("decision_{}", id(3));
+    let mut decide = request(
+        cmd(3),
+        CommandType::ReviewDecide,
+        Some(&target),
+        json!({"decision_id":decision,"type":"complete"}),
+        vec![shown(EntityType::Task, &target, "2")],
+    );
+    decide.context.policy.weekly_review = true;
+    execute(store, ids, &decide).unwrap();
+    confirm_all(store);
+    (target, decision)
+}
+
+fn bind_account_for_undo(store: &mut Store) {
+    use bb_client::{Authentication, SessionBinding, SyncSession};
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE sync_meta SET account_link_state='linked',account_id='account-test'",
+                [],
+            )
+        })
+        .unwrap();
+    SyncSession::start(
+        store,
+        &SessionBinding {
+            account_id: Id::parse("account-test").unwrap(),
+            scope_id: Id::parse("scope-test").unwrap(),
+            device_id: Id::parse("device-test").unwrap(),
+            authentication: Authentication::Fresh,
+        },
+    )
+    .unwrap();
+}
+
+fn undo_public_decision(target: &str, decision: &str, n: u64) -> ExecuteRequest {
+    request(
+        cmd(n),
+        CommandType::ReviewUndoDecision,
+        Some(decision),
+        json!({}),
+        vec![shown(EntityType::Task, target, "3")],
+    )
+}
+
+#[test]
+fn bound_private_undo_defers_without_projection_and_preserves_retry_reopen_and_dependents() {
+    let path = scratch("bound-private-undo");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision) = confirmed_public_decision(&mut store, &mut ids);
+    bind_account_for_undo(&mut store);
+    let before = visible(&mut store, "task");
+    let watch = bb_client::workspace_watch(&mut store).unwrap();
+    let undo = undo_public_decision(&target, &decision, 4);
+    let saved = execute(&mut store, &mut ids, &undo).unwrap();
+    let after = bb_client::workspace_watch(&mut store).unwrap();
+    assert_eq!(saved.projection_generation, watch.projection_generation);
+    assert_eq!(after.projection_generation, watch.projection_generation);
+    assert_ne!(after.status_token, watch.status_token);
+    assert_eq!(visible(&mut store, "task"), before);
+    assert_eq!(visible(&mut store, "review_decision").len(), 1);
+    let original = envelope(&mut store, 4);
+    let local_result: Value = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT local_result FROM outbox WHERE command_id=?1",
+                [cmd(4).as_str()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+        })
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+        .unwrap();
+    assert!(local_result["versions"].as_array().unwrap().is_empty());
+    let mut dependent = request(
+        cmd(5),
+        CommandType::TaskCreate,
+        None,
+        json!({"title":"Dependent input retained"}),
+        vec![],
+    );
+    dependent.depends_on.push(cmd(4));
+    let dependent_id = execute(&mut store, &mut ids, &dependent).unwrap().entity_id;
+    let independent = create_task(&mut store, &mut ids, 6, "Independent work");
+    store.close().unwrap();
+    let mut store = open(&path).unwrap();
+    let report = replay(&mut store, &context()).unwrap();
+    assert_eq!(report.deferred, [cmd(4), cmd(5)]);
+    assert_eq!(report.applied, [cmd(6)]);
+    assert!(report.rejected.is_empty() && report.blocked.is_empty());
+    assert_eq!(state(&mut store, 4), "queued");
+    assert_eq!(envelope(&mut store, 4), original);
+    assert!(task(&mut store, dependent_id.as_str()).is_none());
+    assert!(task(&mut store, &independent).is_some());
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "completed");
+    let mut later_retry = undo.clone();
+    later_retry.context.now = Instant::parse("2030-01-01T00:00:00Z").unwrap();
+    let retry = execute(&mut store, &mut ids, &later_retry).unwrap();
+    assert!(retry.replayed);
+    assert_eq!(retry.local_sequence, saved.local_sequence);
+    assert_eq!(envelope(&mut store, 4), original);
+    let mut new_expired = later_retry;
+    new_expired.command_id = cmd(7);
+    assert!(
+        matches!(execute(&mut store,&mut ids,&new_expired),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::UndoUnavailable)
+    );
+    // A real server refusal keeps the envelope and blocks descendants; this
+    // missing-private path does not reinterpret terminal outcomes.
+    record_rejection(
+        &mut store,
+        &context(),
+        &cmd(4),
+        &IssueReason::Validation("undo_unavailable".into()),
+    )
+    .unwrap();
+    let rejected = replay(&mut store, &context()).unwrap();
+    assert_eq!(state(&mut store, 4), "rejected");
+    assert_eq!(state(&mut store, 5), "blocked_dependency");
+    assert_eq!(envelope(&mut store, 4), original);
+    assert!(rejected.deferred.is_empty());
+}
+
+#[test]
+fn undo_requires_trusted_bound_mode_and_result_dependent_batch_rolls_back() {
+    let path = scratch("bound-undo-batch-proof");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision) = confirmed_public_decision(&mut store, &mut ids);
+    let undo = undo_public_decision(&target, &decision, 4);
+    assert!(
+        matches!(execute(&mut store,&mut ids,&undo),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::IncompleteReadSet)
+    );
+    // Imported account identity alone is not trusted session binding.
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE sync_meta SET account_link_state='linked',account_id='account-test'",
+                [],
+            )
+        })
+        .unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&undo),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::IncompleteReadSet)
+    );
+    store
+        .write(|tx| tx.execute("UPDATE sync_meta SET scope_id='scope-test'", []))
+        .unwrap();
+    assert!(matches!(
+        execute(&mut store, &mut ids, &undo),
+        Err(ExecuteError::Store(StoreError::Corrupt))
+    ));
+    store
+        .write(|tx| tx.execute("UPDATE sync_meta SET scope_id=NULL", []))
+        .unwrap();
+    bind_account_for_undo(&mut store);
+    let edit = request(
+        cmd(5),
+        CommandType::TaskUpdate,
+        Some(&target),
+        json!({"title":"Preserved draft input"}),
+        vec![after(&cmd(4), EntityType::Task, &target)],
+    );
+    let before = states(&mut store);
+    let frame = visible(&mut store, "task");
+    assert!(bb_client::execute_batch(&mut store, &mut ids, &[undo.clone(), edit]).is_err());
+    assert_eq!(states(&mut store), before);
+    assert_eq!(visible(&mut store, "task"), frame);
+    create_task(&mut store, &mut ids, 8, "Rejected dependency");
+    for failed in ["rejected", "blocked_dependency"] {
+        set_state(&mut store, 8, failed, false);
+        let mut dependent_undo = undo.clone();
+        dependent_undo.depends_on.push(cmd(8));
+        assert!(
+            matches!(execute(&mut store,&mut ids,&dependent_undo),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::DependencyRejected)
+        );
+        assert!(!states(&mut store).contains_key(cmd(4).as_str()));
+    }
+    // Present malformed private facts must never enter the absent-facts path.
+    let malformed_before = task(&mut store, &target).unwrap();
+    store.write(|tx| tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.private',json(?1)) AS BLOB) WHERE record_type='review_decision'",[json!({"task_before":malformed_before,"created_task_revision":null,"receipt_kind":null}).to_string()])).unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&undo),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::InvalidValue)
+    );
+    store.write(|tx| tx.execute("UPDATE visible_records SET body=CAST(json_remove(CAST(body AS TEXT),'$.private') AS BLOB) WHERE record_type='review_decision'",[])).unwrap();
+    let before = states(&mut store);
+    let mut stale = undo;
+    stale.preconditions = vec![shown(EntityType::Task, &target, "2")];
+    assert!(
+        matches!(execute(&mut store,&mut ids,&stale),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::UndoUnavailable)
+    );
+    assert_eq!(states(&mut store), before);
+}
+
+#[test]
+fn bound_bulk_undo_missing_private_never_marks_release_undone_or_restores_tasks() {
+    let path = scratch("bound-bulk-undo");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let target = create_task(&mut store, &mut ids, 1, "Inbox task");
+    let bulk = format!("bulk_{}", id(2));
+    execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(2),
+            CommandType::ReviewBulkRelease,
+            Some(&bulk),
+            json!({"kind":"inbox_remainder","items":[{"task_id":target,"expected_revision":"1"}]}),
+            vec![],
+        ),
+    )
+    .unwrap();
+    confirm_all(&mut store);
+    bind_account_for_undo(&mut store);
+    let tasks = visible(&mut store, "task");
+    let releases = visible(&mut store, "review_bulk_release");
+    let undo = request(
+        cmd(3),
+        CommandType::ReviewBulkUndo,
+        Some(&bulk),
+        json!({}),
+        vec![],
+    );
+    execute(&mut store, &mut ids, &undo).unwrap();
+    let original = envelope(&mut store, 3);
+    assert_eq!(visible(&mut store, "task"), tasks);
+    assert_eq!(visible(&mut store, "review_bulk_release"), releases);
+    let report = replay(&mut store, &context()).unwrap();
+    assert_eq!(report.deferred, [cmd(3)]);
+    assert!(report.applied.is_empty() && report.rejected.is_empty());
+    assert_eq!(visible(&mut store, "task"), tasks);
+    assert_eq!(visible(&mut store, "review_bulk_release"), releases);
+    assert_eq!(envelope(&mut store, 3), original);
+    // Public skips cannot complete an all-stale bulk while its required private
+    // evidence is absent. The source's undone marker still belongs to server.
+    server_edit(&mut store, &target, |task| {
+        task["title"] = json!("Remote edit");
+    });
+    replay(&mut store, &context()).unwrap();
+    let all_stale = request(
+        cmd(4),
+        CommandType::ReviewBulkUndo,
+        Some(&bulk),
+        json!({}),
+        vec![],
+    );
+    let tasks = visible(&mut store, "task");
+    execute(&mut store, &mut ids, &all_stale).unwrap();
+    assert_eq!(visible(&mut store, "task"), tasks);
+    assert_eq!(visible(&mut store, "review_bulk_release"), releases);
+    assert_eq!(
+        replay(&mut store, &context()).unwrap().deferred,
+        [cmd(3), cmd(4)]
+    );
+    assert_eq!(visible(&mut store, "review_bulk_release"), releases);
+}

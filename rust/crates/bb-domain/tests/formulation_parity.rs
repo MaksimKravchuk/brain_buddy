@@ -282,7 +282,7 @@ fn apply_event(
         "undo_bulk_release" => {
             let previous = state(&event["previous_state"]).expect("a previous list");
             let stored = released_from(&event["clock_before"]);
-            Some(formulation::undo_release(clock, previous, Some(&stored)))
+            Some(formulation::undo_release(clock, previous, Some(&stored))?)
         }
         "activate" => {
             let when = at(text(event, "at"));
@@ -954,4 +954,16 @@ fn formulation_026_fr_017_the_decision_queue_reads_stored_tasks() {
         formulation::decision_queue_of_tasks([&task], &settings, at("2026-09-25T00:00:00Z")),
         Ok(Vec::new())
     );
+}
+
+#[test]
+fn native_undo_release_requires_the_original_next_clock() {
+    let clock = clock_from(
+        &json!({"state":"someday","title":"Released task","revision":2}),
+        "task_vector",
+    );
+    assert!(matches!(
+        formulation::undo_release(&clock, TaskState::Next, None),
+        Err(formulation::FormulationError::MissingInput("clock_before"))
+    ));
 }

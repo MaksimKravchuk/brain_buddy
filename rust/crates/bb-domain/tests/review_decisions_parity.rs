@@ -2849,7 +2849,21 @@ fn review_decisions_026_fr_016_undo_after_the_task_changed_the_snapshot_expired_
     decided(&mut device, "complete", json!({}), 1, 1);
     let local = device.decision(&did(1)).expect("decision");
     assert!(local.private.is_none() && local.undo_available_until.is_none());
-    assert_eq!(refusal(device.decide(&ok)).reason, Reason::UndoUnavailable);
+    let missing = refusal(device.decide(&ok));
+    assert_eq!(missing.reason, Reason::IncompleteReadSet);
+    assert_eq!(missing.field.as_deref(), Some("undo_snapshot"));
+    assert_eq!(
+        missing.entity,
+        Some((EntityType::ReviewDecision, vec![did(1)]))
+    );
+    assert_eq!(
+        refusal(device.decide(&undo_command(&did(1), &tid(1), 1))).reason,
+        Reason::UndoUnavailable
+    );
+    assert_eq!(
+        refusal(device.decide_at(&ok, "2026-10-16T12:00:00Z", &[])).reason,
+        Reason::UndoUnavailable
+    );
 }
 
 #[test]
@@ -3250,8 +3264,15 @@ fn review_decisions_026_fr_017_bulk_undo_needs_the_next_clock_and_the_server_con
             .private
             .is_none()
     );
+    let missing = refusal(device.decide(&bulk_undo_command(&bid(1))));
+    assert_eq!(missing.reason, Reason::IncompleteReadSet);
+    assert_eq!(missing.field.as_deref(), Some("released_private"));
     assert_eq!(
-        refusal(device.decide(&bulk_undo_command(&bid(1)))).reason,
+        missing.entity,
+        Some((EntityType::ReviewBulkRelease, vec![bid(1)]))
+    );
+    assert_eq!(
+        refusal(device.decide_at(&bulk_undo_command(&bid(1)), "2026-10-16T12:00:00Z", &[])).reason,
         Reason::UndoUnavailable
     );
     // A release receipt another release or decision wrote since stays.
@@ -3366,4 +3387,73 @@ fn review_decisions_026_fr_002_the_family_reuses_the_clock_park_and_task_rules_i
     ));
     assert_eq!(the_task(&via_decision), the_task(&via_rules));
     let _ = (ParkReturn::NotAReturn, CalendarDay::parse_iso("2026-10-09"));
+}
+
+#[test]
+fn native_undo_missing_private_never_masks_present_malformed_snapshots() {
+    let mut store = asks_store();
+    decided(&mut store, "complete", json!({}), 1, 1);
+    let mut device = store.clone().device();
+    device
+        .read_set
+        .decisions
+        .values_mut()
+        .next()
+        .unwrap()
+        .private
+        .as_mut()
+        .unwrap()
+        .task_before
+        .id = TaskId::parse(tid(99)).unwrap();
+    assert_eq!(
+        refusal(device.decide(&undo_command(&did(1), &tid(1), 2))).reason,
+        Reason::InvalidValue
+    );
+
+    let mut bulk = restart_store(&[old_next(1, 3), old_next(2, 3)]);
+    accepted(bulk.run(&bulk_command(
+        &bid(1),
+        "restart",
+        &[(&tid(1), 3), (&tid(2), 3)],
+        None,
+    )));
+    let mut device = bulk.clone().device();
+    let record = device.read_set.bulk_releases.values_mut().next().unwrap();
+    record.released[0].private = None;
+    record.released[1]
+        .private
+        .as_mut()
+        .unwrap()
+        .clock_before
+        .as_mut()
+        .unwrap()
+        .formulation_id = None;
+    let malformed = refusal(device.decide(&bulk_undo_command(&bid(1))));
+    assert_eq!(malformed.reason, Reason::InvalidValue);
+    assert_eq!(malformed.field.as_deref(), Some("formulation_id"));
+
+    let mut clock_missing = bulk.clone().device();
+    clock_missing
+        .read_set
+        .bulk_releases
+        .values_mut()
+        .next()
+        .unwrap()
+        .released[0]
+        .private
+        .as_mut()
+        .unwrap()
+        .clock_before = None;
+    let missing = refusal(clock_missing.decide(&bulk_undo_command(&bid(1))));
+    assert_eq!(missing.reason, Reason::IncompleteReadSet);
+    assert_eq!(missing.field.as_deref(), Some("clock_before"));
+
+    accepted(bulk.run(&bulk_undo_command(&bid(1))));
+    let noop = accepted(bulk.device().decide_at(
+        &bulk_undo_command(&bid(1)),
+        "2030-01-01T00:00:00Z",
+        &[],
+    ));
+    assert_eq!(noop.outcome, ChangeOutcome::NoOp);
+    assert!(noop.changes.is_empty());
 }

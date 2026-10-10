@@ -28,8 +28,9 @@
 //!
 //! Server-only content is written only where `inputs.authoritative`: the Undo
 //! snapshot of a decision (`Decision::private`) and the clock-before of a bulk
-//! release (`BulkReleased::private`). Without it nothing can be undone here and
-//! the Undo is refused as [`Reason::UndoUnavailable`], never fabricated. The
+//! release (`BulkReleased::private`). A nonauthoritative read missing those
+//! facts reports a precisely named [`Reason::IncompleteReadSet`] after decisive
+//! public checks; authoritative purging remains [`Reason::UndoUnavailable`]. The
 //! 7-day deadline is judged from the stored instants on every read, whether or
 //! not the retention job has nulled the content yet.
 //!
@@ -908,16 +909,56 @@ fn undo_decision(
     let task = existing_task(read_set, &decision.task_id)?;
     let expected = expected_revision(command, &task.id)?;
     let unavailable = || refuse(Reason::UndoUnavailable, EntityType::Task, task.id.as_str());
-    let undo = decision
-        .private
-        .as_ref()
-        .filter(|_| {
-            parse_instant(&decision.decided_at, "decided_at")
-                .is_ok_and(|decided| now < undo_deadline(decided))
-        })
-        .ok_or_else(unavailable)?;
+    let decided = parse_instant(&decision.decided_at, "decided_at").map_err(clock_error)?;
     let at_decision = task.revision == decision.task_revision_after && expected == &task.revision;
-    if !at_decision || !created_task_unchanged(read_set, decision, undo) {
+    if now >= undo_deadline(decided) || !at_decision {
+        return Err(unavailable());
+    }
+    // Visible user rows already make deleting the follow-up unsafe, even when
+    // the private creation revision was not supplied by this read.
+    if let Some(created) = decision
+        .created_task_id
+        .as_ref()
+        .and_then(|id| read_set.tasks.get(id))
+        && (!created.tag_ids.is_empty()
+            || read_set
+                .subtasks
+                .values()
+                .any(|child| child.task_id == created.id)
+            || read_set
+                .comments
+                .values()
+                .any(|child| child.task_id == created.id))
+    {
+        return Err(unavailable());
+    }
+    let undo = decision.private.as_ref().ok_or_else(|| {
+        if inputs.authoritative {
+            unavailable()
+        } else {
+            private_missing(
+                EntityType::ReviewDecision,
+                decision.id.as_str(),
+                "undo_snapshot",
+            )
+        }
+    })?;
+    if undo.task_before.id != task.id || undo.task_before.revision != decision.task_revision_before
+    {
+        return Err(DomainError::field(Reason::InvalidValue, "task_before"));
+    }
+    if decision
+        .created_task_id
+        .as_ref()
+        .is_some_and(|id| read_set.tasks.contains_key(id))
+        && undo.created_task_revision.is_none()
+    {
+        return Err(DomainError::field(
+            Reason::InvalidValue,
+            "created_task_revision",
+        ));
+    }
+    if !created_task_unchanged(read_set, decision, undo) {
         return Err(unavailable());
     }
     let settings = clock_settings(read_set)?;
@@ -1188,17 +1229,13 @@ fn bulk_release(
 
 // ======================================================================= bulk undo
 
-/// `_snapshot_purged`: the Undo content is gone, by age or because an item lost
-/// the clock a Next task needs.
-fn snapshot_purged(release: &BulkRelease, now: UtcInstant) -> Result<bool, DomainError> {
-    let created = parse_instant(&release.created_at, "created_at").map_err(clock_error)?;
-    if now >= undo_deadline(created) {
-        return Ok(true);
+/// Only absent private facts qualify for deferred native Undo. Present malformed
+/// snapshots are validated by the ordinary restoration path instead.
+fn private_missing(entity: EntityType, id: &str, field: &str) -> DomainError {
+    DomainError {
+        field: Some(field.to_owned()),
+        ..DomainError::missing(entity, key_of(id))
     }
-    Ok(release.released.iter().any(|item| match &item.private {
-        None => true,
-        Some(private) => private.previous_state == OpenList::Next && private.clock_before.is_none(),
-    }))
 }
 
 fn bulk_undo(
@@ -1224,11 +1261,66 @@ fn bulk_undo(
             ..ChangeSet::no_op()
         });
     }
-    if snapshot_purged(release, now)? {
-        return Err(refuse(
+    if release.undone_at.is_some() {
+        return Err(DomainError::field(Reason::InvalidValue, "undo"));
+    }
+    let created = parse_instant(&release.created_at, "created_at").map_err(clock_error)?;
+    let unavailable = || {
+        refuse(
             Reason::UndoUnavailable,
             EntityType::ReviewBulkRelease,
             bulk_id.as_str(),
+        )
+    };
+    if now >= undo_deadline(created) {
+        return Err(unavailable());
+    }
+    // Publicly stale/missing tasks are skips, but they do not prove the
+    // source's private snapshot was retained. Never complete the bulk locally
+    // while any required private fact is absent, including an all-skipped bulk.
+    let mut missing = None;
+    for item in &release.released {
+        let task = read_set
+            .tasks
+            .get(&item.task_id)
+            .filter(|task| task.revision == item.revision_after);
+        if let Some(task) = task {
+            TaskClock::from_task(task).map_err(clock_error)?;
+        }
+        match &item.private {
+            None if inputs.authoritative => return Err(unavailable()),
+            None => {
+                missing.get_or_insert("released_private");
+            }
+            Some(private)
+                if private.previous_state == OpenList::Next && private.clock_before.is_none() =>
+            {
+                if inputs.authoritative {
+                    return Err(unavailable());
+                }
+                missing.get_or_insert("clock_before");
+            }
+            _ => {}
+        }
+        if let Some(private) = &item.private
+            && (private.previous_state != releasable(release.kind)
+                || (private.previous_state != OpenList::Next && private.clock_before.is_some()))
+        {
+            return Err(DomainError::field(Reason::InvalidValue, "released_private"));
+        }
+        if let Some(clock) = item
+            .private
+            .as_ref()
+            .and_then(|private| private.clock_before.as_ref())
+        {
+            released_clock(clock)?;
+        }
+    }
+    if let Some(field) = missing {
+        return Err(private_missing(
+            EntityType::ReviewBulkRelease,
+            bulk_id.as_str(),
+            field,
         ));
     }
     let mut restored = Vec::new();
@@ -1255,7 +1347,8 @@ fn bulk_undo(
             &TaskClock::from_task(task).map_err(clock_error)?,
             private.previous_state.task_state(),
             stored.as_ref(),
-        );
+        )
+        .map_err(clock_error)?;
         let mut back = Task {
             state: private.previous_state.task_state(),
             revision: Counter::from(clock.revision),
