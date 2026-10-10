@@ -135,6 +135,27 @@ pub struct BridgeLegacyConversion {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyConversionPlan {
+    pub token: String,
+    pub context: BridgeExecuteContext,
+    pub source_count: u64,
+    pub atomic_group: bool,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyConversionPage {
+    pub items: Vec<BridgeLegacyUnsent>,
+    pub page_token: String,
+    pub next_after: Option<String>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyConversionProgress {
+    pub source_count: u64,
+    pub processed_count: u64,
+    pub complete: bool,
+    pub status: super::BridgeLegacyOutboxStatus,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeLegacyReviewMetadata {
     pub token: Vec<u8>,
     pub source_counts: Vec<u8>,
@@ -321,6 +342,42 @@ fn form_query_failure(error: QueryError) -> Failure {
     match error {
         QueryError::Refused(error) => form_failure(ExecuteError::Refused(error)),
         error => query_failure(error),
+    }
+}
+
+fn bound_legacy_items(items: &[BridgeLegacyConversion]) -> Result<(), Failure> {
+    if items.len() > 200 {
+        return Err(Failure::new("TOO_MANY_ITEMS", Some("legacy_outbox")));
+    }
+    let size: usize = items
+        .iter()
+        .map(|i| {
+            i.entry_id.len()
+                + i.issued_at.len()
+                + i.command.payload.len()
+                + i.command.preconditions.len()
+                + i.command.admission_tokens.len()
+                + i.command.command_id.len()
+                + i.command.command_type.len()
+                + i.command.entity_id.as_ref().map_or(0, String::len)
+                + i.command.depends_on.iter().map(String::len).sum::<usize>()
+                + 256
+        })
+        .sum();
+    if size > 8 * 1024 * 1024 {
+        return Err(Failure::new("TOO_MANY_BYTES", Some("legacy_outbox")));
+    }
+    Ok(())
+}
+
+fn conversion_progress_bridge(
+    progress: bb_client::LegacyConversionProgress,
+) -> BridgeLegacyConversionProgress {
+    BridgeLegacyConversionProgress {
+        source_count: progress.source_count,
+        processed_count: progress.processed_count,
+        complete: progress.complete,
+        status: progress.status.into(),
     }
 }
 
@@ -879,6 +936,7 @@ impl BridgeWorkspace {
         context: BridgeExecuteContext,
         operation: Arc<BridgeOperation>,
     ) -> Result<BridgeExecution, BridgeError> {
+        bound_legacy_items(&items)?;
         let mut prepared = Vec::with_capacity(items.len());
         let mut entry_ids = Vec::with_capacity(items.len());
         for item in items {
@@ -888,6 +946,136 @@ impl BridgeWorkspace {
             entry_ids.push(item.entry_id);
         }
         Ok(self.save_requests(prepared, operation, Some(entry_ids))?)
+    }
+
+    pub fn begin_legacy_conversion(
+        &self,
+        context: BridgeExecuteContext,
+        atomic_group: bool,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeLegacyConversionPlan, BridgeError> {
+        let context = owned_context(&context)?;
+        let plan = self.mutate_local_review(
+            operation,
+            |store, before| {
+                bb_client::begin_legacy_conversion_with(store, &context, atomic_group, |_| before())
+            },
+            execute_failure,
+        )?;
+        Ok(BridgeLegacyConversionPlan {
+            token: plan.token,
+            source_count: plan.source_count,
+            atomic_group: plan.atomic_group,
+            context: BridgeExecuteContext {
+                now: plan.context.now.as_str().to_owned(),
+                time_zone: plan.context.time_zone.as_str().to_owned(),
+                actor_id: plan.context.actor_id.as_str().to_owned(),
+                policy: to_json(&plan.context.policy)?,
+            },
+        })
+    }
+
+    pub fn legacy_conversion_page(
+        &self,
+        token: String,
+        after: Option<String>,
+    ) -> Result<BridgeLegacyConversionPage, BridgeError> {
+        Ok(self.with_store(|store| {
+            let page = bb_client::legacy_conversion_page(store, &token, after.as_deref())
+                .map_err(execute_failure)?;
+            Ok(BridgeLegacyConversionPage {
+                page_token: page.page_token,
+                next_after: page.next_after,
+                items: page
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        Ok(BridgeLegacyUnsent {
+                            entry_id: item.entry_id,
+                            idempotency_key: item.idempotency_key.as_str().to_owned(),
+                            issued_at: item.issued_at.as_str().to_owned(),
+                            command: to_json(&item.command)?,
+                        })
+                    })
+                    .collect::<Result<_, Failure>>()?,
+            })
+        })?)
+    }
+
+    pub fn convert_legacy_conversion_page(
+        &self,
+        token: String,
+        page_token: String,
+        items: Vec<BridgeLegacyConversion>,
+        atomic_stage: bool,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeLegacyConversionProgress, BridgeError> {
+        bound_legacy_items(&items)?;
+        let progress = self.mutate_local_review(
+            operation,
+            |store, before| {
+                let plan = bb_client::legacy_conversion_plan(store, &token)?;
+                let context = BridgeExecuteContext {
+                    now: plan.context.now.as_str().to_owned(),
+                    time_zone: plan.context.time_zone.as_str().to_owned(),
+                    actor_id: plan.context.actor_id.as_str().to_owned(),
+                    policy: serde_json::to_vec(&plan.context.policy)
+                        .map_err(|_| ExecuteError::Store(StoreError::Corrupt))?,
+                };
+                let mut prepared = Vec::with_capacity(items.len());
+                let mut entry_ids = Vec::with_capacity(items.len());
+                for item in items {
+                    let mut issued = context.clone();
+                    issued.now = item.issued_at;
+                    prepared.extend(requests(&[item.command], &issued).map_err(|_| {
+                        ExecuteError::Refused(bb_domain::types::DomainError::field(
+                            bb_domain::types::Reason::InvalidPayload,
+                            "legacy_outbox",
+                        ))
+                    })?);
+                    entry_ids.push(item.entry_id);
+                }
+                if atomic_stage {
+                    bb_client::stage_legacy_page_with(
+                        store,
+                        &token,
+                        &page_token,
+                        &entry_ids,
+                        &prepared,
+                        |_| before(),
+                    )
+                } else {
+                    bb_client::convert_legacy_page_with(
+                        store,
+                        &mut RandomIds,
+                        &token,
+                        &page_token,
+                        &entry_ids,
+                        &prepared,
+                        |_| before(),
+                    )
+                }
+            },
+            execute_failure,
+        )?;
+        Ok(conversion_progress_bridge(progress))
+    }
+
+    pub fn finalize_legacy_conversion(
+        &self,
+        token: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeLegacyConversionProgress, BridgeError> {
+        let progress = self.mutate_local_review(
+            operation,
+            |store, before| {
+                bb_client::finalize_legacy_conversion_with(store, &mut RandomIds, &token, |_| {
+                    before()
+                })
+            },
+            execute_failure,
+        )?;
+        Ok(conversion_progress_bridge(progress))
     }
 
     pub fn legacy_unsent(&self) -> Result<Vec<BridgeLegacyUnsent>, BridgeError> {

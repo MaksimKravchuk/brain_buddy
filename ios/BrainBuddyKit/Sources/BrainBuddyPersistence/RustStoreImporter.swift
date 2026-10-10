@@ -162,7 +162,8 @@ public struct RustStoreImporter: Sendable {
     public func prepareAccountlessRuntime(facade: RustDomainFacade, reviewEnabled: Bool = false)
         async throws -> RustWorkspaceRuntime {
         let report = try await run()
-        let document = try await retainedDocument(report)
+        let source = try await retainedSource(report)
+        let document = source.document
         guard document.account == nil else {
             throw RustStoreImportError.failed(RustBridgeError(code: "INVALID_REQUEST", field: "account_less_import"))
         }
@@ -208,27 +209,46 @@ public struct RustStoreImporter: Sendable {
             let outbox = RustOutboxImporter(runtime: runtime, databaseURL: databaseURL, workspaceID: workspaceID,
                 busyTimeoutMilliseconds: busyTimeoutMilliseconds, now: now)
             _ = try await outbox.run()
-            let unsent = try await workspace.legacyUnsent()
-            guard unsent.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS", field: "legacy_outbox") }
-            if !unsent.isEmpty {
-                let decoder = StoreDocumentCoding.makeDecoder()
-                let commands = try unsent.map { try decoder.decode(GTDCommand.self, from: $0.command) }
-                let dates = try unsent.map { entry -> Date in
-                    guard let date = ISO8601Timestamp.date(from: entry.issuedAt) else { throw RustBridgeError(code: "INVALID_REQUEST", field: "issued_at") }
-                    return date
-                }
-                let requests = try facade.workspaceIdentityRequests(for: commands, in: document.base, at: instant)
+            // Prepare the verified ORIGINAL sequence once, including converted
+            // prefixes. Re-encoding a suffix from base loses dependency lineage.
+            let original = try await Task.detached(priority: .userInitiated) {
+                try Self.neverSentSource(source.bytes, document: document)
+            }.value
+            if !original.isEmpty {
+                let plan = try await workspace.beginLegacyConversion(context: context)
+                guard plan.sourceCount == UInt64(original.count) else { throw RustStoreImportError.sourceChanged }
+                let commands = original.map(\.command)
+                let requests = try facade.workspaceIdentityRequests(for: commands, in: document.base, at: plan.context.now)
                 bindings = []
                 for offset in stride(from: 0, to: requests.count, by: 200) {
                     bindings += try await workspace.resolveIdentities(Array(requests[offset..<min(offset + 200, requests.count)]))
                 }
-                let encoded = try facade.workspaceLegacyCommands(commands, commandKeys: unsent.map(\.idempotencyKey),
-                    at: dates, in: document.base, bindings: bindings)
-                let conversion = zip(unsent, encoded).map { RustWorkspaceLegacyConversion(entryID: $0.0.entryID,
-                    issuedAt: $0.0.issuedAt, command: $0.1) }
-                guard case .saved = try await workspace.convertLegacyUnsent(conversion, context: context) else {
-                    throw RustBridgeError(code: "LEGACY_CONVERSION_REFUSED")
+                let frozenFacade = RustDomainFacade(runtime: facade.runtime, context: RustDomainContext(
+                    scopeID: facade.context.scopeID, actorID: plan.context.actorID, deviceTimeZone: plan.context.timeZone))
+                let ownedBindings = bindings
+                let encoded = try await Task.detached(priority: .userInitiated) {
+                    try frozenFacade.workspaceLegacyCommands(commands, commandKeys: original.map(\.key),
+                        at: original.map(\.date), in: document.base, bindings: ownedBindings)
+                }.value
+                var prepared: [String: RustWorkspaceLegacyConversion] = [:]
+                for (entry, command) in zip(original, encoded) {
+                    guard prepared[entry.id] == nil else { throw RustStoreImportError.sourceChanged }
+                    prepared[entry.id] = RustWorkspaceLegacyConversion(entryID: entry.id, issuedAt: entry.issuedAt, command: command)
                 }
+                var cursor: String?
+                repeat {
+                    let page = try await workspace.legacyConversionPage(token: plan.token, after: cursor)
+                    guard !page.items.isEmpty else { throw RustStoreImportError.sourceChanged }
+                    let conversion = try page.items.map { entry -> RustWorkspaceLegacyConversion in
+                        guard let item = prepared[entry.entryID], item.issuedAt == entry.issuedAt,
+                              item.command.commandID == entry.idempotencyKey else { throw RustStoreImportError.sourceChanged }
+                        return item
+                    }
+                    _ = try await workspace.convertLegacyConversionPage(conversion, token: plan.token,
+                        pageToken: page.pageToken, atomicStage: plan.atomicGroup)
+                    cursor = page.nextAfter
+                } while cursor != nil
+                if plan.atomicGroup { _ = try await workspace.finalizeLegacyConversion(token: plan.token) }
             }
             guard try await outbox.run().mayRun else { throw RustBridgeError(code: "LEGACY_OUTBOX_NOT_READY") }
             return workspace
@@ -245,11 +265,41 @@ public struct RustStoreImporter: Sendable {
     /// Check the exact owned bytes before decoding; a second path read would
     /// not prove that the native codec saw the admitted original source.
     func retainedDocument(_ report: RustLegacyImportReport) async throws -> StoreDocument {
+        try await retainedSource(report).document
+    }
+
+    private func retainedSource(_ report: RustLegacyImportReport) async throws -> (bytes: Data, document: StoreDocument) {
         let retained = retainedSourceURL(report)
         let bytes = try await Task.detached(priority: .userInitiated) { try Data(contentsOf: retained) }.value
         guard UInt64(bytes.count) == report.sourceBytes,
               try await runtime.importSourceSHA256(bytes) == report.sourceSHA256 else { throw RustStoreImportError.sourceChanged }
-        return try await Task.detached(priority: .userInitiated) { try StoreDocumentCoding.decode(bytes) }.value
+        let document = try await Task.detached(priority: .userInitiated) { try StoreDocumentCoding.decode(bytes) }.value
+        return (bytes, document)
+    }
+
+    private struct OriginalNeverSent: Sendable {
+        let id: String
+        let key: String
+        let issuedAt: String
+        let date: Date
+        let command: GTDCommand
+    }
+
+    /// UUID casing and the original timestamp spelling belong to the immutable
+    /// source. A Codable UUID round-trip cannot recover those exact strings.
+    private static func neverSentSource(_ bytes: Data, document: StoreDocument) throws -> [OriginalNeverSent] {
+        guard let root = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let rows = root["outbox"] as? [[String: Any]], rows.count == document.outbox.count else {
+            throw RustStoreImportError.sourceChanged
+        }
+        return try zip(rows, document.outbox).compactMap { raw, entry in
+            guard !entry.hasBeenSent else { return nil }
+            guard let id = raw["id"] as? String, UUID(uuidString: id) == entry.id,
+                  let key = raw["idempotencyKey"] as? String, UUID(uuidString: key) == entry.idempotencyKey,
+                  let issuedAt = raw["issuedAt"] as? String, let date = ISO8601Timestamp.date(from: issuedAt),
+                  date == entry.issuedAt else { throw RustStoreImportError.sourceChanged }
+            return OriginalNeverSent(id: id, key: key, issuedAt: issuedAt, date: date, command: entry.command)
+        }
     }
 
     private static func reviewIdentities(in state: GTDState) -> [RustWorkspaceIdentityRequest] {

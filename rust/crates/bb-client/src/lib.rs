@@ -72,9 +72,12 @@ pub use issues::{
     save_draft,
 };
 pub use legacy_outbox::{
-    LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend, LegacyUnsent, ProvenAlias,
-    ProvidedReceipts, ReceiptLookup, convert_legacy_prepared_with, convert_legacy_unsent_with,
-    legacy_outbox_sends, legacy_outbox_status, legacy_unsent, resolve_legacy_outbox,
+    LegacyAnswer, LegacyConversionPage, LegacyConversionPlan, LegacyConversionProgress,
+    LegacyOutboxError, LegacyOutboxStatus, LegacySend, LegacyUnsent, ProvenAlias, ProvidedReceipts,
+    ReceiptLookup, begin_legacy_conversion_with, convert_legacy_page_with,
+    convert_legacy_prepared_with, convert_legacy_unsent_with, finalize_legacy_conversion_with,
+    legacy_conversion_page, legacy_conversion_plan, legacy_outbox_sends, legacy_outbox_status,
+    legacy_unsent, resolve_legacy_outbox, stage_legacy_page_with,
 };
 pub use locking::{LockMode, MigrationLock};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};

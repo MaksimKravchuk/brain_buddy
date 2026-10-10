@@ -57,6 +57,41 @@ private func importFailure(of body: () async throws -> Void) async -> RustStoreI
 
 @Suite("Rust store import (026-FR-010, 026-FR-013, 026-FR-022, 026-FR-025, 026-SC-005)")
 struct RustStoreImporterTests {
+    @Test("201 compacted ordinary intents migrate through bounded pages and retry under their frozen context")
+    func migratesMoreThanOneBoundedPage() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let runtime = try RustBridgeRuntime()
+        let facade = RustDomainFacade(runtime: runtime, context: .init(deviceTimeZone: "UTC"))
+        var document = StoreDocument()
+        for index in 1...201 {
+            let taskID = TaskID(String(format: "00000000-0000-4000-8000-%012d", index))
+            let operation = PendingOperation(command: .createTask(.init(taskID: taskID, title: "Original \(index)", list: .inbox)),
+                issuedAt: Fixtures.issuedAt)
+            document.outbox = OutboxCompactor.appending(operation, to: document.outbox)
+        }
+        #expect(document.outbox.count == 201)
+        try await lane.write(document)
+        let original = try Data(contentsOf: lane.legacy)
+        let workspace = try await lane.importer(runtime: runtime).prepareAccountlessRuntime(facade: facade)
+        let inputs = try facade.workspaceQueryInputs(at: Fixtures.issuedAt, zone: "UTC", reviewExposed: false)
+        let answer = try await workspace.query(Data(#"{"kind":"list_counts"}"#.utf8), inputs: inputs)
+        guard case .answered(let page) = answer else { Issue.record("Converted workspace did not answer counts"); return }
+        let counts = try facade.workspaceCounts(from: page.result)
+        #expect(counts.inbox == 201)
+        #expect(try Data(contentsOf: lane.legacy) == original)
+        try await workspace.close()
+        // A process restart uses the entire original source and the first frozen
+        // context, including commands whose conversion markers are complete.
+        let changedFacade = RustDomainFacade(runtime: runtime, context: .init(actorID: "changed-device", deviceTimeZone: "Asia/Tokyo"))
+        let reopened = try await lane.importer(runtime: runtime).prepareAccountlessRuntime(facade: changedFacade)
+        let retry = try await reopened.query(Data(#"{"kind":"list_counts"}"#.utf8), inputs: inputs)
+        guard case .answered(let retryPage) = retry else { Issue.record("Known migration retry did not answer counts"); return }
+        #expect(try facade.workspaceCounts(from: retryPage.result).inbox == 201)
+        #expect(try Data(contentsOf: lane.legacy) == original)
+        try await reopened.close()
+    }
+
     @Test("026-FR-013: a populated document is imported, backed up and counted as the kit's decoder counts it")
     func importsAPopulatedDocument() async throws {
         let workspace = try LegacyLane()

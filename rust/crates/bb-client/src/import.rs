@@ -1832,7 +1832,7 @@ fn context(staged: &Staged) -> Result<ExecuteContext, ImportError> {
 }
 
 /// The marker row of a finished import: its activation ID and the marker.
-fn read_marker(
+pub(crate) fn read_marker(
     tx: &Transaction<'_>,
     workspace: &str,
 ) -> rusqlite::Result<Option<(String, ImportMarker)>> {

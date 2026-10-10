@@ -434,7 +434,7 @@ pub fn legacy_outbox_status(store: &mut Store) -> Result<LegacyOutboxStatus, Leg
 
 /// Unsent source intents in immutable queue order. Swift uses the existing
 /// GTDCommand decoder/encoder; Rust does not grow a second legacy rule mapper.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LegacyUnsent {
     pub entry_id: String,
     pub idempotency_key: CommandId,
@@ -445,7 +445,7 @@ pub struct LegacyUnsent {
 pub fn legacy_unsent(store: &mut Store) -> Result<Vec<LegacyUnsent>, LegacyOutboxError> {
     legacy_import_marker(store)?.ok_or(LegacyOutboxError::NotImported)?;
     let loaded = store.read(|tx| Ok(load(tx)))??;
-    loaded
+    let items: Vec<_> = loaded
         .entries
         .iter()
         .filter(|entry| {
@@ -455,6 +455,7 @@ pub fn legacy_unsent(store: &mut Store) -> Result<Vec<LegacyUnsent>, LegacyOutbo
                     .get(&entry.id)
                     .is_some_and(|s| s == "unsent")
         })
+        .take(201)
         .map(|entry| {
             Ok(LegacyUnsent {
                 entry_id: entry.id.clone(),
@@ -477,7 +478,16 @@ pub fn legacy_unsent(store: &mut Store) -> Result<Vec<LegacyUnsent>, LegacyOutbo
                     .ok_or(unreadable("command"))?,
             })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    if items.len() > 200
+        || serde_json::to_vec(&items)
+            .map_err(|_| unreadable("outbox"))?
+            .len()
+            > CONVERSION_BYTES
+    {
+        return Err(unreadable("legacy_outbox_page"));
+    }
+    Ok(items)
 }
 
 /// All prepared unsent intents and their conversion markers commit together.
@@ -568,6 +578,644 @@ pub fn convert_legacy_prepared_with(
         }
         before_commit(tx)?;
         Ok(results)
+    })
+}
+
+// ---------------------------------------------------------------- bounded native preparation
+
+const CONVERSION_HEADER: &str = "runtime-legacy-conversion";
+const CONVERSION_KIND: &str = "runtime_legacy_conversion";
+const CONVERSION_ITEM_KIND: &str = "runtime_legacy_conversion_item";
+const CONVERSION_BYTES: usize = 8 * 1024 * 1024;
+
+/// A small import-bound preparation context. It survives completion; payload
+/// fragments do not. The native codec uses this frozen context on every restart.
+#[derive(Clone, Debug)]
+pub struct LegacyConversionPlan {
+    pub token: String,
+    pub context: crate::ExecuteContext,
+    pub source_count: u64,
+    pub atomic_group: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct LegacyConversionPage {
+    pub items: Vec<LegacyUnsent>,
+    pub page_token: String,
+    pub next_after: Option<String>,
+}
+
+/// Scalar results keep a large atomic group off the bridge.
+#[derive(Clone, Debug)]
+pub struct LegacyConversionProgress {
+    pub source_count: u64,
+    pub processed_count: u64,
+    pub complete: bool,
+    pub status: LegacyOutboxStatus,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversionHeader {
+    workspace: String,
+    import_sha: String,
+    authority: String,
+    source_count: u64,
+    first: Option<String>,
+    last: Option<String>,
+    source_digest: String,
+    context: crate::ExecuteContext,
+    atomic_group: bool,
+    token: String,
+    seal: Option<String>,
+    completed: bool,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversionCursor {
+    plan: String,
+    after: Option<String>,
+    last: String,
+    count: usize,
+    digest: String,
+}
+
+fn conversion_invalid() -> ExecuteError {
+    ExecuteError::Refused(DomainError::field(Reason::InvalidPayload, "legacy_outbox"))
+}
+
+fn conversion_json<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ExecuteError> {
+    serde_json::to_vec(value).map_err(|_| ExecuteError::Store(StoreError::Corrupt))
+}
+
+fn conversion_decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, ExecuteError> {
+    serde_json::from_slice(bytes).map_err(|_| conversion_invalid())
+}
+
+fn conversion_part(digest: &mut crate::DigestStream, bytes: &[u8]) {
+    digest.update(&(bytes.len() as u64).to_be_bytes());
+    digest.update(bytes);
+}
+
+/// Streams immutable ordinal carriers. No live queue offset or unbounded ID list.
+fn conversion_sources(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    mut visit: impl FnMut(&str, &Entry, &str, &[u8]) -> Result<(), ExecuteError>,
+) -> Result<(), ExecuteError> {
+    let mut query = tx.prepare(
+        "SELECT d.draft_id,d.fields,r.fields FROM drafts d
+         LEFT JOIN drafts r ON r.workspace_id=d.workspace_id
+           AND r.editor_kind='legacy_outbox_resolution' AND r.record_key=d.record_key
+         WHERE d.workspace_id=?1 AND d.editor_kind='legacy_outbox_entry' ORDER BY d.draft_id",
+    )?;
+    let mut rows = query.query([workspace])?;
+    while let Some(row) = rows.next()? {
+        let ordinal: String = row.get(0)?;
+        let bytes: Vec<u8> = row.get(1)?;
+        let entry = Entry::read(conversion_decode(&bytes)?).map_err(|_| conversion_invalid())?;
+        if entry.sent {
+            continue;
+        }
+        let resolution: Option<Vec<u8>> = row.get(2)?;
+        let resolution: Value =
+            conversion_decode(resolution.as_deref().ok_or_else(conversion_invalid)?)?;
+        let standing = resolution
+            .get("standing")
+            .and_then(Value::as_str)
+            .ok_or_else(conversion_invalid)?;
+        if !matches!(standing, "unsent" | "converted") {
+            return Err(conversion_invalid());
+        }
+        visit(&ordinal, &entry, standing, &bytes)?;
+    }
+    Ok(())
+}
+
+fn conversion_header(tx: &Transaction<'_>, token: &str) -> Result<ConversionHeader, ExecuteError> {
+    let workspace: String = tx.query_row("SELECT workspace_id FROM sync_meta", [], |r| r.get(0))?;
+    let bytes: Option<Vec<u8>> = tx
+        .query_row(
+            "SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+            params![workspace, CONVERSION_HEADER, CONVERSION_KIND],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let header: ConversionHeader =
+        conversion_decode(bytes.as_deref().ok_or_else(conversion_invalid)?)?;
+    if header.token != token || header.workspace != workspace {
+        return Err(conversion_invalid());
+    }
+    let marker = crate::import::read_marker(tx, &workspace)?
+        .ok_or_else(conversion_invalid)?
+        .1;
+    let authority: String =
+        tx.query_row("SELECT account_link_state FROM sync_meta", [], |r| r.get(0))?;
+    if marker.source_sha256 != header.import_sha || authority != header.authority {
+        return Err(conversion_invalid());
+    }
+    let mut digest = crate::DigestStream::default();
+    let mut count = 0;
+    let mut first = None;
+    let mut last = None;
+    conversion_sources(tx, &workspace, |ordinal, _, _, bytes| {
+        first.get_or_insert_with(|| ordinal.to_owned());
+        last = Some(ordinal.to_owned());
+        count += 1;
+        conversion_part(&mut digest, ordinal.as_bytes());
+        conversion_part(&mut digest, bytes);
+        Ok(())
+    })?;
+    if (count, first, last, digest.digest())
+        != (
+            header.source_count,
+            header.first.clone(),
+            header.last.clone(),
+            header.source_digest.clone(),
+        )
+    {
+        return Err(conversion_invalid());
+    }
+    Ok(header)
+}
+
+fn save_conversion_header(
+    tx: &Transaction<'_>,
+    header: &ConversionHeader,
+) -> Result<(), ExecuteError> {
+    tx.execute(
+        "INSERT INTO drafts(workspace_id,draft_id,editor_kind,fields,updated_at)
+         VALUES(?1,?2,?3,?4,?5) ON CONFLICT(workspace_id,draft_id) DO UPDATE SET fields=excluded.fields",
+        params![header.workspace,CONVERSION_HEADER,CONVERSION_KIND,conversion_json(header)?,header.context.now.as_str()],
+    )?;
+    Ok(())
+}
+
+pub fn begin_legacy_conversion_with(
+    store: &mut Store,
+    context: &crate::ExecuteContext,
+    atomic_group: bool,
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<LegacyConversionPlan, ExecuteError> {
+    store.try_write(|tx| {
+        let workspace: String =
+            tx.query_row("SELECT workspace_id FROM sync_meta", [], |r| r.get(0))?;
+        let old: Option<Vec<u8>> = tx.query_row(
+            "SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+            params![workspace, CONVERSION_HEADER, CONVERSION_KIND], |r| r.get(0),
+        ).optional()?;
+        let header = if let Some(bytes) = old {
+            let old: ConversionHeader = conversion_decode(&bytes)?;
+            let header = conversion_header(tx, &old.token)?;
+            if atomic_group && !header.atomic_group {
+                return Err(conversion_invalid());
+            }
+            header
+        } else {
+            let import_sha = crate::import::read_marker(tx, &workspace)?
+                .ok_or_else(conversion_invalid)?
+                .1
+                .source_sha256;
+            if !status_in(tx, &workspace)?.classified() {
+                return Err(conversion_invalid());
+            }
+            let authority =
+                tx.query_row("SELECT account_link_state FROM sync_meta", [], |r| r.get(0))?;
+            let mut source = crate::DigestStream::default();
+            let mut source_count = 0;
+            let mut first = None;
+            let mut last = None;
+            let mut coupled = atomic_group;
+            conversion_sources(tx, &workspace, |ordinal, entry, _, bytes| {
+                first.get_or_insert_with(|| ordinal.to_owned());
+                last = Some(ordinal.to_owned());
+                source_count += 1;
+                conversion_part(&mut source, ordinal.as_bytes());
+                conversion_part(&mut source, bytes);
+                // Existing Swift Codable discriminants. Conservatively keep the
+                // whole original sequence together before any prefix can commit.
+                let command = entry.raw.get("command").ok_or_else(conversion_invalid)?;
+                coupled |=
+                    command.get("deleteTag").is_some() || command.get("bulkRelease").is_some();
+                Ok(())
+            })?;
+            let mut header = ConversionHeader {
+                workspace,
+                import_sha,
+                authority,
+                source_count,
+                first,
+                last,
+                source_digest: source.digest(),
+                context: context.clone(),
+                atomic_group: coupled,
+                token: String::new(),
+                seal: None,
+                completed: false,
+            };
+            header.token = crate::sha256_hex(&conversion_json(&header)?);
+            if header.atomic_group {
+                let mut converted = 0;
+                conversion_sources(tx, &header.workspace, |_, _, standing, _| {
+                    converted += u64::from(standing == "converted");
+                    Ok(())
+                })?;
+                if converted > 0 && converted != header.source_count {
+                    return Err(conversion_invalid());
+                }
+                if converted == header.source_count {
+                    header.completed = true;
+                    header.seal = Some(conversion_seal(tx, &header, true)?);
+                }
+            }
+
+            save_conversion_header(tx, &header)?;
+            header
+        };
+        before_commit(tx)?;
+        Ok(LegacyConversionPlan {
+            token: header.token,
+            context: header.context,
+            source_count: header.source_count,
+            atomic_group: header.atomic_group,
+        })
+    })
+}
+
+fn conversion_page_in(
+    tx: &Transaction<'_>,
+    header: &ConversionHeader,
+    after: Option<&str>,
+) -> Result<LegacyConversionPage, ExecuteError> {
+    let after_ordinal = after;
+    let mut after_found = after_ordinal.is_none();
+    let mut items = Vec::new();
+    let mut last = String::new();
+    let mut bytes_used = 2;
+    let mut more = false;
+    let mut digest = crate::DigestStream::default();
+    conversion_sources(tx, &header.workspace, |ordinal, entry, _, raw| {
+        if after_ordinal.is_some_and(|a| ordinal <= a) {
+            after_found |= after_ordinal == Some(ordinal);
+            return Ok(());
+        }
+        let item = LegacyUnsent {
+            entry_id: entry.id.clone(),
+            idempotency_key: CommandId::parse(entry.key.as_deref().ok_or_else(conversion_invalid)?)
+                .map_err(|_| conversion_invalid())?,
+            issued_at: Instant::parse(
+                entry
+                    .raw
+                    .get("issuedAt")
+                    .and_then(Value::as_str)
+                    .ok_or_else(conversion_invalid)?,
+            )
+            .map_err(|_| conversion_invalid())?,
+            command: entry
+                .raw
+                .get("command")
+                .cloned()
+                .ok_or_else(conversion_invalid)?,
+        };
+        let size = conversion_json(&item)?.len() + 64;
+        if size > CONVERSION_BYTES {
+            return Err(conversion_invalid());
+        }
+        if items.len() == 200 || (!items.is_empty() && bytes_used + size > CONVERSION_BYTES / 2) {
+            more = true;
+            return Ok(());
+        }
+        if more {
+            return Ok(());
+        }
+        bytes_used += size;
+        conversion_part(&mut digest, ordinal.as_bytes());
+        conversion_part(&mut digest, raw);
+        last = ordinal.to_owned();
+        items.push(item);
+        Ok(())
+    })?;
+    if !after_found {
+        return Err(conversion_invalid());
+    }
+    let cursor = ConversionCursor {
+        plan: header.token.clone(),
+        after: after.map(str::to_owned),
+        last,
+        count: items.len(),
+        digest: digest.digest(),
+    };
+    let page_token =
+        String::from_utf8(conversion_json(&cursor)?).map_err(|_| conversion_invalid())?;
+    Ok(LegacyConversionPage {
+        items,
+        next_after: more.then(|| page_token.clone()),
+        page_token,
+    })
+}
+
+pub fn legacy_conversion_plan(
+    store: &mut Store,
+    token: &str,
+) -> Result<LegacyConversionPlan, ExecuteError> {
+    if token.len() > 4096 {
+        return Err(conversion_invalid());
+    }
+    store.read(|tx| {
+        Ok((|| {
+            let header = conversion_header(tx, token)?;
+            Ok(LegacyConversionPlan {
+                token: header.token,
+                context: header.context,
+                source_count: header.source_count,
+                atomic_group: header.atomic_group,
+            })
+        })())
+    })?
+}
+
+pub fn legacy_conversion_page(
+    store: &mut Store,
+    token: &str,
+    after: Option<&str>,
+) -> Result<LegacyConversionPage, ExecuteError> {
+    if token.len() > 4096 || after.is_some_and(|s| s.len() > 8192) {
+        return Err(conversion_invalid());
+    }
+    store.read(|tx| {
+        Ok((|| {
+            let header = conversion_header(tx, token)?;
+            let cursor: Option<ConversionCursor> =
+                after.map(|s| conversion_decode(s.as_bytes())).transpose()?;
+            if cursor.as_ref().is_some_and(|c| c.plan != header.token) {
+                return Err(conversion_invalid());
+            }
+            conversion_page_in(tx, &header, cursor.as_ref().map(|c| c.last.as_str()))
+        })())
+    })?
+}
+
+fn prepared_conversion_page(
+    tx: &Transaction<'_>,
+    header: &ConversionHeader,
+    page_token: &str,
+    entry_ids: &[String],
+    requests: &[ExecuteRequest],
+) -> Result<LegacyConversionPage, ExecuteError> {
+    if requests.is_empty()
+        || requests.len() > 200
+        || page_token.len() > 8192
+        || conversion_json(&requests)?.len()
+            + entry_ids.iter().map(String::len).sum::<usize>()
+            + page_token.len()
+            > CONVERSION_BYTES
+    {
+        return Err(conversion_invalid());
+    }
+    let cursor: ConversionCursor = conversion_decode(page_token.as_bytes())?;
+    let page = conversion_page_in(tx, header, cursor.after.as_deref())?;
+    if page.page_token != page_token
+        || page.items.len() != requests.len()
+        || entry_ids.len() != requests.len()
+    {
+        return Err(conversion_invalid());
+    }
+    for ((source, request), id) in page.items.iter().zip(requests).zip(entry_ids) {
+        if source.entry_id != *id
+            || source.idempotency_key != request.command_id
+            || source.issued_at != request.context.now
+            || request.context.actor_id != header.context.actor_id
+            || request.context.time_zone != header.context.time_zone
+            || request.context.policy != header.context.policy
+        {
+            return Err(conversion_invalid());
+        }
+    }
+    if requests
+        .iter()
+        .any(|r| r.command_type.as_str().starts_with("review."))
+        && !crate::legacy_review::is_active_in(tx, &header.workspace)?
+    {
+        return Err(conversion_invalid());
+    }
+    Ok(page)
+}
+
+fn conversion_known(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    request: &ExecuteRequest,
+) -> Result<(), ExecuteError> {
+    let known = crate::execute::known_request_digest_in(tx, workspace, &request.command_id)?
+        .ok_or_else(conversion_invalid)?;
+    if known != crate::execute::original_request_digest(request) {
+        return Err(ExecuteError::CommandIdReused);
+    }
+    Ok(())
+}
+
+fn mark_conversion(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    page: &LegacyConversionPage,
+    requests: &[ExecuteRequest],
+) -> Result<(), ExecuteError> {
+    for (source, request) in page.items.iter().zip(requests) {
+        tx.execute("UPDATE drafts SET fields=?3 WHERE workspace_id=?1 AND editor_kind='legacy_outbox_resolution' AND record_key=?2",
+            params![workspace,source.entry_id,json!({"standing":"converted","command_id":request.command_id,"resolved_at":request.context.now}).to_string().into_bytes()])?;
+    }
+    Ok(())
+}
+
+fn conversion_progress(
+    tx: &Transaction<'_>,
+    header: &ConversionHeader,
+) -> Result<LegacyConversionProgress, ExecuteError> {
+    let processed_count = if header.atomic_group && !header.completed {
+        tx.query_row(
+            "SELECT COUNT(*) FROM drafts WHERE workspace_id=?1 AND editor_kind=?2",
+            params![header.workspace, CONVERSION_ITEM_KIND],
+            |r| r.get(0),
+        )?
+    } else {
+        let mut count = 0;
+        conversion_sources(tx, &header.workspace, |_, _, standing, _| {
+            count += u64::from(standing == "converted");
+            Ok(())
+        })?;
+        count
+    };
+    Ok(LegacyConversionProgress {
+        source_count: header.source_count,
+        processed_count,
+        complete: (!header.atomic_group || header.completed)
+            && processed_count == header.source_count,
+        status: status_in(tx, &header.workspace)?,
+    })
+}
+
+pub fn convert_legacy_page_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    token: &str,
+    page_token: &str,
+    entry_ids: &[String],
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<LegacyConversionProgress, ExecuteError> {
+    store.try_write(|tx| {
+        let header = conversion_header(tx, token)?;
+        if header.atomic_group {
+            return Err(conversion_invalid());
+        }
+        let page = prepared_conversion_page(tx, &header, page_token, entry_ids, requests)?;
+        let mut expected = page.items.iter().zip(requests).peekable();
+        let mut blocked = false;
+        conversion_sources(tx, &header.workspace, |_, entry, standing, _| {
+            if expected
+                .peek()
+                .is_some_and(|(source, _)| source.entry_id == entry.id)
+            {
+                let (_, request) = expected.next().ok_or_else(conversion_invalid)?;
+                if standing == "converted" {
+                    conversion_known(tx, &header.workspace, request)?;
+                } else if blocked {
+                    return Err(conversion_invalid());
+                }
+            } else if standing == "unsent" {
+                blocked = true;
+            }
+            Ok(())
+        })?;
+        if expected.next().is_some() {
+            return Err(conversion_invalid());
+        }
+        execute_batch_in(tx, ids, requests)?;
+        mark_conversion(tx, &header.workspace, &page, requests)?;
+        let progress = conversion_progress(tx, &header)?;
+        before_commit(tx)?;
+        Ok(progress)
+    })
+}
+
+fn conversion_seal(
+    tx: &Transaction<'_>,
+    header: &ConversionHeader,
+    completed: bool,
+) -> Result<String, ExecuteError> {
+    let mut digest = crate::DigestStream::default();
+    conversion_sources(tx, &header.workspace, |ordinal, entry, standing, _| {
+        let fingerprint = if completed {
+            if standing != "converted" {
+                return Err(conversion_invalid());
+            }
+            let key = CommandId::parse(entry.key.as_deref().ok_or_else(conversion_invalid)?)
+                .map_err(|_| conversion_invalid())?;
+            crate::execute::known_request_digest_in(tx, &header.workspace, &key)?
+                .ok_or_else(conversion_invalid)?
+        } else {
+            if standing != "unsent" {
+                return Err(conversion_invalid());
+            }
+            let bytes: Option<Vec<u8>> = tx.query_row("SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+                params![header.workspace,format!("{CONVERSION_HEADER}:{ordinal}"),CONVERSION_ITEM_KIND],|r|r.get(0)).optional()?;
+            let request: ExecuteRequest =
+                conversion_decode(bytes.as_deref().ok_or_else(conversion_invalid)?)?;
+            crate::execute::original_request_digest(&request)
+        };
+        conversion_part(&mut digest, ordinal.as_bytes());
+        conversion_part(&mut digest, &fingerprint);
+        Ok(())
+    })?;
+    Ok(digest.digest())
+}
+
+pub fn stage_legacy_page_with(
+    store: &mut Store,
+    token: &str,
+    page_token: &str,
+    entry_ids: &[String],
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<LegacyConversionProgress, ExecuteError> {
+    store.try_write(|tx| {
+        let mut header = conversion_header(tx,token)?;
+        if !header.atomic_group {return Err(conversion_invalid());}
+        let page = prepared_conversion_page(tx,&header,page_token,entry_ids,requests)?;
+        // Completed retries check every original fingerprint without rebuilding
+        // payload staging. A mixed converted/unsent group is never executable.
+        conversion_sources(tx,&header.workspace, |_,_,standing,_| {
+            if (standing=="converted")!=header.completed {return Err(conversion_invalid());} Ok(())
+        })?;
+        if header.completed {
+            for request in requests {conversion_known(tx,&header.workspace,request)?;}
+            if header.seal.as_ref()!=Some(&conversion_seal(tx,&header,true)?) {return Err(conversion_invalid());}
+        } else {
+            let mut positions = HashMap::new();
+            conversion_sources(tx,&header.workspace, |ordinal,entry,_,_| {if page.items.iter().any(|s|s.entry_id==entry.id){positions.insert(entry.id.clone(),ordinal.to_owned());}Ok(())})?;
+            // Every earlier source entry must already be staged; no gaps.
+            let first = positions.get(&page.items[0].entry_id).ok_or_else(conversion_invalid)?;
+            conversion_sources(tx,&header.workspace, |ordinal,_,_,_| {
+                if ordinal < first.as_str() {
+                    let present: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3)",
+                        params![header.workspace,format!("{CONVERSION_HEADER}:{ordinal}"),CONVERSION_ITEM_KIND],|r|r.get(0))?;
+                    if !present {return Err(conversion_invalid());}
+                } Ok(())
+            })?;
+            for (source,request) in page.items.iter().zip(requests) {
+                let id = format!("{CONVERSION_HEADER}:{}",positions.get(&source.entry_id).ok_or_else(conversion_invalid)?);
+                let bytes = conversion_json(request)?;
+                let old: Option<Vec<u8>> = tx.query_row("SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+                    params![header.workspace,id,CONVERSION_ITEM_KIND],|r|r.get(0)).optional()?;
+                if let Some(old) = old {
+                    let previous: ExecuteRequest = conversion_decode(&old)?;
+                    if crate::execute::original_request_digest(&previous)!=crate::execute::original_request_digest(request) {return Err(ExecuteError::CommandIdReused);}
+                } else {
+                    tx.execute("INSERT INTO drafts(workspace_id,draft_id,editor_kind,record_key,fields,updated_at) VALUES(?1,?2,?3,?4,?5,?6)",
+                        params![header.workspace,id,CONVERSION_ITEM_KIND,source.entry_id,bytes,source.issued_at.as_str()])?;
+                }
+            }
+            let count = conversion_progress(tx,&header)?.processed_count;
+            if count==header.source_count {
+                header.seal=Some(conversion_seal(tx,&header,false)?);
+                save_conversion_header(tx,&header)?;
+            }
+        }
+        let progress = conversion_progress(tx,&header)?;
+        before_commit(tx)?;
+        Ok(progress)
+    })
+}
+
+pub fn finalize_legacy_conversion_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    token: &str,
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<LegacyConversionProgress, ExecuteError> {
+    store.try_write(|tx| {
+        let mut header=conversion_header(tx,token)?;
+        if !header.atomic_group || header.seal.as_ref()!=Some(&conversion_seal(tx,&header,header.completed)?) {return Err(conversion_invalid());}
+        if !header.completed {
+            let mut requests=Vec::new();
+            let mut items=Vec::new();
+            conversion_sources(tx,&header.workspace, |ordinal,entry,_,_| {
+                let bytes: Vec<u8> = tx.query_row("SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+                    params![header.workspace,format!("{CONVERSION_HEADER}:{ordinal}"),CONVERSION_ITEM_KIND],|r|r.get(0))?;
+                let request: ExecuteRequest=conversion_decode(&bytes)?;
+                items.push(LegacyUnsent {entry_id:entry.id.clone(),idempotency_key:request.command_id.clone(),issued_at:request.context.now.clone(),command:Value::Null});
+                requests.push(request); Ok(())
+            })?;
+            execute_batch_in(tx,ids,&requests)?;
+            mark_conversion(tx,&header.workspace,&LegacyConversionPage {items,page_token:String::new(),next_after:None},&requests)?;
+            tx.execute("DELETE FROM drafts WHERE workspace_id=?1 AND editor_kind=?2",params![header.workspace,CONVERSION_ITEM_KIND])?;
+            header.completed=true;
+            save_conversion_header(tx,&header)?;
+        }
+        let progress=conversion_progress(tx,&header)?;
+        before_commit(tx)?;
+        Ok(progress)
     })
 }
 

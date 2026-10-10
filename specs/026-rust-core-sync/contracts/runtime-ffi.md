@@ -321,3 +321,38 @@ A manifest retains a source-provenance digest alongside the existing header and
 request digests. Successful private admission/upkeep requires host cache
 invalidation because these private changes do not advance public projection
 generation.
+
+### Bounded native legacy conversion
+
+Accountless preparation encodes the verified original never-sent sequence once in
+host memory, including keys already converted on a prior attempt. It never bridges
+the full queue. `beginLegacyConversion` freezes the existing execute context in an
+import/workspace/authority-bound reserved draft before encoding; each request still
+uses its original `issuedAt`. The context survives completion for deterministic
+retry. Original IDs, key casing, timestamps and source order remain immutable.
+
+`legacyConversionPage` uses immutable source ordinal keysets, with at most 200
+items and 8 MiB of owned JSON before crossing FFI. The compatibility `legacyUnsent`
+array refuses oversized results instead of returning an incomplete array. Ordinary
+`convertLegacyConversionPage` commits only the earliest unresolved contiguous
+prefix, allowing exact-known converted leading retries and checking every original
+request fingerprint. It never skips a gap or reissues a sent/uncertain entry.
+
+Any original never-sent `deleteTag` or `bulkRelease` conservatively forces the
+whole original sequence into one prepared atomic group before prefix effects.
+`convertLegacyConversionPage(atomicStage: true)` streams bounded typed fragments
+into existing reserved drafts; source interval/count/digests and the runtime seal
+replace an unbounded header ID array. Incomplete stages have no command or
+conversion effects. `finalizeLegacyConversion` rechecks source pins, authority,
+contiguous eligibility and the seal, then runs the existing `execute_batch_in`, all
+resolution markers and payload-fragment cleanup in one transaction. It returns
+scalar progress and global status. Fresh-only TagDelete/bulk-skip proof remains
+restricted to that transaction; historical reference semantics do not change.
+
+Exact completed retries check every supplied original fingerprint against known
+intents and recompute the ordered seal, without recreating payload fragments. Mixed
+converted/unconverted atomic groups, changed source/body, gaps and reordered pages
+refuse without effects. Each write shares the existing BridgeOperation cancellation
+and commit arbitration: precommit cancellation rolls back that write; durable
+prefixes/stages remain saved after interruption. Workspace binding requires the
+whole classified outbox's `mayRun`, never a page or caller completion assertion.

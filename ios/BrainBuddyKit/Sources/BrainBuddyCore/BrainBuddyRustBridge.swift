@@ -669,6 +669,31 @@ public struct RustWorkspaceLegacyConversion: Equatable, Sendable {
     }
 }
 
+public struct RustWorkspaceLegacyConversionPlan: Sendable {
+    public let token: String
+    public let context: RustWorkspaceContext
+    public let sourceCount: UInt64
+    public let atomicGroup: Bool
+}
+public struct RustWorkspaceLegacyConversionPage: Sendable {
+    public let items: [RustWorkspaceLegacyUnsent]
+    public let pageToken: String
+    public let nextAfter: String?
+}
+public struct RustWorkspaceLegacyConversionProgress: Sendable {
+    public let sourceCount: UInt64
+    public let processedCount: UInt64
+    public let complete: Bool
+    public let status: RustLegacyOutboxStatus
+
+    fileprivate init(_ value: BridgeLegacyConversionProgress) {
+        sourceCount = value.sourceCount
+        processedCount = value.processedCount
+        complete = value.complete
+        status = RustLegacyOutboxStatus(value.status)
+    }
+}
+
 public struct RustWorkspaceIdentityRequest: Hashable, Sendable {
     public let entityType: String
     public let localID: String
@@ -1112,12 +1137,50 @@ public final class RustWorkspaceRuntime: Sendable {
 
     public func convertLegacyUnsent(_ entries: [RustWorkspaceLegacyConversion], context: RustWorkspaceContext)
         async throws -> RustWorkspaceExecution {
-        let items = entries.map {
-            BridgeLegacyConversion(entryId: $0.entryID, issuedAt: $0.issuedAt, command: $0.command.bridged)
-        }
+        let items = try Self.boundedLegacyConversions(entries)
         let context = context.bridged
         return try await durable { workspace, operation in
             try workspace.convertLegacyUnsent(items: items, context: context, operation: operation)
+        }
+    }
+
+    /// The original migration context survives prefix commits and process death.
+    public func beginLegacyConversion(context: RustWorkspaceContext, atomicGroup: Bool = false)
+        async throws -> RustWorkspaceLegacyConversionPlan {
+        let context = context.bridged
+        return try await committing { workspace, operation in
+            let plan = try workspace.beginLegacyConversion(context: context, atomicGroup: atomicGroup, operation: operation)
+            guard let now = RustInstant.parse(plan.context.now) else { throw RustDomainError.malformedResult }
+            return RustWorkspaceLegacyConversionPlan(token: plan.token,
+                context: RustWorkspaceContext(now: now, timeZone: plan.context.timeZone,
+                    actorID: plan.context.actorId, policy: plan.context.policy),
+                sourceCount: plan.sourceCount, atomicGroup: plan.atomicGroup)
+        }
+    }
+
+    public func legacyConversionPage(token: String, after: String? = nil) async throws -> RustWorkspaceLegacyConversionPage {
+        try await offActor { workspace in
+            let page = try workspace.legacyConversionPage(token: token, after: after)
+            return RustWorkspaceLegacyConversionPage(items: page.items.map {
+                RustWorkspaceLegacyUnsent(entryID: $0.entryId, idempotencyKey: $0.idempotencyKey,
+                    issuedAt: $0.issuedAt, command: $0.command)
+            }, pageToken: page.pageToken, nextAfter: page.nextAfter)
+        }
+    }
+
+    public func convertLegacyConversionPage(_ entries: [RustWorkspaceLegacyConversion], token: String,
+                                           pageToken: String, atomicStage: Bool)
+        async throws -> RustWorkspaceLegacyConversionProgress {
+        let items = try Self.boundedLegacyConversions(entries)
+        return try await committing { workspace, operation in
+            RustWorkspaceLegacyConversionProgress(try workspace.convertLegacyConversionPage(token: token,
+                pageToken: pageToken, items: items, atomicStage: atomicStage, operation: operation))
+        }
+    }
+
+    public func finalizeLegacyConversion(token: String) async throws -> RustWorkspaceLegacyConversionProgress {
+        try await committing { workspace, operation in
+            RustWorkspaceLegacyConversionProgress(try workspace.finalizeLegacyConversion(token: token, operation: operation))
         }
     }
 
@@ -1153,6 +1216,16 @@ public final class RustWorkspaceRuntime: Sendable {
                                               collectionNextCursor: page.collectionNextCursor, taskFrames: page.taskFrames))
         case .refused(let refusal, let generation): return .refused(RustRefusal(refusal), projectionGeneration: generation)
         }
+    }
+
+    private static func boundedLegacyConversions(_ entries: [RustWorkspaceLegacyConversion]) throws -> [BridgeLegacyConversion] {
+        guard entries.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS", field: "legacy_outbox") }
+        let bytes = entries.reduce(0) { $0 + $1.command.payload.count + $1.command.preconditions.count
+            + $1.command.admissionTokens.count + $1.command.dependsOn.reduce(0) { $0 + $1.utf8.count }
+            + $1.entryID.utf8.count + $1.issuedAt.utf8.count + $1.command.commandID.utf8.count
+            + $1.command.commandType.utf8.count + ($1.command.entityID?.utf8.count ?? 0) + 256 }
+        guard bytes <= 8 * 1024 * 1024 else { throw RustBridgeError(code: "TOO_MANY_BYTES", field: "legacy_outbox") }
+        return entries.map { BridgeLegacyConversion(entryId: $0.entryID, issuedAt: $0.issuedAt, command: $0.command.bridged) }
     }
 
     private func durable(_ work: @escaping @Sendable (BridgeWorkspace, BridgeOperation) throws -> BridgeExecution)

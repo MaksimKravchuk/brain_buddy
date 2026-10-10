@@ -194,8 +194,11 @@ fn resolve(
 // ------------------------------------------------------------------------- tests
 
 fn prepared(store: &mut Store) -> Vec<ExecuteRequest> {
-    legacy_unsent(store)
-        .unwrap()
+    prepared_entries(legacy_unsent(store).unwrap())
+}
+
+fn prepared_entries(entries: Vec<bb_client::LegacyUnsent>) -> Vec<ExecuteRequest> {
+    entries
         .into_iter()
         .map(|entry| {
             let source = &entry.command["createTask"]["_0"];
@@ -876,4 +879,650 @@ fn review_unsent_conversion_requires_atomic_review_activation_first() {
         1
     );
     assert!(legacy_unsent(&mut store).unwrap().is_empty());
+}
+
+fn page_requests(
+    page: &bb_client::LegacyConversionPage,
+    plan: &bb_client::LegacyConversionPlan,
+) -> Vec<ExecuteRequest> {
+    prepared_entries(page.items.clone())
+        .into_iter()
+        .map(|mut request| {
+            let issued = request.context.now.clone();
+            request.context = plan.context.clone();
+            request.context.now = issued;
+            request
+        })
+        .collect()
+}
+
+fn page_ids(page: &bb_client::LegacyConversionPage) -> Vec<String> {
+    page.items
+        .iter()
+        .map(|item| item.entry_id.clone())
+        .collect()
+}
+
+fn conversion_context() -> ExecuteContext {
+    ExecuteContext {
+        now: at(NOW),
+        time_zone: ZoneName::new("UTC").unwrap(),
+        actor_id: ActorId::parse("device").unwrap(),
+        policy: Policy {
+            weekly_review: false,
+            navigator_provider: None,
+            navigator_available: false,
+            consent_text_version: 1,
+        },
+    }
+}
+
+#[test]
+fn bounded_conversion_201_preserves_prefix_restart_order_known_retries_and_context() {
+    use bb_client::{
+        begin_legacy_conversion_with, convert_legacy_page_with, legacy_conversion_page,
+    };
+    let lane = lane("bounded-201");
+    let mut store = lane.imported(&document(
+        (1..=201)
+            .map(|n| unsent(n, &uuid(10_000 + n), "Original"))
+            .collect(),
+        vec![],
+    ));
+    resolve(&mut store, NOW, nothing);
+    assert!(legacy_unsent(&mut store).is_err()); // Compatibility never bridges an unbounded array.
+    let plan =
+        begin_legacy_conversion_with(&mut store, &conversion_context(), false, |_| Ok(())).unwrap();
+    assert_eq!(plan.source_count, 201);
+    assert!(!plan.atomic_group);
+    let first = legacy_conversion_page(&mut store, &plan.token, None).unwrap();
+    assert_eq!(first.items.len(), 200);
+    let first_requests = page_requests(&first, &plan);
+    let second =
+        legacy_conversion_page(&mut store, &plan.token, first.next_after.as_deref()).unwrap();
+    assert_eq!(second.items.len(), 1);
+    assert!(second.next_after.is_none());
+    let mut second_requests = page_requests(&second, &plan);
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &second.page_token,
+            &page_ids(&second),
+            &second_requests,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    assert_eq!(count(&mut store, "outbox"), 0);
+    assert_eq!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &first_requests,
+            |_| Err(ExecuteError::Cancelled)
+        )
+        .unwrap_err(),
+        ExecuteError::Cancelled
+    );
+    assert_eq!(count(&mut store, "outbox"), 0);
+    let prefix = convert_legacy_page_with(
+        &mut store,
+        &mut RandomIds,
+        &plan.token,
+        &first.page_token,
+        &page_ids(&first),
+        &first_requests,
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(prefix.processed_count, 200);
+    assert!(!prefix.complete);
+    assert!(!prefix.status.may_run());
+    drop(store);
+    let mut store = Store::open(&options(&lane.database)).unwrap();
+    let mut changed_context = conversion_context();
+    changed_context.time_zone = ZoneName::new("Asia/Tokyo").unwrap();
+    changed_context.actor_id = ActorId::parse("changed-device").unwrap();
+    changed_context.policy.weekly_review = true;
+    let resumed =
+        begin_legacy_conversion_with(&mut store, &changed_context, false, |_| Ok(())).unwrap();
+    assert_eq!(resumed.token, plan.token);
+    assert_eq!(resumed.context.actor_id, plan.context.actor_id);
+    assert_eq!(resumed.context.policy, plan.context.policy);
+    assert_eq!(resumed.context.time_zone, plan.context.time_zone);
+    // Ordinary durable dependencies cross the page boundary; every creation
+    // still keeps its original source identity and issued time.
+    second_requests[0]
+        .depends_on
+        .push(first_requests[0].command_id.clone());
+    let done = convert_legacy_page_with(
+        &mut store,
+        &mut RandomIds,
+        &plan.token,
+        &second.page_token,
+        &page_ids(&second),
+        &second_requests,
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert!(done.complete);
+    assert!(done.status.may_run());
+    assert_eq!(count(&mut store, "outbox"), 201);
+    let tasks: i64 = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT COUNT(*) FROM visible_records WHERE record_type='task'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(tasks, 201);
+    // Page1 exact retry remains valid after page2; every changed known body is checked.
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &first_requests,
+            |_| Ok(())
+        )
+        .unwrap()
+        .complete
+    );
+    let mut changed = first_requests.clone();
+    changed[199]
+        .payload
+        .insert("title".into(), json!("Changed"));
+    assert_eq!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &changed,
+            |_| Ok(())
+        )
+        .unwrap_err(),
+        ExecuteError::CommandIdReused
+    );
+    assert_eq!(count(&mut store, "outbox"), 201);
+    let mut wrong = page_ids(&first);
+    wrong.swap(0, 1);
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &first.page_token,
+            &wrong,
+            &first_requests,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &[first_requests.clone(), vec![second_requests[0].clone()]].concat(),
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    // A stale immutable source pin is not an offset or a new queue to convert.
+    store.write(|tx| {tx.execute("UPDATE drafts SET fields=replace(CAST(fields AS TEXT),'Original','Changed') WHERE editor_kind='legacy_outbox_entry' AND draft_id='legacy-outbox:00000000'",[])?;Ok(())}).unwrap();
+    assert!(legacy_conversion_page(&mut store, &plan.token, None).is_err());
+}
+
+#[test]
+fn bounded_atomic_staging_keeps_201_fresh_bulk_skip_applied_and_stale_guards_together() {
+    use bb_client::{
+        begin_legacy_conversion_with, convert_legacy_page_with, finalize_legacy_conversion_with,
+        legacy_conversion_page, stage_legacy_page_with,
+    };
+    use bb_protocol::{
+        command::{AfterCommandPrecondition, CommandRef, Precondition},
+        wire::Id,
+    };
+    for (name, state, guard, success) in [
+        ("applied", "inbox", "1", true),
+        ("skipped", "next", "1", true),
+        ("stale", "inbox", "99", false),
+    ] {
+        let lane = lane(&format!("staged-bulk-{name}"));
+        let mut source: Vec<_> = (1..=199)
+            .map(|n| unsent(n, &uuid(20_000 + n), "Unrelated"))
+            .collect();
+        let mut bulk_source = unsent(200, &uuid(20_200), "");
+        bulk_source["command"] = json!({"bulkRelease":{"_0":{"bulkID":uuid(30_000),"kind":"inbox_remainder","taskIDs":[uuid(29_000)],"undoRetained":true}}});
+        source.push(bulk_source);
+        source.push(unsent(201, &uuid(20_201), "Dependent editor"));
+        let mut store = lane.imported(&document(source, vec![]));
+        resolve(&mut store, NOW, nothing);
+        let capture = bb_client::capture_legacy_review(&mut store).unwrap();
+        let prepared = bb_client::PreparedLegacyReview {
+            token: capture.token,
+            read_set: Default::default(),
+            aliases: vec![],
+            derived_counts: Default::default(),
+        };
+        let mut context = conversion_context();
+        context.policy.weekly_review = true;
+        bb_client::activate_legacy_review(&mut store, &context, &prepared).unwrap();
+        let mut seed = prepared_entries(vec![bb_client::LegacyUnsent {
+            entry_id: uuid(900),
+            idempotency_key: bb_protocol::wire::CommandId::parse(uuid(901)).unwrap(),
+            issued_at: at(LONG_AGO),
+            command: create_task(&uuid(29_000), "Before migration"),
+        }])
+        .remove(0);
+        seed.payload.insert("state".into(), json!(state));
+        let target = seed.entity_id.clone().unwrap();
+        bb_client::execute(&mut store, &mut RandomIds, &seed).unwrap();
+        let before = count(&mut store, "outbox");
+        // False host mode cannot split the coupled original sequence.
+        let plan = begin_legacy_conversion_with(&mut store, &context, false, |_| Ok(())).unwrap();
+        assert!(plan.atomic_group);
+        let first = legacy_conversion_page(&mut store, &plan.token, None).unwrap();
+        let second =
+            legacy_conversion_page(&mut store, &plan.token, first.next_after.as_deref()).unwrap();
+        let mut first_requests = page_requests(
+            &bb_client::LegacyConversionPage {
+                items: first.items[..199].to_vec(),
+                page_token: String::new(),
+                next_after: None,
+            },
+            &plan,
+        );
+        let bulk=ExecuteRequest {command_id:first.items[199].idempotency_key.clone(),command_type:CommandType::ReviewBulkRelease,
+            entity_id:Some(Id::parse("bulk_00000000-0000-4000-8000-000000030000").unwrap()),
+            payload:json!({"kind":"inbox_remainder","items":[{"task_id":target,"expected_revision":guard}]}).as_object().unwrap().clone(),
+            preconditions:vec![],depends_on:vec![],admission_tokens:vec![],context:ExecuteContext {now:first.items[199].issued_at.clone(),..plan.context.clone()}};
+        let bulk_id = bulk.command_id.clone();
+        first_requests.push(bulk);
+        let mut second_requests = page_requests(&second, &plan);
+        second_requests[0].command_type = CommandType::TaskUpdate;
+        second_requests[0].entity_id = Some(target.clone());
+        second_requests[0].payload = json!({"title":"Dependent editor"})
+            .as_object()
+            .unwrap()
+            .clone();
+        second_requests[0].preconditions =
+            vec![Precondition::AfterCommand(AfterCommandPrecondition {
+                after_command: CommandRef {
+                    command_id: bulk_id,
+                    entity_type: EntityType::Task,
+                    entity_id: target,
+                },
+            })];
+        assert!(
+            convert_legacy_page_with(
+                &mut store,
+                &mut RandomIds,
+                &plan.token,
+                &first.page_token,
+                &page_ids(&first),
+                &first_requests,
+                |_| Ok(())
+            )
+            .is_err()
+        );
+        assert!(
+            stage_legacy_page_with(
+                &mut store,
+                &plan.token,
+                &second.page_token,
+                &page_ids(&second),
+                &second_requests,
+                |_| Ok(())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            stage_legacy_page_with(
+                &mut store,
+                &plan.token,
+                &first.page_token,
+                &page_ids(&first),
+                &first_requests,
+                |_| Err(ExecuteError::Cancelled)
+            )
+            .unwrap_err(),
+            ExecuteError::Cancelled
+        );
+        let staged = stage_legacy_page_with(
+            &mut store,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &first_requests,
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(staged.processed_count, 200);
+        assert!(!staged.complete);
+        assert!(!staged.status.may_run());
+        assert_eq!(count(&mut store, "outbox"), before);
+        assert!(
+            finalize_legacy_conversion_with(&mut store, &mut RandomIds, &plan.token, |_| Ok(()))
+                .is_err()
+        );
+        drop(store);
+        let mut store = Store::open(&options(&lane.database)).unwrap();
+        stage_legacy_page_with(
+            &mut store,
+            &plan.token,
+            &first.page_token,
+            &page_ids(&first),
+            &first_requests,
+            |_| Ok(()),
+        )
+        .unwrap();
+        stage_legacy_page_with(
+            &mut store,
+            &plan.token,
+            &second.page_token,
+            &page_ids(&second),
+            &second_requests,
+            |_| Ok(()),
+        )
+        .unwrap();
+        let cancelled =
+            finalize_legacy_conversion_with(&mut store, &mut RandomIds, &plan.token, |_| {
+                Err(ExecuteError::Cancelled)
+            })
+            .unwrap_err();
+        if success {
+            assert_eq!(cancelled, ExecuteError::Cancelled);
+        } else {
+            assert!(matches!(cancelled, ExecuteError::Refused(_)));
+        }
+
+        assert_eq!(count(&mut store, "outbox"), before);
+        assert_eq!(legacy_outbox_status(&mut store).unwrap().unsent, 201);
+        let finalized =
+            finalize_legacy_conversion_with(&mut store, &mut RandomIds, &plan.token, |_| Ok(()));
+        if success {
+            assert!(finalized.unwrap().complete);
+            assert_eq!(count(&mut store, "outbox"), before + 201);
+            let fragments:i64=store.read(|tx|tx.query_row("SELECT COUNT(*) FROM drafts WHERE editor_kind='runtime_legacy_conversion_item'",[],|r|r.get(0))).unwrap();
+            assert_eq!(fragments, 0);
+            stage_legacy_page_with(
+                &mut store,
+                &plan.token,
+                &first.page_token,
+                &page_ids(&first),
+                &first_requests,
+                |_| Ok(()),
+            )
+            .unwrap();
+            let mut changed = second_requests.clone();
+            changed[0]
+                .payload
+                .insert("title".into(), json!("Different retry"));
+            assert_eq!(
+                stage_legacy_page_with(
+                    &mut store,
+                    &plan.token,
+                    &second.page_token,
+                    &page_ids(&second),
+                    &changed,
+                    |_| Ok(())
+                )
+                .unwrap_err(),
+                ExecuteError::CommandIdReused
+            );
+            assert!(
+                finalize_legacy_conversion_with(
+                    &mut store,
+                    &mut RandomIds,
+                    &plan.token,
+                    |_| Ok(())
+                )
+                .unwrap()
+                .complete
+            );
+            assert_eq!(count(&mut store, "outbox"), before + 201);
+        } else {
+            assert!(matches!(finalized, Err(ExecuteError::Refused(_))));
+        }
+    }
+}
+
+#[test]
+fn bounded_atomic_tag_delete_preserves_task_guard_after_a_staged_page_boundary() {
+    use bb_client::{
+        begin_legacy_conversion_with, finalize_legacy_conversion_with, legacy_conversion_page,
+        stage_legacy_page_with,
+    };
+    use bb_protocol::{
+        command::{Precondition, RevisionPrecondition},
+        wire::{Counter, Id},
+    };
+    let lane = lane("staged-tag-guard");
+    let mut source: Vec<_> = (1..=199)
+        .map(|n| unsent(n, &uuid(40_000 + n), "Unrelated"))
+        .collect();
+    let mut delete_source = unsent(200, &uuid(40_200), "");
+    delete_source["command"] = json!({"deleteTag":{"_0":uuid(45_000)}});
+    source.push(delete_source);
+    source.push(unsent(201, &uuid(40_201), "Editor"));
+    let mut store = lane.imported(&document(source, vec![]));
+    resolve(&mut store, NOW, nothing);
+    let mut tag = page_requests(
+        &bb_client::LegacyConversionPage {
+            items: vec![bb_client::LegacyUnsent {
+                entry_id: uuid(900),
+                idempotency_key: bb_protocol::wire::CommandId::parse(uuid(902)).unwrap(),
+                issued_at: at(LONG_AGO),
+                command: create_task(&uuid(45_000), ""),
+            }],
+            page_token: String::new(),
+            next_after: None,
+        },
+        &bb_client::LegacyConversionPlan {
+            token: String::new(),
+            context: conversion_context(),
+            source_count: 0,
+            atomic_group: false,
+        },
+    )
+    .remove(0);
+    tag.command_type = CommandType::TagCreate;
+    tag.entity_id = Some(Id::parse(format!("tag_{}", uuid(45_000))).unwrap());
+    tag.payload = json!({"name":"Tag to remove"}).as_object().unwrap().clone();
+    let tag_id = tag.entity_id.clone().unwrap();
+    bb_client::execute(&mut store, &mut RandomIds, &tag).unwrap();
+    let mut seed = prepared_entries(vec![bb_client::LegacyUnsent {
+        entry_id: uuid(901),
+        idempotency_key: bb_protocol::wire::CommandId::parse(uuid(903)).unwrap(),
+        issued_at: at(LONG_AGO),
+        command: create_task(&uuid(45_001), "Shown task"),
+    }])
+    .remove(0);
+    seed.payload.insert("tag_ids".into(), json!([tag_id]));
+    let target = seed.entity_id.clone().unwrap();
+    bb_client::execute(&mut store, &mut RandomIds, &seed).unwrap();
+    let before = count(&mut store, "outbox");
+    let plan =
+        begin_legacy_conversion_with(&mut store, &conversion_context(), false, |_| Ok(())).unwrap();
+    assert!(plan.atomic_group);
+    let first = legacy_conversion_page(&mut store, &plan.token, None).unwrap();
+    let second =
+        legacy_conversion_page(&mut store, &plan.token, first.next_after.as_deref()).unwrap();
+    let shown = |kind, target: Id| {
+        Precondition::Revision(RevisionPrecondition {
+            entity_type: kind,
+            entity_id: target,
+            edit_revision: Counter::parse("1").unwrap(),
+        })
+    };
+    let mut first_requests = page_requests(
+        &bb_client::LegacyConversionPage {
+            items: first.items[..199].to_vec(),
+            page_token: String::new(),
+            next_after: None,
+        },
+        &plan,
+    );
+    first_requests.push(ExecuteRequest {
+        command_id: first.items[199].idempotency_key.clone(),
+        command_type: CommandType::TagDelete,
+        entity_id: Some(tag_id.clone()),
+        payload: json!({}).as_object().unwrap().clone(),
+        preconditions: vec![
+            shown(EntityType::Tag, tag_id),
+            shown(EntityType::Task, target.clone()),
+        ],
+        depends_on: vec![],
+        admission_tokens: vec![],
+        context: ExecuteContext {
+            now: first.items[199].issued_at.clone(),
+            ..plan.context.clone()
+        },
+    });
+
+    let mut second_requests = page_requests(&second, &plan);
+    second_requests[0].command_type = CommandType::TaskUpdate;
+    second_requests[0].entity_id = Some(target.clone());
+    second_requests[0].payload = json!({"title":"Saved after delete"})
+        .as_object()
+        .unwrap()
+        .clone();
+    second_requests[0].preconditions = vec![shown(EntityType::Task, target)];
+    stage_legacy_page_with(
+        &mut store,
+        &plan.token,
+        &first.page_token,
+        &page_ids(&first),
+        &first_requests,
+        |_| Ok(()),
+    )
+    .unwrap();
+    stage_legacy_page_with(
+        &mut store,
+        &plan.token,
+        &second.page_token,
+        &page_ids(&second),
+        &second_requests,
+        |_| Ok(()),
+    )
+    .unwrap();
+    let finalized =
+        finalize_legacy_conversion_with(&mut store, &mut RandomIds, &plan.token, |_| Ok(()))
+            .unwrap();
+    assert!(finalized.complete);
+    assert_eq!(count(&mut store, "outbox"), before + 201);
+    stage_legacy_page_with(
+        &mut store,
+        &plan.token,
+        &second.page_token,
+        &page_ids(&second),
+        &second_requests,
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(count(&mut store, "outbox"), before + 201);
+}
+
+#[test]
+fn bounded_conversion_refuses_sent_uncertain_and_over_byte_budget_without_effects() {
+    use bb_client::{
+        begin_legacy_conversion_with, convert_legacy_page_with, legacy_conversion_page,
+    };
+    let lane = lane("bounded-negative");
+    let mut store = lane.imported(&document(
+        vec![
+            sent(1, &uuid(51_001), "Sent", FIRST_SENT),
+            unsent(2, &uuid(51_002), "Never sent"),
+        ],
+        vec![],
+    ));
+    resolve(&mut store, LATER, nothing);
+    let plan =
+        begin_legacy_conversion_with(&mut store, &conversion_context(), false, |_| Ok(())).unwrap();
+    assert_eq!(plan.source_count, 1);
+    let page = legacy_conversion_page(&mut store, &plan.token, None).unwrap();
+    assert_eq!(page.items[0].entry_id, uuid(2));
+    let requests = page_requests(&page, &plan);
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &page.page_token,
+            &[uuid(1)],
+            &requests,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    let mut wrong_time = requests.clone();
+    wrong_time[0].context.now = at(NOW);
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &page.page_token,
+            &page_ids(&page),
+            &wrong_time,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    let mut wrong_key = requests.clone();
+    wrong_key[0].command_id = bb_protocol::wire::CommandId::parse(uuid(1001)).unwrap();
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &page.page_token,
+            &page_ids(&page),
+            &wrong_key,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    let mut too_big = requests.clone();
+    too_big[0]
+        .payload
+        .insert("details".into(), json!("x".repeat(8 * 1024 * 1024)));
+    assert!(
+        convert_legacy_page_with(
+            &mut store,
+            &mut RandomIds,
+            &plan.token,
+            &page.page_token,
+            &page_ids(&page),
+            &too_big,
+            |_| Ok(())
+        )
+        .is_err()
+    );
+    assert_eq!(count(&mut store, "outbox"), 0);
+    let status = legacy_outbox_status(&mut store).unwrap();
+    assert_eq!(status.uncertain, 1);
+    assert_eq!(status.unsent, 1);
+    assert!(!status.may_run());
+    store
+        .write(|tx| {
+            tx.execute("UPDATE sync_meta SET account_link_state='linking'", [])?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(legacy_conversion_page(&mut store, &plan.token, None).is_err());
 }

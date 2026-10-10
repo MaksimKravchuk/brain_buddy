@@ -52,7 +52,7 @@ pub(crate) const RULE_VERSION: u32 = 1;
 // ---------------------------------------------------------------------- the request
 
 /// The trusted facts a gesture is decided with; the platform supplies them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecuteContext {
     /// The device instant: the intent's `issued_at` and the rules' `now`.
     pub now: Instant,
@@ -63,7 +63,7 @@ pub struct ExecuteContext {
 }
 
 /// One gesture. `command_id` is chosen by the caller and kept across retries.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecuteRequest {
     pub command_id: CommandId,
     pub command_type: CommandType,
@@ -1200,6 +1200,20 @@ fn request_canonical(request: &ExecuteRequest) -> String {
         value["admission_tokens"] = json!(request.admission_tokens);
     }
     value.to_string()
+}
+
+/// The exact original LOCAL request fingerprint used by execute; staging never
+/// resolves or rewrites a request before checking it.
+pub(crate) fn original_request_digest(request: &ExecuteRequest) -> Vec<u8> {
+    sha256(request_canonical(request).as_bytes()).to_vec()
+}
+
+pub(crate) fn known_request_digest_in(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    command: &CommandId,
+) -> Result<Option<Vec<u8>>, ExecuteError> {
+    Ok(known_command(tx, workspace, command)?.map(|known| known.digest))
 }
 
 struct Known {

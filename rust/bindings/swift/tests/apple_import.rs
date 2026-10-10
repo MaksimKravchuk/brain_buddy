@@ -522,12 +522,77 @@ fn apple_import_026_fr_013_prepared_conversion_preserves_source_identity_and_com
     assert!(!committed.cancel());
     assert!(workspace.legacy_unsent().unwrap().is_empty());
     let BridgeExecution::Saved { results } = workspace
-        .convert_legacy_unsent(vec![item], context, Arc::new(BridgeOperation::new()))
+        .convert_legacy_unsent(
+            vec![item.clone()],
+            context.clone(),
+            Arc::new(BridgeOperation::new()),
+        )
         .unwrap()
     else {
         panic!("retry")
     };
     assert!(results[0].replayed);
+    let begin = Arc::new(BridgeOperation::new());
+    let plan = workspace
+        .begin_legacy_conversion(context, false, begin.clone())
+        .unwrap();
+    assert!(begin.is_committed());
+    assert!(!begin.cancel());
+    assert_eq!(plan.source_count, 1);
+    let page = workspace
+        .legacy_conversion_page(plan.token.clone(), None)
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+    let cancelled = Arc::new(BridgeOperation::new());
+    cancelled.cancel();
+    assert_eq!(
+        failed(
+            workspace
+                .convert_legacy_conversion_page(
+                    plan.token.clone(),
+                    page.page_token.clone(),
+                    vec![item.clone()],
+                    false,
+                    cancelled
+                )
+                .unwrap_err()
+        )
+        .0,
+        "CANCELLED"
+    );
+    let commit = Arc::new(BridgeOperation::new());
+    let progress = workspace
+        .convert_legacy_conversion_page(
+            plan.token.clone(),
+            page.page_token.clone(),
+            vec![item.clone()],
+            false,
+            commit.clone(),
+        )
+        .unwrap();
+    assert!(progress.complete);
+    assert!(progress.status.may_run);
+    assert!(commit.is_committed());
+    assert!(!commit.cancel());
+    let mut changed = item;
+    changed.command.payload = json!({"title":"Different prepared body","state":"next"})
+        .to_string()
+        .into_bytes();
+    assert_eq!(
+        failed(
+            workspace
+                .convert_legacy_conversion_page(
+                    plan.token,
+                    page.page_token,
+                    vec![changed],
+                    false,
+                    Arc::new(BridgeOperation::new())
+                )
+                .unwrap_err()
+        )
+        .0,
+        "COMMAND_ID_REUSED"
+    );
 }
 
 #[test]
