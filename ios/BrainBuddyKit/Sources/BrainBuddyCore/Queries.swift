@@ -274,3 +274,71 @@ public enum GTDQueries {
             .map { TagSummary(tag: $0.tag, openTaskCount: openCounts[$0.tag.id] ?? 0) }
     }
 }
+
+extension GTDQueries {
+    /// The tasks a screen shows, from the rules `rules` selects. With `.rust` the shared core
+    /// answers (and refuses a destination or option it has no answer for with
+    /// `RustDomainError.unsupportedQuery`); with `.legacy` the Swift read model does.
+    /// `calendar` fixes the device's day and zone.
+    public static func list(
+        _ destination: Destination, options: ListOptions, in state: GTDState, now: Date,
+        calendar: Calendar = .current, rules: RuleEpoch
+    ) async throws -> TaskListResult {
+        switch rules {
+        case .legacy:
+            return list(destination, options: options, in: state, today: CalendarDay(date: now, calendar: calendar))
+        case .rust(let facade):
+            return try await facade.list(
+                destination, options: options, in: state, now: now, zone: calendar.timeZone.identifier)
+        }
+    }
+
+    /// Sidebar and badge counts from the rules `rules` selects.
+    public static func counts(
+        in state: GTDState, now: Date, calendar: Calendar = .current, rules: RuleEpoch
+    ) async throws -> ListCounts {
+        switch rules {
+        case .legacy:
+            return counts(in: state, today: CalendarDay(date: now, calendar: calendar))
+        case .rust(let facade):
+            return try await facade.counts(in: state, now: now, zone: calendar.timeZone.identifier)
+        }
+    }
+
+    /// Active (or archived) projects by name from the rules `rules` selects.
+    public static func projects(
+        in state: GTDState, archived: Bool = false, now: Date, calendar: Calendar = .current, rules: RuleEpoch
+    ) async throws -> [ProjectSummary] {
+        switch rules {
+        case .legacy:
+            return projects(in: state, archived: archived)
+        case .rust(let facade):
+            return try await facade.projects(
+                in: state, archived: archived, now: now, zone: calendar.timeZone.identifier)
+        }
+    }
+
+    /// Active tags by name from the rules `rules` selects.
+    public static func tags(
+        in state: GTDState, now: Date, calendar: Calendar = .current, rules: RuleEpoch
+    ) async throws -> [TagSummary] {
+        switch rules {
+        case .legacy:
+            return tags(in: state)
+        case .rust(let facade):
+            return try await facade.tags(in: state, now: now, zone: calendar.timeZone.identifier)
+        }
+    }
+
+    /// How a project presents itself, from the rules `rules` selects.
+    public static func projectDisplay(
+        _ id: ProjectID, in state: GTDState, now: Date, calendar: Calendar = .current, rules: RuleEpoch
+    ) async throws -> ProjectDisplay? {
+        switch rules {
+        case .legacy:
+            return projectDisplay(id, in: state)
+        case .rust(let facade):
+            return try await facade.projectDisplay(id, in: state, now: now, zone: calendar.timeZone.identifier)
+        }
+    }
+}
