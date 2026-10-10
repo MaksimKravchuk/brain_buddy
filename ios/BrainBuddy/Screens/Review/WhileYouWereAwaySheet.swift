@@ -25,13 +25,17 @@ struct WhileYouWereAwaySheet: View {
     @State private var outcomes: [TaskID: WhileAwayRow.Outcome] = [:]
     @State private var summary: String?
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @State private var hasContinued = false
     @State private var hasLoaded = false
 
     init() {}
 
     var body: some View {
+        let readiness = whileAwayReadiness
         NavigationStack {
+            WorkspaceQueryContent(readiness: readiness, retry: { Task { hasLoaded = false; await load() } }) {
             WhileAwayContent(
                 rows: rows, summary: summary, problem: problem,
                 morePending: workspace.localReview.parkBatchWaiting, isOffline: isOffline,
@@ -43,9 +47,10 @@ struct WhileYouWereAwaySheet: View {
                     Button("Close") { dismiss() }
                 }
             }
+            }
         }
         .presentationDetents([.large])
-        .onAppear(perform: load)
+        .task { await load() }
         .onDisappear(perform: closedWithoutContinue)
     }
 
@@ -54,23 +59,50 @@ struct WhileYouWereAwaySheet: View {
         return false
     }
 
+    private var whileAwayReadiness: WorkspaceQueryReadiness {
+        let state = workspace.reviewReadiness(.state)
+        guard state == .ready else { return state }
+        if !noticeIDs.isEmpty {
+            let notices = workspace.taskViewsReadiness(noticeIDs)
+            if notices != .ready { return notices }
+        }
+        if !projectReads.isEmpty {
+            let projects = workspace.recordsReadiness(projectReads)
+            if projects != .ready { return projects }
+        }
+        return parkReads.first(where: { workspace.reviewReadiness($0) != .ready })
+            .map { workspace.reviewReadiness($0) } ?? .ready
+    }
+
+    private var projectReads: [WorkspaceRecordRead] {
+        Array(Set(workspace.unseenParks().compactMap { $0.projectID.map(WorkspaceRecordRead.project) }))
+    }
+
+    private var parkReads: [WorkspaceReviewRead] { parkIDs.map { .parkReturn($0, shownPark($0)) } }
+
     private var rows: [WhileAwayRow] {
         // Shown in the device's current zone (ios-commands §6).
-        let zone = TimeZone.current
         let parks = parkIDs.compactMap { id -> WhileAwayRow? in
-            guard let task = workspace.task(id) else { return nil }
+            guard let shown = workspace.reviewShownTask(id, read: .state) else { return nil }
+            let task = shown.content
+            let formulation = workspace.reviewFormulation(id, read: .state)
             // Checked against the park this sheet listed: a later park of the task is not it.
             let blocked = workspace.parkReturnProblem(of: id, shown: shownPark(id))
-            var place = task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject
+            var place = task.projectID.flatMap { workspace.records(projectReads)?.projects[$0]?.name } ?? ReviewCopy.noProject
             if case .projectArchived(let name)? = blocked { place = ReviewCopy.archivedPlace(name) }
             let parkedAt = shownPark(id)?.parkedAt ?? task.parked?.at
-            let detail = parkedAt.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0, in: zone), place: place) } ?? place
+            let detail = parkedAt.map { ReviewCopy.parkedRow(day: ReviewCopy.day($0, in: .current), place: place) }
+                ?? formulation?.parkedAfterDays.map { days in
+                    let age = days == 1 ? "1 day" : "\(days) days"
+                    return "Parked \(age) · \(place)"
+                }
+                ?? place
             // A park that changed elsewhere offers no "Return to Next" (Core's mapping).
             let initial = WhileAwayOutcome.initial(for: blocked)
             return WhileAwayRow(id: id, title: task.title, detail: detail, outcome: outcomes[id] ?? initial)
         }
         let notices = noticeIDs.compactMap { id -> WhileAwayRow? in
-            guard let task = workspace.task(id) else { return nil }
+            guard let task = workspace.taskViews(noticeIDs)?.first(where: { $0.id == id }) else { return nil }
             return WhileAwayRow(
                 id: id, title: task.title, detail: ReviewCopy.extensionRestarted(title: task.title), outcome: .notice
             )
@@ -78,10 +110,19 @@ struct WhileYouWereAwaySheet: View {
         return parks + notices
     }
 
-    private func load() {
+    private func load() async {
         guard !hasLoaded else { return }
         hasLoaded = true
-        reloadLists()
+        do {
+            try await workspace.prepareReviewRead(.state)
+            reloadLists()
+            let notices = workspace.linkedExtensionNotices
+            if !notices.isEmpty { _ = try await workspace.prepareTaskViews(notices) }
+            let projects = Array(Set(workspace.unseenParks().compactMap { $0.projectID.map(WorkspaceRecordRead.project) }))
+            if !projects.isEmpty { _ = try await workspace.prepareRecords(projects) }
+            for read in parkReads { try await workspace.prepareReviewRead(read) }
+        } catch { problem = TaskCommandRunner.message(for: error) }
+        if parkIDs.isEmpty { reloadLists() }
     }
 
     private func reloadLists() {
@@ -101,8 +142,17 @@ struct WhileYouWereAwaySheet: View {
     /// cannot (archived project, changed elsewhere), as Core answers it.
     @discardableResult
     private func returnTask(_ id: TaskID) -> Bool {
+        let shown = shownPark(id)
+        Task { await returnTaskDurably(id, shown: shown) }
+        return false
+    }
+
+    @MainActor private func returnTaskDurably(_ id: TaskID, shown: ParkAck?) async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
-        switch workspace.parkReturnProblem(of: id, shown: shownPark(id)) {
+        switch workspace.parkReturnProblem(of: id, shown: shown) {
         case .changedElsewhere?:
             outcomes[id] = .changedElsewhere
             if let task = workspace.task(id) { summary = ReviewCopy.returnChangedElsewhere(title: task.title) }
@@ -114,26 +164,34 @@ struct WhileYouWereAwaySheet: View {
             break
         }
         do {
-            try workspace.moveTask(id, to: .next)
+            try await workspace.moveTask(id, to: .next, editorID: editorID)
             outcomes[id] = .returned
             return true
         } catch {
-            if error == .projectArchived || error == .projectNotActive {
-                let name = workspace.task(id)?.projectID.flatMap { workspace.project($0)?.name } ?? ""
+            if let validation = error as? GTDValidationError,
+                validation == .projectArchived || validation == .projectNotActive
+            {
+                let projectID = workspace.reviewShownTask(id, read: .state)?.content.projectID
+                let name = projectID.flatMap { workspace.records(projectReads)?.projects[$0]?.name } ?? ""
                 outcomes[id] = .archived(project: name)
             } else {
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
             return false
         }
     }
 
     private func returnAll() {
+        let shownByID = Dictionary(uniqueKeysWithValues: shownParks.map { ($0.taskID, $0) })
+        Task { await returnAllDurably(shownByID: shownByID) }
+    }
+
+    @MainActor private func returnAllDurably(shownByID: [TaskID: ParkAck]) async {
         let pending = rows.filter { $0.outcome.offersReturn }
         var returned = 0
         var blocked: [WhileAwayRow] = []
         for row in pending {
-            if returnTask(row.id) { returned += 1 } else { blocked.append(row) }
+            if await returnTaskDurably(row.id, shown: shownByID[row.id]) { returned += 1 } else { blocked.append(row) }
         }
         let archivedRows = blocked.compactMap { row -> String? in
             guard case .archived(let project)? = outcomes[row.id] else { return nil }
@@ -152,11 +210,19 @@ struct WhileYouWereAwaySheet: View {
     /// Continue: the listed parks are seen; held-back parks may now apply,
     /// and when they do the sheet shows the next batch instead of closing.
     private func continueReview() {
+        guard !isSaving else { return }
+        isSaving = true
+        let shown = shownParks
         let batchWaiting = workspace.localReview.parkBatchWaiting
+        Task { await continueReviewDurably(shown: shown, batchWaiting: batchWaiting) }
+    }
+
+    @MainActor private func continueReviewDurably(shown: [ParkAck], batchWaiting: Bool) async {
+        defer { isSaving = false }
         do {
-            try workspace.dismissWhileAway(shown: shownParks)
+            try await workspace.dismissWhileAway(shown: shown, editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         hasContinued = true

@@ -1,5 +1,6 @@
 import BrainBuddyCore
 import BrainBuddyMacCore
+import BrainBuddyWorkspace
 import SwiftUI
 
 /// The Project review on this Mac: one active project at a time. A decision is a mark in
@@ -21,7 +22,7 @@ struct ProjectReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Review projects").font(.title2.bold())
-                    Text(loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") left · revisit after seven days" : "One project at a time")
+                    Text(loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") on this page · revisit after seven days" : "One project at a time")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -30,14 +31,49 @@ struct ProjectReviewView: View {
                     .keyboardShortcut(.cancelAction)
             }
 
-            if items.isEmpty {
+            if !loaded {
+                ProgressView("Loading projects…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.projectReviewReadiness != .ready {
+                if case .failed = model.projectReviewReadiness, model.workspace.isRustSelected {
+                    ContentUnavailableView {
+                        Label("Project review couldn’t load", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("The complete project signature is unavailable. Retry to check the current canonical review query.")
+                    } actions: {
+                        Button("Retry", action: load)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if case .failed = model.projectReviewReadiness {
+                    ContentUnavailableView {
+                        Label("Projects couldn’t load", systemImage: "exclamationmark.triangle")
+                    } actions: {
+                        Button("Retry", action: load)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView("Loading projects…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if items.isEmpty {
+                VStack(spacing: 12) {
                 ContentUnavailableView(
                     "Projects reviewed", systemImage: "checkmark.circle",
                     description: Text("Your decisions are saved on this Mac. Projects return after seven days.")
                 )
+                    if model.projectsPageState.hasNext {
+                        Button("Next projects") {
+                            Task {
+                                await model.workspace.nextProjectsPage()
+                                load()
+                            }
+                        }
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let item = items[index]
+                let taskPageState = model.projectReviewTaskPageState(item)
                 HStack {
                     Button("Previous") {
                         index -= 1
@@ -47,19 +83,50 @@ struct ProjectReviewView: View {
                     Text("\(index + 1) of \(items.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Next") {
-                        index += 1
-                        decision = nil
+                    Button(index >= items.count - 1 && model.projectsPageState.hasNext ? "Next projects" : "Next") {
+                        if index < items.count - 1 {
+                            index += 1
+                            decision = nil
+                        } else {
+                            Task {
+                                await model.workspace.nextProjectsPage()
+                                load()
+                            }
+                        }
                     }
-                    .disabled(index >= items.count - 1)
+                    .disabled(index >= items.count - 1 && !model.projectsPageState.hasNext)
                     Spacer()
                     Button("Open project to edit actions") { openProject(item.id) }
                 }
                 ScrollView {
-                    details(item)
+                    if taskPageState.readiness == .ready {
+                        details(item)
+                        HStack {
+                            Button("Previous actions") { changeTaskPage(previous: true, item: item) }
+                                .disabled(!taskPageState.hasPrevious)
+                            Text(taskPageState.hasPrevious || taskPageState.hasNext ? "More actions" : "All actions shown")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button("Next actions") { changeTaskPage(previous: false, item: item) }
+                                .disabled(!taskPageState.hasNext)
+                        }
+                    } else if case .failed = taskPageState.readiness {
+                        ContentUnavailableView {
+                            Label("Project actions couldn’t load", systemImage: "exclamationmark.triangle")
+                        } actions: {
+                            if taskPageState.readiness == .failed("REVIEW_PAGE_CHANGED") {
+                                Button("Reload review", action: load)
+                            } else {
+                                Button("Retry actions") { Task { await loadProjectTasks(item) } }
+                            }
+                        }
+                    } else {
+                        ProgressView("Loading project actions…")
+                    }
                 }
+                .task(id: item.id) { await loadProjectTasks(item) }
                 Divider()
                 decisionControls(item)
+                    .disabled(taskPageState.readiness != .ready)
                 if let error = model.error {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
@@ -71,7 +138,8 @@ struct ProjectReviewView: View {
         .confirmationDialog("Archive this completed project?", isPresented: $confirmingArchive) {
             Button("Archive project") {
                 guard index < items.count else { return }
-                if model.archiveProject(items[index].id) { removeCurrent() }
+                let id = items[index].id
+                Task { if await model.archiveProject(id) { removeCurrent() } }
             }
             Button("Keep project", role: .cancel) {}
         } message: {
@@ -105,9 +173,10 @@ struct ProjectReviewView: View {
             }
             ForEach(TaskList.allCases) { list in
                 let rows = item.openTasks.filter { $0.state == list.taskState }
-                if !rows.isEmpty {
+                let wholeCount = item.count(list.taskState)
+                if wholeCount > 0 {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("\(list.title.uppercased()) · \(rows.count)")
+                        Text("\(list.title.uppercased()) · \(wholeCount)")
                             .font(.caption.bold())
                             .foregroundStyle(.secondary)
                         ForEach(rows) { task in
@@ -125,11 +194,14 @@ struct ProjectReviewView: View {
                 }
             }
             let closures = item.tasks.filter(\.state.isTerminal)
-                .sorted { ($0.completedAt ?? $0.cancelledAt ?? .distantPast) > ($1.completedAt ?? $1.cancelledAt ?? .distantPast) }
-            if !closures.isEmpty {
+            let displayedClosures = model.workspace.isRustSelected
+                ? Array(closures.prefix(3))
+                : Array(closures.sorted { ($0.completedAt ?? $0.cancelledAt ?? .distantPast) > ($1.completedAt ?? $1.cancelledAt ?? .distantPast) }.prefix(3))
+            if !displayedClosures.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("RECENT CLOSURES").font(.caption.bold()).foregroundStyle(.secondary)
-                    ForEach(Array(closures.prefix(3))) { task in
+                    Text(model.workspace.isRustSelected ? "CLOSURES ON THIS PAGE" : "RECENT CLOSURES")
+                        .font(.caption.bold()).foregroundStyle(.secondary)
+                    ForEach(displayedClosures) { task in
                         Text("\(task.state == .completed ? "Completed" : "Cancelled") · \(task.title)")
                             .font(.subheadline)
                     }
@@ -141,12 +213,16 @@ struct ProjectReviewView: View {
 
     @ViewBuilder
     private func decisionControls(_ item: ProjectReviewItem) -> some View {
-        if item.openTasks.isEmpty {
+        if item.openTaskCount == 0 {
             Text("No open actions. If the outcome is complete, archive this project; otherwise add a Next action.")
                 .font(.subheadline)
             Button("Archive completed project…") { confirmingArchive = true }
                 .disabled(!model.canArchiveProject)
                 .help("Add or clear the current task draft before archiving")
+        } else if item.openTasks.isEmpty {
+            Text("No open actions are on this page. Load another actions page to review the project.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         } else {
             Picker("Your decision", selection: $decision) {
                 Text("Choose after checking the project").tag(ProjectReviewDecision?.none)
@@ -161,18 +237,43 @@ struct ProjectReviewView: View {
                 .foregroundStyle(.secondary)
             Button("Mark reviewed") {
                 guard let decision else { return }
-                if model.markProjectReviewed(item, decision: decision) { removeCurrent() }
+                if model.workspace.isRustSelected {
+                    Task { if await model.markNativeProjectReviewed(item, decision: decision) { removeCurrent() } }
+                } else if model.markProjectReviewed(item, decision: decision) {
+                    removeCurrent()
+                }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!canMark(item))
+            .disabled(!canMark(item) || model.projectReviewTaskPageState(item).readiness != .ready)
         }
     }
 
+    private func changeTaskPage(previous: Bool, item: ProjectReviewItem) {
+        Task {
+            let updated = previous
+                ? await model.previousProjectReviewTaskPage(item)
+                : await model.nextProjectReviewTaskPage(item)
+            guard index < items.count, items[index].id == item.id,
+                  items[index].projectionGeneration == item.projectionGeneration else { return }
+            items[index] = updated
+        }
+    }
+
+    private func loadProjectTasks(_ item: ProjectReviewItem) async {
+        let updated = await model.reloadProjectReviewTaskPage(item)
+        guard !Task.isCancelled, index < items.count, items[index].id == item.id,
+              items[index].projectionGeneration == item.projectionGeneration else { return }
+        items[index] = updated
+    }
+
     private func load() {
-        items = model.loadProjectReview()
-        index = 0
-        decision = nil
-        loaded = true
+        loaded = false
+        Task {
+            items = await model.loadProjectReview()
+            index = 0
+            decision = nil
+            loaded = true
+        }
     }
 
     private func removeCurrent() {
@@ -203,9 +304,11 @@ struct ProjectReviewView: View {
         if item.hasChanges { result.append("Actions changed since the last review") }
         if item.project.desiredOutcome?.isEmpty ?? true { result.append("Desired outcome is missing") }
         if item.nextCount == 0 { result.append("No Next action") }
-        let weekAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        let oldWaiting = item.openTasks.filter { $0.state == .waiting && ($0.waitingSince.map { $0 < weekAgo } ?? false) }.count
-        if oldWaiting > 0 { result.append("\(oldWaiting) Waiting item\(oldWaiting == 1 ? "" : "s") older than a week") }
+        if !model.workspace.isRustSelected {
+            let weekAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+            let oldWaiting = item.openTasks.filter { $0.state == .waiting && ($0.waitingSince.map { $0 < weekAgo } ?? false) }.count
+            if oldWaiting > 0 { result.append("\(oldWaiting) Waiting item\(oldWaiting == 1 ? "" : "s") older than a week") }
+        }
         if item.somedayCount > 0 {
             result.append("\(item.somedayCount) Someday item\(item.somedayCount == 1 ? "" : "s") to reconsider")
         }

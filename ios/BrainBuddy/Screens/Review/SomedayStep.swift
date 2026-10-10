@@ -19,7 +19,7 @@ struct SomedayStep: View {
     var body: some View {
         ReviewItemStep(
             context: context, step: .someday, list: .someday, emptyTitle: ReviewCopy.nothingInSomeday,
-            queue: { workspace.somedayDue().shown.map(\.id) },
+            queue: { workspace.somedayDue(session: context.sessionID).shown },
             meta: { task in
                 var parts = [task.projectID.flatMap { workspace.project($0)?.name } ?? ReviewCopy.noProject]
                 if task.parked != nil { parts.append(ReviewCopy.markerParked) }

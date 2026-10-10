@@ -495,6 +495,9 @@ fn activate_in(
     }
     check_not_older(&base, target, watermark)?;
 
+    let local_before = crate::localfacts::snapshot_before(tx, workspace_id)?;
+    let same_generation = base.server_generation() == Some(target);
+
     // Replace the base while streaming the staged pages: each page and the
     // whole stream is checked against the manifest as it goes by, and any
     // disagreement (or a missing page) rolls this transaction back, old base
@@ -521,6 +524,14 @@ fn activate_in(
             }
             install_change(tx, workspace_id, change)
         },
+    )?;
+    crate::localfacts::snapshot_after(
+        tx,
+        workspace_id,
+        local_before,
+        same_generation,
+        target,
+        watermark,
     )?;
     tx.execute("UPDATE sync_meta SET server_generation = ?1", [target])?;
     let completed = settle_accepted(tx, workspace_id, target, watermark)?;

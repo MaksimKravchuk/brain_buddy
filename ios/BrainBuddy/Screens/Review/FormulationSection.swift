@@ -28,7 +28,7 @@ struct FormulationSection: View {
     var body: some View {
         // Read, so each tick re-evaluates the state against the clock.
         let _ = minute
-        if let state = FormulationSectionState(task: task, workspace: workspace) {
+        if let state = FormulationSectionState(task: task, workspace: workspace, formulation: workspace.taskDetailFormulation(task.id)) {
             Section {
                 FormulationSectionContent(state: state, onDecide: onDecide)
             } header: {
@@ -75,7 +75,7 @@ extension FormulationSectionState {
     /// Nil when the section is not shown. Dates and times are shown in the
     /// device's current zone (ios-commands §6); every rule is Core's.
     @MainActor
-    init?(task: TaskRecord, workspace: Workspace) {
+    init?(task: TaskRecord, workspace: Workspace, formulation: RustWorkspaceFormulation?) {
         guard workspace.reviewExposed else { return nil }
         let zone = TimeZone.current
         if task.state == .someday, let parked = task.parked {
@@ -88,14 +88,15 @@ extension FormulationSectionState {
             self.init(
                 kind: .parked(
                     on: ReviewCopy.day(parked.at, in: zone), at: ReviewCopy.time(parked.at, in: zone),
-                    afterDays: GTDQueries.parkedAfterDays(task), archivedProject: archived
+                    afterDays: workspace.isRustSelected ? formulation?.parkedAfterDays : GTDQueries.parkedAfterDays(task), archivedProject: archived
                 ),
                 age: nil
             )
             return
         }
-        guard task.state == .next, let clock = task.formulation, let kind = workspace.formulationClass(of: task.id),
-            let instants = workspace.derivedInstants(of: task.id)
+        guard task.state == .next, let clock = task.formulation,
+            let kind = workspace.isRustSelected ? formulation?.classification : workspace.formulationClass(of: task.id),
+            let instants = workspace.isRustSelected ? formulation?.derived : workspace.derivedInstants(of: task.id)
         else { return nil }
         let age = ReviewCopy.daysInNext(since: clock.startedAt, now: workspace.reviewNow)
         switch kind {

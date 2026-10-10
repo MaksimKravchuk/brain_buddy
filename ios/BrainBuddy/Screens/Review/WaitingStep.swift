@@ -19,7 +19,7 @@ struct WaitingStep: View {
     var body: some View {
         ReviewItemStep(
             context: context, step: .waiting, list: .waiting, emptyTitle: ReviewCopy.nothingToChase,
-            queue: { workspace.waitingDue().map(\.id) },
+            queue: { workspace.waitingDue(session: context.sessionID) },
             meta: { task in
                 let days = task.waitingSince.map { Int(workspace.reviewNow.timeIntervalSince($0) / FormulationRule.day) } ?? 0
                 return ReviewCopy.waitingMeta(waitingFor: task.waitingFor ?? "", days: max(0, days))
@@ -63,22 +63,24 @@ struct ReviewItemStep: View {
     let step: ReviewStep
     let list: TaskState
     let emptyTitle: String
-    let queue: () -> [TaskID]
+    let queue: () -> [TaskRecord]
     let meta: (TaskRecord) -> String
     let choices: [ReviewItemChoice]
 
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
-    @State private var snapshot: [TaskID]?
+    @State private var snapshot: [TaskRecord]?
     /// The task as the item showed it: a change since makes the decision stale (FR-011).
     @State private var shown: ShownTask?
     @State private var asking: ReviewItemChoice?
     @State private var text = ""
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(
         context: ReviewStepContext, step: ReviewStep, list: TaskState, emptyTitle: String,
-        queue: @escaping () -> [TaskID], meta: @escaping (TaskRecord) -> String, choices: [ReviewItemChoice]
+        queue: @escaping () -> [TaskRecord], meta: @escaping (TaskRecord) -> String, choices: [ReviewItemChoice]
     ) {
         self.context = context
         self.step = step
@@ -90,6 +92,8 @@ struct ReviewItemStep: View {
     }
 
     var body: some View {
+        let read = WorkspaceReviewRead.queue(step, context.sessionID)
+        let page = workspace.reviewPageState(read)
         let task = current
         ReviewItemContent(
             title: task?.title ?? ((snapshot ?? []).isEmpty ? emptyTitle : ReviewCopy.stepTitle(step)),
@@ -107,17 +111,27 @@ struct ReviewItemStep: View {
         )
         .id(task?.id)
         .onAppear { if snapshot == nil { snapshot = queue() } }
+        .task { try? await workspace.prepareReviewRead(read); snapshot = queue() }
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read); snapshot = queue() } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read); snapshot = queue() },
+                next: { try? await workspace.nextReviewPage(read); snapshot = queue() })
+        }
         .onChange(of: task?.id, initial: true) { _, _ in
             asking = nil
             text = ""
-            shown = task.map { workspace.shownTask(of: $0) }
+            shown = task.flatMap { workspace.reviewShownTask($0.id, read: .queue(step, context.sessionID)) }
         }
     }
 
     private var current: TaskRecord? {
         guard let snapshot else { return nil }
-        let decided = Set(workspace.state.review.decisions.values.filter { $0.sessionID == context.sessionID }.map(\.taskID))
-        return snapshot.lazy.compactMap { workspace.task($0) }.first { $0.state == list && !decided.contains($0.id) }
+        return snapshot.first { $0.state == list }
     }
 
     private func choose(_ choice: ReviewItemChoice, for task: TaskRecord) {
@@ -131,31 +145,43 @@ struct ReviewItemStep: View {
     }
 
     private func decide(_ type: DecisionType, _ task: TaskRecord, title: String?) {
+        guard !isSaving else { return }
+        isSaving = true
+        let expectedTask = shown
+        let submittedEditorID = editorID
+        Task { await decideDurably(type, task, title: title, expectedTask: expectedTask, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func decideDurably(_ type: DecisionType, _ task: TaskRecord, title: String?, expectedTask: ShownTask?, editorID submittedEditorID: String) async {
+        defer { isSaving = false }
         let typed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let decisionID: DecisionID
         do {
-            decisionID = try workspace.decide(
-                type, on: task.id, title: typed, sessionID: context.sessionID, expectedTask: shown
+            decisionID = try await workspace.decide(
+                type, on: task.id, title: typed, sessionID: context.sessionID, expectedTask: expectedTask,
+                editorID: submittedEditorID
             )
         } catch {
-            switch error {
+            guard let validation = error as? GTDValidationError else {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
+            switch validation {
             case .formulationChanged, .taskNotFound:
                 problem = ReviewCopy.stale
-                shown = workspace.task(task.id).map { workspace.shownTask(of: $0) }
             case .projectArchived where type == .followUp:
                 problem = ReviewCopy.archivedFollowUp
             default:
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
             return
         }
         problem = nil
         asking = nil
         text = ""
-        ReviewDraftField.submitted(
-            .reviewStep(session: context.sessionID, step: step, item: task.id.rawValue), in: workspace,
-            fields: context.fields
-        )
+        context.fields.set(.reviewStep(session: context.sessionID, step: step, item: task.id.rawValue), dirty: false)
+        snapshot = queue()
+        editorID = UUID().uuidString
         DecisionUndoToast.show(
             decisionID, decision: type, title: typed ?? task.title, taskID: task.id, workspace: workspace, toasts: toasts
         )

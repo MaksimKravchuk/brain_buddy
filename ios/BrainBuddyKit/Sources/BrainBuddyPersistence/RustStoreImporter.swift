@@ -110,7 +110,7 @@ extension RustImportCounts {
 ///
 /// The pending operations and sync issues of the legacy file are carried whole and counted
 /// (`counts.outboxEntries`, `counts.issues`) but not converted: the workspace must not run on the
-/// Rust store until the outbox import has consumed them.
+/// Rust store until `RustOutboxImporter` has classified them (`mayRun`).
 public struct RustStoreImporter: Sendable {
     private let runtime: RustBridgeRuntime
     private let legacyFile: DocumentFile
@@ -155,6 +155,170 @@ public struct RustStoreImporter: Sendable {
         } catch let error as RustStoreImportError where error == .verificationFailed(check: "expected_counts") {
             return try await attempt()
         }
+    }
+
+    /// Callable T043 bootstrap. The app's default epoch and T044 activation
+    /// stay unchanged. Nothing is exposed until every preparation step succeeds.
+    public func prepareAccountlessRuntime(facade: RustDomainFacade, reviewEnabled: Bool = false)
+        async throws -> RustWorkspaceRuntime {
+        let report = try await run()
+        let source = try await retainedSource(report)
+        let document = source.document
+        guard document.account == nil else {
+            throw RustStoreImportError.failed(RustBridgeError(code: "INVALID_REQUEST", field: "account_less_import"))
+        }
+        let retained = retainedSourceURL(report)
+        let workspace = try await runtime.openStore(workspaceID: workspaceID, databaseURL: databaseURL,
+            busyTimeoutMilliseconds: busyTimeoutMilliseconds)
+        do {
+            guard case .ready = try await workspace.status() else { throw RustBridgeError(code: "READ_ONLY_RECOVERY") }
+            let metadata = try await workspace.captureLegacyReviewMetadata()
+            guard let token = try JSONSerialization.jsonObject(with: metadata.token) as? [String: Any],
+                  token["import_source_sha256"] as? String == report.sourceSHA256 else {
+                throw RustStoreImportError.sourceChanged
+            }
+            let instant = now()
+            let inputs = try facade.workspaceQueryInputs(at: instant, zone: facade.context.deviceTimeZone,
+                reviewExposed: reviewEnabled)
+            guard let root = try JSONSerialization.jsonObject(with: inputs) as? [String: Any], let policy = root["policy"] else {
+                throw RustDomainError.malformedResult
+            }
+            let context = RustWorkspaceContext(now: instant, timeZone: facade.context.deviceTimeZone,
+                actorID: facade.context.actorID, policy: try JSONSerialization.data(withJSONObject: policy, options: [.sortedKeys]))
+            var bindings: [RustWorkspaceIdentityBinding] = []
+            if !metadata.alreadyActive {
+                let identities = Self.reviewIdentities(in: document.base)
+                for offset in stride(from: 0, to: identities.count, by: 200) {
+                    bindings += try await workspace.resolveIdentities(Array(identities[offset..<min(offset + 200, identities.count)]))
+                }
+                let prepared = try facade.workspacePrepareLegacyReview(document.base, bindings: bindings)
+                _ = try await workspace.activateLegacyReview(metadata, prepared: prepared, context: context)
+            }
+            try await workspace.establishAccountlessFromImport(retainedSourceURL: retained)
+            for source in Self.privateReviewSources(in: document.base) {
+                if try await workspace.localReviewPrivateSourceCompleted(retainedSourceURL: retained, selected: source) { continue }
+                var cursor: String?
+                repeat {
+                    guard let fragment = try await workspace.captureLocalReviewPrivateFragment(retainedSourceURL: retained,
+                        selected: source, after: cursor, now: now()) else { break }
+                    let prepared = try facade.workspacePrepareLegacyReviewPrivate(fragment.page, now: now())
+                    _ = try await workspace.admitLocalReviewPrivateFragment(retainedSourceURL: retained, prepared: prepared, now: now())
+                    cursor = fragment.nextCursor
+                } while cursor != nil
+            }
+            let outbox = RustOutboxImporter(runtime: runtime, databaseURL: databaseURL, workspaceID: workspaceID,
+                busyTimeoutMilliseconds: busyTimeoutMilliseconds, now: now)
+            if try await outbox.run().mayRun { return workspace }
+            // Prepare the verified ORIGINAL sequence once, including converted
+            // prefixes. Re-encoding a suffix from base loses dependency lineage.
+            let original = try await Task.detached(priority: .userInitiated) {
+                try Self.neverSentSource(source.bytes, document: document)
+            }.value
+            if !original.isEmpty {
+                let plan = try await workspace.beginLegacyConversion(context: context)
+                guard plan.sourceCount == UInt64(original.count) else { throw RustStoreImportError.sourceChanged }
+                let commands = original.map(\.command)
+                let requests = try facade.workspaceIdentityRequests(for: commands, in: document.base, at: plan.context.now)
+                bindings = []
+                for offset in stride(from: 0, to: requests.count, by: 200) {
+                    bindings += try await workspace.resolveIdentities(Array(requests[offset..<min(offset + 200, requests.count)]))
+                }
+                let frozenFacade = RustDomainFacade(runtime: facade.runtime, context: RustDomainContext(
+                    scopeID: facade.context.scopeID, actorID: plan.context.actorID, deviceTimeZone: plan.context.timeZone))
+                let ownedBindings = bindings
+                let encoded = try await Task.detached(priority: .userInitiated) {
+                    try frozenFacade.workspaceLegacyCommands(commands, commandKeys: original.map(\.key),
+                        at: original.map(\.date), in: document.base, bindings: ownedBindings)
+                }.value
+                var prepared: [String: RustWorkspaceLegacyConversion] = [:]
+                for (entry, command) in zip(original, encoded) {
+                    guard prepared[entry.id] == nil else { throw RustStoreImportError.sourceChanged }
+                    prepared[entry.id] = RustWorkspaceLegacyConversion(entryID: entry.id, issuedAt: entry.issuedAt, command: command)
+                }
+                var cursor: String?
+                repeat {
+                    let page = try await workspace.legacyConversionPage(token: plan.token, after: cursor)
+                    guard !page.items.isEmpty else { throw RustStoreImportError.sourceChanged }
+                    let conversion = try page.items.map { entry -> RustWorkspaceLegacyConversion in
+                        guard let item = prepared[entry.entryID], item.issuedAt == entry.issuedAt,
+                              item.command.commandID == entry.idempotencyKey else { throw RustStoreImportError.sourceChanged }
+                        return item
+                    }
+                    _ = try await workspace.convertLegacyConversionPage(conversion, token: plan.token,
+                        pageToken: page.pageToken, atomicStage: plan.atomicGroup)
+                    cursor = page.nextAfter
+                } while cursor != nil
+                if plan.atomicGroup { _ = try await workspace.finalizeLegacyConversion(token: plan.token) }
+            }
+            guard try await outbox.run().mayRun else { throw RustBridgeError(code: "LEGACY_OUTBOX_NOT_READY") }
+            return workspace
+        } catch {
+            try? await workspace.close()
+            throw error
+        }
+    }
+
+    private func retainedSourceURL(_ report: RustLegacyImportReport) -> URL {
+        (backupDirectory ?? legacyFile.url.deletingLastPathComponent()).appendingPathComponent(report.backupFile)
+    }
+
+    /// Check the exact owned bytes before decoding; a second path read would
+    /// not prove that the native codec saw the admitted original source.
+    func retainedDocument(_ report: RustLegacyImportReport) async throws -> StoreDocument {
+        try await retainedSource(report).document
+    }
+
+    private func retainedSource(_ report: RustLegacyImportReport) async throws -> (bytes: Data, document: StoreDocument) {
+        let retained = retainedSourceURL(report)
+        let bytes = try await Task.detached(priority: .userInitiated) { try Data(contentsOf: retained) }.value
+        guard UInt64(bytes.count) == report.sourceBytes,
+              try await runtime.importSourceSHA256(bytes) == report.sourceSHA256 else { throw RustStoreImportError.sourceChanged }
+        let document = try await Task.detached(priority: .userInitiated) { try StoreDocumentCoding.decode(bytes) }.value
+        return (bytes, document)
+    }
+
+    private struct OriginalNeverSent: Sendable {
+        let id: String
+        let key: String
+        let issuedAt: String
+        let date: Date
+        let command: GTDCommand
+    }
+
+    /// UUID casing and the original timestamp spelling belong to the immutable
+    /// source. A Codable UUID round-trip cannot recover those exact strings.
+    private static func neverSentSource(_ bytes: Data, document: StoreDocument) throws -> [OriginalNeverSent] {
+        guard let root = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+              let rows = root["outbox"] as? [[String: Any]], rows.count == document.outbox.count else {
+            throw RustStoreImportError.sourceChanged
+        }
+        return try zip(rows, document.outbox).compactMap { raw, entry in
+            guard !entry.hasBeenSent else { return nil }
+            guard let id = raw["id"] as? String, UUID(uuidString: id) == entry.id,
+                  let key = raw["idempotencyKey"] as? String, UUID(uuidString: key) == entry.idempotencyKey,
+                  let issuedAt = raw["issuedAt"] as? String, let date = ISO8601Timestamp.date(from: issuedAt),
+                  date == entry.issuedAt else { throw RustStoreImportError.sourceChanged }
+            return OriginalNeverSent(id: id, key: key, issuedAt: issuedAt, date: date, command: entry.command)
+        }
+    }
+
+    private static func reviewIdentities(in state: GTDState) -> [RustWorkspaceIdentityRequest] {
+        state.tasks.keys.sorted().map { .init(entityType: "task", localID: $0.rawValue) }
+        + state.projects.keys.sorted().map { .init(entityType: "project", localID: $0.rawValue) }
+        + state.tags.keys.sorted().map { .init(entityType: "tag", localID: $0.rawValue) }
+        + state.review.sessions.keys.sorted().map { .init(entityType: "review_session", localID: $0.rawValue) }
+        + state.review.decisions.keys.sorted().map { .init(entityType: "review_decision", localID: $0.rawValue) }
+        + state.review.bulkReleases.keys.sorted().map { .init(entityType: "review_bulk_release", localID: $0.rawValue) }
+    }
+
+    private static func privateReviewSources(in state: GTDState) -> [RustWorkspaceLocalReviewSource] {
+        // Only the original threshold clock is private settings evidence.
+        // Untouched defaults have no activated public settings row to enrich.
+        (state.review.settings.thresholdChangedAt == nil ? [] : [.init(.settings, sourceID: "settings")])
+        + state.review.sessions.keys.sorted().map { .init(.session, sourceID: $0.rawValue) }
+        + state.review.decisions.keys.sorted().map { .init(.decision, sourceID: $0.rawValue) }
+        + state.review.bulkReleases.keys.sorted().map { .init(.bulkRelease, sourceID: $0.rawValue) }
+        + state.tasks.values.filter { $0.parked != nil }.sorted { $0.id < $1.id }.map { .init(.taskPark, sourceID: $0.id.rawValue) }
     }
 
     private func attempt() async throws -> RustLegacyImportReport {

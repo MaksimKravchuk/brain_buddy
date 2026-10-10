@@ -13,6 +13,8 @@ struct SubtasksSection: View {
     @Environment(Workspace.self) private var workspace
     @State private var newTitle = ""
     @State private var errorMessage: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isAdding: Bool
 
     init(task: TaskRecord, isReadOnly: Bool = false) {
@@ -54,9 +56,10 @@ struct SubtasksSection: View {
     private var addRow: some View {
         Label {
             TextField("Add a subtask", text: $newTitle)
+                .disabled(isSaving)
                 .focused($isAdding)
                 .submitLabel(.done)
-                .onSubmit(add)
+                .onSubmit { Task { await add() } }
                 .accessibilityLabel("New subtask")
         } icon: {
             Image(systemName: "plus")
@@ -66,17 +69,20 @@ struct SubtasksSection: View {
         .frame(minHeight: BBMetrics.rowMinHeight)
     }
 
-    private func add() {
+    @MainActor private func add() async {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
+        guard !title.isEmpty, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try workspace.addSubtask(to: task.id, title: title)
+            try await workspace.addSubtask(to: task.id, title: title, editorID: editorID)
             newTitle = ""
+            editorID = UUID().uuidString
             errorMessage = nil
             // Keep the keyboard up for the next one.
             isAdding = true
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }
@@ -89,6 +95,9 @@ private struct DetailSubtaskRow: View {
 
     @Environment(Workspace.self) private var workspace
     @State private var title: String
+    @State private var editorID = UUID().uuidString
+    @State private var transitionEditorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isEditing: Bool
     /// The state symbol sits in the same icon column as the rows above.
     @ScaledMetric(relativeTo: .body) private var iconColumn: CGFloat = BBMetrics.iconColumn
@@ -126,6 +135,7 @@ private struct DetailSubtaskRow: View {
 
             if isOpen && !isReadOnly {
                 TextField("Subtask", text: $title, axis: .vertical)
+                    .disabled(isSaving)
                     .focused($isEditing)
                     .submitLabel(.done)
                     .onSubmit { isEditing = false }
@@ -156,7 +166,7 @@ private struct DetailSubtaskRow: View {
                 Menu {
                     ForEach(availableActions, id: \.self) { action in
                         Button {
-                            transition(action)
+                            Task { await transition(action) }
                         } label: {
                             Label(Self.title(for: action), systemImage: Self.symbol(for: action))
                         }
@@ -172,12 +182,12 @@ private struct DetailSubtaskRow: View {
             }
         }
         .onChange(of: isEditing) { _, editing in
-            if !editing { commitRename() }
+            if !editing { Task { await commitRename() } }
         }
         .onChange(of: subtask.title) { _, newValue in
             if !isEditing { title = newValue }
         }
-        .onDisappear { commitRename() }
+        .onDisappear { Task { await commitRename() } }
     }
 
     private var symbol: String {
@@ -219,34 +229,40 @@ private struct DetailSubtaskRow: View {
     }
 
     private func toggle() {
-        transition(isOpen ? .complete : .reopen)
+        Task { await transition(isOpen ? .complete : .reopen) }
     }
 
-    private func transition(_ action: SubtaskTransitionAction) {
-        commitRename()
+    @MainActor private func transition(_ action: SubtaskTransitionAction) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        guard await commitRename() else { return }
         do {
-            try workspace.transitionSubtask(subtask.id, in: taskID, action)
+            try await workspace.transitionSubtask(subtask.id, in: taskID, action, editorID: transitionEditorID)
+            transitionEditorID = UUID().uuidString
             onProblem(nil)
         } catch {
-            onProblem(error.message)
+            onProblem(TaskCommandRunner.message(for: error))
         }
     }
 
-    private func commitRename() {
-        guard isOpen, !isReadOnly else { return }
+    @MainActor private func commitRename() async -> Bool {
+        guard isOpen, !isReadOnly else { return true }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != subtask.title else { return }
+        guard trimmed != subtask.title else { return true }
         guard !trimmed.isEmpty else {
             title = subtask.title
-            return
+            return true
         }
         do {
-            try workspace.renameSubtask(subtask.id, in: taskID, to: trimmed)
+            try await workspace.renameSubtask(subtask.id, in: taskID, to: trimmed, editorID: editorID)
+            editorID = UUID().uuidString
             title = trimmed
             onProblem(nil)
+            return true
         } catch {
-            title = subtask.title
-            onProblem(error.message)
+            onProblem(TaskCommandRunner.message(for: error))
+            return false
         }
     }
 }

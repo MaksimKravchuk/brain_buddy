@@ -8,8 +8,8 @@
 
 use super::errors::{DomainError, Reason};
 use super::primitives::{
-    ActorId, BulkId, CommentId, DecisionId, ProjectId, ProviderName, SessionId, SubtaskId, TagId,
-    TaskId, ZoneName,
+    ActorId, BulkId, CommentId, DecisionId, FormulationId, ProjectId, ProviderName, SessionId,
+    SubtaskId, TagId, TaskId, ZoneName,
 };
 use super::references::{AliasRef, Dependencies, ProjectRef, TagRef};
 use super::review_commands::{
@@ -26,7 +26,8 @@ use super::tasks::{
     TaskTransition, TaskUpdate,
 };
 use super::vocabulary::{
-    DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort, WriterOrigin,
+    BulkKind, DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort,
+    WriterOrigin,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{CommandEnvelope, CommandRef, Precondition};
@@ -630,17 +631,54 @@ pub enum Query {
     TaskDetail {
         task_id: TaskId,
     },
+    /// Runtime-only exact public task views, with partial children and frozen rule facts.
+    NativeTaskViews {
+        task_ids: Vec<TaskId>,
+    },
     // Field-less variants are written `{}`: serde ignores unknown fields on a
     // unit variant of an internally tagged enum, a struct variant refuses them.
     ListCounts {},
     Projects {
         filter: ProjectFilter,
     },
+    /// Runtime-only bounded catalog selector; the server Projects shape stays unchanged.
+    NativeProjects {
+        filter: ProjectFilter,
+        #[serde(default)]
+        search: Option<String>,
+        #[serde(default)]
+        project_id: Option<ProjectId>,
+    },
+    NativeTags {
+        #[serde(default)]
+        search: Option<String>,
+        #[serde(default)]
+        sort: NativeTagSort,
+    },
     ProjectDisplay {
         project_id: ProjectId,
     },
     Tags {},
     ReviewState {},
+    TaskFormulation {
+        task_id: TaskId,
+    },
+    ParkReturnShown {
+        task_id: TaskId,
+        parked_at: Option<Instant>,
+        formulation_id: Option<FormulationId>,
+    },
+    RestartCandidates {},
+    AutoParkDue {},
+    ReviewSummary {
+        session_id: Option<SessionId>,
+        #[serde(default)]
+        local: Option<ReviewPresentation>,
+    },
+    OpenReleases {
+        release_kind: BulkKind,
+        session_id: Option<SessionId>,
+    },
     ReviewQueue {
         step: StepCode,
         session_id: Option<SessionId>,
@@ -661,14 +699,38 @@ pub enum Query {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ListMode {
+    OpenList {
+        list: OpenList,
+    },
+    Project {
+        project_id: ProjectId,
+    },
+    Tag {
+        tag_id: TagId,
+    },
     /// Completed or cancelled tasks, most recent first.
-    History { kind: HistoryKind },
+    History {
+        kind: HistoryKind,
+    },
     /// Open dated tasks as Overdue, Today and Upcoming sections.
     Agenda {},
     /// One of the agenda's sections on its own.
-    DateView { view: DateView },
+    DateView {
+        view: DateView,
+    },
     /// Title and notes, NFKC and case- and diacritic-insensitive, all states.
-    Search { text: String },
+    Search {
+        text: String,
+    },
+}
+
+/// Native tag catalog order. Default/server ordering is unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeTagSort {
+    #[default]
+    Name,
+    OpenCount,
 }
 
 /// `ListOptions` of `Queries.swift`; every field is optional on the wire.
@@ -689,6 +751,8 @@ pub struct ListOptions {
     /// Narrow to tasks carrying this tag. A tag the read set lacks matches
     /// nothing; it is not an error.
     pub tag_filter: Option<TagId>,
+    /// Optional title/notes search combined with this destination before paging.
+    pub search: Option<String>,
 }
 
 /// The explicit facts a query reads besides the state.
@@ -698,4 +762,50 @@ pub struct QueryInputs {
     pub now: Instant,
     pub device_zone: ZoneName,
     pub policy: Policy,
+}
+
+/// Device presentation marks supplied explicitly; never canonical task/session state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReviewPresentation {
+    pub explainer_seen_locally: bool,
+    pub activated_at: Option<Instant>,
+    pub ended_elsewhere_session: Option<SessionId>,
+}
+
+/// Borrowed private Review bookkeeping capability. It cannot be serialized.
+/// Ordinary rules derive it from their existing server authority; only the
+/// Rust dispatcher constructs the distinct local capability.
+pub struct ReviewInputs<'a> {
+    execution: &'a ExecutionInputs,
+    private_review: bool,
+    local_review: bool,
+}
+impl<'a> ReviewInputs<'a> {
+    pub fn server(execution: &'a ExecutionInputs) -> Self {
+        Self {
+            execution,
+            private_review: execution.authoritative,
+            local_review: false,
+        }
+    }
+    pub(crate) fn local(execution: &'a ExecutionInputs) -> Self {
+        Self {
+            execution,
+            private_review: true,
+            local_review: true,
+        }
+    }
+    pub fn private_review(&self) -> bool {
+        self.private_review
+    }
+    pub fn local_review(&self) -> bool {
+        self.local_review
+    }
+}
+impl std::ops::Deref for ReviewInputs<'_> {
+    type Target = ExecutionInputs;
+    fn deref(&self) -> &ExecutionInputs {
+        self.execution
+    }
 }

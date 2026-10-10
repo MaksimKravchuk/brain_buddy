@@ -92,10 +92,12 @@ public struct ListOptions: Hashable, Codable, Sendable {
     public var priorities: Set<TaskPriority>
     /// Narrow to tasks carrying this tag (GTD "context").
     public var tagFilter: TagID?
+    /// Narrow the destination with canonical title/notes search before paging.
+    public var search: String?
 
     public init(
         sort: TaskSort = .manual, groupByProject: Bool = false, showCompleted: Bool = false,
-        showCancelled: Bool = false, priorities: Set<TaskPriority> = [], tagFilter: TagID? = nil
+        showCancelled: Bool = false, priorities: Set<TaskPriority> = [], tagFilter: TagID? = nil, search: String? = nil
     ) {
         self.sort = sort
         self.groupByProject = groupByProject
@@ -103,6 +105,7 @@ public struct ListOptions: Hashable, Codable, Sendable {
         self.showCancelled = showCancelled
         self.priorities = priorities
         self.tagFilter = tagFilter
+        self.search = search
     }
 }
 
@@ -124,12 +127,16 @@ public struct TaskSection: Identifiable, Hashable, Sendable {
     public var title: String?
     public var kind: Kind
     public var tasks: [TaskRecord]
+    private var canonicalTotalCount: Int?
+    /// Whole matching section count; legacy constructors retain their computed total.
+    public var totalCount: Int { canonicalTotalCount ?? tasks.count }
 
-    public init(id: String, title: String?, kind: Kind, tasks: [TaskRecord]) {
+    public init(id: String, title: String?, kind: Kind, tasks: [TaskRecord], totalCount: Int? = nil) {
         self.id = id
         self.title = title
         self.kind = kind
         self.tasks = tasks
+        canonicalTotalCount = totalCount
     }
 }
 
@@ -137,10 +144,20 @@ public struct TaskListResult: Hashable, Sendable {
     public var sections: [TaskSection]
     /// Open tasks in the result (terminal history rows excluded).
     public var openCount: Int
+    private var canonicalTotalCount: Int?
+    private var canonicalCompletedCount: Int?
+    private var canonicalCancelledCount: Int?
+    public var totalCount: Int { canonicalTotalCount ?? sections.reduce(0) { $0 + $1.totalCount } }
+    public var completedCount: Int { canonicalCompletedCount ?? sections.flatMap(\.tasks).filter { $0.state == .completed }.count }
+    public var cancelledCount: Int { canonicalCancelledCount ?? sections.flatMap(\.tasks).filter { $0.state == .cancelled }.count }
 
-    public init(sections: [TaskSection], openCount: Int) {
+    public init(sections: [TaskSection], openCount: Int, totalCount: Int? = nil,
+                completedCount: Int? = nil, cancelledCount: Int? = nil) {
         self.sections = sections
         self.openCount = openCount
+        canonicalTotalCount = totalCount
+        canonicalCompletedCount = completedCount
+        canonicalCancelledCount = cancelledCount
     }
 
     public var isEmpty: Bool { sections.allSatisfy(\.tasks.isEmpty) }
@@ -178,16 +195,19 @@ public struct ProjectSummary: Identifiable, Hashable, Sendable {
     public var project: ProjectRecord
     public var openTaskCount: Int
     public var nextActionCount: Int
+    /// Whole-project facts from a canonical native summary, never a task page count.
+    public var countsByState: [OpenList: Int]?
     /// An active project without an open next action (including one with no
     /// open tasks at all) — the GTD signal that a project is stuck.
     public var needsNextAction: Bool { project.state == .active && nextActionCount == 0 }
 
     public var id: ProjectID { project.id }
 
-    public init(project: ProjectRecord, openTaskCount: Int, nextActionCount: Int) {
+    public init(project: ProjectRecord, openTaskCount: Int, nextActionCount: Int, countsByState: [OpenList: Int]? = nil) {
         self.project = project
         self.openTaskCount = openTaskCount
         self.nextActionCount = nextActionCount
+        self.countsByState = countsByState
     }
 }
 

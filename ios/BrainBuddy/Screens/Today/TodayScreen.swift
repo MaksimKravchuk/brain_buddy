@@ -9,12 +9,15 @@ struct TodayScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     @Environment(\.dayChangeCount) private var dayChangeCount
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init() {}
 
     var body: some View {
         let _ = dayChangeCount
         let agenda = workspace.list(.agenda)
+        let page = workspace.listPageState(.agenda)
+        WorkspaceQueryContent(readiness: page.readiness, retry: { Task { await workspace.prepareList(.agenda) } }) {
         List {
             if agenda.isEmpty {
                 EmptyStateView(
@@ -36,6 +39,10 @@ struct TodayScreen: View {
         }
         .listStyle(.plain)
         .bbDenseList()
+        .animation(
+            BBMotion.animation(.settle, reduceMotion: reduceMotion),
+            value: agenda.sections.flatMap(\.tasks).map(\.id)
+        )
         .bbScreenTitle("Today")
         .bbScreenSubtitle(subtitle(summary: Self.summary(of: agenda)))
         .toolbar {
@@ -48,6 +55,8 @@ struct TodayScreen: View {
             }
         }
         .refreshable { await workspace.syncNow() }
+        }
+        .task { await workspace.prepareList(.agenda) }
     }
 
     /// "Friday, October 9 · 2 overdue · 3 due today": the date, then the
@@ -63,7 +72,7 @@ struct TodayScreen: View {
         var parts: [String] = []
         for section in agenda.sections where !section.tasks.isEmpty {
             guard case .dateView(let view) = section.kind else { continue }
-            let count = section.tasks.count
+            let count = section.totalCount
             switch view {
             case .overdue: parts.append("\(count) overdue")
             case .today: parts.append("\(count) due today")
@@ -77,12 +86,14 @@ struct TodayScreen: View {
 /// One of Overdue, Today or Upcoming.
 private struct AgendaSection: View {
     let section: TaskSection
+    @Environment(Workspace.self) private var workspace
 
     var body: some View {
         Section {
             ForEach(section.tasks) { task in
                 NavigationLink(value: AppRoute.task(task.id)) {
-                    TaskRow(task: task, showsProject: true, showsList: true)
+                    TaskRow(task: task, showsProject: true, showsList: true,
+                        preparedFormulation: workspace.listFormulation(task.id, destination: .agenda))
                 }
                 .taskActions(task)
             }

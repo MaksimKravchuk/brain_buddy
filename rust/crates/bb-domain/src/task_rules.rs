@@ -190,7 +190,7 @@ fn formulation_id(
         .allocated_ids
         .first()
         .ok_or_else(|| DomainError::field(Reason::FormulationIdRequired, "new_formulation_id"))?;
-    FormulationId::parse(allocated.as_str())
+    FormulationId::parse_allocated(allocated.as_str())
 }
 
 fn day_of(task: &Task) -> Result<Option<CalendarDay>, DomainError> {

@@ -22,6 +22,8 @@ struct TagEditorSheet: View {
     private let mode: Mode
     @State private var name: String
     @State private var message: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isNameFocused: Bool
 
     init(mode: Mode) {
@@ -55,6 +57,7 @@ struct TagEditorSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .navigationTitle(isCreating ? "New tag" : "Rename tag")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -63,7 +66,7 @@ struct TagEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isCreating ? "Add" : "Save") { save() }
-                        .disabled(cleanedName.isEmpty)
+                        .disabled(cleanedName.isEmpty || isSaving)
                 }
             }
             .onChange(of: name) { message = nil }
@@ -85,21 +88,26 @@ struct TagEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         let newName = cleanedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
+        isSaving = true
+        let submittedEditorID = editorID
+        Task { await saveDurably(name: newName, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(name newName: String, editorID: String) async {
+        defer { isSaving = false }
         do {
             switch mode {
             case .create:
-                try workspace.createTag(name: newName)
+                try await workspace.createTag(name: newName, editorID: editorID)
             case .rename(let original):
-                guard let current = workspace.tag(original.id) else {
-                    throw GTDValidationError.tagNotFound
-                }
-                if newName != current.name {
-                    try workspace.renameTag(current.id, to: newName)
+                if newName != original.name {
+                    try await workspace.renameTag(original.id, to: newName, editorID: editorID)
                 }
             }
             dismiss()

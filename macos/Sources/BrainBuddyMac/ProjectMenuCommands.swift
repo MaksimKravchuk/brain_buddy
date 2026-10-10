@@ -12,12 +12,12 @@ struct ProjectMenuCommands: Commands {
         CommandGroup(after: .newItem) {
             Divider()
             Button("Archive project") {
-                if let model, let id = activeProject(model) { model.archiveProject(id) }
+                if let model, let id = activeProject(model) { Task { _ = await model.archiveProject(id) } }
             }
             .disabled(!canArchive)
             .help("Add or clear the current task draft before archiving")
             Button("Unarchive project") {
-                if let model, let id = archivedProject(model) { model.unarchiveProject(id) }
+                if let model, let id = archivedProject(model) { Task { _ = await model.unarchiveProject(id) } }
             }
             .disabled(model.flatMap { archivedProject($0) } == nil)
         }

@@ -13,6 +13,9 @@ struct ReviewSettingsSection: View {
     /// Set after a change made here, until the screen closes.
     @State private var floorNote: String?
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var pendingThreshold: Int?
+    @State private var isSaving = false
 
     init() {}
 
@@ -20,7 +23,7 @@ struct ReviewSettingsSection: View {
         if workspace.reviewExposed {
             ReviewSettingsContent(
                 threshold: Binding(
-                    get: { workspace.state.review.settings.thresholdDays },
+                    get: { pendingThreshold ?? workspace.state.review.settings.thresholdDays },
                     set: { change(to: $0) }
                 ),
                 floorNote: floorNote, problem: problem
@@ -29,14 +32,22 @@ struct ReviewSettingsSection: View {
     }
 
     private func change(to days: Int) {
-        guard days != workspace.state.review.settings.thresholdDays else { return }
+        guard days != workspace.state.review.settings.thresholdDays, !isSaving else { return }
+        pendingThreshold = days
+        isSaving = true
+        Task { await changeDurably(to: days) }
+    }
+
+    @MainActor private func changeDurably(to days: Int) async {
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.updateReviewSettings(ReviewSettingsChange(thresholdDays: days))
+            try await workspace.updateReviewSettings(ReviewSettingsChange(thresholdDays: days), editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
+        pendingThreshold = nil
         floorNote = workspace.state.review.settings.ownerParkFloorAt.map {
             ReviewSettingsContent.floorNoteText(until: ReviewCopy.day($0, in: .current))
         }

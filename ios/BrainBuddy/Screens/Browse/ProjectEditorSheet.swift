@@ -28,6 +28,8 @@ struct ProjectEditorSheet: View {
     @State private var color: String?
     @State private var hasPreparedColor: Bool
     @State private var message: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isNameFocused: Bool
 
     init(mode: Mode, onCreate: ((ProjectID) -> Void)? = nil) {
@@ -51,6 +53,7 @@ struct ProjectEditorSheet: View {
                 nameSection
                 colorSection
             }
+            .disabled(isSaving)
             .navigationTitle(isCreating ? "New project" : "Edit project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -59,7 +62,7 @@ struct ProjectEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isCreating ? "Add" : "Save") { save() }
-                        .disabled(trimmedName.isEmpty)
+                        .disabled(trimmedName.isEmpty || isSaving)
                 }
             }
             .onChange(of: name) { message = nil }
@@ -149,25 +152,31 @@ struct ProjectEditorSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
         let newName = trimmedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
+        isSaving = true
+        let submittedColor = color
+        let submittedEditorID = editorID
+        Task { await saveDurably(name: newName, color: submittedColor, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(name newName: String, color submittedColor: String?, editorID: String) async {
+        defer { isSaving = false }
         do {
             switch mode {
             case .create:
-                let id = try workspace.createProject(name: newName, color: color)
+                let id = try await workspace.createProject(name: newName, color: submittedColor, editorID: editorID)
                 onCreate?(id)
             case .edit(let original):
-                guard let current = workspace.project(original.id) else {
-                    throw GTDValidationError.projectNotFound
+                if newName != original.name {
+                    try await workspace.renameProject(original.id, to: newName, editorID: editorID)
                 }
-                if newName != current.name {
-                    try workspace.renameProject(current.id, to: newName)
-                }
-                if !ProjectColorNames.same(color, current.color) {
-                    try workspace.setProjectColor(current.id, color: color)
+                if !ProjectColorNames.same(submittedColor, original.color) {
+                    try await workspace.setProjectColor(original.id, color: submittedColor, editorID: editorID)
                 }
             }
             dismiss()

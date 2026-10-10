@@ -26,6 +26,7 @@ struct TaskRow: View {
     let task: TaskRecord
     var showsProject: Bool = true
     var showsList: Bool = false
+    var preparedFormulation: RustWorkspaceFormulation? = nil
 
     @Environment(Workspace.self) private var workspace
     @Environment(\.openDecisionCard) private var openDecisionCard
@@ -39,10 +40,11 @@ struct TaskRow: View {
     /// height of a one-line row.
     private static let verticalPadding: CGFloat = 6
 
-    init(task: TaskRecord, showsProject: Bool = true, showsList: Bool = false) {
+    init(task: TaskRecord, showsProject: Bool = true, showsList: Bool = false, preparedFormulation: RustWorkspaceFormulation? = nil) {
         self.task = task
         self.showsProject = showsProject
         self.showsList = showsList
+        self.preparedFormulation = preparedFormulation
     }
 
     var body: some View {
@@ -91,7 +93,7 @@ struct TaskRow: View {
     }
 
     private var row: some View {
-        let marker = ReviewRowMarker.style(for: task, in: workspace)
+        let marker = ReviewRowMarker.style(for: task, in: workspace, prepared: preparedFormulation)
         let details = TaskRowDetails(
             task: task, workspace: workspace, showsProject: showsProject, showsList: showsList, marker: marker
         )
@@ -126,9 +128,17 @@ enum ReviewRowMarker {
     /// The list marker for `task`, or nil: only while the review is exposed,
     /// only in Next, and only the states lists show (asks, moves tomorrow).
     /// Before activation Core classifies nothing, so nothing shows (FR-051).
-    static func style(for task: TaskRecord, in workspace: Workspace) -> MarkerStyle? {
-        guard workspace.reviewExposed, task.state == .next, let kind = workspace.formulationClass(of: task.id) else {
+    static func style(for task: TaskRecord, in workspace: Workspace, prepared: RustWorkspaceFormulation?) -> MarkerStyle? {
+        guard workspace.reviewExposed, task.state == .next else {
             return nil
+        }
+        let kind: FormulationClass
+        if workspace.isRustSelected {
+            guard let prepared else { return nil }
+            kind = prepared.classification
+        } else {
+            guard let legacy = workspace.formulationClass(of: task.id) else { return nil }
+            kind = legacy
         }
         let style = MarkerStyle.for(kind)
         return style.showsInLists ? style : nil
@@ -332,6 +342,8 @@ private struct CompletionControl: View {
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isCompleting = false
+    @State private var isSavingCompletion = false
+    @State private var completionEditorID = UUID().uuidString
 
     var body: some View {
         if task.isOpen {
@@ -351,18 +363,19 @@ private struct CompletionControl: View {
     }
 
     private func complete() {
-        guard !isCompleting else { return }
-        withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) {
-            isCompleting = true
-        }
+        guard !isCompleting, !isSavingCompletion else { return }
+        isSavingCompletion = true
         let task = task
         let workspace = workspace
         let toasts = toasts
         let pause: Duration = reduceMotion ? .milliseconds(150) : .milliseconds(300)
         Task {
             try? await Task.sleep(for: pause)
-            let completed = TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
-            if !completed { isCompleting = false }
+            let completed = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts, editorID: completionEditorID)
+            if completed {
+                withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) { isCompleting = true }
+            }
+            isSavingCompletion = false
         }
     }
 }

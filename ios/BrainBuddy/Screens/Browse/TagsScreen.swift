@@ -10,6 +10,8 @@ struct TagsScreen: View {
     @State private var editorMode: TagEditorSheet.Mode?
     @State private var deleteCandidate: TagRecord?
     @State private var isConfirmingDelete = false
+    @State private var isSavingAction = false
+    @State private var editorIDs: [TagID: String] = [:]
 
     init() {}
 
@@ -39,10 +41,13 @@ struct TagsScreen: View {
             } message: { _ in
                 Text("It's removed from every task. The tasks stay.")
             }
+        .task { await workspace.prepareTags() }
     }
 
     @ViewBuilder private var content: some View {
         let tags = workspace.tags()
+        let page = workspace.tagsPageState()
+        WorkspaceQueryContent(readiness: page.readiness, retry: { Task { await workspace.prepareTags() } }) {
         if tags.isEmpty {
             EmptyStateView(
                 title: "No tags yet",
@@ -56,6 +61,11 @@ struct TagsScreen: View {
                 }
             }
             .bbDenseList()
+        }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousTagsPage() }, next: { await workspace.nextTagsPage() })
         }
     }
 
@@ -104,14 +114,28 @@ struct TagsScreen: View {
     }
 
     private func delete(_ tag: TagRecord) {
+        Task { await deleteDurably(tag) }
+    }
+
+    @MainActor private func deleteDurably(_ tag: TagRecord) async {
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
         let name = tag.name
-        let deleted = TaskCommandRunner.run(toasts) {
-            try workspace.deleteTag(tag.id)
+        let deleted = await TaskCommandRunner.run(toasts) {
+            try await workspace.deleteTag(tag.id, editorID: editorIDs[tag.id] ?? newEditorID(for: tag.id))
         }
-        deleteCandidate = nil
         if deleted {
+            editorIDs[tag.id] = UUID().uuidString
+            deleteCandidate = nil
             toasts.show("Deleted #\(name)", actionTitle: nil, action: nil)
         }
+    }
+
+    private func newEditorID(for id: TagID) -> String {
+        let value = UUID().uuidString
+        editorIDs[id] = value
+        return value
     }
 }
 

@@ -30,10 +30,15 @@ private struct ActiveProjectsList: View {
     @State private var editorMode: ProjectEditorSheet.Mode?
     @State private var archiveCandidate: ProjectRecord?
     @State private var isConfirmingArchive = false
+    @State private var isSavingAction = false
+    @State private var editorIDs: [ProjectID: String] = [:]
 
     var body: some View {
         let summaries = workspace.projects()
-        let hasArchived = !workspace.projects(archived: true).isEmpty
+        let page = workspace.projectsPageState()
+        let archivedPage = workspace.projectsPageState(archived: true)
+        let readiness = page.readiness == .ready ? archivedPage.readiness : page.readiness
+        let hasArchived = archivedPage.readiness == .ready && !workspace.projects(archived: true).isEmpty
         List {
             if summaries.isEmpty {
                 EmptyStateView(
@@ -63,6 +68,19 @@ private struct ActiveProjectsList: View {
             }
         }
         .bbDenseList()
+        .overlay {
+            if readiness != .ready {
+                WorkspaceQueryContent(readiness: readiness, retry: { Task { await workspace.prepareProjects(); await workspace.prepareProjects(archived: true) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousProjectsPage() }, next: { await workspace.nextProjectsPage() })
+        }
+        .task {
+            await workspace.prepareProjects()
+            await workspace.prepareProjects(archived: true)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -136,22 +154,44 @@ private struct ActiveProjectsList: View {
     }
 
     private func archive(_ project: ProjectRecord) {
+        Task { await archiveDurably(project) }
+    }
+
+    @MainActor private func archiveDurably(_ project: ProjectRecord) async {
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
         let name = project.name
-        let archived = TaskCommandRunner.run(toasts) {
-            try workspace.archiveProject(project.id)
+        let archived = await TaskCommandRunner.run(toasts) {
+            try await workspace.archiveProject(project.id, editorID: editorIDs[project.id] ?? newEditorID(for: project.id))
         }
-        archiveCandidate = nil
         if archived {
+            editorIDs[project.id] = UUID().uuidString
+            archiveCandidate = nil
             toasts.show("Archived “\(name)”", actionTitle: nil, action: nil)
         }
     }
 
     private func setColor(_ color: String?, of project: ProjectRecord) {
-        let current = workspace.project(project.id)?.color
+        Task { await setColorDurably(color, of: project) }
+    }
+
+    @MainActor private func setColorDurably(_ color: String?, of project: ProjectRecord) async {
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
+        let current = project.color
         guard !ProjectColorNames.same(color, current) else { return }
-        _ = TaskCommandRunner.run(toasts) {
-            try workspace.setProjectColor(project.id, color: color)
+        let saved = await TaskCommandRunner.run(toasts) {
+            try await workspace.setProjectColor(project.id, color: color, editorID: editorIDs[project.id] ?? newEditorID(for: project.id))
         }
+        if saved { editorIDs[project.id] = UUID().uuidString }
+    }
+
+    private func newEditorID(for id: ProjectID) -> String {
+        let value = UUID().uuidString
+        editorIDs[id] = value
+        return value
     }
 }
 
@@ -201,6 +241,8 @@ private struct ArchivedProjectsList: View {
 
     var body: some View {
         let summaries = workspace.projects(archived: true)
+        let page = workspace.projectsPageState(archived: true)
+        WorkspaceQueryContent(readiness: page.readiness, retry: { Task { await workspace.prepareProjects(archived: true) } }) {
         if summaries.isEmpty {
             EmptyStateView(
                 title: "No archived projects",
@@ -219,6 +261,13 @@ private struct ArchivedProjectsList: View {
             }
             .bbDenseList()
         }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousProjectsPage(archived: true) },
+                next: { await workspace.nextProjectsPage(archived: true) })
+        }
+        .task { await workspace.prepareProjects(archived: true) }
     }
 }
 

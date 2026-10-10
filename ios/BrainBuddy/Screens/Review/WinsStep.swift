@@ -14,18 +14,33 @@ struct WinsStep: View {
     @Environment(Workspace.self) private var workspace
 
     var body: some View {
-        WinsContent(titles: workspace.wins().map(\.title), onNext: context.advance)
+        let read = WorkspaceReviewRead.queue(.wins, context.sessionID)
+        let page = workspace.reviewPageState(read)
+        let rows = workspace.wins(session: context.sessionID)
+        WinsContent(titles: rows.map(\.title), total: workspace.winsCount(session: context.sessionID), onNext: context.advance)
+            .overlay {
+                if page.readiness != .ready {
+                    WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                WorkspaceQueryPageControls(page: page,
+                    previous: { try? await workspace.previousReviewPage(read) },
+                    next: { try? await workspace.nextReviewPage(read) })
+            }
+            .task { try? await workspace.prepareReviewRead(read) }
     }
 }
 
 /// The step for given titles (every state has a preview).
 struct WinsContent: View {
     let titles: [String]
+    var total: Int = -1
     let onNext: () -> Void
 
     var body: some View {
         ReviewStepFrame(
-            title: titles.isEmpty ? ReviewCopy.stepTitle(.wins) : ReviewCopy.wins(titles.count),
+            title: (total < 0 ? titles.count : total) == 0 ? ReviewCopy.stepTitle(.wins) : ReviewCopy.wins(total < 0 ? titles.count : total),
             primaryTitle: ReviewCopy.next, onPrimary: onNext
         ) {
             if titles.isEmpty {

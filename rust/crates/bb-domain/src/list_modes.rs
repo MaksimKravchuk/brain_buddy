@@ -101,17 +101,77 @@ pub fn list_mode(
     page: &Page,
     inputs: &QueryInputs,
 ) -> Result<ListModePage, DomainError> {
+    list_mode_with_local_facts(
+        read_set,
+        mode,
+        options,
+        page,
+        inputs,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Local terminal-list origins are presentation facts, never replicated task data.
+/// Unknown origins are shown in History only.
+pub fn list_mode_with_local_facts(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    last_open_lists: &std::collections::BTreeMap<crate::types::TaskId, crate::types::OpenList>,
+) -> Result<ListModePage, DomainError> {
+    list_mode_with_origin_lookup(read_set, mode, options, page, inputs, &|task| {
+        last_open_lists.get(&task.id).copied()
+    })
+}
+
+/// Store adapters can read one exact local carrier per terminal task without
+/// constructing an additional origin map over the entire projection.
+pub fn list_mode_with_origin_lookup(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+) -> Result<ListModePage, DomainError> {
+    select_list_mode(read_set, mode, options, page, inputs, origin, false)
+}
+
+/// Native metadata uses the same placement/ordering, retaining counters only
+/// for the returned section identities. Pure/server serialization is unchanged.
+pub fn native_list_mode_with_origin_lookup(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+) -> Result<ListModePage, DomainError> {
+    select_list_mode(read_set, mode, options, page, inputs, origin, true)
+}
+
+fn select_list_mode(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+    native: bool,
+) -> Result<ListModePage, DomainError> {
     if !(1..=MAX_LIMIT).contains(&page.limit) {
         return Err(invalid("limit"));
     }
     let needle = match mode {
         ListMode::Search { text } => match search_query(text) {
             Some(needle) => Some(needle),
-            None => return Ok(empty_page()),
+            None => return Ok(empty_page(native)),
         },
         _ => None,
     };
-    let plan = Plan::new(read_set, mode, options, needle, inputs)?;
+    let plan = Plan::new(read_set, mode, options, needle, inputs, origin)?;
     let filters = plan.filters();
     let after = page
         .after
@@ -124,6 +184,9 @@ pub fn list_mode(
     let limit = usize::try_from(page.limit).unwrap_or(usize::MAX);
     let keep = limit.saturating_add(1);
     let mut open_count = 0u32;
+    let mut total_count = 0u32;
+    let mut completed_count = 0u32;
+    let mut cancelled_count = 0u32;
     let mut best: BinaryHeap<Candidate> =
         BinaryHeap::with_capacity(keep.min(MAX_LIMIT as usize + 1));
     for task in read_set.tasks.values() {
@@ -131,6 +194,11 @@ pub fn list_mode(
             continue;
         };
         open_count = open_count.saturating_add(u32::from(placed.open));
+        total_count = total_count.saturating_add(1);
+        completed_count =
+            completed_count.saturating_add(u32::from(task.state == TaskState::Completed));
+        cancelled_count =
+            cancelled_count.saturating_add(u32::from(task.state == TaskState::Cancelled));
         let key = plan.key(task, &placed.section)?;
         if after.as_ref().is_some_and(|last| &key <= last) {
             continue;
@@ -172,18 +240,41 @@ pub fn list_mode(
             )?);
         }
     }
+    if native {
+        // At most limit section counters, including sections split across pages.
+        let mut counts: std::collections::BTreeMap<String, u32> = sections
+            .iter()
+            .map(|section| (section.id.clone(), 0))
+            .collect();
+        for task in read_set.tasks.values() {
+            if let Some(placed) = plan.place(task)?
+                && let Some(count) = counts.get_mut(&Plan::section_id(&placed.section))
+            {
+                *count = count.saturating_add(1);
+            }
+        }
+        for section in &mut sections {
+            section.total_count = Some(counts[&section.id]);
+        }
+    }
     Ok(ListModePage {
         sections,
         open_count,
+        total_count: native.then_some(total_count),
+        completed_count: native.then_some(completed_count),
+        cancelled_count: native.then_some(cancelled_count),
         next_cursor,
         has_more,
     })
 }
 
-fn empty_page() -> ListModePage {
+fn empty_page(native: bool) -> ListModePage {
     ListModePage {
         sections: Vec::new(),
         open_count: 0,
+        total_count: native.then_some(0),
+        completed_count: native.then_some(0),
+        cancelled_count: native.then_some(0),
         next_cursor: None,
         has_more: false,
     }
@@ -220,6 +311,7 @@ enum Section {
     /// The one unnamed section of open rows.
     Open,
     Project(ProjectId),
+    List(crate::types::OpenList),
     /// Tasks without a project, or whose project the read set lacks.
     NoProject,
     Date(DateView),
@@ -319,6 +411,7 @@ struct Plan<'a> {
     options: &'a ListOptions,
     /// The folded Search query.
     needle: Option<String>,
+    search: Option<String>,
     /// The device's day; set for the Agenda and the date views only.
     today: Option<CalendarDay>,
     order: Order,
@@ -327,6 +420,7 @@ struct Plan<'a> {
     show_completed: bool,
     show_cancelled: bool,
     priorities: BTreeSet<Priority>,
+    origin: &'a dyn Fn(&Task) -> Option<crate::types::OpenList>,
 }
 
 impl<'a> Plan<'a> {
@@ -336,6 +430,7 @@ impl<'a> Plan<'a> {
         options: &'a ListOptions,
         needle: Option<String>,
         inputs: &QueryInputs,
+        origin: &'a dyn Fn(&Task) -> Option<crate::types::OpenList>,
     ) -> Result<Self, DomainError> {
         let uses_day = matches!(mode, ListMode::Agenda {} | ListMode::DateView { .. });
         let today = if uses_day {
@@ -353,22 +448,38 @@ impl<'a> Plan<'a> {
         };
         let order = match mode {
             ListMode::History { .. } if options.sort == TaskSort::Manual => Order::Recency,
-            ListMode::History { .. } | ListMode::Search { .. } => Order::Sorted(options.sort),
+            ListMode::History { .. }
+            | ListMode::Search { .. }
+            | ListMode::OpenList { .. }
+            | ListMode::Project { .. }
+            | ListMode::Tag { .. } => Order::Sorted(options.sort),
             ListMode::Agenda {} | ListMode::DateView { .. } => Order::Sorted(date_sort),
         };
         let (show_completed, show_cancelled) = match mode {
             ListMode::Search { .. } => (true, true),
             ListMode::History { .. } => (false, false),
-            ListMode::Agenda {} | ListMode::DateView { .. } => {
-                (options.show_completed, options.show_cancelled)
-            }
+            ListMode::Agenda {}
+            | ListMode::DateView { .. }
+            | ListMode::OpenList { .. }
+            | ListMode::Project { .. }
+            | ListMode::Tag { .. } => (options.show_completed, options.show_cancelled),
         };
-        let grouped = options.group_by_project && !matches!(mode, ListMode::Agenda {});
+        let grouped = options.group_by_project
+            && !matches!(
+                mode,
+                ListMode::Agenda {}
+                    | ListMode::Project { .. }
+                    | ListMode::OpenList {
+                        list: crate::types::OpenList::Inbox
+                    }
+            );
         Ok(Self {
             read_set,
+            origin,
             mode,
             options,
             needle,
+            search: options.search.as_deref().and_then(search_query),
             today,
             order,
             grouped,
@@ -382,12 +493,15 @@ impl<'a> Plan<'a> {
     /// ignores do not change them.
     fn filters(&self) -> Value {
         let (mode, detail) = match self.mode {
+            ListMode::OpenList { list } => ("open_list", Value::from(list.as_str())),
+            ListMode::Project { project_id } => ("project", Value::from(project_id.as_str())),
+            ListMode::Tag { tag_id } => ("tag", Value::from(tag_id.as_str())),
             ListMode::History { kind } => ("history", Value::from(kind.as_str())),
             ListMode::Agenda {} => ("agenda", Value::Null),
             ListMode::DateView { view } => ("date_view", Value::from(view.as_str())),
             ListMode::Search { .. } => ("search", Value::from(self.needle.clone())),
         };
-        json!({
+        let mut filters = json!({
             "screen": "list_mode",
             "mode": mode,
             "detail": detail,
@@ -398,7 +512,11 @@ impl<'a> Plan<'a> {
             "show_cancelled": self.show_cancelled,
             "priorities": self.priorities.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
             "tag_filter": self.options.tag_filter.as_ref().map(|tag| tag.as_str()),
-        })
+        });
+        if let Some(search) = &self.search {
+            filters["search"] = Value::from(search.clone());
+        }
+        filters
     }
 
     // ------------------------------------------------------------- placement
@@ -406,6 +524,11 @@ impl<'a> Plan<'a> {
     /// `TaskListBuilder`: the section a task belongs to, or none when the mode
     /// leaves it out.
     fn place(&self, task: &Task) -> Result<Option<Placed>, DomainError> {
+        if let Some(needle) = &self.search
+            && !search_haystack(task).contains(needle)
+        {
+            return Ok(None);
+        }
         if !self.priorities.is_empty() && !self.priorities.contains(&task.priority) {
             return Ok(None);
         }
@@ -423,6 +546,39 @@ impl<'a> Plan<'a> {
             open: false,
         };
         Ok(match self.mode {
+            ListMode::OpenList { list } => {
+                if *list == crate::types::OpenList::Inbox && task.project_id.is_some() {
+                    None
+                } else if task.state.open_list().is_some() {
+                    (task.state == list.task_state()).then(|| {
+                        open(if self.grouped {
+                            self.project_section(task)
+                        } else {
+                            Section::Open
+                        })
+                    })
+                } else if (self.origin)(task) == Some(*list) {
+                    self.by_state(task, open)
+                } else {
+                    None
+                }
+            }
+            ListMode::Project { project_id } => {
+                if task.project_id.as_ref() != Some(project_id) {
+                    None
+                } else if let Some(list) = task.state.open_list() {
+                    Some(open(Section::List(list)))
+                } else {
+                    self.by_state(task, open)
+                }
+            }
+            ListMode::Tag { tag_id } => {
+                if task.tag_ids.contains(tag_id) {
+                    self.by_state(task, open)
+                } else {
+                    None
+                }
+            }
             ListMode::History { kind } => (task.state == history_state(*kind)).then(|| Placed {
                 section: if self.grouped {
                     self.project_section(task)
@@ -513,6 +669,15 @@ impl<'a> Plan<'a> {
         use KeyPart::Int;
         match section {
             Section::Open => vec![Int(0), Int(0)],
+            Section::List(list) => vec![
+                Int(0),
+                Int(match list {
+                    crate::types::OpenList::Next => 0,
+                    crate::types::OpenList::Waiting => 1,
+                    crate::types::OpenList::Inbox => 2,
+                    crate::types::OpenList::Someday => 3,
+                }),
+            ],
             Section::Date(view) => vec![Int(0), Int(view_index(*view))],
             Section::Project(id) => {
                 let mut key = vec![Int(1)];
@@ -595,6 +760,7 @@ impl<'a> Plan<'a> {
     fn section_id(section: &Section) -> String {
         match section {
             Section::Open => "open".to_owned(),
+            Section::List(list) => format!("list:{}", list.as_str()),
             Section::Project(id) => format!("project:{}", id.as_str()),
             Section::NoProject => "none".to_owned(),
             Section::Date(view) => format!("date:{}", view.as_str()),
@@ -606,6 +772,18 @@ impl<'a> Plan<'a> {
     fn describe(&self, section: &Section) -> PageSection {
         let (title, kind) = match section {
             Section::Open => (None, SectionKind::Open {}),
+            Section::List(list) => (
+                Some(
+                    match list {
+                        crate::types::OpenList::Inbox => "Inbox",
+                        crate::types::OpenList::Next => "Next",
+                        crate::types::OpenList::Waiting => "Waiting",
+                        crate::types::OpenList::Someday => "Someday / Maybe",
+                    }
+                    .to_owned(),
+                ),
+                SectionKind::List { list: *list },
+            ),
             Section::Project(id) => (
                 self.read_set
                     .projects
@@ -638,6 +816,7 @@ impl<'a> Plan<'a> {
             title,
             kind,
             items: Vec::new(),
+            total_count: None,
         }
     }
 
@@ -649,6 +828,7 @@ impl<'a> Plan<'a> {
             "completed" => Section::Ended(HistoryKind::Completed),
             "cancelled" => Section::Ended(HistoryKind::Cancelled),
             other => match other.split_once(':')? {
+                ("list", list) => Section::List(crate::types::OpenList::from_wire(list)?),
                 ("date", view) => Section::Date(DateView::from_wire(view)?),
                 ("project", project) => {
                     let (known, _) = self
@@ -661,7 +841,14 @@ impl<'a> Plan<'a> {
             },
         };
         let allowed = match (&section, self.mode) {
-            (Section::Open, ListMode::DateView { .. } | ListMode::Search { .. }) => !self.grouped,
+            (
+                Section::Open,
+                ListMode::DateView { .. }
+                | ListMode::Search { .. }
+                | ListMode::OpenList { .. }
+                | ListMode::Tag { .. },
+            ) => !self.grouped,
+            (Section::List(_), ListMode::Project { .. }) => true,
             (Section::Project(_) | Section::NoProject, _) => self.grouped,
             (Section::Date(_), ListMode::Agenda {}) => true,
             (Section::Ended(kind), ListMode::History { kind: wanted }) => {

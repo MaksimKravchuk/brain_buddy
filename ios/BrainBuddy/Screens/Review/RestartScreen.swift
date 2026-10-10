@@ -17,23 +17,51 @@ struct RestartScreen: View {
     /// The words about the last Undo, until the next release.
     @State private var undoMessage: String?
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(onStart: @escaping () -> Void) {
         self.onStart = onStart
     }
 
     var body: some View {
+        let read = WorkspaceReviewRead.restart
+        let page = workspace.reviewPageState(read)
+        let releasesRead = WorkspaceReviewRead.releases(.restart, nil)
+        let releasesReadiness = workspace.reviewReadiness(releasesRead)
+        let summaryReadiness = workspace.reviewReadiness(.summary(nil))
+        let countsReadiness = workspace.countsReadiness()
+        let readiness = page.readiness != .ready ? page.readiness : releasesReadiness != .ready ? releasesReadiness
+            : summaryReadiness != .ready ? summaryReadiness : countsReadiness
         let released = workspace.openRestartReleases()
         let candidates = workspace.restartCandidates()
         let now = workspace.reviewNow
         RestartContent(
             heading: heading, welcome: welcome,
-            ages: candidates.map { RestartContent.Row(id: $0.id, title: $0.title, age: age(of: $0, now: now)) },
+            ages: candidates.map { task in
+                let start = workspace.isRustSelected
+                    ? workspace.reviewFormulation(task.id, read: read)?.derived?.start
+                    : task.formulation?.startedAt
+                return RestartContent.Row(id: task.id, title: task.title, age: start.map { ReviewCopy.daysInNext(since: $0, now: now) } ?? "")
+            },
             releasedCount: released.reduce(0) { $0 + $1.released.count },
             partial: released.reduce(0) { $0 + $1.skipped.count },
             nextNow: workspace.counts().next, undoMessage: undoMessage, problem: problem,
             onRelease: { release(candidates) }, onUndo: { undo(released) }, onStart: onStart
         )
+        .overlay {
+            if readiness != .ready {
+                WorkspaceQueryContent(readiness: readiness, retry: {
+                    Task { try? await workspace.prepareReviewRead(read); try? await workspace.prepareReviewRead(releasesRead); try? await workspace.prepareReviewRead(.summary(nil)); await workspace.prepareCounts() }
+                }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read) },
+                next: { try? await workspace.nextReviewPage(read) })
+        }
+        .task { try? await workspace.prepareReviewRead(read); try? await workspace.prepareReviewRead(releasesRead); try? await workspace.prepareReviewRead(.summary(nil)); await workspace.prepareCounts() }
     }
 
     private var heading: String {
@@ -45,26 +73,36 @@ struct RestartScreen: View {
         return ReviewCopy.restartWelcome(daysSinceLastReview: days)
     }
 
-    private func age(of task: TaskRecord, now: Date) -> String {
-        task.formulation.map { ReviewCopy.daysInNext(since: $0.startedAt, now: now) } ?? ""
+    private func release(_ candidates: [TaskRecord]) {
+        Task { await releaseDurably(candidates) }
     }
 
-    private func release(_ candidates: [TaskRecord]) {
+    @MainActor private func releaseDurably(_ candidates: [TaskRecord]) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.bulkRelease(.restart, taskIDs: candidates.map(\.id))
+            try await workspace.bulkRelease(.restart, taskIDs: candidates.map(\.id), editorID: editorID)
             undoMessage = nil
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
         }
     }
 
     private func undo(_ records: [BulkReleaseRecord]) {
+        Task { await undoDurably(records) }
+    }
+
+    @MainActor private func undoDurably(_ records: [BulkReleaseRecord]) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.undoBulkRelease(records.map(\.id))
+            try await workspace.undoBulkRelease(records.map(\.id), editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         let results = records.compactMap { workspace.state.review.bulkReleases[$0.id]?.undoResult }

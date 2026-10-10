@@ -85,7 +85,7 @@ private struct MainTabView: View {
             Tab(AppTab.inbox.title, systemImage: AppTab.inbox.symbolName, value: AppTab.inbox) {
                 TabRootView(tab: .inbox)
             }
-            .badge(workspace.counts().inbox)
+            .badge(workspace.countsReadiness() == .ready ? workspace.counts().inbox : 0)
 
             Tab(AppTab.next.title, systemImage: AppTab.next.symbolName, value: AppTab.next) {
                 TabRootView(tab: .next)
@@ -110,6 +110,11 @@ private struct MainTabView: View {
         }
         .tabViewSidebarBottomBar {
             CaptureAccessory(drawsGlass: true)
+        }
+        .task {
+            await workspace.prepareCounts()
+            try? await workspace.prepareReviewRead(.state)
+            try? await workspace.prepareReviewRead(.summary(nil))
         }
         .background(PresentationProbeView(probe: presentationProbe))
         // A capture waits while the explainer is due or a review startup

@@ -29,12 +29,14 @@ use crate::replay::{ReplayError, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::dispatch;
 use bb_domain::types::{
-    ActorId, AliasRef, Binding, ChangeOutcome, ChangeSet, Dependencies, DomainChange, DomainError,
-    ExecutionInputs, Policy, ReadSet, Reason, Record, WriterOrigin, ZoneName,
+    ActorId, AliasRef, Binding, BulkReleaseRequest, ChangeOutcome, ChangeSet, Dependencies,
+    DomainChange, DomainError, ExecutionInputs, Policy, ReadSet, Reason, Record, WriterOrigin,
+    ZoneName,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{
-    AfterCommandPrecondition, CommandRef, Decoded, Precondition, StableEnvelope, decode_command,
+    AfterCommandPrecondition, CommandRef, Decoded, Precondition, RevisionPrecondition,
+    StableEnvelope, decode_command,
 };
 use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CommandId, Counter, Id, Instant, OpenObject, PROTOCOL_VERSION, RecordKey};
@@ -50,7 +52,7 @@ pub(crate) const RULE_VERSION: u32 = 1;
 // ---------------------------------------------------------------------- the request
 
 /// The trusted facts a gesture is decided with; the platform supplies them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecuteContext {
     /// The device instant: the intent's `issued_at` and the rules' `now`.
     pub now: Instant,
@@ -61,7 +63,7 @@ pub struct ExecuteContext {
 }
 
 /// One gesture. `command_id` is chosen by the caller and kept across retries.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecuteRequest {
     pub command_id: CommandId,
     pub command_type: CommandType,
@@ -71,6 +73,8 @@ pub struct ExecuteRequest {
     /// The revisions the user was shown.
     pub preconditions: Vec<Precondition>,
     pub depends_on: Vec<CommandId>,
+    /// Original rendered frames; LOCAL only, never part of the sync envelope.
+    pub admission_tokens: Vec<crate::ShownFrameToken>,
     pub context: ExecuteContext,
 }
 
@@ -93,9 +97,48 @@ pub struct Executed {
     pub replayed: bool,
 }
 
+/// Read-only recovery of an original immutable prepared batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KnownBatch {
+    Known { results: Vec<Executed> },
+    NotKnown,
+}
+
+/// Checks every original fingerprint in one read snapshot. An unknown suffix
+/// is never executed, and a later ID mismatch wins over any unknown earlier ID.
+pub fn lookup_known_batch(
+    store: &mut Store,
+    requests: &[ExecuteRequest],
+) -> Result<KnownBatch, ExecuteError> {
+    store.read(|tx| {
+        Ok((|| {
+            let meta = read_meta(tx)?;
+            let mut results = Vec::with_capacity(requests.len());
+            let mut unknown = false;
+            for request in requests {
+                if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+                    if known.digest != sha256(request_canonical(request).as_bytes()) {
+                        return Err(ExecuteError::CommandIdReused);
+                    }
+                    results.push(known.answer(&request.command_id, meta.projection_generation)?);
+                } else {
+                    unknown = true;
+                }
+            }
+            Ok(if unknown {
+                KnownBatch::NotKnown
+            } else {
+                KnownBatch::Known { results }
+            })
+        })())
+    })?
+}
+
 /// Why nothing was saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecuteError {
+    /// Cancellation won before the batch commit boundary. Nothing was saved.
+    Cancelled,
     /// The store could not do it; only `STORE_BUSY` is worth retrying as is.
     Store(StoreError),
     /// The rules (or the request's shape) refused the command.
@@ -108,6 +151,7 @@ impl ExecuteError {
     /// The stable code the bindings carry across FFI.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Cancelled => "CANCELLED",
             Self::Store(error) => error.code(),
             Self::Refused(_) => "VALIDATION_FAILED",
             Self::CommandIdReused => "IDEMPOTENCY_KEY_REUSED",
@@ -125,7 +169,7 @@ impl std::fmt::Display for ExecuteError {
             Self::Store(error) => error.fmt(f),
             // The reason and field names carry no user text.
             Self::Refused(error) => write!(f, "{}: {}", self.code(), error.reason.as_str()),
-            Self::CommandIdReused => f.write_str(self.code()),
+            Self::CommandIdReused | Self::Cancelled => f.write_str(self.code()),
         }
     }
 }
@@ -153,6 +197,41 @@ impl From<io::Error> for ExecuteError {
 impl From<DomainError> for ExecuteError {
     fn from(error: DomainError) -> Self {
         Self::Refused(error)
+    }
+}
+
+/// LOCAL failure context for a batch caller. This never enters an envelope,
+/// fingerprint or durable result; the ordinary execute APIs discard it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportedExecuteError {
+    pub error: ExecuteError,
+    /// Exact original request that refused; global and non-rule errors have none.
+    pub failed_command_id: Option<CommandId>,
+}
+
+impl ReportedExecuteError {
+    fn for_request(error: ExecuteError, request: &ExecuteRequest) -> Self {
+        let failed_command_id =
+            matches!(&error, ExecuteError::Refused(_)).then(|| request.command_id.clone());
+        Self {
+            error,
+            failed_command_id,
+        }
+    }
+}
+
+impl From<ExecuteError> for ReportedExecuteError {
+    fn from(error: ExecuteError) -> Self {
+        Self {
+            error,
+            failed_command_id: None,
+        }
+    }
+}
+
+impl From<StoreError> for ReportedExecuteError {
+    fn from(error: StoreError) -> Self {
+        ExecuteError::from(error).into()
     }
 }
 
@@ -300,7 +379,108 @@ pub fn execute_with(
     request: &ExecuteRequest,
     mut hook: impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
-    store.try_write(|tx| run(tx, ids, request, None, &mut hook))
+    store.try_write(|tx| {
+        run(
+            tx,
+            ids,
+            request,
+            None,
+            &mut hook,
+            &mut BatchEvidence::default(),
+        )
+    })
+}
+
+/// Saves a UI gesture containing several catalog commands, all or nothing.
+/// Each command sees earlier commands in the same transaction. Stable command
+/// IDs recover a lost completion without allocating a second intent.
+pub fn execute_batch(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_with(store, ids, requests, |_| Ok(()))
+}
+
+/// The final callback may refuse/cancel the batch before commit. A bridge can
+/// hold its cancellation arbitration lock from this callback until this function
+/// returns: cancellation then wins before commit or observes the committed result.
+pub fn execute_batch_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_reported_with(store, ids, requests, before_commit).map_err(|error| error.error)
+}
+
+/// The same atomic batch execution with exact original-command context on a
+/// command-specific refusal. A failure of the commit callback is batch-global.
+pub fn execute_batch_reported_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ReportedExecuteError> {
+    store.try_write(|tx| {
+        let results = execute_batch_reported_in(tx, ids, requests)?;
+        before_commit(tx)?;
+        Ok(results)
+    })
+}
+
+pub(crate) fn execute_batch_in(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_reported_in(tx, ids, requests).map_err(|error| error.error)
+}
+
+fn execute_batch_reported_in(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ReportedExecuteError> {
+    let mut evidence = BatchEvidence {
+        batch: true,
+        ..BatchEvidence::default()
+    };
+    let mut meta = read_meta(tx)?;
+    let mut unknown = Vec::new();
+    // All original fingerprints precede normalization and admission. Known
+    // results remain recoverable even after their original frame changed.
+    for request in requests {
+        if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+            if known.digest != sha256(request_canonical(request).as_bytes()) {
+                return Err(ExecuteError::CommandIdReused.into());
+            }
+        } else {
+            unknown.push(request);
+        }
+    }
+    if !unknown.is_empty() {
+        if meta.projection_stale {
+            replay_in(tx, &unknown[0].context).map_err(|error| match error {
+                ReplayError::Store(error) => ExecuteError::Store(error),
+                _ => ExecuteError::Store(StoreError::Corrupt),
+            })?;
+            meta = read_meta(tx)?;
+        }
+        let state = read_projection(tx, &meta.workspace_id)?;
+        evidence.start(&state);
+        for request in unknown {
+            crate::admission::validate(tx, &meta.workspace_id, &state, &request.admission_tokens)
+                .map_err(|error| ReportedExecuteError::for_request(error, request))?;
+        }
+    }
+    requests
+        .iter()
+        .map(|request| {
+            run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence)
+                .map_err(|error| ReportedExecuteError::for_request(error, request))
+        })
+        .collect()
 }
 
 /// [`execute`] inside a transaction the caller already holds, for a command
@@ -311,7 +491,14 @@ pub(crate) fn execute_in(
     request: &ExecuteRequest,
     supersedes: &CommandId,
 ) -> Result<Executed, ExecuteError> {
-    run(tx, ids, request, Some(supersedes), &mut |_, _| Ok(()))
+    run(
+        tx,
+        ids,
+        request,
+        Some(supersedes),
+        &mut |_, _| Ok(()),
+        &mut BatchEvidence::default(),
+    )
 }
 
 struct Meta {
@@ -352,14 +539,261 @@ fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
     )?)
 }
 
+/// Durable account binding established by Session::start; grants only local
+/// enqueue/defer eligibility, never authority to invent server-private facts.
+pub(crate) fn bound_account(conn: &rusqlite::Connection) -> Result<bool, StoreError> {
+    let (link, account, scope, device): (String, Option<String>, Option<String>, Option<String>) =
+        conn.query_row(
+            "SELECT account_link_state,account_id,scope_id,device_id FROM sync_meta",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    for identity in [&account, &scope, &device].into_iter().flatten() {
+        Id::parse(identity).map_err(|_| StoreError::Corrupt)?;
+    }
+    match (link.as_str(), account, scope, device) {
+        ("linked", Some(_), Some(_), Some(_)) => Ok(true),
+        (_, _, None, None) => Ok(false), // imported account awaiting trusted binding
+        _ => Err(StoreError::Corrupt),
+    }
+}
+
+/// Exact missing-private result produced only after the Undo owner's public
+/// checks. Unrelated incomplete reads and every actual refusal stay errors.
+pub(crate) fn private_undo_missing(kind: CommandType, entity: &Id, error: &DomainError) -> bool {
+    let (expected_type, fields): (EntityType, &[&str]) = match kind {
+        CommandType::ReviewUndoDecision => (EntityType::ReviewDecision, &["undo_snapshot"]),
+        CommandType::ReviewBulkUndo => (
+            EntityType::ReviewBulkRelease,
+            &["released_private", "clock_before"],
+        ),
+        _ => return false,
+    };
+    error.reason == Reason::IncompleteReadSet
+        && error.current_revision.is_none()
+        && error
+            .field
+            .as_deref()
+            .is_some_and(|field| fields.contains(&field))
+        && error.entity.as_ref().is_some_and(|(kind, key)| {
+            *kind == expected_type && key.as_slice() == [entity.as_str()]
+        })
+}
+
+/// Fresh decision evidence belongs only to this atomic batch. A skipped bulk
+/// item has no produced task revision; its original effective shown guard can
+/// still protect a following edit without treating absence as a success result.
+#[derive(Default)]
+struct BatchEvidence {
+    batch: bool,
+    skipped: HashMap<(String, String), Counter>,
+    start_revisions: Option<HashMap<String, Counter>>,
+    fresh_tasks: HashMap<String, FreshTask>,
+}
+
+struct FreshTask {
+    command: CommandId,
+    guarded: bool,
+}
+
+impl BatchEvidence {
+    fn start(&mut self, state: &ReadSet) {
+        self.start_revisions.get_or_insert_with(|| {
+            state
+                .tasks
+                .values()
+                .map(|task| (task.id.as_str().to_owned(), task.revision.clone()))
+                .collect()
+        });
+    }
+
+    fn produced(&mut self, request: &ExecuteRequest, changes: &ChangeSet) {
+        for change in &changes.changes {
+            if let DomainChange::Upsert(Record::Task(task)) = change {
+                let owns_guard = matches!(
+                    request.command_type,
+                    CommandType::TaskUpdate
+                        | CommandType::TaskTransition
+                        | CommandType::TaskTags
+                        | CommandType::TagDelete
+                        | CommandType::ReviewDecide
+                );
+                let bulk_item = request.command_type == CommandType::ReviewBulkRelease
+                    && request
+                        .payload
+                        .get("items")
+                        .and_then(Value::as_array)
+                        .is_some_and(|items| {
+                            items
+                                .iter()
+                                .filter(|item| {
+                                    item.get("task_id").and_then(Value::as_str)
+                                        == Some(task.id.as_str())
+                                })
+                                .count()
+                                == 1
+                        });
+                let guarded = bulk_item
+                    || (owns_guard
+                        && request.preconditions.iter().any(|guard| match guard {
+                            Precondition::Revision(guard) => {
+                                guard.entity_type == EntityType::Task
+                                    && guard.entity_id.as_str() == task.id.as_str()
+                            }
+                            Precondition::AfterCommand(guard) => {
+                                guard.after_command.entity_type == EntityType::Task
+                                    && guard.after_command.entity_id.as_str() == task.id.as_str()
+                            }
+                        }));
+                self.fresh_tasks.insert(
+                    task.id.as_str().to_owned(),
+                    FreshTask {
+                        command: request.command_id.clone(),
+                        guarded,
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn normalize_fresh_tasks(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    original: &ExecuteRequest,
+    mut normalized: ExecuteRequest,
+    evidence: &BatchEvidence,
+) -> Result<ExecuteRequest, ExecuteError> {
+    if !matches!(
+        original.command_type,
+        CommandType::TaskUpdate | CommandType::TagDelete
+    ) {
+        return Ok(normalized);
+    }
+    for (original_guard, guard) in original
+        .preconditions
+        .iter()
+        .zip(&mut normalized.preconditions)
+    {
+        match original_guard {
+            Precondition::Revision(shown) if shown.entity_type == EntityType::Task => {
+                if original.command_type == CommandType::TaskUpdate
+                    && original.entity_id.as_ref() != Some(&shown.entity_id)
+                {
+                    continue;
+                }
+                let start = evidence
+                    .start_revisions
+                    .as_ref()
+                    .and_then(|revisions| revisions.get(shown.entity_id.as_str()));
+                let Some(start) = start else {
+                    return Err(DomainError::about(
+                        Reason::NotFound,
+                        EntityType::Task,
+                        vec![shown.entity_id.as_str().to_owned()],
+                    )
+                    .into());
+                };
+                if start != &shown.edit_revision {
+                    return Err(DomainError::stale(
+                        EntityType::Task,
+                        vec![shown.entity_id.as_str().to_owned()],
+                        start.clone(),
+                    )
+                    .into());
+                }
+                if let Some(produced) = evidence.fresh_tasks.get(shown.entity_id.as_str()) {
+                    if !produced.guarded {
+                        return Err(refuse(Reason::InvalidPayload, "preconditions"));
+                    }
+                    *guard = Precondition::AfterCommand(AfterCommandPrecondition {
+                        after_command: CommandRef {
+                            command_id: produced.command.clone(),
+                            entity_type: EntityType::Task,
+                            entity_id: shown.entity_id.clone(),
+                        },
+                    });
+                    push_unique(&mut normalized.depends_on, &produced.command);
+                }
+            }
+            Precondition::AfterCommand(after)
+                if after.after_command.entity_type == EntityType::Task =>
+            {
+                let reference = &after.after_command;
+                let kind: Option<String> = tx.query_row("SELECT json_extract(CAST(envelope AS TEXT),'$.type') FROM outbox WHERE workspace_id=?1 AND command_id=?2", params![workspace,reference.command_id.as_str()], |row| row.get(0)).optional()?;
+                if kind.as_deref() == Some(CommandType::TagDelete.as_str())
+                    && !evidence
+                        .fresh_tasks
+                        .get(reference.entity_id.as_str())
+                        .is_some_and(|producer| {
+                            producer.command == reference.command_id && producer.guarded
+                        })
+                {
+                    return Err(refuse(Reason::InvalidPayload, "preconditions"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_skipped_bulk(
+    request: &ExecuteRequest,
+    evidence: &BatchEvidence,
+) -> Result<ExecuteRequest, ExecuteError> {
+    let mut normalized = request.clone();
+    if request.command_type != CommandType::TaskUpdate {
+        return Ok(normalized);
+    }
+    let mut resolved = std::collections::BTreeSet::new();
+    for precondition in &mut normalized.preconditions {
+        let Precondition::AfterCommand(after) = precondition else {
+            continue;
+        };
+        let reference = &after.after_command;
+        if reference.entity_type != EntityType::Task
+            || request.entity_id.as_ref() != Some(&reference.entity_id)
+        {
+            continue;
+        }
+        let key = (
+            reference.command_id.as_str().to_owned(),
+            reference.entity_id.as_str().to_owned(),
+        );
+        let Some(revision) = evidence.skipped.get(&key) else {
+            continue;
+        };
+        if !resolved.insert(key) {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        push_unique(&mut normalized.depends_on, &reference.command_id);
+        *precondition = Precondition::Revision(RevisionPrecondition {
+            entity_type: EntityType::Task,
+            entity_id: reference.entity_id.clone(),
+            edit_revision: revision.clone(),
+        });
+    }
+    Ok(normalized)
+}
+
 fn run(
     tx: &Transaction<'_>,
     ids: &mut impl IdSource,
     request: &ExecuteRequest,
     supersedes: Option<&CommandId>,
     hook: &mut impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
+    evidence: &mut BatchEvidence,
 ) -> Result<Executed, ExecuteError> {
     let mut meta = read_meta(tx)?;
+    let digest = sha256(request_canonical(request).as_bytes());
+    if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+        return if known.digest == digest {
+            known.answer(&request.command_id, meta.projection_generation)
+        } else {
+            Err(ExecuteError::CommandIdReused)
+        };
+    }
     if meta.projection_stale {
         // An upgraded store holds confirmed rows and queued work but no visible
         // projection yet: build it before deciding anything against it.
@@ -369,23 +803,46 @@ fn run(
         })?;
         meta = read_meta(tx)?;
     }
-    let digest = sha256(request_canonical(request).as_bytes());
-    if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
-        return if known.digest == digest {
-            known.answer(&request.command_id, meta.projection_generation)
-        } else {
-            Err(ExecuteError::CommandIdReused)
-        };
+    let mut visible = load_visible(tx, &meta.workspace_id)?;
+    let local_authority = crate::local_review::account_less(tx)?;
+    evidence.start(&visible.read_set);
+    if !evidence.batch {
+        crate::admission::validate(
+            tx,
+            &meta.workspace_id,
+            &visible.read_set,
+            &request.admission_tokens,
+        )?;
     }
-
-    let visible = load_visible(tx, &meta.workspace_id)?;
+    let mut local_facts = crate::localfacts::load(tx, &meta.workspace_id)?;
     let entity_id = match (&request.entity_id, new_entity_prefix(request.command_type)) {
         (Some(id), _) => id.clone(),
         (None, Some(prefix)) => prefixed(ids, prefix)?,
         (None, None) => return Err(refuse(Reason::InvalidPayload, "entity_id")),
     };
-    let (preconditions, depends_on) = wire(request, &entity_id, &visible.pending);
+    let normalized = normalize_skipped_bulk(request, evidence)?;
+    let normalized = normalize_fresh_tasks(tx, &meta.workspace_id, request, normalized, evidence)?;
+    let (preconditions, depends_on) = wire(&normalized, &entity_id, &visible.pending);
     let results = load_dependencies(tx, &meta.workspace_id, &depends_on)?;
+    if local_authority {
+        for dependency in &depends_on {
+            let state: String = tx.query_row(
+                "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
+                params![meta.workspace_id, dependency.as_str()],
+                |r| r.get(0),
+            )?;
+            if state != "completed" {
+                return Err(refuse(
+                    if matches!(state.as_str(), "rejected" | "blocked_dependency") {
+                        Reason::DependencyRejected
+                    } else {
+                        Reason::DependencyPending
+                    },
+                    "depends_on",
+                ));
+            }
+        }
+    }
 
     let (epoch, new_epoch) = match &meta.device_epoch {
         Some(epoch) if matches!(meta.epoch_state.as_str(), "pending_registration" | "active") => {
@@ -410,7 +867,7 @@ fn run(
         depends_on: depends_on.clone(),
         issued_at: request.context.now.clone(),
         supersedes_command_id: supersedes.cloned(),
-        payload: request.payload.clone(),
+        payload: resolved_bulk_payload(request, &results)?,
     };
     let envelope = match decode_command(&json!(stable).to_string()) {
         Ok(Decoded::Executable(envelope)) => envelope,
@@ -442,7 +899,40 @@ fn run(
         )?,
         policy: request.context.policy.clone(),
     };
-    let changes = dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)?;
+    if local_authority {
+        visible.read_set = crate::local_review::private_read_set(
+            tx,
+            &meta.workspace_id,
+            &visible.read_set,
+            &inputs.now,
+        )?;
+    }
+    let decided = if local_authority {
+        dispatch::decide_local_review_envelope(&visible.read_set, &envelope, &results, &inputs)
+    } else {
+        dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)
+    };
+    let (changes, deferred) = match decided {
+        Ok(changes) => (changes, false),
+        Err(error) if private_undo_missing(request.command_type, &entity_id, &error) => {
+            for dependency in &depends_on {
+                let state: String = tx.query_row(
+                    "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
+                    params![meta.workspace_id, dependency.as_str()],
+                    |row| row.get(0),
+                )?;
+                if matches!(state.as_str(), "rejected" | "blocked_dependency") {
+                    return Err(refuse(Reason::DependencyRejected, "depends_on"));
+                }
+            }
+            if !bound_account(tx)? {
+                return Err(error.into());
+            }
+            (ChangeSet::no_op(), true)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    evidence.produced(request, &changes);
 
     // What the rules resolved (a Smart Add name matched onto a queued project,
     // the tasks an archive touched) is a dependency on the command that wrote
@@ -506,15 +996,111 @@ fn run(
             ],
         )?;
     }
+    if local_authority {
+        tx.execute(
+            "UPDATE outbox SET state='completed' WHERE workspace_id=?1 AND command_id=?2",
+            params![meta.workspace_id, request.command_id.as_str()],
+        )?;
+    }
     hook(Stage::IntentStored, tx)?;
+    let mut local_read_set = visible.read_set.clone();
     for change in &changes.changes {
+        crate::localfacts::project(
+            &mut local_facts,
+            &local_read_set,
+            change,
+            &request.command_id,
+        );
+        if local_authority {
+            crate::local_review::settle_change(
+                tx,
+                &meta.workspace_id,
+                &request.command_id,
+                change,
+                &request.context.now,
+            )?;
+        }
         apply(tx, &meta.workspace_id, &request.command_id, change)?;
+        match change {
+            DomainChange::Upsert(record) => file(&mut local_read_set, record.clone()),
+            DomainChange::Tombstone {
+                entity_type,
+                record_key,
+            } => crate::replay::remove(&mut local_read_set, *entity_type, record_key),
+        }
+    }
+    if local_authority {
+        crate::localfacts::settled(&mut local_facts, &request.command_id);
+        let mut settled: LocalResult = serde_json::from_slice(&local_result).map_err(corrupt)?;
+        let mut versions = std::collections::BTreeMap::new();
+        for change in &changes.changes {
+            let kind = change.entity_type();
+            let key = change.record_key();
+            let version:String=tx.query_row("SELECT record_version FROM confirmed_records WHERE workspace_id=?1 AND record_type=?2 AND record_key=?3",params![meta.workspace_id,kind.as_str(),json!(key).to_string()],|row|row.get(0))?;
+            versions.insert(
+                (kind.as_str(), json!(key).to_string()),
+                LocalVersion {
+                    entity_type: kind,
+                    record_key: key,
+                    edit_revision: match change {
+                        DomainChange::Upsert(record) => edit_revision(record),
+                        DomainChange::Tombstone { .. } => None,
+                    },
+                    record_version: Some(Counter::parse(version).map_err(corrupt)?),
+                },
+            );
+        }
+        settled.versions = versions.into_values().collect();
+        tx.execute(
+            "UPDATE outbox SET local_result=?3 WHERE workspace_id=?1 AND command_id=?2",
+            params![
+                meta.workspace_id,
+                request.command_id.as_str(),
+                serde_json::to_vec(&settled).map_err(corrupt)?
+            ],
+        )?;
+    }
+    let fact_writes = if deferred {
+        0
+    } else {
+        crate::localfacts::save(tx, &meta.workspace_id, &local_facts)?
+    };
+    let projection_generation = projection_generation
+        + i64::from(fact_writes > 0 && changes.outcome != ChangeOutcome::Applied);
+    if fact_writes > 0 && changes.outcome != ChangeOutcome::Applied {
+        tx.execute("UPDATE outbox SET projection_generation = ?3 WHERE workspace_id = ?1 AND command_id = ?2",
+            params![meta.workspace_id, request.command_id.as_str(), projection_generation])?;
     }
     tx.execute(
         "UPDATE sync_meta SET next_local_seq = ?1, projection_generation = ?2",
         params![meta.next_local_seq + 1, projection_generation],
     )?;
     hook(Stage::ProjectionStored, tx)?;
+    if request.command_type == CommandType::ReviewBulkRelease
+        && changes.outcome == ChangeOutcome::Applied
+    {
+        let bulk: BulkReleaseRequest =
+            serde_json::from_value(Value::Object(stable.payload.clone()))
+                .map_err(|_| ExecuteError::Store(StoreError::Corrupt))?;
+        for skipped in &changes.result.skipped {
+            let mut items = bulk
+                .items
+                .as_slice()
+                .iter()
+                .filter(|item| item.task_id == skipped.task_id);
+            if let Some(item) = items.next()
+                && items.next().is_none()
+            {
+                evidence.skipped.insert(
+                    (
+                        request.command_id.as_str().to_owned(),
+                        item.task_id.as_str().to_owned(),
+                    ),
+                    item.expected_revision.clone(),
+                );
+            }
+        }
+    }
     Ok(Executed {
         command_id: request.command_id.clone(),
         entity_id,
@@ -550,17 +1136,84 @@ fn stored_envelope(stable: &StableEnvelope, meta: &Meta) -> Vec<u8> {
 
 /// The canonical form of the gesture a retry is compared with: everything the
 /// caller decides, and nothing the runtime assigns (sequence, epoch, instants).
+/// Bulk items carry independent shown revisions. An explicit typed reference
+/// may name the actual result of an earlier atomic batch command for that item.
+/// The original request remains the receipt fingerprint and is checked first.
+fn resolved_bulk_payload(
+    request: &ExecuteRequest,
+    results: &LocalResults,
+) -> Result<OpenObject, ExecuteError> {
+    if request.command_type != CommandType::ReviewBulkRelease {
+        return Ok(request.payload.clone());
+    }
+    let mut bulk: BulkReleaseRequest =
+        serde_json::from_value(Value::Object(request.payload.clone()))
+            .map_err(|_| refuse(Reason::InvalidPayload, "payload"))?;
+    let mut resolved = std::collections::BTreeSet::new();
+    for precondition in &request.preconditions {
+        let Precondition::AfterCommand(after) = precondition else {
+            continue;
+        };
+        let reference = &after.after_command;
+        if reference.entity_type != EntityType::Task {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        let matches = bulk
+            .items
+            .as_slice()
+            .iter()
+            .filter(|item| item.task_id.as_str() == reference.entity_id.as_str())
+            .count();
+        if matches != 1 || !resolved.insert(reference.entity_id.as_str().to_owned()) {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        let revision = results.edit_revision(reference)?;
+        // Limited owns its sequence and exposes only a slice; rebuild through
+        // the typed constructor after replacing this exact matching item.
+        let mut items = bulk.items.as_slice().to_vec();
+        for item in &mut items {
+            if item.task_id.as_str() == reference.entity_id.as_str() {
+                item.expected_revision = revision.clone();
+            }
+        }
+        bulk.items = bb_domain::types::Limited::new(items).map_err(ExecuteError::Refused)?;
+    }
+    serde_json::to_value(bulk)
+        .map_err(|_| ExecuteError::Store(StoreError::Corrupt))?
+        .as_object()
+        .cloned()
+        .ok_or(ExecuteError::Store(StoreError::Corrupt))
+}
+
 fn request_canonical(request: &ExecuteRequest) -> String {
     let mut depends_on: Vec<&str> = request.depends_on.iter().map(CommandId::as_str).collect();
     depends_on.sort_unstable();
-    json!({
+    let mut value = json!({
         "type": request.command_type.as_str(),
         "entity_id": request.entity_id.as_ref().map(Id::as_str),
         "preconditions": request.preconditions,
         "depends_on": depends_on,
         "payload": request.payload,
-    })
-    .to_string()
+    });
+    // Empty LOCAL metadata preserves fingerprints of existing durable IDs.
+    if !request.admission_tokens.is_empty() {
+        value["admission_tokens"] = json!(request.admission_tokens);
+    }
+    value.to_string()
+}
+
+/// The exact original LOCAL request fingerprint used by execute; staging never
+/// resolves or rewrites a request before checking it.
+pub(crate) fn original_request_digest(request: &ExecuteRequest) -> Vec<u8> {
+    sha256(request_canonical(request).as_bytes()).to_vec()
+}
+
+pub(crate) fn known_request_digest_in(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    command: &CommandId,
+) -> Result<Option<Vec<u8>>, ExecuteError> {
+    Ok(known_command(tx, workspace, command)?.map(|known| known.digest))
 }
 
 struct Known {
@@ -673,6 +1326,13 @@ fn load_visible(tx: &Transaction<'_>, workspace_id: &str) -> Result<Visible, Exe
     Ok(visible)
 }
 
+pub(crate) fn read_projection(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+) -> Result<ReadSet, ExecuteError> {
+    Ok(load_visible(tx, workspace_id)?.read_set)
+}
+
 /// A stored record: `kind` is its wire entity type and `body` its `value`.
 pub(crate) fn record_from(kind: &str, body: &[u8]) -> Result<Record, ExecuteError> {
     // `Record` is adjacently tagged; the stored body is its `value`.
@@ -740,7 +1400,10 @@ fn apply(
 ) -> Result<(), ExecuteError> {
     match change {
         DomainChange::Upsert(record) => {
-            let body = json!(record)["value"].take().to_string().into_bytes();
+            let body = json!(record.public())["value"]
+                .take()
+                .to_string()
+                .into_bytes();
             tx.execute(
                 "INSERT OR REPLACE INTO visible_records (workspace_id, record_type, record_key,
                     edit_revision, source_command_id, body)
@@ -771,6 +1434,86 @@ fn apply(
         }
     }
     Ok(())
+}
+
+// ----------------------------------------------------------------------- snapshot
+
+/// What a screen reads: the visible projection of the workspace at one
+/// projection generation, and how much of the queue still waits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VisibleSnapshot {
+    pub projection_generation: u64,
+    /// Every visible record, in a stable order.
+    pub records: Vec<Record>,
+    /// Queued intents the server has not settled (everything but `completed`
+    /// and `rejected`, which an issue keeps).
+    pub pending: u64,
+    /// Sync issues still waiting for the user.
+    pub open_issues: u64,
+}
+
+/// Reads the visible projection in one read transaction, so the records, the
+/// generation and the counts belong together. Takes no write lock, so a screen
+/// never waits for a gesture and a gesture never waits for a screen.
+///
+/// # Errors
+///
+/// [`ExecuteError::Store`]; a projection an upgrade left to be rebuilt is
+/// `Corrupt` here, because only a write (which has the instant and the policy
+/// the rebuild needs) can repair it.
+pub fn visible_snapshot(store: &mut Store) -> Result<VisibleSnapshot, ExecuteError> {
+    let (generation, stale, pending, open_issues, rows) = store.read(|tx| {
+        let (generation, stale, workspace_id): (i64, i64, String) = tx.query_row(
+            "SELECT projection_generation, projection_stale, workspace_id FROM sync_meta",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let pending: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM outbox WHERE workspace_id = ?1
+             AND state NOT IN ('completed', 'rejected')",
+            [&workspace_id],
+            |row| row.get(0),
+        )?;
+        let open_issues: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_issues WHERE workspace_id = ?1 AND resolution = 'open'",
+            [&workspace_id],
+            |row| row.get(0),
+        )?;
+        let mut statement = tx.prepare(
+            "SELECT record_type, body FROM visible_records WHERE workspace_id = ?1
+             ORDER BY record_type, record_key",
+        )?;
+        let rows = statement
+            .query_map([&workspace_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, Vec<u8>)>, _>>()?;
+        Ok((generation, stale, pending, open_issues, rows))
+    })?;
+    if stale != 0 {
+        return Err(StoreError::Corrupt.into());
+    }
+    Ok(VisibleSnapshot {
+        projection_generation: unsigned(generation)?,
+        records: rows
+            .iter()
+            .map(|(kind, body)| record_from(kind, body).map(|record| record.public()))
+            .collect::<Result<_, _>>()?,
+        pending: unsigned(pending)?,
+        open_issues: unsigned(open_issues)?,
+    })
+}
+
+/// The projection generation alone: the cheap read a subscription polls.
+///
+/// # Errors
+///
+/// [`ExecuteError::Store`].
+pub fn projection_generation(store: &mut Store) -> Result<u64, ExecuteError> {
+    let generation = store.read(|tx| {
+        tx.query_row("SELECT projection_generation FROM sync_meta", [], |row| {
+            row.get(0)
+        })
+    })?;
+    unsigned(generation)
 }
 
 // ------------------------------------------------------------------- dependencies
@@ -934,6 +1677,8 @@ struct LocalVersion {
     entity_type: EntityType,
     record_key: RecordKey,
     edit_revision: Option<Counter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    record_version: Option<Counter>,
 }
 
 /// What a decided command leaves for the commands that build on it, as stored.
@@ -947,6 +1692,7 @@ pub(crate) fn local_result(changes: &ChangeSet) -> Vec<u8> {
                     entity_type: record.entity_type(),
                     record_key: record.record_key(),
                     edit_revision: edit_revision(record),
+                    record_version: None,
                 }),
                 DomainChange::Tombstone { .. } => None,
             })
@@ -968,6 +1714,7 @@ pub(crate) fn receipt_result(receipt: &Receipt) -> Vec<u8> {
                 entity_type: version.entity_type,
                 record_key: version.record_key.clone(),
                 edit_revision: version.edit_revision.clone(),
+                record_version: None,
             })
             .collect(),
         id_bindings: receipt.id_bindings.clone(),
@@ -1098,6 +1845,7 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// Incremental SHA-256, for streams too large to hold whole.
+#[derive(Clone)]
 pub(crate) struct Sha256 {
     state: [u32; 8],
     /// Fewer than 64 bytes between calls.

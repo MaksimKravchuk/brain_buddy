@@ -393,9 +393,12 @@ public struct ShownTask: Hashable, Sendable {
     /// This device's child edits on the task when the card opened
     /// (`GTDState.localChildEdits`).
     public var localChildEdits: Int
+    /// Content-free proof from the original canonical read; local prepared gesture only.
+    public var runtimeAdmissionToken: Data?
 
     public init(_ task: TaskRecord, localChildEdits: Int = 0) {
         self.localChildEdits = localChildEdits
+        runtimeAdmissionToken = nil
         content = Self.visible(task)
         childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
         subtasks = Self.visible(task.subtasks)
@@ -633,7 +636,13 @@ public struct ReviewReceipt: Hashable, Sendable, Codable {
 
     /// Hidden while not expired and the task is unchanged since.
     public func hides(_ task: TaskRecord, now: Date) -> Bool {
-        guard now < hiddenUntil else { return false }
+        now < hiddenUntil && taskIsUnchanged(task)
+    }
+
+    /// Original task correspondence, independent of the receipt's deadline.
+    /// The import codec uses this same optional-constraint rule before Rust
+    /// binds an unchanged receipt to its admitted local revision.
+    func taskIsUnchanged(_ task: TaskRecord) -> Bool {
         if let taskRevision, taskRevision != task.serverRevision { return false }
         if let taskUpdatedAt, taskUpdatedAt != task.updatedAt { return false }
         return true

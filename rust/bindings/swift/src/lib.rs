@@ -30,6 +30,10 @@
 //! as owned records (paths, an instant, counts) and fails as a [`BridgeError`] whose
 //! `code` is the import's own (`IMPORT_*`, `STORE_*`) and whose `field` names a section
 //! or check, never content. Only the Swift facade imports the generated module.
+//!
+//! Since T042 [`BridgeRuntime::resolve_legacy_outbox`] classifies the pending sends and issues
+//! that import carried. The Swift side passes the receipt answers it already fetched (by
+//! idempotency key); the lookup itself is a port in `bb-client`, so no callback crosses.
 
 use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
@@ -39,7 +43,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use bb_client::{
-    ImportError, ImportReport, ImportRequest, OpenOptions, SourceCounts, import_legacy_store,
+    ImportError, ImportReport, ImportRequest, LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus,
+    OpenOptions, ProvenAlias, ProvidedReceipts, SourceCounts, Store, import_legacy_store,
+    legacy_outbox_sends, resolve_legacy_outbox,
 };
 use bb_domain::dispatch;
 use bb_domain::smart_add::{self, Classification, Draft, Resolution, TokenKind};
@@ -47,6 +53,7 @@ use bb_domain::types::{
     DomainError, DueDay, ExecutionInputs, OpenList, Priority, ProjectId, Query, QueryInputs,
     ReadSet, TagId,
 };
+use bb_protocol::catalog::EntityType;
 use bb_protocol::command::{self, Decoded, Unsupported};
 use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CodecError, Instant, PROTOCOL_VERSION};
@@ -54,6 +61,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
+
+mod workspace;
+pub use workspace::*;
 
 const OPEN: u8 = 0;
 const CLOSED: u8 = 1;
@@ -619,6 +629,170 @@ fn run_import(request: &BridgeImportRequest) -> Result<BridgeImportReport, Failu
         .map_err(|error| Failure::from(&error))
 }
 
+/// A server ID a retained receipt proved for a local ID of an old command.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeLegacyAlias {
+    /// The wire name of the entity type (`task`, `project`, ...).
+    pub entity_type: String,
+    pub old_local_id: String,
+    pub server_id: String,
+}
+
+/// What the server can prove about one old send (`LegacyAnswer` in `bb-client`).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeLegacyAnswer {
+    Accepted {
+        aliases: Vec<BridgeLegacyAlias>,
+    },
+    Rejected {
+        code: String,
+    },
+    /// No receipt, one still pending, or no answer at all: never proof either way.
+    Unproven,
+}
+
+/// The answer already fetched for one `Idempotency-Key`, matched by key alone.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeLegacyReceipt {
+    pub idempotency_key: String,
+    pub answer: BridgeLegacyAnswer,
+}
+
+/// The classification of the outbox a legacy import carried (spec 026 T042).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeLegacyOutboxRequest {
+    pub workspace_id: String,
+    pub database_path: String,
+    /// The instant of the classification (RFC 3339): the 24-hour window ends against it.
+    pub now: String,
+    pub busy_timeout_ms: u32,
+    pub receipts: Vec<BridgeLegacyReceipt>,
+}
+
+/// Where the legacy outbox stands. Counts only; no user text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeLegacyOutboxStatus {
+    pub carried: u64,
+    pub unsent: u64,
+    pub converted: u64,
+    pub accepted: u64,
+    pub rejected: u64,
+    pub awaiting: u64,
+    pub uncertain: u64,
+    pub carried_issues: u64,
+    pub converted_issues: u64,
+    pub open_issues: u64,
+    pub aliases: u64,
+    pub classified: bool,
+    pub may_run: bool,
+    pub fully_synced: bool,
+}
+
+impl From<LegacyOutboxStatus> for BridgeLegacyOutboxStatus {
+    fn from(status: LegacyOutboxStatus) -> Self {
+        Self {
+            carried: status.carried,
+            unsent: status.unsent,
+            converted: status.converted,
+            accepted: status.accepted,
+            rejected: status.rejected,
+            awaiting: status.awaiting,
+            uncertain: status.uncertain,
+            carried_issues: status.carried_issues,
+            converted_issues: status.converted_issues,
+            open_issues: status.open_issues,
+            aliases: status.aliases,
+            classified: status.classified(),
+            may_run: status.may_run(),
+            fully_synced: status.fully_synced(),
+        }
+    }
+}
+
+impl From<&LegacyOutboxError> for Failure {
+    fn from(error: &LegacyOutboxError) -> Self {
+        Self {
+            code: error.code(),
+            retryable: error.is_retryable(),
+            field: error.field(),
+        }
+    }
+}
+
+fn legacy_answer(answer: &BridgeLegacyAnswer) -> Result<LegacyAnswer, Failure> {
+    Ok(match answer {
+        BridgeLegacyAnswer::Accepted { aliases } => LegacyAnswer::Accepted {
+            aliases: aliases
+                .iter()
+                .map(|alias| {
+                    Ok(ProvenAlias {
+                        entity_type: EntityType::from_wire(&alias.entity_type)
+                            .ok_or(Failure::new("INVALID_REQUEST", Some("entity_type")))?,
+                        old_local_id: alias.old_local_id.clone(),
+                        server_id: alias.server_id.clone(),
+                    })
+                })
+                .collect::<Result<_, Failure>>()?,
+        },
+        BridgeLegacyAnswer::Rejected { code } => LegacyAnswer::Rejected { code: code.clone() },
+        BridgeLegacyAnswer::Unproven => LegacyAnswer::Unproven,
+    })
+}
+
+/// Classifies the legacy outbox for one request. A request that cannot be read fails as
+/// `INVALID_REQUEST` naming the argument; the classification's own failures keep their codes.
+fn run_legacy_outbox(
+    request: &BridgeLegacyOutboxRequest,
+) -> Result<BridgeLegacyOutboxStatus, Failure> {
+    let now = Instant::parse(request.now.as_str())
+        .map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+    let mut receipts = ProvidedReceipts::default();
+    for receipt in &request.receipts {
+        receipts.insert(&receipt.idempotency_key, legacy_answer(&receipt.answer)?);
+    }
+    let mut store = open_outbox_store(request)?;
+    resolve_legacy_outbox(&mut store, &mut receipts, &now)
+        .map(BridgeLegacyOutboxStatus::from)
+        .map_err(|error| Failure::from(&error))
+}
+
+fn open_outbox_store(request: &BridgeLegacyOutboxRequest) -> Result<Store, Failure> {
+    if request.workspace_id.is_empty() {
+        return Err(Failure::new("INVALID_REQUEST", Some("workspace_id")));
+    }
+    Store::open(&OpenOptions {
+        path: PathBuf::from(&request.database_path),
+        workspace_id: request.workspace_id.clone(),
+        busy_timeout: Duration::from_millis(u64::from(request.busy_timeout_ms)),
+    })
+    .map_err(|error| Failure::from(&LegacyOutboxError::Store(error)))
+}
+
+/// One old send to ask the server about, by the key it was made with.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeLegacySend {
+    pub entry_id: String,
+    pub idempotency_key: String,
+    /// The old command as the legacy file held it, JSON bytes.
+    pub command: Vec<u8>,
+}
+
+/// The sends still to look up, read from the Rust store (`receipts` and `now` are not read).
+fn run_legacy_sends(request: &BridgeLegacyOutboxRequest) -> Result<Vec<BridgeLegacySend>, Failure> {
+    let mut store = open_outbox_store(request)?;
+    legacy_outbox_sends(&mut store)
+        .map_err(|error| Failure::from(&error))?
+        .into_iter()
+        .map(|send| {
+            Ok(BridgeLegacySend {
+                entry_id: send.entry_id,
+                idempotency_key: send.idempotency_key,
+                command: to_json(&send.command)?,
+            })
+        })
+        .collect()
+}
+
 /// One bridge runtime handle. `close` is idempotent and final.
 #[derive(uniffi::Object)]
 pub struct BridgeRuntime {
@@ -638,6 +812,13 @@ impl BridgeRuntime {
 
 #[uniffi::export]
 impl BridgeRuntime {
+    /// Opens the durable local workspace. Disk work belongs off the UI actor.
+    pub fn open_store(
+        &self,
+        request: BridgeStoreRequest,
+    ) -> Result<std::sync::Arc<BridgeWorkspace>, BridgeError> {
+        Ok(guarded(&self.state, || BridgeWorkspace::open(request))?)
+    }
     /// Open a runtime for the given sync protocol version.
     #[uniffi::constructor]
     pub fn new(protocol_version: u32) -> Result<Self, BridgeError> {
@@ -694,6 +875,25 @@ impl BridgeRuntime {
         request: BridgeImportRequest,
     ) -> Result<BridgeImportReport, BridgeError> {
         Ok(guarded(&self.state, || run_import(&request))?)
+    }
+
+    /// The old sends a receipt lookup is still needed for, read from the Rust store (spec 026
+    /// T042). Only `workspace_id`, `database_path` and `busy_timeout_ms` of the request are read.
+    pub fn legacy_outbox_sends(
+        &self,
+        request: BridgeLegacyOutboxRequest,
+    ) -> Result<Vec<BridgeLegacySend>, BridgeError> {
+        Ok(guarded(&self.state, || run_legacy_sends(&request))?)
+    }
+
+    /// Classify the outbox and issues a legacy import carried (spec 026 T042): a send a receipt
+    /// proves is settled, one that may have reached the server stays an issue and is never
+    /// reissued. One transaction, or nothing. Blocking disk work: call it off the main actor.
+    pub fn resolve_legacy_outbox(
+        &self,
+        request: BridgeLegacyOutboxRequest,
+    ) -> Result<BridgeLegacyOutboxStatus, BridgeError> {
+        Ok(guarded(&self.state, || run_legacy_outbox(&request))?)
     }
 
     /// Resolve a Smart Add draft (the capture sheet's preview) against an owned read set.
@@ -953,5 +1153,43 @@ mod bridge_tests {
         assert_eq!(failure.code, "INVALID_REQUEST");
         let error = BridgeError::from(failure);
         assert!(!format!("{error:?}{error}").contains(secret));
+    }
+}
+
+/// Hash the exact owned bytes the host will decode, in caller-defined order.
+#[derive(uniffi::Object)]
+pub struct BridgeDigest {
+    state: std::sync::Mutex<bb_client::DigestStream>,
+    lifecycle: AtomicU8,
+}
+#[uniffi::export]
+impl BridgeDigest {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            state: std::sync::Mutex::new(bb_client::DigestStream::default()),
+            lifecycle: AtomicU8::new(OPEN),
+        })
+    }
+    pub fn update(&self, data: Vec<u8>) -> Result<(), BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            if data.len() > 8 * 1024 * 1024 {
+                return Err(Failure::new("INVALID_REQUEST", Some("digest_chunk")));
+            }
+            self.state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .update(&data);
+            Ok(())
+        })?)
+    }
+    pub fn digest(&self) -> Result<String, BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            Ok(self
+                .state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .digest())
+        })?)
     }
 }

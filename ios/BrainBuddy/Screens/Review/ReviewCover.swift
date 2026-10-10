@@ -35,6 +35,7 @@ struct ReviewStepContext {
 final class ReviewFields {
     private(set) var dirty: Set<DraftKey> = []
     private var messages: [DraftKey: String] = [:]
+    private var editorID = UUID().uuidString
 
     init() {}
 
@@ -49,8 +50,8 @@ final class ReviewFields {
     }
 
     /// Discard: the drafts go with the text.
-    func discard(in workspace: Workspace) {
-        for key in dirty { workspace.discardDraft(for: key) }
+    func discard(in workspace: Workspace) async throws {
+        for key in dirty { try await workspace.discardDraft(for: key, editorID: editorID) }
         dirty = []
         messages = [:]
     }
@@ -86,6 +87,9 @@ struct ReviewCover: View {
     @State private var sessionID: ReviewSessionID?
     @State private var step: ReviewStep = .wins
     @State private var hasLoaded = false
+    @State private var editorID = UUID().uuidString
+    @State private var problem: String?
+    @State private var isSaving = false
     @State private var fields = ReviewFields()
     @State private var activity = ActiveTimeAccumulator()
     @State private var sentSeconds: [ReviewStep: Int] = [:]
@@ -93,8 +97,6 @@ struct ReviewCover: View {
     @State private var asksToDiscard = false
     @State private var asksToLeave = false
     @State private var movedOnNote: String?
-    @State private var problem: String?
-
     private enum Exit {
         case leave
         case skip
@@ -111,6 +113,16 @@ struct ReviewCover: View {
         content
             .bbScreenBackground()
             .toastMagicTap()
+            .overlay {
+                let stateReadiness = workspace.reviewReadiness(.state)
+                let summaryReadiness = workspace.reviewReadiness(.summary(nil))
+                let readiness = stateReadiness == .ready ? summaryReadiness : stateReadiness
+                if readiness != .ready {
+                    WorkspaceQueryContent(readiness: readiness, retry: {
+                        Task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)); load() }
+                    }) { EmptyView() }
+                }
+            }
             .sheet(
                 isPresented: Binding(
                     get: { prelude.first == .whileAway },
@@ -129,11 +141,15 @@ struct ReviewCover: View {
                 // The cancel role makes "Keep editing" the default (FR-052).
                 Button(ReviewCopy.keepEditing, role: .cancel) { pendingExit = nil }
                 Button(ReviewCopy.discard, role: .destructive) {
-                    fields.discard(in: workspace)
-                    if let exit = pendingExit { perform(exit) }
+                    Task {
+                        do {
+                            try await fields.discard(in: workspace)
+                            if let exit = pendingExit { perform(exit) }
+                        } catch { problem = TaskCommandRunner.message(for: error) }
+                    }
                 }
             }
-            .onAppear(perform: load)
+            .task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)); load() }
             .onChange(of: workspace.reviewExposed) { _, exposed in
                 if !exposed { dismiss() }
             }
@@ -173,7 +189,7 @@ struct ReviewCover: View {
             case .explainer, .modePicker, .resume, .quickReview: false
             }
         }
-        if prelude.isEmpty { begin() }
+        if prelude.isEmpty { Task { await beginDurably() } }
     }
 
     @ViewBuilder private func preludeView(_ screen: ReviewScreen) -> some View {
@@ -201,19 +217,26 @@ struct ReviewCover: View {
     private func advancePrelude() {
         guard !prelude.isEmpty else { return }
         prelude.removeFirst()
-        if prelude.isEmpty { begin() }
+        if prelude.isEmpty { Task { await beginDurably() } }
     }
 
     /// Starts the chosen review (replacing an open one, FR-029) or picks up
     /// the one being resumed.
     private func begin() {
+        Task { await beginDurably() }
+    }
+
+    @MainActor private func beginDurably() async {
+        guard sessionID == nil, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         let id: ReviewSessionID
         switch launch {
         case .new(let mode):
             do {
-                id = try workspace.startReview(mode: mode, entry: .list)
+                id = try await workspace.startReview(mode: mode, entry: .list, editorID: editorID)
             } catch {
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
                 return
             }
         case .resume(let resumed):
@@ -337,16 +360,23 @@ struct ReviewCover: View {
 
     /// Records the step as `status` with its active time and moves to the next.
     private func move(_ status: StepStatus) {
+        guard !isSaving else { return }
+        isSaving = true
+        Task { await moveDurably(status) }
+    }
+
+    @MainActor private func moveDurably(_ status: StepStatus) async {
+        defer { isSaving = false }
         guard let session, let index = session.mode.steps.firstIndex(of: step) else { return }
         let upcoming = index + 1 < session.mode.steps.count ? session.mode.steps[index + 1] : nil
         let seconds = unsentSeconds(for: step)
         do {
-            try workspace.recordReviewProgress(
+            try await workspace.recordReviewProgress(
                 session.id, currentStep: upcoming, step: step, stepStatus: status,
-                activeStep: seconds == nil ? nil : step, activeSeconds: seconds
+                activeStep: seconds == nil ? nil : step, activeSeconds: seconds, editorID: editorID
             )
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         problem = nil
@@ -363,26 +393,36 @@ struct ReviewCover: View {
     }
 
     /// The step's active time is sent before the review is left or finished.
-    private func sendActiveTime() {
-        guard let id = sessionID, let seconds = unsentSeconds(for: step) else { return }
-        if (try? workspace.recordReviewProgress(id, activeStep: step, activeSeconds: seconds)) != nil {
+    @MainActor private func sendActiveTime() async -> Bool {
+        guard let id = sessionID, let seconds = unsentSeconds(for: step) else { return true }
+        do {
+            try await workspace.recordReviewProgress(id, activeStep: step, activeSeconds: seconds, editorID: editorID)
             sentSeconds[step, default: 0] += seconds
+            return true
+        } catch {
+            problem = TaskCommandRunner.message(for: error)
+            return false
         }
     }
 
     private func leaveNow() {
-        sendActiveTime()
-        activity.record(.leave, at: Date())
-        dismiss()
+        Task { guard await sendActiveTime() else { return }; activity.record(.leave, at: Date()); dismiss() }
     }
 
     private func finish(_ clearStart: ClearStart?) {
+        guard !isSaving else { return }
+        isSaving = true
+        Task { await finishDurably(clearStart) }
+    }
+
+    @MainActor private func finishDurably(_ clearStart: ClearStart?) async {
+        defer { isSaving = false }
         guard let id = sessionID else { return }
-        sendActiveTime()
+        guard await sendActiveTime() else { return }
         do {
-            try workspace.finishReview(id, clearStart: clearStart)
+            try await workspace.finishReview(id, clearStart: clearStart, editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         dismiss()
@@ -528,6 +568,15 @@ struct ReviewDraftField: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasLoaded = false
+    @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
+    /// The newest text requested while a durable draft write is in flight.
+    /// The active writer drains this slot after its immutable snapshot settles.
+    @State private var pendingDraftText: String?
+    /// Unstructured so canceling a superseded debounce task cannot cancel the
+    /// durable writer that owns this field's queued latest text.
+    @State private var draftSaveTask: Task<Void, Never>?
 
     init(
         prompt: String, key: DraftKey, text: Binding<String>, fields: ReviewFields,
@@ -541,29 +590,75 @@ struct ReviewDraftField: View {
     }
 
     var body: some View {
-        TextField(prompt, text: $text, axis: .vertical)
-            .lineLimit(1...4)
-            .submitLabel(.done)
-            .padding(BBSpacing.s3)
-            .frame(minHeight: BBMetrics.hitTarget)
-            .bbCard()
-            .accessibilityLabel(prompt)
-            .onAppear {
-                guard !hasLoaded else { return }
-                hasLoaded = true
-                if text.isEmpty, let draft = workspace.draft(for: key) { text = draft }
-                report()
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(prompt, text: $text, axis: .vertical)
+                .lineLimit(1...4)
+                .submitLabel(.done)
+                .padding(BBSpacing.s3)
+                .frame(minHeight: BBMetrics.hitTarget)
+                .bbCard()
+                .accessibilityLabel(prompt)
+            if let problem {
+                InlineProblemText(message: problem)
+                Button("Retry draft save") { Task { await loadDraft(); await persistDraft() } }
+                    .frame(minHeight: BBMetrics.hitTarget)
             }
+        }
+            .task { await loadDraft() }
             .onChange(of: text) { _, _ in report() }
             .task(id: text) {
                 // Kept a moment after typing stops, and when the app leaves the foreground.
                 try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled, hasLoaded else { return }
-                workspace.saveDraft(text, for: key)
+                await persistDraft()
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active, hasLoaded { workspace.saveDraft(text, for: key) }
+                if phase != .active, hasLoaded { Task { await persistDraft() } }
             }
+    }
+
+    @MainActor private func loadDraft() async {
+        guard !hasLoaded else { return }
+        do {
+            if text.isEmpty, let draft = try await workspace.draft(for: key, editorID: editorID) { text = draft }
+            hasLoaded = true
+            report()
+        } catch { problem = TaskCommandRunner.message(for: error) }
+    }
+
+    @MainActor private func persistDraft() async {
+        guard hasLoaded else { return }
+        pendingDraftText = text
+        if let draftSaveTask {
+            await draftSaveTask.value
+            return
+        }
+        isSaving = true
+        let writer = Task { @MainActor in await drainDraftSaves() }
+        draftSaveTask = writer
+        await writer.value
+    }
+
+    @MainActor private func drainDraftSaves() async {
+        while let submittedText = pendingDraftText {
+            pendingDraftText = nil
+            do {
+                if submittedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if try await workspace.draft(for: key, editorID: editorID) != nil {
+                        try await workspace.discardDraft(for: key, editorID: editorID)
+                    }
+                } else {
+                    try await workspace.saveDraft(submittedText, for: key, editorID: editorID)
+                }
+                if pendingDraftText == nil { problem = nil }
+            } catch {
+                problem = TaskCommandRunner.message(for: error)
+            }
+        }
+        // This unstructured MainActor task owns the full drain, even when the
+        // debounce task that requested it is cancelled by newer typing.
+        draftSaveTask = nil
+        isSaving = false
     }
 
     private var isBlank: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -574,8 +669,8 @@ struct ReviewDraftField: View {
     }
 
     /// The text was saved elsewhere: the draft and the unsaved flag go.
-    static func submitted(_ key: DraftKey, in workspace: Workspace, fields: ReviewFields) {
-        workspace.discardDraft(for: key)
+    static func submitted(_ key: DraftKey, in workspace: Workspace, fields: ReviewFields, editorID: String) async throws {
+        try await workspace.discardDraft(for: key, editorID: editorID)
         fields.set(key, dirty: false)
     }
 }

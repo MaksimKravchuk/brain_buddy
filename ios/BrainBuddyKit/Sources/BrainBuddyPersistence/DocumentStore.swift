@@ -34,7 +34,10 @@ public protocol DocumentStore: Sendable {
     /// Reads the latest document under the lock (a fresh one if none exists),
     /// applies `transform`, increments `generation`, and atomically replaces
     /// the file before returning the written document. If `transform` throws,
-    /// nothing is written and the error is rethrown.
+    /// nothing is written and the error is rethrown. Any returned error means
+    /// no commit occurred. Implementations must not throw after the atomic
+    /// replacement/assignment succeeds; post-commit maintenance is best effort.
+    /// Awaited saves depend on this boundary to offer a safe explicit retry.
     func update(
         _ transform: @Sendable (inout StoreDocument) throws -> Void
     ) async throws -> StoreDocument

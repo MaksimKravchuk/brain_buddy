@@ -18,14 +18,17 @@
 //!   awaiting its feed) is never judged here. The server's receipt decides, so
 //!   replay leaves it exactly as it is and simply does not project it, and what
 //!   depends on it waits with it (026-FR-010: no outcome is guessed or rekeyed).
+//! * A durably bound Undo missing precisely its server-private beforeimage is
+//!   deferred even when never sent. Its descendants wait; no public restoration
+//!   or result version is invented, and independent commands still project.
 //!
 //! The confirmed base is read as stored (`record_type`, `record_key`, and the
 //! record's `value` as `body`); tombstones are what keeps deletion final.
 //! Rule IDs derive from the command ID, so replaying does not change them.
 
 use crate::execute::{
-    ExecuteContext, ExecuteError, LocalResults, RULE_VERSION, edit_revision, file, has_bindings,
-    local_result, record_from, rule_ids,
+    ExecuteContext, ExecuteError, LocalResults, RULE_VERSION, bound_account, edit_revision, file,
+    has_bindings, local_result, private_undo_missing, record_from, rule_ids,
 };
 use crate::issues::{self, IssueReason};
 use crate::storage::{Store, StoreError};
@@ -106,7 +109,8 @@ pub struct Replayed {
     pub rejected: Vec<CommandId>,
     /// Never-sent commands held behind a rejected one: now `blocked_dependency`.
     pub blocked: Vec<CommandId>,
-    /// Possibly-sent commands (or their dependants) left to the server's verdict.
+    /// Possibly-sent commands, bound Undo missing private proof, and descendants
+    /// left to the server's verdict without changing their immutable intents.
     pub deferred: Vec<CommandId>,
     pub projection_generation: u64,
 }
@@ -133,7 +137,10 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
+    let local_authority = crate::local_review::account_less(tx)?;
     let mut base = Projection::confirmed(tx, &workspace_id)?;
+    let mut local_facts = crate::localfacts::load(tx, &workspace_id)?;
+    crate::localfacts::reset_visible(&mut local_facts);
     let queue = load_queue(tx, &workspace_id)?;
     let mut results = LocalResults::new();
     for command in &queue {
@@ -152,7 +159,8 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         .filter(|command| match command.state.as_str() {
             "accepted_awaiting_feed" => true,
             "completed" => {
-                !proven.contains(command.id.as_str())
+                !local_authority
+                    && !proven.contains(command.id.as_str())
                     && command.local_result.as_deref().is_some_and(has_bindings)
             }
             _ => false,
@@ -217,6 +225,12 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         match decide(&base, &results, &envelope, context) {
             Ok(changes) => {
                 for change in &changes.changes {
+                    crate::localfacts::project(
+                        &mut local_facts,
+                        &base.read_set,
+                        change,
+                        &command.id,
+                    );
                     base.install(change, &command.id);
                 }
                 if !proven.contains(id) {
@@ -232,7 +246,13 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
                 }
                 report.applied.push(command.id.clone());
             }
-            Err(reason) if judgeable => {
+            Err(ReplayDecisionError::PrivateMissing(_)) if bound_account(tx)? => {
+                report.deferred.push(command.id.clone());
+                held.insert(id.to_owned(), Held::Deferred);
+            }
+            Err(
+                ReplayDecisionError::Refused(reason) | ReplayDecisionError::PrivateMissing(reason),
+            ) if judgeable => {
                 issues::open(
                     tx,
                     &workspace_id,
@@ -253,7 +273,9 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
     }
 
     issues::refresh_dependents(tx, &workspace_id)?;
-    let writes = base.save(tx, &workspace_id)?;
+    crate::localfacts::prune(tx, &workspace_id, &mut local_facts)?;
+    let writes =
+        base.save(tx, &workspace_id)? + crate::localfacts::save(tx, &workspace_id, &local_facts)?;
     let generation = generation + i64::from(writes > 0);
     // The projection is whole now, whatever state the store was upgraded from.
     tx.execute(
@@ -302,16 +324,21 @@ fn set_state(
 
 // ------------------------------------------------------------------------- deciding
 
+enum ReplayDecisionError {
+    Refused(IssueReason),
+    PrivateMissing(IssueReason),
+}
+
 fn decide(
     base: &Projection,
     results: &LocalResults,
     envelope: &CommandEnvelope,
     context: &ExecuteContext,
-) -> Result<bb_domain::types::ChangeSet, IssueReason> {
+) -> Result<bb_domain::types::ChangeSet, ReplayDecisionError> {
     let stable = &envelope.envelope;
     // A deleted record stays deleted, whatever a late command says about it.
     if base.deleted(&[stable.entity_id.as_str().to_owned()]) {
-        return Err(IssueReason::EntityDeleted);
+        return Err(ReplayDecisionError::Refused(IssueReason::EntityDeleted));
     }
     let inputs = ExecutionInputs {
         rule_version: RULE_VERSION,
@@ -327,11 +354,18 @@ fn decide(
             &stable.payload,
             &base.read_set,
         )
-        .map_err(|_| IssueReason::Validation("invalid_payload".to_owned()))?,
+        .map_err(|_| {
+            ReplayDecisionError::Refused(IssueReason::Validation("invalid_payload".to_owned()))
+        })?,
         policy: context.policy.clone(),
     };
-    dispatch::decide_envelope(&base.read_set, envelope, results, &inputs)
-        .map_err(|error| classify(&error, base))
+    dispatch::decide_envelope(&base.read_set, envelope, results, &inputs).map_err(|error| {
+        if private_undo_missing(envelope.command_type, &stable.entity_id, &error) {
+            ReplayDecisionError::PrivateMissing(classify(&error, base))
+        } else {
+            ReplayDecisionError::Refused(classify(&error, base))
+        }
+    })
 }
 
 /// The issue reason of a refusal. A refusal about a record the base holds a
@@ -495,10 +529,13 @@ impl Projection {
                     Row {
                         revision: edit_revision(record).map(|c| c.as_str().to_owned()),
                         source: Some(command.as_str().to_owned()),
-                        body: json!(record)["value"].take().to_string().into_bytes(),
+                        body: json!(record.public())["value"]
+                            .take()
+                            .to_string()
+                            .into_bytes(),
                     },
                 );
-                file(&mut self.read_set, record.clone());
+                file(&mut self.read_set, record.public());
             }
             DomainChange::Tombstone {
                 entity_type,
@@ -555,7 +592,7 @@ impl Projection {
 }
 
 /// Removes the record a tombstone names from what the rules read.
-fn remove(read_set: &mut ReadSet, entity_type: EntityType, key: &RecordKey) {
+pub(crate) fn remove(read_set: &mut ReadSet, entity_type: EntityType, key: &RecordKey) {
     let id = key.first().map_or("", String::as_str);
     let keyed = |record: Record| record.record_key() == *key;
     match entity_type {

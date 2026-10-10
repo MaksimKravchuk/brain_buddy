@@ -173,6 +173,10 @@ impl ReviewSession {
 pub struct SessionPrivate {
     pub applied_progress: BTreeMap<ProgressId, String>,
     pub finished_empty: Vec<StepCode>,
+    /// Native legacy source IDs retained under the explicit LOCAL capability.
+    /// Their source never carried payload digests; no digest is fabricated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_imported_progress: Vec<ProgressId>,
 }
 
 /// `task_ids: None` is an uncaptured queue; `Some(vec![])` is captured-empty.
@@ -229,6 +233,33 @@ pub struct DecisionUndo {
     pub task_before: Box<Task>,
     pub created_task_revision: Option<Counter>,
     pub receipt_kind: Option<ReceiptKind>,
+    /// Accountless local before-state; absent on the ordinary server path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_before: Option<LocalDecisionBefore>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalDecisionBefore {
+    pub receipt_replaced: Option<ReplacedReceipt>,
+    pub session_before: Option<SessionBefore>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplacedReceipt {
+    pub receipt: ReviewReceipt,
+    /// Exact original eligibility proof, not a guess from a restored revision.
+    pub task_was_unchanged: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionBefore {
+    pub qualifying_activity: bool,
+    pub last_activity_at: Instant,
+    pub last_activity_after: Instant,
+    pub revision_after: Option<Counter>,
 }
 
 /// A Keep or release receipt: one current receipt per task and kind.
@@ -329,6 +360,12 @@ pub struct ReleasedItem {
 pub struct ReleasedPrivate {
     pub previous_state: OpenList,
     pub clock_before: Option<ClockBefore>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_receipt_replaced: Option<ReplacedReceipt>,
+    /// Exact imported source-stamp eligibility. An explicit stale source item
+    /// remains a skip even when both imported numeric revisions are zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_source_task_unchanged: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

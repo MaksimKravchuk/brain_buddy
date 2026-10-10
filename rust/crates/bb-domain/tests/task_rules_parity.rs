@@ -604,6 +604,14 @@ fn task_rules_026_fr_002_source_captures_need_the_adapters_capture_validation() 
 #[test]
 fn task_rules_026_fr_002_a_task_created_in_next_starts_its_formulation() {
     let store = world();
+    let historical = "0b0e1f30-0000-4000-8000-00000000000a";
+    let invalid_allocation = refusal(store.decide_with(
+        &create(NEW_TASK, json!({"title": "X", "state": "next"})),
+        NOW,
+        &[historical],
+    ));
+    assert_eq!(invalid_allocation.reason, Reason::InvalidValue);
+    assert_eq!(invalid_allocation.field.as_deref(), Some("FormulationId"));
     let asked = accepted(store.decide_with(
         &create(
             NEW_TASK,

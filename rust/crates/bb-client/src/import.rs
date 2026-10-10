@@ -78,17 +78,18 @@ const STAGING_SCHEMA: &str = "brainbuddy-legacy-import-staging/v1";
 /// A staged page: small enough that one page never holds the write lock long.
 const PAGE_BYTES: usize = 256 * 1024;
 const ALIAS_PROVENANCE: &str = "legacy-import:server-id";
+const NORMALIZED_ALIAS_PROVENANCE: &str = "legacy-import:normalized-local-id";
 /// The author of a comment the legacy file left unattributed and no account owns.
 const LOCAL_ACTOR: &str = "local";
 /// Imported records start below every real record version, so the first feed or
 /// snapshot change always advances them.
-const IMPORTED_VERSION: u64 = 0;
+pub(crate) const IMPORTED_VERSION: u64 = 0;
 
 /// The newest `StoreDocument.version` this build reads (`StoreDocument.currentVersion`).
 pub const SUPPORTED_SOURCE_VERSION: i64 = 2;
 
-const KIND_OUTBOX: &str = "legacy_outbox_entry";
-const KIND_ISSUE: &str = "legacy_sync_issue";
+pub(crate) const KIND_OUTBOX: &str = "legacy_outbox_entry";
+pub(crate) const KIND_ISSUE: &str = "legacy_sync_issue";
 const KIND_REVIEW: &str = "legacy_review_base";
 const KIND_LOCAL: &str = "legacy_local_review";
 const KIND_SYNC: &str = "legacy_sync_metadata";
@@ -156,6 +157,67 @@ pub struct ImportMarker {
     /// Tasks whose local-only facts (`lastOpenList`, `childrenSyncedAt`, the
     /// private part of a park) were kept.
     pub local_task_facts: u64,
+}
+
+/// Importer-verified accountless source ownership. Not serializable and not
+/// constructible by host JSON: it binds exact retained backup bytes to an
+/// already admitted immutable import marker.
+pub struct AccountlessImportProof {
+    pub(crate) workspace: String,
+    pub(crate) activation: String,
+    pub(crate) marker_sha256: String,
+    pub(crate) source_sha256: String,
+    pub(crate) source_bytes: u64,
+    pub(crate) source_version: i64,
+    pub(crate) source_generation: i64,
+    /// Verified original bytes decoded only after the existing strict parser.
+    /// Memory-only: never another persisted source copy or host authority flag.
+    pub(crate) source: Value,
+}
+
+/// Verifies the exact retained source through the same duplicate-key, source
+/// version and account parser as import. Missing/mismatched backups refuse.
+pub fn verify_accountless_import(
+    store: &mut Store,
+    retained_source: &Path,
+) -> Result<AccountlessImportProof, ImportError> {
+    let (workspace, activation, manifest, digest): (String,String,Vec<u8>,Vec<u8>) = store.read(|tx| {
+        tx.query_row("SELECT m.workspace_id,s.activation_id,s.manifest,s.manifest_digest FROM sync_meta m JOIN staging_bases s ON s.workspace_id=m.workspace_id WHERE s.activation_id LIKE 'legacy-import-%' AND s.state='activated'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
+    })?;
+    if sha256(&manifest).as_slice() != digest.as_slice() {
+        return Err(ImportError::StagingInvalid);
+    }
+    let marker: ImportMarker =
+        serde_json::from_slice(&manifest).map_err(|_| ImportError::StagingInvalid)?;
+    if marker.schema != MARKER_SCHEMA {
+        return Err(ImportError::StagingInvalid);
+    }
+    let bytes = read_source(retained_source)?;
+    if hex(&sha256(&bytes)) != marker.source_sha256
+        || u64::try_from(bytes.len()).map_err(|_| ImportError::StagingInvalid)?
+            != marker.source_bytes
+    {
+        return Err(failed("account_less_source"));
+    }
+    let now = Instant::parse(&marker.imported_at).map_err(|_| ImportError::StagingInvalid)?;
+    let plan = parse(&bytes, &now)?;
+    if plan.account_id.is_some()
+        || plan.version != marker.source_version
+        || plan.generation != marker.source_generation
+        || plan.counts != marker.counts
+    {
+        return Err(failed("account_less_source"));
+    }
+    Ok(AccountlessImportProof {
+        workspace,
+        activation,
+        marker_sha256: hex(&sha256(&manifest)),
+        source_sha256: marker.source_sha256,
+        source_bytes: marker.source_bytes,
+        source_version: marker.source_version,
+        source_generation: marker.source_generation,
+        source: serde_json::from_slice(&bytes).map_err(|_| ImportError::StagingInvalid)?,
+    })
 }
 
 /// The outcome of [`import_legacy_store`].
@@ -316,7 +378,12 @@ pub fn legacy_record_key(entity: EntityType, local_id: &str, server_id: Option<&
     if let Some(server) = server_id {
         return server.to_owned();
     }
-    let prefix = entity.as_str();
+    let prefix = match entity {
+        EntityType::ReviewSession => "review",
+        EntityType::ReviewDecision => "decision",
+        EntityType::ReviewBulkRelease => "bulk",
+        _ => entity.as_str(),
+    };
     if is_client_shape(local_id, prefix) {
         return local_id.to_owned();
     }
@@ -618,6 +685,11 @@ struct Alias {
     entity_type: String,
     old_local_id: String,
     server_id: String,
+    #[serde(default = "server_alias_provenance")]
+    provenance: String,
+}
+fn server_alias_provenance() -> String {
+    ALIAS_PROVENANCE.to_owned()
 }
 
 /// A row of `drafts` that carries a datum the schema has no table for.
@@ -1116,15 +1188,21 @@ impl Builder {
         }
     }
 
-    /// Records a proven server ID for a local one.
+    /// Records every source-proven identity difference, including normalization
+    /// of an unsynced bare UUID by the accepted import identity helper.
     fn alias(&mut self, entity: EntityType, local: &str, server: Option<&str>) {
-        if let Some(server) = server
-            && server != local
-        {
+        let canonical = legacy_record_key(entity, local, server);
+        if canonical != local {
             self.aliases.push(Alias {
                 entity_type: entity.as_str().to_owned(),
                 old_local_id: local.to_owned(),
-                server_id: server.to_owned(),
+                server_id: canonical,
+                provenance: if server.is_some() {
+                    ALIAS_PROVENANCE
+                } else {
+                    NORMALIZED_ALIAS_PROVENANCE
+                }
+                .to_owned(),
             });
         }
     }
@@ -1678,7 +1756,7 @@ fn activate(
                 alias.entity_type,
                 alias.old_local_id,
                 alias.server_id,
-                ALIAS_PROVENANCE
+                alias.provenance
             ],
         )?;
     }
@@ -1754,7 +1832,7 @@ fn context(staged: &Staged) -> Result<ExecuteContext, ImportError> {
 }
 
 /// The marker row of a finished import: its activation ID and the marker.
-fn read_marker(
+pub(crate) fn read_marker(
     tx: &Transaction<'_>,
     workspace: &str,
 ) -> rusqlite::Result<Option<(String, ImportMarker)>> {
@@ -1919,16 +1997,20 @@ fn verify(
     let mut stored: Vec<Alias> = Vec::new();
     {
         let mut statement = tx.prepare(
-            "SELECT entity_type, old_local_id, server_id FROM identity_aliases
-             WHERE workspace_id = ?1 AND provenance = ?2",
+            "SELECT entity_type, old_local_id, server_id, provenance FROM identity_aliases
+             WHERE workspace_id = ?1 AND provenance IN (?2,?3)",
         )?;
-        let found = statement.query_map(params![workspace, ALIAS_PROVENANCE], |row| {
-            Ok(Alias {
-                entity_type: row.get(0)?,
-                old_local_id: row.get(1)?,
-                server_id: row.get(2)?,
-            })
-        })?;
+        let found = statement.query_map(
+            params![workspace, ALIAS_PROVENANCE, NORMALIZED_ALIAS_PROVENANCE],
+            |row| {
+                Ok(Alias {
+                    entity_type: row.get(0)?,
+                    old_local_id: row.get(1)?,
+                    server_id: row.get(2)?,
+                    provenance: row.get(3)?,
+                })
+            },
+        )?;
         for alias in found {
             stored.push(alias?);
         }
@@ -1951,7 +2033,7 @@ fn verify(
     // The carriers hold exactly what the file's verbatim sections held (their
     // digests are part of the facts above) and one row per local fact.
     let carried: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM drafts WHERE workspace_id = ?1",
+        "SELECT COUNT(*) FROM drafts WHERE workspace_id = ?1 AND editor_kind != 'runtime_task_local'",
         [workspace],
         |row| row.get(0),
     )?;
