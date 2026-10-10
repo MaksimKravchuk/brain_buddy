@@ -113,14 +113,20 @@ struct ProjectReviewView: View {
                         ContentUnavailableView {
                             Label("Project actions couldn’t load", systemImage: "exclamationmark.triangle")
                         } actions: {
-                            Button("Retry actions") { loadProjectTasks(item) }
+                            if taskPageState.readiness == .failed("REVIEW_PAGE_CHANGED") {
+                                Button("Reload review", action: load)
+                            } else {
+                                Button("Retry actions") { Task { await loadProjectTasks(item) } }
+                            }
                         }
                     } else {
                         ProgressView("Loading project actions…")
                     }
                 }
+                .task(id: item.id) { await loadProjectTasks(item) }
                 Divider()
                 decisionControls(item)
+                    .disabled(taskPageState.readiness != .ready)
                 if let error = model.error {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
@@ -244,22 +250,20 @@ struct ProjectReviewView: View {
 
     private func changeTaskPage(previous: Bool, item: ProjectReviewItem) {
         Task {
-            let tasks = previous
+            let updated = previous
                 ? await model.previousProjectReviewTaskPage(item)
                 : await model.nextProjectReviewTaskPage(item)
-            guard index < items.count, items[index].id == item.id else { return }
-            items[index].tasks = tasks
-            items[index].taskPageState = model.projectReviewTaskPageState(items[index])
+            guard index < items.count, items[index].id == item.id,
+                  items[index].projectionGeneration == item.projectionGeneration else { return }
+            items[index] = updated
         }
     }
 
-    private func loadProjectTasks(_ item: ProjectReviewItem) {
-        Task {
-            let tasks = await model.reloadProjectReviewTaskPage(item)
-            guard index < items.count, items[index].id == item.id else { return }
-            items[index].tasks = tasks
-            items[index].taskPageState = model.projectReviewTaskPageState(items[index])
-        }
+    private func loadProjectTasks(_ item: ProjectReviewItem) async {
+        let updated = await model.reloadProjectReviewTaskPage(item)
+        guard !Task.isCancelled, index < items.count, items[index].id == item.id,
+              items[index].projectionGeneration == item.projectionGeneration else { return }
+        items[index] = updated
     }
 
     private func load() {

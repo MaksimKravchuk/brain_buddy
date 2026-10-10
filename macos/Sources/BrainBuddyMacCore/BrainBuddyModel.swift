@@ -40,6 +40,8 @@ package struct ProjectReviewItem: Identifiable, Sendable {
     package let primaryRecordKey: String
     package let countsByState: [TaskState: Int]?
     package var taskPageState: WorkspaceQueryPageState
+    /// Generation pairing the displayed catalog record with its complete signature.
+    package let projectionGeneration: UInt64?
     /// The last review, valid or not.
     package let lastReview: ProjectReviewMark?
     /// A review exists but the project's tasks changed since.
@@ -198,9 +200,11 @@ package final class BrainBuddyModel {
         guard readiness == .ready, workspace.isRustSelected else { return readiness }
         let ids = workspace.projects().map(\.project).filter { $0.state == .active }.map(\.id)
         let stampReadiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, projects: ids)
-        if case .failed = projectReviewStampReadiness, stampReadiness == .ready { return projectReviewStampReadiness }
+        guard projectReviewStampReadiness == .ready else { return projectReviewStampReadiness }
         guard stampReadiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, projects: ids) else { return stampReadiness }
-        if let projectReviewStampGeneration, projectReviewStampGeneration != answer.generation {
+        guard let shownGeneration = projectReviewStampGeneration,
+              shownGeneration == workspace.projectsPageState().projectionGeneration,
+              shownGeneration == answer.generation else {
             return .failed("REVIEW_PAGE_CHANGED")
         }
         return stampReadiness
@@ -662,11 +666,18 @@ package final class BrainBuddyModel {
             return []
         }
         let result = workspace.list(.list(.waiting), options: ListOptions())
+        let shownGeneration = workspace.listPageState(.list(.waiting), options: ListOptions()).projectionGeneration
         await prepareProjectDisplays(for: result)
         let tasks = result.sections.flatMap(\.tasks)
         if workspace.isRustSelected {
             do {
                 let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: tasks.map(\.id))
+                guard let shownGeneration, shownGeneration == answer.generation else {
+                    waitingReviewStampReadiness = .failed("REVIEW_PAGE_CHANGED")
+                    waitingReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
                 let mappedStamps = tasks.compactMap { task in Self.reviewStamp(for: task.id, in: answer).map { (task.id, $0) } }
                 guard mappedStamps.count == tasks.count else {
                     waitingReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
@@ -675,7 +686,7 @@ package final class BrainBuddyModel {
                     return []
                 }
                 waitingReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
-                waitingReviewStampGeneration = answer.generation
+                waitingReviewStampGeneration = shownGeneration
                 waitingReviewStampReadiness = .ready
                 queryRevision &+= 1
                 let reviewNow = self.reviewNow
@@ -707,17 +718,21 @@ package final class BrainBuddyModel {
         if workspace.isRustSelected, list == .waiting {
             let ids = result.sections.flatMap(\.tasks).map(\.id)
             let readiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, tasks: ids)
-            if case .failed = waitingReviewStampReadiness, readiness == .ready { return waitingReviewStampReadiness }
+            guard waitingReviewStampReadiness == .ready else { return waitingReviewStampReadiness }
             guard readiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, tasks: ids) else { return readiness }
-            if let waitingReviewStampGeneration, waitingReviewStampGeneration != answer.generation { return .failed("REVIEW_PAGE_CHANGED") }
+            guard let shownGeneration = waitingReviewStampGeneration,
+                  shownGeneration == workspace.listPageState(.list(list), options: ListOptions()).projectionGeneration,
+                  shownGeneration == answer.generation else { return .failed("REVIEW_PAGE_CHANGED") }
             return readiness
         }
         if workspace.isRustSelected, list == .someday {
             let ids = result.sections.flatMap(\.tasks).map(\.id)
             let readiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, tasks: ids)
-            if case .failed = somedayReviewStampReadiness, readiness == .ready { return somedayReviewStampReadiness }
+            guard somedayReviewStampReadiness == .ready else { return somedayReviewStampReadiness }
             guard readiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, tasks: ids) else { return readiness }
-            if let somedayReviewStampGeneration, somedayReviewStampGeneration != answer.generation { return .failed("REVIEW_PAGE_CHANGED") }
+            guard let shownGeneration = somedayReviewStampGeneration,
+                  shownGeneration == workspace.listPageState(.list(list), options: ListOptions()).projectionGeneration,
+                  shownGeneration == answer.generation else { return .failed("REVIEW_PAGE_CHANGED") }
             return readiness
         }
         return .ready
@@ -771,11 +786,18 @@ package final class BrainBuddyModel {
             return []
         }
         let result = workspace.list(.list(.someday), options: ListOptions())
+        let shownGeneration = workspace.listPageState(.list(.someday), options: ListOptions()).projectionGeneration
         await prepareProjectDisplays(for: result)
         let tasks = result.sections.flatMap(\.tasks)
         if workspace.isRustSelected {
             do {
                 let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: tasks.map(\.id))
+                guard let shownGeneration, shownGeneration == answer.generation else {
+                    somedayReviewStampReadiness = .failed("REVIEW_PAGE_CHANGED")
+                    somedayReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
                 let mappedStamps = tasks.compactMap { task in Self.reviewStamp(for: task.id, in: answer).map { (task.id, $0) } }
                 guard mappedStamps.count == tasks.count else {
                     somedayReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
@@ -784,7 +806,7 @@ package final class BrainBuddyModel {
                     return []
                 }
                 somedayReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
-                somedayReviewStampGeneration = answer.generation
+                somedayReviewStampGeneration = shownGeneration
                 somedayReviewStampReadiness = .ready
                 queryRevision &+= 1
                 let reviewNow = self.reviewNow
@@ -887,9 +909,16 @@ package final class BrainBuddyModel {
         queryRevision &+= 1
         guard workspace.projectsReadiness() == .ready else { return [] }
         let activeProjects = projects.filter { $0.state == .active }
+        let shownGeneration = workspace.projectsPageState().projectionGeneration
         if workspace.isRustSelected {
             do {
                 let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, projects: activeProjects.map(\.id))
+                guard let shownGeneration, shownGeneration == answer.generation else {
+                    projectReviewStampReadiness = .failed("REVIEW_PAGE_CHANGED")
+                    projectReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
                 let mappedStamps = activeProjects.compactMap { project in Self.projectStamp(for: project.id, in: answer).map { (project.id, $0) } }
                 guard mappedStamps.count == activeProjects.count else {
                     projectReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
@@ -898,7 +927,7 @@ package final class BrainBuddyModel {
                     return []
                 }
                 projectReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
-                projectReviewStampGeneration = answer.generation
+                projectReviewStampGeneration = shownGeneration
                 projectReviewStampReadiness = .ready
                 queryRevision &+= 1
                 var items: [ProjectReviewItem] = []
@@ -909,15 +938,11 @@ package final class BrainBuddyModel {
                     }
                     let mark = localState.projectMark(recordKeys: stamp.recordKeys)
                     if localState.validProjectMark(for: project, signature: stamp.signature, recordKeys: stamp.recordKeys, now: reviewNow) != nil { continue }
-                    let options = projectReviewTaskOptions
-                    await workspace.prepareList(.project(project.id), options: options)
-                    let pageState = workspace.listPageState(.project(project.id), options: options)
-                    let taskPage = pageState.readiness == .ready
-                        ? workspace.list(.project(project.id), options: options).sections.flatMap(\.tasks) : []
+                    let pageState = WorkspaceQueryPageState(readiness: .notRequested)
                     items.append(ProjectReviewItem(
-                        project: project, tasks: taskPage, signature: stamp.signature,
+                        project: project, tasks: [], signature: stamp.signature,
                         canonicalProjectID: stamp.projectID, recordKeys: stamp.recordKeys, primaryRecordKey: stamp.primaryRecordKey,
-                        countsByState: stamp.countsByState, taskPageState: pageState,
+                        countsByState: stamp.countsByState, taskPageState: pageState, projectionGeneration: shownGeneration,
                         lastReview: mark,
                         hasChanges: localState.projectChangedSinceReview(project, signature: stamp.signature, recordKeys: stamp.recordKeys)
                     ))
@@ -936,12 +961,11 @@ package final class BrainBuddyModel {
             guard localState.validProjectMark(for: project, in: state, now: reviewNow) == nil else { return nil }
             let tasks = state.tasks.values.filter { $0.projectID == project.id }
                 .sorted { ($0.orderKey, $0.createdAt, $0.id) < ($1.orderKey, $1.createdAt, $1.id) }
-            let options = projectReviewTaskOptions
             let pageState = WorkspaceQueryPageState(readiness: .ready)
             return ProjectReviewItem(
                 project: project, tasks: tasks, signature: localState.signature(ofProject: project.id, in: state),
                 canonicalProjectID: project.id, recordKeys: RecordKey.candidates(serverID: project.serverID, clientID: project.id.rawValue),
-                primaryRecordKey: RecordKey.of(project), countsByState: nil, taskPageState: pageState,
+                primaryRecordKey: RecordKey.of(project), countsByState: nil, taskPageState: pageState, projectionGeneration: nil,
                 lastReview: localState.projectMark(for: project), hasChanges: localState.projectChangedSinceReview(project, in: state)
             )
         }
@@ -969,29 +993,58 @@ package final class BrainBuddyModel {
     }
 
     package func projectReviewTaskPageState(_ item: ProjectReviewItem) -> WorkspaceQueryPageState {
-        guard workspace.isRustSelected else { return WorkspaceQueryPageState(readiness: .ready) }
-        return workspace.listPageState(.project(item.id), options: projectReviewTaskOptions)
+        guard workspace.isRustSelected else { return item.taskPageState }
+        _ = queryRevision
+        let current = workspace.listPageState(.project(item.id), options: projectReviewTaskOptions)
+        guard current.readiness == .ready else { return current }
+        guard item.taskPageState.readiness == .ready else { return item.taskPageState }
+        guard let shownGeneration = item.projectionGeneration,
+              shownGeneration == item.taskPageState.projectionGeneration,
+              shownGeneration == current.projectionGeneration else {
+            return WorkspaceQueryPageState(readiness: .failed("REVIEW_PAGE_CHANGED"))
+        }
+        return item.taskPageState
     }
 
-    package func nextProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+    /// Copy the tasks and their page state together, retaining the original complete signature.
+    private func preparedProjectReviewTaskPage(_ item: ProjectReviewItem) -> ProjectReviewItem {
+        var updated = item
+        let pageState = workspace.listPageState(.project(item.id), options: projectReviewTaskOptions)
+        guard pageState.readiness == .ready else {
+            updated.tasks = []
+            updated.taskPageState = pageState
+            return updated
+        }
+        guard let shownGeneration = item.projectionGeneration,
+              shownGeneration == pageState.projectionGeneration else {
+            updated.tasks = []
+            updated.taskPageState = WorkspaceQueryPageState(readiness: .failed("REVIEW_PAGE_CHANGED"))
+            return updated
+        }
+        updated.tasks = workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+        updated.taskPageState = pageState
+        return updated
+    }
+
+    package func nextProjectReviewTaskPage(_ item: ProjectReviewItem) async -> ProjectReviewItem {
+        guard workspace.isRustSelected else { return item }
         await workspace.nextListPage(.project(item.id), options: projectReviewTaskOptions)
         queryRevision &+= 1
-        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
-        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+        return preparedProjectReviewTaskPage(item)
     }
 
-    package func previousProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+    package func previousProjectReviewTaskPage(_ item: ProjectReviewItem) async -> ProjectReviewItem {
+        guard workspace.isRustSelected else { return item }
         await workspace.previousListPage(.project(item.id), options: projectReviewTaskOptions)
         queryRevision &+= 1
-        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
-        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+        return preparedProjectReviewTaskPage(item)
     }
 
-    package func reloadProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+    package func reloadProjectReviewTaskPage(_ item: ProjectReviewItem) async -> ProjectReviewItem {
+        guard workspace.isRustSelected else { return item }
         await workspace.prepareList(.project(item.id), options: projectReviewTaskOptions)
         queryRevision &+= 1
-        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
-        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+        return preparedProjectReviewTaskPage(item)
     }
 
     /// Records a decision against the exact displayed signature. Legacy compatibility remains synchronous.
@@ -1019,7 +1072,7 @@ package final class BrainBuddyModel {
     }
 
     package func markNativeProjectReviewed(_ item: ProjectReviewItem, decision: ProjectReviewDecision) async -> Bool {
-        guard workspace.isRustSelected else {
+        guard workspace.isRustSelected, projectReviewTaskPageState(item).readiness == .ready else {
             error = "Project review is no longer ready. Reopen it to inspect current actions."
             return false
         }

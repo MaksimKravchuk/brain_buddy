@@ -5,6 +5,7 @@ import Foundation
 import Testing
 
 @testable import BrainBuddyMacCore
+@testable import BrainBuddyWorkspace
 
 /// The Mac's offline journeys on the kit (T105), ported from the XCTest suite that ran against the
 /// old local store (tasks.md "XCTest ledger"): every case runs account-less over a real
@@ -156,7 +157,7 @@ struct OfflineWorkspaceTests {
         let source = try app.add("Receive landlord's answer", .waiting, project: project, waitingFor: "Landlord")
         for index in 0..<100 { try app.add("Other reply \(index)", .waiting, waitingFor: "Another person") }
 
-        let review = app.model.loadWaitingReviewTasks()
+        let review = await app.model.loadWaitingReviewTasks()
         #expect(review.count == 101 && review.contains { $0.id == source })
         #expect(await app.model.createFollowUp(for: source, title: "  ") == false)
         #expect(app.titles(.next).isEmpty)
@@ -167,7 +168,7 @@ struct OfflineWorkspaceTests {
         #expect(try app.task("Ask landlord for an update").projectID == project)
 
         await app.restart()
-        let reopened = app.model.loadWaitingReviewTasks()
+        let reopened = await app.model.loadWaitingReviewTasks()
         #expect(reopened.count == 100 && !reopened.contains { $0.id == source })
         #expect(app.model.sidebarCounts.next == 1)
         try app.workspace.archiveProject(project)
@@ -187,7 +188,7 @@ struct OfflineWorkspaceTests {
         #expect(app.workspace.task(source) == before)
         await app.restart()
         #expect(app.titles(.next) == ["Ask Sam for an update"])
-        #expect(app.model.loadWaitingReviewTasks().isEmpty)
+        #expect(await app.model.loadWaitingReviewTasks().isEmpty)
     }
 
     @Test("021-FR-010 returning a Waiting item to Next and cancelling another persist across a restart")
@@ -200,7 +201,7 @@ struct OfflineWorkspaceTests {
         #expect(await app.model.cancelTask(cancelled))
 
         await app.restart()
-        #expect(app.model.loadWaitingReviewTasks().isEmpty)
+        #expect(await app.model.loadWaitingReviewTasks().isEmpty)
         let next = try app.task("Read Sam's revised draft")
         #expect(next.state == .next && next.waitingFor == nil && next.waitingSince == nil)
         #expect(app.workspace.task(cancelled)?.state == .cancelled)
@@ -211,17 +212,17 @@ struct OfflineWorkspaceTests {
         let app = await App()
         let id = try app.add("Wait for a reply", .waiting, waitingFor: "Sam")
         let since = try #require(app.workspace.task(id)?.waitingSince)
-        #expect(app.model.keepWaiting(id))
-        #expect(app.model.loadWaitingReviewTasks().isEmpty)
+        #expect(await app.model.keepWaiting(try #require(app.workspace.task(id))))
+        #expect(await app.model.loadWaitingReviewTasks().isEmpty)
 
         await app.restart()
-        #expect(app.model.loadWaitingReviewTasks().isEmpty)
+        #expect(await app.model.loadWaitingReviewTasks().isEmpty)
         try app.workspace.updateTask(id, TaskChanges(title: .set("Wait for Sam's revised reply")))
-        #expect(app.model.loadWaitingReviewTasks().map(\.id) == [id])
-        #expect(app.model.keepWaiting(id))
-        #expect(app.model.loadWaitingReviewTasks().isEmpty)
+        #expect(await app.model.loadWaitingReviewTasks().map(\.id) == [id])
+        #expect(await app.model.keepWaiting(try #require(app.workspace.task(id))))
+        #expect(await app.model.loadWaitingReviewTasks().isEmpty)
         app.clock.advance(7 * TestClock.day)
-        #expect(app.model.loadWaitingReviewTasks().map(\.id) == [id], "due again after 7 days")
+        #expect(await app.model.loadWaitingReviewTasks().map(\.id) == [id], "due again after 7 days")
         #expect(app.workspace.task(id)?.waitingSince == since, "a review mark never touches the task")
     }
 
@@ -230,15 +231,89 @@ struct OfflineWorkspaceTests {
         let app = await App()
         let source = try app.add("Build a small greenhouse", .someday)
         for index in 0..<100 { try app.add("Future idea \(index)", .someday) }
-        #expect(app.model.loadSomedayReviewTasks().count == 101)
-        #expect(app.model.keepSomeday(source))
+        #expect(await app.model.loadSomedayReviewTasks().count == 101)
+        #expect(await app.model.keepSomeday(try #require(app.workspace.task(source))))
 
         await app.restart()
-        #expect(app.model.loadSomedayReviewTasks().count == 100)
+        #expect(await app.model.loadSomedayReviewTasks().count == 100)
         try app.workspace.updateTask(source, TaskChanges(title: .set("Build a greenhouse next spring")))
-        #expect(app.model.loadSomedayReviewTasks().count == 101)
-        #expect(app.model.keepSomeday(source))
-        #expect(app.model.loadSomedayReviewTasks().count == 100)
+        #expect(await app.model.loadSomedayReviewTasks().count == 101)
+        #expect(await app.model.keepSomeday(try #require(app.workspace.task(source))))
+        #expect(await app.model.loadSomedayReviewTasks().count == 100)
+    }
+
+    private func selectedReviewModel(in folder: TemporaryFolder, clock: TestClock) async throws -> BrainBuddyModel {
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: folder.file("store.sqlite3"))
+        let workspace = Workspace(store: InMemoryDocumentStore(), sync: nil,
+            rust: RustWorkspaceSelection(runtime: runtime,
+                facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC")),
+                startup: .freshAccountless), now: clock.provider)
+        workspace.deviceTimeZone = { TimeZone(secondsFromGMT: 0)! }
+        await workspace.load()
+        return BrainBuddyModel(workspace: workspace, localStateStore: MacLocalStateStore(directory: folder.url), now: clock.provider)
+    }
+
+    @Test("026-FR-025 Mac Review never makes old displayed Waiting or Someday items ready after their query generation changes",
+        arguments: [TaskList.waiting, .someday])
+    func selectedTaskReviewRetainsDisplayedGeneration(_ list: TaskList) async throws {
+        let folder = TemporaryFolder()
+        let model = try await selectedReviewModel(in: folder, clock: TestClock())
+        let id = TaskID.random()
+        try await model.workspace.apply([.createTask(.init(taskID: id, title: "Original shown content", list: list,
+            waitingFor: list == .waiting ? "Sam" : nil))], editorID: "review-fixture:capture")
+        let shown = list == .waiting ? await model.loadWaitingReviewTasks() : await model.loadSomedayReviewTasks()
+        let task = try #require(shown.first)
+        #expect(model.reviewListReadiness(list) == .ready)
+        let originalGeneration = model.reviewListPageState(list).projectionGeneration
+
+        try await model.workspace.updateTask(task.id, TaskChanges(title: .set("Changed unseen content")), editorID: "review-fixture:edit")
+        await model.workspace.prepareList(.list(list))
+        _ = try await model.workspace.prepareReviewContentStamps(key: model.localState.installSalt, tasks: [task.id])
+        #expect(model.reviewListPageState(list).projectionGeneration != originalGeneration)
+        #expect(model.reviewListReadiness(list) == .failed("REVIEW_PAGE_CHANGED"))
+        let kept = list == .waiting ? await model.keepWaiting(task) : await model.keepSomeday(task)
+        #expect(!kept)
+        #expect(model.localState.waitingReviews.isEmpty && model.localState.somedayReviews.isEmpty)
+        await model.workspace.closeRuntime()
+    }
+
+    @Test("026-FR-025 Mac Project Review keeps a catalog larger than the query cache usable and prepares only the displayed actions")
+    func selectedProjectReviewLoadsOnlyDisplayedPage() async throws {
+        let folder = TemporaryFolder()
+        let model = try await selectedReviewModel(in: folder, clock: TestClock())
+        for number in 0..<70 {
+            _ = try await model.workspace.createProject(name: "Project \(number)", editorID: "review-fixture:project:\(number)")
+        }
+        let items = await model.loadProjectReview()
+        #expect(items.count == 70)
+        #expect(model.projectReviewReadiness == .ready)
+        #expect(items.allSatisfy { $0.tasks.isEmpty && $0.taskPageState.readiness == .notRequested })
+        func actionQueryCount() throws -> Int {
+            try #require(model.workspace.rustQueries).entries.keys.filter { key in
+                let query = (try? JSONSerialization.jsonObject(with: key)) as? [String: Any]
+                let mode = query?["mode"] as? [String: Any]
+                return query?["kind"] as? String == "list_mode" && mode?["type"] as? String == "project"
+            }.count
+        }
+        #expect(try actionQueryCount() == 0)
+        let first = await model.reloadProjectReviewTaskPage(try #require(items.first))
+        #expect(first.taskPageState.readiness == .ready)
+        #expect(model.projectReviewTaskPageState(first).readiness == .ready)
+        #expect(model.projectReviewReadiness == .ready)
+        #expect(try actionQueryCount() == 1)
+        let last = await model.reloadProjectReviewTaskPage(try #require(items.last))
+        #expect(model.projectReviewTaskPageState(last).readiness == .ready)
+        #expect(model.projectReviewReadiness == .ready)
+        #expect(try actionQueryCount() == 2)
+
+        // Loading a task page after a write cannot attach new unseen actions to the old signature.
+        try await model.workspace.apply([.createTask(.init(taskID: .random(), title: "Changed unseen action", list: .next,
+            projectID: first.id))], editorID: "review-fixture:changed-action")
+        let changed = await model.reloadProjectReviewTaskPage(first)
+        #expect(changed.tasks.isEmpty)
+        #expect(changed.taskPageState.readiness == .failed("REVIEW_PAGE_CHANGED"))
+        await model.workspace.closeRuntime()
     }
 
     @Test("021-FR-010 making a Someday item a Next action is one change; a second try is refused")
@@ -317,19 +392,19 @@ struct OfflineWorkspaceTests {
         let second = try app.workspace.createProject(name: "Second")
         for index in 0..<101 { try app.add("Action \(index)", project: first) }
 
-        let initial = app.model.loadProjectReview()
+        let initial = await app.model.loadProjectReview()
         #expect(initial.map(\.project.name) == ["First", "Second"])
         #expect(initial.first?.tasks.count == 101 && initial.first?.nextCount == 101)
         #expect(app.model.markProjectReviewed(try #require(initial.first), decision: .keep))
 
         await app.restart()
-        let remaining = app.model.loadProjectReview()
+        let remaining = await app.model.loadProjectReview()
         #expect(remaining.map(\.id) == [second] && remaining.first?.lastReview == nil)
         let reviewed = try #require(app.workspace.project(first))
         #expect(app.model.localState.projectMark(for: reviewed)?.decision == .keep)
         #expect(app.workspace.projects().first { $0.id == first }?.openTaskCount == 101)
         try app.add("New action after review", project: first)
-        let changed = app.model.loadProjectReview()
+        let changed = await app.model.loadProjectReview()
         #expect(changed.map(\.id) == [first, second])
         #expect(changed.first?.hasChanges == true)
     }
@@ -339,12 +414,12 @@ struct OfflineWorkspaceTests {
         let app = await App()
         let project = try app.workspace.createProject(name: "Move house")
         let action = try app.add("Call mover", project: project)
-        let opened = try #require(app.model.loadProjectReview().first)
+        let opened = try #require(await app.model.loadProjectReview().first)
         try app.workspace.updateTask(action, TaskChanges(title: .set("Book mover")))
 
         #expect(!app.model.markProjectReviewed(opened, decision: .keep))
         #expect(app.model.error == "Project changed elsewhere. Reopen the review to inspect its current actions.")
-        let stillDue = try #require(app.model.loadProjectReview().first)
+        let stillDue = try #require(await app.model.loadProjectReview().first)
         #expect(stillDue.lastReview == nil && stillDue.tasks.first?.title == "Book mover")
         #expect(app.model.markProjectReviewed(stillDue, decision: .keep))
     }
@@ -358,7 +433,7 @@ struct OfflineWorkspaceTests {
         try app.add("Already in a project", .inbox, project: existing)
 
         app.model.choose(.list(.inbox))
-        let review = app.model.loadInboxClarificationTasks()
+        let review = await app.model.loadInboxClarificationTasks()
         #expect(review.count == 101 && review.contains { $0.id == source })
         #expect(
             await app.model.clarifyInboxAsProject(
@@ -406,7 +481,7 @@ struct OfflineWorkspaceTests {
         let leftAlone = try app.add("Skim the manual", .inbox)
 
         app.model.choose(.list(.inbox))
-        #expect(app.model.loadInboxClarificationTasks().count == 4)
+        #expect(await app.model.loadInboxClarificationTasks().count == 4)
         #expect(await app.model.saveTask(next, changes: TaskChanges(projectID: .set(project)), moveTo: .next))
         #expect(
             await app.model.saveTask(
@@ -422,7 +497,7 @@ struct OfflineWorkspaceTests {
         let movedSomeday = try #require(app.workspace.task(someday))
         #expect(movedSomeday.state == .someday && movedSomeday.projectID == project)
         // Items that got a project leave the Inbox; the one left alone stays, still without a project.
-        #expect(app.model.loadInboxClarificationTasks().map(\.id) == [leftAlone])
+        #expect(await app.model.loadInboxClarificationTasks().map(\.id) == [leftAlone])
         #expect(app.workspace.task(leftAlone)?.projectID == nil)
     }
 
