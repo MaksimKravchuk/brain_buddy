@@ -53,11 +53,13 @@ struct ReopenSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .navigationTitle("Reopen task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Reopen") { Task { await reopen() } }
@@ -66,6 +68,7 @@ struct ReopenSheet: View {
             }
             .onChange(of: destination) { _, _ in errorMessage = nil }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.medium, .large])
     }
 
@@ -76,11 +79,18 @@ struct ReopenSheet: View {
     }
 
     @MainActor private func reopen() async {
+        guard !isSaving else { return }
         let current = self.task
+        let submittedDestination = destination
+        let submittedWaitingFor = waitingFor
+        let submittedEditorID = editorID
         isSaving = true
         defer { isSaving = false }
         do {
-            try await TaskListMover.reopen(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts, editorID: editorID)
+            try await TaskListMover.reopen(
+                current, to: submittedDestination, waitingFor: submittedWaitingFor, workspace: workspace, toasts: toasts,
+                editorID: submittedEditorID
+            )
             dismiss()
         } catch {
             errorMessage = TaskCommandRunner.message(for: error)

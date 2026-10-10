@@ -64,12 +64,14 @@ struct MoveSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .bbDenseList()
             .navigationTitle("Move task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Move") { Task { await move() } }
@@ -78,16 +80,22 @@ struct MoveSheet: View {
             }
             .onChange(of: destination) { _, _ in errorMessage = nil }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.medium, .large])
     }
 
     @MainActor private func move() async {
-        guard let destination else { return }
+        guard !isSaving, let destination else { return }
         let current = self.task
+        let submittedWaitingFor = waitingFor
+        let submittedEditorID = editorID
         isSaving = true
         defer { isSaving = false }
         do {
-            try await TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts, editorID: editorID)
+            try await TaskListMover.move(
+                current, to: destination, waitingFor: submittedWaitingFor, workspace: workspace, toasts: toasts,
+                editorID: submittedEditorID
+            )
             dismiss()
         } catch {
             errorMessage = TaskCommandRunner.message(for: error)
