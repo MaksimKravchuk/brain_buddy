@@ -28,7 +28,7 @@
 use crate::storage::{Store, StoreError};
 use bb_domain::dispatch;
 use bb_domain::types::{
-    ActorId, AliasRef, Binding, ChangeOutcome, Dependencies, DomainChange, DomainError,
+    ActorId, AliasRef, Binding, ChangeOutcome, ChangeSet, Dependencies, DomainChange, DomainError,
     ExecutionInputs, Policy, ReadSet, Reason, Record, WriterOrigin, ZoneName,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -43,7 +43,7 @@ use std::collections::HashMap;
 use std::io::{self, Read};
 
 /// The rule version the local projection is decided with.
-const RULE_VERSION: u32 = 1;
+pub(crate) const RULE_VERSION: u32 = 1;
 
 // ---------------------------------------------------------------------- the request
 
@@ -158,7 +158,7 @@ fn refuse(reason: Reason, field: &str) -> ExecuteError {
     DomainError::field(reason, field).into()
 }
 
-fn corrupt<E>(_: E) -> ExecuteError {
+pub(crate) fn corrupt<E>(_: E) -> ExecuteError {
     StoreError::Corrupt.into()
 }
 
@@ -178,18 +178,23 @@ impl IdSource for RandomIds {
     fn uuid(&mut self) -> io::Result<String> {
         let mut bytes = [0u8; 16];
         std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-        bytes[6] = (bytes[6] & 0x0f) | 0x40;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-        Ok(format!(
-            "{}-{}-{}-{}-{}",
-            &hex[..8],
-            &hex[8..12],
-            &hex[12..16],
-            &hex[16..20],
-            &hex[20..]
-        ))
+        Ok(uuid_from(bytes))
     }
+}
+
+/// Formats 16 bytes as a version 4 UUID.
+fn uuid_from(mut bytes: [u8; 16]) -> String {
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
 }
 
 fn prefixed(ids: &mut impl IdSource, prefix: &str) -> Result<Id, ExecuteError> {
@@ -211,15 +216,17 @@ fn new_entity_prefix(command_type: CommandType) -> Option<&'static str> {
 }
 
 /// The IDs a rule mints beyond the request's own, in the order it consumes
-/// them (`ExecutionInputs::allocated_ids`).
-fn rule_ids(
-    ids: &mut impl IdSource,
-    request: &ExecuteRequest,
+/// them (`ExecutionInputs::allocated_ids`). They derive from the command ID, so
+/// replaying a queued command over a changed base mints the same IDs again and
+/// the projection does not churn.
+pub(crate) fn rule_ids(
+    command_id: &CommandId,
+    command_type: CommandType,
+    payload: &OpenObject,
     read_set: &ReadSet,
 ) -> Result<Vec<Id>, ExecuteError> {
-    let payload = &request.payload;
     let mut kinds = vec!["form"];
-    match request.command_type {
+    match command_type {
         CommandType::ReviewDecide
             if payload.get("type").and_then(Value::as_str) == Some("follow_up")
                 && !payload.contains_key("follow_up_task_id") =>
@@ -239,7 +246,16 @@ fn rule_ids(
         }
         _ => {}
     }
-    kinds.into_iter().map(|kind| prefixed(ids, kind)).collect()
+    kinds
+        .into_iter()
+        .enumerate()
+        .map(|(index, kind)| {
+            let digest = sha256(format!("{}:{index}", command_id.as_str()).as_bytes());
+            let (seed, _) = digest.as_chunks::<16>();
+            let uuid = uuid_from(seed.first().copied().unwrap_or_default());
+            Id::parse(format!("{kind}_{uuid}")).map_err(corrupt)
+        })
+        .collect()
 }
 
 // ------------------------------------------------------------------ test seam
@@ -282,7 +298,18 @@ pub fn execute_with(
     request: &ExecuteRequest,
     mut hook: impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
-    store.try_write(|tx| run(tx, ids, request, &mut hook))
+    store.try_write(|tx| run(tx, ids, request, None, &mut hook))
+}
+
+/// [`execute`] inside a transaction the caller already holds, for a command
+/// that replaces `supersedes` (an explicit resolution of a sync issue).
+pub(crate) fn execute_in(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    request: &ExecuteRequest,
+    supersedes: &CommandId,
+) -> Result<Executed, ExecuteError> {
+    run(tx, ids, request, Some(supersedes), &mut |_, _| Ok(()))
 }
 
 struct Meta {
@@ -296,7 +323,7 @@ struct Meta {
 }
 
 /// SQLite integers are signed; the counters stored in them never are.
-fn unsigned(value: i64) -> Result<u64, ExecuteError> {
+pub(crate) fn unsigned(value: i64) -> Result<u64, ExecuteError> {
     u64::try_from(value).map_err(corrupt)
 }
 
@@ -323,6 +350,7 @@ fn run(
     tx: &Transaction<'_>,
     ids: &mut impl IdSource,
     request: &ExecuteRequest,
+    supersedes: Option<&CommandId>,
     hook: &mut impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
     let meta = read_meta(tx)?;
@@ -366,7 +394,7 @@ fn run(
             .collect(),
         depends_on: depends_on.clone(),
         issued_at: request.context.now.clone(),
-        supersedes_command_id: None,
+        supersedes_command_id: supersedes.cloned(),
         payload: request.payload.clone(),
     };
     let envelope = match decode_command(&json!(stable).to_string()) {
@@ -391,7 +419,12 @@ fn run(
         origin: WriterOrigin::Device,
         actor_id: request.context.actor_id.clone(),
         authoritative: false,
-        allocated_ids: rule_ids(ids, request, &visible.read_set)?,
+        allocated_ids: rule_ids(
+            &request.command_id,
+            request.command_type,
+            &request.payload,
+            &visible.read_set,
+        )?,
         policy: request.context.policy.clone(),
     };
     let changes = dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)?;
@@ -424,21 +457,7 @@ fn run(
     // Decided: from here on only writes, all inside this transaction.
     let projection_generation =
         meta.projection_generation + i64::from(changes.outcome == ChangeOutcome::Applied);
-    let local_result = LocalResult {
-        versions: changes
-            .changes
-            .iter()
-            .filter_map(|change| match change {
-                DomainChange::Upsert(record) => Some(LocalVersion {
-                    entity_type: record.entity_type(),
-                    record_key: record.record_key(),
-                    edit_revision: edit_revision(record),
-                }),
-                DomainChange::Tombstone { .. } => None,
-            })
-            .collect(),
-        id_bindings: changes.result.id_bindings.clone(),
-    };
+    let local_result = local_result(&changes);
     if new_epoch {
         tx.execute(
             "UPDATE sync_meta SET device_epoch = ?1, device_epoch_state = 'pending_registration'",
@@ -458,7 +477,7 @@ fn run(
             digest.as_slice(),
             request.context.now.as_str(),
             projection_generation,
-            json!(local_result).to_string().into_bytes(),
+            local_result,
         ],
     )?;
     for dependency in &depends_on {
@@ -627,12 +646,7 @@ fn load_visible(tx: &Transaction<'_>, workspace_id: &str) -> Result<Visible, Exe
         let body: Vec<u8> = row.get(3)?;
         let source: Option<String> = row.get(4)?;
         let entity_type = EntityType::from_wire(&kind).ok_or_else(|| corrupt(()))?;
-        // `Record` is adjacently tagged; the stored body is its `value`.
-        let mut tagged = format!(r#"{{"entity_type":"{kind}","value":"#).into_bytes();
-        tagged.extend_from_slice(&body);
-        tagged.push(b'}');
-        let record: Record = serde_json::from_slice(&tagged).map_err(corrupt)?;
-        file(&mut visible.read_set, record);
+        file(&mut visible.read_set, record_from(&kind, &body)?);
         if let Some(command) = source {
             visible.pending.entry(key).or_default().push(Pending {
                 entity_type,
@@ -644,7 +658,16 @@ fn load_visible(tx: &Transaction<'_>, workspace_id: &str) -> Result<Visible, Exe
     Ok(visible)
 }
 
-fn file(read_set: &mut ReadSet, record: Record) {
+/// A stored record: `kind` is its wire entity type and `body` its `value`.
+pub(crate) fn record_from(kind: &str, body: &[u8]) -> Result<Record, ExecuteError> {
+    // `Record` is adjacently tagged; the stored body is its `value`.
+    let mut tagged = format!(r#"{{"entity_type":"{kind}","value":"#).into_bytes();
+    tagged.extend_from_slice(body);
+    tagged.push(b'}');
+    serde_json::from_slice(&tagged).map_err(corrupt)
+}
+
+pub(crate) fn file(read_set: &mut ReadSet, record: Record) {
     match record {
         Record::Task(r) => drop(read_set.tasks.insert(r.id.clone(), r)),
         Record::Project(r) => drop(read_set.projects.insert(r.id.clone(), r)),
@@ -666,7 +689,7 @@ fn file(read_set: &mut ReadSet, record: Record) {
 
 /// The revision a record's own edit concurrency is checked against; the
 /// Review projections without one have none.
-fn edit_revision(record: &Record) -> Option<Counter> {
+pub(crate) fn edit_revision(record: &Record) -> Option<Counter> {
     match record {
         Record::Task(r) => Some(r.revision.clone()),
         Record::Project(r) => Some(r.revision.clone()),
@@ -883,7 +906,48 @@ struct LocalVersion {
     edit_revision: Option<Counter>,
 }
 
-struct LocalResults(HashMap<String, LocalResult>);
+/// What a decided command leaves for the commands that build on it, as stored.
+pub(crate) fn local_result(changes: &ChangeSet) -> Vec<u8> {
+    let result = LocalResult {
+        versions: changes
+            .changes
+            .iter()
+            .filter_map(|change| match change {
+                DomainChange::Upsert(record) => Some(LocalVersion {
+                    entity_type: record.entity_type(),
+                    record_key: record.record_key(),
+                    edit_revision: edit_revision(record),
+                }),
+                DomainChange::Tombstone { .. } => None,
+            })
+            .collect(),
+        id_bindings: changes.result.id_bindings.clone(),
+    };
+    json!(result).to_string().into_bytes()
+}
+
+/// The stored local results of the commands a replay decides against.
+pub(crate) struct LocalResults(HashMap<String, LocalResult>);
+
+impl LocalResults {
+    pub(crate) fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    /// Records a command's stored result; none stored is an empty result.
+    pub(crate) fn insert(
+        &mut self,
+        command_id: &CommandId,
+        stored: Option<&[u8]>,
+    ) -> Result<(), ExecuteError> {
+        let result = match stored {
+            None => LocalResult::default(),
+            Some(bytes) => serde_json::from_slice(bytes).map_err(corrupt)?,
+        };
+        self.0.insert(command_id.as_str().to_owned(), result);
+        Ok(())
+    }
+}
 
 /// Every dependency must be a command this workspace queued.
 fn load_dependencies(
