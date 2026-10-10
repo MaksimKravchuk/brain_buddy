@@ -480,10 +480,13 @@ fn select_issues(
 
 type RawCurrent = (String, String, Option<String>, i64, Option<Vec<u8>>);
 
-/// The record key an intent's target is stored under. The Review settings are
-/// a singleton under the empty key, whatever scope ID the command names; the
-/// type comes from the precondition on the target (or the command itself).
-fn target_key(intent: &Value) -> Option<String> {
+/// The record type and key an intent's target is stored under. The Review
+/// settings are a singleton under the empty key, whatever scope ID the command
+/// names; the type comes from the precondition on the target (or the command
+/// itself). Records of different types can share a key (a Review session and
+/// its decision queue are both `[session_id]`), so a known type narrows the
+/// lookup.
+fn target_key(intent: &Value) -> Option<(Option<EntityType>, String)> {
     let target = intent.get("entity_id")?.as_str()?;
     let checked = |precondition: &&Value| {
         let named = precondition.get("after_command").unwrap_or(precondition);
@@ -503,7 +506,10 @@ fn target_key(intent: &Value) -> Option<String> {
             (intent.get("type")?.as_str()? == "review.settings")
                 .then_some(EntityType::ReviewSettings)
         });
-    Some(shown_key(entity_type.unwrap_or(EntityType::Task), target))
+    Some((
+        entity_type,
+        shown_key(entity_type.unwrap_or(EntityType::Task), target),
+    ))
 }
 
 /// The record the confirmed base holds for a target now.
@@ -512,14 +518,16 @@ fn current_of(
     workspace_id: &str,
     issue: &Issue,
 ) -> Result<Option<CurrentRecord>, IssueError> {
-    let Some(key) = target_key(&issue.local_intent) else {
+    let Some((entity_type, key)) = target_key(&issue.local_intent) else {
         return Ok(None);
     };
     let row: Option<RawCurrent> = tx
         .query_row(
             "SELECT record_type, record_version, edit_revision, tombstone, body
-             FROM confirmed_records WHERE workspace_id = ?1 AND record_key = ?2",
-            params![workspace_id, key],
+             FROM confirmed_records
+             WHERE workspace_id = ?1 AND record_key = ?2
+               AND (?3 IS NULL OR record_type = ?3)",
+            params![workspace_id, key, entity_type.map(EntityType::as_str)],
             |row| {
                 Ok((
                     row.get(0)?,
