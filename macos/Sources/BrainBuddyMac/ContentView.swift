@@ -200,6 +200,7 @@ struct WorkspaceView: View {
     @State private var collectionEditorID = UUID().uuidString
     @State private var collectionCreateEditorID = UUID().uuidString
     @State private var projectOutcomeEditorID = UUID().uuidString
+    @State private var isSubmittingSheet = false
     @State private var reopenEditorID = UUID().uuidString
     @State private var moveWaitingEditorID = UUID().uuidString
     @State private var hoveredTaskID: TaskID?
@@ -244,6 +245,18 @@ struct WorkspaceView: View {
         reviewSheets(collectionSheets(taskSheets(window)))
     }
 
+    private var sheetIsBusy: Bool { model.isSaving || isSubmittingSheet }
+
+    /// Covers model preparation and post-save work as well as the durable write.
+    private func performSheetSave(editorID: String, _ operation: @escaping @MainActor (String) async -> Void) {
+        guard !sheetIsBusy else { return }
+        isSubmittingSheet = true
+        Task { @MainActor in
+            defer { isSubmittingSheet = false }
+            await operation(editorID)
+        }
+    }
+
     private var window: some View {
         NavigationSplitView(columnVisibility: $columns) {
             sidebar
@@ -267,7 +280,7 @@ struct WorkspaceView: View {
             canvasFocus = .retry
             AccessibilityNotification.Announcement(message).post()
         }
-        .disabled(model.isSaving)
+        .disabled(sheetIsBusy)
         // presentation-region-end
         // X-03 and X-04, attached through the router; "Sign out…" runs the unsaved-edit guard first.
         .routedSignInSheet(sync.router, onDismiss: { sync.closeSignIn() }) { _ in
@@ -644,17 +657,17 @@ struct WorkspaceView: View {
 
     fileprivate func createCollection(_ kind: NewCollection) {
         let name = collectionName
-        Task {
+        performSheetSave(editorID: collectionCreateEditorID) { submittedEditorID in
             switch kind {
             case .project:
-                if let id = await model.createProject(name, editorID: collectionCreateEditorID) {
+                if let id = await model.createProject(name, editorID: submittedEditorID) {
                     collectionCreateEditorID = UUID().uuidString
                     addingCollection = nil
                     collectionName = ""
                     requestNavigation(.destination(.project(id)))
                 }
             case .tag:
-                if let id = await model.createTag(name, editorID: collectionCreateEditorID) {
+                if let id = await model.createTag(name, editorID: submittedEditorID) {
                     collectionCreateEditorID = UUID().uuidString
                     addingCollection = nil
                     collectionName = ""
@@ -672,11 +685,11 @@ struct WorkspaceView: View {
     // presentation-region: rename sheet focus
     fileprivate func renameCollection(_ kind: CollectionToEdit) {
         let name = editedCollectionName
-        Task {
+        performSheetSave(editorID: collectionEditorID) { submittedEditorID in
             let saved: Bool
             switch kind {
-            case .project(let id): saved = await model.renameProject(id, to: name, editorID: collectionEditorID)
-            case .tag(let id): saved = await model.renameTag(id, to: name, editorID: collectionEditorID)
+            case .project(let id): saved = await model.renameProject(id, to: name, editorID: submittedEditorID)
+            case .tag(let id): saved = await model.renameTag(id, to: name, editorID: submittedEditorID)
             }
             guard saved else { collectionNameFocused = true; return }
             collectionEditorID = UUID().uuidString
@@ -1285,6 +1298,7 @@ struct WorkspaceView: View {
     }
 
     fileprivate func saveQuickRename(_ task: TaskRecord) {
+        guard !sheetIsBusy else { return }
         let title = quickRenameTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, EditorLimits.fits(title, EditorLimits.title) else { return }
         guard let current = model.task(task.id) else {
@@ -1295,8 +1309,8 @@ struct WorkspaceView: View {
             renamingTask = nil
             return
         }
-        Task {
-            if await model.saveTask(task.id, changes: TaskChanges(title: .set(title)), editorID: quickRenameEditorID) {
+        performSheetSave(editorID: quickRenameEditorID) { submittedEditorID in
+            if await model.saveTask(task.id, changes: TaskChanges(title: .set(title)), editorID: submittedEditorID) {
                 quickRenameEditorID = UUID().uuidString
                 renamingTask = nil
                 quickRenameError = nil
@@ -1706,9 +1720,13 @@ extension WorkspaceView {
                 } onClose: {
                     quickOpenPresented = false
                 }
+                .disabled(sheetIsBusy)
+                .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(item: $renamingTask) { task in
                 quickRenameSheet(task)
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(isPresented: $voicePresented) {
                 VoiceCaptureView(onUseAsTask: { transcript in
@@ -1720,6 +1738,8 @@ extension WorkspaceView {
                         confirmingReplaceDraft = true
                     }
                 })
+                .disabled(sheetIsBusy)
+                .interactiveDismissDisabled(sheetIsBusy)
             }
             .confirmationDialog("Discard unsaved changes?", isPresented: $confirmingDiscard) {
                 if selectedTaskID != nil && editorDirty {
@@ -1764,12 +1784,18 @@ extension WorkspaceView {
                 }
             ) {
                 captureListSheet
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(item: $reopeningTask) { task in
                 reopenSheet(task)
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(item: $movingTask) { task in
                 moveToWaitingSheet(task)
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             // presentation-region-end
     }
@@ -1856,7 +1882,14 @@ extension WorkspaceView {
                 Button("Cancel") { reopeningTask = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("Reopen task") {
-                    Task { if await model.reopenTask(task.id, to: reopenDestination, waitingFor: reopenWaitingFor, editorID: reopenEditorID) { reopeningTask = nil; reopenEditorID = UUID().uuidString } }
+                    let destination = reopenDestination
+                    let waitingFor = reopenWaitingFor
+                    performSheetSave(editorID: reopenEditorID) { submittedEditorID in
+                        if await model.reopenTask(task.id, to: destination, waitingFor: waitingFor, editorID: submittedEditorID) {
+                            reopeningTask = nil
+                            reopenEditorID = UUID().uuidString
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -1887,7 +1920,13 @@ extension WorkspaceView {
                 Button("Keep in \(task.state.openList?.title ?? "current list")") { movingTask = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("Move to Waiting for") {
-                    Task { if await model.moveTask(task.id, to: .waiting, waitingFor: moveWaitingFor, editorID: moveWaitingEditorID) { movingTask = nil; moveWaitingEditorID = UUID().uuidString } }
+                    let waitingFor = moveWaitingFor
+                    performSheetSave(editorID: moveWaitingEditorID) { submittedEditorID in
+                        if await model.moveTask(task.id, to: .waiting, waitingFor: waitingFor, editorID: submittedEditorID) {
+                            movingTask = nil
+                            moveWaitingEditorID = UUID().uuidString
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -1930,12 +1969,18 @@ extension WorkspaceView {
                 }
                 .padding(24)
                 .frame(width: 340)
+                .disabled(sheetIsBusy)
+                .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(item: $editingCollection) { kind in
                 renameSheet(kind)
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(item: $editingOutcomeProject) { project in
                 outcomeSheet(project)
+                    .disabled(sheetIsBusy)
+                    .interactiveDismissDisabled(sheetIsBusy)
             }
             // presentation-region-end
     }
@@ -1998,7 +2043,13 @@ extension WorkspaceView {
                 Button("Cancel") { editingOutcomeProject = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("Save outcome") {
-                    Task { if await model.saveProjectOutcome(project.id, to: outcomeDraft, editorID: projectOutcomeEditorID) { editingOutcomeProject = nil; projectOutcomeEditorID = UUID().uuidString } }
+                    let authored = outcomeDraft
+                    performSheetSave(editorID: projectOutcomeEditorID) { submittedEditorID in
+                        if await model.saveProjectOutcome(project.id, to: authored, editorID: submittedEditorID) {
+                            editingOutcomeProject = nil
+                            projectOutcomeEditorID = UUID().uuidString
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -2016,18 +2067,23 @@ extension WorkspaceView {
             // presentation-region: review and clarify sheets
             .sheet(isPresented: $reviewingWaiting) {
                 WaitingReviewView(model: model)
+                    .disabled(sheetIsBusy)
             }
             .sheet(isPresented: $reviewingSomeday) {
                 SomedayReviewView(model: model)
+                    .disabled(sheetIsBusy)
             }
             .sheet(isPresented: $reviewingProjects) {
                 ProjectReviewView(model: model) { id in
                     reviewingProjects = false
                     requestNavigation(.destination(.project(id)))
                 }
+                .disabled(sheetIsBusy)
+                .interactiveDismissDisabled(sheetIsBusy)
             }
             .sheet(isPresented: $clarifyingInbox) {
                 InboxClarifyView(model: model)
+                    .disabled(sheetIsBusy)
             }
             // presentation-region-end
     }
@@ -2635,6 +2691,18 @@ private struct InboxClarifyView: View {
     @State private var editorID = UUID().uuidString
     @State private var newProjectEditorID = UUID().uuidString
     @State private var clarifyProjectID = ProjectID.random()
+    @State private var isSubmitting = false
+
+    private var isBusy: Bool { model.isSaving || isSubmitting }
+
+    private func performSave(editorID: String, _ operation: @escaping @MainActor (String) async -> Void) {
+        guard !isBusy else { return }
+        isSubmitting = true
+        Task { @MainActor in
+            defer { isSubmitting = false }
+            await operation(editorID)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -2684,15 +2752,23 @@ private struct InboxClarifyView: View {
         .padding(24)
         .frame(width: 640, height: index < items.count && step == .decision ? 640 : 430)
         .onAppear(perform: load)
-        .interactiveDismissDisabled(step != .decision)
+        .disabled(isBusy)
+        .interactiveDismissDisabled(isBusy || step != .decision)
         // presentation-region: project creator sheet
-        .sheet(isPresented: $showingProjectCreator) { projectCreator }
+        .sheet(isPresented: $showingProjectCreator) {
+            projectCreator
+                .disabled(isBusy)
+                .interactiveDismissDisabled(isBusy)
+        }
         // presentation-region-end
         // presentation-region: clarify confirmations
         .confirmationDialog("Cancel this Inbox item?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
-                Task { if await model.cancelTask(items[index].id) { advance() } }
+                let taskID = items[index].id
+                performSave(editorID: editorID) { submittedEditorID in
+                    if await model.cancelTask(taskID, editorID: submittedEditorID) { advance() }
+                }
             }
             Button("Keep in Inbox", role: .cancel) {}
         } message: {
@@ -2791,12 +2867,14 @@ private struct InboxClarifyView: View {
                 .keyboardShortcut(.cancelAction)
                 Button("Add project") {
                     let authored = newProjectName
-                    Task { if let id = await model.createProject(authored, editorID: newProjectEditorID) {
-                        newProjectEditorID = UUID().uuidString
-                        stagedProjectID = id
-                        newProjectName = ""
-                        showingProjectCreator = false
-                    } }
+                    performSave(editorID: newProjectEditorID) { submittedEditorID in
+                        if let id = await model.createProject(authored, editorID: submittedEditorID) {
+                            newProjectEditorID = UUID().uuidString
+                            stagedProjectID = id
+                            newProjectName = ""
+                            showingProjectCreator = false
+                        }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -2814,7 +2892,9 @@ private struct InboxClarifyView: View {
         VStack(alignment: .leading, spacing: 9) {
             Button("Already a concrete action → Next") {
                 let changes = withStagedProject()
-                Task { if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: editorID) { advance() } }
+                performSave(editorID: editorID) { submittedEditorID in
+                    if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: submittedEditorID) { advance() }
+                }
             }
             Button("Rewrite as a Next action…") {
                 proposedTitle = item.title
@@ -2834,7 +2914,9 @@ private struct InboxClarifyView: View {
             .disabled(item.projectID != nil)
             Button("Someday / maybe") {
                 let changes = withStagedProject()
-                Task { if await model.saveTask(item.id, changes: changes, moveTo: .someday, editorID: editorID) { advance() } }
+                performSave(editorID: editorID) { submittedEditorID in
+                    if await model.saveTask(item.id, changes: changes, moveTo: .someday, editorID: submittedEditorID) { advance() }
+                }
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
             Button("Leave in Inbox for now") { advance() }
@@ -2952,14 +3034,16 @@ private struct InboxClarifyView: View {
     }
 
     private func submit(_ item: TaskRecord) {
-        guard isValidAnswer else { return }
+        guard !isBusy, isValidAnswer else { return }
         switch step {
         case .decision:
             break
         case .nextTitle:
             let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             let changes = withStagedProject(title == item.title ? TaskChanges() : TaskChanges(title: .set(title)))
-            Task { if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: editorID) { advance() } }
+            performSave(editorID: editorID) { submittedEditorID in
+                if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: submittedEditorID) { advance() }
+            }
         case .waitingReason:
             step = .waitingTitle
         case .waitingTitle:
@@ -2968,7 +3052,9 @@ private struct InboxClarifyView: View {
             let changes = withStagedProject(
                 TaskChanges(title: title == item.title ? .unchanged : .set(title), waitingFor: .set(reason))
             )
-            Task { if await model.saveTask(item.id, changes: changes, moveTo: .waiting, editorID: editorID) { advance() } }
+            performSave(editorID: editorID) { submittedEditorID in
+                if await model.saveTask(item.id, changes: changes, moveTo: .waiting, editorID: submittedEditorID) { advance() }
+            }
         case .projectName:
             step = .projectOutcome
         case .projectOutcome:
@@ -2977,9 +3063,12 @@ private struct InboxClarifyView: View {
             let outcome = desiredOutcome.trimmingCharacters(in: .whitespacesAndNewlines)
             let projectName = projectName.trimmingCharacters(in: .whitespacesAndNewlines)
             let firstAction = firstAction.trimmingCharacters(in: .whitespacesAndNewlines)
-            Task { if await model.clarifyInboxAsProject(item.id, projectName: projectName,
-                outcome: outcome.isEmpty ? nil : outcome, firstAction: firstAction,
-                projectID: clarifyProjectID, editorID: editorID) { advance() } }
+            let submittedProjectID = clarifyProjectID
+            performSave(editorID: editorID) { submittedEditorID in
+                if await model.clarifyInboxAsProject(item.id, projectName: projectName,
+                    outcome: outcome.isEmpty ? nil : outcome, firstAction: firstAction,
+                    projectID: submittedProjectID, editorID: submittedEditorID) { advance() }
+            }
         }
     }
 
@@ -3010,6 +3099,18 @@ private struct WaitingReviewView: View {
     @State private var confirmingCancel = false
     @State private var editorID = UUID().uuidString
     @State private var followUpTaskID = TaskID.random()
+    @State private var isSubmitting = false
+
+    private var isBusy: Bool { model.isSaving || isSubmitting }
+
+    private func performSave(editorID: String, _ operation: @escaping @MainActor (String) async -> Void) {
+        guard !isBusy else { return }
+        isSubmitting = true
+        Task { @MainActor in
+            defer { isSubmitting = false }
+            await operation(editorID)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -3052,12 +3153,17 @@ private struct WaitingReviewView: View {
         }
         .padding(24)
         .frame(width: 640, height: 480)
+        .disabled(isBusy)
+        .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
         // presentation-region: cancel task confirmations
         .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
-                Task { if await model.cancelTask(items[index].id) { advance() } }
+                let taskID = items[index].id
+                performSave(editorID: editorID) { submittedEditorID in
+                    if await model.cancelTask(taskID, editorID: submittedEditorID) { advance() }
+                }
             }
             Button("Keep task", role: .cancel) {}
         } message: {
@@ -3131,7 +3237,9 @@ private struct WaitingReviewView: View {
             .font(.headline)
         HStack(spacing: 10) {
             Button("Keep waiting") {
-                Task { if await model.keepWaiting(item) { advance() } }
+                performSave(editorID: editorID) { _ in
+                    if await model.keepWaiting(item) { advance() }
+                }
             }
             .help("Review again after seven days or when this task changes")
             Button("Create follow-up…") {
@@ -3163,15 +3271,20 @@ private struct WaitingReviewView: View {
     }
 
     private func submit(_ item: TaskRecord, decision: WaitingReviewDecision) {
-        guard validAnswer(actionTitle, limit: EditorLimits.title) else { return }
+        guard !isBusy, validAnswer(actionTitle, limit: EditorLimits.title) else { return }
         let title = actionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         switch decision {
         case .followUp:
-            Task { if await model.createFollowUp(for: item.id, title: title, taskID: followUpTaskID, editorID: editorID, shownTask: item) { advance() } }
+            let submittedTaskID = followUpTaskID
+            performSave(editorID: editorID) { submittedEditorID in
+                if await model.createFollowUp(for: item.id, title: title, taskID: submittedTaskID, editorID: submittedEditorID, shownTask: item) { advance() }
+            }
             return
         case .returnToNext:
             let changes = title == item.title ? TaskChanges() : TaskChanges(title: .set(title))
-            Task { if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: editorID) { advance() } }
+            performSave(editorID: editorID) { submittedEditorID in
+                if await model.saveTask(item.id, changes: changes, moveTo: .next, editorID: submittedEditorID) { advance() }
+            }
             return
         }
     }
@@ -3197,6 +3310,18 @@ private struct SomedayReviewView: View {
     @State private var actionTitle = ""
     @State private var confirmingCancel = false
     @State private var editorID = UUID().uuidString
+    @State private var isSubmitting = false
+
+    private var isBusy: Bool { model.isSaving || isSubmitting }
+
+    private func performSave(editorID: String, _ operation: @escaping @MainActor (String) async -> Void) {
+        guard !isBusy else { return }
+        isSubmitting = true
+        Task { @MainActor in
+            defer { isSubmitting = false }
+            await operation(editorID)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -3242,12 +3367,17 @@ private struct SomedayReviewView: View {
         }
         .padding(24)
         .frame(width: 640, height: 440)
+        .disabled(isBusy)
+        .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
         // presentation-region: cancel task confirmations
         .confirmationDialog("Cancel this task?", isPresented: $confirmingCancel) {
             Button("Cancel task", role: .destructive) {
                 guard index < items.count else { return }
-                Task { if await model.cancelTask(items[index].id) { advance() } }
+                let taskID = items[index].id
+                performSave(editorID: editorID) { submittedEditorID in
+                    if await model.cancelTask(taskID, editorID: submittedEditorID) { advance() }
+                }
             }
             Button("Keep task", role: .cancel) {}
         } message: {
@@ -3305,7 +3435,9 @@ private struct SomedayReviewView: View {
         Text("Is this relevant now?").font(.headline)
         HStack(spacing: 10) {
             Button("Keep in Someday") {
-                Task { if await model.keepSomeday(item) { advance() } }
+                performSave(editorID: editorID) { _ in
+                    if await model.keepSomeday(item) { advance() }
+                }
             }
             .help("Review again after seven days or when this task changes")
             Button("Make it a Next action…") {
@@ -3333,9 +3465,11 @@ private struct SomedayReviewView: View {
     }
 
     private func activate(_ task: TaskRecord) {
-        guard validAnswer(actionTitle, limit: EditorLimits.title), !model.isArchived(task.projectID) else { return }
+        guard !isBusy, validAnswer(actionTitle, limit: EditorLimits.title), !model.isArchived(task.projectID) else { return }
         let title = actionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task { if await model.activateSomeday(task.id, title: title, editorID: editorID) { advance() } }
+        performSave(editorID: editorID) { submittedEditorID in
+            if await model.activateSomeday(task.id, title: title, editorID: submittedEditorID) { advance() }
+        }
     }
 
     private func advance() {
