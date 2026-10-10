@@ -120,6 +120,10 @@ class RustCore:
             wire=decoded.to_bytes(),
         )
 
+    def persistence(self, kind: str, wire: bytes) -> bytes:
+        """Stable/JCS and typed persistence codec; never execute domain rules."""
+        return bytes(self._call(self._runtime.persistence, kind, wire))
+
     def decide(
         self,
         read_set: Mapping[str, Any],

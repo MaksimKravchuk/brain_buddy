@@ -35,6 +35,7 @@ from .domain import (
     TaskSubtaskDocument,
 )
 from .review_repository import ReviewRepositoryMixin, WriteScope
+from .sync.change_log import initialize, purge_owner
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -286,6 +287,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                     ON idempotency_records(owner_id, created_at);
                 """)
             self._initialize_review_tables(conn, utcnow())
+            initialize(conn)
 
     def _migrate_legacy_json_once(self) -> None:
         with self._owned_connection() as conn:
@@ -800,6 +802,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 self._connection(self._thread_state) as conn,
             ):
                 self._delete_review_rows(conn, owner_id)
+                purge_owner(conn, owner_id)
                 for table in (
                     "task_tags",
                     "subtasks",

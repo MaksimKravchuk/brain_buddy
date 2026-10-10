@@ -31,6 +31,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from sqlite3 import Connection
+from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -44,6 +45,35 @@ from app.modules.tasks.repository import TaskRepository
 
 class UnitOfWorkError(RepositoryError):
     """A write or read was attempted outside the boundary of the open unit."""
+
+
+SchedulerConnectionT_contra = TypeVar("SchedulerConnectionT_contra", contravariant=True)
+
+
+class OwnerRepository(Protocol):
+    """The aggregate read port; transaction ownership stays in its adapter."""
+
+    def get_for_owner(self, task_id: str, *, owner_id: str) -> TaskDocument: ...
+    def get_project_for_owner(
+        self, project_id: str, *, owner_id: str
+    ) -> ProjectDocument: ...
+    def get_tag_for_owner(self, tag_id: str, *, owner_id: str) -> TagDocument: ...
+
+
+class JobScheduler(Protocol[SchedulerConnectionT_contra]):
+    def schedule_in(
+        self,
+        conn: SchedulerConnectionT_contra,
+        *,
+        job_type: str,
+        dedup_key: str,
+        run_at: datetime,
+        scope: str = SYSTEM_SCOPE,
+        payload_ref: str | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
+        correlation_id: str | None = None,
+        pull_forward: bool = False,
+    ) -> bool: ...
 
 
 class ReadSetChangedError(ConflictError):
@@ -106,15 +136,15 @@ class ReadSet:
     fingerprints: Mapping[tuple[str, str], str | None]
 
 
-class OwnerUnitOfWork:
+class OwnerUnitOfWork[ConnectionT]:
     """The open transaction of one owner; created only by ``TaskUnitOfWork``."""
 
     def __init__(
         self,
         owner_id: str,
-        repo: TaskRepository,
-        jobs: JobRepository,
-        conn: Connection,
+        repo: OwnerRepository,
+        jobs: JobScheduler[ConnectionT],
+        conn: ConnectionT,
     ) -> None:
         self.owner_id = owner_id
         self._repo = repo
@@ -123,7 +153,23 @@ class OwnerUnitOfWork:
         self._open = True
         self._writes: list[WriteRecord] = []
         self._intents: list[JobIntent] = []
+        self._activity = 0
         self._after_commit: list[Callable[[], None]] = []
+
+    @property
+    def connection(self) -> ConnectionT:
+        """Only the open unit exposes its adapter's transaction connection."""
+        self._require_open()
+        return self._conn
+
+    @property
+    def activity(self) -> int:
+        """Write/schedule activity, including an existing job's pull-forward.
+
+        ``intents`` remains created-only. Receipt no-op/rejection/replay guards
+        also need to detect schedule_in's updates that return False.
+        """
+        return self._activity
 
     @property
     def writes(self) -> tuple[WriteRecord, ...]:
@@ -149,6 +195,7 @@ class OwnerUnitOfWork:
                 "unit's owner lock."
             )
         self._writes.append(WriteRecord(resource, owner_id, record_id))
+        self._activity += 1
 
     def after_commit(self, action: Callable[[], None]) -> None:
         self._require_open()
@@ -164,6 +211,7 @@ class OwnerUnitOfWork:
             raise UnitOfWorkError(
                 f"A job scope of another owner cannot be scheduled by '{self.owner_id}'."
             )
+        self._activity += 1
         created = self._jobs.schedule_in(
             self._conn,
             job_type=intent.job_type,
@@ -263,7 +311,7 @@ class TaskUnitOfWork:
     @contextmanager
     def begin(
         self, owner_id: str, *, cleanup: bool = False
-    ) -> Iterator[OwnerUnitOfWork]:
+    ) -> Iterator[OwnerUnitOfWork[Connection]]:
         """Hold ``owner_id``'s writer lock; commit once on exit, roll back on error.
 
         A bound job execution is re-checked under the lock before the body

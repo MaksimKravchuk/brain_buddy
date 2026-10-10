@@ -12,6 +12,7 @@
 //! * [`capabilities`]: device registration and capabilities.
 //! * [`strict_json`]: duplicate-key rejection used by every decoder.
 
+pub mod canonical;
 pub mod capabilities;
 pub mod catalog;
 pub mod command;

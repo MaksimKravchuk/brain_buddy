@@ -22,7 +22,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Once};
 
 use bb_domain::dispatch;
-use bb_domain::types::{DomainError, ExecutionInputs, Query, QueryInputs, QueryResult, ReadSet};
+use bb_domain::types::{
+    DomainChange, DomainError, ExecutionInputs, Query, QueryInputs, QueryResult, ReadSet,
+};
 use bb_protocol::command::{self, Decoded, Unsupported};
 use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CodecError, PROTOCOL_VERSION};
@@ -197,6 +199,70 @@ fn answer_query(read_set: &[u8], query: &[u8], inputs: &[u8]) -> Result<Vec<u8>,
     })
 }
 
+fn persistence(kind: &str, data: &[u8]) -> Result<Vec<u8>, Failure> {
+    let text = std::str::from_utf8(data).map_err(|_| Failure::new("INVALID_REQUEST", None))?;
+    match kind {
+        "canonical" => Ok(bb_protocol::canonical::canonical_json(data)?),
+        "stable" => to_json(&command::decode_stable(text)?),
+        "receipt" => to_json(&bb_protocol::decode::<Receipt>(text)?),
+        "transaction" => to_json(&bb_protocol::decode::<bb_protocol::feed::Transaction>(
+            text,
+        )?),
+        "refusal" => {
+            let error: DomainError = parse_json(data, "refusal")?;
+            let reason = error.reason.as_str();
+            match reason {
+                "dependency_pending" => {
+                    return Err(Failure {
+                        code: "DEPENDENCY_PENDING",
+                        retryable: true,
+                        field: None,
+                    });
+                }
+                "unsupported_command_version" => {
+                    return Err(Failure::new("UPGRADE_REQUIRED", None));
+                }
+                "incomplete_read_set" => return Err(Failure::new("INTERNAL_ERROR", None)),
+                _ => {}
+            }
+            let code = match reason {
+                "revision_conflict" => "REVISION_CONFLICT",
+                "entity_deleted" => "ENTITY_DELETED",
+                "dependency_rejected" => "DEPENDENCY_REJECTED",
+                other => other,
+            };
+            to_json(&serde_json::json!({"code":code,"retryable":false,
+                "message":"Command rejected.","details":{"reason":reason}}))
+        }
+        "changes" => {
+            let changes: Vec<DomainChange> = parse_json(data, "changes")?;
+            let public = changes
+                .into_iter()
+                .map(|change| {
+                    let key = change.record_key();
+                    let change = match change {
+                        DomainChange::Upsert(record) => DomainChange::Upsert(record.public()),
+                        other => other,
+                    };
+                    let mut value = serde_json::to_value(change)
+                        .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+                    value
+                        .as_object_mut()
+                        .ok_or(Failure::new("INTERNAL_ERROR", None))?
+                        .insert(
+                            "record_key".into(),
+                            serde_json::to_value(key)
+                                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?,
+                        );
+                    Ok(value)
+                })
+                .collect::<Result<Vec<_>, Failure>>()?;
+            to_json(&public)
+        }
+        _ => Err(Failure::new("INVALID_REQUEST", Some("persistence kind"))),
+    }
+}
+
 /// A decoded command envelope; every value is owned by this object.
 #[pyclass(frozen, module = "bb_core")]
 struct Command {
@@ -305,6 +371,20 @@ impl Runtime {
     #[new]
     fn new(protocol_version: u32) -> PyResult<Self> {
         Ok(Self::try_new(protocol_version)?)
+    }
+
+    /// Stable recovery, JCS and typed persistence checks. No execution validation
+    /// runs here: a known receipt survives retirement and tighter payload rules.
+    fn persistence<'py>(
+        &self,
+        py: Python<'py>,
+        kind: &str,
+        data: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let (kind, data) = (kind.to_owned(), data.to_vec());
+        let state = Arc::clone(&self.state);
+        let out = py.detach(move || guarded(&state, || persistence(&kind, &data)))?;
+        Ok(PyBytes::new(py, &out))
     }
 
     fn close(&self) {
