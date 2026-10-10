@@ -2352,6 +2352,8 @@ describe("CrtWorkspace tree lifecycle", () => {
       fireEvent.click(screen.getByRole("button", { name: /current tree: online save/i }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Switch to Online other" }));
       expect(await screen.findByRole("dialog", { name: "Resolve unsynced changes before continuing" })).toBeInTheDocument();
+      // Initial focus marks completion of the modal's keyboard effects.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Stay and retry" })).toHaveFocus());
       fireEvent.keyDown(document, { key: "Escape" });
       await waitFor(() => {
         expect(screen.queryByRole("dialog", { name: "Resolve unsynced changes before continuing" })).not.toBeInTheDocument();
