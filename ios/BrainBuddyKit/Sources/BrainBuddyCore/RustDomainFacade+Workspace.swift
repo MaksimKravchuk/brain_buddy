@@ -8,6 +8,35 @@ public struct RustWorkspaceReviewPreparation: Sendable {
 }
 
 extension RustDomainFacade {
+    /// Legacy identity is the original serialized key, including its casing.
+    /// The ordinary gesture codec accepts UUIDs and normalizes new IDs; map its
+    /// batch references back to the immutable imported keys without minting any.
+    public func workspaceLegacyCommands(_ commands: [GTDCommand], commandKeys: [String], at dates: [Date],
+                                        in state: GTDState, bindings: [RustWorkspaceIdentityBinding]) throws
+        -> [RustWorkspaceCommand] {
+        let ids = try commandKeys.map { key -> UUID in
+            guard let id = UUID(uuidString: key) else { throw RustBridgeError(code: "INVALID_REQUEST", field: "idempotency_key") }
+            return id
+        }
+        let normalized = ids.map { $0.uuidString.lowercased() }
+        guard Set(normalized).count == normalized.count else { throw RustBridgeError(code: "INVALID_REQUEST", field: "idempotency_key") }
+        let originals = Dictionary(uniqueKeysWithValues: zip(normalized, commandKeys))
+        return try workspaceCommands(commands, commandIDs: ids, at: dates, in: state, bindings: bindings).map { command in
+            var guards = try RustJSON.array(command.preconditions)
+            for index in guards.indices {
+                guard var row = guards[index] as? WireObject, var after = row["after_command"] as? WireObject,
+                      let key = after["command_id"] as? String, let original = originals[key] else { continue }
+                after["command_id"] = original
+                row["after_command"] = after
+                guards[index] = row
+            }
+            return RustWorkspaceCommand(commandID: originals[command.commandID] ?? command.commandID,
+                commandType: command.commandType, entityID: command.entityID, payload: command.payload,
+                preconditions: try RustJSON.data(guards), dependsOn: command.dependsOn.map { originals[$0] ?? $0 },
+                admissionTokens: command.admissionTokens)
+        }
+    }
+
     /// Runtime IDs remain canonical. A UUID-shaped suffix is not alias proof.
     public func workspaceLocalID(_ canonical: String) -> String {
         RustIDTable(stripsUUIDPrefixes: false).swift(canonical)

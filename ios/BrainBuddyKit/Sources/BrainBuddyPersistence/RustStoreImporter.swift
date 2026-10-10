@@ -213,10 +213,6 @@ public struct RustStoreImporter: Sendable {
             if !unsent.isEmpty {
                 let decoder = StoreDocumentCoding.makeDecoder()
                 let commands = try unsent.map { try decoder.decode(GTDCommand.self, from: $0.command) }
-                let keys = try unsent.map { entry -> UUID in
-                    guard let id = UUID(uuidString: entry.idempotencyKey) else { throw RustBridgeError(code: "INVALID_REQUEST", field: "idempotency_key") }
-                    return id
-                }
                 let dates = try unsent.map { entry -> Date in
                     guard let date = ISO8601Timestamp.date(from: entry.issuedAt) else { throw RustBridgeError(code: "INVALID_REQUEST", field: "issued_at") }
                     return date
@@ -226,7 +222,8 @@ public struct RustStoreImporter: Sendable {
                 for offset in stride(from: 0, to: requests.count, by: 200) {
                     bindings += try await workspace.resolveIdentities(Array(requests[offset..<min(offset + 200, requests.count)]))
                 }
-                let encoded = try facade.workspaceCommands(commands, commandIDs: keys, at: dates, in: document.base, bindings: bindings)
+                let encoded = try facade.workspaceLegacyCommands(commands, commandKeys: unsent.map(\.idempotencyKey),
+                    at: dates, in: document.base, bindings: bindings)
                 let conversion = zip(unsent, encoded).map { RustWorkspaceLegacyConversion(entryID: $0.0.entryID,
                     issuedAt: $0.0.issuedAt, command: $0.1) }
                 guard case .saved = try await workspace.convertLegacyUnsent(conversion, context: context) else {

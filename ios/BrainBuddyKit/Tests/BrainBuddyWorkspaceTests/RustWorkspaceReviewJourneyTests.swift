@@ -121,8 +121,12 @@ struct RustWorkspaceReviewJourneyTests {
         let session = try legacy.startReview(mode: .quick, entry: .list)
         let decision = try legacy.decide(.waiting, on: task, waitingFor: "Original private evidence", sessionID: session)
         let extraTask = TaskID("00000000-0000-4000-8000-000000000073")
-        let source = StoreDocument(base: legacy.state, outbox: [PendingOperation(command: .createTask(.init(
-            taskID: extraTask, title: "Never sent capture", list: .inbox)), issuedAt: clock.now)], local: legacy.localReview)
+        let source = StoreDocument(base: legacy.state, outbox: [
+            PendingOperation(command: .createTask(.init(taskID: extraTask, title: "Never sent capture", list: .inbox)),
+                issuedAt: clock.now, idempotencyKey: UUID(uuidString: "A0000000-0000-4000-8000-000000000001")!),
+            PendingOperation(command: .updateTask(.init(taskID: extraTask, changes: TaskChanges(title: .set("Never sent edited")))),
+                issuedAt: clock.now, idempotencyKey: UUID(uuidString: "B0000000-0000-4000-8000-000000000002")!)
+        ], local: legacy.localReview)
         let json = directory.appendingPathComponent("store.json")
         try StoreDocumentCoding.makeEncoder().encode(source).write(to: json)
         let originalBytes = try Data(contentsOf: json)
@@ -140,7 +144,7 @@ struct RustWorkspaceReviewJourneyTests {
         #expect(workspace.state.review.settings.thresholdDays == originalSettings.thresholdDays)
         #expect(workspace.state.review.openSession?.id != nil)
         await workspace.prepareList(.list(.inbox))
-        #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title) == ["Never sent capture"])
+        #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title) == ["Never sent edited"])
         try await workspace.undoDecision(decision, editorID: "scene:import:undo")
         await workspace.prepareList(.list(.next))
         await workspace.refreshTaskDetails(task)
