@@ -432,3 +432,99 @@ fn apple_outbox_026_fr_022_failures_are_typed_and_carry_no_user_text() {
     );
     assert_eq!(error.0, "WORKSPACE_CLOSED");
 }
+
+#[test]
+fn apple_import_026_fr_013_prepared_conversion_preserves_source_identity_and_commit_arbitration() {
+    use bb_swift::{
+        BridgeExecuteContext, BridgeExecution, BridgeLegacyConversion, BridgeOperation,
+        BridgeStoreRequest, BridgeWorkspaceCommand,
+    };
+    use std::sync::Arc;
+    let directory = lane("prepared-conversion");
+    fs::write(
+        directory.join("store.json"),
+        serde_json::to_vec(&document()).unwrap(),
+    )
+    .unwrap();
+    let runtime = runtime();
+    let request = request(&directory);
+    runtime.import_legacy_store(request.clone()).unwrap();
+    runtime
+        .resolve_legacy_outbox(BridgeLegacyOutboxRequest {
+            workspace_id: request.workspace_id.clone(),
+            database_path: request.database_path.clone(),
+            now: NOW.into(),
+            busy_timeout_ms: 2000,
+            receipts: vec![],
+        })
+        .unwrap();
+    let workspace = runtime
+        .open_store(BridgeStoreRequest {
+            workspace_id: request.workspace_id,
+            database_path: request.database_path,
+            busy_timeout_ms: 2000,
+        })
+        .unwrap();
+    let unsent = workspace.legacy_unsent().unwrap();
+    assert_eq!(unsent.len(), 1);
+    assert_eq!(unsent[0].issued_at, T0);
+    let source: Value = serde_json::from_slice(&unsent[0].command).unwrap();
+    assert_eq!(source["createTask"]["_0"]["title"], SENTINEL);
+    let item = BridgeLegacyConversion {
+        entry_id: unsent[0].entry_id.clone(),
+        issued_at: unsent[0].issued_at.clone(),
+        command: BridgeWorkspaceCommand {
+            command_id: unsent[0].idempotency_key.clone(),
+            command_type: "task.create".into(),
+            entity_id: Some("task_00000000-0000-4000-8000-000000000009".into()),
+            payload: json!({"title":SENTINEL,"state":"inbox"})
+                .to_string()
+                .into_bytes(),
+            preconditions: b"[]".to_vec(),
+            depends_on: vec![],
+        },
+    };
+    let context = BridgeExecuteContext {now:NOW.into(),time_zone:"UTC".into(),actor_id:"device".into(),policy:json!({"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}).to_string().into_bytes()};
+    let mut wrong = item.clone();
+    wrong.entry_id = "another source".into();
+    assert!(matches!(
+        workspace
+            .convert_legacy_unsent(
+                vec![wrong],
+                context.clone(),
+                Arc::new(BridgeOperation::new())
+            )
+            .unwrap(),
+        BridgeExecution::Refused { .. }
+    ));
+    let cancelled = Arc::new(BridgeOperation::new());
+    cancelled.cancel();
+    assert_eq!(
+        failed(
+            workspace
+                .convert_legacy_unsent(vec![item.clone()], context.clone(), cancelled)
+                .unwrap_err()
+        )
+        .0,
+        "CANCELLED"
+    );
+    assert_eq!(workspace.legacy_unsent().unwrap().len(), 1);
+    let committed = Arc::new(BridgeOperation::new());
+    let BridgeExecution::Saved { results } = workspace
+        .convert_legacy_unsent(vec![item.clone()], context.clone(), committed.clone())
+        .unwrap()
+    else {
+        panic!("saved")
+    };
+    assert_eq!(results[0].command_id, unsent[0].idempotency_key);
+    assert!(committed.is_committed());
+    assert!(!committed.cancel());
+    assert!(workspace.legacy_unsent().unwrap().is_empty());
+    let BridgeExecution::Saved { results } = workspace
+        .convert_legacy_unsent(vec![item], context, Arc::new(BridgeOperation::new()))
+        .unwrap()
+    else {
+        panic!("retry")
+    };
+    assert!(results[0].replayed);
+}

@@ -100,9 +100,15 @@ pub fn query(
             project_display(read_set, project_id).map(QueryResult::ProjectDisplay)
         }
         Query::Tags {} => Ok(QueryResult::Tags(tags(read_set))),
-        Query::ReviewState {} | Query::ReviewQueue { .. } | Query::ListMode { .. } => {
-            Err(DomainError::field(Reason::InvalidValue, "kind"))
-        }
+        Query::ReviewState {}
+        | Query::ReviewQueue { .. }
+        | Query::ListMode { .. }
+        | Query::TaskFormulation { .. }
+        | Query::ParkReturnShown { .. }
+        | Query::RestartCandidates {}
+        | Query::AutoParkDue {}
+        | Query::ReviewSummary { .. }
+        | Query::OpenReleases { .. } => Err(DomainError::field(Reason::InvalidValue, "kind")),
     }
 }
 
@@ -716,4 +722,122 @@ pub fn project_display(
             project.name.as_str().to_owned()
         },
     })
+}
+
+/// Native project/tag collections select bounded keys first, then count only
+/// their rows. The order and membership are the ordinary query family's rules.
+pub fn classification_page(
+    read_set: &ReadSet,
+    query: &Query,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    if !(1..=MAX_LIMIT).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let after: Option<(String, String)> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let mut best = BinaryHeap::new();
+    let mut select = |name: &str, id: &str| {
+        let key = (name_key(name), id.to_owned());
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == limit as usize + 1 && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            return;
+        }
+        if best.len() == limit as usize + 1 {
+            best.pop();
+        }
+        best.push(key);
+    };
+    match query {
+        Query::Projects { filter } => {
+            for project in read_set.projects.values().filter(|p| match filter {
+                ProjectFilter::All => true,
+                ProjectFilter::Active => p.state == ProjectState::Active,
+                ProjectFilter::Archived => p.state == ProjectState::Archived,
+            }) {
+                select(project.name.as_str(), project.id.as_str());
+            }
+        }
+        Query::Tags {} => {
+            for tag in read_set
+                .tags
+                .values()
+                .filter(|t| t.state == TagState::Active)
+            {
+                select(tag.name.as_str(), tag.id.as_str());
+            }
+        }
+        _ => return Err(invalid("kind")),
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let mut counts: BTreeMap<&str, (u32, u32)> =
+        keys.iter().map(|(_, id)| (id.as_str(), (0, 0))).collect();
+    for task in read_set.tasks.values().filter(|task| task.state.is_open()) {
+        match query {
+            Query::Projects { .. } => {
+                if let Some(count) = task
+                    .project_id
+                    .as_ref()
+                    .and_then(|id| counts.get_mut(id.as_str()))
+                {
+                    count.0 += 1;
+                    count.1 += u32::from(task.state == TaskState::Next);
+                }
+            }
+            Query::Tags {} => {
+                for (id, count) in &mut counts {
+                    if task.tag_ids.iter().any(|tag| tag.as_str() == *id) {
+                        count.0 += 1;
+                    }
+                }
+            }
+            _ => return Err(invalid("kind")),
+        }
+    }
+    let result = match query {
+        Query::Projects { .. } => QueryResult::Projects(
+            keys.iter()
+                .map(|(_, id)| {
+                    let project = read_set
+                        .projects
+                        .get(&ProjectId::parse(id).map_err(|_| invalid("project_id"))?)
+                        .ok_or_else(|| invalid("project_id"))?;
+                    let (open_task_count, next_action_count) = counts[id.as_str()];
+                    Ok(ProjectSummary {
+                        project: project.clone(),
+                        open_task_count,
+                        next_action_count,
+                    })
+                })
+                .collect::<Result<Vec<_>, DomainError>>()?,
+        ),
+        Query::Tags {} => QueryResult::Tags(
+            keys.iter()
+                .map(|(_, id)| {
+                    let tag = read_set
+                        .tags
+                        .get(&TagId::parse(id).map_err(|_| invalid("tag_id"))?)
+                        .ok_or_else(|| invalid("tag_id"))?;
+                    Ok(TagSummary {
+                        tag: tag.clone(),
+                        open_task_count: counts[id.as_str()].0,
+                    })
+                })
+                .collect::<Result<Vec<_>, DomainError>>()?,
+        ),
+        _ => return Err(invalid("kind")),
+    };
+    Ok((result, next))
 }

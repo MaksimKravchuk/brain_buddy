@@ -63,8 +63,8 @@ pub use issues::{
 };
 pub use legacy_outbox::{
     LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend, LegacyUnsent, ProvenAlias,
-    ProvidedReceipts, ReceiptLookup, convert_legacy_unsent_with, legacy_outbox_sends,
-    legacy_outbox_status, legacy_unsent, resolve_legacy_outbox,
+    ProvidedReceipts, ReceiptLookup, convert_legacy_prepared_with, convert_legacy_unsent_with,
+    legacy_outbox_sends, legacy_outbox_status, legacy_unsent, resolve_legacy_outbox,
 };
 pub use locking::{LockMode, MigrationLock};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
@@ -79,5 +79,8 @@ pub use sync_session::{
     SessionError, SyncSession,
 };
 pub use workspace_query::{
-    QueryError, QueryPage, WorkspaceWatch, query_collection_page, query_page, workspace_watch,
+    IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceSyncStatus, WorkspaceWatch,
+    delete_workspace_draft_with, load_workspace_draft, query_collection_page, query_page,
+    resolve_workspace_identities, save_workspace_draft_with, workspace_issues_page, workspace_read,
+    workspace_sync_status, workspace_watch,
 };

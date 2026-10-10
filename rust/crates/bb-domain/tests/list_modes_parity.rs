@@ -1982,3 +1982,66 @@ fn queries_026_fr_002_list_modes_have_a_json_wire_shape_and_one_owner() {
     assert_eq!(section["items"][0]["title"], "Done");
     assert_eq!(written["value"]["open_count"], 0);
 }
+
+#[test]
+fn queries_026_fr_026_native_destinations_preserve_membership_sections_and_local_origins() {
+    use bb_domain::types::{ListMode, ListOptions, OpenList, Page, TaskId};
+    let mut fixture = Fixture::default();
+    let project = fixture.project("Home", "project-home", false);
+    let tag = fixture.tag("phone", "tag-phone");
+    fixture.add(t("Next").project(&project).tags(&[&tag]));
+    fixture.add(t("Waiting").state("waiting").project(&project));
+    fixture.add(t("Inbox in project").state("inbox").project(&project));
+    fixture.add(t("Someday").state("someday").project(&project));
+    fixture.add(t("Inbox").state("inbox"));
+    let ended = fixture.add(t("Ended here").state("completed").project(&project));
+    fixture.add(t("Unknown origin").state("completed"));
+    let state = fixture.read_set();
+    let project_mode = json!({"type":"project","project_id":project});
+    let (rows, count, pages) =
+        page_through(&state, &project_mode, &json!({"show_completed":true}), 2);
+    assert_eq!(count, 4);
+    assert_eq!(pages, 3);
+    assert_eq!(
+        rows.iter()
+            .map(|(section, _)| section.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "list:next",
+            "list:waiting",
+            "list:inbox",
+            "list:someday",
+            "completed"
+        ]
+    );
+    assert_eq!(
+        fixture
+            .plain(json!({"type":"open_list","list":"inbox"}))
+            .titles(),
+        vec![vec!["Inbox"]]
+    );
+    assert_eq!(
+        fixture.plain(json!({"type":"tag","tag_id":tag})).titles(),
+        vec![vec!["Next"]]
+    );
+    let mut origins = BTreeMap::new();
+    origins.insert(TaskId::parse(&ended).unwrap(), OpenList::Next);
+    let result = bb_domain::list_modes::list_mode_with_local_facts(
+        &state,
+        &ListMode::OpenList {
+            list: OpenList::Next,
+        },
+        &ListOptions {
+            show_completed: true,
+            ..ListOptions::default()
+        },
+        &Page {
+            limit: 200,
+            after: None,
+        },
+        &inputs(TODAY, "UTC"),
+        &origins,
+    )
+    .unwrap();
+    assert_eq!(R(result).titles(), vec![vec!["Next"], vec!["Ended here"]]);
+}

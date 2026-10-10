@@ -128,6 +128,11 @@ fn to_http(value: &Value) -> Value {
         Value::Object(members) => Value::Object(
             members
                 .iter()
+                // Native TaskView keeps this fact outside a running clock; HTTP fixtures predate it.
+                .filter(|(key, _)| {
+                    key.as_str() != "consecutive_stalled_formulations"
+                        || !members.contains_key("subtasks")
+                })
                 .map(|(key, member)| {
                     let numeric =
                         matches!(key.as_str(), "revision" | "order_key" | "task_revision");
@@ -2867,4 +2872,97 @@ fn review_sessions_026_sc_001_a_session_round_trips_through_the_record_form() {
     assert!(public["value"].get("private").is_none());
     assert_eq!(record.record_key(), vec![SESSION_A.to_owned()]);
     let _ = (ReviewMode::Quick, TaskState::Next);
+}
+
+#[test]
+fn review_sessions_026_fr_016_native_helpers_share_clock_and_shown_marker_rules() {
+    use bb_domain::dispatch;
+    let mut next = next_task(1, 10, "2026-09-01T09:00:00Z");
+    next["consecutive_stalled_formulations"] = json!(2);
+    let state = Store {
+        settings: Some(settings_row(Some("2026-09-01T09:00:00Z"))),
+        tasks: vec![next],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query =
+        serde_json::from_value(json!({"kind":"task_formulation","task_id":"task_n001"})).unwrap();
+    let QueryResult::TaskFormulation(facts) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("facts")
+    };
+    assert_eq!(facts.class, "park_due");
+    assert!(facts.third_stall);
+    assert!(facts.derived.is_some());
+    assert!(facts.extension.is_some());
+    let (QueryResult::RestartCandidates(page), after) =
+        bb_domain::review_sessions::native_task_page(
+            &state,
+            &Query::RestartCandidates {},
+            &query_inputs(NOW, true),
+            1,
+            None,
+        )
+        .unwrap()
+    else {
+        panic!("restart")
+    };
+    assert_eq!(page.len(), 1);
+    assert!(after.is_none());
+    assert_eq!(page[0].consecutive_stalled_formulations, 2);
+    let mut parked = task("parked", "someday", 11);
+    parked["parked"] = json!({"at":"2026-10-01T09:00:00Z","formulation_id":form_id(5)});
+    let state = Store {
+        tasks: vec![parked],
+        ..Store::default()
+    }
+    .read_set();
+    let query:Query=serde_json::from_value(json!({"kind":"park_return_shown","task_id":"parked","parked_at":"2026-09-30T09:00:00Z","formulation_id":form_id(5)})).unwrap();
+    assert!(matches!(
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap(),
+        QueryResult::ParkReturnShown(Some(bb_domain::types::ParkReturnProblem::ChangedElsewhere))
+    ));
+}
+
+#[test]
+fn review_sessions_026_fr_016_native_summary_uses_canonical_idle_end_and_explicit_device_marks() {
+    use bb_domain::dispatch;
+    let mut partial = session_row(
+        SESSION_A,
+        "partial",
+        "2026-09-01T09:00:00Z",
+        "2026-10-01T09:00:00Z",
+    );
+    partial["ended_at"] = json!("2026-10-08T09:00:00Z");
+    partial["qualifying_activity"] = json!(true);
+    partial["counts"]["done"] = json!(4);
+    partial["counts"]["inbox_processed"] = json!(10);
+    let state = Store {
+        sessions: vec![partial],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query = serde_json::from_value(
+        json!({"kind":"review_summary","session_id":null,"local":{"explainer_seen_locally":true}}),
+    )
+    .unwrap();
+    let QueryResult::ReviewSummary(summary) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("summary")
+    };
+    assert_eq!(summary.entry_notice.unwrap()["type"], "closed_after_a_week");
+    assert_eq!(summary.days_since_last_review, Some(8));
+    assert!(!summary.explainer_needed);
+    assert!(summary.unavailable_local_facts.is_empty());
+    let query:Query=serde_json::from_value(json!({"kind":"review_summary","session_id":null,"local":{"ended_elsewhere_session":SESSION_A}})).unwrap();
+    let QueryResult::ReviewSummary(summary) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("summary")
+    };
+    let notice = summary.entry_notice.unwrap();
+    assert_eq!(notice["type"], "replaced_elsewhere");
+    assert_eq!(notice["decisions"], 4);
 }

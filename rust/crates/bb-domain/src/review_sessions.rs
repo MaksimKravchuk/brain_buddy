@@ -1367,7 +1367,17 @@ impl<'a> Snapshot<'a> {
 /// Whether this family answers `query`.
 #[must_use]
 pub fn handles_query(query: &Query) -> bool {
-    matches!(query, Query::ReviewState {} | Query::ReviewQueue { .. })
+    matches!(
+        query,
+        Query::ReviewState {}
+            | Query::ReviewQueue { .. }
+            | Query::TaskFormulation { .. }
+            | Query::ParkReturnShown { .. }
+            | Query::RestartCandidates {}
+            | Query::AutoParkDue {}
+            | Query::ReviewSummary { .. }
+            | Query::OpenReleases { .. }
+    )
 }
 
 /// Answers `ReviewState` and `ReviewQueue`. Both are reads of the weekly
@@ -1392,6 +1402,128 @@ pub fn query(
     }
     let now = instant(&inputs.now, "now")?;
     match query {
+        Query::TaskFormulation { task_id } => {
+            native_formulation(read_set, task_id, now).map(QueryResult::TaskFormulation)
+        }
+        Query::ParkReturnShown {
+            task_id,
+            parked_at,
+            formulation_id,
+        } => {
+            use crate::types::{ParkReturnProblem, ProjectState};
+            let problem = read_set
+                .tasks
+                .get(task_id)
+                .and_then(|task| {
+                    if task.state != TaskState::Someday {
+                        return None;
+                    }
+                    let marker = task.parked.as_ref()?;
+                    if parked_at.as_ref().is_some_and(|at| at != &marker.at)
+                        || formulation_id
+                            .as_ref()
+                            .is_some_and(|id| id != &marker.formulation_id)
+                    {
+                        return None;
+                    }
+                    Some(
+                        task.project_id
+                            .as_ref()
+                            .and_then(|id| read_set.projects.get(id))
+                            .filter(|project| project.state == ProjectState::Archived)
+                            .map(|project| ParkReturnProblem::ProjectArchived {
+                                name: project.name.as_str().to_owned(),
+                            }),
+                    )
+                })
+                .unwrap_or(Some(ParkReturnProblem::ChangedElsewhere));
+            Ok(QueryResult::ParkReturnShown(problem))
+        }
+        Query::RestartCandidates {} | Query::AutoParkDue {} => {
+            let settings = clock_settings(read_set)?;
+            let mut tasks = Vec::new();
+            for task in read_set.tasks.values() {
+                let clock = TaskClock::from_task(task).map_err(stored)?;
+                let eligible = if matches!(query, Query::RestartCandidates {}) {
+                    formulation::restart_eligible(&clock, &settings, now)
+                } else {
+                    formulation::classify(&clock, &settings, now) == FormulationClass::ParkDue
+                };
+                if eligible {
+                    tasks.push(task);
+                }
+            }
+            tasks.sort_by(|a, b| {
+                (a.formulation.as_ref().map(|f| f.started_at.as_str()), &a.id)
+                    .cmp(&(b.formulation.as_ref().map(|f| f.started_at.as_str()), &b.id))
+            });
+            let views = tasks
+                .into_iter()
+                .map(|task| queries::task_view(task, Vec::new(), Vec::new(), &settings))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(if matches!(query, Query::RestartCandidates {}) {
+                QueryResult::RestartCandidates(views)
+            } else {
+                QueryResult::AutoParkDue(views)
+            })
+        }
+        Query::ReviewSummary { session_id, local } => {
+            native_summary(read_set, session_id.as_ref(), inputs, now, local.as_ref())
+                .map(QueryResult::ReviewSummary)
+        }
+        Query::OpenReleases {
+            release_kind,
+            session_id,
+        } => {
+            use crate::types::BulkKind;
+            let session = session_id
+                .as_ref()
+                .map(|id| {
+                    read_set
+                        .sessions
+                        .get(id)
+                        .ok_or_else(|| session_not_found(id))
+                })
+                .transpose()?;
+            if *release_kind == BulkKind::InboxRemainder && session.is_none() {
+                return Err(invalid("session_id"));
+            }
+            let last_start = read_set
+                .sessions
+                .values()
+                .map(|s| s.started_at.as_str())
+                .max();
+            let inbox_pending = session.is_some_and(|s| {
+                s.steps
+                    .get(&StepCode::Inbox)
+                    .copied()
+                    .unwrap_or(StepStatus::Pending)
+                    == StepStatus::Pending
+            });
+            let mut releases: Vec<_> = read_set
+                .bulk_releases
+                .values()
+                .filter(|release| {
+                    release.kind == *release_kind
+                        && release.undone_at.is_none()
+                        && !release.released.is_empty()
+                        && match release_kind {
+                            BulkKind::Restart => {
+                                last_start.is_none_or(|at| at < release.created_at.as_str())
+                            }
+                            BulkKind::InboxRemainder => {
+                                inbox_pending && release.session_id.as_ref() == session_id.as_ref()
+                            }
+                        }
+                })
+                .collect();
+            releases.sort_by(|a, b| {
+                (a.created_at.as_str(), &a.id).cmp(&(b.created_at.as_str(), &b.id))
+            });
+            Ok(QueryResult::OpenReleases(
+                releases.into_iter().map(|r| r.public()).collect(),
+            ))
+        }
         Query::ReviewQueue { step, session_id } => {
             review_queue(read_set, *step, session_id.as_ref(), now).map(QueryResult::ReviewQueue)
         }
@@ -1589,6 +1721,21 @@ fn review_queue(
     session_id: Option<&SessionId>,
     now: UtcInstant,
 ) -> Result<QueueView, DomainError> {
+    let snapshot = Snapshot::new(read_set, now)?;
+    let (tasks, meta) = queue_parts(read_set, step, session_id, now, &snapshot)?;
+    Ok(QueueView {
+        items: snapshot.views(&tasks)?,
+        meta,
+    })
+}
+
+fn queue_parts<'a>(
+    read_set: &'a ReadSet,
+    step: StepCode,
+    session_id: Option<&SessionId>,
+    now: UtcInstant,
+    snapshot: &Snapshot<'a>,
+) -> Result<(Vec<&'a Task>, QueueMeta), DomainError> {
     let session = session_id
         .map(|id| {
             read_set
@@ -1597,7 +1744,6 @@ fn review_queue(
                 .ok_or_else(|| session_not_found(id))
         })
         .transpose()?;
-    let snapshot = Snapshot::new(read_set, now)?;
     let no_meta = || QueueMeta::Empty(NoMeta {});
     let (tasks, meta): (Vec<&Task>, QueueMeta) = match step {
         StepCode::MindSweep | StepCode::Summary => (Vec::new(), no_meta()),
@@ -1608,12 +1754,12 @@ fn review_queue(
         }
         StepCode::Inbox => (snapshot.in_state(TaskState::Inbox)?, no_meta()),
         StepCode::Decisions => {
-            let ids = decision_ids(&snapshot, session)?;
+            let ids = decision_ids(snapshot, session)?;
             let tasks = snapshot.pick(&ids);
             let meta = handled_decisions(read_set, session, &tasks);
             (tasks, QueueMeta::Decisions(meta))
         }
-        StepCode::RestOfNext => rest_of_next(&snapshot, session)?,
+        StepCode::RestOfNext => rest_of_next(snapshot, session)?,
         StepCode::Waiting => {
             let ids = waiting_queue(&snapshot.review_tasks, &snapshot.receipts, now);
             (snapshot.pick(&ids), no_meta())
@@ -1635,12 +1781,44 @@ fn review_queue(
             };
             (snapshot.pick(&pass.shown), QueueMeta::Someday(meta))
         }
-        StepCode::Dates => dates(&snapshot)?,
+        StepCode::Dates => dates(snapshot)?,
     };
-    Ok(QueueView {
-        items: snapshot.views(&tasks)?,
-        meta,
-    })
+    Ok((tasks, meta))
+}
+
+/// Native pages reuse the owning queue's order and metadata, and construct
+/// canonical TaskViews only for the requested page.
+pub fn native_queue_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    offset: usize,
+) -> Result<(QueryResult, Option<usize>), DomainError> {
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let Query::ReviewQueue { step, session_id } = query else {
+        return Err(invalid("kind"));
+    };
+    let now = instant(&inputs.now, "now")?;
+    let snapshot = Snapshot::new(read_set, now)?;
+    let (tasks, meta) = queue_parts(read_set, *step, session_id.as_ref(), now, &snapshot)?;
+    if offset > tasks.len() {
+        return Err(invalid("cursor"));
+    }
+    let end = offset.saturating_add(limit as usize).min(tasks.len());
+    let next = (end < tasks.len()).then_some(end);
+    Ok((
+        QueryResult::ReviewQueue(QueueView {
+            items: snapshot.views(&tasks[offset..end])?,
+            meta,
+        }),
+        next,
+    ))
 }
 
 /// The run's snapshot once taken, else the live aggregate (http §6).
@@ -1886,4 +2064,392 @@ fn sha256_hex(data: &[u8]) -> String {
         }
     }
     state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn derived_view(
+    value: formulation::DerivedInstants,
+) -> Result<crate::types::DerivedView, DomainError> {
+    Ok(crate::types::DerivedView {
+        start: wire(value.start, "start")?,
+        ageing_at: wire(value.ageing_at, "ageing_at")?,
+        ask_at: wire(value.ask_at, "ask_at")?,
+        park_due_at: wire(value.park_due_at, "park_due_at")?,
+        tomorrow_at: wire(value.tomorrow_at, "tomorrow_at")?,
+        paused_until: optional_wire(value.paused_until, "paused_until")?,
+    })
+}
+
+fn native_formulation(
+    read_set: &ReadSet,
+    id: &TaskId,
+    now: UtcInstant,
+) -> Result<crate::types::TaskFormulationView, DomainError> {
+    let task = read_set
+        .tasks
+        .get(id)
+        .ok_or_else(|| DomainError::new(Reason::NotFound))?;
+    let settings = clock_settings(read_set)?;
+    let clock = TaskClock::from_task(task).map_err(stored)?;
+    let derived = formulation::derive_instants(&clock, &settings)
+        .map(derived_view)
+        .transpose()?;
+    let extension = formulation::extend(&clock, "", &settings, now)
+        .ok()
+        .and_then(|extended| formulation::derive_instants(&extended, &settings))
+        .map(derived_view)
+        .transpose()?;
+    let parked_after_days = task
+        .parked
+        .as_ref()
+        .and_then(|park| park.private.as_ref().map(|private| (park, private)))
+        .map(|(park, private)| -> Result<i64, DomainError> {
+            Ok((instant(&park.at, "parked.at")?
+                .micros_since(instant(&private.clock_before.started_at, "started_at")?)
+                / (DAY * MICROS))
+                .max(0))
+        })
+        .transpose()?;
+    Ok(crate::types::TaskFormulationView {
+        task_id: id.clone(),
+        class: formulation::classify(&clock, &settings, now)
+            .as_str()
+            .to_owned(),
+        derived,
+        third_stall: formulation::third_stall(&clock, &settings, now),
+        extension,
+        parked_after_days,
+        unavailable_local_facts: if task.parked.is_some() && parked_after_days.is_none() {
+            vec!["park_clock_before".to_owned()]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn native_summary(
+    read_set: &ReadSet,
+    session_id: Option<&SessionId>,
+    inputs: &QueryInputs,
+    now: UtcInstant,
+    local: Option<&crate::types::ReviewPresentation>,
+) -> Result<crate::types::ReviewSummaryView, DomainError> {
+    use crate::types::DecisionStepView;
+    let session = session_id
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
+    let settings = clock_settings(read_set)?;
+    let summaries = read_set
+        .sessions
+        .values()
+        .map(summary_of)
+        .collect::<Result<Vec<_>, _>>()?;
+    let last = last_counted_review_at(&summaries);
+    let zone = parse_zone(inputs.device_zone.as_str(), "device_zone")?;
+    let today = CalendarDay::of_instant(now.unix_seconds(), &zone);
+    let days_since_last_review = last.map(|at| {
+        CalendarDay::of_instant(at.unix_seconds(), &zone)
+            .days_until(today)
+            .max(0)
+    });
+    let decision_step = session
+        .map(|session| -> Result<DecisionStepView, DomainError> {
+            let snapshot = Snapshot::new(read_set, now)?;
+            let queue = decision_ids(&snapshot, Some(session))?;
+            let decided: BTreeSet<_> = read_set
+                .decisions
+                .values()
+                .filter(|d| d.session_id.as_ref() == Some(&session.id))
+                .map(|d| d.task_id.as_str())
+                .collect();
+            let aside: BTreeSet<_> = read_set
+                .decision_queues
+                .get(&session.id)
+                .map(|q| q.set_aside_task_ids.iter().map(|id| id.as_str()).collect())
+                .unwrap_or_default();
+            let asks: BTreeSet<_> = snapshot.asking_ids()?.into_iter().collect();
+            let count = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
+            if let Some((index, id)) = queue.iter().enumerate().find(|(_, id)| {
+                !decided.contains(id.as_str()) && !aside.contains(id.as_str()) && asks.contains(*id)
+            }) {
+                return Ok(DecisionStepView::Card {
+                    task_id: TaskId::parse(id).map_err(|_| invalid("task_id"))?,
+                    position: count(index + 1),
+                    total: count(queue.len()),
+                });
+            }
+            let done = queue
+                .iter()
+                .filter(|id| decided.contains(id.as_str()))
+                .count();
+            let kept = queue
+                .iter()
+                .filter(|id| decided.contains(id.as_str()) && asks.contains(*id))
+                .count();
+            let left = queue
+                .iter()
+                .filter(|id| {
+                    !decided.contains(id.as_str())
+                        && aside.contains(id.as_str())
+                        && asks.contains(*id)
+                })
+                .count();
+            Ok(if left > 0 {
+                DecisionStepView::SomeLeft {
+                    decided: count(done),
+                    total: count(queue.len()),
+                    still_asking: count(left + kept),
+                }
+            } else if done == 0 {
+                DecisionStepView::NothingAsks
+            } else {
+                DecisionStepView::AllDecided {
+                    decided: count(done),
+                    kept_wording: count(kept),
+                }
+            })
+        })
+        .transpose()?;
+    let latest = read_set
+        .sessions
+        .values()
+        .filter(|session| session.status != SessionStatus::Open)
+        .map(|session| {
+            Ok((
+                (
+                    instant(
+                        session.ended_at.as_ref().unwrap_or(&session.started_at),
+                        "ended_at",
+                    )?,
+                    session.id.clone(),
+                ),
+                session,
+            ))
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?
+        .into_iter()
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, session)| session);
+    let entry_notice = latest.map(|session| -> Result<Option<serde_json::Value>,DomainError> {
+        let counts=serde_json::to_value(session.counts).map_err(|_| invalid("counts"))?;
+        let decisions=counts.as_object().ok_or_else(|| invalid("counts"))?.iter().filter(|(key,_)| key.as_str()!="inbox_processed").map(|(_,value)| value.as_u64().unwrap_or(0)).sum::<u64>();
+        if local.is_some_and(|local| local.ended_elsewhere_session.as_ref()==Some(&session.id)) {
+            return Ok(Some(serde_json::json!({"type":"replaced_elsewhere","origin":session.origin,"decisions":decisions})));
+        }
+        let idle=matches!(session.status,SessionStatus::Partial|SessionStatus::Abandoned)
+            && session.ended_at.as_ref().map(|at| instant(at,"ended_at")).transpose()?
+                == Some(instant(&session.last_activity_at,"last_activity_at")?.plus_seconds(IDLE_CLOSE_AFTER));
+        Ok(idle.then(|| serde_json::json!({"type":"closed_after_a_week","started_at":session.started_at,"decisions":decisions})))
+    }).transpose()?.flatten();
+    Ok(crate::types::ReviewSummaryView {
+        entry_notice,
+        explainer_needed: settings.activated_at().is_none()
+            && local
+                .is_none_or(|local| local.activated_at.is_none() && !local.explainer_seen_locally),
+        days_since_last_review,
+        decision_step,
+        unavailable_local_facts: if local.is_none() {
+            vec![
+                "ended_elsewhere".to_owned(),
+                "explainer_seen_locally".to_owned(),
+            ]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+/// Native clock collections keep only `limit + 1` keys beyond the cursor.
+/// All evaluation remains with the clock rules used by the ordinary queries.
+pub fn native_task_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use std::collections::BinaryHeap;
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !matches!(query, Query::RestartCandidates {} | Query::AutoParkDue {}) {
+        return Err(invalid("kind"));
+    }
+    let after: Option<(i64, String)> = after
+        .map(|value| serde_json::from_str(value).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let settings = clock_settings(read_set)?;
+    let now = instant(&inputs.now, "now")?;
+    let mut best = BinaryHeap::new();
+    let keep = limit as usize + 1;
+    for task in read_set.tasks.values() {
+        let clock = TaskClock::from_task(task).map_err(stored)?;
+        let eligible = if matches!(query, Query::RestartCandidates {}) {
+            formulation::restart_eligible(&clock, &settings, now)
+        } else {
+            formulation::classify(&clock, &settings, now) == FormulationClass::ParkDue
+        };
+        if !eligible {
+            continue;
+        }
+        let started = task
+            .formulation
+            .as_ref()
+            .ok_or_else(|| invalid("formulation"))?;
+        // Normalize equal instants; wire spellings may use different offsets.
+        let key = (
+            instant(&started.started_at, "started_at")?.unix_micros(),
+            task.id.as_str().to_owned(),
+        );
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            continue;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let views = keys
+        .into_iter()
+        .map(|(_, id)| {
+            let task = read_set
+                .tasks
+                .get(&TaskId::parse(&id).map_err(|_| invalid("task_id"))?)
+                .ok_or_else(|| invalid("task_id"))?;
+            queries::task_view(task, Vec::new(), Vec::new(), &settings)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        if matches!(query, Query::RestartCandidates {}) {
+            QueryResult::RestartCandidates(views)
+        } else {
+            QueryResult::AutoParkDue(views)
+        },
+        next,
+    ))
+}
+
+/// Release history offered for Undo, with a bounded runtime page. Public
+/// records omit private clock snapshots through the existing record mapper.
+pub fn native_release_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use crate::types::BulkKind;
+    use std::collections::BinaryHeap;
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let Query::OpenReleases {
+        release_kind,
+        session_id,
+    } = query
+    else {
+        return Err(invalid("kind"));
+    };
+    let session = session_id
+        .as_ref()
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
+    if *release_kind == BulkKind::InboxRemainder && session.is_none() {
+        return Err(invalid("session_id"));
+    }
+    let last_start =
+        read_set
+            .sessions
+            .values()
+            .try_fold(None, |latest, session| -> Result<_, DomainError> {
+                Ok(latest.max(Some(instant(&session.started_at, "started_at")?)))
+            })?;
+    let inbox_pending = session.is_some_and(|s| {
+        s.steps
+            .get(&StepCode::Inbox)
+            .copied()
+            .unwrap_or(StepStatus::Pending)
+            == StepStatus::Pending
+    });
+    let after: Option<(i64, String)> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let mut best = BinaryHeap::new();
+    let keep = limit as usize + 1;
+    for release in read_set.bulk_releases.values() {
+        if release.kind != *release_kind
+            || release.undone_at.is_some()
+            || release.released.is_empty()
+        {
+            continue;
+        }
+        let at = instant(&release.created_at, "created_at")?;
+        let eligible = match release_kind {
+            BulkKind::Restart => last_start.is_none_or(|last| last < at),
+            BulkKind::InboxRemainder => {
+                inbox_pending && release.session_id.as_ref() == session_id.as_ref()
+            }
+        };
+        if !eligible {
+            continue;
+        }
+        let key = (at.unix_micros(), release.id.as_str().to_owned());
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            continue;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let releases = keys
+        .into_iter()
+        .map(|(_, id)| {
+            read_set
+                .bulk_releases
+                .get(&crate::types::BulkId::parse(&id).map_err(|_| invalid("bulk_id"))?)
+                .map(|release| release.public())
+                .ok_or_else(|| invalid("bulk_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((QueryResult::OpenReleases(releases), next))
 }
