@@ -252,7 +252,9 @@ mod tests {
         let hex = "010000000141000100000005696e626f78000001000000046e6f6e65000000000000000000";
         let bytes: Vec<u8> = hex
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
             .collect();
         let task: bb_domain::types::Task =
