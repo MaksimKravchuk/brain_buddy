@@ -15,7 +15,7 @@
 //!   workspace is not [`LegacyOutboxStatus::may_run`].
 //! * **Accepted**: the receipt for the entry's own idempotency key says the server
 //!   did it. Every identity the receipt proves is recorded as an alias, but only
-//!   for an ID the old command itself names and never against a different
+//!   for an ID the old command uses as that entity's identifier (never text) and never against a different
 //!   alias already proven. The entry leaves pending work without a new command.
 //! * **Rejected**: the receipt for the key says the server refused it. An issue
 //!   keeps the intent and its text.
@@ -494,8 +494,8 @@ fn settle(
     Ok(())
 }
 
-/// A receipt proves an identity only when the old command itself names the local ID and
-/// no different server ID was proven for it before.
+/// A receipt proves an identity only when the old command uses the local ID as an identifier
+/// of that entity type (see [`names`]) and no different server ID was proven for it before.
 fn provable(
     tx: &Transaction<'_>,
     workspace: &str,
@@ -513,7 +513,7 @@ fn provable(
             )
             .optional()?;
         if alias.server_id.is_empty()
-            || !names(command, &alias.old_local_id)
+            || !names(command, alias.entity_type, &alias.old_local_id)
             || known.is_some_and(|server| server != alias.server_id)
         {
             return Ok(false);
@@ -522,14 +522,41 @@ fn provable(
     Ok(true)
 }
 
-/// Whether `id` is one of the values of `value`.
-fn names(value: &Value, id: &str) -> bool {
-    match value {
-        Value::String(text) => text == id,
-        Value::Array(items) => items.iter().any(|item| names(item, id)),
-        Value::Object(map) => map.values().any(|item| names(item, id)),
-        _ => false,
-    }
+/// Whether the old command uses `id` as an identifier of `entity`: only in the fields the
+/// legacy `GTDCommand` shape defines as that entity's IDs, never in text. The command is
+/// `{"<case>": payload}` where a struct payload sits under `_0`; `[]` ends a path to an
+/// array of IDs.
+fn names(command: &Value, entity: EntityType, id: &str) -> bool {
+    let Some((case, payload)) = command.as_object().and_then(|map| map.iter().next()) else {
+        return false;
+    };
+    let payload = payload
+        .get("_0")
+        .filter(|inner| inner.is_object())
+        .unwrap_or(payload);
+    let paths: &[&str] = match (entity, case.as_str()) {
+        (EntityType::Task, _) => &["taskID", "followUpTaskID", "taskIDs[]"],
+        (EntityType::Project, "archiveProject") => &["_0"],
+        (EntityType::Project, _) => &["projectID", "project", "changes/projectID/set/_0"],
+        (EntityType::Tag, "deleteTag") => &["_0"],
+        (EntityType::Tag, _) => &["tagID", "tagIDs[]", "changes/tagIDs/set/_0[]"],
+        (EntityType::Subtask, _) => &["subtaskID"],
+        (EntityType::Comment, _) => &["commentID"],
+        _ => &[],
+    };
+    paths.iter().any(|path| {
+        let (path, many) = path
+            .strip_suffix("[]")
+            .map_or((*path, false), |p| (p, true));
+        let found = path
+            .split('/')
+            .try_fold(payload, |value, key| value.get(key));
+        match found {
+            Some(Value::String(text)) => !many && text == id,
+            Some(Value::Array(items)) => many && items.iter().any(|item| item.as_str() == Some(id)),
+            _ => false,
+        }
+    })
 }
 
 /// An error code of a receipt, kept only when it is the shape of one.

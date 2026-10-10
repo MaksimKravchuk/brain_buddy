@@ -279,6 +279,81 @@ fn legacy_outbox_026_fr_005_an_alias_for_an_id_the_command_never_named_is_not_pr
 }
 
 #[test]
+fn legacy_outbox_026_sc_002_an_alias_matching_only_a_title_is_not_proof() {
+    // The title equals the "local ID" the receipt claims: text is never an identifier.
+    let lane = lane("title-alias");
+    let mut store = lane.imported(&document(
+        vec![sent(1, "task-9", "task-title-1", LONG_AGO)],
+        vec![],
+    ));
+
+    let status = resolve(&mut store, NOW, |_| {
+        accepted("task-title-1", "task_ffffffffffff")
+    });
+
+    assert_eq!(
+        (status.accepted, status.uncertain, status.aliases),
+        (0, 1, 0)
+    );
+    assert!(aliases(&mut store).is_empty());
+    assert_eq!(issue_rows(&mut store).len(), 1);
+}
+
+#[test]
+fn legacy_outbox_026_sc_002_an_alias_for_the_wrong_entity_type_is_not_proof() {
+    // `createTask` names task-9 as a task and project-1 as a project, and nothing else.
+    let lane = lane("wrong-type");
+    let mut entry = sent(1, "task-9", "x", LONG_AGO);
+    entry["command"]["createTask"]["_0"]["projectID"] = json!("project-1");
+    entry["command"]["createTask"]["_0"]["tagIDs"] = json!(["tag-1"]);
+    let mut store = lane.imported(&document(vec![entry], vec![]));
+    let alias = |entity_type, old: &str| LegacyAnswer::Accepted {
+        aliases: vec![ProvenAlias {
+            entity_type,
+            old_local_id: old.to_owned(),
+            server_id: "server_id_0001".to_owned(),
+        }],
+    };
+
+    for (entity_type, old) in [
+        (EntityType::Project, "task-9"),
+        (EntityType::Task, "project-1"),
+        (EntityType::Tag, "project-1"),
+        (EntityType::Comment, "task-9"),
+    ] {
+        let status = resolve(&mut store, NOW, |_| alias(entity_type, old));
+        assert_eq!(
+            (status.accepted, status.aliases),
+            (0, 0),
+            "{old} as {entity_type:?}"
+        );
+    }
+    assert!(aliases(&mut store).is_empty());
+
+    // The same IDs as the right types are proof.
+    let status = resolve(&mut store, NOW, |_| LegacyAnswer::Accepted {
+        aliases: vec![
+            ProvenAlias {
+                entity_type: EntityType::Task,
+                old_local_id: "task-9".into(),
+                server_id: "task_0123456789ab".into(),
+            },
+            ProvenAlias {
+                entity_type: EntityType::Project,
+                old_local_id: "project-1".into(),
+                server_id: "project_0123456789ab".into(),
+            },
+            ProvenAlias {
+                entity_type: EntityType::Tag,
+                old_local_id: "tag-1".into(),
+                server_id: "tag_0123456789ab".into(),
+            },
+        ],
+    });
+    assert_eq!((status.accepted, status.aliases), (1, 3));
+}
+
+#[test]
 fn legacy_outbox_026_fr_005_an_alias_that_contradicts_a_proven_one_is_not_proof() {
     let lane = lane("contradiction");
     let mut store = lane.imported(&document(
