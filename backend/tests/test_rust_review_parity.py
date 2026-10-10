@@ -29,7 +29,7 @@ from collections import Counter
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import available_timezones
@@ -1700,3 +1700,51 @@ def test_026_FR_016_a_due_date_moved_in_next_logs_the_same_line_with_the_flag_on
     with allure.step("three changes in Next are logged identically"):
         check_equal("ON lines", lines["ON"], lines["OFF"])
         assert len(lines["ON"]) == 3
+
+
+def test_026_FR_016_a_settings_write_between_two_reads_cannot_split_the_state_response(
+    apps: Apps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The state answer is derived from one settings snapshot, and says so."""
+
+    s, ok = apps.on, apps.on.ok
+    api = s.api
+    api.activate_at(s.clock() - 30 * DAY)
+    repo = api.container.task_repo
+    original = repo.get_review_settings
+    reads: list[int] = []
+
+    def read_then_change(owner_id: str) -> Any:
+        stored = original(owner_id)
+        reads.append(1)
+        if len(reads) == 1:
+            # A PUT /review/settings commits right after the first read.
+            assert stored is not None
+            repo.save_review_settings(
+                stored.model_copy(
+                    update={
+                        "review_weekday": 2,
+                        "review_time": "09:30",
+                        "revision": stored.revision + 1,
+                    }
+                )
+            )
+        return stored
+
+    monkeypatch.setattr(repo, "get_review_settings", read_then_change)
+    with allure.step("a write lands after the first settings read of a state read"):
+        body = ok(s.get("/review/state"))
+        monkeypatch.undo()
+        _evidence("settings", body["settings"])
+        _evidence("next_review_at", body["next_review_at"])
+        _evidence("settings reads", len(reads))
+    with allure.step("the settings and what was derived from them agree"):
+        due = datetime.fromisoformat(body["next_review_at"].replace("Z", "+00:00"))
+        slot = (due.isoweekday(), f"{due:%H:%M}")
+        shown = (body["settings"]["review_weekday"], body["settings"]["review_time"])
+        check_equal("next review slot", slot, shown)
+        assert len(reads) == 1
+    with allure.step("the next read sees the committed change"):
+        later = ok(s.get("/review/state"))
+        check_equal("settings revision", later["settings"]["revision"], 2)
+        assert later["settings"]["review_weekday"] == 2

@@ -36,6 +36,15 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   its `RustBridgeRuntime` takes and returns owned values, throws `RustBridgeError`
   (`code`, `retryable`, `field`, never payload text), runs off the caller's actor and
   honours task cancellation. Change the Rust interface and the facade together.
+- `RustDomainFacade` (Core) is the bounded mapping of `GTDCommand`, `GTDState` and the
+  catalog queries onto the core's `decide` / `query` (the Python counterpart is
+  `rust_task_facade.py`). `RuleEpoch` selects the rules for a workspace: `.legacy` is the
+  Swift reducer and read model for a file written before the cutover, `.rust(facade)` is the
+  shared core and never reaches the Swift handlers. `GTDReducer.apply(…rules:)`,
+  `GTDQueries.list/counts/projects/tags/projectDisplay(…rules:)` and `CapturePlanner.preview/capture(…rules:)`
+  dispatch on it; no mutation runs both. Comparing the two images belongs in tests
+  (`RustDomainParityTests`). Change the Rust payloads and `RustDomain{Commands,Changes,Wire}.swift`
+  together; `rust/bindings/swift/tests/apple_wire.rs` runs the same wire shapes from the Rust side.
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.

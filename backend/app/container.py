@@ -764,7 +764,9 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
         job_execution=JobExecutionGate(
             job_repository,
             # Identity is the scope authority: an owner that no longer resolves
-            # (purged, removed) can no longer be written for by any job.
-            owner_current=lambda owner_id: user_repo.get_by_id(owner_id) is not None,
+            # (purged, removed) or whose deletion has begun can no longer be
+            # written for by any job, so a job cannot recreate data a purge
+            # has already wiped before the user row itself is deleted.
+            owner_current=_owner_is_live,
         ),
     )
