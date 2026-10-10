@@ -219,6 +219,29 @@ extension MacLocalState {
         Self.hex(HMAC<SHA256>.authenticationCode(for: Data(RecordContentForm.bytes(ofTasksIn: id, in: state)), using: key))
     }
 
+    package func waitingReviewDue(_ task: TaskRecord, stamp: String, now: Date) -> Bool {
+        guard task.state == .waiting else { return false }
+        guard let mark = waitingMark(for: task) else { return true }
+        return mark.stamp != stamp || mark.reviewedAt.addingTimeInterval(Self.reviewValidity) <= now
+    }
+
+    package func somedayReviewDue(_ task: TaskRecord, stamp: String, now: Date) -> Bool {
+        guard task.state == .someday else { return false }
+        guard let mark = somedayMark(for: task) else { return true }
+        return mark.stamp != stamp || mark.reviewedAt.addingTimeInterval(Self.reviewValidity) <= now
+    }
+
+    package func validProjectMark(for project: ProjectRecord, signature: String, now: Date) -> ProjectReviewMark? {
+        guard let mark = projectMark(for: project), mark.taskSignature == signature,
+              mark.reviewedAt.addingTimeInterval(Self.reviewValidity) > now else { return nil }
+        return mark
+    }
+
+    package func projectChangedSinceReview(_ project: ProjectRecord, signature: String) -> Bool {
+        guard let mark = projectMark(for: project) else { return false }
+        return mark.taskSignature != signature
+    }
+
     /// A keyed digest of arbitrary bytes, for the legacy file (never a fingerprint usable off this Mac).
     package func digest(of data: Data) -> String {
         Self.hex(HMAC<SHA256>.authenticationCode(for: data, using: key))
@@ -292,6 +315,14 @@ extension MacLocalState {
     package mutating func markSomedayReviewed(_ task: TaskRecord, in state: GTDState, at now: Date) {
         let mark = TaskReviewMark(reviewedAt: now, stamp: stamp(of: task, in: state))
         Self.set(&somedayReviews, mark, task: task)
+    }
+
+    package mutating func markWaitingReviewed(_ task: TaskRecord, stamp: String, at now: Date) {
+        Self.set(&waitingReviews, TaskReviewMark(reviewedAt: now, stamp: stamp), task: task)
+    }
+
+    package mutating func markSomedayReviewed(_ task: TaskRecord, stamp: String, at now: Date) {
+        Self.set(&somedayReviews, TaskReviewMark(reviewedAt: now, stamp: stamp), task: task)
     }
 
     package mutating func markProjectReviewed(

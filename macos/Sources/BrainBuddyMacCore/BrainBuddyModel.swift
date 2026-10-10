@@ -112,6 +112,7 @@ package final class BrainBuddyModel {
     package private(set) var projectStateChanges = 0
     /// Invalidates SwiftUI after a prepared Workspace answer publishes.
     package private(set) var queryRevision = 0
+    package private(set) var isPreparingVisibleQueries = false
     /// The search and priority the list shows: applied on submit, as before 021.
     package private(set) var appliedSearch: String?
     package private(set) var appliedPriority: TaskPriority?
@@ -145,6 +146,9 @@ package final class BrainBuddyModel {
         return workspace.listPageState(destination.query, options: currentListOptions)
     }
     package var visibleListOptions: ListOptions { currentListOptions }
+    package var queryReadinessSnapshot: [WorkspaceQueryReadiness] {
+        [countsReadiness, projectsReadiness, archivedProjectsReadiness, tagsReadiness, visibleReadiness]
+    }
     package var countsReadiness: WorkspaceQueryReadiness {
         _ = queryRevision
         return workspace.countsReadiness()
@@ -203,6 +207,9 @@ package final class BrainBuddyModel {
     /// synchronous accessors as their source of truth; Rust workspaces publish a revision only
     /// after each bounded answer has settled.
     package func prepareVisibleQueries() async {
+        guard !isPreparingVisibleQueries else { return }
+        isPreparingVisibleQueries = true
+        defer { isPreparingVisibleQueries = false }
         await workspace.prepareCounts()
         await workspace.prepareList(destination.query, options: currentListOptions)
         if workspace.listReadiness(destination.query, options: currentListOptions) == .ready {
@@ -218,6 +225,12 @@ package final class BrainBuddyModel {
         await workspace.prepareTags()
         await workspace.prepareCapturePreview(captureDraft)
         queryRevision &+= 1
+    }
+
+    package func refreshVisibleQueriesIfNeeded() async {
+        guard !isPreparingVisibleQueries else { return }
+        guard queryReadinessSnapshot.contains(where: { $0 == .loading || $0 == .notRequested }) else { return }
+        await prepareVisibleQueries()
     }
 
     private func prepareProjectDisplays(for result: TaskListResult) async {
