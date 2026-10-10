@@ -528,7 +528,7 @@ public final class RustBridgeRuntime: Sendable {
 
 /// One immutable catalog intent. Keep commandID with the draft until completion
 /// is known; retrying with a fresh ID could save the same intent twice.
-public struct RustWorkspaceCommand: Equatable, Sendable {
+public struct RustWorkspaceCommand: Equatable, Sendable, Codable {
     public let commandID: String
     public let commandType: String
     public let entityID: String?
@@ -552,7 +552,7 @@ public struct RustWorkspaceCommand: Equatable, Sendable {
     }
 }
 
-public struct RustWorkspaceContext: Sendable {
+public struct RustWorkspaceContext: Sendable, Codable {
     public let now: Date
     public let timeZone: String
     public let actorID: String
@@ -595,11 +595,17 @@ public struct RustWorkspacePage: Equatable, Sendable {
     public let projectionGeneration: String
     public let result: Data
     public let collectionNextCursor: String?
+
+    public init(projectionGeneration: String, result: Data, collectionNextCursor: String? = nil) {
+        self.projectionGeneration = projectionGeneration
+        self.result = result
+        self.collectionNextCursor = collectionNextCursor
+    }
 }
 
 public enum RustWorkspaceAnswer: Equatable, Sendable {
     case answered(RustWorkspacePage)
-    case refused(RustRefusal)
+    case refused(RustRefusal, projectionGeneration: String? = nil)
 }
 
 public struct RustWorkspaceSnapshot: Equatable, Sendable {
@@ -609,9 +615,108 @@ public struct RustWorkspaceSnapshot: Equatable, Sendable {
     public let openIssues: String
 }
 
+public struct RustWorkspaceLegacyUnsent: Equatable, Sendable {
+    public let entryID: String
+    public let idempotencyKey: String
+    public let issuedAt: String
+    public let command: Data
+}
+
+public struct RustWorkspaceLegacyConversion: Equatable, Sendable {
+    public let entryID: String
+    public let issuedAt: String
+    public let command: RustWorkspaceCommand
+
+    public init(entryID: String, issuedAt: String, command: RustWorkspaceCommand) {
+        self.entryID = entryID
+        self.issuedAt = issuedAt
+        self.command = command
+    }
+}
+
+public struct RustWorkspaceIdentityRequest: Hashable, Sendable {
+    public let entityType: String
+    public let localID: String
+
+    public init(entityType: String, localID: String) {
+        self.entityType = entityType
+        self.localID = localID
+    }
+}
+
+public struct RustWorkspaceRecordRequest: Equatable, Sendable {
+    public let entityType: String
+    public let recordKey: [String]
+
+    public init(entityType: String, recordKey: [String]) {
+        self.entityType = entityType
+        self.recordKey = recordKey
+    }
+}
+
+public struct RustWorkspaceIdentityBinding: Equatable, Sendable {
+    public let entityType: String
+    public let localID: String
+    public let canonicalID: String?
+
+    public init(entityType: String, localID: String, canonicalID: String?) {
+        self.entityType = entityType
+        self.localID = localID
+        self.canonicalID = canonicalID
+    }
+}
+
+/// Device-local editor metadata in the runtime's existing drafts table.
+/// A prepared gesture keeps its exact command IDs, payload and trusted context
+/// here before execution, so reopening can reconcile the original receipt.
+public struct RustWorkspaceDraft: Equatable, Sendable {
+    public let draftID: String
+    public let editorKind: String
+    public let recordType: String?
+    public let recordKey: String?
+    public let baseRevision: String?
+    public let fields: Data
+    public let updatedAt: String
+
+    public init(draftID: String, editorKind: String, recordType: String? = nil, recordKey: String? = nil,
+                baseRevision: String? = nil, fields: Data, updatedAt: String) {
+        self.draftID = draftID
+        self.editorKind = editorKind
+        self.recordType = recordType
+        self.recordKey = recordKey
+        self.baseRevision = baseRevision
+        self.fields = fields
+        self.updatedAt = updatedAt
+    }
+
+    fileprivate var bridged: BridgeWorkspaceDraft {
+        BridgeWorkspaceDraft(draftId: draftID, editorKind: editorKind, recordType: recordType,
+            recordKey: recordKey, baseRevision: baseRevision, fields: fields, updatedAt: updatedAt)
+    }
+
+    fileprivate init(_ draft: BridgeWorkspaceDraft) {
+        self.init(draftID: draft.draftId, editorKind: draft.editorKind, recordType: draft.recordType,
+            recordKey: draft.recordKey, baseRevision: draft.baseRevision, fields: draft.fields, updatedAt: draft.updatedAt)
+    }
+}
+
 public enum RustWorkspaceStoreStatus: Equatable, Sendable {
     case ready
     case readOnlyRecovery(found: Int64)
+}
+
+public struct RustWorkspaceLegacyReview: Sendable {
+    public let token: Data
+    public let review: Data
+    public let aliases: Data
+    public let sourceCounts: Data
+    public let alreadyActive: Bool
+}
+
+public struct RustWorkspaceReviewActivated: Sendable {
+    public let projectionGeneration: String
+    public let alreadyActive: Bool
+    public let aliases: Data
 }
 
 public struct RustWorkspaceInvalidation: Equatable, Sendable {
@@ -662,24 +767,142 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
+    public func captureLegacyReview() async throws -> RustWorkspaceLegacyReview {
+        try await offActor { workspace in
+            let source = try workspace.captureLegacyReview()
+            return RustWorkspaceLegacyReview(token: source.token, review: source.review, aliases: source.aliases,
+                sourceCounts: source.sourceCounts, alreadyActive: source.alreadyActive)
+        }
+    }
+
+    public func activateLegacyReview(_ source: RustWorkspaceLegacyReview,
+                                    prepared: RustWorkspaceReviewPreparation,
+                                    context: RustWorkspaceContext) async throws -> RustWorkspaceReviewActivated {
+        let counts = try JSONSerialization.data(withJSONObject: ["decision_queues": prepared.decisionQueues,
+            "unseen_park_acks": prepared.unseenParkAcknowledgements], options: [.sortedKeys])
+        let request = BridgeLegacyReviewPrepared(token: source.token, readSet: prepared.readSet,
+            aliases: prepared.aliases, derivedCounts: counts)
+        let context = context.bridged
+        return try await committing { workspace, operation in
+            let result = try workspace.activateLegacyReview(prepared: request, context: context, operation: operation)
+            return RustWorkspaceReviewActivated(projectionGeneration: result.projectionGeneration,
+                alreadyActive: result.alreadyActive, aliases: result.aliases)
+        }
+    }
+
     /// The committed receipt is delivered even if Task cancellation arrived
     /// after commit. Cancellation that wins before commit returns CANCELLED.
     /// A storage/bridge error leaves caller-owned command IDs available for retry.
     public func execute(_ commands: [RustWorkspaceCommand], context: RustWorkspaceContext)
         async throws -> RustWorkspaceExecution {
-        let operation = BridgeOperation()
-        let workspace = workspace
         let commands = commands.map(\.bridged)
         let context = context.bridged
+        return try await durable { workspace, operation in
+            try workspace.execute(commands: commands, context: context, operation: operation)
+        }
+    }
+
+    /// Source bodies are immutable and read from the imported Rust store.
+    /// Only entries proven never sent are eligible for this conversion.
+    public func legacyUnsent() async throws -> [RustWorkspaceLegacyUnsent] {
+        try await offActor { workspace in
+            try workspace.legacyUnsent().map {
+                RustWorkspaceLegacyUnsent(entryID: $0.entryId, idempotencyKey: $0.idempotencyKey,
+                                          issuedAt: $0.issuedAt, command: $0.command)
+            }
+        }
+    }
+
+    public func resolveIdentities(_ identities: [RustWorkspaceIdentityRequest]) async throws -> [RustWorkspaceIdentityBinding] {
+        let items = identities.map { BridgeIdentityRequest(entityType: $0.entityType, localId: $0.localID) }
+        return try await offActor { workspace in
+            try workspace.resolveIdentities(items: items).map {
+                RustWorkspaceIdentityBinding(entityType: $0.entityType, localID: $0.localId, canonicalID: $0.canonicalId)
+            }
+        }
+    }
+
+    public func issues(limit: UInt32 = 200, after: String? = nil) async throws -> RustWorkspaceAnswer {
+        try await offActor { workspace in Self.answer(try workspace.workspaceIssues(limit: limit, after: after)) }
+    }
+
+    public func records(_ requests: [RustWorkspaceRecordRequest]) async throws -> RustWorkspaceAnswer {
+        let items = try requests.map {
+            BridgeRecordRequest(entityType: $0.entityType,
+                recordKey: try JSONSerialization.data(withJSONObject: $0.recordKey))
+        }
+        return try await offActor { workspace in Self.answer(try workspace.records(items: items)) }
+    }
+
+    public func syncStatus() async throws -> Data {
+        try await offActor { workspace in try workspace.syncStatus() }
+    }
+
+    public func loadDraft(_ draftID: String) async throws -> RustWorkspaceDraft? {
+        try await offActor { workspace in try workspace.loadDraft(draftId: draftID).map(RustWorkspaceDraft.init) }
+    }
+
+    public func saveDraft(_ draft: RustWorkspaceDraft) async throws {
+        let draft = draft.bridged
+        try await committing { workspace, operation in try workspace.saveDraft(draft: draft, operation: operation) }
+    }
+
+    public func deleteDraft(_ draftID: String) async throws {
+        try await committing { workspace, operation in try workspace.deleteDraft(draftId: draftID, operation: operation) }
+    }
+
+    public func convertLegacyUnsent(_ entries: [RustWorkspaceLegacyConversion], context: RustWorkspaceContext)
+        async throws -> RustWorkspaceExecution {
+        let items = entries.map {
+            BridgeLegacyConversion(entryId: $0.entryID, issuedAt: $0.issuedAt, command: $0.command.bridged)
+        }
+        let context = context.bridged
+        return try await durable { workspace, operation in
+            try workspace.convertLegacyUnsent(items: items, context: context, operation: operation)
+        }
+    }
+
+    public func smartAddResolve(draft: Data) async throws -> RustWorkspaceAnswer {
+        try await offActor { workspace in
+            Self.answer(try workspace.smartAddResolve(draft: draft))
+        }
+    }
+
+    public func smartAddPropose(draft: Data, minted: Data, expectedGeneration: String)
+        async throws -> RustWorkspaceAnswer {
+        try await offActor { workspace in
+            Self.answer(try workspace.smartAddPropose(draft: draft, minted: minted, expectedGeneration: expectedGeneration))
+        }
+    }
+
+    private static func answer(_ answer: BridgeWorkspaceAnswer) -> RustWorkspaceAnswer {
+        switch answer {
+        case .answered(let page):
+            return .answered(RustWorkspacePage(projectionGeneration: page.projectionGeneration, result: page.result,
+                                              collectionNextCursor: page.collectionNextCursor))
+        case .refused(let refusal, let generation): return .refused(RustRefusal(refusal), projectionGeneration: generation)
+        }
+    }
+
+    private func durable(_ work: @escaping @Sendable (BridgeWorkspace, BridgeOperation) throws -> BridgeExecution)
+        async throws -> RustWorkspaceExecution {
+        try await committing { workspace, operation in
+            switch try work(workspace, operation) {
+            case .saved(let results): return .saved(results.map(RustWorkspaceSaved.init))
+            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            }
+        }
+    }
+
+    private func committing<T: Sendable>(_ work: @escaping @Sendable (BridgeWorkspace, BridgeOperation) throws -> T)
+        async throws -> T {
+        let operation = BridgeOperation()
+        let workspace = workspace
         return try await withTaskCancellationHandler {
             let outcome = await Task.detached(priority: .userInitiated) {
-                () -> Result<RustWorkspaceExecution, RustBridgeError> in
-                do {
-                    switch try workspace.execute(commands: commands, context: context, operation: operation) {
-                    case .saved(let results): return .success(.saved(results.map(RustWorkspaceSaved.init)))
-                    case .refused(let refusal): return .success(.refused(RustRefusal(refusal)))
-                    }
-                } catch { return .failure(RustBridgeError(thrown: error)) }
+                () -> Result<T, RustBridgeError> in
+                do { return .success(try work(workspace, operation)) }
+                catch { return .failure(RustBridgeError(thrown: error)) }
             }.value
             return try outcome.get()
         } onCancel: { _ = operation.cancel() }
@@ -693,7 +916,7 @@ public final class RustWorkspaceRuntime: Sendable {
             case .answered(let page):
                 return .answered(RustWorkspacePage(projectionGeneration: page.projectionGeneration, result: page.result,
                                                   collectionNextCursor: page.collectionNextCursor))
-            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            case .refused(let refusal, let generation): return .refused(RustRefusal(refusal), projectionGeneration: generation)
             }
         }
     }

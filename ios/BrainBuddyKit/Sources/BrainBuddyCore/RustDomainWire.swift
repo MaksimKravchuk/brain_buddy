@@ -217,12 +217,32 @@ enum RustInstant {
 /// or of no shape the core could accept, crosses unchanged.
 struct RustIDTable {
     private let stripsUUIDPrefixes: Bool
+    private let collectsRequests: Bool
     /// Prefixed wire ID to the Swift ID it stands for.
     private(set) var known: [String: String] = [:]
+    private(set) var requested: Set<RustWorkspaceIdentityRequest> = []
+    private var canonical: [String: String] = [:]
 
-    init(stripsUUIDPrefixes: Bool = false) { self.stripsUUIDPrefixes = stripsUUIDPrefixes }
+    init(stripsUUIDPrefixes: Bool = false, bindings: [RustWorkspaceIdentityBinding] = [], collectsRequests: Bool = false) {
+        self.stripsUUIDPrefixes = stripsUUIDPrefixes
+        self.collectsRequests = collectsRequests
+        for binding in bindings {
+            guard let id = binding.canonicalID else { continue }
+            let prefix = ["review_session": "review", "review_decision": "decision",
+                          "review_bulk_release": "bulk", "review_decision_queue": "review"][binding.entityType]
+                ?? binding.entityType
+            canonical[prefix + ":" + binding.localID] = id
+        }
+    }
 
     mutating func wire(_ raw: String, prefix: String) -> String {
+        let entityTypes = ["review": "review_session", "decision": "review_decision", "bulk": "review_bulk_release"]
+        let entityType = entityTypes[prefix] ?? prefix
+        if collectsRequests, ["task", "project", "tag", "subtask", "comment", "review_session", "review_decision", "review_bulk_release"]
+            .contains(entityType) {
+            requested.insert(RustWorkspaceIdentityRequest(entityType: entityType, localID: raw))
+        }
+        if let id = canonical[prefix + ":" + raw] { return id }
         if ClientID.isValid(raw, prefix: prefix) { return raw }
         let wire = "\(prefix)_\(raw)"
         guard ClientID.isValid(wire, prefix: prefix) else { return raw }

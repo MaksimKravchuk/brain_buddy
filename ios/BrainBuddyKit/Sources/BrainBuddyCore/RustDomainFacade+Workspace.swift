@@ -1,34 +1,205 @@
 import Foundation
 
+public struct RustWorkspaceReviewPreparation: Sendable {
+    public let readSet: Data
+    public let aliases: Data
+    public let decisionQueues: UInt64
+    public let unseenParkAcknowledgements: UInt64
+}
+
 extension RustDomainFacade {
+    /// Only the established validated UUID prefix is removed. Opaque server
+    /// identifiers remain intact, including prepared gesture result IDs.
+    public func workspaceLocalID(_ canonical: String) -> String {
+        RustIDTable(stripsUUIDPrefixes: true).swift(canonical)
+    }
+
+    public func workspaceIdentityBindings(from data: Data) throws -> [RustWorkspaceIdentityBinding] {
+        try RustJSON.array(data).map { value in
+            guard let row = value as? WireObject else { throw RustDomainError.malformedResult }
+            return RustWorkspaceIdentityBinding(entityType: try row.string("entity_type"),
+                localID: try row.string("local_id"), canonicalID: try row.string("server_id"))
+        }
+    }
+
+    /// Only identifiers explicitly touched by this gesture; no database-wide
+    /// native read set is sent back to the runtime.
+    public func workspaceIdentityRequests(for commands: [GTDCommand], in shown: GTDState,
+                                         at date: Date) throws -> [RustWorkspaceIdentityRequest] {
+        var ids = RustIDTable(collectsRequests: true)
+        for command in commands {
+            _ = try RustCommandEncoder.encode(command, at: date, in: shown, scopeID: context.scopeID, ids: &ids)
+        }
+        return ids.requested.sorted {
+            ($0.entityType, $0.localID) < ($1.entityType, $1.localID)
+        }
+    }
+
+    /// One migration-only use of the established native Review codec. This
+    /// result is admitted atomically by the runtime, never used as a query.
+    public func workspacePrepareLegacyReview(_ source: GTDState,
+        bindings: [RustWorkspaceIdentityBinding]) throws -> RustWorkspaceReviewPreparation {
+        var admitted = bindings
+        var additions: [WireObject] = []
+        for decision in source.review.decisions.values.sorted(by: { $0.id < $1.id }) {
+            guard let before = decision.undo?.taskBefore, let server = before.serverID,
+                  !admitted.contains(where: { $0.entityType == "task" && $0.localID == before.id.rawValue }) else { continue }
+            // Exact source metadata only. The runtime rereads the immutable
+            // carrier and validates this proof before admitting the alias.
+            admitted.append(RustWorkspaceIdentityBinding(entityType: "task", localID: before.id.rawValue, canonicalID: server))
+            additions.append(["entity_type": "task", "local_id": before.id.rawValue, "server_id": server])
+        }
+        var ids = RustIDTable(bindings: admitted)
+        var records = RustReadSet.make(source, actorID: context.actorID, ids: &ids)
+        for key in ["tasks", "projects", "tags", "subtasks", "comments"] { records.removeValue(forKey: key) }
+        let queues = records["decision_queues"] as? WireObject ?? [:]
+        let unseen = (records["park_acks"] as? [WireObject] ?? []).filter { $0["seen_at"] is NSNull }.count
+        return RustWorkspaceReviewPreparation(readSet: try RustJSON.data(records), aliases: try RustJSON.data(additions),
+            decisionQueues: UInt64(queues.count), unseenParkAcknowledgements: UInt64(unseen))
+    }
+
     /// Encodes an intent only; the runtime decides under its DB write lock.
     /// afterCommand names an earlier command in the same all-or-nothing gesture
     /// that writes this target, so no guessed revision replaces its result.
     public func workspaceCommand(_ command: GTDCommand, commandID: UUID, at date: Date,
-                                 in state: GTDState, afterCommand: UUID? = nil) throws -> RustWorkspaceCommand {
-        var ids = RustIDTable()
-        _ = RustReadSet.make(state, actorID: context.actorID, ids: &ids)
-        let encoded = try RustCommandEncoder.encode(command, at: date, in: state, scopeID: context.scopeID, ids: &ids)
+                                 in state: GTDState, afterCommand: UUID? = nil,
+                                 bindings: [RustWorkspaceIdentityBinding] = [],
+                                 intendedTagMembership: [String: [TagID]] = [:],
+                                 intendedDeletedTags: Set<String> = []) throws -> RustWorkspaceCommand {
+        var ids = RustIDTable(bindings: bindings)
+        let shown = Self.workspaceAliasView(state, bindings: bindings)
+        let encoded = try RustCommandEncoder.encode(command, at: date, in: shown, scopeID: context.scopeID, ids: &ids,
+            intendedTagMembership: intendedTagMembership, intendedDeletedTags: intendedDeletedTags)
         var preconditions: [WireObject] = []
-        if let target = encoded.target {
-            if let afterCommand {
-                preconditions = [["after_command": ["command_id": afterCommand.uuidString.lowercased(),
-                    "entity_type": target.entityType, "entity_id": target.id]]]
-            } else {
-                preconditions = [["entity_type": target.entityType, "entity_id": target.id,
-                                  "edit_revision": String(target.revision)]]
-            }
+        if let afterCommand, let type = encoded.target?.entityType ?? Self.workspaceTargetType(encoded.type) {
+            preconditions = [["after_command": ["command_id": afterCommand.uuidString.lowercased(),
+                "entity_type": type, "entity_id": encoded.target?.id ?? encoded.entityID]]]
+        } else if let target = encoded.target {
+            preconditions = [["entity_type": target.entityType, "entity_id": target.id,
+                              "edit_revision": String(target.revision)]]
         }
         return RustWorkspaceCommand(commandID: commandID.uuidString.lowercased(), commandType: encoded.type,
             entityID: encoded.entityID, payload: try RustJSON.data(encoded.payload),
             preconditions: try RustJSON.data(preconditions))
     }
 
+    /// Sequential intent encoding advances only explicit desired memberships.
+    /// It never decides a command or publishes a scratch projection/revision.
+    public func workspaceCommands(_ commands: [GTDCommand], commandIDs: [UUID], at dates: [Date],
+                                  in shown: GTDState, bindings: [RustWorkspaceIdentityBinding] = []) throws
+        -> [RustWorkspaceCommand] {
+        guard commands.count == commandIDs.count, commands.count == dates.count else {
+            throw RustDomainError.malformedResult
+        }
+        var membership: [String: [TagID]] = [:]
+        var deletedTags: Set<String> = []
+        var earlier: [String: UUID] = [:]
+        var result: [RustWorkspaceCommand] = []
+        var ids = RustIDTable(bindings: bindings)
+        for index in commands.indices {
+            var encoded = try workspaceCommand(commands[index], commandID: commandIDs[index], at: dates[index],
+                in: shown, bindings: bindings, intendedTagMembership: membership, intendedDeletedTags: deletedTags)
+            let primary = try Self.workspacePrimaryTarget(encoded)
+            if let primary, let previous = earlier[primary], !encoded.commandType.hasSuffix(".create") {
+                encoded = try workspaceCommand(commands[index], commandID: commandIDs[index], at: dates[index],
+                    in: shown, afterCommand: previous, bindings: bindings, intendedTagMembership: membership,
+                    intendedDeletedTags: deletedTags)
+            }
+            if case .bulkRelease(let release) = commands[index] {
+                var refs = try RustJSON.array(encoded.preconditions)
+                for task in release.taskIDs {
+                    let target = ids.task(task)
+                    if let previous = earlier["task:" + target] {
+                        refs.append(["after_command": ["command_id": previous.uuidString.lowercased(),
+                            "entity_type": "task", "entity_id": target]])
+                    }
+                }
+                encoded = RustWorkspaceCommand(commandID: encoded.commandID, commandType: encoded.commandType,
+                    entityID: encoded.entityID, payload: encoded.payload, preconditions: try RustJSON.data(refs))
+            }
+            result.append(encoded)
+            if let primary { earlier[primary] = commandIDs[index] }
+            switch commands[index] {
+            case .createTask(let create): membership[ids.task(create.taskID)] = create.tagIDs
+            case .updateTask(let update):
+                switch update.changes.tagIDs {
+                case .set(let tags): membership[ids.task(update.taskID)] = tags
+                case .clear: membership[ids.task(update.taskID)] = []
+                case .unchanged: break
+                }
+            case .deleteTag(let tag):
+                let removed = ids.tag(tag)
+                deletedTags.insert(removed)
+                for key in Array(membership.keys) {
+                    membership[key] = membership[key]?.filter { ids.tag($0) != removed }
+                }
+            case .bulkRelease(let release):
+                // Requested identities only: the runtime resolves the actual
+                // produced version, or the frozen guard for a proven skipped
+                // item. The mapper never predicts eligibility or revisions.
+                for task in release.taskIDs { earlier["task:" + ids.task(task)] = commandIDs[index] }
+            default: break
+            }
+        }
+        return result
+    }
+
+    private static func workspacePrimaryTarget(_ command: RustWorkspaceCommand) throws -> String? {
+        if let first = try RustJSON.array(command.preconditions).first as? WireObject {
+            let target = first.optionalObject("after_command") ?? first
+            if let type = target.optionalString("entity_type"), let id = target.optionalString("entity_id") {
+                return type + ":" + id
+            }
+        }
+        guard let type = workspaceTargetType(command.commandType), let id = command.entityID else { return nil }
+        return type + ":" + id
+    }
+
+    private static func workspaceTargetType(_ type: String) -> String? {
+        let prefix = type.split(separator: ".").first.map(String.init)
+        if let prefix, ["task", "project", "tag", "subtask", "comment"].contains(prefix) { return prefix }
+        switch type {
+        case "review.decide", "review.auto_park": return "task"
+        case "review.undo_decision": return "review_decision"
+        case "review.bulk_release", "review.bulk_undo": return "review_bulk_release"
+        default: return nil
+        }
+    }
+
     public func workspaceValidationError(_ refusal: RustRefusal, command: RustWorkspaceCommand,
                                          in state: GTDState) throws -> GTDValidationError? {
-        var ids = RustIDTable(stripsUUIDPrefixes: true)
-        _ = RustReadSet.make(state, actorID: context.actorID, ids: &ids)
+        let ids = RustIDTable(stripsUUIDPrefixes: true)
         return Self.validationError(refusal, payload: try RustJSON.object(command.payload), in: state, ids: ids)
+    }
+
+    /// An encoding lookup view of the shown records, not a projected state.
+    /// An imported command can still name the local ID whose alias the store
+    /// proved. Its revision comes from that same shown canonical record.
+    private static func workspaceAliasView(_ state: GTDState, bindings: [RustWorkspaceIdentityBinding]) -> GTDState {
+        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        var shown = state
+        for binding in bindings {
+            guard let canonical = binding.canonicalID else { continue }
+            let key = ids.swift(canonical)
+            switch binding.entityType {
+            case "task":
+                if let task = state.tasks[TaskID(key)] { shown.tasks[TaskID(binding.localID)] = task }
+            case "project":
+                if let project = state.projects[ProjectID(key)] { shown.projects[ProjectID(binding.localID)] = project }
+            case "tag":
+                if let tag = state.tags[TagID(key)] { shown.tags[TagID(binding.localID)] = tag }
+            case "review_session":
+                if let session = state.review.sessions[ReviewSessionID(key)] {
+                    shown.review.sessions[ReviewSessionID(binding.localID)] = session
+                }
+            case "review_decision":
+                if let decision = state.review.decisions[DecisionID(key)] {
+                    shown.review.decisions[DecisionID(binding.localID)] = decision
+                }
+            default: break
+            }
+        }
+        return shown
     }
 
     /// Adopts an authoritative bootstrap image, retaining device-local facts on

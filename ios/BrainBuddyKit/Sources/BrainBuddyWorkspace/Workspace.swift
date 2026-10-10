@@ -873,6 +873,23 @@ extension Workspace {
         if let error = error as? DocumentStoreError { return error.message }
         return "Your latest changes couldn't be saved on this device yet. They're kept and saved with your next change."
     }
+
+    /// Async save callers keep their draft and use the same validation copy.
+    /// Bridge failures expose only safe, stable codes at this boundary.
+    public nonisolated static func saveMessage(for error: any Error) -> String {
+        if let validation = error as? GTDValidationError { return validation.message }
+        if let workspace = error as? WorkspaceError { return workspace.message }
+        if let bridge = error as? RustBridgeError {
+            switch bridge.code {
+            case "CANCELLED": return "This save was cancelled. Your text is still here."
+            case "STORE_BUSY": return "Another window is saving. Try again."
+            case "STORE_UPGRADE_REQUIRED": return "Update Brain Buddy before saving on this device."
+            case "WORKSPACE_CLOSED": return "This workspace was closed. Open it and try again."
+            default: break
+            }
+        }
+        return "This save couldn't be confirmed on this device. Your text is still here. Try again."
+    }
 }
 
 // MARK: - Adopting documents

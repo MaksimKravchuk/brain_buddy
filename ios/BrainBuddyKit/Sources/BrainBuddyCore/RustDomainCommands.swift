@@ -32,7 +32,8 @@ enum RustCommandEncoder {
     /// - Throws: `GTDValidationError` for a request the shared payloads cannot carry
     ///   (a null title or priority), as the server reports them.
     static func encode(
-        _ command: GTDCommand, at date: Date, in state: GTDState, scopeID: String, ids: inout RustIDTable
+        _ command: GTDCommand, at date: Date, in state: GTDState, scopeID: String, ids: inout RustIDTable,
+        intendedTagMembership: [String: [TagID]] = [:], intendedDeletedTags: Set<String> = []
     ) throws -> RustEncodedCommand {
         var encoded: RustEncodedCommand
         switch command {
@@ -79,7 +80,9 @@ enum RustCommandEncoder {
             encoded.allocatedIDs = [derivedFormulation(create.taskID, date)]
         case .updateTask(let update):
             encoded = make("task.update", ids.task(update.taskID), date)
-            try encodeTaskChanges(update.changes, of: state.tasks[update.taskID], into: &encoded.payload, ids: &ids)
+            try encodeTaskChanges(update.changes, of: state.tasks[update.taskID],
+                intendedTags: intendedTagMembership[encoded.entityID], deletedTags: intendedDeletedTags,
+                into: &encoded.payload, ids: &ids)
             if let id = update.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
             encoded.allocatedIDs = [derivedFormulation(update.taskID, date)]
             encoded.target = target("task", encoded.entityID, revision(state.tasks[update.taskID]))
@@ -183,7 +186,8 @@ enum RustCommandEncoder {
     }
 
     private static func encodeTaskChanges(
-        _ changes: TaskChanges, of task: TaskRecord?, into payload: inout WireObject, ids: inout RustIDTable
+        _ changes: TaskChanges, of task: TaskRecord?, intendedTags: [TagID]?, deletedTags: Set<String>,
+        into payload: inout WireObject, ids: inout RustIDTable
     ) throws {
         // A null title or priority is a request error the shared payloads cannot carry.
         switch changes.title {
@@ -205,16 +209,17 @@ enum RustCommandEncoder {
         if let value = patch(changes.dueDate, { $0.isoString }) { payload["due_date"] = value }
         if let value = patch(changes.waitingFor, { $0 }) { payload["waiting_for"] = value }
         // The shared edit names the difference to the stored membership, not the whole list.
-        let current = task?.tagIDs ?? []
+        let current = (intendedTags ?? task?.tagIDs ?? []).map { ids.tag($0) }.filter { !deletedTags.contains($0) }
         switch changes.tagIDs {
         case .unchanged:
             break
         case .clear:
-            payload["tag_changes"] = ["add_tag_ids": [String](), "remove_tag_ids": current.map { ids.tag($0) }]
+            payload["tag_changes"] = ["add_tag_ids": [String](), "remove_tag_ids": current]
         case .set(let wanted):
+            let wanted = wanted.map { ids.tag($0) }
             payload["tag_changes"] = [
-                "add_tag_ids": wanted.filter { !current.contains($0) }.map { ids.tag($0) },
-                "remove_tag_ids": current.filter { !wanted.contains($0) }.map { ids.tag($0) },
+                "add_tag_ids": wanted.filter { !current.contains($0) },
+                "remove_tag_ids": current.filter { !wanted.contains($0) },
             ]
         }
     }
