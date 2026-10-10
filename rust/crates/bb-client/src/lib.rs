@@ -6,14 +6,25 @@
 //! immutable intent and visible projection in one transaction, and [`replay`]
 //! with the sync issues it keeps: `visible = confirmed + replay(allowed
 //! pending)`, a rejected intent preserved for the user, independent commands
-//! still progressing. Feed application and sync build on these in later slices.
+//! still progressing. [`apply_changes`] and [`receipts`] move the confirmed
+//! base forward: whole feed transactions in commit order (gaps and duplicates
+//! detected, oversized ones staged and verified first), and receipts that
+//! settle a command but never write after-images or move the cursor. Snapshot
+//! activation and the sync session build on these in later slices.
 
+mod apply_changes;
 mod execute;
 mod issues;
 mod locking;
+mod receipts;
 mod replay;
 mod storage;
 
+pub use apply_changes::{
+    Applied, ApplyError, ApplyStage, FeedStep, Fence, Recovery, TransferFault, TransferProgress,
+    abandon_transfer, apply_changes, apply_changes_with, apply_transfer, apply_transfer_with,
+    capture_fence, sha256_hex, stage_transfer_page,
+};
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
     Stage, execute, execute_with,
@@ -25,5 +36,6 @@ pub use issues::{
     save_draft,
 };
 pub use locking::{LockMode, MigrationLock};
+pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
 pub use replay::{ReplayError, Replayed, replay, replay_in};
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};

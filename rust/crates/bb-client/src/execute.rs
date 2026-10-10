@@ -36,6 +36,7 @@ use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{
     AfterCommandPrecondition, CommandRef, Decoded, Precondition, StableEnvelope, decode_command,
 };
+use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CommandId, Counter, Id, Instant, OpenObject, PROTOCOL_VERSION, RecordKey};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -955,6 +956,30 @@ pub(crate) fn local_result(changes: &ChangeSet) -> Vec<u8> {
     json!(result).to_string().into_bytes()
 }
 
+/// The result a terminal receipt makes authoritative: its versions and its
+/// alias bindings replace what the optimistic decision predicted, since the
+/// server alone knows which entity an alias was resolved onto.
+pub(crate) fn receipt_result(receipt: &Receipt) -> Vec<u8> {
+    let result = LocalResult {
+        versions: receipt
+            .result_versions
+            .iter()
+            .map(|version| LocalVersion {
+                entity_type: version.entity_type,
+                record_key: version.record_key.clone(),
+                edit_revision: version.edit_revision.clone(),
+            })
+            .collect(),
+        id_bindings: receipt.id_bindings.clone(),
+    };
+    json!(result).to_string().into_bytes()
+}
+
+/// Whether a stored local result carries alias bindings.
+pub(crate) fn has_bindings(stored: &[u8]) -> bool {
+    serde_json::from_slice::<LocalResult>(stored).is_ok_and(|result| !result.id_bindings.is_empty())
+}
+
 /// The stored local results of the commands a replay decides against.
 pub(crate) struct LocalResults(HashMap<String, LocalResult>);
 
@@ -1066,18 +1091,74 @@ const K: [u32; 64] = [
 
 /// FIPS 180-4 SHA-256. The store compares a retried request with the stored
 /// one by this digest; it is an equality check on local data, not a secret.
-fn sha256(data: &[u8]) -> [u8; 32] {
-    let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-        0x5be0cd19,
-    ];
-    let mut padded = data.to_vec();
-    padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0);
+pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finish()
+}
+
+/// Incremental SHA-256, for streams too large to hold whole.
+pub(crate) struct Sha256 {
+    state: [u32; 8],
+    /// Fewer than 64 bytes between calls.
+    pending: Vec<u8>,
+    length: u64,
+}
+
+impl Sha256 {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
+            ],
+            pending: Vec::new(),
+            length: 0,
+        }
     }
-    padded.extend_from_slice(&(data.len() as u64 * 8).to_be_bytes());
-    for block in padded.as_chunks::<64>().0 {
+
+    pub(crate) fn update(&mut self, data: &[u8]) {
+        self.length = self.length.wrapping_add(data.len() as u64);
+        let mut data = data;
+        if !self.pending.is_empty() {
+            let take = (64 - self.pending.len()).min(data.len());
+            self.pending.extend_from_slice(&data[..take]);
+            data = &data[take..];
+            if self.pending.len() < 64 {
+                return;
+            }
+            for block in self.pending.as_chunks::<64>().0 {
+                compress(&mut self.state, block);
+            }
+            self.pending.clear();
+        }
+        let (blocks, rest) = data.as_chunks::<64>();
+        for block in blocks {
+            compress(&mut self.state, block);
+        }
+        self.pending.extend_from_slice(rest);
+    }
+
+    pub(crate) fn finish(mut self) -> [u8; 32] {
+        let bits = self.length.wrapping_mul(8);
+        self.pending.push(0x80);
+        while self.pending.len() % 64 != 56 {
+            self.pending.push(0);
+        }
+        self.pending.extend_from_slice(&bits.to_be_bytes());
+        for block in self.pending.as_chunks::<64>().0 {
+            compress(&mut self.state, block);
+        }
+        let mut digest = [0u8; 32];
+        for (bytes, word) in digest.as_chunks_mut::<4>().0.iter_mut().zip(self.state) {
+            *bytes = word.to_be_bytes();
+        }
+        digest
+    }
+}
+
+fn compress(state: &mut [u32; 8], block: &[u8; 64]) {
+    {
         let mut w = [0u32; 64];
         for (slot, word) in w.iter_mut().zip(block.as_chunks::<4>().0) {
             *slot = u32::from_be_bytes(*word);
@@ -1090,7 +1171,7 @@ fn sha256(data: &[u8]) -> [u8; 32] {
                 .wrapping_add(w[i - 7])
                 .wrapping_add(s1);
         }
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
         for (k, word) in K.iter().zip(w) {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let choose = (e & f) ^ (!e & g);
@@ -1108,17 +1189,27 @@ fn sha256(data: &[u8]) -> [u8; 32] {
             *slot = slot.wrapping_add(value);
         }
     }
-    let mut digest = [0u8; 32];
-    for (bytes, word) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
-        *bytes = word.to_be_bytes();
-    }
-    digest
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{file, record_from, sha256};
+    use super::{Sha256, file, record_from, sha256};
     use bb_domain::types::ReadSet;
+
+    #[test]
+    fn apply_changes_026_fr_004_incremental_digest_equals_the_one_shot_at_every_split() {
+        let data: Vec<u8> = (0..200_u32).map(|n| (n * 7 % 251) as u8).collect();
+        let expected = sha256(&data);
+        for first in 0..=data.len() {
+            for second in [first, (first + 63).min(data.len()), data.len()] {
+                let mut hasher = Sha256::new();
+                hasher.update(&data[..first]);
+                hasher.update(&data[first..second]);
+                hasher.update(&data[second..]);
+                assert_eq!(hasher.finish(), expected, "{first}/{second}");
+            }
+        }
+    }
 
     #[test]
     fn execute_026_fr_001_filing_a_list_record_replaces_the_entry_with_its_key() {

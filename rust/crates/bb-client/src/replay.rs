@@ -24,8 +24,8 @@
 //! Rule IDs derive from the command ID, so replaying does not change them.
 
 use crate::execute::{
-    ExecuteContext, ExecuteError, LocalResults, RULE_VERSION, edit_revision, file, local_result,
-    record_from, rule_ids,
+    ExecuteContext, ExecuteError, LocalResults, RULE_VERSION, edit_revision, file, has_bindings,
+    local_result, record_from, rule_ids,
 };
 use crate::issues::{self, IssueReason};
 use crate::storage::{Store, StoreError};
@@ -140,6 +140,25 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         results.insert(&command.id, command.local_result.as_deref())?;
     }
     let edges = load_edges(tx, &workspace_id)?;
+    // A command with a verified acceptance has its result from the receipt, which
+    // replay keeps: the server's bindings are the truth the prediction is not.
+    let proven = proven_results(tx, &workspace_id)?;
+    // The effect of these is not (or not provably) in the confirmed base, and
+    // their result may differ from the prediction. What builds on them cannot be
+    // judged against the base yet: it waits rather than being rejected for a
+    // reference the base cannot resolve until the feed lands or a receipt says.
+    let unproven: HashSet<&str> = queue
+        .iter()
+        .filter(|command| match command.state.as_str() {
+            "accepted_awaiting_feed" => true,
+            "completed" => {
+                !proven.contains(command.id.as_str())
+                    && command.local_result.as_deref().is_some_and(has_bindings)
+            }
+            _ => false,
+        })
+        .map(|command| command.id.as_str())
+        .collect();
 
     let mut report = Replayed::default();
     let mut held: HashMap<String, Held> = HashMap::new();
@@ -156,7 +175,13 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
             continue; // completed: already part of the confirmed base
         }
         // Only a command the server has never seen may be judged locally.
-        let judgeable = command.state == "queued" && !command.ever_sent;
+        let judgeable = command.state == "queued"
+            && !command.ever_sent
+            && !edges
+                .get(id)
+                .into_iter()
+                .flatten()
+                .any(|dependency| unproven.contains(dependency.as_str()));
         let cause = edges
             .get(id)
             .into_iter()
@@ -194,15 +219,17 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
                 for change in &changes.changes {
                     base.install(change, &command.id);
                 }
-                let stored = local_result(&changes);
-                if command.local_result.as_deref() != Some(stored.as_slice()) {
-                    tx.execute(
-                        "UPDATE outbox SET local_result = ?3
-                         WHERE workspace_id = ?1 AND command_id = ?2",
-                        params![workspace_id, id, stored],
-                    )?;
+                if !proven.contains(id) {
+                    let stored = local_result(&changes);
+                    if command.local_result.as_deref() != Some(stored.as_slice()) {
+                        tx.execute(
+                            "UPDATE outbox SET local_result = ?3
+                             WHERE workspace_id = ?1 AND command_id = ?2",
+                            params![workspace_id, id, stored],
+                        )?;
+                    }
+                    results.insert(&command.id, Some(&stored))?;
                 }
-                results.insert(&command.id, Some(&stored))?;
                 report.applied.push(command.id.clone());
             }
             Err(reason) if judgeable => {
@@ -235,6 +262,22 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
     )?;
     report.projection_generation = u64::try_from(generation).map_err(corrupt)?;
     Ok(report)
+}
+
+/// The commands the server accepted (a verified receipt of the generation the
+/// base is built from): their stored result is the receipt's.
+fn proven_results(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+) -> Result<HashSet<String>, ReplayError> {
+    let mut statement = tx.prepare(
+        "SELECT r.command_id FROM command_receipts r
+         JOIN sync_meta m ON m.workspace_id = r.workspace_id
+                         AND m.server_generation = r.server_generation
+         WHERE r.workspace_id = ?1 AND r.outcome IN ('accepted', 'no_op')",
+    )?;
+    let rows = statement.query_map([workspace_id], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Why a pending command is not projected. `Rejected` outranks `Deferred`.
