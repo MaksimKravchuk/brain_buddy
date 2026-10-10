@@ -57,6 +57,85 @@ private func importFailure(of body: () async throws -> Void) async -> RustStoreI
 
 @Suite("Rust store import (026-FR-010, 026-FR-013, 026-FR-022, 026-FR-025, 026-SC-005)")
 struct RustStoreImporterTests {
+    @Test("An already converted old-port import binds after actor, zone and policy changes without re-encoding known intents")
+    func alreadyConvertedOldPortKeepsOriginalKnownRequests() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let runtime = try RustBridgeRuntime()
+        let operation = PendingOperation(command: .createTask(.init(
+            taskID: TaskID("00000000-0000-4000-8000-000000080001"), title: "Original old-port intent", list: .inbox)),
+            issuedAt: Fixtures.issuedAt)
+        let document = StoreDocument(outbox: [operation])
+        try await lane.write(document)
+        let before = try Data(contentsOf: lane.legacy)
+        let importer = lane.importer(runtime: runtime)
+        let report = try await importer.run()
+        let workspace = try await runtime.openStore(workspaceID: "workspace-local", databaseURL: lane.database)
+        try await workspace.establishAccountlessFromImport(retainedSourceURL: lane.directory.appendingPathComponent(report.backupFile))
+        _ = try await RustOutboxImporter(runtime: runtime, databaseURL: lane.database, workspaceID: "workspace-local",
+            now: { Fixtures.issuedAt }).run()
+        let unsent = try await workspace.legacyUnsent()
+        let entry = try #require(unsent.first)
+        // This is a valid original minimal native create accepted by the old
+        // prepared port. Its omitted defaults need not equal a future codec's
+        // serialization, even though it creates the same task.
+        let command = RustWorkspaceCommand(commandID: entry.idempotencyKey, commandType: "task.create",
+            entityID: "task_00000000-0000-4000-8000-000000080001",
+            payload: Data(#"{"title":"Original old-port intent","state":"inbox"}"#.utf8),
+            preconditions: Data("[]".utf8), dependsOn: [])
+        let oldContext = RustWorkspaceContext(now: Fixtures.issuedAt, timeZone: "UTC", actorID: "original-device",
+            policy: Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8))
+        guard case .saved = try await workspace.convertLegacyUnsent([
+            RustWorkspaceLegacyConversion(entryID: entry.entryID, issuedAt: entry.issuedAt, command: command)
+        ], context: oldContext) else { Issue.record("Old prepared conversion refused"); return }
+        let oldKnown = try #require(try await workspace.lookupKnownBatch([command], context: oldContext)?.first)
+        try await workspace.close()
+        let changed = RustDomainFacade(runtime: runtime, context: .init(actorID: "changed-device", deviceTimeZone: "Asia/Tokyo"))
+        let prepared = try await importer.prepareAccountlessRuntime(facade: changed, reviewEnabled: true)
+        let stillKnown = try #require(try await prepared.lookupKnownBatch([command], context: oldContext)?.first)
+        #expect(stillKnown.commandID == oldKnown.commandID)
+        #expect(stillKnown.localSequence == oldKnown.localSequence)
+        #expect(stillKnown.entityID == oldKnown.entityID)
+        #expect(stillKnown.replayed)
+        #expect(try Data(contentsOf: lane.legacy) == before)
+        try await prepared.close()
+    }
+
+    @Test("201 compacted ordinary intents migrate through bounded pages and reopen after context changes")
+    func migratesMoreThanOneBoundedPage() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let runtime = try RustBridgeRuntime()
+        let facade = RustDomainFacade(runtime: runtime, context: .init(deviceTimeZone: "UTC"))
+        var document = StoreDocument()
+        for index in 1...201 {
+            let taskID = TaskID(String(format: "00000000-0000-4000-8000-%012d", index))
+            let operation = PendingOperation(command: .createTask(.init(taskID: taskID, title: "Original \(index)", list: .inbox)),
+                issuedAt: Fixtures.issuedAt)
+            document.outbox = OutboxCompactor.appending(operation, to: document.outbox)
+        }
+        #expect(document.outbox.count == 201)
+        try await lane.write(document)
+        let original = try Data(contentsOf: lane.legacy)
+        let workspace = try await lane.importer(runtime: runtime).prepareAccountlessRuntime(facade: facade)
+        let inputs = try facade.workspaceQueryInputs(at: Fixtures.issuedAt, zone: "UTC", reviewExposed: false)
+        let answer = try await workspace.query(Data(#"{"kind":"list_counts"}"#.utf8), inputs: inputs)
+        guard case .answered(let page) = answer else { Issue.record("Converted workspace did not answer counts"); return }
+        let counts = try facade.workspaceCounts(from: page.result)
+        #expect(counts.inbox == 201)
+        #expect(try Data(contentsOf: lane.legacy) == original)
+        try await workspace.close()
+        // Once the whole queue is resolved, a process restart uses verified global
+        // readiness and never re-encodes or repartitions completed source intents.
+        let changedFacade = RustDomainFacade(runtime: runtime, context: .init(actorID: "changed-device", deviceTimeZone: "Asia/Tokyo"))
+        let reopened = try await lane.importer(runtime: runtime).prepareAccountlessRuntime(facade: changedFacade)
+        let retry = try await reopened.query(Data(#"{"kind":"list_counts"}"#.utf8), inputs: inputs)
+        guard case .answered(let retryPage) = retry else { Issue.record("Known migration retry did not answer counts"); return }
+        #expect(try facade.workspaceCounts(from: retryPage.result).inbox == 201)
+        #expect(try Data(contentsOf: lane.legacy) == original)
+        try await reopened.close()
+    }
+
     @Test("026-FR-013: a populated document is imported, backed up and counted as the kit's decoder counts it")
     func importsAPopulatedDocument() async throws {
         let workspace = try LegacyLane()
@@ -92,6 +171,13 @@ struct RustStoreImporterTests {
         #expect(try Data(contentsOf: workspace.directory.appendingPathComponent(report.backupFile)) == before)
         #expect(try workspace.backups() == [report.backupFile, report.manifestFile].sorted())
         #expect(FileManager.default.fileExists(atPath: workspace.database.path))
+        do {
+            _ = try await workspace.importer(runtime: runtime).prepareAccountlessRuntime(
+                facade: RustDomainFacade(runtime: runtime), reviewEnabled: true)
+            Issue.record("A Review flag cannot turn the imported owner's work into accountless authority")
+        } catch {
+            #expect((error as? RustStoreImportError) == .failed(RustBridgeError(code: "INVALID_REQUEST", field: "account_less_import")))
+        }
     }
 
     @Test("026-FR-010: importing the same file again does nothing")
@@ -109,6 +195,29 @@ struct RustStoreImporterTests {
         #expect(second.sourceSHA256 == first.sourceSHA256)
         #expect(second.counts == first.counts)
         #expect(try workspace.backups().count == 2)
+    }
+
+    @Test("A same-length retained backup edit is refused before decoding or Review activation")
+    func retainedSourceRequiresOriginalBytes() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let bridge = try RustBridgeRuntime()
+        var original = Fixtures.richDocument()
+        original.base.tasks[TaskID("task-1")]?.title = "Original title"
+        try await lane.write(original)
+        let importer = lane.importer(runtime: bridge)
+        let report = try await importer.run()
+        let backup = lane.directory.appendingPathComponent(report.backupFile)
+        let bytes = try Data(contentsOf: backup)
+        let changed = try #require(String(data: bytes, encoding: .utf8)).replacingOccurrences(of: "Original title", with: "Modified title")
+        #expect(Data(changed.utf8).count == bytes.count)
+        #expect(RustImportCounts(counting: try StoreDocumentCoding.decode(Data(changed.utf8))) == report.counts)
+        try Data(changed.utf8).write(to: backup)
+        let failure = await importFailure { _ = try await importer.retainedDocument(report) }
+        #expect(failure == .sourceChanged)
+        let workspace = try await bridge.openStore(workspaceID: "workspace-local", databaseURL: lane.database)
+        #expect(try await workspace.captureLegacyReviewMetadata().alreadyActive == false)
+        try await workspace.close()
     }
 
     @Test("026-FR-013: a different file after an import is refused and never merged")

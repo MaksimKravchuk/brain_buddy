@@ -22,20 +22,34 @@ struct InboxStep: View {
     @State private var rest: [TaskID] = []
     @State private var isDone = false
     @State private var problem: String?
+    @State private var pendingProgress = 0
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     var body: some View {
+        let queueRead = WorkspaceReviewRead.queue(.inbox, context.sessionID)
+        let queuePage = workspace.reviewPageState(queueRead)
+        let releasesRead = WorkspaceReviewRead.releases(.inboxRemainder, context.sessionID)
+        let releasesReadiness = workspace.reviewReadiness(releasesRead)
+        let readiness = queuePage.readiness == .ready ? releasesReadiness : queuePage.readiness
         let session = workspace.state.review.sessions[context.sessionID]
         let releases = session.map { workspace.openInboxReleases(in: $0) } ?? []
         let items = inboxItems
+        WorkspaceQueryContent(readiness: readiness, retry: {
+            Task { try? await workspace.prepareReviewRead(queueRead); try? await workspace.prepareReviewRead(releasesRead) }
+        }) {
+        Group {
         if let queue, !isDone, releases.isEmpty {
             InboxClarifier(
                 queue: queue, onProcessed: processed, onDone: finishProcessing, showsSkipInToolbar: false,
-                onClose: {}
+                progressProblem: problem, onRetryProgress: retryProgress,
+                reviewSessionID: context.sessionID, onClose: {}
             )
         } else if isDone || !releases.isEmpty {
             InboxDoneContent(
                 processed: session?.counts[.inboxProcessed] ?? 0, released: releases.reduce(0) { $0 + $1.released.count },
-                isResumed: !isDone, problem: problem, onUndoRelease: { undoRelease(releases) }, onNext: context.advance
+                isResumed: !isDone, problem: problem, onUndoRelease: { undoRelease(releases) },
+                onRetry: retryPendingWork, onNext: context.advance
             )
         } else if items.isEmpty {
             ReviewStepFrame(title: ReviewCopy.inboxEmpty, primaryTitle: ReviewCopy.next, onPrimary: context.advance) {
@@ -48,11 +62,19 @@ struct InboxStep: View {
         } else {
             Color.clear.onAppear { choose(nil, from: items) }
         }
+        }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: queuePage,
+                previous: { try? await workspace.previousReviewPage(queueRead); queue = nil },
+                next: { try? await workspace.nextReviewPage(queueRead); queue = nil })
+        }
+        .task { try? await workspace.prepareReviewRead(queueRead); try? await workspace.prepareReviewRead(releasesRead) }
     }
 
     /// The Inbox as Process inbox sees it: projectless inbox tasks.
     private var inboxItems: [TaskID] {
-        workspace.list(.list(.inbox)).sections.flatMap(\.tasks).filter { $0.state == .inbox && $0.projectID == nil }.map(\.id)
+        workspace.inboxReviewQueue(session: context.sessionID).map(\.id)
     }
 
     private func choose(_ choice: InboxChoice?, from items: [TaskID]) {
@@ -61,29 +83,64 @@ struct InboxStep: View {
         rest = plan.release
     }
 
-    private func processed(_ delta: Int) {
-        try? workspace.recordReviewProgress(context.sessionID, inboxProcessedDelta: delta)
+    @MainActor private func processed(_ delta: Int) async {
+        pendingProgress += delta
+        await retryProgressDurably()
+    }
+
+    private func retryProgress() { Task { await retryProgressDurably() } }
+
+    @MainActor private func retryProgressDurably() async {
+        guard pendingProgress != 0, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let delta = pendingProgress
+        do {
+            try await workspace.recordReviewProgress(context.sessionID, inboxProcessedDelta: delta, editorID: editorID)
+            pendingProgress = 0
+            problem = nil
+        } catch { problem = TaskCommandRunner.message(for: error) }
     }
 
     /// The last item is done: release the rest that is still in the Inbox.
     private func finishProcessing() {
-        isDone = true
-        let remaining = rest.filter { workspace.task($0)?.state == .inbox }
-        rest = []
-        guard !remaining.isEmpty else { return }
+        Task { await finishProcessingDurably() }
+    }
+
+    @MainActor private func finishProcessingDurably() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let stillInbox = Set(workspace.inboxReviewQueue(session: context.sessionID).map(\.id))
+        let remaining = rest.filter { stillInbox.contains($0) }
+        guard !remaining.isEmpty else { isDone = true; return }
         do {
-            try workspace.bulkRelease(.inboxRemainder, taskIDs: remaining, sessionID: context.sessionID)
+            try await workspace.bulkRelease(.inboxRemainder, taskIDs: remaining, sessionID: context.sessionID, editorID: editorID)
+            rest = []
+            isDone = true
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
+            isDone = true
         }
     }
 
+    private func retryPendingWork() {
+        if pendingProgress != 0 { retryProgress() } else { finishProcessing() }
+    }
+
     private func undoRelease(_ records: [BulkReleaseRecord]) {
+        Task { await undoReleaseDurably(records) }
+    }
+
+    @MainActor private func undoReleaseDurably(_ records: [BulkReleaseRecord]) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.undoBulkRelease(records.map(\.id))
+            try await workspace.undoBulkRelease(records.map(\.id), editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
         }
     }
 }
@@ -119,19 +176,21 @@ struct InboxDoneContent: View {
     let isResumed: Bool
     let problem: String?
     let onUndoRelease: () -> Void
+    let onRetry: () -> Void
     let onNext: () -> Void
 
     var body: some View {
         ReviewStepFrame(
             title: isResumed && released > 0
                 ? ReviewCopy.inboxReleasedResumed(released) : ReviewCopy.inboxProcessed(processed, released: released),
-            primaryTitle: ReviewCopy.next, onPrimary: onNext
+            primaryTitle: ReviewCopy.next, primaryEnabled: problem == nil, onPrimary: onNext
         ) {
             if released > 0 {
                 ReviewChoiceRow(title: ReviewCopy.undoTheReleaseLabel, action: onUndoRelease)
             }
             if let problem {
                 InlineProblemText(message: problem)
+                ReviewChoiceRow(title: "Retry save", action: onRetry)
             }
         }
     }
@@ -142,17 +201,17 @@ struct InboxDoneContent: View {
 }
 
 #Preview("M-15 done") {
-    InboxDoneContent(processed: 10, released: 0, isResumed: false, problem: nil, onUndoRelease: {}, onNext: {})
+    InboxDoneContent(processed: 10, released: 0, isResumed: false, problem: nil, onUndoRelease: {}, onRetry: {}, onNext: {})
         .environment(ToastCenter())
 }
 
 #Preview("M-15 done with release") {
-    InboxDoneContent(processed: 10, released: 12, isResumed: false, problem: nil, onUndoRelease: {}, onNext: {})
+    InboxDoneContent(processed: 10, released: 12, isResumed: false, problem: nil, onUndoRelease: {}, onRetry: {}, onNext: {})
         .environment(ToastCenter())
 }
 
 #Preview("M-15 released, resumed after interruption") {
-    InboxDoneContent(processed: 10, released: 12, isResumed: true, problem: nil, onUndoRelease: {}, onNext: {})
+    InboxDoneContent(processed: 10, released: 12, isResumed: true, problem: nil, onUndoRelease: {}, onRetry: {}, onNext: {})
         .environment(ToastCenter())
 }
 

@@ -27,7 +27,7 @@
 
 mod support;
 
-pub use bb_domain::{calendar, normalization, types};
+pub use bb_domain::{calendar, list_modes, normalization, types};
 
 #[allow(dead_code, unused_imports)]
 #[path = "../src/formulation.rs"]
@@ -128,6 +128,13 @@ fn to_http(value: &Value) -> Value {
         Value::Object(members) => Value::Object(
             members
                 .iter()
+                // Native TaskView keeps this fact outside a running clock; HTTP fixtures predate it.
+                .filter(|(key, _)| {
+                    (key.as_str() != "consecutive_stalled_formulations"
+                        || !members.contains_key("subtasks"))
+                        && (key.as_str() != "unseen_parks_total"
+                            || !members.contains_key("unseen_parks"))
+                })
                 .map(|(key, member)| {
                     let numeric =
                         matches!(key.as_str(), "revision" | "order_key" | "task_revision");
@@ -1932,6 +1939,13 @@ fn review_sessions_026_fr_016_the_first_acknowledgement_activates_and_clamps_nex
     let starved = review_sessions::decide(&read_set, &ack, &exec(NOW)).expect_err("needs an id");
     assert_eq!(starved.reason, Reason::FormulationIdRequired);
 
+    let historical = "0b0e1f30-0000-4000-8000-0000000000aa";
+    let invalid_inputs = exec_with(NOW, true, None, &[historical]);
+    let invalid_allocation = review_sessions::decide(&read_set, &ack, &invalid_inputs)
+        .expect_err("historical references cannot allocate a new clock");
+    assert_eq!(invalid_allocation.reason, Reason::InvalidValue);
+    assert_eq!(invalid_allocation.field.as_deref(), Some("FormulationId"));
+
     let minted = form_id(0xaa);
     let inputs = exec_with(NOW, true, None, &[minted.as_str()]);
     let change_set = review_sessions::decide(&read_set, &ack, &inputs).expect("activated");
@@ -2867,4 +2881,344 @@ fn review_sessions_026_sc_001_a_session_round_trips_through_the_record_form() {
     assert!(public["value"].get("private").is_none());
     assert_eq!(record.record_key(), vec![SESSION_A.to_owned()]);
     let _ = (ReviewMode::Quick, TaskState::Next);
+}
+
+#[test]
+fn review_sessions_026_fr_016_native_helpers_share_clock_and_shown_marker_rules() {
+    use bb_domain::dispatch;
+    let mut next = next_task(1, 10, "2026-09-01T09:00:00Z");
+    next["consecutive_stalled_formulations"] = json!(2);
+    let state = Store {
+        settings: Some(settings_row(Some("2026-09-01T09:00:00Z"))),
+        tasks: vec![next],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query =
+        serde_json::from_value(json!({"kind":"task_formulation","task_id":"task_n001"})).unwrap();
+    let QueryResult::TaskFormulation(facts) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("facts")
+    };
+    assert_eq!(facts.class, "park_due");
+    assert!(facts.third_stall);
+    assert!(facts.derived.is_some());
+    assert!(facts.extension.is_some());
+    let id = types::TaskId::parse("task_n001").unwrap();
+    assert_eq!(
+        bb_domain::review_sessions::task_formulation_view(&state, &id, &query_inputs(NOW, true))
+            .unwrap(),
+        facts
+    );
+    let off =
+        bb_domain::review_sessions::task_formulation_view(&state, &id, &query_inputs(NOW, false))
+            .unwrap();
+    assert_eq!(off.class, "none");
+    assert!(off.derived.is_none());
+    assert!(!off.third_stall);
+    assert_eq!(off.unavailable_local_facts, ["weekly_review_unavailable"]);
+    let pure = types::TaskView::new(state.tasks.get(&id).unwrap(), vec![], vec![]);
+    assert!(
+        serde_json::to_value(pure)
+            .unwrap()
+            .get("formulation_state")
+            .is_none()
+    );
+    let (QueryResult::RestartCandidates(page), after) =
+        bb_domain::review_sessions::native_task_page(
+            &state,
+            &Query::RestartCandidates {},
+            &query_inputs(NOW, true),
+            1,
+            None,
+        )
+        .unwrap()
+    else {
+        panic!("restart")
+    };
+    assert_eq!(page.len(), 1);
+    assert!(after.is_none());
+    assert_eq!(page[0].consecutive_stalled_formulations, 2);
+    let mut parked = task("parked", "someday", 11);
+    parked["parked"] = json!({"at":"2026-10-01T09:00:00Z","formulation_id":form_id(5),
+        "private":{"from_revision":"10","clock_before":{"formulation_id":form_id(5),
+            "started_at":"2026-09-01T09:00:00Z","extended_at":null,"extension_reason":null,
+            "park_floor_at":null,"stalled_before":0}}});
+    let state = Store {
+        tasks: vec![parked],
+        ..Store::default()
+    }
+    .read_set();
+    let parked_id = types::TaskId::parse("parked").unwrap();
+    let facts = bb_domain::review_sessions::task_formulation_view(
+        &state,
+        &parked_id,
+        &query_inputs(NOW, true),
+    )
+    .unwrap();
+    assert_eq!(facts.parked_after_days, Some(30));
+    assert!(facts.unavailable_local_facts.is_empty());
+    let views = bb_domain::queries::native_task_views(&state, &[parked_id]).unwrap();
+    assert!(views.items[0].parked.is_some());
+    assert!(
+        serde_json::to_value(&views.items[0]).unwrap()["parked"]
+            .get("private")
+            .is_none()
+    );
+    let query:Query=serde_json::from_value(json!({"kind":"park_return_shown","task_id":"parked","parked_at":"2026-09-30T09:00:00Z","formulation_id":form_id(5)})).unwrap();
+    assert!(matches!(
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap(),
+        QueryResult::ParkReturnShown(Some(bb_domain::types::ParkReturnProblem::ChangedElsewhere))
+    ));
+}
+
+#[test]
+fn review_sessions_026_fr_016_native_summary_uses_canonical_idle_end_and_explicit_device_marks() {
+    use bb_domain::dispatch;
+    let mut partial = session_row(
+        SESSION_A,
+        "partial",
+        "2026-09-01T09:00:00Z",
+        "2026-10-01T09:00:00Z",
+    );
+    partial["ended_at"] = json!("2026-10-08T09:00:00Z");
+    partial["qualifying_activity"] = json!(true);
+    partial["counts"]["done"] = json!(4);
+    partial["counts"]["inbox_processed"] = json!(10);
+    let state = Store {
+        sessions: vec![partial],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query = serde_json::from_value(
+        json!({"kind":"review_summary","session_id":null,"local":{"explainer_seen_locally":true}}),
+    )
+    .unwrap();
+    let QueryResult::ReviewSummary(summary) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("summary")
+    };
+    assert_eq!(summary.entry_notice.unwrap()["type"], "closed_after_a_week");
+    assert_eq!(summary.days_since_last_review, Some(8));
+    assert!(!summary.explainer_needed);
+    assert!(summary.unavailable_local_facts.is_empty());
+    let query:Query=serde_json::from_value(json!({"kind":"review_summary","session_id":null,"local":{"ended_elsewhere_session":SESSION_A}})).unwrap();
+    let QueryResult::ReviewSummary(summary) =
+        dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap()
+    else {
+        panic!("summary")
+    };
+    let notice = summary.entry_notice.unwrap();
+    assert_eq!(notice["type"], "replaced_elsewhere");
+    assert_eq!(notice["decisions"], 4);
+}
+
+#[test]
+fn native_review_queue_pages_match_owning_order_and_bound_metadata() {
+    let mut read = ReadSet::default();
+    read.settings =
+        Some(serde_json::from_value(settings_row(Some("2026-08-01T00:00:00Z"))).unwrap());
+    let p: types::Project =
+        serde_json::from_value(project("project_stuck", "No next action", "active")).unwrap();
+    read.projects.insert(p.id.clone(), p);
+    for n in 0..30 {
+        for state in ["inbox", "completed", "waiting", "someday"] {
+            let mut row = task(&format!("task_{state}_{n}"), state, (30 - n) as u64);
+            if state == "completed" {
+                row["completed_at"] = json!(format!("2026-10-08T09:{n:02}:00Z"));
+            }
+            if state == "waiting" {
+                row["waiting_since"] = json!(format!("2026-09-01T09:{n:02}:00Z"));
+            }
+            if state == "inbox" {
+                row["project_id"] = json!("project_stuck");
+                row["due_date"] = json!("2026-10-10");
+            }
+            let t: types::Task = serde_json::from_value(row).unwrap();
+            read.tasks.insert(t.id.clone(), t);
+        }
+        let row = next_task(
+            n + 100,
+            30 - n as u64,
+            if n < 15 {
+                "2026-08-01T09:00:00Z"
+            } else {
+                "2026-10-08T09:00:00Z"
+            },
+        );
+        let t: types::Task = serde_json::from_value(row).unwrap();
+        read.tasks.insert(t.id.clone(), t);
+    }
+    let inputs = query_inputs(NOW, true);
+    for step in [
+        StepCode::MindSweep,
+        StepCode::Wins,
+        StepCode::Inbox,
+        StepCode::Decisions,
+        StepCode::RestOfNext,
+        StepCode::Waiting,
+        StepCode::Projects,
+        StepCode::Someday,
+        StepCode::Dates,
+        StepCode::Summary,
+    ] {
+        let q = Query::ReviewQueue {
+            step,
+            session_id: None,
+        };
+        let QueryResult::ReviewQueue(expected) =
+            review_sessions::query(&read, &q, &inputs).unwrap()
+        else {
+            panic!()
+        };
+        let mut after = None;
+        let mut ids = Vec::new();
+        let mut pages = 0;
+        loop {
+            let (answer, next) =
+                review_sessions::native_queue_page(&read, &q, &inputs, 2, after.as_deref())
+                    .unwrap();
+            let QueryResult::ReviewQueue(page) = answer else {
+                panic!()
+            };
+            assert!(page.items.len() <= 2);
+            let page_ids = page
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>();
+            match page.meta {
+                QueueMeta::Dates(meta) => assert!(
+                    meta.days
+                        .iter()
+                        .flat_map(|day| &day.task_ids)
+                        .all(|id| page_ids.contains(id))
+                ),
+                QueueMeta::Decisions(meta) => assert!(
+                    meta.decided_task_ids
+                        .iter()
+                        .chain(&meta.set_aside_task_ids)
+                        .all(|id| page_ids.contains(id))
+                ),
+                meta => assert_eq!(meta, expected.meta),
+            }
+            ids.extend(page_ids);
+            pages += 1;
+            assert!(pages < 100);
+            if next.is_none() {
+                break;
+            }
+            after = next;
+        }
+        assert_eq!(
+            ids,
+            expected
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            "{step:?}"
+        );
+    }
+}
+
+#[test]
+fn native_review_state_pages_bound_combined_arrays_and_keep_global_unseen_count() {
+    let mut read = ReadSet::default();
+    for n in 0..30 {
+        let id = format!("task_parked{n}");
+        let mut row = task(&id, "someday", n);
+        row["parked"] =
+            json!({"at":format!("2026-10-01T09:{n:02}:00Z"),"formulation_id":form_id(n as u32)});
+        let task: types::Task = serde_json::from_value(row).unwrap();
+        read.tasks.insert(task.id.clone(), task);
+        read.receipts.push(
+            serde_json::from_value(receipt_row(&id, "someday", 1, "2026-10-15T00:00:00Z")).unwrap(),
+        );
+    }
+    let inputs = query_inputs(NOW, true);
+    let QueryResult::ReviewState(expected) =
+        review_sessions::query(&read, &Query::ReviewState {}, &inputs).unwrap()
+    else {
+        panic!()
+    };
+    let mut after = None;
+    let mut parks = Vec::new();
+    let mut receipts = Vec::new();
+    let mut receipt_only = false;
+    loop {
+        let (answer, next) =
+            review_sessions::native_state_page(&read, &inputs, 2, after.as_deref()).unwrap();
+        let QueryResult::ReviewState(state) = answer else {
+            panic!()
+        };
+        assert!(state.unseen_parks.len() + state.receipts.len() <= 2);
+        assert_eq!(state.unseen_parks_total, 30);
+        receipt_only |= state.unseen_parks.is_empty() && !state.receipts.is_empty();
+        parks.extend(state.unseen_parks);
+        receipts.extend(state.receipts);
+        if next.is_none() {
+            break;
+        }
+        after = next;
+    }
+    assert!(receipt_only);
+    assert_eq!(parks, expected.unseen_parks);
+    assert_eq!(receipts, expected.receipts);
+}
+
+#[test]
+fn local_imported_progress_is_source_id_only_after_mode_validation_and_clears_at_done() {
+    let mut read = Store::default().read_set();
+    run(
+        &mut read,
+        &start_command(SESSION_A, "quick", &[], true),
+        NOW,
+    );
+    let progress = progress_command(SESSION_A, 37, json!({"inbox_processed_delta":2}));
+    let types::Command::ReviewSessionProgress(payload) = &progress.command else {
+        panic!("progress")
+    };
+    let id = types::SessionId::parse(SESSION_A).unwrap();
+    read.sessions
+        .get_mut(&id)
+        .unwrap()
+        .private
+        .as_mut()
+        .unwrap()
+        .local_imported_progress = vec![payload.progress_id.clone()];
+    assert_eq!(
+        bb_domain::dispatch::decide_local_review(&read, &progress, &exec(NOW))
+            .unwrap()
+            .outcome,
+        ChangeOutcome::NoOp
+    );
+    assert_eq!(
+        review_sessions::decide(&read, &progress, &exec(NOW))
+            .unwrap()
+            .outcome,
+        ChangeOutcome::Applied
+    );
+    let invalid = progress_command(
+        SESSION_A,
+        37,
+        json!({"step":{"code":"mind_sweep","status":"finished"}}),
+    );
+    assert_eq!(
+        bb_domain::dispatch::decide_local_review(&read, &invalid, &exec(NOW))
+            .unwrap_err()
+            .reason,
+        Reason::StepNotInReview
+    );
+    run(&mut read, &finish_command(SESSION_A, None), NOW);
+    assert!(
+        session_of(&read, SESSION_A)
+            .private
+            .as_ref()
+            .unwrap()
+            .local_imported_progress
+            .is_empty()
+    );
 }

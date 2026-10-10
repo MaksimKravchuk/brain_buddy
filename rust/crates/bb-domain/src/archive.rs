@@ -87,14 +87,22 @@ pub fn parse_state_filter(raw: Option<&str>) -> Result<ProjectFilter, DomainErro
     match raw {
         None => Ok(ProjectFilter::Active),
         Some(value) => ProjectFilter::from_wire(value)
+            .filter(|filter| *filter != ProjectFilter::NeedsNextAction)
             .ok_or_else(|| DomainError::field(Reason::InvalidValue, "state")),
     }
 }
 
 /// The projects `filter` selects, in the server's order: trimmed, case-folded
-/// name, then ID. A project is listed by its own state, whatever its members.
+/// name, then ID. State filters ignore members; the native needs-next-action
+/// filter delegates its member facts to the canonical project query.
 #[must_use]
 pub fn projects_in_state(read_set: &ReadSet, filter: ProjectFilter) -> Vec<&Project> {
+    if filter == ProjectFilter::NeedsNextAction {
+        return crate::queries::projects(read_set, filter)
+            .into_iter()
+            .filter_map(|summary| read_set.projects.get(&summary.project.id))
+            .collect();
+    }
     let mut listed: Vec<(String, &Project)> = read_set
         .projects
         .values()
@@ -102,6 +110,7 @@ pub fn projects_in_state(read_set: &ReadSet, filter: ProjectFilter) -> Vec<&Proj
             ProjectFilter::All => true,
             ProjectFilter::Active => project.state == ProjectState::Active,
             ProjectFilter::Archived => project.state == ProjectState::Archived,
+            ProjectFilter::NeedsNextAction => false,
         })
         .map(|project| (norm::casefold(norm::strip(project.name.as_str())), project))
         .collect();

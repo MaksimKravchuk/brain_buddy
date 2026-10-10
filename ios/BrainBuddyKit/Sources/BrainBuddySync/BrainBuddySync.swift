@@ -19,6 +19,30 @@ public enum SyncEvent: Sendable, Hashable {
     case status(SyncStatus)
 }
 
+/// The selected Rust epoch's lifecycle port. It has no DocumentStore or
+/// documentChanged callback: the durable runtime subscription owns its state.
+public protocol SyncRuntimePort: Sendable {
+    func request(_ trigger: SyncTrigger) async -> SyncRuntimeWakeResult
+    func setNetworkAvailable(_ available: Bool) async
+    func close() async
+}
+
+public enum SyncRuntimeWakeResult: Hashable, Sendable {
+    case status(SyncStatus)
+    /// The accepted transport slice has not been installed. Pending local
+    /// commands remain durable; this is never represented as synced.
+    case transportUnavailable
+}
+
+/// Used by the dark native runtime until the accepted transport slice (026,
+/// PR-40). Production activation must inject the real coarse transport port.
+public struct PendingRustSyncRuntimePort: SyncRuntimePort {
+    public init() {}
+    public func request(_ trigger: SyncTrigger) async -> SyncRuntimeWakeResult { .transportUnavailable }
+    public func setNetworkAvailable(_ available: Bool) async {}
+    public func close() async {}
+}
+
 /// A sign-in the server refused, in words for the sign-in sheet.
 public struct SignInFailure: Error, Hashable, Sendable {
     public var message: String

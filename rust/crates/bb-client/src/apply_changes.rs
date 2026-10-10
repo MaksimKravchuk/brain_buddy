@@ -568,10 +568,27 @@ fn install_in(
     transaction
         .validate()
         .map_err(|_| ApplyError::Malformed("transaction"))?;
+    let mut facts = crate::localfacts::load(tx, workspace_id)?;
     for change in &transaction.changes {
-        install_change(tx, workspace_id, change)?;
+        install_feed_change(tx, workspace_id, change, &mut facts)?;
     }
+    crate::localfacts::included(&mut facts, &transaction.source_command_id);
+    crate::localfacts::save_invalidating(tx, workspace_id, &facts)?;
     complete_source(tx, workspace_id, &transaction.source_command_id)
+}
+
+/// Validate/install the after-image before updating local facts, preserving the
+/// feed's existing malformed/contradiction error contract and atomic rollback.
+fn install_feed_change(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    change: &Change,
+    facts: &mut crate::localfacts::Facts,
+) -> Result<(), ApplyError> {
+    let before = crate::localfacts::before_change(tx, workspace_id, change)?;
+    install_change(tx, workspace_id, change)?;
+    crate::localfacts::confirm_change(facts, change, before)?;
+    Ok(())
 }
 
 /// A canonical decimal counter is newer by length, then by digits.
@@ -1141,6 +1158,7 @@ fn install_stream(
     transfer_id: &Id,
     manifest: &TransferManifest,
 ) -> Result<Vec<CommandId>, ApplyError> {
+    let mut facts = crate::localfacts::load(tx, &base.workspace_id)?;
     stream_pages(
         tx,
         &base.workspace_id,
@@ -1151,8 +1169,10 @@ fn install_stream(
             total_bytes: manifest.total_bytes,
             sha256: &manifest.sha256,
         },
-        |change| install_change(tx, &base.workspace_id, change),
+        |change| install_feed_change(tx, &base.workspace_id, change, &mut facts),
     )?;
+    crate::localfacts::included(&mut facts, &manifest.source_command_id);
+    crate::localfacts::save_invalidating(tx, &base.workspace_id, &facts)?;
     complete_source(tx, &base.workspace_id, &manifest.source_command_id)
 }
 

@@ -61,6 +61,8 @@ struct DecisionFormView: View {
     let onCloseCard: () -> Void
     /// The task as the card showed it: any change since makes the save stale.
     let expectedTask: ShownTask?
+    /// The exact task record shown by the card that opened this form.
+    let shownRecord: TaskRecord?
     /// Previews only: starts the field with this text instead of a draft.
     private let seedText: String?
 
@@ -69,6 +71,9 @@ struct DecisionFormView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
     @State private var hasLoaded = false
+    @State private var isLoadingDraft = false
+    @State private var loadGeneration = 0
+    @State private var inputRevision = 0
     @State private var restoredDraft = false
     @State private var problem: String?
     @State private var confirmsDiscard = false
@@ -76,6 +81,8 @@ struct DecisionFormView: View {
     /// The decision was saved (and its drafts removed): a debounced or
     /// background draft write must not bring the text back.
     @State private var didSave = false
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isFieldFocused: Bool
 
     private enum LeaveTarget {
@@ -87,9 +94,11 @@ struct DecisionFormView: View {
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
         sessionID: ReviewSessionID? = nil, isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
         onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: ShownTask? = nil,
+        shownRecord: TaskRecord? = nil,
         seedText: String? = nil
     ) {
         self.expectedTask = expectedTask
+        self.shownRecord = shownRecord
         self.form = form
         self.taskID = taskID
         self.formulationID = formulationID
@@ -103,7 +112,7 @@ struct DecisionFormView: View {
     }
 
     var body: some View {
-        let task = workspace.task(taskID)
+        let task = shownRecord
         Form {
             Section {
                 Text(subheader(task))
@@ -111,7 +120,10 @@ struct DecisionFormView: View {
                     .foregroundStyle(BBColor.textTertiary)
             }
             Section {
-                TextField(placeholder, text: $text, axis: .vertical)
+                TextField(placeholder, text: Binding(get: { text }, set: {
+                    inputRevision += 1
+                    text = $0
+                }), axis: .vertical)
                     .lineLimit(1...8)
                     .focused($isFieldFocused)
                     .submitLabel(.done)
@@ -128,7 +140,7 @@ struct DecisionFormView: View {
                             .font(BBFont.meta)
                             .foregroundStyle(BBColor.textTertiary)
                         Spacer(minLength: BBSpacing.s2)
-                        Button(ReviewCopy.clearDraft, action: clearDraft)
+            Button(ReviewCopy.clearDraft) { Task { await clearDraft() } }
                             .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
                     }
                 }
@@ -136,6 +148,7 @@ struct DecisionFormView: View {
             if let problem {
                 Section {
                     InlineProblemText(message: problem)
+                    Button("Retry draft save") { Task { await retryDraft() } }
                 }
             }
             Section {
@@ -145,10 +158,11 @@ struct DecisionFormView: View {
                         .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canSave(task))
+                .disabled(!canSave(task) || isSaving)
             }
             .listRowBackground(Color.clear)
         }
+        .disabled(isSaving)
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -170,8 +184,13 @@ struct DecisionFormView: View {
             Button(ReviewCopy.keepEditing, role: .cancel) {}
             Button(ReviewCopy.discard, role: .destructive, action: discardAndLeave)
         }
-        .onAppear(perform: load)
+        .task { await load() }
+        .onDisappear {
+            loadGeneration += 1
+            isLoadingDraft = false
+        }
         .onChange(of: text) { _, newValue in
+            if !isLoadingDraft, inputRevision > 0 { hasLoaded = true }
             // Every field is one line: Return (or a pasted line break) ends the edit.
             if newValue.contains(where: \.isNewline) {
                 text = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
@@ -185,14 +204,14 @@ struct DecisionFormView: View {
             // the foreground, below), so an app kill loses nothing.
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            persistDraft()
+            await persistDraft()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { persistDraft() }
+            if phase != .active { Task { await persistDraft() } }
         }
         // The review switched off: the card closes; the typed text is kept.
         .onChange(of: workspace.reviewExposed) { _, exposed in
-            if !exposed { persistDraft() }
+            if !exposed { Task { await persistDraft() } }
         }
     }
 
@@ -303,36 +322,75 @@ struct DecisionFormView: View {
 
     private var draftKey: DraftKey { DraftKey.decisionForm(form.draftKind, task: taskID, formulation: formulationID) }
 
-    private func load() {
-        guard !hasLoaded else { return }
-        hasLoaded = true
-        let title = workspace.task(taskID)?.title ?? ""
+    @MainActor private func load() async {
+        guard !hasLoaded, !isLoadingDraft, !Task.isCancelled else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
+        isLoadingDraft = true
+        defer { if loadGeneration == generation { isLoadingDraft = false } }
+        let title = shownRecord?.title ?? ""
         if let seedText {
             text = seedText
-        } else if let draft = workspace.draft(for: draftKey) {
-            text = draft
-            restoredDraft = true
+            hasLoaded = true
         } else {
-            text = form == .reformulate ? title : ""
+            if inputRevision == 0, text.isEmpty { text = form == .reformulate ? title : "" }
+            let loadedRevision = inputRevision
+            let loadedEditorID = editorID
+            do {
+                let draft = try await workspace.draft(for: draftKey, editorID: loadedEditorID)
+                guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID, !didSave else { return }
+                hasLoaded = true
+                if loadedRevision == 0, inputRevision == loadedRevision, !isSaving {
+                    if let draft {
+                        text = draft
+                        restoredDraft = true
+                    }
+                } else {
+                    await persistDraft()
+                }
+            } catch {
+                guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID, !didSave else { return }
+                // An untouched editor retries the read; authored input retries
+                // persistence directly, without replacing it from storage.
+                hasLoaded = inputRevision > 0
+                problem = TaskCommandRunner.message(for: error)
+            }
         }
         isDirty = Self.hasUnsavedText(text, form: form, title: title)
         isFieldFocused = true
     }
 
-    private func persistDraft() {
-        guard hasLoaded, seedText == nil, !didSave else { return }
-        let title = workspace.task(taskID)?.title ?? ""
-        if Self.hasUnsavedText(text, form: form, title: title) {
-            workspace.saveDraft(text, for: draftKey)
-        } else if workspace.draft(for: draftKey) != nil {
-            workspace.discardDraft(for: draftKey)
+    @MainActor private func retryDraft() async {
+        if hasLoaded { await persistDraft() }
+        else { await load() }
+    }
+
+    @MainActor private func persistDraft(force: Bool = false) async {
+        guard hasLoaded, seedText == nil, !didSave, (!isSaving || force) else { return }
+        let ownsBusyState = !isSaving
+        if ownsBusyState { isSaving = true }
+        defer { if ownsBusyState { isSaving = false } }
+        let title = shownRecord?.title ?? ""
+        do {
+            if Self.hasUnsavedText(text, form: form, title: title) {
+                try await workspace.saveDraft(text, for: draftKey, editorID: editorID)
+            } else if try await workspace.draft(for: draftKey, editorID: editorID) != nil {
+                try await workspace.discardDraft(for: draftKey, editorID: editorID)
+            }
+            problem = nil
+        } catch {
+            problem = TaskCommandRunner.message(for: error)
         }
     }
 
-    private func clearDraft() {
-        workspace.discardDraft(for: draftKey)
+    @MainActor private func clearDraft() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do { try await workspace.discardDraft(for: draftKey, editorID: editorID) }
+        catch { problem = TaskCommandRunner.message(for: error); return }
         restoredDraft = false
-        text = form == .reformulate ? (workspace.task(taskID)?.title ?? "") : ""
+        text = form == .reformulate ? (shownRecord?.title ?? "") : ""
     }
 
     // MARK: Leaving
@@ -347,7 +405,15 @@ struct DecisionFormView: View {
     }
 
     private func discardAndLeave() {
-        workspace.discardDraft(for: draftKey)
+        Task { await discardAndLeaveDurably() }
+    }
+
+    @MainActor private func discardAndLeaveDurably() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do { try await workspace.discardDraft(for: draftKey, editorID: editorID) }
+        catch { problem = TaskCommandRunner.message(for: error); return }
         isDirty = false
         leave()
     }
@@ -366,31 +432,38 @@ struct DecisionFormView: View {
     /// refuses it (`.formulationChanged`), nothing is applied and the card
     /// shows the stale state (FR-011).
     private func save() {
-        guard !didSave, let task = workspace.task(taskID), canSave(task) else { return }
+        guard !isSaving, !didSave, let task = shownRecord, canSave(task) else { return }
+        isSaving = true
         let value = trimmed
+        let submittedEditorID = editorID
+        Task { await saveDurably(value: value, task: task, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(value: String, task: TaskRecord, editorID: String) async {
+        defer { isSaving = false }
         problem = nil
         do {
             let decisionID: DecisionID
             switch form {
             case .reformulate:
-                decisionID = try workspace.decide(
+                decisionID = try await workspace.decide(
                     .reformulate, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
-                    expectedTask: expectedTask
+                    expectedTask: expectedTask, editorID: editorID
                 )
             case .firstStep:
-                decisionID = try workspace.decide(
+                decisionID = try await workspace.decide(
                     .firstStep, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
-                    expectedTask: expectedTask
+                    expectedTask: expectedTask, editorID: editorID
                 )
             case .waiting:
-                decisionID = try workspace.decide(
+                decisionID = try await workspace.decide(
                     .waiting, on: taskID, waitingFor: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
-                    expectedTask: expectedTask
+                    expectedTask: expectedTask, editorID: editorID
                 )
             case .extend:
-                decisionID = try workspace.decide(
+                decisionID = try await workspace.decide(
                     .extend, on: taskID, reason: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
-                    expectedTask: expectedTask
+                    expectedTask: expectedTask, editorID: editorID
                 )
             }
             // `decide` removed the drafts; nothing may write them back.
@@ -400,18 +473,22 @@ struct DecisionFormView: View {
             let shown = form == .reformulate || form == .firstStep ? value : task.title
             onSaved(decisionID, form.decision, shown)
         } catch {
-            switch error {
+            guard let validation = error as? GTDValidationError else {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
+            switch validation {
             case .formulationChanged, .taskNotFound:
                 // The draft stays: it is keyed by the wording, which may be unchanged.
-                persistDraft()
+                await persistDraft(force: true)
                 onStale()
             case .decisionNotAllowed:
                 problem = ReviewCopy.decisionNotAllowed
             case .reviewUnavailable:
-                persistDraft()
-                problem = error.message
+                await persistDraft(force: true)
+                problem = validation.message
             default:
-                problem = error.message
+                problem = validation.message
             }
         }
     }

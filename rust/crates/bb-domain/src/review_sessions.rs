@@ -25,7 +25,7 @@
 //! Server-private bookkeeping (`applied_progress`, the finished-empty steps,
 //! the threshold-change instant, the sweep clock) rides in each record's
 //! `private` member: it is read when the read set holds it and written when
-//! `inputs.authoritative` or the record already carries it.
+//! `inputs.private_review()` or the record already carries it.
 //!
 //! Refusal mapping where the frozen [`Reason`] set has no member of the same
 //! name: `open_session_exists` and `id_conflict` (the server's 409s) are
@@ -255,14 +255,31 @@ pub fn capacity_mirror(
     completed_at: &[UtcInstant],
     now: UtcInstant,
 ) -> CapacityMirror {
-    let weeks = completed_at.iter().min().map_or(0, |first| {
-        now.micros_since(*first).div_euclid(WEEK * MICROS)
-    });
+    capacity_mirror_iter(next_count, completed_at.iter().copied(), now)
+}
+
+fn capacity_mirror_iter(
+    next_count: u32,
+    completed_at: impl IntoIterator<Item = UtcInstant>,
+    now: UtcInstant,
+) -> CapacityMirror {
+    let mut first = None;
+    let mut recent = 0usize;
     let window_start = now.plus_seconds(-CAPACITY_WEEKS * WEEK);
-    let recent = completed_at
-        .iter()
-        .filter(|at| window_start <= **at && **at <= now)
-        .count();
+    for at in completed_at {
+        first = Some(first.map_or(at, |held: UtcInstant| held.min(at)));
+        recent += usize::from(window_start <= at && at <= now);
+    }
+    capacity_mirror_counts(next_count, first, recent, now)
+}
+
+fn capacity_mirror_counts(
+    next_count: u32,
+    first: Option<UtcInstant>,
+    recent: usize,
+    now: UtcInstant,
+) -> CapacityMirror {
+    let weeks = first.map_or(0, |first| now.micros_since(first).div_euclid(WEEK * MICROS));
     let weeks_of_history = u32::try_from(weeks.max(0)).unwrap_or(u32::MAX);
     if weeks < CAPACITY_WEEKS || recent == 0 {
         return CapacityMirror {
@@ -607,6 +624,18 @@ pub fn decide(
     command: &DomainCommand,
     inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
+    decide_review(
+        read_set,
+        command,
+        &crate::types::ReviewInputs::server(inputs),
+    )
+}
+
+pub(crate) fn decide_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &crate::types::ReviewInputs<'_>,
+) -> Result<ChangeSet, DomainError> {
     let now = instant(&inputs.now, "now")?;
     match &command.command {
         Command::ReviewSessionStart(payload) => session_start(read_set, command, payload, inputs),
@@ -649,6 +678,7 @@ fn ended(
     run.ended_at = Some(wire(ended_at, "ended_at")?);
     if let Some(private) = run.private.as_mut() {
         private.applied_progress.clear();
+        private.local_imported_progress.clear();
     }
     run.revision = next_counter(&session.revision, "revision")?;
     Ok(run)
@@ -677,7 +707,7 @@ fn session_start(
     read_set: &ReadSet,
     command: &DomainCommand,
     start: &SessionStart,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
 ) -> Result<ChangeSet, DomainError> {
     let now = instant(&inputs.now, "now")?;
     let id = SessionId::parse(command.entity_id.as_str())?;
@@ -738,9 +768,10 @@ fn session_start(
         qualifying_activity: false,
         clear_start: None,
         revision: Counter::from(1),
-        private: inputs.authoritative.then(|| SessionPrivate {
+        private: inputs.private_review().then(|| SessionPrivate {
             applied_progress: BTreeMap::new(),
             finished_empty: Vec::new(),
+            local_imported_progress: Vec::new(),
         }),
     };
     changes.push(upsert(Record::ReviewSession(session)));
@@ -818,11 +849,20 @@ fn session_progress(
     read_set: &ReadSet,
     command: &DomainCommand,
     progress: &SessionProgress,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let session = existing_session(read_set, command)?;
     require_run_steps(session, progress)?;
+    if inputs.local_review()
+        && session.private.as_ref().is_some_and(|private| {
+            private
+                .local_imported_progress
+                .contains(&progress.progress_id)
+        })
+    {
+        return Ok(ChangeSet::no_op());
+    }
     let digest = progress_digest(progress);
     let known = session
         .private
@@ -849,7 +889,7 @@ fn merged(
     session: &ReviewSession,
     progress: &SessionProgress,
     digest: &str,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let snapshot = Snapshot::new(read_set, now)?;
@@ -933,7 +973,7 @@ fn merged(
         next.last_activity_at = wire(now, "now")?;
     }
     next.revision = next_counter(&session.revision, "revision")?;
-    if inputs.authoritative || session.private.is_some() {
+    if inputs.private_review() || session.private.is_some() {
         let mut applied_progress = session
             .private
             .as_ref()
@@ -943,6 +983,11 @@ fn merged(
         next.private = Some(SessionPrivate {
             applied_progress,
             finished_empty: finished_empty.into_iter().collect(),
+            local_imported_progress: session
+                .private
+                .as_ref()
+                .map(|private| private.local_imported_progress.clone())
+                .unwrap_or_default(),
         });
     }
     let mut changes = vec![upsert(Record::ReviewSession(next))];
@@ -1044,7 +1089,7 @@ fn settings_update(
     read_set: &ReadSet,
     command: &DomainCommand,
     update: &SettingsUpdate,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let current = settings_or_default(read_set)?;
@@ -1063,7 +1108,7 @@ fn settings_update(
         updated.owner_park_floor_at =
             optional_wire(changed.owner_park_floor_at(), "owner_park_floor_at")?;
         let changed_at = wire(now, "now")?;
-        if let Some(private) = settings_private(&mut updated, inputs.authoritative) {
+        if let Some(private) = settings_private(&mut updated, inputs.private_review()) {
             private.threshold_changed_at = Some(changed_at);
         }
     }
@@ -1122,7 +1167,7 @@ fn clock_changes(
 fn explainer_ack(
     read_set: &ReadSet,
     ack: &ExplainerAck,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     if let Some(zone) = &ack.time_zone {
@@ -1140,7 +1185,7 @@ fn explainer_ack(
         activated.time_zone = zone.clone();
     }
     activated.revision = next_counter(&current.revision, "revision")?;
-    if let Some(private) = settings_private(&mut activated, inputs.authoritative) {
+    if let Some(private) = settings_private(&mut activated, inputs.private_review()) {
         private.last_effective_sweep_at = Some(at);
     }
     let mut changes = vec![upsert(Record::ReviewSettings(activated))];
@@ -1152,7 +1197,7 @@ fn explainer_ack(
             let allocated = ids.next().ok_or_else(|| {
                 DomainError::field(Reason::FormulationIdRequired, "allocated_ids")
             })?;
-            FormulationId::parse(allocated.as_str())?.into_string()
+            FormulationId::parse_allocated(allocated.as_str())?.into_string()
         } else {
             String::new()
         };
@@ -1166,7 +1211,7 @@ fn explainer_ack(
 fn consent_grant(
     read_set: &ReadSet,
     grant: &ConsentGrantRequest,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let provider = inputs
@@ -1367,7 +1412,17 @@ impl<'a> Snapshot<'a> {
 /// Whether this family answers `query`.
 #[must_use]
 pub fn handles_query(query: &Query) -> bool {
-    matches!(query, Query::ReviewState {} | Query::ReviewQueue { .. })
+    matches!(
+        query,
+        Query::ReviewState {}
+            | Query::ReviewQueue { .. }
+            | Query::TaskFormulation { .. }
+            | Query::ParkReturnShown { .. }
+            | Query::RestartCandidates {}
+            | Query::AutoParkDue {}
+            | Query::ReviewSummary { .. }
+            | Query::OpenReleases { .. }
+    )
 }
 
 /// Answers `ReviewState` and `ReviewQueue`. Both are reads of the weekly
@@ -1392,6 +1447,128 @@ pub fn query(
     }
     let now = instant(&inputs.now, "now")?;
     match query {
+        Query::TaskFormulation { task_id } => {
+            native_formulation(read_set, task_id, now).map(QueryResult::TaskFormulation)
+        }
+        Query::ParkReturnShown {
+            task_id,
+            parked_at,
+            formulation_id,
+        } => {
+            use crate::types::{ParkReturnProblem, ProjectState};
+            let problem = read_set
+                .tasks
+                .get(task_id)
+                .and_then(|task| {
+                    if task.state != TaskState::Someday {
+                        return None;
+                    }
+                    let marker = task.parked.as_ref()?;
+                    if parked_at.as_ref().is_some_and(|at| at != &marker.at)
+                        || formulation_id
+                            .as_ref()
+                            .is_some_and(|id| id != &marker.formulation_id)
+                    {
+                        return None;
+                    }
+                    Some(
+                        task.project_id
+                            .as_ref()
+                            .and_then(|id| read_set.projects.get(id))
+                            .filter(|project| project.state == ProjectState::Archived)
+                            .map(|project| ParkReturnProblem::ProjectArchived {
+                                name: project.name.as_str().to_owned(),
+                            }),
+                    )
+                })
+                .unwrap_or(Some(ParkReturnProblem::ChangedElsewhere));
+            Ok(QueryResult::ParkReturnShown(problem))
+        }
+        Query::RestartCandidates {} | Query::AutoParkDue {} => {
+            let settings = clock_settings(read_set)?;
+            let mut tasks = Vec::new();
+            for task in read_set.tasks.values() {
+                let clock = TaskClock::from_task(task).map_err(stored)?;
+                let eligible = if matches!(query, Query::RestartCandidates {}) {
+                    formulation::restart_eligible(&clock, &settings, now)
+                } else {
+                    formulation::classify(&clock, &settings, now) == FormulationClass::ParkDue
+                };
+                if eligible {
+                    tasks.push(task);
+                }
+            }
+            tasks.sort_by(|a, b| {
+                (a.formulation.as_ref().map(|f| f.started_at.as_str()), &a.id)
+                    .cmp(&(b.formulation.as_ref().map(|f| f.started_at.as_str()), &b.id))
+            });
+            let views = tasks
+                .into_iter()
+                .map(|task| queries::task_view(task, Vec::new(), Vec::new(), &settings))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(if matches!(query, Query::RestartCandidates {}) {
+                QueryResult::RestartCandidates(views)
+            } else {
+                QueryResult::AutoParkDue(views)
+            })
+        }
+        Query::ReviewSummary { session_id, local } => {
+            native_summary(read_set, session_id.as_ref(), inputs, now, local.as_ref())
+                .map(QueryResult::ReviewSummary)
+        }
+        Query::OpenReleases {
+            release_kind,
+            session_id,
+        } => {
+            use crate::types::BulkKind;
+            let session = session_id
+                .as_ref()
+                .map(|id| {
+                    read_set
+                        .sessions
+                        .get(id)
+                        .ok_or_else(|| session_not_found(id))
+                })
+                .transpose()?;
+            if *release_kind == BulkKind::InboxRemainder && session.is_none() {
+                return Err(invalid("session_id"));
+            }
+            let last_start = read_set
+                .sessions
+                .values()
+                .map(|s| s.started_at.as_str())
+                .max();
+            let inbox_pending = session.is_some_and(|s| {
+                s.steps
+                    .get(&StepCode::Inbox)
+                    .copied()
+                    .unwrap_or(StepStatus::Pending)
+                    == StepStatus::Pending
+            });
+            let mut releases: Vec<_> = read_set
+                .bulk_releases
+                .values()
+                .filter(|release| {
+                    release.kind == *release_kind
+                        && release.undone_at.is_none()
+                        && !release.released.is_empty()
+                        && match release_kind {
+                            BulkKind::Restart => {
+                                last_start.is_none_or(|at| at < release.created_at.as_str())
+                            }
+                            BulkKind::InboxRemainder => {
+                                inbox_pending && release.session_id.as_ref() == session_id.as_ref()
+                            }
+                        }
+                })
+                .collect();
+            releases.sort_by(|a, b| {
+                (a.created_at.as_str(), &a.id).cmp(&(b.created_at.as_str(), &b.id))
+            });
+            Ok(QueryResult::OpenReleases(
+                releases.into_iter().map(|r| r.public()).collect(),
+            ))
+        }
         Query::ReviewQueue { step, session_id } => {
             review_queue(read_set, *step, session_id.as_ref(), now).map(QueryResult::ReviewQueue)
         }
@@ -1435,6 +1612,17 @@ fn last_counted_session(read_set: &ReadSet) -> Result<Option<&ReviewSession>, Do
 }
 
 fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, DomainError> {
+    let mut state = review_state_scalar(read_set, now)?;
+    state.unseen_parks = unseen_parks(read_set)?;
+    state.unseen_parks_total = u32::try_from(state.unseen_parks.len()).unwrap_or(u32::MAX);
+    state.receipts = visible_receipts(read_set, now)?;
+    Ok(state)
+}
+
+fn review_state_scalar(
+    read_set: &ReadSet,
+    now: UtcInstant,
+) -> Result<ReviewStateView, DomainError> {
     let settings = settings_or_default(read_set)?;
     let clock = OwnerClockSettings::from_review_settings(&settings).map_err(stored)?;
     let zone = parse_zone(settings.time_zone.as_str(), "time_zone")?;
@@ -1446,12 +1634,13 @@ fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, 
         moves_tomorrow += u32::from(class == FormulationClass::MovesTomorrow);
     }
 
-    let summaries = read_set
-        .sessions
-        .values()
-        .map(summary_of)
-        .collect::<Result<Vec<_>, _>>()?;
-    let last_counted_at = last_counted_review_at(&summaries);
+    let last_counted_at =
+        read_set
+            .sessions
+            .values()
+            .try_fold(None, |latest, session| -> Result<_, DomainError> {
+                Ok(latest.max(last_counted_review_at(&[summary_of(session)?])))
+            })?;
 
     let last_counted_review = last_counted_session(read_set)?.map(|session| LastCountedReview {
         session_id: session.id.clone(),
@@ -1509,12 +1698,13 @@ fn review_state(read_set: &ReadSet, now: UtcInstant) -> Result<ReviewStateView, 
         )?,
         restart_mode: restart_mode(onboarded_at, last_counted_at, now),
         open_session: open.map(|(_, session)| session.public()),
-        unseen_parks: unseen_parks(read_set)?,
+        unseen_parks: Vec::new(),
+        unseen_parks_total: 0,
         counts: ReviewStateCounts {
             asks_for_decision: asks,
             moves_tomorrow,
         },
-        receipts: visible_receipts(read_set, now)?,
+        receipts: Vec::new(),
         server_now: wire(now, "server_now")?,
         settings: settings.public(),
     })
@@ -1556,6 +1746,27 @@ fn unseen_parks(read_set: &ReadSet) -> Result<Vec<crate::types::UnseenPark>, Dom
     .collect()
 }
 
+fn visible_receipt(
+    read_set: &ReadSet,
+    receipt: &crate::types::ReviewReceipt,
+    now: UtcInstant,
+) -> Result<Option<ReceiptView>, DomainError> {
+    let unchanged = read_set
+        .tasks
+        .get(&receipt.task_id)
+        .is_some_and(|task| task.revision == receipt.task_revision);
+    if unchanged && now < instant(&receipt.hidden_until, "hidden_until")? {
+        Ok(Some(ReceiptView {
+            task_id: receipt.task_id.clone(),
+            kind: receipt.kind,
+            hidden_until: receipt.hidden_until.clone(),
+            task_revision: receipt.task_revision.clone(),
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Receipts that still hide their task: not expired, and the task unchanged
 /// since (data-model E5), by `(task_id, kind)`.
 fn visible_receipts(read_set: &ReadSet, now: UtcInstant) -> Result<Vec<ReceiptView>, DomainError> {
@@ -1567,17 +1778,8 @@ fn visible_receipts(read_set: &ReadSet, now: UtcInstant) -> Result<Vec<ReceiptVi
     keyed.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     let mut visible = Vec::new();
     for (_, _, receipt) in keyed {
-        let unchanged = read_set
-            .tasks
-            .get(&receipt.task_id)
-            .is_some_and(|task| task.revision == receipt.task_revision);
-        if unchanged && now < instant(&receipt.hidden_until, "hidden_until")? {
-            visible.push(ReceiptView {
-                task_id: receipt.task_id.clone(),
-                kind: receipt.kind,
-                hidden_until: receipt.hidden_until.clone(),
-                task_revision: receipt.task_revision.clone(),
-            });
+        if let Some(receipt) = visible_receipt(read_set, receipt, now)? {
+            visible.push(receipt);
         }
     }
     Ok(visible)
@@ -1589,6 +1791,21 @@ fn review_queue(
     session_id: Option<&SessionId>,
     now: UtcInstant,
 ) -> Result<QueueView, DomainError> {
+    let snapshot = Snapshot::new(read_set, now)?;
+    let (tasks, meta) = queue_parts(read_set, step, session_id, now, &snapshot)?;
+    Ok(QueueView {
+        items: snapshot.views(&tasks)?,
+        meta,
+    })
+}
+
+fn queue_parts<'a>(
+    read_set: &'a ReadSet,
+    step: StepCode,
+    session_id: Option<&SessionId>,
+    now: UtcInstant,
+    snapshot: &Snapshot<'a>,
+) -> Result<(Vec<&'a Task>, QueueMeta), DomainError> {
     let session = session_id
         .map(|id| {
             read_set
@@ -1597,7 +1814,6 @@ fn review_queue(
                 .ok_or_else(|| session_not_found(id))
         })
         .transpose()?;
-    let snapshot = Snapshot::new(read_set, now)?;
     let no_meta = || QueueMeta::Empty(NoMeta {});
     let (tasks, meta): (Vec<&Task>, QueueMeta) = match step {
         StepCode::MindSweep | StepCode::Summary => (Vec::new(), no_meta()),
@@ -1608,12 +1824,12 @@ fn review_queue(
         }
         StepCode::Inbox => (snapshot.in_state(TaskState::Inbox)?, no_meta()),
         StepCode::Decisions => {
-            let ids = decision_ids(&snapshot, session)?;
+            let ids = decision_ids(snapshot, session)?;
             let tasks = snapshot.pick(&ids);
             let meta = handled_decisions(read_set, session, &tasks);
             (tasks, QueueMeta::Decisions(meta))
         }
-        StepCode::RestOfNext => rest_of_next(&snapshot, session)?,
+        StepCode::RestOfNext => rest_of_next(snapshot, session)?,
         StepCode::Waiting => {
             let ids = waiting_queue(&snapshot.review_tasks, &snapshot.receipts, now);
             (snapshot.pick(&ids), no_meta())
@@ -1635,12 +1851,402 @@ fn review_queue(
             };
             (snapshot.pick(&pass.shown), QueueMeta::Someday(meta))
         }
-        StepCode::Dates => dates(&snapshot)?,
+        StepCode::Dates => dates(snapshot)?,
     };
-    Ok(QueueView {
-        items: snapshot.views(&tasks)?,
-        meta,
-    })
+    Ok((tasks, meta))
+}
+
+/// Scalars repeat on each page, while the combined park/receipt rows share a
+/// bounded keyset. The unseen count is global and independent of the cursor.
+pub fn native_state_page(
+    read_set: &ReadSet,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use queries::{
+        KeyPart::{Int, Text},
+        SortKey,
+    };
+    use std::collections::BinaryHeap;
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let now = instant(&inputs.now, "now")?;
+    let mut state = review_state_scalar(read_set, now)?;
+    let after: Option<SortKey> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let keep = limit as usize + 1;
+    let mut best = BinaryHeap::<SortKey>::new();
+    let mut offer = |key: SortKey| {
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            return;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    };
+    for task in read_set.tasks.values().filter(|task| task.parked.is_some()) {
+        let clock = TaskClock::from_task(task).map_err(stored)?;
+        let marker = clock.parked.as_ref().ok_or_else(|| invalid("parked"))?;
+        let ack = read_set
+            .park_acks
+            .iter()
+            .rev()
+            .find(|ack| {
+                ack.task_id == task.id && ack.formulation_id.as_str() == marker.formulation_id
+            })
+            .map(ParkRow::from_ack)
+            .transpose()
+            .map_err(stored)?;
+        if !park::unseen_parks([(task.id.as_str(), &clock)], |_, _| ack.clone()).is_empty() {
+            state.unseen_parks_total = state.unseen_parks_total.saturating_add(1);
+            offer(vec![
+                Int(0),
+                Int((marker.at.unix_micros() as u64) ^ (1u64 << 63)),
+                Text(task.id.as_str().to_owned()),
+            ]);
+        }
+    }
+    for receipt in &read_set.receipts {
+        if visible_receipt(read_set, receipt, now)?.is_some() {
+            offer(vec![
+                Int(1),
+                Text(receipt.task_id.as_str().to_owned()),
+                Text(receipt.kind.as_str().to_owned()),
+            ]);
+        }
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    for key in keys {
+        match key.as_slice() {
+            [Int(0), Int(_), Text(id)] => {
+                let id = TaskId::parse(id)?;
+                let marker = read_set
+                    .tasks
+                    .get(&id)
+                    .and_then(|task| task.parked.as_ref())
+                    .ok_or_else(|| invalid("task_id"))?;
+                state.unseen_parks.push(crate::types::UnseenPark {
+                    task_id: id,
+                    formulation_id: marker.formulation_id.clone(),
+                    parked_at: marker.at.clone(),
+                });
+            }
+            [Int(1), Text(id), Text(kind)] => {
+                let receipt = read_set
+                    .receipts
+                    .iter()
+                    .find(|receipt| receipt.task_id.as_str() == id && receipt.kind.as_str() == kind)
+                    .ok_or_else(|| invalid("receipt"))?;
+                state.receipts.push(
+                    visible_receipt(read_set, receipt, now)?.ok_or_else(|| invalid("receipt"))?,
+                );
+            }
+            _ => return Err(invalid("cursor")),
+        }
+    }
+    Ok((QueryResult::ReviewState(Box::new(state)), next))
+}
+
+/// Native queue selection keeps only `limit + 1` keys and constructs views
+/// after selection. Eligibility calls the same pure queue/clock functions as
+/// the ordinary family; metadata identity arrays contain this page only.
+pub fn native_queue_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use queries::{
+        KeyPart::{Int, Text},
+        SortKey,
+    };
+    use std::collections::BinaryHeap;
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let Query::ReviewQueue { step, session_id } = query else {
+        return Err(invalid("kind"));
+    };
+    let session = session_id
+        .as_ref()
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
+    let now = instant(&inputs.now, "now")?;
+    let settings = clock_settings(read_set)?;
+    let zone = parse_zone(settings.time_zone(), "time_zone")?;
+    let today = CalendarDay::of_instant(now.unix_seconds(), &zone);
+    let last = today.add_days(DATES_WINDOW_DAYS - 1);
+    let captured = session
+        .and_then(|session| read_set.decision_queues.get(&session.id))
+        .and_then(|queue| queue.task_ids.as_ref());
+    let after: Option<SortKey> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let keep = if *step == StepCode::Someday {
+        SOMEDAY_SHOWN
+    } else {
+        limit as usize + 1
+    };
+    let mut best = BinaryHeap::<SortKey>::new();
+    let mut total = 0u32;
+    let mut next_count = 0u32;
+    let mut first_completion = None;
+    let mut recent_completions = 0usize;
+    let mut offer = |key: SortKey| {
+        total = total.saturating_add(1);
+        if (*step != StepCode::Someday && after.as_ref().is_some_and(|after| &key <= after))
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            return;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    };
+    let ordered_time = |at: UtcInstant| (at.unix_micros() as u64) ^ (1u64 << 63);
+    for task in read_set.tasks.values() {
+        let review = ReviewTask::from_task(task)?;
+        next_count = next_count.saturating_add(u32::from(task.state == TaskState::Next));
+        if let Some(at) = review.completed_at {
+            first_completion = Some(first_completion.map_or(at, |held: UtcInstant| held.min(at)));
+            recent_completions +=
+                usize::from(now.plus_seconds(-CAPACITY_WEEKS * WEEK) <= at && at <= now);
+        }
+        let receipt = read_set
+            .receipts
+            .iter()
+            .rev()
+            .find(|receipt| {
+                receipt.task_id == task.id
+                    && receipt.kind
+                        == if *step == StepCode::Waiting {
+                            ReceiptKind::Waiting
+                        } else {
+                            ReceiptKind::Someday
+                        }
+            })
+            .map(Receipt::from_row)
+            .transpose()?;
+        let receipts = receipt.as_slice();
+        let id = Text(task.id.as_str().to_owned());
+        let key = match step {
+            StepCode::MindSweep | StepCode::Summary => None,
+            StepCode::Wins => (!wins(std::slice::from_ref(&review), now).is_empty()).then(|| {
+                vec![
+                    Int(u64::MAX - ordered_time(review.completed_at.unwrap())),
+                    id,
+                ]
+            }),
+            StepCode::Inbox => {
+                if task.state == TaskState::Inbox {
+                    Some(queries::sort_key(task, crate::types::TaskSort::Manual)?)
+                } else {
+                    None
+                }
+            }
+            StepCode::Decisions => {
+                if let Some(captured) = captured {
+                    captured
+                        .iter()
+                        .position(|held| held == &task.id)
+                        .map(|index| vec![Int(index as u64), id])
+                } else if task.state == TaskState::Next {
+                    let clock = TaskClock::from_task(task).map_err(stored)?;
+                    formulation::decision_key(&clock, &settings, now).map(|(ask, start)| {
+                        vec![Int(ordered_time(ask)), Int(ordered_time(start)), id]
+                    })
+                } else {
+                    None
+                }
+            }
+            StepCode::RestOfNext => {
+                let asking = match captured {
+                    Some(ids) => ids.contains(&task.id),
+                    None => {
+                        task.state == TaskState::Next
+                            && formulation::classify_task(task, &settings, now)
+                                .map_err(stored)?
+                                .asks_for_decision()
+                    }
+                };
+                if task.state == TaskState::Next && !asking {
+                    Some(queries::sort_key(task, crate::types::TaskSort::Manual)?)
+                } else {
+                    None
+                }
+            }
+            StepCode::Waiting => (!waiting_queue(std::slice::from_ref(&review), receipts, now)
+                .is_empty())
+            .then(|| vec![Int(ordered_time(review.waiting_since.unwrap())), id]),
+            StepCode::Someday => {
+                if someday_queue(std::slice::from_ref(&review), receipts, now, 1).eligible_total
+                    == 0
+                {
+                    None
+                } else {
+                    let updated = review.updated_at.unwrap_or(UtcInstant::EARLIEST);
+                    Some(match receipt {
+                        None => vec![Int(0), Int(ordered_time(updated)), Int(0), id],
+                        Some(receipt) => vec![
+                            Int(1),
+                            Int(ordered_time(receipt.reviewed_at)),
+                            Int(ordered_time(updated)),
+                            id,
+                        ],
+                    })
+                }
+            }
+            StepCode::Dates => {
+                let due = task
+                    .due_date
+                    .as_ref()
+                    .map(|due| {
+                        CalendarDay::parse_iso(due.as_str()).map_err(|_| invalid("due_date"))
+                    })
+                    .transpose()?;
+                match due {
+                    Some(day) if task.state.is_open() && today <= day && day <= last => Some(vec![
+                        Text(day.iso_string()),
+                        Int(queries::counter(&task.order_key, "order_key")?),
+                        id,
+                    ]),
+                    _ => None,
+                }
+            }
+            StepCode::Projects => {
+                if !task.state.is_open() {
+                    None
+                } else if let Some(project) = task
+                    .project_id
+                    .as_ref()
+                    .and_then(|id| read_set.projects.get(id))
+                {
+                    let has_next = read_set.tasks.values().any(|candidate| {
+                        candidate.project_id.as_ref() == Some(&project.id)
+                            && candidate.state == TaskState::Next
+                    });
+                    if !(crate::types::ProjectSummary {
+                        project: project.clone(),
+                        open_task_count: 1,
+                        next_action_count: u32::from(has_next),
+                        counts_by_state: None,
+                    })
+                    .needs_next_action()
+                    {
+                        None
+                    } else {
+                        let mut key = vec![
+                            Text(queries::name_key(project.name.as_str())),
+                            Text(project.id.as_str().to_owned()),
+                        ];
+                        key.extend(queries::sort_key(task, crate::types::TaskSort::Manual)?);
+                        Some(key)
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(key) = key {
+            offer(key);
+        }
+    }
+    let mut keys = best.into_sorted_vec();
+    // Someday's canonical pass shows at most SOMEDAY_SHOWN even when paged.
+    if *step == StepCode::Someday {
+        let shown = total.min(SOMEDAY_SHOWN as u32) as usize;
+        // The pass is small; select its prefix before any ordinary page split.
+        keys.truncate(shown.min(keys.len()));
+        keys.retain(|key| after.as_ref().is_none_or(|after| key > after));
+    }
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let tasks = keys
+        .iter()
+        .map(|key| {
+            let Some(Text(id)) = key.last() else {
+                return Err(invalid("cursor"));
+            };
+            read_set
+                .tasks
+                .get(&TaskId::parse(id)?)
+                .ok_or_else(|| invalid("task_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let meta = match step {
+        StepCode::Wins => QueueMeta::Wins(WinsMeta { count: total }),
+        StepCode::Someday => QueueMeta::Someday(SomedayMeta {
+            eligible_total: total,
+            shown: total.min(SOMEDAY_SHOWN as u32),
+        }),
+        StepCode::Decisions => QueueMeta::Decisions(handled_decisions(read_set, session, &tasks)),
+        StepCode::Dates => {
+            let mut days: Vec<DatesDay> = Vec::new();
+            for task in &tasks {
+                let day = task.due_date.clone().ok_or_else(|| invalid("due_date"))?;
+                if let Some(last) = days.last_mut().filter(|held| held.day == day) {
+                    last.task_ids.push(task.id.clone());
+                } else {
+                    days.push(DatesDay {
+                        day,
+                        task_ids: vec![task.id.clone()],
+                    });
+                }
+            }
+            QueueMeta::Dates(DatesMeta { days })
+        }
+        StepCode::RestOfNext => {
+            let mirror =
+                capacity_mirror_counts(next_count, first_completion, recent_completions, now);
+            QueueMeta::RestOfNext(RestOfNextMeta {
+                next_count: mirror.next_count,
+                weekly_average_4w: mirror.weekly_average_4w,
+                weeks_of_history: mirror.weeks_of_history,
+                implied_weeks: mirror.implied_weeks,
+            })
+        }
+        _ => QueueMeta::Empty(NoMeta {}),
+    };
+    let items = tasks
+        .iter()
+        .map(|task| queries::task_view(task, Vec::new(), Vec::new(), &settings))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((QueryResult::ReviewQueue(QueueView { items, meta }), next))
 }
 
 /// The run's snapshot once taken, else the live aggregate (http §6).
@@ -1671,26 +2277,24 @@ fn handled_decisions(
             set_aside_task_ids: Vec::new(),
         };
     };
-    let decided: BTreeSet<&TaskId> = read_set
-        .decisions
-        .values()
-        .filter(|decision| decision.session_id.as_ref() == Some(&session.id))
-        .map(|decision| &decision.task_id)
-        .collect();
-    let aside: BTreeSet<&TaskId> = read_set
-        .decision_queues
-        .get(&session.id)
-        .map(|queue| queue.set_aside_task_ids.iter().collect())
-        .unwrap_or_default();
+    let decided = |id: &TaskId| {
+        read_set.decisions.values().any(|decision| {
+            decision.session_id.as_ref() == Some(&session.id) && &decision.task_id == id
+        })
+    };
+    let aside = read_set.decision_queues.get(&session.id);
     DecisionsMeta {
         decided_task_ids: queue
             .iter()
-            .filter(|task| decided.contains(&task.id))
+            .filter(|task| decided(&task.id))
             .map(|task| task.id.clone())
             .collect(),
         set_aside_task_ids: queue
             .iter()
-            .filter(|task| aside.contains(&task.id) && !decided.contains(&task.id))
+            .filter(|task| {
+                aside.is_some_and(|queue| queue.set_aside_task_ids.contains(&task.id))
+                    && !decided(&task.id)
+            })
             .map(|task| task.id.clone())
             .collect(),
     }
@@ -1886,4 +2490,417 @@ fn sha256_hex(data: &[u8]) -> String {
         }
     }
     state.iter().map(|word| format!("{word:08x}")).collect()
+}
+
+fn derived_view(
+    value: formulation::DerivedInstants,
+) -> Result<crate::types::DerivedView, DomainError> {
+    Ok(crate::types::DerivedView {
+        start: wire(value.start, "start")?,
+        ageing_at: wire(value.ageing_at, "ageing_at")?,
+        ask_at: wire(value.ask_at, "ask_at")?,
+        park_due_at: wire(value.park_due_at, "park_due_at")?,
+        tomorrow_at: wire(value.tomorrow_at, "tomorrow_at")?,
+        paused_until: optional_wire(value.paused_until, "paused_until")?,
+    })
+}
+
+/// Formulation facts for an already selected native task row. This shares the
+/// explicit formulation read's owner and frozen inputs, without another query.
+/// Hidden Review is represented explicitly rather than classifying in the host.
+pub fn task_formulation_view(
+    read_set: &ReadSet,
+    id: &TaskId,
+    inputs: &QueryInputs,
+) -> Result<crate::types::TaskFormulationView, DomainError> {
+    if !read_set.tasks.contains_key(id) {
+        return Err(DomainError::new(Reason::NotFound));
+    }
+    if !inputs.policy.weekly_review {
+        return Ok(crate::types::TaskFormulationView {
+            task_id: id.clone(),
+            class: "none".to_owned(),
+            derived: None,
+            third_stall: false,
+            extension: None,
+            parked_after_days: None,
+            unavailable_local_facts: vec!["weekly_review_unavailable".to_owned()],
+        });
+    }
+    native_formulation(read_set, id, instant(&inputs.now, "now")?)
+}
+
+fn native_formulation(
+    read_set: &ReadSet,
+    id: &TaskId,
+    now: UtcInstant,
+) -> Result<crate::types::TaskFormulationView, DomainError> {
+    let task = read_set
+        .tasks
+        .get(id)
+        .ok_or_else(|| DomainError::new(Reason::NotFound))?;
+    let settings = clock_settings(read_set)?;
+    let clock = TaskClock::from_task(task).map_err(stored)?;
+    let derived = formulation::derive_instants(&clock, &settings)
+        .map(derived_view)
+        .transpose()?;
+    let extension = formulation::extend(&clock, "", &settings, now)
+        .ok()
+        .and_then(|extended| formulation::derive_instants(&extended, &settings))
+        .map(derived_view)
+        .transpose()?;
+    let parked_after_days = task
+        .parked
+        .as_ref()
+        .and_then(|park| park.private.as_ref().map(|private| (park, private)))
+        .map(|(park, private)| -> Result<i64, DomainError> {
+            Ok((instant(&park.at, "parked.at")?
+                .micros_since(instant(&private.clock_before.started_at, "started_at")?)
+                / (DAY * MICROS))
+                .max(0))
+        })
+        .transpose()?;
+    Ok(crate::types::TaskFormulationView {
+        task_id: id.clone(),
+        class: formulation::classify(&clock, &settings, now)
+            .as_str()
+            .to_owned(),
+        derived,
+        third_stall: formulation::third_stall(&clock, &settings, now),
+        extension,
+        parked_after_days,
+        unavailable_local_facts: if task.parked.is_some() && parked_after_days.is_none() {
+            vec!["park_clock_before".to_owned()]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn native_summary(
+    read_set: &ReadSet,
+    session_id: Option<&SessionId>,
+    inputs: &QueryInputs,
+    now: UtcInstant,
+    local: Option<&crate::types::ReviewPresentation>,
+) -> Result<crate::types::ReviewSummaryView, DomainError> {
+    use crate::types::DecisionStepView;
+    let session = session_id
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
+    let settings = clock_settings(read_set)?;
+    let summaries = read_set
+        .sessions
+        .values()
+        .map(summary_of)
+        .collect::<Result<Vec<_>, _>>()?;
+    let last = last_counted_review_at(&summaries);
+    let zone = parse_zone(inputs.device_zone.as_str(), "device_zone")?;
+    let today = CalendarDay::of_instant(now.unix_seconds(), &zone);
+    let days_since_last_review = last.map(|at| {
+        CalendarDay::of_instant(at.unix_seconds(), &zone)
+            .days_until(today)
+            .max(0)
+    });
+    let decision_step = session
+        .map(|session| -> Result<DecisionStepView, DomainError> {
+            let snapshot = Snapshot::new(read_set, now)?;
+            let queue = decision_ids(&snapshot, Some(session))?;
+            let decided: BTreeSet<_> = read_set
+                .decisions
+                .values()
+                .filter(|d| d.session_id.as_ref() == Some(&session.id))
+                .map(|d| d.task_id.as_str())
+                .collect();
+            let aside: BTreeSet<_> = read_set
+                .decision_queues
+                .get(&session.id)
+                .map(|q| q.set_aside_task_ids.iter().map(|id| id.as_str()).collect())
+                .unwrap_or_default();
+            let asks: BTreeSet<_> = snapshot.asking_ids()?.into_iter().collect();
+            let count = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
+            if let Some((index, id)) = queue.iter().enumerate().find(|(_, id)| {
+                !decided.contains(id.as_str()) && !aside.contains(id.as_str()) && asks.contains(*id)
+            }) {
+                return Ok(DecisionStepView::Card {
+                    task_id: TaskId::parse(id).map_err(|_| invalid("task_id"))?,
+                    position: count(index + 1),
+                    total: count(queue.len()),
+                });
+            }
+            let done = queue
+                .iter()
+                .filter(|id| decided.contains(id.as_str()))
+                .count();
+            let kept = queue
+                .iter()
+                .filter(|id| decided.contains(id.as_str()) && asks.contains(*id))
+                .count();
+            let left = queue
+                .iter()
+                .filter(|id| {
+                    !decided.contains(id.as_str())
+                        && aside.contains(id.as_str())
+                        && asks.contains(*id)
+                })
+                .count();
+            Ok(if left > 0 {
+                DecisionStepView::SomeLeft {
+                    decided: count(done),
+                    total: count(queue.len()),
+                    still_asking: count(left + kept),
+                }
+            } else if done == 0 {
+                DecisionStepView::NothingAsks
+            } else {
+                DecisionStepView::AllDecided {
+                    decided: count(done),
+                    kept_wording: count(kept),
+                }
+            })
+        })
+        .transpose()?;
+    let latest = read_set
+        .sessions
+        .values()
+        .filter(|session| session.status != SessionStatus::Open)
+        .map(|session| {
+            Ok((
+                (
+                    instant(
+                        session.ended_at.as_ref().unwrap_or(&session.started_at),
+                        "ended_at",
+                    )?,
+                    session.id.clone(),
+                ),
+                session,
+            ))
+        })
+        .collect::<Result<Vec<_>, DomainError>>()?
+        .into_iter()
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, session)| session);
+    let entry_notice = latest.map(|session| -> Result<Option<serde_json::Value>,DomainError> {
+        let counts=serde_json::to_value(session.counts).map_err(|_| invalid("counts"))?;
+        let decisions=counts.as_object().ok_or_else(|| invalid("counts"))?.iter().filter(|(key,_)| key.as_str()!="inbox_processed").map(|(_,value)| value.as_u64().unwrap_or(0)).sum::<u64>();
+        if local.is_some_and(|local| local.ended_elsewhere_session.as_ref()==Some(&session.id)) {
+            return Ok(Some(serde_json::json!({"type":"replaced_elsewhere","origin":session.origin,"decisions":decisions})));
+        }
+        let idle=matches!(session.status,SessionStatus::Partial|SessionStatus::Abandoned)
+            && session.ended_at.as_ref().map(|at| instant(at,"ended_at")).transpose()?
+                == Some(instant(&session.last_activity_at,"last_activity_at")?.plus_seconds(IDLE_CLOSE_AFTER));
+        Ok(idle.then(|| serde_json::json!({"type":"closed_after_a_week","started_at":session.started_at,"decisions":decisions})))
+    }).transpose()?.flatten();
+    Ok(crate::types::ReviewSummaryView {
+        entry_notice,
+        explainer_needed: settings.activated_at().is_none()
+            && local
+                .is_none_or(|local| local.activated_at.is_none() && !local.explainer_seen_locally),
+        days_since_last_review,
+        decision_step,
+        unavailable_local_facts: if local.is_none() {
+            vec![
+                "ended_elsewhere".to_owned(),
+                "explainer_seen_locally".to_owned(),
+            ]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+/// Native clock collections keep only `limit + 1` keys beyond the cursor.
+/// All evaluation remains with the clock rules used by the ordinary queries.
+pub fn native_task_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use std::collections::BinaryHeap;
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !matches!(query, Query::RestartCandidates {} | Query::AutoParkDue {}) {
+        return Err(invalid("kind"));
+    }
+    let after: Option<(i64, String)> = after
+        .map(|value| serde_json::from_str(value).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let settings = clock_settings(read_set)?;
+    let now = instant(&inputs.now, "now")?;
+    let mut best = BinaryHeap::new();
+    let keep = limit as usize + 1;
+    for task in read_set.tasks.values() {
+        let clock = TaskClock::from_task(task).map_err(stored)?;
+        let eligible = if matches!(query, Query::RestartCandidates {}) {
+            formulation::restart_eligible(&clock, &settings, now)
+        } else {
+            formulation::classify(&clock, &settings, now) == FormulationClass::ParkDue
+        };
+        if !eligible {
+            continue;
+        }
+        let started = task
+            .formulation
+            .as_ref()
+            .ok_or_else(|| invalid("formulation"))?;
+        // Normalize equal instants; wire spellings may use different offsets.
+        let key = (
+            instant(&started.started_at, "started_at")?.unix_micros(),
+            task.id.as_str().to_owned(),
+        );
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            continue;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let views = keys
+        .into_iter()
+        .map(|(_, id)| {
+            let task = read_set
+                .tasks
+                .get(&TaskId::parse(&id).map_err(|_| invalid("task_id"))?)
+                .ok_or_else(|| invalid("task_id"))?;
+            queries::task_view(task, Vec::new(), Vec::new(), &settings)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        if matches!(query, Query::RestartCandidates {}) {
+            QueryResult::RestartCandidates(views)
+        } else {
+            QueryResult::AutoParkDue(views)
+        },
+        next,
+    ))
+}
+
+/// Release history offered for Undo, with a bounded runtime page. Public
+/// records omit private clock snapshots through the existing record mapper.
+pub fn native_release_page(
+    read_set: &ReadSet,
+    query: &Query,
+    inputs: &QueryInputs,
+    limit: u32,
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use crate::types::BulkKind;
+    use std::collections::BinaryHeap;
+    if !inputs.policy.weekly_review {
+        return Err(DomainError::new(Reason::ReviewUnavailable));
+    }
+    if !(1..=200).contains(&limit) {
+        return Err(invalid("limit"));
+    }
+    let Query::OpenReleases {
+        release_kind,
+        session_id,
+    } = query
+    else {
+        return Err(invalid("kind"));
+    };
+    let session = session_id
+        .as_ref()
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
+    if *release_kind == BulkKind::InboxRemainder && session.is_none() {
+        return Err(invalid("session_id"));
+    }
+    let last_start =
+        read_set
+            .sessions
+            .values()
+            .try_fold(None, |latest, session| -> Result<_, DomainError> {
+                Ok(latest.max(Some(instant(&session.started_at, "started_at")?)))
+            })?;
+    let inbox_pending = session.is_some_and(|s| {
+        s.steps
+            .get(&StepCode::Inbox)
+            .copied()
+            .unwrap_or(StepStatus::Pending)
+            == StepStatus::Pending
+    });
+    let after: Option<(i64, String)> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let mut best = BinaryHeap::new();
+    let keep = limit as usize + 1;
+    for release in read_set.bulk_releases.values() {
+        if release.kind != *release_kind
+            || release.undone_at.is_some()
+            || release.released.is_empty()
+        {
+            continue;
+        }
+        let at = instant(&release.created_at, "created_at")?;
+        let eligible = match release_kind {
+            BulkKind::Restart => last_start.is_none_or(|last| last < at),
+            BulkKind::InboxRemainder => {
+                inbox_pending && release.session_id.as_ref() == session_id.as_ref()
+            }
+        };
+        if !eligible {
+            continue;
+        }
+        let key = (at.unix_micros(), release.id.as_str().to_owned());
+        if after.as_ref().is_some_and(|after| &key <= after)
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            continue;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    }
+    let mut keys = best.into_sorted_vec();
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let releases = keys
+        .into_iter()
+        .map(|(_, id)| {
+            read_set
+                .bulk_releases
+                .get(&crate::types::BulkId::parse(&id).map_err(|_| invalid("bulk_id"))?)
+                .map(|release| release.public())
+                .ok_or_else(|| invalid("bulk_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((QueryResult::OpenReleases(releases), next))
 }

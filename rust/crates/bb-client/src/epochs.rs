@@ -220,6 +220,9 @@ pub fn send_candidates(store: &mut Store) -> Result<Vec<CommandId>, StoreError> 
         let mut statement = tx.prepare(
             "SELECT o.command_id FROM outbox o JOIN sync_meta m
                ON m.workspace_id = o.workspace_id
+              AND m.account_link_state='linked' AND m.account_id IS NOT NULL AND m.scope_id IS NOT NULL AND m.device_id IS NOT NULL
+              AND json_extract(CAST(o.envelope AS TEXT),'$.scope_id')=m.scope_id
+              AND json_extract(CAST(o.envelope AS TEXT),'$.device_id')=m.device_id
               AND m.device_epoch_state = 'active' AND m.device_epoch = o.device_epoch
              WHERE o.state = 'queued'
                AND NOT EXISTS (

@@ -62,6 +62,9 @@ use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
+mod workspace;
+pub use workspace::*;
+
 const OPEN: u8 = 0;
 const CLOSED: u8 = 1;
 const POISONED: u8 = 2;
@@ -671,6 +674,7 @@ pub struct BridgeLegacyOutboxRequest {
 pub struct BridgeLegacyOutboxStatus {
     pub carried: u64,
     pub unsent: u64,
+    pub converted: u64,
     pub accepted: u64,
     pub rejected: u64,
     pub awaiting: u64,
@@ -689,6 +693,7 @@ impl From<LegacyOutboxStatus> for BridgeLegacyOutboxStatus {
         Self {
             carried: status.carried,
             unsent: status.unsent,
+            converted: status.converted,
             accepted: status.accepted,
             rejected: status.rejected,
             awaiting: status.awaiting,
@@ -807,6 +812,13 @@ impl BridgeRuntime {
 
 #[uniffi::export]
 impl BridgeRuntime {
+    /// Opens the durable local workspace. Disk work belongs off the UI actor.
+    pub fn open_store(
+        &self,
+        request: BridgeStoreRequest,
+    ) -> Result<std::sync::Arc<BridgeWorkspace>, BridgeError> {
+        Ok(guarded(&self.state, || BridgeWorkspace::open(request))?)
+    }
     /// Open a runtime for the given sync protocol version.
     #[uniffi::constructor]
     pub fn new(protocol_version: u32) -> Result<Self, BridgeError> {
@@ -1141,5 +1153,43 @@ mod bridge_tests {
         assert_eq!(failure.code, "INVALID_REQUEST");
         let error = BridgeError::from(failure);
         assert!(!format!("{error:?}{error}").contains(secret));
+    }
+}
+
+/// Hash the exact owned bytes the host will decode, in caller-defined order.
+#[derive(uniffi::Object)]
+pub struct BridgeDigest {
+    state: std::sync::Mutex<bb_client::DigestStream>,
+    lifecycle: AtomicU8,
+}
+#[uniffi::export]
+impl BridgeDigest {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            state: std::sync::Mutex::new(bb_client::DigestStream::default()),
+            lifecycle: AtomicU8::new(OPEN),
+        })
+    }
+    pub fn update(&self, data: Vec<u8>) -> Result<(), BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            if data.len() > 8 * 1024 * 1024 {
+                return Err(Failure::new("INVALID_REQUEST", Some("digest_chunk")));
+            }
+            self.state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .update(&data);
+            Ok(())
+        })?)
+    }
+    pub fn digest(&self) -> Result<String, BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            Ok(self
+                .state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .digest())
+        })?)
     }
 }

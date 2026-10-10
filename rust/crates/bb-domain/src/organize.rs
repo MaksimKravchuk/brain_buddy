@@ -461,6 +461,26 @@ fn tag_delete(
     let id = tag_target(command)?;
     let tag = existing_tag(read_set, &id)?;
     check_revision(command, EntityType::Tag, &tag.revision)?;
+    // Optional guards protect only explicitly shown dependent tasks. A
+    // standalone delete still unlinks every membership without task guards.
+    for guard in command
+        .preconditions
+        .iter()
+        .filter(|guard| guard.entity_type == EntityType::Task)
+    {
+        let task_id = TaskId::parse(guard.entity_id.as_str())?;
+        let task = read_set
+            .tasks
+            .get(&task_id)
+            .ok_or_else(|| not_found(EntityType::Task, task_id.as_str()))?;
+        if task.revision != guard.edit_revision {
+            return Err(DomainError::stale(
+                EntityType::Task,
+                key_of(task_id.as_str()),
+                task.revision.clone(),
+            ));
+        }
+    }
     let deleted = Tag {
         state: TagState::Deleted,
         revision: next_revision(&tag.revision)?,

@@ -17,6 +17,8 @@ struct OnboardingScreen: View {
     @State private var threshold = ReviewSettings.defaultThreshold
     @State private var problem: String?
     @State private var hasLoaded = false
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(onDone: @escaping () -> Void) {
         self.onDone = onDone
@@ -30,6 +32,7 @@ struct OnboardingScreen: View {
             graceDay: ReviewCopy.day(grace, in: .current), problem: problem, reference: reference, isOffline: isOffline,
             onContinue: save
         )
+        .disabled(isSaving)
         .onAppear {
             guard !hasLoaded else { return }
             hasLoaded = true
@@ -53,12 +56,23 @@ struct OnboardingScreen: View {
     }
 
     private func save() {
-        let wall = Calendar.current.dateComponents([.hour, .minute], from: time)
+        guard !isSaving else { return }
+        isSaving = true
+        let submittedWeekday = weekday
+        let submittedTime = time
+        let submittedThreshold = threshold
+        let submittedEditorID = editorID
+        Task { await saveDurably(weekday: submittedWeekday, time: submittedTime, threshold: submittedThreshold, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(weekday submittedWeekday: Int, time submittedTime: Date, threshold submittedThreshold: Int, editorID: String) async {
+        defer { isSaving = false }
+        let wall = Calendar.current.dateComponents([.hour, .minute], from: submittedTime)
         let text = String(format: "%02d:%02d", wall.hour ?? 16, wall.minute ?? 0)
         do {
-            try workspace.completeReviewOnboarding(thresholdDays: threshold, reviewWeekday: weekday, reviewTime: text)
+            try await workspace.completeReviewOnboarding(thresholdDays: submittedThreshold, reviewWeekday: submittedWeekday, reviewTime: text, editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         onDone()

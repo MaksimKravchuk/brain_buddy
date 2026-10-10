@@ -19,7 +19,7 @@
 
 mod support;
 
-pub use bb_domain::{calendar, normalization, types};
+pub use bb_domain::{calendar, list_modes, normalization, types};
 
 #[allow(dead_code, unused_imports)]
 #[path = "../src/formulation.rs"]
@@ -875,6 +875,103 @@ fn queries_026_fr_017_inbox_count_is_projectless_but_date_counts_keep_assigned_t
 // ----------------------------------------------------------- projects and tags
 
 #[test]
+fn queries_026_fr_009_needs_next_action_uses_whole_project_counts_before_paging() {
+    let member = |id: &str, state: &str, project_id: &str| {
+        with(task(id, id, state, 0), "project_id", json!(project_id))
+    };
+    let mut tasks = vec![
+        member("t-next", "next", "p-next"),
+        member("t-waiting", "waiting", "p-waiting"),
+        member("t-inbox", "inbox", "p-waiting"),
+        member("t-someday", "someday", "p-waiting"),
+        member("t-closed", "completed", "p-waiting"),
+        member("t-someday-only", "someday", "p-someday"),
+        member("t-ended", "cancelled", "p-ended"),
+    ];
+    // A Next member outside the first 200 member rows still excludes its project.
+    tasks.extend((0..201).map(|n| member(&format!("t-hidden-{n:03}"), "waiting", "p-hidden")));
+    tasks.push(member("t-hidden-z-next", "next", "p-hidden"));
+    let read_set = Store {
+        tasks,
+        projects: vec![
+            project("p-empty", "A empty", "active"),
+            project("p-next", "B next", "active"),
+            project("p-waiting", "C waiting", "active"),
+            project("p-someday", "D someday", "active"),
+            project("p-archived", "E archived", "archived"),
+            project("p-ended", "F ended", "active"),
+            project("p-hidden", "G hidden next", "active"),
+        ],
+        ..Store::default()
+    }
+    .read_set();
+    let query: Query = serde_json::from_value(json!({
+        "kind":"projects", "filter":"needs_next_action"
+    }))
+    .unwrap();
+    let expected = projects(&read_set, ProjectFilter::NeedsNextAction);
+    assert_eq!(
+        expected
+            .iter()
+            .map(|row| (
+                row.project.id.as_str(),
+                row.open_task_count,
+                row.next_action_count
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("p-empty", 0, 0),
+            ("p-waiting", 3, 0),
+            ("p-someday", 1, 0),
+            ("p-ended", 0, 0)
+        ]
+    );
+    // Pure/server summaries omit native-only metadata; the fixture gives the
+    // four whole-state counts explicitly for each native page.
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|mut row| {
+            row.counts_by_state = Some(match row.project.id.as_str() {
+                "p-waiting" => bb_domain::types::TaskCounts {
+                    inbox: 1,
+                    next: 0,
+                    waiting: 1,
+                    someday: 1,
+                },
+                "p-someday" => bb_domain::types::TaskCounts {
+                    someday: 1,
+                    ..Default::default()
+                },
+                _ => bb_domain::types::TaskCounts::default(),
+            });
+            row
+        })
+        .collect();
+    for limit in [1, 2, 200] {
+        let mut after = None;
+        let mut listed = Vec::new();
+        loop {
+            let (result, next) =
+                queries::classification_page(&read_set, &query, limit, after.as_deref()).unwrap();
+            let QueryResult::Projects(page) = result else {
+                panic!("projects");
+            };
+            assert!(page.len() <= limit as usize);
+            assert!(page.iter().all(|row| row.needs_next_action()));
+            listed.extend(page);
+            after = next;
+            if after.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            listed, expected,
+            "eligibility, global counters and ordering survive pagination"
+        );
+    }
+}
+
+#[test]
 fn queries_026_fr_009_reference_store_projects_and_tags_follow_the_server_order() {
     let a = reference_store(OWNER_A).read_set();
     let row = |summary: &bb_domain::types::ProjectSummary| {
@@ -1667,4 +1764,208 @@ fn queries_026_fr_009_a_cursor_key_of_the_wrong_shape_is_refused_for_every_sort(
             );
         }
     }
+}
+
+#[test]
+fn queries_026_fr_009_native_catalog_search_exact_summary_and_global_tag_rank() {
+    let mut store = Store::default();
+    for n in 0..230 {
+        store.projects.push(project(
+            &format!("project-native-{n:03}"),
+            &format!("A {n:03}"),
+            "active",
+        ));
+        store.tags.push(tag(
+            &format!("tag-native-{n:03}"),
+            &format!("A {n:03}"),
+            "active",
+        ));
+    }
+    store.projects.push(project(
+        "project-native-target",
+        "Z Café target",
+        "archived",
+    ));
+    store
+        .tags
+        .push(tag("tag-native-popular", "Z Café popular", "active"));
+    store
+        .tags
+        .push(tag("tag-native-deleted", "Z Café deleted", "deleted"));
+    for (state, count) in [
+        ("inbox", 201),
+        ("next", 2),
+        ("waiting", 3),
+        ("someday", 4),
+        ("completed", 5),
+    ] {
+        for n in 0..count {
+            let mut row = task(&format!("task-native-{state}-{n}"), "Member", state, n);
+            row["project_id"] = json!("project-native-target");
+            row["tag_ids"] = json!([
+                "tag-native-popular",
+                "tag-native-popular",
+                "tag-native-deleted"
+            ]);
+            store.tasks.push(row);
+        }
+    }
+    let read_set = store.read_set();
+    let ordinary: Query =
+        serde_json::from_value(json!({"kind":"projects","filter":"all"})).unwrap();
+    let (page, _) = queries::classification_page(&read_set, &ordinary, 200, None).unwrap();
+    let QueryResult::Projects(page) = page else {
+        panic!("projects")
+    };
+    assert!(
+        !page
+            .iter()
+            .any(|p| p.project.id.as_str() == "project-native-target")
+    );
+    let exact: Query = serde_json::from_value(
+        json!({"kind":"native_projects","filter":"all","project_id":"project-native-target"}),
+    )
+    .unwrap();
+    let (result, next) = queries::classification_page(&read_set, &exact, 200, None).unwrap();
+    let QueryResult::Projects(result) = result else {
+        panic!("projects")
+    };
+    assert!(next.is_none());
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        (result[0].open_task_count, result[0].next_action_count),
+        (210, 2)
+    );
+    let counts = result[0].counts_by_state.unwrap();
+    assert_eq!(
+        (counts.inbox, counts.next, counts.waiting, counts.someday),
+        (201, 2, 3, 4)
+    );
+    let search: Query =
+        serde_json::from_value(json!({"kind":"native_projects","filter":"all","search":"CAFE"}))
+            .unwrap();
+    assert_eq!(
+        queries::classification_page(&read_set, &search, 1, None)
+            .unwrap()
+            .0,
+        QueryResult::Projects(result.clone())
+    );
+    let missing: Query = serde_json::from_value(
+        json!({"kind":"native_projects","filter":"all","project_id":"project-missing"}),
+    )
+    .unwrap();
+    assert_eq!(
+        queries::classification_page(&read_set, &missing, 200, None)
+            .unwrap()
+            .0,
+        QueryResult::Projects(vec![])
+    );
+    let top: Query =
+        serde_json::from_value(json!({"kind":"native_tags","sort":"open_count"})).unwrap();
+    let (ranked, next) = queries::classification_page(&read_set, &top, 5, None).unwrap();
+    let QueryResult::Tags(ranked) = ranked else {
+        panic!("tags")
+    };
+    assert_eq!(ranked.len(), 5);
+    assert_eq!(ranked[0].tag.id.as_str(), "tag-native-popular");
+    assert_eq!(ranked[0].open_task_count, 210);
+    assert_eq!(ranked[1].tag.id.as_str(), "tag-native-000");
+    let QueryResult::Tags(continued) =
+        queries::classification_page(&read_set, &top, 5, next.as_deref())
+            .unwrap()
+            .0
+    else {
+        panic!("tags")
+    };
+    assert_eq!(continued[0].tag.id.as_str(), "tag-native-004");
+    let search: Query =
+        serde_json::from_value(json!({"kind":"native_tags","search":"cafe"})).unwrap();
+    let QueryResult::Tags(found) = queries::classification_page(&read_set, &search, 200, None)
+        .unwrap()
+        .0
+    else {
+        panic!("tags")
+    };
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].tag.id.as_str(), "tag-native-popular");
+    let pure = serde_json::to_value(projects(&read_set, ProjectFilter::All)).unwrap();
+    assert!(
+        pure.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row.get("counts_by_state").is_none())
+    );
+    let QueryResult::TaskList(first_next)=queries::query(&read_set,&serde_json::from_value(json!({"kind":"task_list","list":"next","project_id":"project-native-target","tag_id":null,"sort":"manual","page":{"limit":1,"after":null}})).unwrap(),&inputs(CREATED,"UTC")).unwrap() else {panic!("tasks")};
+    assert_eq!(first_next.items.len(), 1);
+    assert_eq!(first_next.items[0].id.as_str(), "task-native-next-0");
+}
+
+#[test]
+fn queries_026_fr_025_native_exact_views_are_bounded_ordered_and_partial() {
+    let state = Store {
+        tasks: vec![
+            task("task-a", "A", "inbox", 0),
+            task("task-b", "B", "next", 1),
+        ],
+        subtasks: vec![
+            json!({"id":"subtask-a","task_id":"task-a","title":"Owned child",
+            "state":"open","order_key":"1","revision":"1"}),
+        ],
+        ..Store::default()
+    }
+    .read_set();
+    let ids = ["task-b", "task-missing", "task-a", "task-b"]
+        .map(|id| bb_domain::types::TaskId::parse(id).unwrap());
+    let page = bb_domain::queries::native_task_views(&state, &ids).unwrap();
+    assert_eq!(
+        page.items
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["task-b", "task-a"]
+    );
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.subtasks.is_empty() && row.comments.is_empty())
+    );
+    assert!(!page.has_more);
+    assert!(page.next_cursor.is_none());
+    assert_eq!(
+        (page.counts_by_state.inbox, page.counts_by_state.next),
+        (1, 1)
+    );
+    assert!(
+        bb_domain::queries::native_task_views(&state, &[])
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        bb_domain::queries::native_task_views(&state, &vec![ids[0].clone(); 200])
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let error =
+        bb_domain::queries::native_task_views(&state, &vec![ids[0].clone(); 201]).unwrap_err();
+    assert_eq!(
+        (error.reason, error.field.as_deref()),
+        (Reason::InvalidValue, Some("task_ids"))
+    );
+    let native = Query::NativeTaskViews {
+        task_ids: ids.to_vec(),
+    };
+    assert_eq!(
+        bb_domain::dispatch::query_claims(&native),
+        [bb_domain::dispatch::QueryFamily::Queries]
+    );
+    assert_eq!(
+        queries::query(&state, &native, &inputs(CREATED, "UTC"))
+            .unwrap_err()
+            .field
+            .as_deref(),
+        Some("kind")
+    );
 }

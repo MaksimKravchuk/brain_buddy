@@ -49,10 +49,11 @@ struct CompleteTaskIntent: AppIntent {
         if record.state == .completed {
             return .result(dialog: "That task is already complete.")
         }
-        do throws(GTDValidationError) {
-            try workspace.completeTask(id)
+        do {
+            try await workspace.completeTask(id, editorID: UUID().uuidString)
         } catch {
-            throw BrainBuddyIntentError(error)
+            if let validation = error as? GTDValidationError { throw BrainBuddyIntentError(validation) }
+            throw BrainBuddyIntentError(message: "Brain Buddy couldn't save this change. Try again.")
         }
         try await SharedWorkspace.didWrite(workspace)
         return .result(dialog: "Completed “\(record.title)”.")

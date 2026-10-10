@@ -387,6 +387,19 @@ pub fn third_stall(clock: &TaskClock, settings: &OwnerClockSettings, now: UtcIns
         && clock.consecutive_stalled_formulations >= STALLS_BEFORE_THIRD
 }
 
+/// One candidate's position in the canonical decision queue.
+pub(crate) fn decision_key(
+    clock: &TaskClock,
+    settings: &OwnerClockSettings,
+    now: UtcInstant,
+) -> Option<(UtcInstant, UtcInstant)> {
+    let instants = derive_instants(clock, settings)?;
+    let started = clock.formulation_started_at?;
+    classify_instants(Some(&instants), now)
+        .asks_for_decision()
+        .then_some((instants.ask_at, started))
+}
+
 /// Ids of the tasks that ask for a decision, earliest-asking first (§5):
 /// ascending `ask_at`, then ascending `formulation_started_at`, then id.
 #[must_use]
@@ -398,11 +411,7 @@ pub fn decision_queue<Id: Ord + Clone>(
     let mut asking: Vec<(UtcInstant, UtcInstant, Id)> = tasks
         .iter()
         .filter_map(|(id, clock)| {
-            let instants = derive_instants(clock, settings)?;
-            let started = clock.formulation_started_at?;
-            classify_instants(Some(&instants), now)
-                .asks_for_decision()
-                .then(|| (instants.ask_at, started, id.clone()))
+            decision_key(clock, settings, now).map(|(ask, started)| (ask, started, id.clone()))
         })
         .collect();
     asking.sort();
@@ -810,12 +819,14 @@ pub fn release(
 }
 
 /// Returns a released task to its list with its stored clock, exactly.
-#[must_use]
 pub fn undo_release(
     clock: &TaskClock,
     previous_state: TaskState,
     released: Option<&ReleasedClock>,
-) -> TaskClock {
+) -> Result<TaskClock, FormulationError> {
+    if previous_state == TaskState::Next && released.is_none() {
+        return Err(FormulationError::MissingInput("clock_before"));
+    }
     let mut restored = TaskClock {
         state: Some(previous_state),
         parked: None,
@@ -829,7 +840,7 @@ pub fn undo_release(
         restored.formulation_park_floor_at = stored.park_floor_at;
         restored.consecutive_stalled_formulations = stored.stalled_before;
     }
-    bump(restored)
+    Ok(bump(restored))
 }
 
 /// Decision Undo: the snapshot at `revision + 1`, keeping the bookkeeping

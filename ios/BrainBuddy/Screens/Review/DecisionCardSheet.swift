@@ -72,6 +72,8 @@ struct DecisionCardSheet: View {
     @State private var problem: String?
     @State private var isStale = false
     @State private var hasDecided = false
+    @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
 
     init(taskID: TaskID, review: ReviewDecisionContext? = nil) {
         self.taskID = taskID
@@ -109,7 +111,7 @@ struct DecisionCardSheet: View {
                             path = []
                         },
                         onCloseCard: closeCard,
-                        expectedTask: opened?.stamp
+                        expectedTask: opened?.stamp, shownRecord: opened?.task
                     )
                 }
         }
@@ -117,6 +119,11 @@ struct DecisionCardSheet: View {
         .presentationDetents([.large])
         .interactiveDismissDisabled(formIsDirty)
         .onAppear(perform: recordOpenedWording)
+        .task {
+            if let reviewRead { try? await workspace.prepareReviewRead(reviewRead) }
+            else { await workspace.prepareTaskDetail(taskID) }
+            recordOpenedWording()
+        }
         .onChange(of: path) { _, newPath in
             if newPath.isEmpty { formIsDirty = false }
         }
@@ -132,17 +139,54 @@ struct DecisionCardSheet: View {
         if hasDecided {
             // The sheet is closing; the task already changed under it.
             Color.clear
-        } else if let task = workspace.task(taskID), !showsStale(task) {
+        } else if reviewReadiness != .ready {
+            WorkspaceQueryContent(readiness: reviewReadiness, retry: retryReads) { EmptyView() }
+        } else if let task = decisionTask, !showsStale(task) {
             DecisionCardContent(
-                model: DecisionCardModel(task: task, workspace: workspace), stallReason: $stallReason, problem: problem,
+                model: DecisionCardModel(task: task, workspace: workspace,
+                formulation: cardFormulation), stallReason: $stallReason, problem: problem,
                 onChoose: choose
             )
         } else {
             DecisionCardStaleView(
-                was: opened?.title ?? "", now: workspace.task(taskID)?.title, stillAsks: currentlyAsks,
+                was: opened?.title ?? "", now: decisionTask?.title, stillAsks: currentlyAsks,
                 onClose: closeCard, onDecideAgain: decideAgain
             )
         }
+    }
+
+    private var reviewReadiness: WorkspaceQueryReadiness {
+        if let reviewRead { return workspace.reviewReadiness(reviewRead) }
+        return workspace.taskDetailReadiness(taskID)
+    }
+
+    private var reviewRead: WorkspaceReviewRead? {
+        review.map { .queue(.decisions, $0.sessionID) }
+    }
+
+    private var decisionTask: TaskRecord? {
+        if let review { return workspace.decisionQueue(session: review.sessionID).first { $0.id == taskID } }
+        return workspace.taskDetail(taskID)
+    }
+
+    private func retryReads() {
+        Task {
+            if let reviewRead { try? await workspace.prepareReviewRead(reviewRead) }
+            else { await workspace.prepareTaskDetail(taskID) }
+            recordOpenedWording()
+        }
+    }
+
+    /// The card's wording, metadata, and runtime admission proof come from
+    /// one exact rendered source page in either presentation context.
+    private var cardFormulation: RustWorkspaceFormulation? {
+        if let reviewRead { return workspace.reviewFormulation(taskID, read: reviewRead) }
+        return workspace.taskDetailFormulation(taskID)
+    }
+
+    private func cardShownTask() -> ShownTask? {
+        if let reviewRead { return workspace.reviewShownTask(taskID, read: reviewRead) }
+        return workspace.taskDetailShownTask(taskID)
     }
 
     // MARK: Staleness (FR-011)
@@ -150,13 +194,14 @@ struct DecisionCardSheet: View {
     private struct OpenedWording: Hashable {
         var title: String
         var formulationID: FormulationID?
+        var task: TaskRecord
         /// The task as shown: any change since makes a decision stale (Core decides).
         var stamp: ShownTask
     }
 
     private func recordOpenedWording() {
-        guard opened == nil, let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: workspace.shownTask(of: task))
+        guard opened == nil, let task = decisionTask, let stamp = cardShownTask() else { return }
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, task: task, stamp: stamp)
     }
 
     private func showsStale(_ task: TaskRecord) -> Bool {
@@ -166,12 +211,12 @@ struct DecisionCardSheet: View {
     }
 
     private var currentlyAsks: Bool {
-        workspace.formulationClass(of: taskID)?.asksForDecision == true
+        cardFormulation?.classification.asksForDecision == true
     }
 
     private func decideAgain() {
-        guard let task = workspace.task(taskID) else { return }
-        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, stamp: workspace.shownTask(of: task))
+        guard let task = decisionTask, let stamp = cardShownTask() else { return }
+        opened = OpenedWording(title: task.title, formulationID: task.formulation?.id, task: task, stamp: stamp)
         isStale = false
         problem = nil
     }
@@ -179,30 +224,44 @@ struct DecisionCardSheet: View {
     // MARK: Deciding
 
     private func choose(_ decision: DecisionType) {
-        problem = nil
+        guard !isSaving else { return }
         if let form = DecisionForm(decision) {
             path.append(form)
             return
         }
-        guard let task = workspace.task(taskID), !showsStale(task) else {
+        guard let task = decisionTask, !showsStale(task) else {
             isStale = true
             return
         }
+        isSaving = true
+        let openedAtTap = opened
+        let submittedStallReason = stallReason
+        let submittedEditorID = editorID
+        Task { await chooseDurably(decision, task: task, opened: openedAtTap, stallReason: submittedStallReason, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func chooseDurably(_ decision: DecisionType, task: TaskRecord, opened: OpenedWording?, stallReason: StallReason?, editorID: String) async {
+        defer { isSaving = false }
+        problem = nil
         let title = task.title
         do {
-            let decisionID = try workspace.decide(
+            let decisionID = try await workspace.decide(
                 decision, on: taskID, stallReason: stallReason, sessionID: review?.sessionID,
-                formulationID: opened?.formulationID, expectedTask: opened?.stamp
+                formulationID: opened?.formulationID, expectedTask: opened?.stamp, editorID: editorID
             )
             finish(decisionID, decision: decision, title: title)
         } catch {
-            switch error {
+            guard let validation = error as? GTDValidationError else {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
+            switch validation {
             case .formulationChanged, .taskNotFound:
                 isStale = true
             case .decisionNotAllowed:
                 problem = ReviewCopy.decisionNotAllowed
             default:
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
         }
     }
@@ -241,15 +300,17 @@ enum DecisionUndoToast {
         let announcement = ReviewCopy.decisionAnnouncement(decision)
         // "Released to Someday. Undo available." → "Released to Someday".
         let reverts = String(announcement.prefix { $0 != "." })
+        let editorID = UUID().uuidString
         toasts.showUndo(
             ReviewCopy.decisionToast(decision, title: title), announcement: announcement,
             undoAccessibilityLabel: "\(ReviewCopy.undo): \(reverts) \(title)"
         ) {
-            do {
-                try workspace.undoDecision(decisionID)
-            } catch {
+            Task {
+                do { try await workspace.undoDecision(decisionID, editorID: editorID) }
+                catch {
                 let current = workspace.task(taskID)
                 toasts.show(ReviewCopy.undoUnavailable(title: current?.title ?? title, list: current?.openList))
+                }
             }
         }
     }
@@ -274,8 +335,8 @@ struct DecisionCardModel: Hashable {
 
 extension DecisionCardModel {
     @MainActor
-    init(task: TaskRecord, workspace: Workspace) {
-        let kind = workspace.formulationClass(of: task.id) ?? .none
+    init(task: TaskRecord, workspace: Workspace, formulation: RustWorkspaceFormulation?) {
+        let kind = formulation?.classification ?? .none
         let extendedAt = task.formulation?.extendedAt
         var parts: [String] = []
         if let started = task.formulation?.startedAt {
@@ -290,7 +351,7 @@ extension DecisionCardModel {
         if case .offline = workspace.syncStatus { offline = true } else { offline = false }
         self.init(
             title: task.title, marker: kind, meta: parts.joined(separator: " · "),
-            thirdStall: workspace.isThirdStall(task.id),
+            thirdStall: formulation?.thirdStall ?? false,
             decisions: StallReasonRecommendation.cardDecisions(extensionUsed: extendedAt != nil),
             extensionUsed: extendedAt != nil, isOffline: offline
         )

@@ -283,12 +283,40 @@ fn types_026_fr_002_client_and_reference_id_shapes_are_distinct() {
 
 // ---------------------------------------------------------- public record shapes
 
+// HTTP fixtures predate the native-only query view extensions. Their omitted
+// fields deserialize to the documented defaults; all frozen HTTP fields still
+// round-trip exactly. Canonical query values populate the actual facts.
+fn native_query_defaults(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if fields.contains_key("subtasks") && fields.contains_key("title") {
+                fields
+                    .entry("consecutive_stalled_formulations")
+                    .or_insert(json!(0));
+            }
+            if fields.contains_key("unseen_parks") {
+                fields.entry("unseen_parks_total").or_insert(json!(0));
+            }
+            for value in fields.values_mut() {
+                native_query_defaults(value);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                native_query_defaults(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 fn types_026_fr_013_public_review_records_decode_and_round_trip() {
     for e in entries() {
         let id = e["id"].as_str().unwrap().to_owned();
         let mut wire = e["body"].clone();
         decimalize(&mut wire);
+        native_query_defaults(&mut wire);
         let valid = e["valid"] == true;
         match e["model"].as_str().unwrap() {
             "SessionResponse" => {

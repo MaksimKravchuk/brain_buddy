@@ -36,6 +36,11 @@ public struct CapacityMirror: Hashable, Sendable {
 
 /// FR-032: at most `limit` Someday tasks a look is due for.
 public struct SomedayQueue: Hashable, Sendable {
+    public init(eligibleTotal: Int, shown: [TaskRecord]) {
+        self.eligibleTotal = eligibleTotal
+        self.shown = shown
+    }
+
     public var eligibleTotal: Int
     public var shown: [TaskRecord]
 }

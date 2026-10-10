@@ -26,10 +26,11 @@
 //! is an accepted no-op, anything else is [`Reason::IdAlreadyExists`]. The
 //! idempotency-key replay and the stored response stay with the adapter.
 //!
-//! Server-only content is written only where `inputs.authoritative`: the Undo
+//! Server-only content is written only where `inputs.private_review()`: the Undo
 //! snapshot of a decision (`Decision::private`) and the clock-before of a bulk
-//! release (`BulkReleased::private`). Without it nothing can be undone here and
-//! the Undo is refused as [`Reason::UndoUnavailable`], never fabricated. The
+//! release (`BulkReleased::private`). A nonauthoritative read missing those
+//! facts reports a precisely named [`Reason::IncompleteReadSet`] after decisive
+//! public checks; authoritative purging remains [`Reason::UndoUnavailable`]. The
 //! 7-day deadline is judged from the stored instants on every read, whether or
 //! not the retention job has nulled the content yet.
 //!
@@ -49,11 +50,12 @@ use crate::types::{
     BulkId, BulkKind, BulkRelease, BulkReleaseRequest, BulkReleased, BulkSkipped, BulkUndoResult,
     BulkUndoSkipped, ChangeOutcome, ChangeSet, ClockBefore, Command, CountBucket, Counter, Decide,
     Decision, DecisionId, DecisionType, DecisionUndo, Details, DomainChange, DomainCommand,
-    DomainError, EntityType, ExecutionInputs, FormulationId, Id, Instant, OpenList, Priority,
-    ProjectState, ReadSet, Reason, ReasonText, ReceiptKind, ReceiptSource, Record, ReleasedItem,
-    ReleasedPrivate, ResultRefs, ReviewReceipt, ReviewSession, RevisionCheck, SessionCounts,
-    SessionId, SessionStatus, SkipReason, StepCode, StepStatus, Task, TaskAction, TaskCreate,
-    TaskId, TaskState, TaskTransition, Title, UndoSkipReason, WaitingFor,
+    DomainError, EntityType, ExecutionInputs, FormulationId, Id, Instant, LocalDecisionBefore,
+    OpenList, Priority, ProjectState, ReadSet, Reason, ReasonText, ReceiptKind, ReceiptSource,
+    Record, ReleasedItem, ReleasedPrivate, ReplacedReceipt, ResultRefs, ReviewReceipt,
+    ReviewSession, RevisionCheck, SessionBefore, SessionCounts, SessionId, SessionStatus,
+    SkipReason, StepCode, StepStatus, Task, TaskAction, TaskCreate, TaskId, TaskState,
+    TaskTransition, Title, UndoSkipReason, WaitingFor,
 };
 use std::collections::BTreeSet;
 
@@ -85,6 +87,18 @@ pub fn decide(
     read_set: &ReadSet,
     command: &DomainCommand,
     inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    decide_review(
+        read_set,
+        command,
+        &crate::types::ReviewInputs::server(inputs),
+    )
+}
+
+pub(crate) fn decide_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &crate::types::ReviewInputs<'_>,
 ) -> Result<ChangeSet, DomainError> {
     let now = parse_instant(&inputs.now, "now").map_err(clock_error)?;
     match &command.command {
@@ -348,6 +362,8 @@ fn session_change(
     bucket: CountBucket,
     delta: i64,
     now: UtcInstant,
+    local: bool,
+    restore: Option<&SessionBefore>,
 ) -> Result<Option<DomainChange>, DomainError> {
     let Some(session) = session_id.and_then(|id| read_set.sessions.get(id)) else {
         return Ok(None);
@@ -359,7 +375,27 @@ fn session_change(
         revision: plus_one(&session.revision)?,
         ..session.clone()
     };
-    if session.status == SessionStatus::Open {
+    if local {
+        updated.qualifying_activity = session.qualifying_activity;
+        if delta > 0 {
+            updated.qualifying_activity = true;
+            updated.last_activity_at = wire(
+                now.max(
+                    parse_instant(&session.last_activity_at, "last_activity_at")
+                        .map_err(clock_error)?,
+                ),
+            )?;
+        } else if let Some(before) = restore
+            && session.last_activity_at == before.last_activity_after
+            && before
+                .revision_after
+                .as_ref()
+                .is_none_or(|after| *after == session.revision)
+        {
+            updated.qualifying_activity = before.qualifying_activity;
+            updated.last_activity_at = before.last_activity_at.clone();
+        }
+    } else if session.status == SessionStatus::Open {
         updated.last_activity_at = wire(now)?;
     }
     Ok(Some(upsert(Record::ReviewSession(updated))))
@@ -371,7 +407,7 @@ struct Context<'a> {
     read_set: &'a ReadSet,
     command: &'a DomainCommand,
     payload: &'a Decide,
-    inputs: &'a ExecutionInputs,
+    inputs: &'a crate::types::ReviewInputs<'a>,
     settings: OwnerClockSettings,
     now: UtcInstant,
 }
@@ -756,7 +792,7 @@ fn follow_up(context: &Context<'_>, task: &Task) -> Result<Effect, DomainError> 
     };
     let inputs = ExecutionInputs {
         allocated_ids: allocated.iter().skip(taken).cloned().collect(),
-        ..context.inputs.clone()
+        ..(**context.inputs).clone()
     };
     let scoped = ReadSet {
         tasks: context
@@ -816,6 +852,42 @@ fn assemble_decision(
     let decision_id = DecisionId::from(payload.decision_id.clone());
     let session_id = known_session(read_set, payload.session_id.as_ref());
     let bucket = counts_as(payload.decision_type);
+    let session_after = session_change(
+        read_set,
+        session_id.as_ref(),
+        bucket,
+        1,
+        now,
+        inputs.local_review(),
+        None,
+    )?;
+    let local_before = inputs.local_review().then(|| LocalDecisionBefore {
+        receipt_replaced: effect
+            .receipt
+            .as_ref()
+            .and_then(|written| {
+                read_set
+                    .receipts
+                    .iter()
+                    .find(|receipt| receipt.task_id == base.id && receipt.kind == written.kind)
+            })
+            .map(|receipt| ReplacedReceipt {
+                receipt: receipt.clone(),
+                task_was_unchanged: receipt.task_revision == base.revision,
+            }),
+        session_before: session_id
+            .as_ref()
+            .and_then(|id| read_set.sessions.get(id))
+            .and_then(|before| match &session_after {
+                Some(DomainChange::Upsert(Record::ReviewSession(after))) => Some(SessionBefore {
+                    qualifying_activity: before.qualifying_activity,
+                    last_activity_at: before.last_activity_at.clone(),
+                    last_activity_after: after.last_activity_at.clone(),
+                    revision_after: Some(after.revision.clone()),
+                }),
+                _ => None,
+            }),
+    });
     let mut changes = effect.changes;
     if yielded && let Some(parked) = formulation_of_park(read_set, base, payload) {
         // A yield reverses the park itself; it is not a return (E6).
@@ -838,10 +910,11 @@ fn assemble_decision(
             ..receipt
         })));
     }
-    let private = inputs.authoritative.then(|| DecisionUndo {
+    let private = inputs.private_review().then(|| DecisionUndo {
         task_before: Box::new(base.clone()),
         created_task_revision: created_revision,
         receipt_kind,
+        local_before,
     });
     let undo_available_until = private
         .as_ref()
@@ -870,13 +943,7 @@ fn assemble_decision(
         undo_available_until,
         private,
     })));
-    changes.extend(session_change(
-        read_set,
-        session_id.as_ref(),
-        bucket,
-        1,
-        now,
-    )?);
+    changes.extend(session_after);
     Ok(applied(
         changes,
         ResultRefs {
@@ -897,7 +964,7 @@ fn formulation_of_park(read_set: &ReadSet, base: &Task, payload: &Decide) -> Opt
 fn undo_decision(
     read_set: &ReadSet,
     command: &DomainCommand,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let decision_id = DecisionId::parse(command.entity_id.as_str())?;
@@ -908,16 +975,74 @@ fn undo_decision(
     let task = existing_task(read_set, &decision.task_id)?;
     let expected = expected_revision(command, &task.id)?;
     let unavailable = || refuse(Reason::UndoUnavailable, EntityType::Task, task.id.as_str());
-    let undo = decision
-        .private
-        .as_ref()
-        .filter(|_| {
-            parse_instant(&decision.decided_at, "decided_at")
-                .is_ok_and(|decided| now < undo_deadline(decided))
-        })
-        .ok_or_else(unavailable)?;
+    let decided = parse_instant(&decision.decided_at, "decided_at").map_err(clock_error)?;
     let at_decision = task.revision == decision.task_revision_after && expected == &task.revision;
-    if !at_decision || !created_task_unchanged(read_set, decision, undo) {
+    if now >= undo_deadline(decided) || !at_decision {
+        return Err(unavailable());
+    }
+    // Visible user rows already make deleting the follow-up unsafe, even when
+    // the private creation revision was not supplied by this read.
+    if let Some(created) = decision
+        .created_task_id
+        .as_ref()
+        .and_then(|id| read_set.tasks.get(id))
+        && (!created.tag_ids.is_empty()
+            || read_set
+                .subtasks
+                .values()
+                .any(|child| child.task_id == created.id)
+            || read_set
+                .comments
+                .values()
+                .any(|child| child.task_id == created.id))
+    {
+        return Err(unavailable());
+    }
+    let undo = decision.private.as_ref().ok_or_else(|| {
+        if inputs.private_review() {
+            unavailable()
+        } else {
+            private_missing(
+                EntityType::ReviewDecision,
+                decision.id.as_str(),
+                "undo_snapshot",
+            )
+        }
+    })?;
+    if undo.task_before.id != task.id || undo.task_before.revision != decision.task_revision_before
+    {
+        return Err(DomainError::field(Reason::InvalidValue, "task_before"));
+    }
+    if decision
+        .created_task_id
+        .as_ref()
+        .is_some_and(|id| read_set.tasks.contains_key(id))
+        && undo.created_task_revision.is_none()
+    {
+        return Err(DomainError::field(
+            Reason::InvalidValue,
+            "created_task_revision",
+        ));
+    }
+    if inputs.local_review()
+        && let Some(local) = &undo.local_before
+    {
+        if local.receipt_replaced.as_ref().is_some_and(|previous| {
+            previous.receipt.task_id != decision.task_id
+                || Some(previous.receipt.kind) != undo.receipt_kind
+        }) {
+            return Err(DomainError::field(Reason::InvalidValue, "receipt_replaced"));
+        }
+        if let Some(before) = &local.session_before {
+            if decision.session_id.is_none() {
+                return Err(DomainError::field(Reason::InvalidValue, "session_before"));
+            }
+            parse_instant(&before.last_activity_at, "last_activity_at").map_err(clock_error)?;
+            parse_instant(&before.last_activity_after, "last_activity_after")
+                .map_err(clock_error)?;
+        }
+    }
+    if !created_task_unchanged(read_set, decision, undo) {
         return Err(unavailable());
     }
     let settings = clock_settings(read_set)?;
@@ -934,6 +1059,7 @@ fn undo_decision(
     restored_clock
         .write_clock_fields(&mut restored)
         .map_err(clock_error)?;
+    let restored_revision = restored.revision.clone();
     let mut changes = vec![upsert(Record::Task(restored))];
     // Back in its park (Undo of `return_to_next`): the row reads as it did
     // while parked, not returned (E6).
@@ -953,14 +1079,27 @@ fn undo_decision(
                 && receipt.decision_id.as_ref() == Some(&decision.id)
         })
     {
-        // Only the receipt this decision wrote: a later decision's stays.
-        changes.push(tombstone(
-            EntityType::ReviewReceipt,
-            vec![
-                decision.task_id.as_str().to_owned(),
-                kind.as_str().to_owned(),
-            ],
-        ));
+        // Only the receipt this decision still owns; preserve later receipts.
+        if inputs.local_review()
+            && let Some(previous) = undo
+                .local_before
+                .as_ref()
+                .and_then(|before| before.receipt_replaced.as_ref())
+        {
+            let mut receipt = previous.receipt.clone();
+            if previous.task_was_unchanged {
+                receipt.task_revision = restored_revision.clone();
+            }
+            changes.push(upsert(Record::ReviewReceipt(receipt)));
+        } else {
+            changes.push(tombstone(
+                EntityType::ReviewReceipt,
+                vec![
+                    decision.task_id.as_str().to_owned(),
+                    kind.as_str().to_owned(),
+                ],
+            ));
+        }
     }
     changes.push(tombstone(
         EntityType::ReviewDecision,
@@ -972,6 +1111,10 @@ fn undo_decision(
         decision.review_counts_as,
         -1,
         now,
+        inputs.local_review(),
+        undo.local_before
+            .as_ref()
+            .and_then(|before| before.session_before.as_ref()),
     )?);
     Ok(applied(
         changes,
@@ -1068,7 +1211,7 @@ fn bulk_release(
     read_set: &ReadSet,
     command: &DomainCommand,
     payload: &BulkReleaseRequest,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let bulk_id = BulkId::parse(command.entity_id.as_str())?;
@@ -1137,10 +1280,26 @@ fn bulk_release(
             bulk_id: Some(bulk_id.clone()),
             ..receipt_for(&moved, ReceiptKind::Someday, ReceiptSource::Release, now)?
         });
-        let private = if inputs.authoritative {
+        let private = if inputs.private_review() {
             Some(ReleasedPrivate {
+                local_source_task_unchanged: None,
                 previous_state: releasable(payload.kind),
                 clock_before: snapshot.as_ref().map(stored_clock).transpose()?,
+                local_receipt_replaced: inputs
+                    .local_review()
+                    .then(|| {
+                        read_set
+                            .receipts
+                            .iter()
+                            .find(|receipt| {
+                                receipt.task_id == task.id && receipt.kind == ReceiptKind::Someday
+                            })
+                            .map(|receipt| ReplacedReceipt {
+                                receipt: receipt.clone(),
+                                task_was_unchanged: receipt.task_revision == task.revision,
+                            })
+                    })
+                    .flatten(),
             })
         } else {
             None
@@ -1188,23 +1347,19 @@ fn bulk_release(
 
 // ======================================================================= bulk undo
 
-/// `_snapshot_purged`: the Undo content is gone, by age or because an item lost
-/// the clock a Next task needs.
-fn snapshot_purged(release: &BulkRelease, now: UtcInstant) -> Result<bool, DomainError> {
-    let created = parse_instant(&release.created_at, "created_at").map_err(clock_error)?;
-    if now >= undo_deadline(created) {
-        return Ok(true);
+/// Only absent private facts qualify for deferred native Undo. Present malformed
+/// snapshots are validated by the ordinary restoration path instead.
+fn private_missing(entity: EntityType, id: &str, field: &str) -> DomainError {
+    DomainError {
+        field: Some(field.to_owned()),
+        ..DomainError::missing(entity, key_of(id))
     }
-    Ok(release.released.iter().any(|item| match &item.private {
-        None => true,
-        Some(private) => private.previous_state == OpenList::Next && private.clock_before.is_none(),
-    }))
 }
 
 fn bulk_undo(
     read_set: &ReadSet,
     command: &DomainCommand,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let bulk_id = BulkId::parse(command.entity_id.as_str())?;
@@ -1224,17 +1379,102 @@ fn bulk_undo(
             ..ChangeSet::no_op()
         });
     }
-    if snapshot_purged(release, now)? {
-        return Err(refuse(
+    if release.undone_at.is_some() {
+        return Err(DomainError::field(Reason::InvalidValue, "undo"));
+    }
+    let created = parse_instant(&release.created_at, "created_at").map_err(clock_error)?;
+    let unavailable = || {
+        refuse(
             Reason::UndoUnavailable,
             EntityType::ReviewBulkRelease,
             bulk_id.as_str(),
+        )
+    };
+    if now >= undo_deadline(created) {
+        return Err(unavailable());
+    }
+    // Publicly stale/missing tasks are skips, but they do not prove the
+    // source's private snapshot was retained. Never complete the bulk locally
+    // while any required private fact is absent, including an all-skipped bulk.
+    let mut missing = None;
+    for item in &release.released {
+        if inputs.local_review()
+            && item
+                .private
+                .as_ref()
+                .is_some_and(|private| private.local_source_task_unchanged == Some(false))
+        {
+            continue;
+        }
+        let task = read_set
+            .tasks
+            .get(&item.task_id)
+            .filter(|task| task.revision == item.revision_after);
+        if let Some(task) = task {
+            TaskClock::from_task(task).map_err(clock_error)?;
+        }
+        match &item.private {
+            None if inputs.private_review() => return Err(unavailable()),
+            None => {
+                missing.get_or_insert("released_private");
+            }
+            Some(private)
+                if private.previous_state == OpenList::Next && private.clock_before.is_none() =>
+            {
+                if inputs.private_review() {
+                    return Err(unavailable());
+                }
+                missing.get_or_insert("clock_before");
+            }
+            _ => {}
+        }
+        if let Some(private) = &item.private
+            && (private.previous_state != releasable(release.kind)
+                || (private.previous_state != OpenList::Next && private.clock_before.is_some()))
+        {
+            return Err(DomainError::field(Reason::InvalidValue, "released_private"));
+        }
+        if inputs.local_review()
+            && let Some(previous) = item
+                .private
+                .as_ref()
+                .and_then(|private| private.local_receipt_replaced.as_ref())
+            && (previous.receipt.task_id != item.task_id
+                || previous.receipt.kind != ReceiptKind::Someday)
+        {
+            return Err(DomainError::field(Reason::InvalidValue, "receipt_replaced"));
+        }
+        if let Some(clock) = item
+            .private
+            .as_ref()
+            .and_then(|private| private.clock_before.as_ref())
+        {
+            released_clock(clock)?;
+        }
+    }
+    if let Some(field) = missing {
+        return Err(private_missing(
+            EntityType::ReviewBulkRelease,
+            bulk_id.as_str(),
+            field,
         ));
     }
     let mut restored = Vec::new();
     let mut skipped = Vec::new();
     let mut changes = Vec::new();
     for item in &release.released {
+        if inputs.local_review()
+            && item
+                .private
+                .as_ref()
+                .is_some_and(|private| private.local_source_task_unchanged == Some(false))
+        {
+            skipped.push(BulkUndoSkipped {
+                task_id: item.task_id.clone(),
+                reason: UndoSkipReason::Stale,
+            });
+            continue;
+        }
         let current = read_set
             .tasks
             .get(&item.task_id)
@@ -1255,7 +1495,8 @@ fn bulk_undo(
             &TaskClock::from_task(task).map_err(clock_error)?,
             private.previous_state.task_state(),
             stored.as_ref(),
-        );
+        )
+        .map_err(clock_error)?;
         let mut back = Task {
             state: private.previous_state.task_state(),
             revision: Counter::from(clock.revision),
@@ -1263,6 +1504,7 @@ fn bulk_undo(
             ..task.clone()
         };
         clock.write_clock_fields(&mut back).map_err(clock_error)?;
+        let restored_revision = back.revision.clone();
         changes.push(upsert(Record::Task(back)));
         // The release receipt goes only when this release wrote it (E5).
         if read_set.receipts.iter().any(|receipt| {
@@ -1270,13 +1512,23 @@ fn bulk_undo(
                 && receipt.kind == ReceiptKind::Someday
                 && receipt.bulk_id.as_ref() == Some(&bulk_id)
         }) {
-            changes.push(tombstone(
-                EntityType::ReviewReceipt,
-                vec![
-                    item.task_id.as_str().to_owned(),
-                    ReceiptKind::Someday.as_str().to_owned(),
-                ],
-            ));
+            if inputs.local_review()
+                && let Some(previous) = &private.local_receipt_replaced
+            {
+                let mut receipt = previous.receipt.clone();
+                if previous.task_was_unchanged {
+                    receipt.task_revision = restored_revision.clone();
+                }
+                changes.push(upsert(Record::ReviewReceipt(receipt)));
+            } else {
+                changes.push(tombstone(
+                    EntityType::ReviewReceipt,
+                    vec![
+                        item.task_id.as_str().to_owned(),
+                        ReceiptKind::Someday.as_str().to_owned(),
+                    ],
+                ));
+            }
         }
         restored.push(item.task_id.clone());
     }
@@ -1284,6 +1536,11 @@ fn bulk_undo(
     changes.push(upsert(Record::ReviewBulkRelease(BulkRelease {
         undone_at: Some(inputs.now.clone()),
         undo: Some(undo.clone()),
+        released: if inputs.local_review() {
+            release.released.iter().map(BulkReleased::public).collect()
+        } else {
+            release.released.clone()
+        },
         ..release.clone()
     })));
     Ok(applied(

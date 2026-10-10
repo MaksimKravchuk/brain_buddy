@@ -14,6 +14,9 @@ struct ReviewEntryScreen: View {
     init() {}
 
     var body: some View {
+        let page = workspace.reviewPageState(.state)
+        let summaryPage = workspace.reviewPageState(.summary(nil))
+        let readiness = page.readiness == .ready ? summaryPage.readiness : page.readiness
         ReviewEntryContent(
             model: ReviewEntryModel(workspace: workspace),
             onContinue: { launch = .resume($0) }, onStart: { launch = .new($0) }
@@ -23,6 +26,14 @@ struct ReviewEntryScreen: View {
         .fullScreenCover(item: $launch) { launch in
             ReviewCover(launch: launch)
         }
+        .overlay {
+            if readiness != .ready {
+                WorkspaceQueryContent(readiness: readiness, retry: {
+                    Task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)) }
+                }) { EmptyView() }
+            }
+        }
+        .task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)) }
     }
 }
 

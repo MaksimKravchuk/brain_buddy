@@ -68,6 +68,7 @@ struct ListOptionsMenu: View {
         }
         .accessibilityLabel("List options")
         .accessibilityValue(ListOptionsRules.isFiltered(options) ? "Filters on" : "")
+        .task { if ListOptionsRules.allowsTagFilter(destination) { await workspace.prepareTags() } }
     }
 
     private var priorityMenu: some View {
@@ -85,15 +86,27 @@ struct ListOptionsMenu: View {
     }
 
     private var tagPicker: some View {
-        Picker(selection: $options.tagFilter) {
-            Text("Any tag").tag(TagID?.none)
-            ForEach(workspace.tags()) { summary in
-                Text(summary.tag.name).tag(Optional(summary.id))
+        let page = workspace.tagsPageState()
+        return Menu {
+            if page.readiness != .ready {
+                Button("Retry loading tags") { Task { await workspace.prepareTags() } }
+            }
+            Picker("Tag", selection: $options.tagFilter) {
+                Text("Any tag").tag(TagID?.none)
+                ForEach(workspace.tags()) { summary in
+                    Text(summary.tag.name).tag(Optional(summary.id))
+                }
+            }
+            .pickerStyle(.menu)
+            if page.hasPrevious {
+                Button("Previous tags") { Task { await workspace.previousTagsPage() } }
+            }
+            if page.hasNext {
+                Button("More tags") { Task { await workspace.nextTagsPage() } }
             }
         } label: {
             Label("Tag", systemImage: "tag")
         }
-        .pickerStyle(.menu)
     }
 
     private var priorityMenuTitle: String {

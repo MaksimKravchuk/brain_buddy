@@ -37,7 +37,23 @@ struct QuickOpenView: View {
             .padding(12)
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
 
-            if results.isEmpty {
+            if model.quickOpenReadiness(query) != .ready {
+                if case .failed = model.quickOpenReadiness(query) {
+                    ContentUnavailableView {
+                        Label("Quick Open couldn’t load", systemImage: "exclamationmark.triangle")
+                    } actions: {
+                        Button("Retry") {
+                            Task {
+                                await model.prepareQuickOpen(query)
+                                results = model.quickOpenResults(query)
+                            }
+                        }
+                    }
+                } else {
+                    ProgressView("Searching…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if results.isEmpty {
                 ContentUnavailableView("No matches", systemImage: "magnifyingglass")
             } else {
                 ScrollViewReader { proxy in
@@ -94,6 +110,10 @@ struct QuickOpenView: View {
         .onChange(of: query, initial: true) { _, query in
             results = model.quickOpenResults(query)
             selectedIndex = 0
+            Task {
+                await model.prepareQuickOpen(query)
+                results = model.quickOpenResults(query)
+            }
         }
     }
 

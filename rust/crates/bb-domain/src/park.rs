@@ -39,7 +39,7 @@
 //! is an accepted no-op (a parked task is no longer in Next; an acknowledged
 //! row is no longer unseen).
 //!
-//! Server-private content is written only where `inputs.authoritative`: the
+//! Server-private content is written only where `inputs.private_review()`: the
 //! park marker's clock before and revision, the park row's source and revision
 //! and the settings' `last_effective_sweep_at`. A writer without it produces
 //! the public projection, which can neither yield nor be restored.
@@ -718,6 +718,18 @@ pub fn decide(
     command: &DomainCommand,
     inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
+    decide_review(
+        read_set,
+        command,
+        &crate::types::ReviewInputs::server(inputs),
+    )
+}
+
+pub(crate) fn decide_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &crate::types::ReviewInputs<'_>,
+) -> Result<ChangeSet, DomainError> {
     match &command.command {
         Command::ReviewAutoPark(payload) => {
             let now = parse_instant(&inputs.now, "now").map_err(stored)?;
@@ -807,10 +819,10 @@ fn noted_settings(
 fn parked_task(
     task: &Task,
     parked: &Parked,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
 ) -> Result<Task, DomainError> {
     let mut clock = parked.clock.clone();
-    if !inputs.authoritative {
+    if !inputs.private_review() {
         clock.parked = clock.parked.as_ref().map(public_marker);
     }
     let mut written = Task {
@@ -827,7 +839,7 @@ fn auto_park(
     read_set: &ReadSet,
     command: &DomainCommand,
     payload: &FormulationRef,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let task_id = TaskId::parse(command.entity_id.as_str())?;
@@ -858,7 +870,7 @@ fn auto_park(
     let mut changes = Vec::new();
     // The sweep-gap bookkeeping runs first, whatever the park answers.
     if let (Some(note), Some(row)) = (&device.sweep, &read_set.settings)
-        && let Some(updated) = noted_settings(row, &owner, note, inputs.authoritative)?
+        && let Some(updated) = noted_settings(row, &owner, note, inputs.private_review())?
     {
         changes.push(upsert(Record::ReviewSettings(updated)));
     }
@@ -866,7 +878,7 @@ fn auto_park(
         AutoPark::Applied(parked) => {
             changes.push(upsert(Record::Task(parked_task(task, parked, inputs)?)));
             let ack = parked.row.to_ack().map_err(stored)?;
-            let ack = if inputs.authoritative {
+            let ack = if inputs.private_review() {
                 ack
             } else {
                 ack.public()

@@ -211,6 +211,12 @@ fn sample_queries() -> Vec<Query> {
         json!({"kind": "review_queue", "step": "wins", "session_id": null}),
         json!({"kind": "list_mode", "mode": {"type": "agenda"}, "options": {},
                "page": {"limit": 50, "after": null}}),
+        json!({"kind":"task_formulation","task_id":REF_TASK}),
+        json!({"kind":"park_return_shown","task_id":REF_TASK,"parked_at":null,"formulation_id":null}),
+        json!({"kind":"restart_candidates"}),
+        json!({"kind":"auto_park_due"}),
+        json!({"kind":"review_summary","session_id":null}),
+        json!({"kind":"open_releases","release_kind":"restart","session_id":null}),
     ]
     .into_iter()
     .map(|raw| serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{raw}: {e}")))
@@ -405,7 +411,7 @@ fn dispatch_026_fr_002_the_samples_cover_every_catalog_command_and_query_kind() 
 
     let kinds: BTreeSet<QueryKind> = sample_queries().iter().map(query_kind).collect();
     let catalog: BTreeSet<QueryKind> = QueryKind::ALL.into_iter().collect();
-    assert_eq!(catalog.len(), 9);
+    assert_eq!(catalog.len(), 15);
     assert_eq!(kinds, catalog, "one sample per query kind");
     for (sample, kind) in sample_queries().iter().zip(QueryKind::ALL) {
         let tagged = serde_json::to_value(sample).expect("a query serializes");
@@ -493,6 +499,12 @@ fn dispatch_026_fr_002_every_query_kind_has_exactly_one_owner() {
         (QueryKind::ReviewState, ReviewSessions),
         (QueryKind::ReviewQueue, ReviewSessions),
         (QueryKind::ListMode, ListModes),
+        (QueryKind::TaskFormulation, ReviewSessions),
+        (QueryKind::ParkReturnShown, ReviewSessions),
+        (QueryKind::RestartCandidates, ReviewSessions),
+        (QueryKind::AutoParkDue, ReviewSessions),
+        (QueryKind::ReviewSummary, ReviewSessions),
+        (QueryKind::OpenReleases, ReviewSessions),
     ];
     assert_eq!(expected.len(), QueryKind::ALL.len());
     let samples = sample_queries();

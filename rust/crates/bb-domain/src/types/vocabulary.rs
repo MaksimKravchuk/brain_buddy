@@ -90,7 +90,10 @@ vocab! {
     /// The two states a counted review can end in (`last_counted_review.status`).
     CountedStatus { Completed => "completed", Partial => "partial" }
     TaskSort { Manual => "manual", Due => "due", Priority => "priority", Title => "title" }
-    ProjectFilter { Active => "active", Archived => "archived", All => "all" }
+    ProjectFilter {
+        Active => "active", Archived => "archived", All => "all",
+        NeedsNextAction => "needs_next_action",
+    }
     /// Where an open dated task falls relative to the device's day
     /// (`DateView` in `Queries.swift`).
     DateView { Overdue => "overdue", Today => "today", Upcoming => "upcoming" }

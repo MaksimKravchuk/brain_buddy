@@ -72,10 +72,11 @@ struct CaptureTaskIntent: AppIntent {
             dueDate: dueDate.map { CalendarDay(date: $0) }
         )
         let taskID: TaskID
-        do throws(GTDValidationError) {
-            taskID = try workspace.capture(draft)
+        do {
+            taskID = try await workspace.capture(draft, editorID: UUID().uuidString)
         } catch {
-            throw BrainBuddyIntentError(error)
+            if let validation = error as? GTDValidationError { throw BrainBuddyIntentError(validation) }
+            throw BrainBuddyIntentError(message: "Brain Buddy couldn't save this change. Try again.")
         }
         try await SharedWorkspace.didWrite(workspace)
 

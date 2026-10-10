@@ -577,7 +577,7 @@ struct MacSyncFlowTests {
         #expect(first.text.detail?.contains("You're offline, so they can't be sent now.") == true)
         #expect(rig.controller.router.isConfirmingSignOut)
 
-        try rig.model.quickCaptureInbox("Water the tomatoes")
+        try await rig.model.quickCaptureInbox("Water the tomatoes")
         #expect(await rig.controller.confirmSignOut() == .changed)
         let second = try #require(rig.controller.signOut.prompt)
         #expect(second.unsent == 4 && second.text.title == "4 changes haven't synced yet.")
@@ -672,9 +672,9 @@ struct MacSyncFlowTests {
 
         var refusal: String?
         do {
-            try rig.model.quickCaptureInbox("Water the tomatoes")
+            try await rig.model.quickCaptureInbox("Water the tomatoes")
         } catch {
-            refusal = error.message
+            refusal = (error as? GTDValidationError)?.message ?? error.localizedDescription
         }
         await rig.server.logoutGate.open()
         #expect(await confirming.value == .signedOut)
@@ -685,7 +685,7 @@ struct MacSyncFlowTests {
             "refused, so the panel keeps the text, or kept")
         #expect(refusal == "Brain Buddy is signing out. This wasn't saved; try again in a moment.")
         #expect(rig.workspace.account == nil)
-        try rig.model.quickCaptureInbox("Water the tomatoes")
+        try await rig.model.quickCaptureInbox("Water the tomatoes")
         #expect(rig.workspace.pendingChangeCount == 1, "saved again once signed out, on this Mac")
     }
 

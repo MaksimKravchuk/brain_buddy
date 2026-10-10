@@ -14,8 +14,10 @@ struct DatesStep: View {
     @Environment(Workspace.self) private var workspace
 
     var body: some View {
+        let read = WorkspaceReviewRead.queue(.dates, context.sessionID)
+        let page = workspace.reviewPageState(read)
         DatesContent(
-            days: workspace.datesAhead().map { due in
+            days: workspace.datesAhead(session: context.sessionID).map { due in
                 DatesContent.Day(
                     heading: due.day.startDate().formatted(.dateTime.weekday(.wide).day().month(.abbreviated)),
                     rows: due.tasks.map { task in
@@ -25,6 +27,17 @@ struct DatesStep: View {
             },
             onNext: context.advance
         )
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read) },
+                next: { try? await workspace.nextReviewPage(read) })
+        }
+        .task { try? await workspace.prepareReviewRead(read) }
     }
 }
 

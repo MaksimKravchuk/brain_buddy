@@ -35,6 +35,35 @@ use crate::{
 };
 use bb_protocol::command::CommandEnvelope;
 
+/// Rust-only local Review private capability. Other command owners use the
+/// ordinary inputs unchanged; this grants no remote/provider authority.
+pub fn decide_local_review_envelope(
+    read_set: &ReadSet,
+    envelope: &CommandEnvelope,
+    dependencies: &(impl Dependencies + ?Sized),
+    inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    let command = DomainCommand::from_envelope(envelope, dependencies)?;
+    decide_local_review(read_set, &command, inputs)
+}
+
+/// Typed counterpart of the Rust-only private Review entry point.
+pub fn decide_local_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    let review = crate::types::ReviewInputs::local(inputs);
+    match command_owner(&command.command)? {
+        CommandFamily::Park => park::decide_review(read_set, command, &review),
+        CommandFamily::ReviewDecisions => {
+            review_decisions::decide_review(read_set, command, &review)
+        }
+        CommandFamily::ReviewSessions => review_sessions::decide_review(read_set, command, &review),
+        _ => decide(read_set, command, inputs),
+    }
+}
+
 /// A rule family that decides commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CommandFamily {
@@ -119,11 +148,17 @@ pub enum QueryKind {
     ReviewState,
     ReviewQueue,
     ListMode,
+    TaskFormulation,
+    ParkReturnShown,
+    RestartCandidates,
+    AutoParkDue,
+    ReviewSummary,
+    OpenReleases,
 }
 
 impl QueryKind {
     /// Every query kind of the catalog.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 15] = [
         Self::TaskList,
         Self::TaskDetail,
         Self::ListCounts,
@@ -133,6 +168,12 @@ impl QueryKind {
         Self::ReviewState,
         Self::ReviewQueue,
         Self::ListMode,
+        Self::TaskFormulation,
+        Self::ParkReturnShown,
+        Self::RestartCandidates,
+        Self::AutoParkDue,
+        Self::ReviewSummary,
+        Self::OpenReleases,
     ];
 
     /// The wire spelling of `Query`'s `kind` tag.
@@ -147,6 +188,12 @@ impl QueryKind {
             Self::ReviewState => "review_state",
             Self::ReviewQueue => "review_queue",
             Self::ListMode => "list_mode",
+            Self::TaskFormulation => "task_formulation",
+            Self::ParkReturnShown => "park_return_shown",
+            Self::RestartCandidates => "restart_candidates",
+            Self::AutoParkDue => "auto_park_due",
+            Self::ReviewSummary => "review_summary",
+            Self::OpenReleases => "open_releases",
         }
     }
 }
@@ -154,15 +201,21 @@ impl QueryKind {
 /// The kind of a query. Exhaustive: a new variant must name its kind here.
 pub fn query_kind(query: &Query) -> QueryKind {
     match query {
-        Query::TaskList { .. } => QueryKind::TaskList,
+        Query::TaskList { .. } | Query::NativeTaskViews { .. } => QueryKind::TaskList,
         Query::TaskDetail { .. } => QueryKind::TaskDetail,
         Query::ListCounts {} => QueryKind::ListCounts,
-        Query::Projects { .. } => QueryKind::Projects,
+        Query::Projects { .. } | Query::NativeProjects { .. } => QueryKind::Projects,
         Query::ProjectDisplay { .. } => QueryKind::ProjectDisplay,
-        Query::Tags {} => QueryKind::Tags,
+        Query::Tags {} | Query::NativeTags { .. } => QueryKind::Tags,
         Query::ReviewState {} => QueryKind::ReviewState,
         Query::ReviewQueue { .. } => QueryKind::ReviewQueue,
         Query::ListMode { .. } => QueryKind::ListMode,
+        Query::TaskFormulation { .. } => QueryKind::TaskFormulation,
+        Query::ParkReturnShown { .. } => QueryKind::ParkReturnShown,
+        Query::RestartCandidates { .. } => QueryKind::RestartCandidates,
+        Query::AutoParkDue { .. } => QueryKind::AutoParkDue,
+        Query::ReviewSummary { .. } => QueryKind::ReviewSummary,
+        Query::OpenReleases { .. } => QueryKind::OpenReleases,
     }
 }
 

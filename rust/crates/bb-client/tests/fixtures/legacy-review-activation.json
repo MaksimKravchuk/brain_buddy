@@ -1,0 +1,334 @@
+{
+  "schema": "brainbuddy-legacy-review-activation/v1",
+  "source_review": {
+    "settings": {
+      "thresholdDays": 21,
+      "reviewWeekday": 2,
+      "reviewTime": "09:30",
+      "timeZone": "UTC",
+      "onboardedAt": "2026-10-10T09:00:00Z",
+      "activatedAt": "2026-10-10T09:00:00Z",
+      "ownerParkFloorAt": "2026-10-10T09:00:00Z",
+      "thresholdChangedAt": "2026-10-10T09:00:00Z",
+      "revision": 3
+    },
+    "sessions": {
+      "00000000-0000-4000-8000-000000000013": {
+        "id": "00000000-0000-4000-8000-000000000013",
+        "mode": "full",
+        "entry": "list",
+        "origin": "macos",
+        "status": "open",
+        "startedAt": "2026-10-10T09:00:00Z",
+        "lastActivityAt": "2026-10-10T09:00:00Z",
+        "currentStep": "decisions",
+        "steps": {
+          "decisions": "pending"
+        },
+        "activeSecondsByStep": {
+          "decisions": 7
+        },
+        "counts": {
+          "kept": 1
+        },
+        "setAsideTaskIDs": [
+          "00000000-0000-4000-8000-000000000012"
+        ],
+        "setAsideCount": 1,
+        "qualifyingActivity": true,
+        "decisionQueue": [
+          "00000000-0000-4000-8000-000000000011",
+          "00000000-0000-4000-8000-000000000012"
+        ],
+        "appliedProgress": [
+          "00000000-0000-4000-8000-000000000028"
+        ],
+        "revision": 2,
+        "endedElsewhere": false,
+        "movedOnElsewhere": false
+      }
+    },
+    "decisions": {
+      "00000000-0000-4000-8000-000000000014": {
+        "id": "00000000-0000-4000-8000-000000000014",
+        "taskID": "00000000-0000-4000-8000-000000000011",
+        "type": "keep_waiting",
+        "sessionID": "00000000-0000-4000-8000-000000000013",
+        "decidedAt": "2026-10-10T09:00:00Z",
+        "formulationID": "00000000-0000-4000-8000-000000000016",
+        "aiUse": "none",
+        "reasonText": "Private undo remains in the carrier",
+        "undo": {
+          "taskBefore": {
+            "id": "00000000-0000-4000-8000-000000000011",
+            "serverID": "task_history_proven",
+            "serverRevision": 4,
+            "title": "Waiting on the historical report",
+            "state": "waiting",
+            "tagIDs": [],
+            "priority": "low",
+            "waitingFor": "Alex",
+            "waitingSince": "2026-10-10T09:00:00Z",
+            "orderKey": 2,
+            "createdAt": "2026-10-10T09:00:00Z",
+            "updatedAt": "2026-10-10T09:00:00Z",
+            "subtasks": [],
+            "comments": []
+          },
+          "createdTaskID": "00000000-0000-4000-8000-000000000012",
+          "createdTaskAfter": {
+            "serverRevision": 1,
+            "updatedAt": "2026-10-10T09:00:00Z"
+          },
+          "receiptWritten": "waiting",
+          "sessionBefore": {
+            "qualifyingActivity": false,
+            "lastActivityAt": "2026-10-10T09:00:00Z",
+            "lastActivityAfter": "2026-10-10T09:00:00Z"
+          }
+        },
+        "taskAfter": {
+          "serverRevision": 5,
+          "updatedAt": "2026-10-10T09:00:00Z"
+        },
+        "yieldedAutoPark": false,
+        "snapshotOnServer": false
+      }
+    },
+    "receipts": [
+      {
+        "taskID": "00000000-0000-4000-8000-000000000011",
+        "kind": "waiting",
+        "reviewedAt": "2026-10-10T09:00:00Z",
+        "hiddenUntil": "2026-10-17T09:00:00Z",
+        "source": "keep",
+        "taskRevision": 5,
+        "taskUpdatedAt": "2026-10-10T09:00:00Z",
+        "decisionID": "00000000-0000-4000-8000-000000000014"
+      }
+    ],
+    "parkAcks": [
+      {
+        "taskID": "00000000-0000-4000-8000-000000000011",
+        "formulationID": "00000000-0000-4000-8000-000000000016",
+        "parkedAt": "2026-10-10T09:00:00Z"
+      }
+    ],
+    "bulkReleases": {
+      "00000000-0000-4000-8000-000000000015": {
+        "id": "00000000-0000-4000-8000-000000000015",
+        "kind": "restart",
+        "sessionID": "00000000-0000-4000-8000-000000000013",
+        "createdAt": "2026-10-10T09:00:00Z",
+        "released": [
+          {
+            "taskID": "00000000-0000-4000-8000-000000000011",
+            "previousState": "waiting",
+            "taskAfter": {
+              "serverRevision": 6,
+              "updatedAt": "2026-10-10T09:00:00Z"
+            },
+            "clockKnown": false
+          }
+        ],
+        "skipped": [
+          {
+            "taskID": "00000000-0000-4000-8000-000000000012",
+            "reason": "stale"
+          }
+        ],
+        "undoneAt": "2026-10-10T09:00:00Z",
+        "undoResult": {
+          "restored": [
+            "00000000-0000-4000-8000-000000000011"
+          ],
+          "skipped": [
+            "00000000-0000-4000-8000-000000000012"
+          ]
+        }
+      }
+    },
+    "navigatorConsents": {
+      "anthropic": {
+        "provider": "anthropic",
+        "grantedAt": "2026-10-10T09:00:00Z",
+        "consentTextVersion": 2
+      }
+    },
+    "server": {
+      "exposed": true,
+      "restartMode": false,
+      "pulledAt": "2026-10-10T09:00:00Z"
+    }
+  },
+  "source_tasks": {
+    "00000000-0000-4000-8000-000000000011": {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "serverID": "task_history_proven",
+      "serverRevision": 4,
+      "title": "Waiting on the historical report",
+      "state": "waiting",
+      "tagIDs": [],
+      "priority": "low",
+      "waitingFor": "Alex",
+      "waitingSince": "2026-10-10T09:00:00Z",
+      "orderKey": 2,
+      "createdAt": "2026-10-10T09:00:00Z",
+      "updatedAt": "2026-10-10T09:00:00Z",
+      "subtasks": [],
+      "comments": []
+    }
+  },
+  "expected_read_set": {
+    "settings": {
+      "threshold_days": 21,
+      "review_weekday": 2,
+      "review_time": "09:30",
+      "time_zone": "UTC",
+      "onboarded_at": "2026-10-10T09:00:00Z",
+      "activated_at": "2026-10-10T09:00:00Z",
+      "owner_park_floor_at": "2026-10-10T09:00:00Z",
+      "revision": "3"
+    },
+    "sessions": {
+      "review_00000000-0000-4000-8000-000000000013": {
+        "id": "review_00000000-0000-4000-8000-000000000013",
+        "mode": "full",
+        "entry": "list",
+        "origin": "macos",
+        "status": "open",
+        "started_at": "2026-10-10T09:00:00Z",
+        "last_activity_at": "2026-10-10T09:00:00Z",
+        "ended_at": null,
+        "current_step": "decisions",
+        "steps": {
+          "decisions": "pending"
+        },
+        "active_seconds_by_step": {
+          "decisions": 7
+        },
+        "counts": {
+          "done": 0,
+          "reformulated": 0,
+          "first_step": 0,
+          "waiting": 0,
+          "someday": 0,
+          "cancelled": 0,
+          "extended": 0,
+          "inbox_processed": 0,
+          "kept": 1,
+          "moved_to_next": 0
+        },
+        "set_aside_count": 1,
+        "qualifying_activity": true,
+        "clear_start": null,
+        "revision": "2"
+      }
+    },
+    "decision_queues": {
+      "review_00000000-0000-4000-8000-000000000013": {
+        "session_id": "review_00000000-0000-4000-8000-000000000013",
+        "task_ids": [
+          "task_history_proven",
+          "task_00000000-0000-4000-8000-000000000012"
+        ],
+        "decided_task_ids": [
+          "task_history_proven"
+        ],
+        "set_aside_task_ids": [
+          "task_00000000-0000-4000-8000-000000000012"
+        ]
+      }
+    },
+    "decisions": {
+      "decision_00000000-0000-4000-8000-000000000014": {
+        "id": "decision_00000000-0000-4000-8000-000000000014",
+        "type": "keep_waiting",
+        "task_id": "task_history_proven",
+        "session_id": "review_00000000-0000-4000-8000-000000000013",
+        "decided_at": "2026-10-10T09:00:00Z",
+        "substantive": null,
+        "stall_reason": null,
+        "ai_use": "none",
+        "yielded_auto_park": false,
+        "formulation_id": "00000000-0000-4000-8000-000000000016",
+        "task_revision_before": "4",
+        "task_revision_after": "5",
+        "created_task_id": "task_00000000-0000-4000-8000-000000000012",
+        "navigator_request_id": null,
+        "review_counts_as": "kept",
+        "client_decided_at": null,
+        "reason_text": "Private undo remains in the carrier",
+        "undo_available_until": null
+      }
+    },
+    "receipts": [
+      {
+        "task_id": "task_history_proven",
+        "kind": "waiting",
+        "hidden_until": "2026-10-17T09:00:00Z",
+        "task_revision": "5",
+        "reviewed_at": "2026-10-10T09:00:00Z",
+        "source": "keep",
+        "decision_id": "decision_00000000-0000-4000-8000-000000000014",
+        "bulk_id": null
+      }
+    ],
+    "park_acks": [
+      {
+        "task_id": "task_history_proven",
+        "formulation_id": "00000000-0000-4000-8000-000000000016",
+        "parked_at": "2026-10-10T09:00:00Z",
+        "seen_at": "2026-10-10T09:00:00Z",
+        "returned_at": null
+      }
+    ],
+    "bulk_releases": {
+      "bulk_00000000-0000-4000-8000-000000000015": {
+        "id": "bulk_00000000-0000-4000-8000-000000000015",
+        "kind": "restart",
+        "session_id": "review_00000000-0000-4000-8000-000000000013",
+        "created_at": "2026-10-10T09:00:00Z",
+        "undone_at": "2026-10-10T09:00:00Z",
+        "released": [
+          {
+            "task_id": "task_history_proven",
+            "revision_after": "6"
+          }
+        ],
+        "skipped": [
+          {
+            "task_id": "task_00000000-0000-4000-8000-000000000012",
+            "reason": "stale"
+          }
+        ],
+        "undo": {
+          "restored": [
+            "task_history_proven"
+          ],
+          "skipped": [
+            {
+              "task_id": "task_00000000-0000-4000-8000-000000000012",
+              "reason": "stale"
+            }
+          ]
+        }
+      }
+    },
+    "consents": [
+      {
+        "provider": "anthropic",
+        "consent": {
+          "granted_at": "2026-10-10T09:00:00Z",
+          "revoked_at": null,
+          "consent_text_version": 2
+        }
+      }
+    ]
+  },
+  "expected_derived_counts": {
+    "decision_queues": 1,
+    "unseen_park_acks": 0
+  },
+  "note": "Independent explicit public-projection oracle. Undo-created task and prior formulation are historical, absent from current task records. The immutable source keeps all private/session presentation facts."
+}

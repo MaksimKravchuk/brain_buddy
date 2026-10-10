@@ -122,6 +122,8 @@ private struct QuickCaptureView: View {
 
     @State private var title = ""
     @State private var error: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @State private var confirmingDiscard = false
     @FocusState private var titleFocused: Bool
 
@@ -133,6 +135,7 @@ private struct QuickCaptureView: View {
                 .font(.title2.bold())
             TextField("What's on your mind?", text: $title)
                 .textFieldStyle(.roundedBorder)
+                .disabled(isSaving)
                 .focused($titleFocused)
                 .onSubmit(save)
             Text("You can clarify and organize it later.")
@@ -145,9 +148,10 @@ private struct QuickCaptureView: View {
                 Spacer()
                 Button("Cancel") { requestClose() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
                 Button("Save to Inbox", action: save)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(cleanTitle.isEmpty || !EditorLimits.fits(cleanTitle, EditorLimits.title))
+                    .disabled(isSaving || cleanTitle.isEmpty || !EditorLimits.fits(cleanTitle, EditorLimits.title))
             }
         }
         .padding(22)
@@ -162,16 +166,23 @@ private struct QuickCaptureView: View {
     }
 
     private func requestClose() {
+        guard !isSaving else { return }
         if title.isEmpty { onClose() } else { confirmingDiscard = true }
     }
 
     private func save() {
-        guard !cleanTitle.isEmpty, EditorLimits.fits(cleanTitle, EditorLimits.title) else { return }
-        do {
-            try model.quickCaptureInbox(cleanTitle)
-            onClose()
-        } catch {
-            self.error = error.message
+        guard !isSaving, !cleanTitle.isEmpty, EditorLimits.fits(cleanTitle, EditorLimits.title) else { return }
+        let authored = cleanTitle
+        let submittedEditorID = editorID
+        isSaving = true
+        Task {
+            do {
+                try await model.quickCaptureInbox(authored, editorID: submittedEditorID)
+                onClose()
+            } catch {
+                self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."
+                isSaving = false
+            }
         }
     }
 }

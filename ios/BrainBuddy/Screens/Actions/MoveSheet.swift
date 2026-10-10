@@ -14,6 +14,8 @@ struct MoveSheet: View {
     @State private var destination: OpenList?
     @State private var waitingFor = ""
     @State private var errorMessage: String?
+    @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
 
     /// `initialList` preselects a destination, for example Waiting for chosen
     /// from a context menu.
@@ -62,31 +64,41 @@ struct MoveSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .bbDenseList()
             .navigationTitle("Move task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Move", action: move)
-                        .disabled(!canMove)
+                    Button("Move") { Task { await move() } }
+                        .disabled(!canMove || isSaving)
                 }
             }
             .onChange(of: destination) { _, _ in errorMessage = nil }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.medium, .large])
     }
 
-    private func move() {
-        guard let destination else { return }
-        let current = workspace.task(self.task.id) ?? self.task
+    @MainActor private func move() async {
+        guard !isSaving, let destination else { return }
+        let current = self.task
+        let submittedWaitingFor = waitingFor
+        let submittedEditorID = editorID
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            try await TaskListMover.move(
+                current, to: destination, waitingFor: submittedWaitingFor, workspace: workspace, toasts: toasts,
+                editorID: submittedEditorID
+            )
             dismiss()
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }

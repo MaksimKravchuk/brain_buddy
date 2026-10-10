@@ -169,6 +169,12 @@ public struct RustDomainFacade: Sendable {
     static func refusalError(
         _ refusal: RustRefusal, payload: WireObject, in state: GTDState, ids: RustIDTable
     ) -> any Error {
+        // This public-only pure facade has no durable native Store in which
+        // to defer Undo. Preserve its established unavailable result; the
+        // runtime execution port handles bound pending Undo separately.
+        if refusal.reason == "incomplete_read_set", refusal.field == "undo_snapshot" {
+            return GTDValidationError.undoUnavailable
+        }
         if let known = validationError(refusal, payload: payload, in: state, ids: ids) { return known }
         return RustDomainError.refused(reason: refusal.reason, field: refusal.field)
     }

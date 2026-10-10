@@ -15,18 +15,31 @@ struct RestOfNextStep: View {
     @Environment(Workspace.self) private var workspace
 
     var body: some View {
-        let capacity = ReviewCopy.capacity(workspace.capacityMirror())
-        let tasks = workspace.list(.list(.next)).sections.flatMap(\.tasks)
+        let read = WorkspaceReviewRead.queue(.restOfNext, context.sessionID)
+        let page = workspace.reviewPageState(read)
+        let capacity = ReviewCopy.capacity(workspace.capacityMirror(session: context.sessionID))
+        let tasks = workspace.restOfNext(session: context.sessionID)
         RestOfNextContent(
             figures: capacity.figures, note: capacity.note,
             rows: tasks.map { task in
                 RestOfNextContent.Row(
                     id: task.id, title: task.title,
-                    marker: workspace.formulationClass(of: task.id).map { MarkerStyle.for($0) }.flatMap { $0.showsInLists ? $0 : nil }
+                    marker: workspace.reviewFormulation(task.id, read: read).map(\.classification).map { MarkerStyle.for($0) }.flatMap { $0.showsInLists ? $0 : nil }
                 )
             },
             onNext: context.advance
         )
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read) },
+                next: { try? await workspace.nextReviewPage(read) })
+        }
+        .task { try? await workspace.prepareReviewRead(read) }
     }
 }
 

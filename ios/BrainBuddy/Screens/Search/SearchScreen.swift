@@ -29,7 +29,17 @@ struct SearchScreen: View {
                 clear: { recentStorage = "" }
             )
         } else {
-            SearchResultsView(text: text, sections: Self.ordered(workspace.list(.search(text)).sections))
+            let destination = Destination.search(text)
+            let page = workspace.listPageState(destination)
+            SearchResultsView(text: text, sections: Self.ordered(workspace.list(destination).sections), page: page) {
+                Task { await workspace.prepareList(destination) }
+            }
+            .safeAreaInset(edge: .bottom) {
+                WorkspaceQueryPageControls(page: page,
+                    previous: { await workspace.previousListPage(destination) },
+                    next: { await workspace.nextListPage(destination) })
+            }
+            .task(id: text) { await workspace.prepareList(destination) }
         }
     }
 }
@@ -87,26 +97,32 @@ private struct SearchIdleView: View {
 private struct SearchResultsView: View {
     let text: String
     let sections: [TaskSection]
+    let page: WorkspaceQueryPageState
+    let retry: () -> Void
+    @Environment(Workspace.self) private var workspace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if sections.isEmpty {
+        WorkspaceQueryContent(readiness: page.readiness, retry: retry) {
+          if sections.isEmpty {
             EmptyStateView(
                 title: "No results",
                 message: "Nothing on this \(ThisDevice.name) matches “\(text)”. Try fewer or different words.",
                 systemImage: "magnifyingglass"
             )
-        } else {
+          } else {
             List {
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.tasks) { task in
                             NavigationLink(value: AppRoute.task(task.id)) {
-                                TaskRow(task: task, showsProject: true, showsList: true)
+                                TaskRow(task: task, showsProject: true, showsList: true,
+                                    preparedFormulation: workspace.listFormulation(task.id, destination: .search(text)))
                             }
                             .taskActions(task)
                         }
                     } header: {
-                        BBSectionHeader(SearchScreen.title(for: section), count: section.tasks.count, countsTasks: true)
+                        BBSectionHeader(SearchScreen.title(for: section), count: section.totalCount, countsTasks: true)
                     } footer: {
                         if section.id == sections.last?.id {
                             Text("Searches this \(ThisDevice.name)")
@@ -115,6 +131,11 @@ private struct SearchResultsView: View {
                 }
             }
             .bbDenseList()
+            .animation(
+                BBMotion.animation(.settle, reduceMotion: reduceMotion),
+                value: sections.flatMap(\.tasks).map(\.id)
+            )
+          }
         }
     }
 }
