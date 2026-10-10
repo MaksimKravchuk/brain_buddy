@@ -223,7 +223,8 @@ pub(crate) fn private_read_set(
         if overlay.version != 1
             || overlay.workspace != workspace
             || overlay.entity_type.as_str() != kind
-            || json!(overlay.record_key).to_string() != key
+            || serde_json::from_str::<RecordKey>(&key).map_err(|_| StoreError::Corrupt)?
+                != overlay.record_key
         {
             return Err(StoreError::Corrupt.into());
         }

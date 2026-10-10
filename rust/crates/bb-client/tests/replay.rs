@@ -1644,22 +1644,16 @@ fn accountless_local_decision_private_undo_reopen_and_expired_replay_keep_saved_
             .unwrap()
             .replayed
     );
-    let bound: (
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    ) = store
+    let unbound: bool = store
         .read(|tx| {
             tx.query_row(
-                "SELECT account_id,scope_id,device_id,server_generation,cursor FROM sync_meta",
+                "SELECT account_id IS NULL AND scope_id IS NULL AND device_id IS NULL AND server_generation IS NULL AND cursor IS NULL FROM sync_meta",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| r.get(0),
             )
         })
         .unwrap();
-    assert_eq!(bound, (None, None, None, None, None));
+    assert!(unbound);
 }
 
 #[test]
