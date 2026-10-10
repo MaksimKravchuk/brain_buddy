@@ -742,7 +742,8 @@ package final class BrainBuddyModel {
 
     @discardableResult
     package func keepWaiting(_ shownTask: TaskRecord) async -> Bool {
-        guard shownTask.state == .waiting, workspace.isRustSelected,
+        guard workspace.isRustSelected else { return keepWaiting(shownTask.id) }
+        guard shownTask.state == .waiting,
               let shown = waitingReviewStamps[shownTask.id] else {
             error = "This Waiting review is no longer ready. Reopen it to inspect the task."
             return false
@@ -815,7 +816,8 @@ package final class BrainBuddyModel {
 
     @discardableResult
     package func keepSomeday(_ shownTask: TaskRecord) async -> Bool {
-        guard shownTask.state == .someday, workspace.isRustSelected,
+        guard workspace.isRustSelected else { return keepSomeday(shownTask.id) }
+        guard shownTask.state == .someday,
               let shown = somedayReviewStamps[shownTask.id] else {
             error = "This Someday review is no longer ready. Reopen it to inspect the task."
             return false
