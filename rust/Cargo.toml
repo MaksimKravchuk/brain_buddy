@@ -10,6 +10,7 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+bb-client = { path = "crates/bb-client" }
 bb-domain = { path = "crates/bb-domain" }
 bb-protocol = { path = "crates/bb-protocol" }
 # The Unicode data version of the three crates below must equal the server's

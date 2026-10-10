@@ -129,6 +129,7 @@ dependencies = [
 name = "bb-swift"
 version = "0.1.0"
 dependencies = [
+ "bb-client",
  "bb-domain",
  "bb-protocol",
  "serde",

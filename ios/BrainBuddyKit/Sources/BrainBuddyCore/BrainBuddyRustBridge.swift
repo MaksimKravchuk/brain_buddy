@@ -120,6 +120,144 @@ public enum RustAnswer: Equatable, Sendable {
     case refused(RustRefusal)
 }
 
+/// What a legacy `StoreDocument` file holds, counted by the means any reader of the file has
+/// (spec 026, T041). The Swift importer counts the file with the kit's own decoder and the
+/// Rust importer counts the same bytes with its own reader; the two must agree before the
+/// store is switched.
+public struct RustImportCounts: Equatable, Hashable, Sendable {
+    public var tasks: UInt64
+    public var subtasks: UInt64
+    public var comments: UInt64
+    public var projects: UInt64
+    public var tags: UInt64
+    /// Pending operations; carried whole for the outbox import.
+    public var outboxEntries: UInt64
+    /// Sync issues; carried whole for the outbox import.
+    public var issues: UInt64
+    public var reviewSessions: UInt64
+    public var reviewDecisions: UInt64
+    public var reviewReceipts: UInt64
+    public var reviewParkAcks: UInt64
+    public var reviewBulkReleases: UInt64
+    public var reviewNavigatorConsents: UInt64
+    /// Unsaved Review form text (`local.formDrafts`).
+    public var formDrafts: UInt64
+
+    public init(
+        tasks: UInt64 = 0, subtasks: UInt64 = 0, comments: UInt64 = 0, projects: UInt64 = 0, tags: UInt64 = 0,
+        outboxEntries: UInt64 = 0, issues: UInt64 = 0, reviewSessions: UInt64 = 0, reviewDecisions: UInt64 = 0,
+        reviewReceipts: UInt64 = 0, reviewParkAcks: UInt64 = 0, reviewBulkReleases: UInt64 = 0,
+        reviewNavigatorConsents: UInt64 = 0, formDrafts: UInt64 = 0
+    ) {
+        self.tasks = tasks
+        self.subtasks = subtasks
+        self.comments = comments
+        self.projects = projects
+        self.tags = tags
+        self.outboxEntries = outboxEntries
+        self.issues = issues
+        self.reviewSessions = reviewSessions
+        self.reviewDecisions = reviewDecisions
+        self.reviewReceipts = reviewReceipts
+        self.reviewParkAcks = reviewParkAcks
+        self.reviewBulkReleases = reviewBulkReleases
+        self.reviewNavigatorConsents = reviewNavigatorConsents
+        self.formDrafts = formDrafts
+    }
+
+    fileprivate init(_ counts: BridgeImportCounts) {
+        self.init(
+            tasks: counts.tasks, subtasks: counts.subtasks, comments: counts.comments, projects: counts.projects,
+            tags: counts.tags, outboxEntries: counts.outboxEntries, issues: counts.issues,
+            reviewSessions: counts.reviewSessions, reviewDecisions: counts.reviewDecisions,
+            reviewReceipts: counts.reviewReceipts, reviewParkAcks: counts.reviewParkAcks,
+            reviewBulkReleases: counts.reviewBulkReleases, reviewNavigatorConsents: counts.reviewNavigatorConsents,
+            formDrafts: counts.formDrafts)
+    }
+
+    fileprivate var bridged: BridgeImportCounts {
+        BridgeImportCounts(
+            tasks: tasks, subtasks: subtasks, comments: comments, projects: projects, tags: tags,
+            outboxEntries: outboxEntries, issues: issues, reviewSessions: reviewSessions,
+            reviewDecisions: reviewDecisions, reviewReceipts: reviewReceipts, reviewParkAcks: reviewParkAcks,
+            reviewBulkReleases: reviewBulkReleases, reviewNavigatorConsents: reviewNavigatorConsents,
+            formDrafts: formDrafts)
+    }
+}
+
+/// The import of the legacy `StoreDocument` file into the Rust store of one workspace.
+public struct RustLegacyImportRequest: Equatable, Sendable {
+    public var workspaceID: String
+    /// The Rust store file. Created when it does not exist.
+    public var databasePath: String
+    /// The legacy JSON file. It is only read.
+    public var sourcePath: String
+    /// Where the backup and the schema manifest go; beside the source when nil.
+    public var backupDirectory: String?
+    /// The instant of the import, RFC 3339.
+    public var now: String
+    /// The bound on every lock wait; running out is a retryable `STORE_BUSY`.
+    public var busyTimeoutMilliseconds: UInt32
+    /// The counts an independent reader took from the same file.
+    public var expected: RustImportCounts?
+
+    public init(
+        workspaceID: String, databasePath: String, sourcePath: String, backupDirectory: String? = nil,
+        now: String, busyTimeoutMilliseconds: UInt32 = 5_000, expected: RustImportCounts? = nil
+    ) {
+        self.workspaceID = workspaceID
+        self.databasePath = databasePath
+        self.sourcePath = sourcePath
+        self.backupDirectory = backupDirectory
+        self.now = now
+        self.busyTimeoutMilliseconds = busyTimeoutMilliseconds
+        self.expected = expected
+    }
+
+    fileprivate var bridged: BridgeImportRequest {
+        BridgeImportRequest(
+            workspaceId: workspaceID, databasePath: databasePath, sourcePath: sourcePath,
+            backupDirectory: backupDirectory, now: now, busyTimeoutMs: busyTimeoutMilliseconds,
+            expected: expected?.bridged)
+    }
+}
+
+/// The activation marker of a finished import: what the legacy file was and what was
+/// kept of it. No user text.
+public struct RustLegacyImportReport: Equatable, Sendable {
+    /// The same file had already been imported: nothing was done.
+    public let alreadyActive: Bool
+    /// SHA-256 of the legacy file's bytes, lowercase hex.
+    public let sourceSHA256: String
+    public let sourceBytes: UInt64
+    public let sourceVersion: Int64
+    public let sourceGeneration: Int64
+    /// File names, beside the source (or in the requested directory).
+    public let backupFile: String
+    public let manifestFile: String
+    public let importedAt: String
+    public let counts: RustImportCounts
+    /// Identity aliases written (a server ID the file proved for a local ID).
+    public let aliases: UInt64
+    /// Tasks whose local-only facts (`lastOpenList`, `childrenSyncedAt`, the private part of a
+    /// park) were kept.
+    public let localTaskFacts: UInt64
+
+    fileprivate init(_ report: BridgeImportReport) {
+        alreadyActive = report.alreadyActive
+        sourceSHA256 = report.sourceSha256
+        sourceBytes = report.sourceBytes
+        sourceVersion = report.sourceVersion
+        sourceGeneration = report.sourceGeneration
+        backupFile = report.backupFile
+        manifestFile = report.manifestFile
+        importedAt = report.importedAt
+        counts = RustImportCounts(report.counts)
+        aliases = report.aliases
+        localTaskFacts = report.localTaskFacts
+    }
+}
+
 /// One bridge runtime handle. It is safe to share between tasks and threads; `close()`
 /// is final and idempotent, and later calls fail with `WORKSPACE_CLOSED`.
 public final class RustBridgeRuntime: Sendable {
@@ -200,6 +338,20 @@ public final class RustBridgeRuntime: Sendable {
             case .answered(let result): return .answered(result)
             case .refused(let refusal): return .refused(RustRefusal(refusal))
             }
+        }
+    }
+
+    /// Imports the legacy `StoreDocument` file into the Rust store, off the caller's actor.
+    ///
+    /// The file is only read; the store switches in one transaction after the imported rows were
+    /// checked against it, or not at all, so every failure leaves the legacy file as it was. A
+    /// caller that was cancelled before the call gets `CANCELLED` and nothing is done. One that is
+    /// cancelled while it runs also gets `CANCELLED`, but the import is atomic and runs to its end:
+    /// call again and it reports `alreadyActive`.
+    public func importLegacyStore(_ request: RustLegacyImportRequest) async throws -> RustLegacyImportReport {
+        let bridged = request.bridged
+        return try await offActor { (runtime: BridgeRuntime) throws -> RustLegacyImportReport in
+            RustLegacyImportReport(try runtime.importLegacyStore(request: bridged))
         }
     }
 

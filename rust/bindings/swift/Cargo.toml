@@ -24,6 +24,7 @@ required-features = ["bindgen"]
 bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
 
 [dependencies]
+bb-client.workspace = true
 bb-domain.workspace = true
 bb-protocol.workspace = true
 serde.workspace = true
