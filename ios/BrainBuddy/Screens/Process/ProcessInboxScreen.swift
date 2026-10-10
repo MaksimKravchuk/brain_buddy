@@ -120,7 +120,6 @@ struct InboxClarifier: View {
             }
         }
         .disabled(isSaving)
-        .task { await prepareQueries() }
         .onChange(of: hasSnapshot && current == nil) { _, isDone in
             if isDone { onDone?() }
         }
@@ -163,6 +162,7 @@ struct InboxClarifier: View {
             }
         }
         }
+        .task { await prepareQueries() }
     }
 
     // MARK: Queue
@@ -848,6 +848,7 @@ private struct MakeProjectSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .navigationTitle("Make it a project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -876,11 +877,12 @@ private struct MakeProjectSheet: View {
         let projectName = trimmed(name)
         let action = trimmed(firstAction)
         let desiredOutcome = trimmed(outcome)
+        let operationEditorID = editorID
         guard !projectName.isEmpty, !action.isEmpty, !isSaving else { return }
         isSaving = true
         defer { isSaving = false }
         do {
-            try await onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action, editorID)
+            try await onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action, operationEditorID)
             dismiss()
         } catch {
             message = TaskCommandRunner.message(for: error)
