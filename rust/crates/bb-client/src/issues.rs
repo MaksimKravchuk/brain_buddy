@@ -29,11 +29,13 @@
 //! after a restart, never submitted by itself, and loses its retry approvals
 //! when the record changed since it was shown.
 
-use crate::execute::{ExecuteContext, ExecuteError, ExecuteRequest, IdSource, execute_in};
+use crate::execute::{
+    ExecuteContext, ExecuteError, ExecuteRequest, IdSource, execute_in, shown_key,
+};
 use crate::replay::{ReplayError, Replayed, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::types::Reason;
-use bb_protocol::catalog::CommandType;
+use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::Precondition;
 use bb_protocol::wire::{CommandId, Id};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -169,6 +171,8 @@ pub enum IssueError {
     DependentChoiceRequired(CommandId),
     UnknownDependent(CommandId),
     DiscardNotConfirmed(CommandId),
+    /// A replacement must be a new command: its ID is already in the queue.
+    ReplacementIdReused(CommandId),
     Execute(ExecuteError),
 }
 
@@ -186,6 +190,7 @@ impl IssueError {
             Self::DependentChoiceRequired(_) => "DEPENDENT_CHOICE_REQUIRED",
             Self::UnknownDependent(_) => "UNKNOWN_DEPENDENT",
             Self::DiscardNotConfirmed(_) => "DISCARD_NOT_CONFIRMED",
+            Self::ReplacementIdReused(_) => "REPLACEMENT_ID_REUSED",
             Self::Execute(error) => error.code(),
         }
     }
@@ -475,20 +480,46 @@ fn select_issues(
 
 type RawCurrent = (String, String, Option<String>, i64, Option<Vec<u8>>);
 
+/// The record key an intent's target is stored under. The Review settings are
+/// a singleton under the empty key, whatever scope ID the command names; the
+/// type comes from the precondition on the target (or the command itself).
+fn target_key(intent: &Value) -> Option<String> {
+    let target = intent.get("entity_id")?.as_str()?;
+    let checked = |precondition: &&Value| {
+        let named = precondition.get("after_command").unwrap_or(precondition);
+        named.get("entity_id").and_then(Value::as_str) == Some(target)
+    };
+    let entity_type = intent
+        .get("preconditions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(checked)
+        .and_then(|precondition| {
+            let named = precondition.get("after_command").unwrap_or(precondition);
+            EntityType::from_wire(named.get("entity_type")?.as_str()?)
+        })
+        .or_else(|| {
+            (intent.get("type")?.as_str()? == "review.settings")
+                .then_some(EntityType::ReviewSettings)
+        });
+    Some(shown_key(entity_type.unwrap_or(EntityType::Task), target))
+}
+
 /// The record the confirmed base holds for a target now.
 fn current_of(
     tx: &Transaction<'_>,
     workspace_id: &str,
     issue: &Issue,
 ) -> Result<Option<CurrentRecord>, IssueError> {
-    let Some(target) = issue.local_intent.get("entity_id").and_then(Value::as_str) else {
+    let Some(key) = target_key(&issue.local_intent) else {
         return Ok(None);
     };
     let row: Option<RawCurrent> = tx
         .query_row(
             "SELECT record_type, record_version, edit_revision, tombstone, body
              FROM confirmed_records WHERE workspace_id = ?1 AND record_key = ?2",
-            params![workspace_id, json!([target]).to_string()],
+            params![workspace_id, key],
             |row| {
                 Ok((
                     row.get(0)?,
@@ -804,6 +835,18 @@ fn replace(
     context: &ExecuteContext,
 ) -> Result<(), IssueError> {
     ensure_resolvable(tx, workspace_id, old)?;
+    let reused: Option<i64> = tx
+        .query_row(
+            "SELECT 1 FROM outbox WHERE workspace_id = ?1 AND command_id = ?2",
+            params![workspace_id, replacement.command_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if reused.is_some() {
+        return Err(IssueError::ReplacementIdReused(
+            replacement.command_id.clone(),
+        ));
+    }
     for dependency in &replacement.depends_on {
         let state: Option<String> = tx
             .query_row(
@@ -846,13 +889,19 @@ fn replace(
         depends_on: replacement.depends_on.clone(),
         context: context.clone(),
     };
-    execute_in(tx, ids, &request, &old_id).map_err(|error| match error {
+    let queued = execute_in(tx, ids, &request, &old_id).map_err(|error| match error {
         ExecuteError::Refused(refusal) if refusal.reason == Reason::RevisionConflict => {
             IssueError::ChangedAgain
         }
         ExecuteError::Store(error) => IssueError::Store(error),
         other => IssueError::Execute(other),
     })?;
+    // Closing the old command is only honest if a new one was written.
+    if queued.replayed {
+        return Err(IssueError::ReplacementIdReused(
+            replacement.command_id.clone(),
+        ));
+    }
     close(
         tx,
         workspace_id,

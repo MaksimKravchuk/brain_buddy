@@ -173,9 +173,12 @@ fn confirm_all(store: &mut Store) {
 
 /// Another device changed a confirmed record: its revision moves on.
 fn server_edit(store: &mut Store, id: &str, change: impl FnOnce(&mut Value)) {
+    server_edit_at(store, json!([id]).to_string(), change);
+}
+
+fn server_edit_at(store: &mut Store, key: String, change: impl FnOnce(&mut Value)) {
     store
         .write(|tx| {
-            let key = json!([id]).to_string();
             let (body, revision): (Vec<u8>, String) = tx.query_row(
                 "SELECT body, edit_revision FROM confirmed_records WHERE record_key = ?1",
                 [&key],
@@ -1115,4 +1118,90 @@ fn replay_026_fr_007_a_queued_revoke_then_regrant_replaces_the_confirmed_consent
     assert_eq!(consents.len(), 1);
     assert_eq!(consents[0]["consent"]["revoked_at"], Value::Null);
     assert_eq!(consents[0]["consent"]["granted_at"], NOW);
+}
+
+#[test]
+fn replay_026_fr_007_a_settings_conflict_finds_its_singleton_record_and_revision() {
+    let path = scratch("settings");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let settings_edit = |n, weekday: u8, revision: &str| {
+        request(
+            cmd(n),
+            CommandType::ReviewSettings,
+            Some("scope-a"),
+            json!({ "review_weekday": weekday }),
+            vec![shown(EntityType::ReviewSettings, "scope-a", revision)],
+        )
+    };
+    execute(&mut store, &mut ids, &settings_edit(1, 2, "1")).unwrap();
+    confirm_all(&mut store);
+    let revision: String = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT edit_revision FROM confirmed_records WHERE record_key = '[]'",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    execute(&mut store, &mut ids, &settings_edit(2, 3, &revision)).unwrap();
+
+    // Another device changes the settings first.
+    server_edit_at(&mut store, "[]".to_string(), |settings| {
+        settings["review_weekday"] = json!(5);
+    });
+    let replayed = replay(&mut store, &context()).unwrap();
+    assert_eq!(replayed.rejected, [cmd(2)]);
+
+    let view = issue(&mut store, &issue_id(2)).unwrap().unwrap();
+    assert_eq!(view.issue.reason, IssueReason::RevisionConflict);
+    let current = view.current.expect("the singleton settings record");
+    assert_eq!(current.entity_type, "review_settings");
+    let shown_now = current
+        .edit_revision
+        .expect("a revision to compare against");
+    assert_eq!(current.record.unwrap()["review_weekday"], 5);
+
+    // A draft made against the revision shown is not "changed again".
+    let draft = DecisionDraft {
+        shown_revision: Some(shown_now),
+        ..DecisionDraft::default()
+    };
+    save_draft(&mut store, &issue_id(2), &draft, NOW).unwrap();
+    assert!(
+        !load_draft(&mut store, &issue_id(2))
+            .unwrap()
+            .unwrap()
+            .changed_again
+    );
+}
+
+#[test]
+fn replay_026_fr_007_a_replacement_must_be_a_new_command_or_nothing_is_closed() {
+    let path = scratch("reused");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let task_id = confirmed_task(&mut store, &mut ids);
+    offline_edit(&mut store, &mut ids, &task_id);
+    server_edit(&mut store, &task_id, |task| task["title"] = json!("Theirs"));
+    replay(&mut store, &context()).unwrap();
+    let before = states(&mut store);
+
+    // The old command's own ID, and any other queued command's, are refused.
+    for reused in [2, 1] {
+        let keep = resolution(
+            2,
+            keep_mine(reused, vec![shown(EntityType::Task, &task_id, "2")]),
+            vec![],
+        );
+        assert_eq!(
+            resolve_issue(&mut store, &mut ids, &keep).unwrap_err(),
+            IssueError::ReplacementIdReused(cmd(reused))
+        );
+    }
+    assert_eq!(states(&mut store), before);
+    assert_eq!(open_issues(&mut store).unwrap().len(), 1);
+    assert_eq!(superseded_by(&mut store, 2), None);
+    assert_eq!(task(&mut store, &task_id).unwrap()["title"], "Theirs");
 }

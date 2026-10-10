@@ -784,7 +784,7 @@ fn depend_on_key(
 /// The record key a shown revision of `entity_type` is stored under: the
 /// Review settings are a singleton with the empty key, every other record with
 /// an edit revision is keyed by its ID.
-fn shown_key(entity_type: EntityType, id: &str) -> String {
+pub(crate) fn shown_key(entity_type: EntityType, id: &str) -> String {
     if entity_type == EntityType::ReviewSettings {
         json!(RecordKey::new()).to_string()
     } else {
