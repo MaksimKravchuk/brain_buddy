@@ -287,7 +287,6 @@ struct WorkspaceView: View {
         .onChange(of: model.appliedPriority) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
-        .onChange(of: model.queryReadinessSnapshot) { _, _ in Task { await model.refreshVisibleQueriesIfNeeded() } }
     }
 
     @ToolbarContentBuilder
