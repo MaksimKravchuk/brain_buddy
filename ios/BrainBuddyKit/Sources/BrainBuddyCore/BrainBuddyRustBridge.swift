@@ -535,20 +535,36 @@ public struct RustWorkspaceCommand: Equatable, Sendable, Codable {
     public let payload: Data
     public let preconditions: Data
     public let dependsOn: [String]
+    public let admissionTokens: Data
 
     public init(commandID: String, commandType: String, entityID: String?, payload: Data,
-                preconditions: Data = Data("[]".utf8), dependsOn: [String] = []) {
+                preconditions: Data = Data("[]".utf8), dependsOn: [String] = [],
+                admissionTokens: Data = Data("[]".utf8)) {
         self.commandID = commandID
         self.commandType = commandType
         self.entityID = entityID
         self.payload = payload
         self.preconditions = preconditions
         self.dependsOn = dependsOn
+        self.admissionTokens = admissionTokens
+    }
+
+    enum CodingKeys: String, CodingKey { case commandID, commandType, entityID, payload, preconditions, dependsOn, admissionTokens }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        commandID = try values.decode(String.self, forKey: .commandID)
+        commandType = try values.decode(String.self, forKey: .commandType)
+        entityID = try values.decodeIfPresent(String.self, forKey: .entityID)
+        payload = try values.decode(Data.self, forKey: .payload)
+        preconditions = try values.decode(Data.self, forKey: .preconditions)
+        dependsOn = try values.decode([String].self, forKey: .dependsOn)
+        admissionTokens = try values.decodeIfPresent(Data.self, forKey: .admissionTokens) ?? Data("[]".utf8)
     }
 
     fileprivate var bridged: BridgeWorkspaceCommand {
         BridgeWorkspaceCommand(commandId: commandID, commandType: commandType, entityId: entityID,
-                               payload: payload, preconditions: preconditions, dependsOn: dependsOn)
+                               payload: payload, preconditions: preconditions, dependsOn: dependsOn, admissionTokens: admissionTokens)
     }
 }
 
@@ -595,11 +611,14 @@ public struct RustWorkspacePage: Equatable, Sendable {
     public let projectionGeneration: String
     public let result: Data
     public let collectionNextCursor: String?
+    public let taskFrames: Data
 
-    public init(projectionGeneration: String, result: Data, collectionNextCursor: String? = nil) {
+    public init(projectionGeneration: String, result: Data, collectionNextCursor: String? = nil,
+                taskFrames: Data = Data("[]".utf8)) {
         self.projectionGeneration = projectionGeneration
         self.result = result
         self.collectionNextCursor = collectionNextCursor
+        self.taskFrames = taskFrames
     }
 }
 
@@ -698,6 +717,33 @@ public struct RustWorkspaceDraft: Equatable, Sendable {
         self.init(draftID: draft.draftId, editorKind: draft.editorKind, recordType: draft.recordType,
             recordKey: draft.recordKey, baseRevision: draft.baseRevision, fields: draft.fields, updatedAt: draft.updatedAt)
     }
+}
+
+public struct RustWorkspaceReviewFormLoaded: Sendable {
+    public let sourceKey: String
+    public let draft: FormDraft?
+    public let liveCount: Int
+    public let projectionGeneration: String
+}
+
+public struct RustWorkspaceReviewFormCount: Sendable {
+    public let liveCount: Int
+    public let projectionGeneration: String
+}
+
+public struct RustWorkspaceSourceIdentityRequest: Sendable {
+    public let entityType: String
+    public let canonicalID: String
+    public init(entityType: String, canonicalID: String) {
+        self.entityType = entityType
+        self.canonicalID = canonicalID
+    }
+}
+
+public struct RustWorkspaceSourceIdentityBinding: Sendable {
+    public let entityType: String
+    public let canonicalID: String
+    public let sourceID: String?
 }
 
 public enum RustWorkspaceStoreStatus: Equatable, Sendable {
@@ -802,6 +848,20 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
+    /// Read-only recovery: nil means at least one original command is unknown.
+    /// It never executes an unknown suffix or creates a replacement gesture.
+    public func lookupKnownBatch(_ commands: [RustWorkspaceCommand], context: RustWorkspaceContext)
+        async throws -> [RustWorkspaceSaved]? {
+        let commands = commands.map(\.bridged)
+        let context = context.bridged
+        return try await offActor { workspace in
+            switch try workspace.lookupKnownBatch(commands: commands, context: context) {
+            case .known(let results): return results.map(RustWorkspaceSaved.init)
+            case .notKnown: return nil
+            }
+        }
+    }
+
     /// Source bodies are immutable and read from the imported Rust store.
     /// Only entries proven never sent are eligible for this conversion.
     public func legacyUnsent() async throws -> [RustWorkspaceLegacyUnsent] {
@@ -836,6 +896,61 @@ public final class RustWorkspaceRuntime: Sendable {
 
     public func syncStatus() async throws -> Data {
         try await offActor { workspace in try workspace.syncStatus() }
+    }
+
+    public func reverseIdentities(_ requests: [RustWorkspaceSourceIdentityRequest]) async throws -> [RustWorkspaceSourceIdentityBinding] {
+        let items = requests.map { BridgeSourceIdentityRequest(entityType: $0.entityType, canonicalId: $0.canonicalID) }
+        return try await offActor { workspace in
+            try workspace.reverseIdentities(items: items).map {
+                RustWorkspaceSourceIdentityBinding(entityType: $0.entityType, canonicalID: $0.canonicalId, sourceID: $0.sourceId)
+            }
+        }
+    }
+
+    public func loadReviewForm(_ key: String, now: Date) async throws -> RustWorkspaceReviewFormLoaded {
+        let instant = RustInstant.format(now)
+        return try await offActor { workspace in
+            let result = try workspace.loadReviewForm(key: key, now: instant)
+            let draft = try result.draft.map { form -> FormDraft in
+                guard let date = RustInstant.parse(form.savedAt) else { throw RustBridgeError(code: "MALFORMED_DRAFT") }
+                return FormDraft(text: form.text, savedAt: date)
+            }
+            guard let count = Int(result.liveCount), count >= 0 else { throw RustBridgeError(code: "MALFORMED_DRAFT_COUNT") }
+            return RustWorkspaceReviewFormLoaded(sourceKey: result.sourceKey, draft: draft, liveCount: count,
+                projectionGeneration: result.projectionGeneration)
+        }
+    }
+
+    public func reviewFormCount(now: Date) async throws -> RustWorkspaceReviewFormCount {
+        let instant = RustInstant.format(now)
+        return try await offActor { workspace in try Self.formCount(workspace.reviewFormCount(now: instant)) }
+    }
+
+    public func saveReviewForm(_ key: String, sourceKey: String?, draft: FormDraft?, now: Date) async throws -> RustWorkspaceReviewFormCount {
+        let form = draft.map { BridgeReviewForm(text: $0.text, savedAt: RustInstant.format($0.savedAt)) }
+        let instant = RustInstant.format(now)
+        return try await committing { workspace, operation in
+            try Self.formCount(workspace.saveReviewForm(key: key, sourceKey: sourceKey, draft: form, now: instant, operation: operation))
+        }
+    }
+
+    public func clearReviewFormsForTask(_ canonicalTaskID: String, now: Date) async throws -> RustWorkspaceReviewFormCount {
+        let instant = RustInstant.format(now)
+        return try await committing { workspace, operation in
+            try Self.formCount(workspace.clearReviewFormsForTask(canonicalTaskId: canonicalTaskID, now: instant, operation: operation))
+        }
+    }
+
+    public func pruneReviewForms(now: Date) async throws -> RustWorkspaceReviewFormCount {
+        let instant = RustInstant.format(now)
+        return try await committing { workspace, operation in
+            try Self.formCount(workspace.pruneReviewForms(now: instant, operation: operation))
+        }
+    }
+
+    private static func formCount(_ result: BridgeReviewFormCount) throws -> RustWorkspaceReviewFormCount {
+        guard let count = Int(result.liveCount), count >= 0 else { throw RustBridgeError(code: "MALFORMED_DRAFT_COUNT") }
+        return RustWorkspaceReviewFormCount(liveCount: count, projectionGeneration: result.projectionGeneration)
     }
 
     public func loadDraft(_ draftID: String) async throws -> RustWorkspaceDraft? {
@@ -879,7 +994,7 @@ public final class RustWorkspaceRuntime: Sendable {
         switch answer {
         case .answered(let page):
             return .answered(RustWorkspacePage(projectionGeneration: page.projectionGeneration, result: page.result,
-                                              collectionNextCursor: page.collectionNextCursor))
+                                              collectionNextCursor: page.collectionNextCursor, taskFrames: page.taskFrames))
         case .refused(let refusal, let generation): return .refused(RustRefusal(refusal), projectionGeneration: generation)
         }
     }
@@ -915,7 +1030,7 @@ public final class RustWorkspaceRuntime: Sendable {
                                        collectionAfter: collectionAfter) {
             case .answered(let page):
                 return .answered(RustWorkspacePage(projectionGeneration: page.projectionGeneration, result: page.result,
-                                                  collectionNextCursor: page.collectionNextCursor))
+                                                  collectionNextCursor: page.collectionNextCursor, taskFrames: page.taskFrames))
             case .refused(let refusal, let generation): return .refused(RustRefusal(refusal), projectionGeneration: generation)
             }
         }

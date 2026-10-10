@@ -393,9 +393,12 @@ public struct ShownTask: Hashable, Sendable {
     /// This device's child edits on the task when the card opened
     /// (`GTDState.localChildEdits`).
     public var localChildEdits: Int
+    /// Content-free proof from the original canonical read; local prepared gesture only.
+    public var runtimeAdmissionToken: Data?
 
     public init(_ task: TaskRecord, localChildEdits: Int = 0) {
         self.localChildEdits = localChildEdits
+        runtimeAdmissionToken = nil
         content = Self.visible(task)
         childrenKnown = task.serverID == nil || task.childrenSyncedAt != nil
         subtasks = Self.visible(task.subtasks)

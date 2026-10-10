@@ -251,7 +251,7 @@
         "stall_reason": null,
         "ai_use": "none",
         "yielded_auto_park": false,
-        "formulation_id": "form_00000000-0000-4000-8000-000000000016",
+        "formulation_id": "00000000-0000-4000-8000-000000000016",
         "task_revision_before": "4",
         "task_revision_after": "5",
         "created_task_id": "task_00000000-0000-4000-8000-000000000012",
@@ -277,7 +277,7 @@
     "park_acks": [
       {
         "task_id": "task_history_proven",
-        "formulation_id": "form_00000000-0000-4000-8000-000000000016",
+        "formulation_id": "00000000-0000-4000-8000-000000000016",
         "parked_at": "2026-10-10T09:00:00Z",
         "seen_at": "2026-10-10T09:00:00Z",
         "returned_at": null

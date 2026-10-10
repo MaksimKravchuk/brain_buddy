@@ -218,14 +218,19 @@ enum RustInstant {
 struct RustIDTable {
     private let stripsUUIDPrefixes: Bool
     private let collectsRequests: Bool
+    private let preservesReferences: Bool
+    private let canonicalFormulationIDs: Set<String>
     /// Prefixed wire ID to the Swift ID it stands for.
     private(set) var known: [String: String] = [:]
     private(set) var requested: Set<RustWorkspaceIdentityRequest> = []
     private var canonical: [String: String] = [:]
 
-    init(stripsUUIDPrefixes: Bool = false, bindings: [RustWorkspaceIdentityBinding] = [], collectsRequests: Bool = false) {
+    init(stripsUUIDPrefixes: Bool = false, bindings: [RustWorkspaceIdentityBinding] = [], collectsRequests: Bool = false,
+         canonicalFormulationIDs: Set<String> = [], preservesReferences: Bool = false) {
         self.stripsUUIDPrefixes = stripsUUIDPrefixes
         self.collectsRequests = collectsRequests
+        self.preservesReferences = preservesReferences
+        self.canonicalFormulationIDs = canonicalFormulationIDs
         for binding in bindings {
             guard let id = binding.canonicalID else { continue }
             let prefix = ["review_session": "review", "review_decision": "decision",
@@ -236,6 +241,7 @@ struct RustIDTable {
     }
 
     mutating func wire(_ raw: String, prefix: String) -> String {
+        if prefix == "form", canonicalFormulationIDs.contains(raw) { return raw }
         let entityTypes = ["review": "review_session", "decision": "review_decision", "bulk": "review_bulk_release"]
         let entityType = entityTypes[prefix] ?? prefix
         if collectsRequests, ["task", "project", "tag", "subtask", "comment", "review_session", "review_decision", "review_bulk_release"]
@@ -243,6 +249,7 @@ struct RustIDTable {
             requested.insert(RustWorkspaceIdentityRequest(entityType: entityType, localID: raw))
         }
         if let id = canonical[prefix + ":" + raw] { return id }
+        if preservesReferences { return raw }
         if ClientID.isValid(raw, prefix: prefix) { return raw }
         let wire = "\(prefix)_\(raw)"
         guard ClientID.isValid(wire, prefix: prefix) else { return raw }
@@ -275,6 +282,13 @@ struct RustIDTable {
     mutating func subtask(_ id: SubtaskID) -> String { wire(id.rawValue, prefix: "subtask") }
     mutating func comment(_ id: CommentID) -> String { wire(id.rawValue, prefix: "comment") }
     mutating func formulation(_ id: FormulationID) -> String { wire(id.rawValue, prefix: "form") }
+    mutating func newFormulation(_ id: FormulationID) -> String {
+        if ClientID.isValid(id.rawValue, prefix: "form") { return id.rawValue }
+        let created = "form_" + id.rawValue
+        guard ClientID.isValid(created, prefix: "form") else { return id.rawValue }
+        known[created] = id.rawValue
+        return created
+    }
     mutating func decision(_ id: DecisionID) -> String { wire(id.rawValue, prefix: "decision") }
     mutating func bulk(_ id: BulkID) -> String { wire(id.rawValue, prefix: "bulk") }
     mutating func session(_ id: ReviewSessionID) -> String { wire(id.rawValue, prefix: "review") }

@@ -175,3 +175,41 @@ private actor ControlledRustQuery {
             result: Data("{\"kind\":\"list_counts\",\"value\":{}}".utf8), collectionNextCursor: nextCursor)))
     }
 }
+
+
+extension RustWorkspaceTests {
+    @Test("026-FR-026: an old tokenless interactive draft cannot execute an unknown suffix or mint replacement IDs")
+    @MainActor
+    func tokenlessInteractiveUnknownPreservesDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let instant = Date(timeIntervalSince1970: 1_790_000_000)
+        let facade = RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC"))
+        let command = try facade.workspaceCommand(.decideTask(.init(decisionID: .make(UUID()), taskID: TaskID("task_unknown"), type: .keepWaiting)),
+            commandID: UUID(), at: instant, in: .empty)
+        let context = RustWorkspaceContext(now: instant, timeZone: "UTC", actorID: "device",
+            policy: Data(#"{"weekly_review":true,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8))
+        let original = RustWorkspaceGesture(authoredIntent: Data("preserved authored input".utf8), commands: [command], context: context)
+        var fields = try #require(JSONSerialization.jsonObject(with: StoreDocumentCoding.makeEncoder().encode(original)) as? [String: Any])
+        var oldCommands = try #require(fields["commands"] as? [[String: Any]])
+        oldCommands[0].removeValue(forKey: "admissionTokens")
+        fields["commands"] = oldCommands
+        let bytes = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+        try await runtime.saveDraft(RustWorkspaceDraft(draftID: "runtime:prepared:scene:old", editorKind: "runtime_gesture",
+            recordType: nil, recordKey: nil, baseRevision: nil, fields: bytes, updatedAt: "2026-10-10T09:00:00Z"))
+        var prepared = false
+        do {
+            _ = try await RustWorkspaceGestureSaver(runtime: runtime).save(editorID: "scene:old", authoredIntent: original.authoredIntent) {
+                prepared = true
+                return original
+            }
+            Issue.record("unknown original interactive completion requires a reload")
+        } catch { #expect((error as? RustBridgeError)?.code == "SHOWN_FRAME_RELOAD_REQUIRED") }
+        #expect(!prepared)
+        #expect(try await runtime.loadDraft("runtime:prepared:scene:old")?.fields == bytes)
+        #expect(try await runtime.snapshot().pending == "0")
+        try await runtime.close()
+    }
+}

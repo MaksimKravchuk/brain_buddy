@@ -76,14 +76,14 @@ enum RustCommandEncoder {
                 "tag_ids": create.tagIDs.map { ids.tag($0) }, "due_date": wireNull(create.dueDate?.isoString),
                 "priority": create.priority.rawValue, "waiting_for": wireNull(create.waitingFor),
             ]
-            if let id = create.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
+            if let id = create.newFormulationID { encoded.payload["new_formulation_id"] = ids.newFormulation(id) }
             encoded.allocatedIDs = [derivedFormulation(create.taskID, date)]
         case .updateTask(let update):
             encoded = make("task.update", ids.task(update.taskID), date)
             try encodeTaskChanges(update.changes, of: state.tasks[update.taskID],
                 intendedTags: intendedTagMembership[encoded.entityID], deletedTags: intendedDeletedTags,
                 into: &encoded.payload, ids: &ids)
-            if let id = update.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
+            if let id = update.newFormulationID { encoded.payload["new_formulation_id"] = ids.newFormulation(id) }
             encoded.allocatedIDs = [derivedFormulation(update.taskID, date)]
             encoded.target = target("task", encoded.entityID, revision(state.tasks[update.taskID]))
         case .transitionTask(let transition):
@@ -91,7 +91,7 @@ enum RustCommandEncoder {
             encoded.payload = ["action": transition.action.rawValue]
             if let list = transition.toList { encoded.payload["to_state"] = list.rawValue }
             if let note = transition.waitingFor { encoded.payload["waiting_for"] = note }
-            if let id = transition.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
+            if let id = transition.newFormulationID { encoded.payload["new_formulation_id"] = ids.newFormulation(id) }
             encoded.allocatedIDs = [derivedFormulation(transition.taskID, date)]
             encoded.target = target("task", encoded.entityID, revision(state.tasks[transition.taskID]))
         case .createSubtask(let create):
@@ -238,7 +238,7 @@ enum RustCommandEncoder {
             "ai_use": decide.aiUse.rawValue, "navigator_request_id": wireNull(decide.navigatorRequestID),
             "client_decided_at": RustInstant.format(date),
         ]
-        if let id = decide.newFormulationID { payload["new_formulation_id"] = ids.formulation(id) }
+        if let id = decide.newFormulationID { payload["new_formulation_id"] = ids.newFormulation(id) }
         encoded.allocatedIDs = [derivedFormulation(decide.taskID, date)]
         if let followUp = decide.followUpTaskID {
             payload["follow_up_task_id"] = ids.task(followUp)

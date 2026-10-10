@@ -42,7 +42,7 @@ public struct RustWorkspaceReviewQueue: Sendable {
 extension RustDomainFacade {
     public func workspaceReviewState(from result: Data, keeping previous: GTDState, at date: Date) throws -> RustWorkspaceReviewState {
         let value = try RustJSON.object(result).object("value")
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var state = GTDState.empty
         state.review = previous.review
         try applyOwned("review_settings", value: value.object("settings"), to: &state, at: date, ids: ids)
@@ -84,7 +84,7 @@ extension RustDomainFacade {
 
     public func workspaceOpenReleasesQuery(_ kind: BulkReleaseKindCode, session: ReviewSessionID? = nil,
                                            bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         return try RustJSON.data(["kind": "open_releases", "release_kind": kind.rawValue,
                                   "session_id": ids.optional(session?.rawValue, prefix: "review")])
     }
@@ -92,7 +92,7 @@ extension RustDomainFacade {
     public func workspaceOpenReleases(from result: Data, keeping previous: GTDState, at date: Date) throws -> [BulkReleaseRecord] {
         let rows = try RustJSON.object(result)["value"] as? [WireObject]
         guard let rows else { throw RustDomainError.malformedResult }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var state = previous
         return try rows.map { row in
             try applyOwned("review_bulk_release", value: row, to: &state, at: date, ids: ids)
@@ -105,7 +105,7 @@ extension RustDomainFacade {
 
     public func workspaceReviewQueueQuery(_ step: ReviewStep, session: ReviewSessionID? = nil,
                                          bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         return try RustJSON.data(["kind": "review_queue", "step": step.rawValue,
                                   "session_id": ids.optional(session?.rawValue, prefix: "review")])
     }
@@ -113,7 +113,7 @@ extension RustDomainFacade {
     public func workspaceReviewSummaryQuery(session: ReviewSessionID? = nil, explainerSeenLocally: Bool,
                                            activatedAt: Date?, endedElsewhere: ReviewSessionID? = nil,
                                            bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         return try RustJSON.data(["kind": "review_summary", "session_id": ids.optional(session?.rawValue, prefix: "review"),
             "local": ["explainer_seen_locally": explainerSeenLocally, "activated_at": wireInstant(activatedAt),
                       "ended_elsewhere_session": ids.optional(endedElsewhere?.rawValue, prefix: "review")]])
@@ -121,11 +121,11 @@ extension RustDomainFacade {
 
     public func workspaceParkReturnQuery(_ task: TaskID, shown: ParkAck? = nil,
                                         bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         var query: WireObject = ["kind": "park_return_shown", "task_id": ids.task(task)]
         if let shown {
             query["parked_at"] = wireInstant(shown.parkedAt)
-            query["formulation_id"] = ids.formulation(shown.formulationID)
+            query["formulation_id"] = shown.formulationID.rawValue
         }
         return try RustJSON.data(query)
     }
@@ -157,7 +157,7 @@ extension RustDomainFacade {
 
     public func workspaceReviewSummary(from result: Data) throws -> RustWorkspaceReviewSummary {
         let row = try RustJSON.object(result).object("value")
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var step: DecisionStepOutcome?
         if let value = row.optionalObject("decision_step") {
             switch try value.string("type") {
@@ -194,7 +194,7 @@ extension RustDomainFacade {
             capacity = CapacityMirror(nextCount: try meta.int("next_count"), weeksOfHistory: try meta.int("weeks_of_history"),
                 weeklyAverage4w: meta["weekly_average_4w"] as? Double, impliedWeeks: meta["implied_weeks"] as? Double)
         }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         let byID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
         let days = try (meta["days"] as? [WireObject] ?? []).map { row -> DueDay in
             guard let day = CalendarDay(isoString: try row.string("day")) else { throw RustDomainError.malformedResult }
@@ -208,7 +208,7 @@ extension RustDomainFacade {
         let raw = try JSONSerialization.jsonObject(with: result)
         let values = (raw as? WireObject)?["value"] ?? raw
         guard let rows = values as? [WireObject] else { throw RustDomainError.malformedResult }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         return try rows.map { row in
             let id = TaskID(ids.swift(try row.string("id")))
             return try workspaceTask(from: RustJSON.data(row), keeping: previous.tasks[id], detail: false, at: date)

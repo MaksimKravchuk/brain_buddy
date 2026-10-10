@@ -60,7 +60,7 @@ extension RustDomainFacade {
 
     public func workspaceRecordRequest(_ kind: String, localID: String,
                                        bindings: [RustWorkspaceIdentityBinding] = []) -> RustWorkspaceRecordRequest {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         let prefixes = ["review_session": "review", "review_decision": "decision", "review_bulk_release": "bulk"]
         return RustWorkspaceRecordRequest(entityType: kind,
             recordKey: [ids.wire(localID, prefix: prefixes[kind] ?? kind)])
@@ -73,7 +73,7 @@ extension RustDomainFacade {
         let root = try RustJSON.object(result)
         guard try root.string("kind") == "records", let rows = root["value"] as? [Any],
               rows.count == requests.count else { throw RustDomainError.malformedResult }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var next = state
         for index in requests.indices {
             if let row = rows[index] as? WireObject {
@@ -111,7 +111,7 @@ extension RustDomainFacade {
 
     public func workspaceCaptureDraft(_ draft: CaptureDraft,
                                       bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         return try RustJSON.data(["text": draft.text, "list": draft.list.rawValue,
             "waiting_for": draft.waitingFor, "details": draft.details,
             "due_date": wireNull(draft.dueDate?.isoString), "priority": draft.priority.rawValue,
@@ -131,7 +131,7 @@ extension RustDomainFacade {
         var problem: GTDValidationError?
         if let refusal = value.optionalObject("problem") {
             let wire = RustRefusal(reason: try refusal.string("reason"), field: refusal.optionalString("field"))
-            problem = Self.validationError(wire, payload: [:], in: shown, ids: RustIDTable(stripsUUIDPrefixes: true))
+            problem = Self.validationError(wire, payload: [:], in: shown, ids: RustIDTable(stripsUUIDPrefixes: false))
             if problem == nil { throw RustDomainError.refused(reason: wire.reason, field: wire.field) }
         }
         return CapturePreview(title: try value.string("title"),
@@ -155,7 +155,7 @@ extension RustDomainFacade {
     public func workspaceListQuery(_ destination: Destination, options: ListOptions,
                                    after cursor: String? = nil,
                                    bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(stripsUUIDPrefixes: true, bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         let mode: WireObject
         switch destination {
         case .list(let list): mode = ["type": "open_list", "list": list.rawValue]
@@ -177,7 +177,7 @@ extension RustDomainFacade {
     public func workspaceReadQuery(_ kind: String, taskID: TaskID? = nil,
                                   sessionID: ReviewSessionID? = nil, filter: String? = nil,
                                   bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
-        var ids = RustIDTable(stripsUUIDPrefixes: true, bindings: bindings)
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
         var query: WireObject = ["kind": kind]
         if let taskID { query["task_id"] = ids.task(taskID) }
         if let sessionID { query["session_id"] = ids.session(sessionID) }
@@ -206,7 +206,7 @@ extension RustDomainFacade {
         let root = try RustJSON.object(page.result)
         guard try root.string("kind") == "list_mode" else { throw RustDomainError.malformedResult }
         let value = try root.object("value")
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         let sections = try value.objects("sections").map { section -> TaskSection in
             let kind = try section.object("kind")
             let sectionKind: TaskSection.Kind
@@ -251,7 +251,7 @@ extension RustDomainFacade {
         guard try root.string("kind") == "projects", let rows = root["value"] as? [WireObject] else {
             throw RustDomainError.malformedResult
         }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         return try rows.map { row in
             let project = try row.object("project")
             let id = ProjectID(ids.swift(try project.string("id")))
@@ -269,7 +269,7 @@ extension RustDomainFacade {
         guard try root.string("kind") == "tags", let rows = root["value"] as? [WireObject] else {
             throw RustDomainError.malformedResult
         }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         return try rows.map { row in
             let tag = try row.object("tag")
             let id = TagID(ids.swift(try tag.string("id")))
@@ -283,7 +283,7 @@ extension RustDomainFacade {
 
     private func workspaceTask(_ row: WireObject, keeping previous: TaskRecord?, detail: Bool,
                                at date: Date) throws -> TaskRecord {
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         let id = TaskID(ids.swift(try row.string("id")))
         var state = GTDState.empty
         state.tasks[id] = previous
@@ -292,20 +292,20 @@ extension RustDomainFacade {
             ?? row.optionalObject("formulation")?["consecutive_stalled"]
             ?? previous?.consecutiveStalledFormulations ?? 0
         try applyOwned("task", value: record, to: &state, at: date, ids: ids)
-        if detail {
-            state.tasks[id]?.subtasks = []
-            state.tasks[id]?.comments = []
-            state.tasks[id]?.childrenSyncedAt = date
-            for child in try row.objects("subtasks") {
-                var value = child
-                value["task_id"] = try row.string("id")
-                try applyOwned("subtask", value: value, to: &state, at: date, ids: ids)
-            }
-            for child in try row.objects("comments") {
-                var value = child
-                value["task_id"] = try row.string("id")
-                try applyOwned("comment", value: value, to: &state, at: date, ids: ids)
-            }
+        // Each canonical answer replaces the rendered child window. Retaining
+        // older hydrated children would pair them with a different read proof.
+        state.tasks[id]?.subtasks = []
+        state.tasks[id]?.comments = []
+        state.tasks[id]?.childrenSyncedAt = nil
+        for child in row["subtasks"] as? [WireObject] ?? [] {
+            var value = child
+            value["task_id"] = try row.string("id")
+            try applyOwned("subtask", value: value, to: &state, at: date, ids: ids)
+        }
+        for child in row["comments"] as? [WireObject] ?? [] {
+            var value = child
+            value["task_id"] = try row.string("id")
+            try applyOwned("comment", value: value, to: &state, at: date, ids: ids)
         }
         guard let task = state.tasks[id] else { throw RustDomainError.malformedResult }
         return task
@@ -317,5 +317,77 @@ extension RustDomainFacade {
         _ = try RustChangeApplier.apply(["changes": [["operation": "upsert", "entity_type": kind, "value": value]],
                                         "outcome": "applied"], to: &state, before: before, at: date,
                                        ids: ids, actorID: context.actorID)
+        if kind == "review_decision" {
+            let id = DecisionID(ids.swift(try value.string("id")))
+            // This public guard is the decision's actual produced revision,
+            // independent of whichever task page the host currently holds.
+            state.review.decisions[id]?.taskAfter = TaskStamp(updatedAt: nil,
+                serverRevision: try value.counter("task_revision_after"))
+        }
+    }
+}
+
+
+public struct RustWorkspaceTaskFrame: Sendable {
+    public let taskID: TaskID
+    public let childrenKnown: Bool
+    public let lastOpenList: OpenList?
+    public let token: Data
+}
+
+extension RustDomainFacade {
+    public func workspaceTaskFrames(from page: RustWorkspacePage) throws -> [RustWorkspaceTaskFrame] {
+        let rows = try RustJSON.array(page.taskFrames)
+        guard rows.count <= 200 else { throw RustDomainError.malformedResult }
+        return try rows.map { value in
+            guard let row = value as? WireObject else { throw RustDomainError.malformedResult }
+            let token = try row.object("token")
+            guard try token.int("version") == 1, row.keys.contains("last_open_list") else { throw RustDomainError.malformedResult }
+            let rawOrigin = row.optionalString("last_open_list")
+            let origin = rawOrigin.flatMap(OpenList.init(rawValue:))
+            guard rawOrigin == nil || origin != nil else { throw RustDomainError.malformedResult }
+            return RustWorkspaceTaskFrame(taskID: TaskID(try token.string("task_id")),
+                childrenKnown: try token.bool("children_known"), lastOpenList: origin, token: try RustJSON.data(token))
+        }
+    }
+}
+
+
+extension RustDomainFacade {
+    /// Bounded typed identity lookup before a query is dispatched. The catalog
+    /// contains canonical references; aliases are proved by this workspace.
+    public func workspaceResolveReferences(_ data: Data, runtime: RustWorkspaceRuntime) async throws -> Data {
+        let source = try RustJSON.object(data)
+        let types = ["task_id": "task", "project_id": "project", "tag_id": "tag", "tag_filter": "tag",
+                     "session_id": "review_session", "ended_elsewhere_session": "review_session",
+                     "context_project": "project", "context_tag": "tag"]
+        func requests(_ object: WireObject) -> [RustWorkspaceIdentityRequest] {
+            var result: [RustWorkspaceIdentityRequest] = []
+            for (key, value) in object {
+                if let type = types[key], let id = value as? String { result.append(.init(entityType: type, localID: id)) }
+                else if let child = value as? WireObject { result += requests(child) }
+            }
+            return result
+        }
+        let touched = Array(Set(requests(source)))
+        guard touched.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        let bindings = try await runtime.resolveIdentities(touched)
+        func rewritten(_ object: WireObject) -> WireObject {
+            var result = object
+            for (key, value) in object {
+                if let type = types[key], let id = value as? String {
+                    if let binding = bindings.first(where: { $0.entityType == type && $0.localID == id }),
+                       let canonical = binding.canonicalID { result[key] = canonical }
+                    else {
+                        // The established importer uses this deterministic key
+                        // for a local record with no proved server identity.
+                        var ids = RustIDTable()
+                        result[key] = ids.wire(id, prefix: type == "review_session" ? "review" : type)
+                    }
+                } else if let child = value as? WireObject { result[key] = rewritten(child) }
+            }
+            return result
+        }
+        return try RustJSON.data(rewritten(source))
     }
 }

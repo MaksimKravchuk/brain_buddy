@@ -8,10 +8,9 @@ public struct RustWorkspaceReviewPreparation: Sendable {
 }
 
 extension RustDomainFacade {
-    /// Only the established validated UUID prefix is removed. Opaque server
-    /// identifiers remain intact, including prepared gesture result IDs.
+    /// Runtime IDs remain canonical. A UUID-shaped suffix is not alias proof.
     public func workspaceLocalID(_ canonical: String) -> String {
-        RustIDTable(stripsUUIDPrefixes: true).swift(canonical)
+        RustIDTable(stripsUUIDPrefixes: false).swift(canonical)
     }
 
     public func workspaceIdentityBindings(from data: Data) throws -> [RustWorkspaceIdentityBinding] {
@@ -49,7 +48,7 @@ extension RustDomainFacade {
             admitted.append(RustWorkspaceIdentityBinding(entityType: "task", localID: before.id.rawValue, canonicalID: server))
             additions.append(["entity_type": "task", "local_id": before.id.rawValue, "server_id": server])
         }
-        var ids = RustIDTable(bindings: admitted)
+        var ids = RustIDTable(bindings: admitted, canonicalFormulationIDs: Self.workspaceFormulationIDs(in: source))
         var records = RustReadSet.make(source, actorID: context.actorID, ids: &ids)
         for key in ["tasks", "projects", "tags", "subtasks", "comments"] { records.removeValue(forKey: key) }
         let queues = records["decision_queues"] as? WireObject ?? [:]
@@ -66,10 +65,17 @@ extension RustDomainFacade {
                                  bindings: [RustWorkspaceIdentityBinding] = [],
                                  intendedTagMembership: [String: [TagID]] = [:],
                                  intendedDeletedTags: Set<String> = []) throws -> RustWorkspaceCommand {
-        var ids = RustIDTable(bindings: bindings)
+        let proved = Self.workspaceCanonicalBindings(in: state) + bindings
+        var ids = RustIDTable(bindings: proved, canonicalFormulationIDs: Self.workspaceFormulationIDs(in: state))
         let shown = Self.workspaceAliasView(state, bindings: bindings)
-        let encoded = try RustCommandEncoder.encode(command, at: date, in: shown, scopeID: context.scopeID, ids: &ids,
+        var encoded = try RustCommandEncoder.encode(command, at: date, in: shown, scopeID: context.scopeID, ids: &ids,
             intendedTagMembership: intendedTagMembership, intendedDeletedTags: intendedDeletedTags)
+        if case .undoDecision(let id) = command {
+            guard let decision = shown.review.decisions[id], let revision = decision.taskAfter.serverRevision else {
+                throw RustDomainError.refused(reason: "incomplete_read_set", field: "decision")
+            }
+            encoded.target = RustEncodedCommand.Target(entityType: "task", id: ids.task(decision.taskID), revision: revision)
+        }
         var preconditions: [WireObject] = []
         if let afterCommand, let type = encoded.target?.entityType ?? Self.workspaceTargetType(encoded.type) {
             preconditions = [["after_command": ["command_id": afterCommand.uuidString.lowercased(),
@@ -95,7 +101,7 @@ extension RustDomainFacade {
         var deletedTags: Set<String> = []
         var earlier: [String: UUID] = [:]
         var result: [RustWorkspaceCommand] = []
-        var ids = RustIDTable(bindings: bindings)
+        var ids = RustIDTable(bindings: Self.workspaceCanonicalBindings(in: shown) + bindings)
         for index in commands.indices {
             var encoded = try workspaceCommand(commands[index], commandID: commandIDs[index], at: dates[index],
                 in: shown, bindings: bindings, intendedTagMembership: membership, intendedDeletedTags: deletedTags)
@@ -116,6 +122,25 @@ extension RustDomainFacade {
                 }
                 encoded = RustWorkspaceCommand(commandID: encoded.commandID, commandType: encoded.commandType,
                     entityID: encoded.entityID, payload: encoded.payload, preconditions: try RustJSON.data(refs))
+            }
+            if case .deleteTag = commands[index] {
+                var guards = try RustJSON.array(encoded.preconditions)
+                var guarded: Set<String> = []
+                for later in commands.indices where later > index {
+                    let frozen = try workspaceCommand(commands[later], commandID: commandIDs[later], at: dates[later],
+                        in: shown, bindings: bindings)
+                    for value in try RustJSON.array(frozen.preconditions) {
+                        guard let row = value as? WireObject, row.optionalString("entity_type") == "task",
+                              let task = row.optionalString("entity_id"), row.optionalString("edit_revision") != nil,
+                              guarded.insert(task).inserted else { continue }
+                        // Only an explicit later shown dependency. The store
+                        // decides whether this delete actually produced a task.
+                        guards.append(row)
+                    }
+                }
+                encoded = RustWorkspaceCommand(commandID: encoded.commandID, commandType: encoded.commandType,
+                    entityID: encoded.entityID, payload: encoded.payload, preconditions: try RustJSON.data(guards),
+                    dependsOn: encoded.dependsOn, admissionTokens: encoded.admissionTokens)
             }
             result.append(encoded)
             if let primary { earlier[primary] = commandIDs[index] }
@@ -168,7 +193,7 @@ extension RustDomainFacade {
 
     public func workspaceValidationError(_ refusal: RustRefusal, command: RustWorkspaceCommand,
                                          in state: GTDState) throws -> GTDValidationError? {
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         return Self.validationError(refusal, payload: try RustJSON.object(command.payload), in: state, ids: ids)
     }
 
@@ -176,7 +201,7 @@ extension RustDomainFacade {
     /// An imported command can still name the local ID whose alias the store
     /// proved. Its revision comes from that same shown canonical record.
     private static func workspaceAliasView(_ state: GTDState, bindings: [RustWorkspaceIdentityBinding]) -> GTDState {
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var shown = state
         for binding in bindings {
             guard let canonical = binding.canonicalID else { continue }
@@ -209,7 +234,7 @@ extension RustDomainFacade {
         guard let records = try JSONSerialization.jsonObject(with: snapshot.records) as? [WireObject] else {
             throw RustDomainError.malformedResult
         }
-        let ids = RustIDTable(stripsUUIDPrefixes: true)
+        let ids = RustIDTable(stripsUUIDPrefixes: false)
         var next = previous
         let byKind = try Dictionary(grouping: records) { try $0.string("entity_type") }
         func identifiers(_ kind: String) throws -> Set<String> {
@@ -252,5 +277,41 @@ extension RustDomainFacade {
         _ = try RustChangeApplier.apply(["changes": changes, "outcome": "applied"], to: &next,
                                        before: previous, at: date, ids: ids, actorID: context.actorID)
         return next
+    }
+}
+
+
+extension RustDomainFacade {
+    private static func workspaceCanonicalBindings(in state: GTDState) -> [RustWorkspaceIdentityBinding] {
+        var result: [RustWorkspaceIdentityBinding] = []
+        func append(_ type: String, _ id: String) {
+            result.append(.init(entityType: type, localID: id, canonicalID: id))
+        }
+        for task in state.tasks.values {
+            append("task", task.id.rawValue)
+            if let project = task.projectID { append("project", project.rawValue) }
+            for tag in task.tagIDs { append("tag", tag.rawValue) }
+            for child in task.subtasks { append("subtask", child.id.rawValue) }
+            for child in task.comments { append("comment", child.id.rawValue) }
+        }
+        for id in state.projects.keys { append("project", id.rawValue) }
+        for id in state.tags.keys { append("tag", id.rawValue) }
+        for id in state.review.sessions.keys { append("review_session", id.rawValue) }
+        for decision in state.review.decisions.values {
+            append("review_decision", decision.id.rawValue)
+            append("task", decision.taskID.rawValue)
+        }
+        for id in state.review.bulkReleases.keys { append("review_bulk_release", id.rawValue) }
+        return result
+    }
+
+    private static func workspaceFormulationIDs(in state: GTDState) -> Set<String> {
+        var ids = Set(state.tasks.values.compactMap { $0.formulation?.id.rawValue })
+        ids.formUnion(state.tasks.values.compactMap { $0.parked?.formulationID.rawValue })
+        ids.formUnion(state.review.parkAcks.map { $0.formulationID.rawValue })
+        ids.formUnion(state.review.decisions.values.compactMap { $0.formulationID?.rawValue })
+        ids.formUnion(state.review.decisions.values.compactMap { $0.undo?.taskBefore.formulation?.id.rawValue })
+        ids.formUnion(state.review.decisions.values.compactMap { $0.undo?.taskBefore.parked?.formulationID.rawValue })
+        return ids
     }
 }

@@ -5,6 +5,27 @@ import BrainBuddySync
 import Foundation
 import Observation
 
+/// An explicitly selected, already prepared runtime. Production migration and
+/// account cutover install this configuration; the default initializer remains
+/// in the legacy epoch. A selected runtime never opens the retired document.
+public struct RustWorkspaceSelection: Sendable {
+    public let runtime: RustWorkspaceRuntime
+    public let facade: RustDomainFacade
+    public let transport: any SyncRuntimePort
+    public let account: LinkedAccount?
+    public let reviewEnabled: Bool
+
+    public init(runtime: RustWorkspaceRuntime, facade: RustDomainFacade,
+                transport: any SyncRuntimePort = PendingRustSyncRuntimePort(),
+                account: LinkedAccount? = nil, reviewEnabled: Bool = false) {
+        self.runtime = runtime
+        self.facade = facade
+        self.transport = transport
+        self.account = account
+        self.reviewEnabled = reviewEnabled
+    }
+}
+
 /// The app's single source of truth on the main actor. SwiftUI views read
 /// `state` and the query helpers; every write goes through a command method,
 /// which validates and applies the change in memory at once (no network, no
@@ -120,6 +141,34 @@ public final class Workspace {
     /// How many times `state` was rebuilt by a full replay (for tests).
     @ObservationIgnored private(set) var fullReplayCount = 0
 
+    @ObservationIgnored private let rustSelection: RustWorkspaceSelection?
+    @ObservationIgnored private(set) var rustRuntime: RustWorkspaceRuntime?
+    @ObservationIgnored private(set) var rustFacade: RustDomainFacade?
+    @ObservationIgnored private(set) var rustQueries: RustWorkspaceAdapter?
+    @ObservationIgnored private var rustGestureSaver: RustWorkspaceGestureSaver?
+    @ObservationIgnored private var rustSubscription: RustWorkspaceSubscription?
+    @ObservationIgnored private var rustWatcher: Task<Void, Never>?
+    @ObservationIgnored private(set) var runtimeBindingID = UUID()
+    @ObservationIgnored private var rustTaskFrames: [TaskID: RustWorkspaceTaskFrame] = [:]
+    @ObservationIgnored private var rustTaskInterests: [Data: Set<TaskID>] = [:]
+    @ObservationIgnored private var rustProjectInterests: [Data: Set<ProjectID>] = [:]
+    @ObservationIgnored private var rustTagInterests: [Data: Set<TagID>] = [:]
+    @ObservationIgnored private var rustPruningDrafts = false
+    @ObservationIgnored var rustReviewPresentationSaving = false
+    var rustLocalReview = LocalReviewState()
+    var rustReviewDraftCount = 0
+    var rustReviewState: RustWorkspaceReviewState?
+    var rustIdentityBindings: [RustWorkspaceIdentityBinding] = []
+    public private(set) var runtimeTransportUnavailable = false
+    public private(set) var runtimeIssues: [RustWorkspaceIssue] = []
+    public private(set) var queryError: String?
+    var presentationDraftError: String?
+    @ObservationIgnored private var rustStatusRequestID: UInt64 = 0
+    private var rustSyncState: RustWorkspaceSyncState?
+
+    public var isRustSelected: Bool { rustSelection != nil }
+    public var isRustBound: Bool { rustRuntime != nil && rustQueries != nil }
+
     // MARK: Construction
 
     /// A workspace over `store`. Pass `sync: nil` where nothing may talk to
@@ -128,16 +177,17 @@ public final class Workspace {
     /// idempotency keys); tests inject deterministic ones, and the scheduler
     /// that runs the foreground tick.
     public init(
-        store: any DocumentStore, sync: (any SyncService)?,
+        store: any DocumentStore, sync: (any SyncService)?, rust: RustWorkspaceSelection? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() },
         tickScheduler: any SyncScheduler = TaskSyncScheduler()
     ) {
         self.store = store
-        self.sync = sync
+        self.sync = rust == nil ? sync : nil
+        rustSelection = rust
         self.now = now
         self.makeID = makeID
-        foregroundTicker = sync.map { sync in
+        foregroundTicker = (rust == nil ? sync : nil).map { sync in
             PeriodicSyncTicker(scheduler: tickScheduler) { await sync.request(.periodic) }
         }
     }
@@ -197,6 +247,7 @@ public final class Workspace {
     /// Changes the other process queued are local changes of this device, and
     /// only the app syncs, so they get the same debounced sync as the app's own.
     public func reloadIfChangedExternally() async {
+        if isRustSelected { await refreshRustStatus(); return }
         guard isLoaded, loadError == nil else { return await load() }
         let known = Set((document.outbox + unpersisted).map(\.id))
         guard let reloaded = await refreshFromStore() else { return }
@@ -208,6 +259,7 @@ public final class Workspace {
     /// Waits until every change applied so far is on disk. When the last
     /// write failed, it tries once more; `storageError` says whether that worked.
     public func flush() async {
+        if isRustSelected { await refreshRustStatus(); return }
         if let writer { await writer.value }
         schedulePersistence()
         if let writer { await writer.value }
@@ -222,6 +274,7 @@ public final class Workspace {
     /// set-aside document's account is logged out (best effort) and forgotten.
     @discardableResult
     public func resetUnreadableStore() async -> URL? {
+        guard !isRustSelected else { return nil }
         if let loadTask { await loadTask.value }
         let setAsideAccount = await store.storedAccount()
         let quarantined: URL?
@@ -251,16 +304,67 @@ public final class Workspace {
     }
 
     public func list(_ destination: Destination, options: ListOptions = ListOptions()) -> TaskListResult {
-        GTDQueries.list(destination, options: options, in: state, today: today)
+        if isRustSelected {
+            guard let key = try? rustFacade?.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings),
+                  let page = rustPage(for: key), let facade = rustFacade else { return TaskListResult(sections: [], openCount: 0) }
+            do { return try facade.workspaceList(from: page, keeping: state, at: now()).list }
+            catch { markRustQueryError(error); return TaskListResult(sections: [], openCount: 0) }
+        }
+        return GTDQueries.list(destination, options: options, in: state, today: today)
     }
 
-    public func counts() -> ListCounts { GTDQueries.counts(in: state, today: today) }
-    public func task(_ id: TaskID) -> TaskRecord? { state.tasks[id] }
-    public func project(_ id: ProjectID) -> ProjectRecord? { state.projects[id] }
-    public func tag(_ id: TagID) -> TagRecord? { state.tags[id] }
-    public func projects(archived: Bool = false) -> [ProjectSummary] { GTDQueries.projects(in: state, archived: archived) }
-    public func tags() -> [TagSummary] { GTDQueries.tags(in: state) }
-    public func capturePreview(_ draft: CaptureDraft) -> CapturePreview { CapturePlanner.preview(draft, in: state) }
+    public func counts() -> ListCounts {
+        if isRustSelected {
+            guard let key = try? rustFacade?.workspaceReadQuery("list_counts"), let page = rustPage(for: key),
+                  let facade = rustFacade else { return ListCounts() }
+            do { return try facade.workspaceCounts(from: page.result) }
+            catch { markRustQueryError(error); return ListCounts() }
+        }
+        return GTDQueries.counts(in: state, today: today)
+    }
+    public func task(_ id: TaskID) -> TaskRecord? {
+        if let task = state.tasks[id] { return task }
+        guard isRustSelected, let canonical = rustIdentityBindings.first(where: { $0.entityType == "task" && $0.localID == id.rawValue })?.canonicalID else { return nil }
+        return state.tasks[TaskID(canonical)]
+    }
+    public func project(_ id: ProjectID) -> ProjectRecord? {
+        if let project = state.projects[id] { return project }
+        guard isRustSelected, let canonical = rustIdentityBindings.first(where: { $0.entityType == "project" && $0.localID == id.rawValue })?.canonicalID else { return nil }
+        return state.projects[ProjectID(canonical)]
+    }
+    public func tag(_ id: TagID) -> TagRecord? {
+        if let tag = state.tags[id] { return tag }
+        guard isRustSelected, let canonical = rustIdentityBindings.first(where: { $0.entityType == "tag" && $0.localID == id.rawValue })?.canonicalID else { return nil }
+        return state.tags[TagID(canonical)]
+    }
+    public func projects(archived: Bool = false) -> [ProjectSummary] {
+        if isRustSelected {
+            guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active"),
+                  let page = rustPage(for: key), let facade = rustFacade else { return [] }
+            do { return try facade.workspaceProjects(from: page.result, keeping: state, at: now()) }
+            catch { markRustQueryError(error); return [] }
+        }
+        return GTDQueries.projects(in: state, archived: archived)
+    }
+    public func tags() -> [TagSummary] {
+        if isRustSelected {
+            guard let key = try? rustFacade?.workspaceReadQuery("tags"), let page = rustPage(for: key),
+                  let facade = rustFacade else { return [] }
+            do { return try facade.workspaceTags(from: page.result, keeping: state, at: now()) }
+            catch { markRustQueryError(error); return [] }
+        }
+        return GTDQueries.tags(in: state)
+    }
+    public func capturePreview(_ draft: CaptureDraft) -> CapturePreview {
+        if isRustSelected {
+            guard let key = try? rustCapturePreviewKey(draft), let page = rustPage(for: key), let facade = rustFacade else {
+                return CapturePreview(title: "", project: nil, tags: [], tokens: [], problem: nil)
+            }
+            do { return try facade.workspaceCapturePreview(from: page.result, in: state) }
+            catch { markRustQueryError(error); return CapturePreview(title: "", project: nil, tags: [], tokens: [], problem: nil) }
+        }
+        return CapturePlanner.preview(draft, in: state)
+    }
 
     /// True when `comment` was written by the signed-in user (or on this device).
     public func isOwnComment(_ comment: CommentRecord) -> Bool {
@@ -272,6 +376,7 @@ public final class Workspace {
     /// Captures one task from a Smart Add draft; creates missing projects/tags.
     @discardableResult
     public func capture(_ draft: CaptureDraft) throws(GTDValidationError) -> TaskID {
+        guard !isRustSelected else { throw .asynchronousSaveRequired }
         let makeID = self.makeID
         let plan = try CapturePlanner.plan(
             draft, in: state,
@@ -371,6 +476,7 @@ public final class Workspace {
         _ id: TaskID, projectName: String, outcome: String? = nil, firstAction: String,
         changes: TaskChanges = TaskChanges()
     ) throws(GTDValidationError) -> ProjectID {
+        guard !isRustSelected else { throw .asynchronousSaveRequired }
         guard let task = state.tasks[id] else { throw .taskNotFound }
         let projectID = ProjectID(Self.rawID(makeID()))
         var changes = changes
@@ -428,6 +534,7 @@ public final class Workspace {
     public func signIn(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
+        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
         }
@@ -471,6 +578,7 @@ public final class Workspace {
 
     /// Additive iOS authentication; legacy password callers keep their contract.
     public func beginSignIn(serverURL: URL) async throws -> NativeSignInAttempt {
+        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
         guard let sync else { throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil) }
         await flush()
         await installEventHandlerIfNeeded(sync)
@@ -484,6 +592,7 @@ public final class Workspace {
     }
 
     public func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
+        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
         guard let sync, nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil) }
         await flush()
         guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
@@ -514,6 +623,7 @@ public final class Workspace {
     }
 
     public func cancelSignIn(_ attempt: NativeSignInAttempt) async {
+        guard !isRustSelected else { return }
         if nativeSignInID == attempt.id { nativeSignInID = nil; isSigningIn = false }
         await sync?.cancelSignIn(attempt)
         refreshDerivedState()
@@ -526,7 +636,7 @@ public final class Workspace {
 
     /// The local changes a sign-out would remove, each by its id and what it holds: unsent ones and
     /// open sync issues, for a sign-out confirmation to name (`signOut(removing:)`).
-    public var pendingChanges: Set<PendingChange> { PendingChange.all(in: document, unpersisted: unpersisted) }
+    public var pendingChanges: Set<PendingChange> { isRustSelected ? [] : PendingChange.all(in: document, unpersisted: unpersisted) }
 
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
@@ -550,6 +660,7 @@ public final class Workspace {
     /// this workspace meanwhile is refused (`GTDValidationError.signingOut`, `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
     /// `WorkspaceError.signingIn` and nothing is removed.
     public func signOut(removing confirmed: Set<PendingChange>) async throws {
+        guard !isRustSelected else { throw WorkspaceError.storage("This account change isn't available yet. Your work is kept.") }
         guard !isSigningIn else { throw WorkspaceError.signingIn }
         let pending = pendingChanges
         if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
@@ -624,6 +735,7 @@ public final class Workspace {
     public func setForegroundActive(_ active: Bool) async {
         guard active != isForeground else { return }
         isForeground = active
+        if isRustSelected { if active { await wakeRustTransport(.foreground) }; return }
         foregroundTicker?.setActive(active)
         if active { await sync?.request(.foreground) }
     }
@@ -633,6 +745,14 @@ public final class Workspace {
     /// so a first sign-in with months-old local data does not read as days of failure; the ones
     /// issued before the link are the first upload.
     public var syncSnapshot: SyncSnapshot {
+        if isRustSelected {
+            return SyncSnapshot(account: account.map { .linked(email: $0.email) } ?? .none,
+                sessionEnded: syncStatus == .needsSignIn, isOnline: networkIsAvailable, isSyncing: syncStatus == .syncing,
+                lastSyncedAt: rustSyncState?.lastSuccessAt, pendingCount: pendingChangeCount,
+                oldestPendingAt: rustSyncState?.oldestPendingAt, initialUploadRemaining: 0,
+                issueCount: Int(clamping: rustSyncState?.openIssues ?? 0), failingSince: nil,
+                lastFailedAttemptAt: nil, lastFailureReferenceID: nil)
+        }
         let operations = document.outbox + unpersisted
         let linkedAt = account?.linkedAt
         let sendable = operations.map { max($0.issuedAt, linkedAt ?? $0.issuedAt) }
@@ -649,6 +769,7 @@ public final class Workspace {
 
     /// Pushes pending changes and pulls the latest server state now.
     public func syncNow() async {
+        if isRustSelected { await maintainRuntimeDrafts(); await wakeRustTransport(.manual); await refreshRustStatus(); return }
         guard let sync, account != nil else { return }
         await flush()
         let status = await sync.syncNow()
@@ -660,11 +781,19 @@ public final class Workspace {
     /// Loads subtasks and comments for a task from the server (when online);
     /// call when a task detail opens.
     public func refreshTaskDetails(_ id: TaskID) async {
+        if isRustSelected {
+            await prepareRustIdentities([.init(entityType: "task", localID: id.rawValue)])
+            if let key = try? rustFacade?.workspaceReadQuery("task_detail", taskID: id, bindings: rustIdentityBindings) {
+                await prepareRustQuery(key)
+            }
+            return
+        }
         guard let sync, account != nil else { return }
         await sync.refreshTask(id)
     }
 
     public func dismissIssue(_ id: SyncIssue.ID) {
+        guard !isRustSelected else { return }
         guard document.issues.contains(where: { $0.id == id }) else { return }
         pendingDismissals.insert(id)
         issues.removeAll { $0.id == id }
@@ -674,6 +803,17 @@ public final class Workspace {
     /// Informs the sync scheduler about connectivity (from NWPathMonitor in the app).
     public func networkAvailabilityChanged(isAvailable: Bool) {
         networkIsAvailable = isAvailable
+        if isRustSelected, let selection = rustSelection {
+            let binding = runtimeBindingID
+            let previous = networkUpdates
+            networkUpdates = Task {
+                await previous?.value
+                guard binding == self.runtimeBindingID else { return }
+                await selection.transport.setNetworkAvailable(isAvailable)
+                if isAvailable { await self.wakeRustTransport(.networkRestored) }
+            }
+            return
+        }
         guard let sync else { return }
         // Chained, so the engine sees the changes in the order they happened.
         let previous = networkUpdates
@@ -706,6 +846,7 @@ extension Workspace {
     /// Before that the reducer derives one (no id is drawn, so nothing else
     /// changes while the feature is off).
     func perform(_ commands: [GTDCommand]) throws(GTDValidationError) {
+        guard !isRustSelected else { throw .asynchronousSaveRequired }
         guard !isSigningOut else { throw .signingOut }
         let issuedAt = Self.storedPrecision(now())
         let makeID = self.makeID
@@ -787,6 +928,7 @@ extension Workspace {
 
     /// Queues a document edit that is not a command and starts a write.
     func edit(_ change: @escaping @Sendable (inout StoreDocument) -> Void) {
+        guard !isRustSelected else { return }
         pendingEdits.append(change)
         schedulePersistence()
     }
@@ -794,6 +936,7 @@ extension Workspace {
     /// Starts the write loop unless it is running (it picks up new changes
     /// itself) or there is nothing to write.
     func schedulePersistence() {
+        guard !isRustSelected else { return }
         guard writer == nil, hasPendingWrites, !writesSuspended else { return }
         writerToken += 1
         let token = writerToken
@@ -901,6 +1044,7 @@ extension Workspace {
     /// our own writes landed. While a write is in flight it waits for that
     /// write, so the commands being written are not applied twice.
     private func receive(_ incoming: StoreDocument) {
+        guard !isRustSelected else { return }
         guard incoming.generation > document.generation else { return }
         guard !isWriting else {
             if incoming.generation > deferredDocument?.generation ?? Int.min { deferredDocument = incoming }
@@ -954,6 +1098,7 @@ extension Workspace {
     /// returns it (nil when there was nothing newer to read).
     @discardableResult
     func refreshFromStore() async -> StoreDocument? {
+        guard !isRustSelected else { return nil }
         let storedGeneration: Int?
         do {
             storedGeneration = try await store.generation()
@@ -972,6 +1117,7 @@ extension Workspace {
     }
 
     private func performLoad() async {
+        if isRustSelected { await bindRustRuntime(); return }
         let epoch = self.epoch
         let loaded: StoreDocument?
         do {
@@ -1033,6 +1179,7 @@ extension Workspace {
     }
 
     func handle(_ event: SyncEvent) {
+        guard !isRustSelected else { return }
         switch event {
         case .status(let status):
             // A late status from before sign-out must not replace "On this iPhone".
@@ -1083,4 +1230,660 @@ extension Workspace {
     public nonisolated static let signingOutMessage = "Brain Buddy is signing out. Try signing in again in a moment."
     /// `signIn`'s refusal while another sign-in runs (`WorkspaceError.signInFailed`).
     public nonisolated static let signInOnItsWayMessage = "Brain Buddy is still finishing the last sign-in. Try again in a moment."
+}
+
+
+extension Workspace {
+    func markRustQueryError(_ error: any Error) {
+        markRustQueryError((error as? RustBridgeError)?.code ?? "MALFORMED_QUERY_RESULT")
+    }
+
+    func markRustQueryError(_ code: String) { queryError = code }
+
+    private func bindRustRuntime() async {
+        guard let selection = rustSelection, rustRuntime == nil else { return }
+        let binding = UUID()
+        runtimeBindingID = binding
+        do {
+            guard case .ready = try await selection.runtime.status() else {
+                throw RustBridgeError(code: "READ_ONLY_RECOVERY")
+            }
+            guard binding == runtimeBindingID else { return }
+            rustRuntime = selection.runtime
+            rustFacade = selection.facade
+            rustGestureSaver = RustWorkspaceGestureSaver(runtime: selection.runtime)
+            account = selection.account
+            accountlessReviewEnabled = selection.reviewEnabled
+            let inputs = try selection.facade.workspaceQueryInputs(at: now(), zone: deviceTimeZone().identifier,
+                reviewExposed: selection.reviewEnabled)
+            let runtime = selection.runtime
+            rustQueries = RustWorkspaceAdapter(inputs: inputs, query: { key, inputs, cursor in
+                let root = try JSONSerialization.jsonObject(with: key) as? [String: Any]
+                if root?["kind"] as? String == "capture_preview", let draft = root?["draft"] {
+                    let data = try JSONSerialization.data(withJSONObject: draft, options: [.sortedKeys])
+                    return try await runtime.smartAddResolve(draft: selection.facade.workspaceResolveReferences(data, runtime: runtime))
+                }
+                let canonical = try await selection.facade.workspaceResolveReferences(key, runtime: runtime)
+                return try await runtime.query(canonical, inputs: inputs, collectionAfter: cursor)
+            }, didPublish: { [weak self] key, page in
+                guard let self, self.runtimeBindingID == binding else { return }
+                try self.adoptRustPage(query: key, page: page)
+            }, didRefuse: { [weak self] key, refusal in
+                guard let self, self.runtimeBindingID == binding else { return }
+                if refusal.reason == "review_unavailable" {
+                    self.rustReviewState = nil
+                    self.state.review.server?.exposed = false
+                }
+                if refusal.reason == "not_found", let root = try? JSONSerialization.jsonObject(with: key) as? [String: Any],
+                   let id = root["task_id"] as? String {
+                    self.state.tasks.removeValue(forKey: TaskID(id))
+                }
+            })
+            var local = try await runtime.loadDraft("runtime:local-review")
+            if local == nil { local = try await runtime.loadDraft("legacy-local-review") }
+            if let local {
+                var decoded = try StoreDocumentCoding.makeDecoder().decode(LocalReviewState.self, from: local.fields)
+                decoded.formDrafts = [:]
+                guard binding == runtimeBindingID else { return }
+                rustLocalReview = decoded
+            }
+            guard binding == runtimeBindingID else { return }
+            let subscription = try await runtime.subscribe()
+            guard binding == runtimeBindingID else { return }
+            rustSubscription = subscription
+            rustWatcher = Task { [weak self] in
+                var token: String?
+                do {
+                    while !Task.isCancelled {
+                        guard let event = try await subscription.next(after: token) else {
+                            if self == nil { return }
+                            continue
+                        }
+                        guard let self, self.runtimeBindingID == binding else { return }
+                        token = event.token
+                        if let generation = UInt64(event.projectionGeneration),
+                           generation > (self.rustQueries?.generationFloor ?? 0) || !event.changedKinds.isEmpty {
+                            let inputs = try selection.facade.workspaceQueryInputs(at: self.now(),
+                                zone: self.deviceTimeZone().identifier, reviewExposed: selection.reviewEnabled)
+                            self.rustQueries?.invalidate(generation: generation, inputs: inputs)
+                        }
+                        if event.syncStatusChanged || event.issuesChanged { await self.refreshRustStatus() }
+                        if !event.changedKinds.isEmpty { await self.maintainRuntimeDrafts() }
+                    }
+                } catch {
+                    guard let self, self.runtimeBindingID == binding, !Task.isCancelled else { return }
+                    self.markRustQueryError(error)
+                }
+            }
+            if let counts = try? selection.facade.workspaceReadQuery("list_counts") { await prepareRustQuery(counts) }
+            await refreshRustStatus()
+            await maintainRuntimeDrafts()
+            await wakeRustTransport(.launch)
+            guard binding == runtimeBindingID else { return }
+            isLoaded = true
+            loadError = nil
+        } catch {
+            guard binding == runtimeBindingID else { return }
+            loadError = Self.saveMessage(for: error)
+            isLoaded = true
+        }
+    }
+
+    public func closeRuntime() async {
+        guard let selection = rustSelection else { return }
+        runtimeBindingID = UUID()
+        rustWatcher?.cancel()
+        rustWatcher = nil
+        rustQueries?.close()
+        rustQueries = nil
+        rustSubscription = nil
+        rustRuntime = nil
+        rustFacade = nil
+        rustGestureSaver = nil
+        rustStatusRequestID &+= 1
+        rustTaskFrames = [:]
+        rustTaskInterests = [:]
+        rustProjectInterests = [:]
+        rustTagInterests = [:]
+        state = .empty
+        await selection.transport.close()
+        do { try await selection.runtime.close() }
+        catch { markRustQueryError(error) }
+    }
+
+    func rustPage(for key: Data) -> RustWorkspacePage? { rustQueries?.page(for: key) }
+    func rustReadiness(for key: Data) -> WorkspaceQueryReadiness { rustQueries?.readiness(for: key) ?? .notRequested }
+    func prepareRustQuery(_ key: Data) async { await rustQueries?.prepare(key) }
+
+    public func prepareList(_ destination: Destination, options: ListOptions = ListOptions()) async {
+        guard isRustSelected, let facade = rustFacade else { return }
+        var refs: [RustWorkspaceIdentityRequest] = []
+        if case .project(let id) = destination { refs.append(.init(entityType: "project", localID: id.rawValue)) }
+        if case .tag(let id) = destination { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
+        if let id = options.tagFilter { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
+        await prepareRustIdentities(refs)
+        guard let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
+        await prepareRustQuery(key)
+    }
+
+    public func listReadiness(_ destination: Destination, options: ListOptions = ListOptions()) -> WorkspaceQueryReadiness {
+        guard isRustSelected, let facade = rustFacade,
+              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return .notRequested }
+        return rustReadiness(for: key)
+    }
+
+    public func nextListPage(_ destination: Destination, options: ListOptions = ListOptions()) async {
+        guard let facade = rustFacade,
+              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
+        await rustQueries?.nextPage(key)
+    }
+
+    public func previousListPage(_ destination: Destination, options: ListOptions = ListOptions()) async {
+        guard let facade = rustFacade,
+              let key = try? facade.workspaceListQuery(destination, options: options, bindings: rustIdentityBindings) else { return }
+        await rustQueries?.previousPage(key)
+    }
+
+    func rustCapturePreviewKey(_ draft: CaptureDraft) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let draft = try facade.workspaceCaptureDraft(draft, bindings: rustIdentityBindings)
+        return try JSONSerialization.data(withJSONObject: ["kind": "capture_preview", "draft": JSONSerialization.jsonObject(with: draft)], options: [.sortedKeys])
+    }
+
+    public func prepareCapturePreview(_ draft: CaptureDraft) async {
+        do { await prepareRustQuery(try rustCapturePreviewKey(draft)) }
+        catch { markRustQueryError(error) }
+    }
+
+    func rustMutateShown(_ mutation: (inout GTDState) -> Void) { mutation(&state) }
+
+    func rustAdoptTasks(_ tasks: [TaskRecord], for query: Data) {
+        rustTaskInterests[query] = Set(tasks.map(\.id))
+        for var task in tasks {
+            if let frame = rustTaskFrames[task.id] {
+                task.lastOpenList = frame.lastOpenList
+                task.childrenSyncedAt = frame.childrenKnown ? now() : nil
+            }
+            state.tasks[task.id] = task
+        }
+        pruneRustRecords(keeping: query)
+    }
+
+    private func pruneRustRecords(keeping query: Data) {
+        let active = Set(rustQueries?.entries.keys ?? Dictionary<Data, RustWorkspaceAdapter.Entry>().keys).union([query])
+        rustTaskInterests = rustTaskInterests.filter { active.contains($0.key) }
+        rustProjectInterests = rustProjectInterests.filter { active.contains($0.key) }
+        rustTagInterests = rustTagInterests.filter { active.contains($0.key) }
+        let tasks = Set(rustTaskInterests.values.flatMap { $0 })
+        let projects = Set(rustProjectInterests.values.flatMap { $0 })
+        let tags = Set(rustTagInterests.values.flatMap { $0 })
+        state.tasks = state.tasks.filter { tasks.contains($0.key) }
+        rustTaskFrames = rustTaskFrames.filter { tasks.contains($0.key) }
+        state.projects = state.projects.filter { projects.contains($0.key) }
+        state.tags = state.tags.filter { tags.contains($0.key) }
+    }
+
+    private func adoptRustPage(query: Data, page: RustWorkspacePage) throws {
+        guard let facade = rustFacade,
+              let root = try JSONSerialization.jsonObject(with: query) as? [String: Any],
+              let kind = root["kind"] as? String else { throw RustDomainError.malformedResult }
+        let frames = try facade.workspaceTaskFrames(from: page)
+        for frame in frames { rustTaskFrames[frame.taskID] = frame }
+        switch kind {
+        case "list_mode":
+            let list = try facade.workspaceList(from: page, keeping: state, at: now())
+            rustAdoptTasks(list.list.sections.flatMap(\.tasks), for: query)
+        case "task_detail":
+            let task = try facade.workspaceTask(from: page.result, detail: true, at: now())
+            rustAdoptTasks([task], for: query)
+        case "projects":
+            let projects = try facade.workspaceProjects(from: page.result, keeping: state, at: now())
+            rustProjectInterests[query] = Set(projects.map { $0.project.id })
+            for row in projects { state.projects[row.project.id] = row.project }
+            pruneRustRecords(keeping: query)
+        case "tags":
+            let tags = try facade.workspaceTags(from: page.result, keeping: state, at: now())
+            rustTagInterests[query] = Set(tags.map { $0.tag.id })
+            for row in tags { state.tags[row.tag.id] = row.tag }
+            pruneRustRecords(keeping: query)
+        case "list_counts": _ = try facade.workspaceCounts(from: page.result)
+        case "capture_preview": _ = try facade.workspaceCapturePreview(from: page.result, in: state)
+        default: try adoptRustReviewPage(query: query, page: page)
+        }
+    }
+
+    func rustReadRecords(_ requests: [RustWorkspaceRecordRequest]) async throws -> RustWorkspacePage {
+        guard let runtime = rustRuntime else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let binding = runtimeBindingID
+        let answer = try await runtime.records(requests)
+        guard binding == runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+        switch answer {
+        case .answered(let page):
+            guard let generation = UInt64(page.projectionGeneration), generation >= (rustQueries?.generationFloor ?? 0) else {
+                throw RustBridgeError(code: "QUERY_RESTART_REQUIRED")
+            }
+            return page
+        case .refused(let refusal, _): throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
+        }
+    }
+
+    private func refreshRustStatus() async {
+        guard let runtime = rustRuntime, let facade = rustFacade else { return }
+        let binding = runtimeBindingID
+        rustStatusRequestID &+= 1
+        let request = rustStatusRequestID
+        do {
+            let status = try facade.workspaceSyncState(from: await runtime.syncStatus())
+            guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
+            guard status.generation >= (rustQueries?.generationFloor ?? 0) else { return }
+            rustSyncState = status
+            pendingChangeCount = Int(clamping: status.pending)
+            let answer = try await runtime.issues()
+            guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
+            if case .answered(let page) = answer, let generation = UInt64(page.projectionGeneration),
+               generation >= (rustQueries?.generationFloor ?? 0) {
+                runtimeIssues = try facade.workspaceIssues(from: page.result)
+            }
+        } catch {
+            guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
+            markRustQueryError(error)
+        }
+    }
+
+    private func wakeRustTransport(_ trigger: SyncTrigger) async {
+        guard let selection = rustSelection, isRustBound else { return }
+        let binding = runtimeBindingID
+        let result = await selection.transport.request(trigger)
+        guard binding == runtimeBindingID else { return }
+        switch result {
+        case .status(let status): runtimeTransportUnavailable = false; syncStatus = status
+        case .transportUnavailable: runtimeTransportUnavailable = true
+        }
+    }
+
+    func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown: GTDState)
+        async throws -> RustWorkspaceSavedGesture {
+        guard let runtime = rustRuntime, let facade = rustFacade, let saver = rustGestureSaver else {
+            throw RustBridgeError(code: "WORKSPACE_NOT_READY")
+        }
+        let binding = runtimeBindingID
+        let instant = now()
+        let witnesses = localChildEdits
+        let result = try await saver.save(editorID: editorID, authoredIntent: authoredIntent) {
+            for command in commands {
+                if case .decideTask(let decision) = command {
+                    guard let expected = decision.expectedTask, expected.runtimeAdmissionToken != nil else {
+                        throw RustBridgeError(code: "SHOWN_FRAME_RELOAD_REQUIRED")
+                    }
+                    guard expected.matches(shown.tasks[decision.taskID], localChildEdits: witnesses[decision.taskID]) else {
+                        throw GTDValidationError.formulationChanged
+                    }
+                }
+            }
+            let identities = try facade.workspaceIdentityRequests(for: commands, in: shown, at: instant)
+            let bindings = try await runtime.resolveIdentities(identities)
+            guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+            var encoded = try facade.workspaceCommands(commands, commandIDs: commands.map { _ in self.makeID() },
+                at: commands.map { _ in instant }, in: shown, bindings: bindings)
+            for index in commands.indices {
+                if case .decideTask(let decision) = commands[index] {
+                    guard let token = decision.expectedTask?.runtimeAdmissionToken else {
+                        throw RustBridgeError(code: "SHOWN_FRAME_RELOAD_REQUIRED")
+                    }
+                    let data = try JSONSerialization.data(withJSONObject: [JSONSerialization.jsonObject(with: token)], options: [.sortedKeys])
+                    let original = encoded[index]
+                    encoded[index] = RustWorkspaceCommand(commandID: original.commandID, commandType: original.commandType,
+                        entityID: original.entityID, payload: original.payload, preconditions: original.preconditions,
+                        dependsOn: original.dependsOn, admissionTokens: data)
+                }
+            }
+            return RustWorkspaceGesture(authoredIntent: authoredIntent, commands: encoded,
+                context: try self.rustExecuteContext(at: instant))
+        }
+        switch result {
+        case .refused(let refusal, let original):
+            var context = shown
+            if let type = refusal.entityType, ["project", "tag"].contains(type), let id = refusal.entityKey.first {
+                let requests = [RustWorkspaceRecordRequest(entityType: type, recordKey: [id])]
+                do {
+                    let page = try await rustReadRecords(requests)
+                    try facade.workspaceApplyRecords(from: page.result, requests: requests, to: &context, at: instant)
+                } catch { if binding == runtimeBindingID { markRustQueryError(error) } }
+            }
+            let candidates = original.filter { $0.commandType.hasPrefix((refusal.entityType ?? "") + ".") }
+            if let id = refusal.entityKey.first {
+                if refusal.reason == "duplicate_project_name", context.projects[ProjectID(id)] == nil, candidates.count > 1 {
+                    throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
+                }
+                if refusal.reason == "duplicate_tag_name", context.tags[TagID(id)] == nil, candidates.count > 1 {
+                    throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
+                }
+            }
+            let wire = candidates.first ?? original.first
+            if let wire, let error = try facade.workspaceValidationError(refusal, command: wire, in: context) { throw error }
+            throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
+        case .saved(let saved):
+            await finishRustSave(saved, binding: binding)
+            return saved
+        }
+    }
+
+    func rustExecuteContext(at instant: Date) throws -> RustWorkspaceContext {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let inputs = try facade.workspaceQueryInputs(at: instant, zone: deviceTimeZone().identifier,
+            reviewExposed: rustSelection?.reviewEnabled == true)
+        guard let root = try JSONSerialization.jsonObject(with: inputs) as? [String: Any], let policy = root["policy"] else {
+            throw RustDomainError.malformedResult
+        }
+        return RustWorkspaceContext(now: instant, timeZone: deviceTimeZone().identifier, actorID: facade.context.actorID,
+            policy: try JSONSerialization.data(withJSONObject: policy, options: [.sortedKeys]))
+    }
+}
+
+
+extension Workspace {
+    func finishRustSave(_ saved: RustWorkspaceSavedGesture, binding: UUID) async {
+        guard binding == runtimeBindingID, let facade = rustFacade else { return }
+        let generation = saved.receipts.compactMap { UInt64($0.projectionGeneration) }.max() ?? 0
+        let inputs = try? facade.workspaceQueryInputs(at: now(), zone: deviceTimeZone().identifier,
+            reviewExposed: rustSelection?.reviewEnabled == true)
+        rustQueries?.invalidate(generation: generation, inputs: inputs)
+        await refreshRustStatus()
+        for key in Array(rustQueries?.entries.keys ?? Dictionary<Data, RustWorkspaceAdapter.Entry>().keys) {
+            await prepareRustQuery(key)
+        }
+        await wakeRustTransport(.localChange)
+        guard binding == runtimeBindingID else { return }
+        didPersist?()
+    }
+
+    @discardableResult
+    public func capture(_ draft: CaptureDraft, editorID: String) async throws -> TaskID {
+        if !isRustSelected { let result = try capture(draft); try await finishLegacyAsyncSave(); return result }
+        guard let runtime = rustRuntime, let facade = rustFacade, let saver = rustGestureSaver else {
+            throw RustBridgeError(code: "WORKSPACE_NOT_READY")
+        }
+        let shown = state
+        let binding = runtimeBindingID
+        let instant = now()
+        let intent = try StoreDocumentCoding.makeEncoder().encode(draft)
+        let result = try await saver.save(editorID: editorID, authoredIntent: intent) {
+            let raw = try facade.workspaceCaptureDraft(draft, bindings: self.rustIdentityBindings)
+            let request = try await facade.workspaceResolveReferences(raw, runtime: runtime)
+            let resolution = try await runtime.smartAddResolve(draft: request)
+            guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+            guard case .answered(let page) = resolution else { throw RustDomainError.malformedResult }
+            let preview = try facade.workspaceCapturePreview(from: page.result, in: shown)
+            if let problem = preview.problem { throw problem }
+            let project = preview.project?.isNew == true ? ProjectID(Self.rawID(self.makeID())) : nil
+            let tags = preview.tags.filter(\.isNew).map { _ in TagID(Self.rawID(self.makeID())) }
+            let minted = try facade.workspaceCaptureMinted(projectID: project, tagIDs: tags)
+            let proposed = try await runtime.smartAddPropose(draft: request, minted: minted, expectedGeneration: page.projectionGeneration)
+            guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+            guard case .answered(let proposal) = proposed else { throw RustDomainError.malformedResult }
+            let command = facade.workspaceCaptureCommand(taskID: TaskID(Self.rawID(self.makeID())),
+                commandID: self.makeID(), proposal: proposal)
+            return RustWorkspaceGesture(authoredIntent: intent, commands: [command], context: try self.rustExecuteContext(at: instant))
+        }
+        switch result {
+        case .refused(let refusal, let commands):
+            if let command = commands.first, let error = try facade.workspaceValidationError(refusal, command: command, in: shown) { throw error }
+            throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
+        case .saved(let saved):
+            await finishRustSave(saved, binding: binding)
+            guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
+            return TaskID(facade.workspaceLocalID(id))
+        }
+    }
+
+    func saveRustCommands(_ commands: [GTDCommand], editorID: String, authoredIntent: Data? = nil)
+        async throws -> RustWorkspaceSavedGesture {
+        let intent = try authoredIntent ?? StoreDocumentCoding.makeEncoder().encode(commands)
+        return try await performAsync(commands, editorID: editorID, authoredIntent: intent, shown: state)
+    }
+
+    public func apply(_ commands: [GTDCommand], editorID: String) async throws {
+        if !isRustSelected { try apply(commands); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands(commands, editorID: editorID)
+    }
+}
+
+
+extension Workspace {
+    public func updateTask(_ id: TaskID, _ changes: TaskChanges, editorID: String) async throws {
+        if !isRustSelected { try updateTask(id, changes); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.updateTask(.init(taskID: id, changes: changes))], editorID: editorID)
+    }
+
+    public func moveTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil, editorID: String) async throws {
+        if !isRustSelected { try moveTask(id, to: list, waitingFor: waitingFor); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .move, toList: list, waitingFor: waitingFor))], editorID: editorID)
+    }
+
+    public func completeTask(_ id: TaskID, editorID: String) async throws {
+        if !isRustSelected { try completeTask(id); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .complete))], editorID: editorID)
+    }
+
+    public func cancelTask(_ id: TaskID, editorID: String) async throws {
+        if !isRustSelected { try cancelTask(id); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .cancel))], editorID: editorID)
+    }
+
+    public func reopenTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil, editorID: String) async throws {
+        if !isRustSelected { try reopenTask(id, to: list, waitingFor: waitingFor); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .reopen, toList: list, waitingFor: waitingFor))], editorID: editorID)
+    }
+
+    public func renameSubtask(_ subtaskID: SubtaskID, in taskID: TaskID, to title: String, editorID: String) async throws {
+        if !isRustSelected { try renameSubtask(subtaskID, in: taskID, to: title); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.updateSubtask(.init(taskID: taskID, subtaskID: subtaskID, title: title))], editorID: editorID)
+    }
+
+    public func transitionSubtask(_ subtaskID: SubtaskID, in taskID: TaskID, _ action: SubtaskTransitionAction, editorID: String) async throws {
+        if !isRustSelected { try transitionSubtask(subtaskID, in: taskID, action); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.transitionSubtask(.init(taskID: taskID, subtaskID: subtaskID, action: action))], editorID: editorID)
+    }
+
+    public func editComment(_ commentID: CommentID, in taskID: TaskID, body: String, editorID: String) async throws {
+        if !isRustSelected { try editComment(commentID, in: taskID, body: body); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.updateComment(.init(taskID: taskID, commentID: commentID, body: body))], editorID: editorID)
+    }
+
+    public func renameProject(_ id: ProjectID, to name: String, editorID: String) async throws {
+        if !isRustSelected { try renameProject(id, to: name); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.updateProject(.init(projectID: id, name: name))], editorID: editorID)
+    }
+
+    public func setProjectColor(_ id: ProjectID, color: String?, editorID: String) async throws {
+        if !isRustSelected { try setProjectColor(id, color: color); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear))], editorID: editorID)
+    }
+
+    public func archiveProject(_ id: ProjectID, editorID: String) async throws {
+        if !isRustSelected { try archiveProject(id); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.archiveProject(id)], editorID: editorID)
+    }
+
+    public func unarchiveProject(_ id: ProjectID, editorID: String) async throws {
+        if !isRustSelected { try unarchiveProject(id); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.unarchiveProject(project: id)], editorID: editorID)
+    }
+
+    public func setProjectOutcome(_ id: ProjectID, outcome: String?, editorID: String) async throws {
+        if !isRustSelected { try setProjectOutcome(id, outcome: outcome); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.setProjectOutcome(project: id, outcome: outcome)], editorID: editorID)
+    }
+
+    public func renameTag(_ id: TagID, to name: String, editorID: String) async throws {
+        if !isRustSelected { try renameTag(id, to: name); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.renameTag(.init(tagID: id, name: name))], editorID: editorID)
+    }
+
+    public func deleteTag(_ id: TagID, editorID: String) async throws {
+        if !isRustSelected { try deleteTag(id); try await finishLegacyAsyncSave(); return }
+        _ = try await saveRustCommands([.deleteTag(id)], editorID: editorID)
+    }
+
+}
+
+
+extension Workspace {
+    @discardableResult
+    public func addSubtask(to taskID: TaskID, title: String, editorID: String) async throws -> SubtaskID {
+        if !isRustSelected { let result = try addSubtask(to: taskID, title: title); try await finishLegacyAsyncSave(); return result }
+        let intent = try JSONSerialization.data(withJSONObject: ["action": "add_subtask", "task": taskID.rawValue, "title": title], options: [.sortedKeys])
+        let created = SubtaskID(Self.rawID(makeID()))
+        let saved = try await saveRustCommands([.createSubtask(.init(taskID: taskID, subtaskID: created, title: title))],
+            editorID: editorID, authoredIntent: intent)
+        guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
+        return SubtaskID(id)
+    }
+
+    @discardableResult
+    public func addComment(to taskID: TaskID, body: String, editorID: String) async throws -> CommentID {
+        if !isRustSelected { let result = try addComment(to: taskID, body: body); try await finishLegacyAsyncSave(); return result }
+        let intent = try JSONSerialization.data(withJSONObject: ["action": "add_comment", "task": taskID.rawValue, "body": body], options: [.sortedKeys])
+        let created = CommentID(Self.rawID(makeID()))
+        let saved = try await saveRustCommands([.createComment(.init(taskID: taskID, commentID: created, body: body))],
+            editorID: editorID, authoredIntent: intent)
+        guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
+        return CommentID(id)
+    }
+
+    @discardableResult
+    public func createProject(name: String, color: String? = nil, editorID: String) async throws -> ProjectID {
+        if !isRustSelected { let result = try createProject(name: name, color: color); try await finishLegacyAsyncSave(); return result }
+        let intent = try JSONSerialization.data(withJSONObject: ["action": "create_project", "name": name,
+            "color": color.map { $0 as Any } ?? NSNull()], options: [.sortedKeys])
+        let created = ProjectID(Self.rawID(makeID()))
+        let saved = try await saveRustCommands([.createProject(.init(projectID: created, name: name, color: color))],
+            editorID: editorID, authoredIntent: intent)
+        guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
+        return ProjectID(id)
+    }
+
+    @discardableResult
+    public func createTag(name: String, editorID: String) async throws -> TagID {
+        if !isRustSelected { let result = try createTag(name: name); try await finishLegacyAsyncSave(); return result }
+        let intent = try JSONSerialization.data(withJSONObject: ["action": "create_tag", "name": name], options: [.sortedKeys])
+        let created = TagID(Self.rawID(makeID()))
+        let saved = try await saveRustCommands([.createTag(.init(tagID: created, name: name))],
+            editorID: editorID, authoredIntent: intent)
+        guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
+        return TagID(id)
+    }
+
+    @discardableResult
+    public func clarifyAsProject(_ id: TaskID, projectName: String, outcome: String? = nil, firstAction: String,
+                                 changes: TaskChanges = TaskChanges(), editorID: String) async throws -> ProjectID {
+        if !isRustSelected {
+            let result = try clarifyAsProject(id, projectName: projectName, outcome: outcome, firstAction: firstAction, changes: changes)
+            try await finishLegacyAsyncSave()
+            return result
+        }
+        let intent = try JSONSerialization.data(withJSONObject: ["action": "clarify_project", "task": id.rawValue,
+            "name": projectName, "outcome": outcome.map { $0 as Any } ?? NSNull(), "first_action": firstAction,
+            "changes": try JSONSerialization.jsonObject(with: StoreDocumentCoding.makeEncoder().encode(changes))], options: [.sortedKeys])
+        let created = ProjectID(Self.rawID(makeID()))
+        var changed = changes
+        changed.projectID = .set(created)
+        if firstAction != state.tasks[id]?.title { changed.title = .set(firstAction) }
+        let saved = try await saveRustCommands([
+            .createProject(.init(projectID: created, name: projectName, desiredOutcome: outcome)),
+            .updateTask(.init(taskID: id, changes: changed)),
+            .transitionTask(.init(taskID: id, action: .move, toList: .next))], editorID: editorID, authoredIntent: intent)
+        guard let id = saved.commands.first(where: { $0.commandType == "project.create" })?.entityID else {
+            throw RustDomainError.malformedResult
+        }
+        return ProjectID(id)
+    }
+}
+
+
+extension Workspace {
+    func rustShownTask(of task: TaskRecord) -> ShownTask {
+        var shown = ShownTask(task, localChildEdits: localChildEdits[task.id] ?? 0)
+        if let frame = rustTaskFrames[task.id], state.tasks[task.id] == task {
+            shown.childrenKnown = frame.childrenKnown
+            shown.runtimeAdmissionToken = frame.token
+        } else {
+            shown.childrenKnown = false
+        }
+        return shown
+    }
+
+    private func finishLegacyAsyncSave() async throws {
+        await flush()
+        if let storageError { throw WorkspaceError.storage(storageError) }
+    }
+}
+
+
+extension Workspace {
+    private func prepareRustIdentities(_ requests: [RustWorkspaceIdentityRequest]) async {
+        guard !requests.isEmpty, let runtime = rustRuntime else { return }
+        let binding = runtimeBindingID
+        do {
+            let resolved = try await runtime.resolveIdentities(requests)
+            guard binding == runtimeBindingID else { return }
+            for row in resolved {
+                rustIdentityBindings.removeAll { $0.entityType == row.entityType && $0.localID == row.localID }
+                rustIdentityBindings.append(row)
+            }
+            if rustIdentityBindings.count > 1_024 { rustIdentityBindings.removeFirst(rustIdentityBindings.count - 1_024) }
+        } catch { if binding == runtimeBindingID { markRustQueryError(error) } }
+    }
+
+    public func prepareProjects(archived: Bool = false) async {
+        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return }
+        await prepareRustQuery(key)
+    }
+
+    public func prepareTags() async {
+        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return }
+        await prepareRustQuery(key)
+    }
+
+    public func projectsReadiness(archived: Bool = false) -> WorkspaceQueryReadiness {
+        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return .notRequested }
+        return rustReadiness(for: key)
+    }
+
+    public func tagsReadiness() -> WorkspaceQueryReadiness {
+        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return .notRequested }
+        return rustReadiness(for: key)
+    }
+
+    public func nextProjectsPage(archived: Bool = false) async {
+        guard let key = try? rustFacade?.workspaceReadQuery("projects", filter: archived ? "archived" : "active") else { return }
+        await rustQueries?.nextPage(key)
+    }
+
+    public func nextTagsPage() async {
+        guard let key = try? rustFacade?.workspaceReadQuery("tags") else { return }
+        await rustQueries?.nextPage(key)
+    }
+}
+
+
+extension Workspace {
+    /// Owner-side retention runs even while Review is hidden. A failure can
+    /// retry on the next lifecycle event; it never changes a saved receipt.
+    public func maintainRuntimeDrafts() async {
+        guard let runtime = rustRuntime, !rustPruningDrafts else { return }
+        let binding = runtimeBindingID
+        rustPruningDrafts = true
+        defer { if binding == runtimeBindingID { rustPruningDrafts = false } }
+        do {
+            let result = try await runtime.pruneReviewForms(now: now())
+            guard binding == runtimeBindingID,
+                  let generation = UInt64(result.projectionGeneration), generation >= (rustQueries?.generationFloor ?? 0) else { return }
+            rustReviewDraftCount = result.liveCount
+            presentationDraftError = nil
+        } catch {
+            guard binding == runtimeBindingID else { return }
+            presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_MAINTENANCE_FAILED"
+        }
+    }
 }

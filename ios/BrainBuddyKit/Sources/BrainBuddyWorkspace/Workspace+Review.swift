@@ -46,7 +46,8 @@ extension Workspace {
     /// The task as a decision card or form shows it now (FR-011), with this
     /// device's child edits on it; pass it to `decide(expectedTask:)`.
     public func shownTask(of task: TaskRecord) -> ShownTask {
-        ShownTask(task, localChildEdits: localChildEdits[task.id] ?? 0)
+        if isRustSelected { return rustShownTask(of: task) }
+        return ShownTask(task, localChildEdits: localChildEdits[task.id] ?? 0)
     }
 
     /// Core's exposure input (`ReviewState.accountlessReleaseSwitch`): the

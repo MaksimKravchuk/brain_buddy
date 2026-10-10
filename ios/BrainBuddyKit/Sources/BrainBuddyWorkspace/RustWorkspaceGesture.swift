@@ -17,7 +17,7 @@ struct RustWorkspaceSavedGesture: Sendable {
 
 enum RustWorkspaceGestureCompletion: Sendable {
     case saved(RustWorkspaceSavedGesture)
-    case refused(RustRefusal)
+    case refused(RustRefusal, commands: [RustWorkspaceCommand])
 }
 
 @MainActor
@@ -36,7 +36,18 @@ final class RustWorkspaceGestureSaver {
         let draftID = "runtime:prepared:" + editorID
         if let draft = try await runtime.loadDraft(draftID) {
             let original = try StoreDocumentCoding.makeDecoder().decode(RustWorkspaceGesture.self, from: draft.fields)
-            let known = try await runtime.execute(original.commands, context: original.context)
+            let known: RustWorkspaceExecution
+            let tokenlessInteractive = original.commands.contains {
+                $0.commandType == "review.decide" && ($0.admissionTokens.isEmpty || $0.admissionTokens == Data("[]".utf8))
+            }
+            if tokenlessInteractive {
+                guard let receipts = try await runtime.lookupKnownBatch(original.commands, context: original.context) else {
+                    throw RustBridgeError(code: "SHOWN_FRAME_RELOAD_REQUIRED")
+                }
+                known = .saved(receipts)
+            } else {
+                known = try await runtime.execute(original.commands, context: original.context)
+            }
             switch known {
             case .saved(let receipts):
                 // Cleanup cannot turn a committed save into a failure. A later
@@ -48,7 +59,7 @@ final class RustWorkspaceGestureSaver {
             case .refused(let refusal):
                 if original.authoredIntent == authoredIntent {
                     await clearKnownDraft(draftID)
-                    return .refused(refusal)
+                    return .refused(refusal, commands: original.commands)
                 }
             }
         }
@@ -64,7 +75,7 @@ final class RustWorkspaceGestureSaver {
         await clearKnownDraft(draftID)
         switch result {
         case .saved(let receipts): return .saved(RustWorkspaceSavedGesture(commands: prepared.commands, receipts: receipts))
-        case .refused(let refusal): return .refused(refusal)
+        case .refused(let refusal): return .refused(refusal, commands: prepared.commands)
         }
     }
 

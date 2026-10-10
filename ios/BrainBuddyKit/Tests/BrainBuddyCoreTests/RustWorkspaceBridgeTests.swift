@@ -60,13 +60,13 @@ struct RustWorkspaceBridgeTests {
         let snapshot = try await runtime.snapshot()
         #expect(snapshot.pending == "1")
         let state = try facade.workspaceState(from: snapshot, keeping: .empty, at: date)
-        #expect(state.tasks[taskID]?.title == "Keep my draft")
+        #expect(state.tasks[TaskID(command.entityID!)]?.title == "Keep my draft")
         let inputs = try facade.workspaceQueryInputs(at: date, zone: "UTC", reviewExposed: false)
         let query = try RustJSON.data(["kind": "task_detail", "task_id": command.entityID!])
         guard case .answered(let detail) = try await runtime.query(query, inputs: inputs) else {
             Issue.record("saved task must have a canonical detail answer"); return
         }
-        var stale = try #require(state.tasks[taskID])
+        var stale = try #require(state.tasks[TaskID(command.entityID!)])
         stale.title = "A stale Swift title"
         stale.subtasks = [SubtaskRecord(id: SubtaskID("stale-child"), title: "Removed", orderKey: 1)]
         let canonical = try facade.workspaceTask(from: detail.result, keeping: stale, detail: true, at: date)
@@ -75,7 +75,7 @@ struct RustWorkspaceBridgeTests {
         #expect(ShownTask(canonical).childrenKnown)
         let summary = try facade.workspaceTask(from: detail.result, keeping: stale, detail: false, at: date)
         #expect(summary.title == "Keep my draft")
-        #expect(summary.subtasks == stale.subtasks)
+        #expect(summary.subtasks.isEmpty)
         let subscription = try await runtime.subscribe()
         let initial = try #require(try await subscription.next(after: nil, timeoutMilliseconds: 0))
         #expect(initial.projectionGeneration == snapshot.projectionGeneration)
@@ -120,8 +120,8 @@ struct RustWorkspaceBridgeTests {
     func commandIdentityAliases() throws {
         let localTask = TaskID("00000000-0000-4000-8000-000000000031")
         let localTag = TagID("00000000-0000-4000-8000-000000000032")
-        let canonicalTask = TaskID("task_proved_server")
-        let canonicalTag = TagID("tag_proved_server")
+        let canonicalTask = TaskID("task_00000000-0000-4000-8000-000000000033")
+        let canonicalTag = TagID("tag_00000000-0000-4000-8000-000000000034")
         let shown = Fixture.state(tasks: [Fixture.task(canonicalTask, tagIDs: [canonicalTag])])
         let bindings = [RustWorkspaceIdentityBinding(entityType: "task", localID: localTask.rawValue,
             canonicalID: canonicalTask.rawValue), RustWorkspaceIdentityBinding(entityType: "tag",
@@ -164,7 +164,45 @@ struct RustWorkspaceBridgeTests {
             Issue.record("the complete gesture must save"); return
         }
         let state = try facade.workspaceState(from: await runtime.snapshot(), keeping: .empty, at: date)
-        #expect(state.tasks[task]?.tagIDs == [second])
+        #expect(state.tasks[TaskID("task_" + task.rawValue)]?.tagIDs == [TagID("tag_" + second.rawValue)])
         try await runtime.close()
+    }
+}
+
+
+extension RustWorkspaceBridgeTests {
+    @Test("026-FR-025: an existing source formulation stays verbatim while a new formulation is explicitly minted")
+    func existingFormulationIdentity() throws {
+        let bare = "00000000-0000-4000-8000-000000000091"
+        let task = TaskID("task_existing")
+        var record = Fixture.task(task)
+        record.formulation = FormulationClock(id: FormulationID(bare), startedAt: date)
+        let facade = RustDomainFacade(runtime: try RustBridgeRuntime(), context: RustDomainContext(deviceTimeZone: "UTC"))
+        let encoded = try facade.workspaceCommand(.autoParkTask(.init(taskID: task, formulationID: FormulationID(bare))),
+            commandID: UUID(), at: date, in: Fixture.state(tasks: [record]))
+        #expect(try RustJSON.object(encoded.payload).string("formulation_id") == bare)
+        let created = try facade.workspaceCommand(.createTask(.init(taskID: TaskID(UUID().uuidString.lowercased()),
+            title: "A new wording", list: .next, newFormulationID: FormulationID(bare))), commandID: UUID(), at: date, in: .empty)
+        #expect(try RustJSON.object(created.payload).string("new_formulation_id") == "form_" + bare)
+    }
+
+    @Test("026-FR-025: the canonical decision's public produced revision survives without a cached task")
+    func decisionPublicGuard() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let fixture = try RustJSON.object(Data(contentsOf: root.appendingPathComponent("rust/crates/bb-client/tests/fixtures/legacy-review-activation.json")))
+        let decisions = try fixture.object("expected_read_set").object("decisions")
+        let row = try #require(decisions.values.first as? WireObject)
+        let id = try row.string("id")
+        let facade = RustDomainFacade(runtime: try RustBridgeRuntime(), context: RustDomainContext(deviceTimeZone: "UTC"))
+        var owned = GTDState.empty
+        let request = RustWorkspaceRecordRequest(entityType: "review_decision", recordKey: [id])
+        try facade.workspaceApplyRecords(from: RustJSON.data(["kind": "records", "value": [["entity_type": "review_decision", "value": row]]]),
+            requests: [request], to: &owned, at: date)
+        #expect(owned.tasks.isEmpty)
+        #expect(owned.review.decisions[DecisionID(id)]?.taskAfter.serverRevision == Int(try row.string("task_revision_after")))
+        let command = try facade.workspaceCommand(.undoDecision(DecisionID(id)), commandID: UUID(), at: date, in: owned)
+        let guardRow = try #require(try RustJSON.array(command.preconditions).first as? WireObject)
+        #expect(try guardRow.string("edit_revision") == row.string("task_revision_after"))
     }
 }
