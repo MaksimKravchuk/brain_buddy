@@ -309,6 +309,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Durable job ledger",
         "One durable worker owns each handed-off scheduler",
     ),
+    "sync_unit_of_work": (
+        EPIC_TASKS,
+        "Task sync unit of work",
+        "Tasks, Review and job intents share one SQLite commit",
+    ),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",

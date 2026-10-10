@@ -11,17 +11,19 @@ another owner's record reads as absent.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from datetime import date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeVar
 
 from pydantic import BaseModel
 
 from app.repositories.sqlite import SQLiteRepositorySupport
+from app.utils.file_ops import write_json
 
 from .domain import TaskDocument
 from .review_domain import (
@@ -37,6 +39,8 @@ from .review_domain import (
 )
 
 _Model = TypeVar("_Model", bound=BaseModel)
+
+_LOG = logging.getLogger(__name__)
 
 REVIEW_LEDGER_ID = "review-v1"
 
@@ -108,6 +112,20 @@ CREATE TABLE IF NOT EXISTS navigator_usage (
 """
 
 
+class WriteScope(Protocol):
+    """The open unit of work a repository write joins (spec 026 PR-25).
+
+    Declared here, the lowest layer, so the repositories never import the unit
+    of work that drives them.
+    """
+
+    def record_write(self, owner_id: str, resource: str, record_id: str) -> None:
+        """Note one write; refuse it when it is for another owner."""
+
+    def after_commit(self, action: Callable[[], None]) -> None:
+        """Run ``action`` once the unit has committed; drop it on rollback."""
+
+
 def _dump(model: BaseModel) -> str:
     return json.dumps(
         model.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
@@ -150,11 +168,67 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 (owner_id,),
             )
 
+    # ------------------------------------------------------------ unit of work
+    def active_unit(self) -> WriteScope | None:
+        """The unit of work open on this thread, if any."""
+
+        unit: WriteScope | None = getattr(self._thread_state, "unit", None)
+        return unit
+
+    def _note_write(self, owner_id: str, resource: str, record_id: str) -> None:
+        """Register a write with the open unit; a no-op for a plain write."""
+
+        unit = self.active_unit()
+        if unit is not None:
+            unit.record_write(owner_id, resource, record_id)
+
+    def _write_mirror(self, path: Path, model: BaseModel) -> None:
+        """Write the JSON mirror now, or after the open unit commits.
+
+        The mirror is a derived copy of SQLite: inside a unit it is written
+        only once the unit has committed, so a rollback leaves no mirror of
+        rows that never existed.
+        """
+
+        payload = model.model_dump(mode="json")
+        unit = self.active_unit()
+        if unit is None:
+            write_json(path, payload)
+            return
+        unit.after_commit(lambda: self._flush_mirror(path, payload))
+
+    def _remove_mirror(self, path: Path) -> None:
+        unit = self.active_unit()
+        if unit is None:
+            path.unlink(missing_ok=True)
+            return
+        unit.after_commit(lambda: self._flush_mirror(path, None))
+
+    @staticmethod
+    def _flush_mirror(path: Path, payload: Any) -> None:
+        # The commit already happened; a mirror that cannot be written is
+        # logged, not reported as a failed command that actually succeeded.
+        try:
+            if payload is None:
+                path.unlink(missing_ok=True)
+            else:
+                write_json(path, payload)
+        except OSError:
+            _LOG.warning("JSON mirror %s could not be updated", path.name)
+
     # ------------------------------------------------------------ helpers
-    def _review_execute(self, resource: str, sql: str, params: tuple[Any, ...]) -> None:
+    def _review_execute(
+        self,
+        resource: str,
+        sql: str,
+        params: tuple[Any, ...],
+        record_id: str | None = None,
+    ) -> None:
+        owner_id = str(params[0])
+        self._note_write(owner_id, resource, record_id or owner_id)
         with (
             self._connection(self._thread_state) as conn,
-            self._sqlite_guard(resource, str(params[0])),
+            self._sqlite_guard(resource, owner_id),
         ):
             conn.execute(sql, params)
 
@@ -246,6 +320,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 session.started_at.isoformat(),
                 _dump(session),
             ),
+            session.id,
         )
 
     def list_review_sessions(self, owner_id: str) -> list[ReviewSessionDocument]:
@@ -301,6 +376,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 decision.decided_at.isoformat(),
                 _dump(decision),
             ),
+            decision.id,
         )
 
     def delete_review_decision(self, owner_id: str, decision_id: str) -> None:
@@ -308,6 +384,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             "Review decision",
             "DELETE FROM review_decisions WHERE owner_id = ? AND id = ?",
             (owner_id, decision_id),
+            decision_id,
         )
 
     def list_review_decisions_for_session(
@@ -364,6 +441,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 payload = excluded.payload
             """,
             (receipt.owner_id, receipt.task_id, receipt.kind, _dump(receipt)),
+            f"{receipt.task_id}:{receipt.kind}",
         )
 
     def delete_review_receipt(self, owner_id: str, task_id: str, kind: str) -> None:
@@ -372,6 +450,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             "DELETE FROM review_receipts "
             "WHERE owner_id = ? AND task_id = ? AND kind = ?",
             (owner_id, task_id, kind),
+            f"{task_id}:{kind}",
         )
 
     def list_review_receipts(self, owner_id: str) -> list[ReviewReceiptDocument]:
@@ -405,6 +484,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 payload = excluded.payload
             """,
             (ack.owner_id, ack.task_id, ack.formulation_id, _dump(ack)),
+            f"{ack.task_id}:{ack.formulation_id}",
         )
 
     def list_park_acks(self, owner_id: str) -> list[ReviewParkAckDocument]:
@@ -441,6 +521,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
                 release.created_at.isoformat(),
                 _dump(release),
             ),
+            release.id,
         )
 
     def list_bulk_releases(
@@ -472,6 +553,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             ON CONFLICT(owner_id, provider) DO UPDATE SET payload = excluded.payload
             """,
             (consent.owner_id, consent.provider, _dump(consent)),
+            consent.provider,
         )
 
     def list_navigator_consents(self, owner_id: str) -> list[NavigatorConsentDocument]:
@@ -491,6 +573,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             ON CONFLICT(owner_id, day) DO UPDATE SET payload = excluded.payload
             """,
             (usage.owner_id, usage.day.isoformat(), _dump(usage)),
+            usage.day.isoformat(),
         )
 
     def list_navigator_usage(self, owner_id: str) -> list[NavigatorUsageDocument]:
@@ -504,6 +587,7 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
     def delete_navigator_usage_before(self, owner_id: str, day: date) -> int:
         """Delete the owner's usage rows of days before ``day``; returns how many."""
 
+        self._note_write(owner_id, "Navigator usage", owner_id)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Navigator usage", owner_id),
@@ -601,8 +685,9 @@ class ReviewRepositoryMixin(SQLiteRepositorySupport):
             "Task",
             "DELETE FROM tasks WHERE owner_id = ? AND id = ?",
             (owner_id, task_id),
+            task_id,
         )
-        self.task_path(owner_id, task_id).unlink(missing_ok=True)
+        self._remove_mirror(self.task_path(owner_id, task_id))
 
     def iter_review_export(self, owner_id: str) -> Iterator[tuple[str, list[Any]]]:
         """``(file name, records)`` for every exported review table (FR-043)."""
