@@ -83,9 +83,11 @@ class FailingConnection(TrackedConnection):
     ],
 )
 def test_public_command_lock_preserves_exact_owner_error(
-    repository_cls, owner_id: str, expected: str
+    repository_cls, owner_id: str, expected: str, tmp_path: Path
 ) -> None:
     repository = repository_cls.__new__(repository_cls)
+    if repository_cls is TaskRepository:
+        repository.db_path = tmp_path / "tasks.sqlite3"
     repository._connect = lambda: FailingConnection()
     with pytest.raises(RepositoryError) as raised, repository.command_lock(owner_id):
         pass
@@ -94,9 +96,11 @@ def test_public_command_lock_preserves_exact_owner_error(
 
 @pytest.mark.parametrize("repository_cls", [TaskRepository, OperationRepository])
 def test_public_command_lock_rolls_back_closes_and_restores_thread_state(
-    repository_cls,
+    repository_cls, tmp_path: Path
 ) -> None:
     repository = repository_cls.__new__(repository_cls)
+    if repository_cls is TaskRepository:
+        repository.db_path = tmp_path / "tasks.sqlite3"
     previous = object()
     repository._thread_state.conn = previous
     connection = TrackedConnection()
@@ -108,8 +112,12 @@ def test_public_command_lock_rolls_back_closes_and_restores_thread_state(
 
 
 @pytest.mark.parametrize("repository_cls", [TaskRepository, OperationRepository])
-def test_public_command_lock_commits_and_closes_on_success(repository_cls) -> None:
+def test_public_command_lock_commits_and_closes_on_success(
+    repository_cls, tmp_path: Path
+) -> None:
     repository = repository_cls.__new__(repository_cls)
+    if repository_cls is TaskRepository:
+        repository.db_path = tmp_path / "tasks.sqlite3"
     if hasattr(repository._thread_state, "conn"):
         del repository._thread_state.conn
     connection = TrackedConnection()
