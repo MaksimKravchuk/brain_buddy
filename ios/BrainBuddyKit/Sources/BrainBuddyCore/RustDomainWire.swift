@@ -216,10 +216,11 @@ enum RustInstant {
 /// creating a second record the Swift state would overwrite. An ID that is already prefixed,
 /// or of no shape the core could accept, crosses unchanged.
 struct RustIDTable {
+    private let stripsUUIDPrefixes: Bool
     /// Prefixed wire ID to the Swift ID it stands for.
     private(set) var known: [String: String] = [:]
 
-    init() {}
+    init(stripsUUIDPrefixes: Bool = false) { self.stripsUUIDPrefixes = stripsUUIDPrefixes }
 
     mutating func wire(_ raw: String, prefix: String) -> String {
         if ClientID.isValid(raw, prefix: prefix) { return raw }
@@ -236,7 +237,17 @@ struct RustIDTable {
     }
 
     /// The Swift identifier a wire identifier stands for; one that was never mapped is its own.
-    func swift(_ wire: String) -> String { known[wire] ?? wire }
+    func swift(_ wire: String) -> String {
+        if let known = known[wire] { return known }
+        if stripsUUIDPrefixes, let separator = wire.firstIndex(of: "_") {
+            let prefix = String(wire[..<separator])
+            if ["task", "project", "tag", "subtask", "comment", "form", "decision", "bulk", "review", "progress"].contains(prefix),
+               ClientID.isValid(wire, prefix: prefix) {
+                return String(wire[wire.index(after: separator)...])
+            }
+        }
+        return wire
+    }
 
     mutating func task(_ id: TaskID) -> String { wire(id.rawValue, prefix: "task") }
     mutating func project(_ id: ProjectID) -> String { wire(id.rawValue, prefix: "project") }

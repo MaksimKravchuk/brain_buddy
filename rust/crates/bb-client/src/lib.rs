@@ -34,6 +34,7 @@ mod replay;
 mod snapshot;
 mod storage;
 mod sync_session;
+mod workspace_query;
 
 pub use apply_changes::{
     Applied, ApplyError, ApplyStage, FeedStep, Fence, Recovery, TransferFault, TransferProgress,
@@ -46,7 +47,8 @@ pub use epochs::{
 };
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
-    Stage, VisibleSnapshot, execute, execute_with, projection_generation, visible_snapshot,
+    Stage, VisibleSnapshot, execute, execute_batch, execute_batch_with, execute_with,
+    projection_generation, visible_snapshot,
 };
 pub use import::{
     ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,
@@ -60,8 +62,9 @@ pub use issues::{
     save_draft,
 };
 pub use legacy_outbox::{
-    LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend, ProvenAlias, ProvidedReceipts,
-    ReceiptLookup, legacy_outbox_sends, legacy_outbox_status, resolve_legacy_outbox,
+    LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend, LegacyUnsent, ProvenAlias,
+    ProvidedReceipts, ReceiptLookup, convert_legacy_unsent_with, legacy_outbox_sends,
+    legacy_outbox_status, legacy_unsent, resolve_legacy_outbox,
 };
 pub use locking::{LockMode, MigrationLock};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
@@ -74,4 +77,7 @@ pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
 pub use sync_session::{
     Authentication, CapabilitiesCheck, EndCause, ErrorAction, Request, RequestKind, SessionBinding,
     SessionError, SyncSession,
+};
+pub use workspace_query::{
+    QueryError, QueryPage, WorkspaceWatch, query_collection_page, query_page, workspace_watch,
 };

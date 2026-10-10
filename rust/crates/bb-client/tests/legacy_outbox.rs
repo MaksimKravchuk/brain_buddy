@@ -8,10 +8,13 @@
 //! the port's fake: a closure or a table of answers, never a transport.
 
 use bb_client::{
-    ImportRequest, IssueState, LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend,
-    OpenOptions, ProvenAlias, ProvidedReceipts, Store, import_legacy_store, legacy_outbox_sends,
-    legacy_outbox_status, open_issues, resolve_legacy_outbox,
+    ExecuteContext, ExecuteError, ExecuteRequest, ImportRequest, IssueState, LegacyAnswer,
+    LegacyOutboxError, LegacyOutboxStatus, LegacySend, OpenOptions, ProvenAlias, ProvidedReceipts,
+    RandomIds, Store, convert_legacy_unsent_with, import_legacy_store, legacy_outbox_sends,
+    legacy_outbox_status, legacy_unsent, open_issues, resolve_legacy_outbox,
 };
+use bb_domain::types::{ActorId, Policy, ZoneName};
+use bb_protocol::catalog::CommandType;
 use bb_protocol::catalog::EntityType;
 use bb_protocol::wire::Instant;
 use serde_json::{Value, json};
@@ -189,6 +192,98 @@ fn resolve(
 }
 
 // ------------------------------------------------------------------------- tests
+
+fn prepared(store: &mut Store) -> Vec<ExecuteRequest> {
+    legacy_unsent(store)
+        .unwrap()
+        .into_iter()
+        .map(|entry| {
+            let source = &entry.command["createTask"]["_0"];
+            ExecuteRequest {
+                command_id: entry.idempotency_key,
+                command_type: CommandType::TaskCreate,
+                entity_id: Some(
+                    bb_protocol::wire::Id::parse(format!(
+                        "task_{}",
+                        source["taskID"].as_str().unwrap()
+                    ))
+                    .unwrap(),
+                ),
+                payload: json!({"title":source["title"],"state":"next"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                preconditions: vec![],
+                depends_on: vec![],
+                context: ExecuteContext {
+                    now: entry.issued_at,
+                    time_zone: ZoneName::new("UTC").unwrap(),
+                    actor_id: ActorId::parse("device").unwrap(),
+                    policy: Policy {
+                        weekly_review: false,
+                        navigator_provider: None,
+                        navigator_available: false,
+                        consent_text_version: 1,
+                    },
+                },
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn legacy_outbox_026_fr_013_unsent_conversion_and_marker_commit_together() {
+    let lane = lane("conversion");
+    let mut store = lane.imported(&document(
+        vec![unsent(1, &uuid(11), "One"), unsent(2, &uuid(12), "Two")],
+        vec![],
+    ));
+    resolve(&mut store, NOW, nothing);
+    let original = carried(&mut store);
+    let requests = prepared(&mut store);
+    let cancelled = convert_legacy_unsent_with(&mut store, &mut RandomIds, &requests, |_| {
+        Err(ExecuteError::Cancelled)
+    });
+    assert_eq!(cancelled.unwrap_err(), ExecuteError::Cancelled);
+    assert_eq!(count(&mut store, "outbox"), 0);
+    assert_eq!(legacy_outbox_status(&mut store).unwrap().unsent, 2);
+    let saved =
+        convert_legacy_unsent_with(&mut store, &mut RandomIds, &requests, |_| Ok(())).unwrap();
+    assert_eq!(saved[0].command_id, requests[0].command_id);
+    let status = legacy_outbox_status(&mut store).unwrap();
+    assert_eq!(status.unsent, 0);
+    assert_eq!(status.converted, 2);
+    assert!(status.may_run());
+    assert!(!status.fully_synced());
+    let retry =
+        convert_legacy_unsent_with(&mut store, &mut RandomIds, &requests, |_| Ok(())).unwrap();
+    assert!(retry.iter().all(|saved| saved.replayed));
+    assert_eq!(count(&mut store, "outbox"), 2);
+    assert_eq!(original, carried(&mut store));
+}
+
+#[test]
+fn legacy_outbox_026_fr_013_conversion_refusal_preserves_all_intents_and_order() {
+    let lane = lane("conversion-refusal");
+    let mut store = lane.imported(&document(
+        vec![unsent(1, &uuid(11), "One"), unsent(2, &uuid(12), "")],
+        vec![],
+    ));
+    resolve(&mut store, NOW, nothing);
+    let requests = prepared(&mut store);
+    assert!(matches!(
+        convert_legacy_unsent_with(&mut store, &mut RandomIds, &requests, |_| Ok(())),
+        Err(ExecuteError::Refused(_))
+    ));
+    assert_eq!(count(&mut store, "outbox"), 0);
+    assert_eq!(legacy_outbox_status(&mut store).unwrap().unsent, 2);
+    let mut wrong_order = requests.clone();
+    wrong_order.reverse();
+    assert!(
+        convert_legacy_unsent_with(&mut store, &mut RandomIds, &wrong_order, |_| Ok(())).is_err()
+    );
+    assert_eq!(count(&mut store, "outbox"), 0);
+}
 
 #[test]
 fn legacy_outbox_026_fr_013_golden_outbox_stays_unsent_is_not_looked_up_and_never_claims_synced() {

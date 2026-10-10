@@ -32,9 +32,11 @@
 //! transaction, and the verdicts are applied in one write transaction that
 //! re-reads what it depends on. Every entry is accounted for or nothing is saved.
 
+use crate::execute::{ExecuteError, ExecuteRequest, Executed, IdSource, execute_batch_in};
 use crate::import::{KIND_ISSUE, KIND_OUTBOX, legacy_import_marker};
 use crate::storage::{Store, StoreError};
 use bb_domain::calendar::UtcInstant;
+use bb_domain::types::{DomainError, Reason};
 use bb_protocol::catalog::EntityType;
 use bb_protocol::wire::{CommandId, Instant};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -130,6 +132,8 @@ pub struct LegacyOutboxStatus {
     /// Pending sends the import carried.
     pub carried: u64,
     pub unsent: u64,
+    /// Converted into durable runtime commands; their server outcomes still wait.
+    pub converted: u64,
     pub accepted: u64,
     pub rejected: u64,
     pub awaiting: u64,
@@ -146,7 +150,13 @@ pub struct LegacyOutboxStatus {
 impl LegacyOutboxStatus {
     /// Every carried entry and issue has a verdict.
     pub fn classified(&self) -> bool {
-        self.carried == self.unsent + self.accepted + self.rejected + self.awaiting + self.uncertain
+        self.carried
+            == self.unsent
+                + self.converted
+                + self.accepted
+                + self.rejected
+                + self.awaiting
+                + self.uncertain
             && self.carried_issues == self.converted_issues
     }
 
@@ -159,7 +169,9 @@ impl LegacyOutboxStatus {
     /// Nothing of the old file is waiting on the server or on the user. Never true while
     /// an uncertain submission or an old issue exists.
     pub fn fully_synced(&self) -> bool {
-        self.may_run() && self.rejected + self.awaiting + self.uncertain + self.open_issues == 0
+        self.may_run()
+            && self.converted + self.rejected + self.awaiting + self.uncertain + self.open_issues
+                == 0
     }
 }
 
@@ -407,6 +419,119 @@ pub fn legacy_outbox_status(store: &mut Store) -> Result<LegacyOutboxStatus, Leg
     let workspace: String =
         store.read(|tx| tx.query_row("SELECT workspace_id FROM sync_meta", [], |r| r.get(0)))?;
     Ok(store.read(|tx| status_in(tx, &workspace))?)
+}
+
+/// Unsent source intents in immutable queue order. Swift uses the existing
+/// GTDCommand decoder/encoder; Rust does not grow a second legacy rule mapper.
+#[derive(Clone, Debug)]
+pub struct LegacyUnsent {
+    pub entry_id: String,
+    pub idempotency_key: CommandId,
+    pub issued_at: bb_protocol::wire::Instant,
+    pub command: Value,
+}
+
+pub fn legacy_unsent(store: &mut Store) -> Result<Vec<LegacyUnsent>, LegacyOutboxError> {
+    legacy_import_marker(store)?.ok_or(LegacyOutboxError::NotImported)?;
+    let loaded = store.read(|tx| Ok(load(tx)))??;
+    loaded
+        .entries
+        .iter()
+        .filter(|entry| {
+            !entry.sent
+                && loaded
+                    .standings
+                    .get(&entry.id)
+                    .is_some_and(|s| s == "unsent")
+        })
+        .map(|entry| {
+            Ok(LegacyUnsent {
+                entry_id: entry.id.clone(),
+                idempotency_key: CommandId::parse(
+                    entry.key.as_deref().ok_or(unreadable("idempotencyKey"))?,
+                )
+                .map_err(|_| unreadable("idempotencyKey"))?,
+                issued_at: bb_protocol::wire::Instant::parse(
+                    entry
+                        .raw
+                        .get("issuedAt")
+                        .and_then(Value::as_str)
+                        .ok_or(unreadable("issuedAt"))?,
+                )
+                .map_err(|_| unreadable("issuedAt"))?,
+                command: entry
+                    .raw
+                    .get("command")
+                    .cloned()
+                    .ok_or(unreadable("command"))?,
+            })
+        })
+        .collect()
+}
+
+/// All prepared unsent intents and their conversion markers commit together.
+/// Re-read eligibility, queue order, original instant and key under the same
+/// lock used by execute. Sent/uncertain submissions can never enter this port.
+/// The source carriers remain immutable for export and audit.
+pub fn convert_legacy_unsent_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ExecuteError> {
+    let invalid =
+        || ExecuteError::Refused(DomainError::field(Reason::InvalidPayload, "legacy_outbox"));
+    legacy_import_marker(store)
+        .map_err(ExecuteError::Store)?
+        .ok_or_else(invalid)?;
+    store.try_write(|tx| {
+        let loaded = load(tx).map_err(|error| match error {
+            LegacyOutboxError::Store(error) => ExecuteError::Store(error),
+            _ => invalid(),
+        })?;
+        let entries: Vec<_> = loaded
+            .entries
+            .iter()
+            .filter(|entry| {
+                !entry.sent
+                    && loaded
+                        .standings
+                        .get(&entry.id)
+                        .is_some_and(|s| matches!(s.as_str(), "unsent" | "converted"))
+            })
+            .collect();
+        if entries.len() != requests.len() {
+            return Err(invalid());
+        }
+        for (entry, request) in entries.iter().zip(requests) {
+            let key = entry
+                .key
+                .as_deref()
+                .and_then(|key| CommandId::parse(key).ok())
+                .ok_or_else(invalid)?;
+            let issued = entry
+                .raw
+                .get("issuedAt")
+                .and_then(Value::as_str)
+                .and_then(|text| bb_protocol::wire::Instant::parse(text).ok())
+                .ok_or_else(invalid)?;
+            if request.command_id != key || request.context.now != issued {
+                return Err(invalid());
+            }
+        }
+        let results = execute_batch_in(tx, ids, requests)?;
+        for (entry, request) in entries.iter().zip(requests) {
+            let fields = json!({"standing":"converted", "command_id":request.command_id,
+                "resolved_at":request.context.now});
+            tx.execute(
+                "UPDATE drafts SET fields = ?3 WHERE workspace_id = ?1
+                AND editor_kind = 'legacy_outbox_resolution' AND record_key = ?2",
+                params![loaded.workspace, entry.id, fields.to_string().into_bytes()],
+            )?;
+        }
+        before_commit(tx)?;
+        Ok(results)
+    })
 }
 
 /// Records the verdict of one entry and the issue (or alias) it implies.
@@ -672,10 +797,19 @@ fn status_in(tx: &Transaction<'_>, workspace: &str) -> rusqlite::Result<LegacyOu
             pattern,
         )
     };
+    let converted = standing("converted")?;
+    let completed = scalar(
+        "SELECT COUNT(*) FROM drafts d JOIN outbox o ON o.workspace_id = d.workspace_id
+        AND o.command_id = json_extract(CAST(d.fields AS TEXT), '$.command_id')
+        WHERE d.workspace_id = ?1 AND d.editor_kind = 'legacy_outbox_resolution'
+        AND json_extract(CAST(d.fields AS TEXT), '$.standing') = ?2 AND o.state = 'completed'",
+        "converted",
+    )?;
     Ok(LegacyOutboxStatus {
         carried: scalar(drafts, KIND_OUTBOX)?,
         unsent: standing(Standing::Unsent.name())?,
-        accepted: standing(Standing::Accepted.name())?,
+        converted: converted - completed,
+        accepted: standing(Standing::Accepted.name())? + completed,
         rejected: standing(Standing::Rejected.name())?,
         awaiting: standing(Standing::Awaiting.name())?,
         uncertain: standing(Standing::Uncertain.name())?,

@@ -346,6 +346,8 @@ public struct RustLegacyOutboxStatus: Equatable, Sendable {
     public let carried: UInt64
     /// Never sent: the intent is still pending and waits to become a new command.
     public let unsent: UInt64
+    /// Durable runtime commands still awaiting their server outcome.
+    public let converted: UInt64
     /// Settled by a receipt for their own key.
     public let accepted: UInt64
     /// Refused by the server: an issue keeps the intent.
@@ -371,6 +373,7 @@ public struct RustLegacyOutboxStatus: Equatable, Sendable {
     fileprivate init(_ status: BridgeLegacyOutboxStatus) {
         carried = status.carried
         unsent = status.unsent
+        converted = status.converted
         accepted = status.accepted
         rejected = status.rejected
         awaiting = status.awaiting
@@ -518,5 +521,230 @@ public final class RustBridgeRuntime: Sendable {
         }.value
         if Task.isCancelled { throw RustBridgeError.cancelled }
         return try outcome.get()
+    }
+}
+
+// MARK: - Durable workspace
+
+/// One immutable catalog intent. Keep commandID with the draft until completion
+/// is known; retrying with a fresh ID could save the same intent twice.
+public struct RustWorkspaceCommand: Equatable, Sendable {
+    public let commandID: String
+    public let commandType: String
+    public let entityID: String?
+    public let payload: Data
+    public let preconditions: Data
+    public let dependsOn: [String]
+
+    public init(commandID: String, commandType: String, entityID: String?, payload: Data,
+                preconditions: Data = Data("[]".utf8), dependsOn: [String] = []) {
+        self.commandID = commandID
+        self.commandType = commandType
+        self.entityID = entityID
+        self.payload = payload
+        self.preconditions = preconditions
+        self.dependsOn = dependsOn
+    }
+
+    fileprivate var bridged: BridgeWorkspaceCommand {
+        BridgeWorkspaceCommand(commandId: commandID, commandType: commandType, entityId: entityID,
+                               payload: payload, preconditions: preconditions, dependsOn: dependsOn)
+    }
+}
+
+public struct RustWorkspaceContext: Sendable {
+    public let now: Date
+    public let timeZone: String
+    public let actorID: String
+    public let policy: Data
+
+    public init(now: Date, timeZone: String, actorID: String, policy: Data) {
+        self.now = now
+        self.timeZone = timeZone
+        self.actorID = actorID
+        self.policy = policy
+    }
+
+    fileprivate var bridged: BridgeExecuteContext {
+        BridgeExecuteContext(now: RustInstant.format(now), timeZone: timeZone, actorId: actorID, policy: policy)
+    }
+}
+
+public struct RustWorkspaceSaved: Equatable, Sendable {
+    public let commandID: String
+    public let entityID: String
+    public let localSequence: String
+    public let projectionGeneration: String
+    public let replayed: Bool
+
+    fileprivate init(_ value: BridgeSaved) {
+        commandID = value.commandId
+        entityID = value.entityId
+        localSequence = value.localSequence
+        projectionGeneration = value.projectionGeneration
+        replayed = value.replayed
+    }
+}
+
+public enum RustWorkspaceExecution: Equatable, Sendable {
+    case saved([RustWorkspaceSaved])
+    case refused(RustRefusal)
+}
+
+public struct RustWorkspacePage: Equatable, Sendable {
+    public let projectionGeneration: String
+    public let result: Data
+    public let collectionNextCursor: String?
+}
+
+public enum RustWorkspaceAnswer: Equatable, Sendable {
+    case answered(RustWorkspacePage)
+    case refused(RustRefusal)
+}
+
+public struct RustWorkspaceSnapshot: Equatable, Sendable {
+    public let projectionGeneration: String
+    public let records: Data
+    public let pending: String
+    public let openIssues: String
+}
+
+public enum RustWorkspaceStoreStatus: Equatable, Sendable {
+    case ready
+    case readOnlyRecovery(found: Int64)
+}
+
+public struct RustWorkspaceInvalidation: Equatable, Sendable {
+    public let projectionGeneration: String
+    public let changedKinds: [String]
+    public let syncStatusChanged: Bool
+    public let issuesChanged: Bool
+    public let pending: String
+    public let openIssues: String
+    public let token: String
+}
+
+extension RustBridgeRuntime {
+    public func openStore(workspaceID: String, databaseURL: URL, busyTimeoutMilliseconds: UInt32 = 2_000)
+        async throws -> RustWorkspaceRuntime {
+        let request = BridgeStoreRequest(workspaceId: workspaceID, databasePath: databaseURL.path,
+                                        busyTimeoutMs: busyTimeoutMilliseconds)
+        return try await offActor { runtime in
+            RustWorkspaceRuntime(try runtime.openStore(request: request))
+        }
+    }
+}
+
+/// All disk work runs off the caller's actor. The adapter chooses where to
+/// adopt results. The generated handle owns no borrowed buffers or pointers.
+public final class RustWorkspaceRuntime: Sendable {
+    private let workspace: BridgeWorkspace
+
+    fileprivate init(_ workspace: BridgeWorkspace) { self.workspace = workspace }
+
+    private func offActor<T: Sendable>(_ work: @escaping @Sendable (BridgeWorkspace) throws -> T) async throws -> T {
+        if Task.isCancelled { throw RustBridgeError.cancelled }
+        let workspace = workspace
+        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<T, RustBridgeError> in
+            do { return .success(try work(workspace)) }
+            catch { return .failure(RustBridgeError(thrown: error)) }
+        }.value
+        if Task.isCancelled { throw RustBridgeError.cancelled }
+        return try outcome.get()
+    }
+
+    public func status() async throws -> RustWorkspaceStoreStatus {
+        try await offActor { workspace in
+            switch try workspace.status() {
+            case .ready: return .ready
+            case .readOnlyRecovery(let found): return .readOnlyRecovery(found: found)
+            }
+        }
+    }
+
+    /// The committed receipt is delivered even if Task cancellation arrived
+    /// after commit. Cancellation that wins before commit returns CANCELLED.
+    /// A storage/bridge error leaves caller-owned command IDs available for retry.
+    public func execute(_ commands: [RustWorkspaceCommand], context: RustWorkspaceContext)
+        async throws -> RustWorkspaceExecution {
+        let operation = BridgeOperation()
+        let workspace = workspace
+        let commands = commands.map(\.bridged)
+        let context = context.bridged
+        return try await withTaskCancellationHandler {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                () -> Result<RustWorkspaceExecution, RustBridgeError> in
+                do {
+                    switch try workspace.execute(commands: commands, context: context, operation: operation) {
+                    case .saved(let results): return .success(.saved(results.map(RustWorkspaceSaved.init)))
+                    case .refused(let refusal): return .success(.refused(RustRefusal(refusal)))
+                    }
+                } catch { return .failure(RustBridgeError(thrown: error)) }
+            }.value
+            return try outcome.get()
+        } onCancel: { _ = operation.cancel() }
+    }
+
+    public func query(_ query: Data, inputs: Data, collectionLimit: UInt32 = 200,
+                      collectionAfter: String? = nil) async throws -> RustWorkspaceAnswer {
+        try await offActor { workspace in
+            switch try workspace.query(query: query, inputs: inputs, collectionLimit: collectionLimit,
+                                       collectionAfter: collectionAfter) {
+            case .answered(let page):
+                return .answered(RustWorkspacePage(projectionGeneration: page.projectionGeneration, result: page.result,
+                                                  collectionNextCursor: page.collectionNextCursor))
+            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            }
+        }
+    }
+
+    /// Bootstrap/diagnostic only. Ordinary lists use the bounded query method.
+    public func snapshot() async throws -> RustWorkspaceSnapshot {
+        try await offActor { workspace in
+            let snapshot = try workspace.snapshot()
+            return RustWorkspaceSnapshot(projectionGeneration: snapshot.projectionGeneration, records: snapshot.records,
+                                         pending: snapshot.pending, openIssues: snapshot.openIssues)
+        }
+    }
+
+    public func subscribe() async throws -> RustWorkspaceSubscription {
+        try await offActor { RustWorkspaceSubscription(try $0.subscribe()) }
+    }
+
+    /// Always settles the handle, even when the caller's Task is cancelled.
+    public func close() async throws {
+        let workspace = workspace
+        let outcome = await Task.detached { () -> Result<Void, RustBridgeError> in
+            do { try workspace.close(); return .success(()) }
+            catch { return .failure(RustBridgeError(thrown: error)) }
+        }.value
+        try outcome.get()
+    }
+}
+
+public final class RustWorkspaceSubscription: Sendable {
+    private let subscription: BridgeSubscription
+    fileprivate init(_ subscription: BridgeSubscription) { self.subscription = subscription }
+
+    public func cancel() { subscription.cancel() }
+
+    /// No callback queue: callers consume one latest invalidation and requery.
+    public func next(after token: String?, timeoutMilliseconds: UInt32 = 1_000)
+        async throws -> RustWorkspaceInvalidation? {
+        let subscription = subscription
+        return try await withTaskCancellationHandler {
+            let outcome = await Task.detached { () -> Result<RustWorkspaceInvalidation?, RustBridgeError> in
+                do {
+                    guard let value = try subscription.next(after: token, timeoutMs: timeoutMilliseconds) else {
+                        return .success(nil)
+                    }
+                    return .success(RustWorkspaceInvalidation(projectionGeneration: value.projectionGeneration,
+                        changedKinds: value.changedKinds, syncStatusChanged: value.syncStatusChanged,
+                        issuesChanged: value.issuesChanged, pending: value.pending, openIssues: value.openIssues, token: value.token))
+                } catch { return .failure(RustBridgeError(thrown: error)) }
+            }.value
+            if Task.isCancelled { throw RustBridgeError.cancelled }
+            return try outcome.get()
+        } onCancel: { subscription.cancel() }
     }
 }

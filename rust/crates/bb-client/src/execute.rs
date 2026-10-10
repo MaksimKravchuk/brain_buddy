@@ -96,6 +96,8 @@ pub struct Executed {
 /// Why nothing was saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExecuteError {
+    /// Cancellation won before the batch commit boundary. Nothing was saved.
+    Cancelled,
     /// The store could not do it; only `STORE_BUSY` is worth retrying as is.
     Store(StoreError),
     /// The rules (or the request's shape) refused the command.
@@ -108,6 +110,7 @@ impl ExecuteError {
     /// The stable code the bindings carry across FFI.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Cancelled => "CANCELLED",
             Self::Store(error) => error.code(),
             Self::Refused(_) => "VALIDATION_FAILED",
             Self::CommandIdReused => "IDEMPOTENCY_KEY_REUSED",
@@ -125,7 +128,7 @@ impl std::fmt::Display for ExecuteError {
             Self::Store(error) => error.fmt(f),
             // The reason and field names carry no user text.
             Self::Refused(error) => write!(f, "{}: {}", self.code(), error.reason.as_str()),
-            Self::CommandIdReused => f.write_str(self.code()),
+            Self::CommandIdReused | Self::Cancelled => f.write_str(self.code()),
         }
     }
 }
@@ -301,6 +304,44 @@ pub fn execute_with(
     mut hook: impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
     store.try_write(|tx| run(tx, ids, request, None, &mut hook))
+}
+
+/// Saves a UI gesture containing several catalog commands, all or nothing.
+/// Each command sees earlier commands in the same transaction. Stable command
+/// IDs recover a lost completion without allocating a second intent.
+pub fn execute_batch(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_with(store, ids, requests, |_| Ok(()))
+}
+
+/// The final callback may refuse/cancel the batch before commit. A bridge can
+/// hold its cancellation arbitration lock from this callback until this function
+/// returns: cancellation then wins before commit or observes the committed result.
+pub fn execute_batch_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ExecuteError> {
+    store.try_write(|tx| {
+        let results = execute_batch_in(tx, ids, requests)?;
+        before_commit(tx)?;
+        Ok(results)
+    })
+}
+
+pub(crate) fn execute_batch_in(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ExecuteError> {
+    requests
+        .iter()
+        .map(|request| run(tx, ids, request, None, &mut |_, _| Ok(())))
+        .collect()
 }
 
 /// [`execute`] inside a transaction the caller already holds, for a command
@@ -671,6 +712,13 @@ fn load_visible(tx: &Transaction<'_>, workspace_id: &str) -> Result<Visible, Exe
         }
     }
     Ok(visible)
+}
+
+pub(crate) fn read_projection(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+) -> Result<ReadSet, ExecuteError> {
+    Ok(load_visible(tx, workspace_id)?.read_set)
 }
 
 /// A stored record: `kind` is its wire entity type and `body` its `value`.

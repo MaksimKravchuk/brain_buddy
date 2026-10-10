@@ -7,7 +7,8 @@
 
 use bb_client::{
     ExecuteContext, ExecuteError, ExecuteRequest, IdSource, OpenOptions, RandomIds, SCHEMA_VERSION,
-    Stage, Store, StoreError, StoreStatus, execute, execute_with,
+    Stage, Store, StoreError, StoreStatus, execute, execute_batch, execute_batch_with,
+    execute_with,
 };
 use bb_domain::types::{ActorId, Policy, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -187,6 +188,51 @@ fn assert_untouched(store: &mut Store) {
     assert!(queue(store).is_empty());
     assert!(visible(store, "task").is_empty());
     assert_eq!(meta(store), ("none".to_string(), None, 1, 0));
+}
+
+#[test]
+fn execute_026_fr_001_batch_refusal_rolls_back_every_command() {
+    let path = scratch("batch-refusal");
+    let mut store = open(&path, 2_000).unwrap();
+    let result = execute_batch(
+        &mut store,
+        &mut SeqIds(0),
+        &[
+            create_task(cmd(1), "Kept only if everything saves"),
+            create_task(cmd(2), ""),
+        ],
+    );
+    assert!(matches!(result, Err(ExecuteError::Refused(_))));
+    assert_untouched(&mut store);
+}
+
+#[test]
+fn execute_026_fr_005_batch_unknown_completion_retries_same_ids() {
+    let path = scratch("batch-retry");
+    let mut store = open(&path, 2_000).unwrap();
+    let requests = [create_task(cmd(1), "One"), create_task(cmd(2), "Two")];
+    let saved = execute_batch(&mut store, &mut SeqIds(0), &requests).unwrap();
+    drop(store); // completion was lost after commit
+    let mut reopened = open(&path, 2_000).unwrap();
+    let retried = execute_batch(&mut reopened, &mut SeqIds(100), &requests).unwrap();
+    assert!(retried.iter().all(|result| result.replayed));
+    assert_eq!(saved[0].entity_id, retried[0].entity_id);
+    assert_eq!(saved[1].local_sequence, retried[1].local_sequence);
+    assert_eq!(queue(&mut reopened).len(), 2);
+}
+
+#[test]
+fn execute_026_fr_001_batch_cancel_before_commit_rolls_back() {
+    let path = scratch("batch-cancel");
+    let mut store = open(&path, 2_000).unwrap();
+    let result = execute_batch_with(
+        &mut store,
+        &mut SeqIds(0),
+        &[create_task(cmd(1), "One"), create_task(cmd(2), "Two")],
+        |_| Err(ExecuteError::Cancelled),
+    );
+    assert_eq!(result.unwrap_err(), ExecuteError::Cancelled);
+    assert_untouched(&mut store);
 }
 
 fn spawn(role: &str, path: &Path, argument: &str) -> Child {
