@@ -24,11 +24,13 @@ struct RustWorkspaceJourneyTests {
         await workspace.load()
         #expect(workspace.isRustBound)
         let project = try await workspace.createProject(name: "Owned stamp project", editorID: "scene:journey:project")
-        let id = try await workspace.capture(CaptureDraft(text: "Canonical capture", contextProjectID: project),
+        let id = try await workspace.capture(CaptureDraft(text: "Canonical capture"),
             editorID: "scene:journey:capture")
         await workspace.prepareList(.list(.inbox))
         #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title) == ["Canonical capture"])
         #expect(workspace.counts().inbox == 1)
+        _ = try await workspace.capture(CaptureDraft(text: "Project membership", list: .next, contextProjectID: project),
+            editorID: "scene:journey:project-capture")
         let key = Data([0, 255, 7])
         let marks = try await workspace.prepareReviewContentStamps(key: key, tasks: [id], projects: [project])
         #expect(workspace.reviewContentStampsReadiness(key: key, tasks: [id], projects: [project]) == .ready)
@@ -45,7 +47,7 @@ struct RustWorkspaceJourneyTests {
         #expect(projectMark.signature.count == 64)
         #expect(projectMark.primaryRecordKey == "c:\(project.rawValue)")
         #expect(projectMark.recordKeys.contains(projectMark.primaryRecordKey))
-        #expect(projectMark.countsByState == [.inbox: 1, .next: 0, .waiting: 0, .someday: 0, .completed: 0, .cancelled: 0])
+        #expect(projectMark.countsByState == [.inbox: 0, .next: 1, .waiting: 0, .someday: 0, .completed: 0, .cancelled: 0])
         let otherMarks = try await workspace.prepareReviewContentStamps(key: Data([0, 255, 8]), tasks: [id], projects: [project])
         #expect(otherMarks.generation == marks.generation)
         #expect(otherMarks.tasks[id]?.stamp != taskMark.stamp)
