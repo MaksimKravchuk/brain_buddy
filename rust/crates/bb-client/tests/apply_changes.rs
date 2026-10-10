@@ -1453,6 +1453,119 @@ mod apply_changes {
         assert_eq!(finish_transfer(&mut store).unwrap().transactions, 1);
     }
 
+    // A transfer's TTL is the server's: the server reads 09:00 and it expires at
+    // 09:30. The device clock is never compared with that instant.
+
+    fn announce_at(store: &mut Store, now: &str, big: &Oversized) {
+        let fence = capture_fence(store).unwrap();
+        let step = apply_changes(
+            store,
+            &context_at(now),
+            &fence,
+            &decode_page(&big.manifest_page),
+        );
+        assert!(matches!(step.unwrap(), FeedStep::Transfer(_)));
+    }
+
+    fn stage_at(
+        store: &mut Store,
+        now: &str,
+        page: &Value,
+    ) -> Result<bb_client::TransferProgress, ApplyError> {
+        let fence = capture_fence(store).unwrap();
+        stage_transfer_page(store, &context_at(now), &fence, &transfer_page(page))
+    }
+
+    fn finish_at(store: &mut Store, now: &str) -> Result<Applied, ApplyError> {
+        let fence = capture_fence(store).unwrap();
+        apply_transfer(
+            store,
+            &context_at(now),
+            &fence,
+            &Id::parse("transfer-1").unwrap(),
+        )
+    }
+
+    #[test]
+    fn feed_026_fr_004_a_device_clock_far_ahead_still_applies_a_fresh_transfer() {
+        let path = scratch("transfer-clock-ahead");
+        let mut store = linked(&path);
+        let big = oversized(1, &external(1), "cursor-1", &big_changes());
+        let ahead = "2026-10-10T14:00:00Z"; // five hours past the server
+
+        announce_at(&mut store, ahead, &big);
+        for page in &big.pages {
+            stage_at(&mut store, ahead, page).unwrap();
+        }
+        let done = finish_at(&mut store, ahead).unwrap();
+
+        assert_eq!(done.transactions, 1);
+        assert_eq!(confirmed(&mut store).len(), 6);
+        assert_eq!(position(&mut store), ("cursor-1".into(), "1".into()));
+    }
+
+    #[test]
+    fn feed_026_fr_004_a_device_clock_behind_still_expires_a_stale_transfer() {
+        let behind = "2026-10-10T06:00:00Z"; // three hours before the server
+        let later = "2026-10-10T06:31:00Z"; // 31 minutes of real time on
+        let big = oversized(1, &external(1), "cursor-1", &big_changes());
+
+        // Elapsed local time spends the TTL, though 06:31 is before 09:30.
+        let path = scratch("transfer-clock-behind-pages");
+        let mut store = linked(&path);
+        announce_at(&mut store, behind, &big);
+        stage_at(&mut store, behind, &big.pages[0]).unwrap();
+        assert_eq!(
+            stage_at(&mut store, later, &big.pages[1]).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+        assert_eq!(staging(&mut store), [("abandoned".to_string(), 0)]);
+
+        // ... the same when applying the completed staging.
+        let path = scratch("transfer-clock-behind-apply");
+        let mut store = linked(&path);
+        announce_at(&mut store, behind, &big);
+        for page in &big.pages {
+            stage_at(&mut store, behind, page).unwrap();
+        }
+        assert_eq!(
+            finish_at(&mut store, later).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+        assert!(confirmed(&mut store).is_empty());
+
+        // The server's own reading on a later page spends it with a still clock.
+        let path = scratch("transfer-clock-behind-server");
+        let mut store = linked(&path);
+        announce_at(&mut store, behind, &big);
+        let mut late_page = big.pages[0].clone();
+        late_page["server_now"] = json!("2026-10-10T09:31:00Z");
+        assert_eq!(
+            stage_at(&mut store, behind, &late_page).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+    }
+
+    #[test]
+    fn feed_026_fr_004_a_backwards_clock_does_not_extend_a_transfers_lifetime() {
+        let path = scratch("transfer-clock-back");
+        let mut store = linked(&path);
+        let big = oversized(1, &external(1), "cursor-1", &big_changes());
+        announce_at(&mut store, NOW, &big);
+        stage_at(&mut store, "2026-10-10T09:20:00Z", &big.pages[0]).unwrap();
+
+        // Restart with the clock set back an hour: 20 minutes are still spent.
+        store.close().unwrap();
+        let mut store = open(&path).unwrap();
+        stage_at(&mut store, "2026-10-10T08:00:00Z", &big.pages[1]).unwrap();
+        assert_eq!(
+            stage_at(&mut store, "2026-10-10T08:11:00Z", &big.pages[2]).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired),
+            "31 minutes in all, not 11"
+        );
+        assert_eq!(staging(&mut store), [("abandoned".to_string(), 0)]);
+    }
+
     #[test]
     fn feed_026_fr_004_an_expired_transfer_is_discarded_and_live_work_is_untouched() {
         let path = scratch("transfer-expired");
@@ -1480,9 +1593,10 @@ mod apply_changes {
         assert_eq!(state(&mut store, 1), "queued");
         assert_eq!(visible(&mut store, "task").len(), 1);
 
-        // A manifest that is already expired is not even staged.
+        // A manifest the server itself dates after its expiry is not even staged.
         let mut late_announce = big.manifest_page.clone();
         late_announce["transaction_manifest"]["transfer_id"] = json!("transfer-2");
+        late_announce["server_now"] = json!("2026-10-10T09:45:00Z");
         let expired = decode_page(&late_announce);
         let error = apply_changes(&mut store, &late, &fence, &expired).unwrap_err();
         assert_eq!(error, ApplyError::Transfer(TransferFault::Expired));
