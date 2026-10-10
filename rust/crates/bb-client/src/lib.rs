@@ -28,6 +28,7 @@ mod execute;
 mod import;
 mod issues;
 mod legacy_outbox;
+mod legacy_review;
 mod localfacts;
 mod locking;
 mod receipts;
@@ -87,3 +88,9 @@ pub use workspace_query::{
 };
 
 pub use localfacts::{local_task_origin_in, local_task_origins, local_task_origins_in};
+
+pub use legacy_review::{
+    LegacyReviewActivated, LegacyReviewAlias, LegacyReviewCapture, LegacyReviewDerivedCounts,
+    LegacyReviewError, LegacyReviewToken, PreparedLegacyReview, activate_legacy_review,
+    activate_legacy_review_with, capture_legacy_review,
+};

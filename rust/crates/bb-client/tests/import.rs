@@ -1654,3 +1654,242 @@ fn import_026_fr_025_a_large_base_stages_in_several_pages_and_imports_whole() {
     assert_eq!(count(&mut store, "identity_aliases"), 1_500);
     assert_eq!(count(&mut store, "staging_pages"), 0);
 }
+
+// Review activation admission and transaction tests. The mapping oracle is
+// explicit fixture data; production conversion remains the existing Swift codec.
+fn review_fixture() -> Value {
+    serde_json::from_str(include_str!("fixtures/legacy-review-activation.json")).unwrap()
+}
+fn review_context() -> bb_client::ExecuteContext {
+    bb_client::ExecuteContext {
+        now: Instant::parse(NOW).unwrap(),
+        time_zone: bb_domain::types::ZoneName::new("UTC").unwrap(),
+        actor_id: bb_domain::types::ActorId::parse("local").unwrap(),
+        policy: bb_domain::types::Policy {
+            weekly_review: true,
+            navigator_provider: None,
+            navigator_available: false,
+            consent_text_version: 1,
+        },
+    }
+}
+fn review_lane(name: &str) -> (Lane, Store, bb_client::PreparedLegacyReview) {
+    review_lane_with(name, review_fixture())
+}
+fn review_lane_with(name: &str, fixture: Value) -> (Lane, Store, bb_client::PreparedLegacyReview) {
+    let lane = lane(name);
+    let mut source: Value = serde_json::from_slice(&golden_bytes()).unwrap();
+    source["base"]["review"] = fixture["source_review"].clone();
+    source["base"]["tasks"] = fixture["source_tasks"].clone();
+    source["outbox"] = json!([]);
+    lane.write_source(&source);
+    import_legacy_store(&lane.request()).unwrap();
+    let mut store = open(&lane.database);
+    let capture = bb_client::capture_legacy_review(&mut store).unwrap();
+    assert_eq!(capture.review, fixture["source_review"]);
+    let prepared = bb_client::PreparedLegacyReview {
+        token: capture.token,
+        read_set: serde_json::from_value(fixture["expected_read_set"].clone()).unwrap(),
+        aliases: vec![],
+        derived_counts: serde_json::from_value(fixture["expected_derived_counts"].clone()).unwrap(),
+    };
+    (lane, store, prepared)
+}
+
+#[test]
+fn review_activation_026_fr_013_atomic_rollback_then_retry_preserves_later_canonical_writes() {
+    let (lane, mut store, prepared) = review_lane("review-atomic");
+    let carrier = carried(&mut store, "legacy_review_base");
+    let tasks = bodies(&mut store, "task");
+    assert_eq!(
+        bb_client::activate_legacy_review_with(&mut store, &review_context(), &prepared, |_| Err(
+            bb_client::LegacyReviewError::Cancelled
+        )),
+        Err(bb_client::LegacyReviewError::Cancelled)
+    );
+    assert!(bodies(&mut store, "review_session").is_empty());
+    assert!(
+        !bb_client::capture_legacy_review(&mut store)
+            .unwrap()
+            .already_active
+    );
+    let first =
+        bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).unwrap();
+    assert!(!first.already_active);
+    assert_eq!(bodies(&mut store, "task"), tasks);
+    assert_eq!(carried(&mut store, "legacy_review_base"), carrier);
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store)
+            .unwrap()
+            .records
+            .iter()
+            .filter(|record| record.entity_type().as_str().starts_with("review_"))
+            .count(),
+        8
+    );
+    // Subsequent canonical edits do not invalidate a completed migration marker.
+    store.write(|tx| {
+        let body: Vec<u8> = tx.query_row("SELECT body FROM confirmed_records WHERE record_type = 'review_settings'", [], |r| r.get(0))?;
+        let mut value: Value = serde_json::from_slice(&body).unwrap(); value["threshold_days"] = json!(28);
+        tx.execute("UPDATE confirmed_records SET body=?1,record_version='1' WHERE record_type='review_settings'", [serde_json::to_vec(&value).unwrap()])?;
+        tx.execute("UPDATE sync_meta SET projection_generation = projection_generation+1", [])?;
+        Ok(())
+    }).unwrap();
+    drop(store);
+    let mut store = open(&lane.database);
+    let again =
+        bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).unwrap();
+    assert!(again.already_active);
+    assert_eq!(again.projection_generation, first.projection_generation);
+    assert_eq!(
+        bodies(&mut store, "review_settings")["[]"]["threshold_days"],
+        28
+    );
+    assert_eq!(
+        bb_client::capture_legacy_review(&mut store).unwrap().token,
+        prepared.token
+    );
+    assert!(
+        import_legacy_store(&lane.request()).unwrap().already_active,
+        "original import marker still works"
+    );
+    let mut changed = prepared;
+    changed.read_set.settings.as_mut().unwrap().threshold_days =
+        bb_domain::types::ThresholdDays::new(14).unwrap();
+    assert_eq!(
+        bb_client::activate_legacy_review(&mut store, &review_context(), &changed),
+        Err(bb_client::LegacyReviewError::AlreadyActivated)
+    );
+}
+
+#[test]
+fn review_activation_026_fr_013_rejects_changed_capture_dirty_target_and_invented_aliases() {
+    for case in [
+        "generation",
+        "carrier",
+        "target",
+        "aliases",
+        "references",
+        "map-key",
+        "counts",
+        "task",
+        "schema",
+    ] {
+        let (_lane, mut store, mut prepared) = review_lane(&format!("review-reject-{case}"));
+        let carrier = carried(&mut store, "legacy_review_base");
+        match case {
+            "generation" => {
+                store
+                    .write(|tx| {
+                        tx.execute(
+                            "UPDATE sync_meta SET projection_generation=projection_generation+1",
+                            [],
+                        )?;
+                        Ok(())
+                    })
+                    .unwrap();
+            }
+            "carrier" => {
+                store.write(|tx| { tx.execute("UPDATE drafts SET fields=x'7b7d' WHERE editor_kind='legacy_review_base'", [])?; Ok(()) }).unwrap();
+            }
+            "target" => {
+                store.write(|tx| { tx.execute("INSERT INTO confirmed_records (workspace_id,record_type,record_key,record_version,tombstone,body) VALUES (?1,'review_settings','[]','0',0,?2)", params![WORKSPACE,serde_json::to_vec(prepared.read_set.settings.as_ref().unwrap()).unwrap()])?; Ok(()) }).unwrap();
+            }
+            "aliases" => prepared.aliases.push(bb_client::LegacyReviewAlias {
+                entity_type: EntityType::ReviewSession,
+                local_id: review_fixture()["source_review"]["sessions"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .next()
+                    .unwrap()
+                    .clone(),
+                server_id: "review_abcdef123abc".into(),
+            }),
+            "references" => {
+                prepared
+                    .read_set
+                    .decisions
+                    .values_mut()
+                    .next()
+                    .unwrap()
+                    .created_task_id =
+                    Some(bb_domain::types::TaskId::parse("invented-history-task").unwrap())
+            }
+            "map-key" => {
+                let session = prepared.read_set.sessions.values().next().unwrap().clone();
+                prepared.read_set.sessions.clear();
+                prepared.read_set.sessions.insert(
+                    bb_domain::types::SessionId::parse("review_abcdef123abc").unwrap(),
+                    session,
+                );
+            }
+            "counts" => prepared.derived_counts.decision_queues = 0,
+            "task" => {
+                let task: Task = serde_json::from_value(
+                    bodies(&mut store, "task").into_values().next().unwrap(),
+                )
+                .unwrap();
+                prepared.read_set.tasks.insert(task.id.clone(), task);
+            }
+            "schema" => store
+                .write(|tx| {
+                    tx.pragma_update(None, "user_version", bb_client::SCHEMA_VERSION + 1)?;
+                    Ok(())
+                })
+                .unwrap(),
+            _ => unreachable!(),
+        }
+        assert!(
+            bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).is_err(),
+            "{case}"
+        );
+        assert_eq!(store.read(|tx| tx.query_row("SELECT COUNT(*) FROM drafts WHERE editor_kind='runtime_legacy_review_activation'", [], |r| r.get::<_,i64>(0))).unwrap(), 0);
+        if case != "carrier" {
+            assert_eq!(carried(&mut store, "legacy_review_base"), carrier);
+        }
+    }
+}
+
+#[test]
+fn review_activation_026_fr_013_admits_exact_historical_alias_atomically() {
+    let mut fixture = review_fixture();
+    let historical = "00000000-0000-4000-8000-000000000012";
+    let decision = fixture["source_review"]["decisions"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap();
+    decision["undo"]["taskBefore"]["id"] = json!(historical);
+    decision["undo"]["taskBefore"]["serverID"] = json!("task_undoremoved_proven");
+    let expected = serde_json::to_string(&fixture["expected_read_set"])
+        .unwrap()
+        .replace(&format!("task_{historical}"), "task_undoremoved_proven");
+    fixture["expected_read_set"] = serde_json::from_str(&expected).unwrap();
+    let (_lane, mut store, mut prepared) = review_lane_with("review-historical-alias", fixture);
+    prepared.aliases.push(bb_client::LegacyReviewAlias {
+        entity_type: EntityType::Task,
+        local_id: historical.into(),
+        server_id: "task_undoremoved_proven".into(),
+    });
+    let aliases_before = count(&mut store, "identity_aliases");
+    assert_eq!(
+        bb_client::activate_legacy_review_with(&mut store, &review_context(), &prepared, |_| Err(
+            bb_client::LegacyReviewError::Cancelled
+        )),
+        Err(bb_client::LegacyReviewError::Cancelled)
+    );
+    assert_eq!(count(&mut store, "identity_aliases"), aliases_before);
+    let result =
+        bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).unwrap();
+    assert_eq!(result.aliases, prepared.aliases);
+    assert_eq!(count(&mut store, "identity_aliases"), aliases_before + 1);
+    assert!(
+        bb_client::capture_legacy_review(&mut store)
+            .unwrap()
+            .aliases
+            .contains(&prepared.aliases[0])
+    );
+    assert!(!bodies(&mut store, "task").contains_key("task_undoremoved_proven"));
+}
