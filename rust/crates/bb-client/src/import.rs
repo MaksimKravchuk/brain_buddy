@@ -82,7 +82,7 @@ const ALIAS_PROVENANCE: &str = "legacy-import:server-id";
 const LOCAL_ACTOR: &str = "local";
 /// Imported records start below every real record version, so the first feed or
 /// snapshot change always advances them.
-const IMPORTED_VERSION: u64 = 0;
+pub(crate) const IMPORTED_VERSION: u64 = 0;
 
 /// The newest `StoreDocument.version` this build reads (`StoreDocument.currentVersion`).
 pub const SUPPORTED_SOURCE_VERSION: i64 = 2;
@@ -316,7 +316,12 @@ pub fn legacy_record_key(entity: EntityType, local_id: &str, server_id: Option<&
     if let Some(server) = server_id {
         return server.to_owned();
     }
-    let prefix = entity.as_str();
+    let prefix = match entity {
+        EntityType::ReviewSession => "review",
+        EntityType::ReviewDecision => "decision",
+        EntityType::ReviewBulkRelease => "bulk",
+        _ => entity.as_str(),
+    };
     if is_client_shape(local_id, prefix) {
         return local_id.to_owned();
     }
