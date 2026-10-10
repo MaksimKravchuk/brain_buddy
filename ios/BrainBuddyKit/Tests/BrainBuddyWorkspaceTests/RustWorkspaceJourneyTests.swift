@@ -94,3 +94,31 @@ extension RustWorkspaceJourneyTests {
         await workspace.closeRuntime()
     }
 }
+
+
+extension RustWorkspaceJourneyTests {
+    @Test("A rolled-back batch uses the exact earlier holder's authored casing in its validation message")
+    @MainActor
+    func duplicateBatchPresentation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let workspace = Workspace(store: ControlledStore(), sync: nil,
+            rust: RustWorkspaceSelection(runtime: runtime,
+                facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC"))))
+        await workspace.load()
+        do {
+            try await workspace.apply([
+                .createProject(.init(projectID: .random(), name: "First Case")),
+                .createProject(.init(projectID: .random(), name: "first case"))
+            ], editorID: "scene:batch:projects")
+            Issue.record("The duplicate name must reject the whole batch")
+        } catch {
+            #expect(Workspace.saveMessage(for: error) == GTDValidationError.duplicateProjectName("First Case").message)
+        }
+        await workspace.prepareProjects()
+        #expect(workspace.projects().isEmpty)
+        await workspace.closeRuntime()
+    }
+}

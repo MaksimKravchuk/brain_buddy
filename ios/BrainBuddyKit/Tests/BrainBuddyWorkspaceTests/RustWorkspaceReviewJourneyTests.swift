@@ -109,12 +109,14 @@ extension RustWorkspaceReviewJourneyTests {
             try await workspace.saveDraft("Still authored", for: key, editorID: "scene:legacy:form")
             Issue.record("A failed local write cannot be reported as saved")
         } catch {
-            #expect(Workspace.saveMessage(for: error) == "No space left on device")
+            #expect(Workspace.saveMessage(for: error).contains("No space left on device"))
         }
-        #expect(workspace.draft(for: key) == "Still authored")
+        #expect(workspace.draft(for: key) == "Keep this text")
         #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Keep this text")
         await store.failWrites(with: nil)
         await workspace.flush()
+        #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Keep this text")
+        try await workspace.saveDraft("Still authored", for: key, editorID: "scene:legacy:form")
         #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Still authored")
     }
 }

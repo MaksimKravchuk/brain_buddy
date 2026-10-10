@@ -109,6 +109,7 @@ public final class Workspace {
     /// The write loop, while it runs. Writes never overlap or reorder.
     @ObservationIgnored private var writer: Task<Void, Never>?
     @ObservationIgnored private var writerToken = 0
+    @ObservationIgnored private var legacySavingEditors: Set<String> = []
     /// True while a store write is in flight: documents read meanwhile wait
     /// in `deferredDocument`, so the commands being written are never
     /// applied twice (once from the new document, once from `unpersisted`).
@@ -1017,6 +1018,11 @@ extension Workspace {
         return "Your latest changes couldn't be saved on this device yet. They're kept and saved with your next change."
     }
 
+    nonisolated static func awaitedStorageMessage(for error: any Error) -> String {
+        if let error = error as? DocumentStoreError { return error.message }
+        return "This change couldn't be saved on this device. Your text is still here. Try again."
+    }
+
     /// Async save callers keep their draft and use the same validation copy.
     /// Bridge failures expose only safe, stable codes at this boundary.
     public nonisolated static func saveMessage(for error: any Error) -> String {
@@ -1541,7 +1547,7 @@ extension Workspace {
                 context: try self.rustExecuteContext(at: instant))
         }
         switch result {
-        case .refused(let refusal, let original):
+        case .refused(let refusal, let failedCommandID, let original):
             var context = shown
             if let type = refusal.entityType, ["project", "tag"].contains(type), let id = refusal.entityKey.first {
                 let requests = [RustWorkspaceRecordRequest(entityType: type, recordKey: [id])]
@@ -1550,17 +1556,9 @@ extension Workspace {
                     try facade.workspaceApplyRecords(from: page.result, requests: requests, to: &context, at: instant)
                 } catch { if binding == runtimeBindingID { markRustQueryError(error) } }
             }
-            let candidates = original.filter { $0.commandType.hasPrefix((refusal.entityType ?? "") + ".") }
-            if let id = refusal.entityKey.first {
-                if refusal.reason == "duplicate_project_name", context.projects[ProjectID(id)] == nil, candidates.count > 1 {
-                    throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
-                }
-                if refusal.reason == "duplicate_tag_name", context.tags[TagID(id)] == nil, candidates.count > 1 {
-                    throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
-                }
-            }
-            let wire = candidates.first ?? original.first
-            if let wire, let error = try facade.workspaceValidationError(refusal, command: wire, in: context) { throw error }
+            if let index = original.firstIndex(where: { $0.commandID == failedCommandID }),
+               let error = try facade.workspaceValidationError(refusal, command: original[index], in: context,
+                    precedingCommands: Array(original[..<index])) { throw error }
             throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
         case .saved(let saved):
             await finishRustSave(saved, binding: binding)
@@ -1599,7 +1597,14 @@ extension Workspace {
 
     @discardableResult
     public func capture(_ draft: CaptureDraft, editorID: String) async throws -> TaskID {
-        if !isRustSelected { let result = try capture(draft); try await finishLegacyAsyncSave(); return result }
+        if !isRustSelected {
+            let makeID = self.makeID
+            let plan = try CapturePlanner.plan(draft, in: state,
+                makeTaskID: { TaskID(Self.rawID(makeID())) },
+                makeProjectID: { ProjectID(Self.rawID(makeID())) }, makeTagID: { TagID(Self.rawID(makeID())) })
+            try await performLegacyDurably(plan.commands, editorID: editorID)
+            return plan.taskID
+        }
         guard let runtime = rustRuntime, let facade = rustFacade, let saver = rustGestureSaver else {
             throw RustBridgeError(code: "WORKSPACE_NOT_READY")
         }
@@ -1626,8 +1631,8 @@ extension Workspace {
             return RustWorkspaceGesture(authoredIntent: intent, commands: [command], context: try self.rustExecuteContext(at: instant))
         }
         switch result {
-        case .refused(let refusal, let commands):
-            if let command = commands.first, let error = try facade.workspaceValidationError(refusal, command: command, in: shown) { throw error }
+        case .refused(let refusal, let failedCommandID, let commands):
+            if let command = commands.first(where: { $0.commandID == failedCommandID }), let error = try facade.workspaceValidationError(refusal, command: command, in: shown) { throw error }
             throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
         case .saved(let saved):
             await finishRustSave(saved, binding: binding)
@@ -1643,7 +1648,7 @@ extension Workspace {
     }
 
     public func apply(_ commands: [GTDCommand], editorID: String) async throws {
-        if !isRustSelected { try apply(commands); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably(commands, editorID: editorID); return }
         _ = try await saveRustCommands(commands, editorID: editorID)
     }
 }
@@ -1651,77 +1656,77 @@ extension Workspace {
 
 extension Workspace {
     public func updateTask(_ id: TaskID, _ changes: TaskChanges, editorID: String) async throws {
-        if !isRustSelected { try updateTask(id, changes); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.updateTask(.init(taskID: id, changes: changes))], editorID: editorID); return }
         _ = try await saveRustCommands([.updateTask(.init(taskID: id, changes: changes))], editorID: editorID)
     }
 
     public func moveTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil, editorID: String) async throws {
-        if !isRustSelected { try moveTask(id, to: list, waitingFor: waitingFor); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.transitionTask(.init(taskID: id, action: .move, toList: list, waitingFor: waitingFor))], editorID: editorID); return }
         _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .move, toList: list, waitingFor: waitingFor))], editorID: editorID)
     }
 
     public func completeTask(_ id: TaskID, editorID: String) async throws {
-        if !isRustSelected { try completeTask(id); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.transitionTask(.init(taskID: id, action: .complete))], editorID: editorID); return }
         _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .complete))], editorID: editorID)
     }
 
     public func cancelTask(_ id: TaskID, editorID: String) async throws {
-        if !isRustSelected { try cancelTask(id); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.transitionTask(.init(taskID: id, action: .cancel))], editorID: editorID); return }
         _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .cancel))], editorID: editorID)
     }
 
     public func reopenTask(_ id: TaskID, to list: OpenList, waitingFor: String? = nil, editorID: String) async throws {
-        if !isRustSelected { try reopenTask(id, to: list, waitingFor: waitingFor); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.transitionTask(.init(taskID: id, action: .reopen, toList: list, waitingFor: waitingFor))], editorID: editorID); return }
         _ = try await saveRustCommands([.transitionTask(.init(taskID: id, action: .reopen, toList: list, waitingFor: waitingFor))], editorID: editorID)
     }
 
     public func renameSubtask(_ subtaskID: SubtaskID, in taskID: TaskID, to title: String, editorID: String) async throws {
-        if !isRustSelected { try renameSubtask(subtaskID, in: taskID, to: title); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.updateSubtask(.init(taskID: taskID, subtaskID: subtaskID, title: title))], editorID: editorID); return }
         _ = try await saveRustCommands([.updateSubtask(.init(taskID: taskID, subtaskID: subtaskID, title: title))], editorID: editorID)
     }
 
     public func transitionSubtask(_ subtaskID: SubtaskID, in taskID: TaskID, _ action: SubtaskTransitionAction, editorID: String) async throws {
-        if !isRustSelected { try transitionSubtask(subtaskID, in: taskID, action); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.transitionSubtask(.init(taskID: taskID, subtaskID: subtaskID, action: action))], editorID: editorID); return }
         _ = try await saveRustCommands([.transitionSubtask(.init(taskID: taskID, subtaskID: subtaskID, action: action))], editorID: editorID)
     }
 
     public func editComment(_ commentID: CommentID, in taskID: TaskID, body: String, editorID: String) async throws {
-        if !isRustSelected { try editComment(commentID, in: taskID, body: body); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.updateComment(.init(taskID: taskID, commentID: commentID, body: body))], editorID: editorID); return }
         _ = try await saveRustCommands([.updateComment(.init(taskID: taskID, commentID: commentID, body: body))], editorID: editorID)
     }
 
     public func renameProject(_ id: ProjectID, to name: String, editorID: String) async throws {
-        if !isRustSelected { try renameProject(id, to: name); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.updateProject(.init(projectID: id, name: name))], editorID: editorID); return }
         _ = try await saveRustCommands([.updateProject(.init(projectID: id, name: name))], editorID: editorID)
     }
 
     public func setProjectColor(_ id: ProjectID, color: String?, editorID: String) async throws {
-        if !isRustSelected { try setProjectColor(id, color: color); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear))], editorID: editorID); return }
         _ = try await saveRustCommands([.updateProject(.init(projectID: id, color: color.map { .set($0) } ?? .clear))], editorID: editorID)
     }
 
     public func archiveProject(_ id: ProjectID, editorID: String) async throws {
-        if !isRustSelected { try archiveProject(id); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.archiveProject(id)], editorID: editorID); return }
         _ = try await saveRustCommands([.archiveProject(id)], editorID: editorID)
     }
 
     public func unarchiveProject(_ id: ProjectID, editorID: String) async throws {
-        if !isRustSelected { try unarchiveProject(id); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.unarchiveProject(project: id)], editorID: editorID); return }
         _ = try await saveRustCommands([.unarchiveProject(project: id)], editorID: editorID)
     }
 
     public func setProjectOutcome(_ id: ProjectID, outcome: String?, editorID: String) async throws {
-        if !isRustSelected { try setProjectOutcome(id, outcome: outcome); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.setProjectOutcome(project: id, outcome: outcome)], editorID: editorID); return }
         _ = try await saveRustCommands([.setProjectOutcome(project: id, outcome: outcome)], editorID: editorID)
     }
 
     public func renameTag(_ id: TagID, to name: String, editorID: String) async throws {
-        if !isRustSelected { try renameTag(id, to: name); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.renameTag(.init(tagID: id, name: name))], editorID: editorID); return }
         _ = try await saveRustCommands([.renameTag(.init(tagID: id, name: name))], editorID: editorID)
     }
 
     public func deleteTag(_ id: TagID, editorID: String) async throws {
-        if !isRustSelected { try deleteTag(id); try await finishLegacyAsyncSave(); return }
+        if !isRustSelected { try await performLegacyDurably([.deleteTag(id)], editorID: editorID); return }
         _ = try await saveRustCommands([.deleteTag(id)], editorID: editorID)
     }
 
@@ -1731,7 +1736,11 @@ extension Workspace {
 extension Workspace {
     @discardableResult
     public func addSubtask(to taskID: TaskID, title: String, editorID: String) async throws -> SubtaskID {
-        if !isRustSelected { let result = try addSubtask(to: taskID, title: title); try await finishLegacyAsyncSave(); return result }
+        if !isRustSelected {
+            let result = SubtaskID(Self.rawID(makeID()))
+            try await performLegacyDurably([.createSubtask(.init(taskID: taskID, subtaskID: result, title: title))], editorID: editorID)
+            return result
+        }
         let intent = try JSONSerialization.data(withJSONObject: ["action": "add_subtask", "task": taskID.rawValue, "title": title], options: [.sortedKeys])
         let created = SubtaskID(Self.rawID(makeID()))
         let saved = try await saveRustCommands([.createSubtask(.init(taskID: taskID, subtaskID: created, title: title))],
@@ -1742,7 +1751,11 @@ extension Workspace {
 
     @discardableResult
     public func addComment(to taskID: TaskID, body: String, editorID: String) async throws -> CommentID {
-        if !isRustSelected { let result = try addComment(to: taskID, body: body); try await finishLegacyAsyncSave(); return result }
+        if !isRustSelected {
+            let result = CommentID(Self.rawID(makeID()))
+            try await performLegacyDurably([.createComment(.init(taskID: taskID, commentID: result, body: body))], editorID: editorID)
+            return result
+        }
         let intent = try JSONSerialization.data(withJSONObject: ["action": "add_comment", "task": taskID.rawValue, "body": body], options: [.sortedKeys])
         let created = CommentID(Self.rawID(makeID()))
         let saved = try await saveRustCommands([.createComment(.init(taskID: taskID, commentID: created, body: body))],
@@ -1753,7 +1766,11 @@ extension Workspace {
 
     @discardableResult
     public func createProject(name: String, color: String? = nil, editorID: String) async throws -> ProjectID {
-        if !isRustSelected { let result = try createProject(name: name, color: color); try await finishLegacyAsyncSave(); return result }
+        if !isRustSelected {
+            let result = ProjectID(Self.rawID(makeID()))
+            try await performLegacyDurably([.createProject(.init(projectID: result, name: name, color: color))], editorID: editorID)
+            return result
+        }
         let intent = try JSONSerialization.data(withJSONObject: ["action": "create_project", "name": name,
             "color": color.map { $0 as Any } ?? NSNull()], options: [.sortedKeys])
         let created = ProjectID(Self.rawID(makeID()))
@@ -1765,7 +1782,11 @@ extension Workspace {
 
     @discardableResult
     public func createTag(name: String, editorID: String) async throws -> TagID {
-        if !isRustSelected { let result = try createTag(name: name); try await finishLegacyAsyncSave(); return result }
+        if !isRustSelected {
+            let result = TagID(Self.rawID(makeID()))
+            try await performLegacyDurably([.createTag(.init(tagID: result, name: name))], editorID: editorID)
+            return result
+        }
         let intent = try JSONSerialization.data(withJSONObject: ["action": "create_tag", "name": name], options: [.sortedKeys])
         let created = TagID(Self.rawID(makeID()))
         let saved = try await saveRustCommands([.createTag(.init(tagID: created, name: name))],
@@ -1778,8 +1799,15 @@ extension Workspace {
     public func clarifyAsProject(_ id: TaskID, projectName: String, outcome: String? = nil, firstAction: String,
                                  changes: TaskChanges = TaskChanges(), editorID: String) async throws -> ProjectID {
         if !isRustSelected {
-            let result = try clarifyAsProject(id, projectName: projectName, outcome: outcome, firstAction: firstAction, changes: changes)
-            try await finishLegacyAsyncSave()
+            guard let task = state.tasks[id] else { throw GTDValidationError.taskNotFound }
+            let result = ProjectID(Self.rawID(makeID()))
+            var changed = changes
+            changed.projectID = .set(result)
+            changed.title = firstAction == task.title ? .unchanged : .set(firstAction)
+            try await performLegacyDurably([
+                .createProject(.init(projectID: result, name: projectName, desiredOutcome: outcome)),
+                .updateTask(.init(taskID: id, changes: changed)),
+                .transitionTask(.init(taskID: id, action: .move, toList: .next))], editorID: editorID)
             return result
         }
         let intent = try JSONSerialization.data(withJSONObject: ["action": "clarify_project", "task": id.rawValue,
@@ -1813,9 +1841,99 @@ extension Workspace {
         return shown
     }
 
-    private func finishLegacyAsyncSave() async throws {
-        await flush()
-        if let storageError { throw WorkspaceError.storage(storageError) }
+    /// The awaited legacy path uses the existing writer and document lock.
+    /// New commands are never optimistic: a returned failure leaves them absent.
+    func performLegacyDurably(
+        _ authored: [GTDCommand], editorID: String,
+        edits: [@Sendable (inout StoreDocument) -> Void] = []
+    ) async throws {
+        guard !isRustSelected else { throw GTDValidationError.asynchronousSaveRequired }
+        guard !isSigningOut, !writesSuspended else { throw GTDValidationError.signingOut }
+        guard !editorID.isEmpty, editorID.utf8.count <= 200 else { throw RustBridgeError(code: "INVALID_DRAFT_ID") }
+        guard legacySavingEditors.insert(editorID).inserted else { throw RustBridgeError(code: "STORE_BUSY") }
+        defer { legacySavingEditors.remove(editorID) }
+        let issuedAt = Self.storedPrecision(now())
+        let commands = reviewExposed ? authored.map {
+            Self.stampingFormulationID($0) { FormulationID.make(self.makeID()) }
+        } : authored
+        let operations = commands.map {
+            PendingOperation(id: makeID(), command: $0, issuedAt: issuedAt, idempotencyKey: makeID())
+        }
+        let previous = writer
+        let ownedEpoch = epoch
+        let exposure = accountlessReleaseSwitch
+        let clockAware = reviewExposed
+        writerToken += 1
+        let token = writerToken
+        let transaction = Task { @MainActor () -> Result<Void, any Error> in
+            if let previous { await previous.value }
+            guard ownedEpoch == self.epoch, !self.writesSuspended, !self.isSigningOut else {
+                return .failure(GTDValidationError.signingOut)
+            }
+            // A prior failure is not permission to stage a new gesture.
+            if previous != nil, self.hasPendingWrites, let error = self.storageError {
+                return .failure(WorkspaceError.storage(error))
+            }
+            if self.hasPendingWrites, !(await self.drainWrites(epoch: ownedEpoch)) {
+                return .failure(WorkspaceError.storage(self.storageError ?? "This save couldn't be completed."))
+            }
+            guard ownedEpoch == self.epoch, !self.writesSuspended, !self.isSigningOut else {
+                return .failure(GTDValidationError.signingOut)
+            }
+            let childEdits = self.localChildEdits
+            self.isWriting = true
+            do {
+                let written = try await self.store.update { document in
+                    var next = OutboxReplayer.replay(document.outbox, onto: document.base,
+                        activatedAt: document.local.activatedAt).state
+                    ReviewSessionUpkeep.closeIdle(document.local.idleClosedSessions, in: &next)
+                    next.review.accountlessReleaseSwitch = exposure
+                    next.localChildEdits = childEdits
+                    for command in commands {
+                        try GTDReducer.apply(command, at: issuedAt, to: &next, mode: .interactive)
+                    }
+                    for operation in operations {
+                        document.outbox = OutboxCompactor.appending(operation, to: document.outbox, clockAware: clockAware)
+                    }
+                    for edit in edits { edit(&document) }
+                }
+                self.isWriting = false
+                // The commit is known. Cancellation or subsequent maintenance
+                // cannot turn it into a retryable save failure.
+                if ownedEpoch == self.epoch {
+                    for command in commands {
+                        if let task = command.childEditTaskID { self.localChildEdits[task, default: 0] += 1 }
+                    }
+                    self.storageError = nil
+                    self.adoptWritten(written, recomputing: true)
+                    self.adoptDeferredDocument()
+                    self.didPersist?()
+                    if !operations.isEmpty, let sync = self.sync { await sync.request(.localChange) }
+                }
+                return .success(())
+            } catch {
+                self.isWriting = false
+                if ownedEpoch == self.epoch {
+                    self.adoptDeferredDocument()
+                    if !(error is GTDValidationError) { self.storageError = Self.awaitedStorageMessage(for: error) }
+                }
+                if let validation = error as? GTDValidationError { return .failure(validation) }
+                return .failure(WorkspaceError.storage(Self.awaitedStorageMessage(for: error)))
+            }
+        }
+        // Registered before the first suspension: flush, sign-out and quit
+        // all wait for this exact transaction through the same writer.
+        writer = Task {
+            let result = await transaction.value
+            guard self.writerToken == token else { return }
+            self.writer = nil
+            switch result {
+            case .success: self.schedulePersistence()
+            case .failure(let error) where error is GTDValidationError: self.schedulePersistence()
+            case .failure: break
+            }
+        }
+        try await transaction.value.get()
     }
 }
 

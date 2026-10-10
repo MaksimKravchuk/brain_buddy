@@ -192,9 +192,29 @@ extension RustDomainFacade {
     }
 
     public func workspaceValidationError(_ refusal: RustRefusal, command: RustWorkspaceCommand,
-                                         in state: GTDState) throws -> GTDValidationError? {
+                                         in state: GTDState, precedingCommands: [RustWorkspaceCommand] = []) throws -> GTDValidationError? {
+        let payload = try RustJSON.object(command.payload)
+        // The typed codec names ShortText for an empty waiting decision note.
+        // Format that proved refusal using the original failed intent.
+        if command.commandType == "review.decide", refusal.reason == "invalid_payload", refusal.field == "ShortText",
+           payload["type"] as? String == "waiting", let waiting = payload["waiting_for"] as? String,
+           NameNormalizer.stripped(waiting).isEmpty { return .waitingForRequired }
+        // Rust identifies the actual holder. Its last authored name in this
+        // refused batch is presentation evidence, even though rollback means
+        // a canonical detail read may still show its older name or no row.
+        if let type = refusal.entityType, let holder = refusal.entityKey.first,
+           (type == "project" && ["duplicate_project_name", "unarchive_name_in_use"].contains(refusal.reason)) ||
+            (type == "tag" && refusal.reason == "duplicate_tag_name") {
+            for prior in precedingCommands.reversed()
+            where prior.entityID == holder && [type + ".create", type + ".update"].contains(prior.commandType) {
+                guard let name = try RustJSON.object(prior.payload)["name"] as? String else { continue }
+                if type == "tag" { return .duplicateTagName(NameNormalizer.tagDisplay(name)) }
+                if refusal.reason == "unarchive_name_in_use" { return .unarchiveNameInUse(NameNormalizer.display(name)) }
+                return .duplicateProjectName(NameNormalizer.display(name))
+            }
+        }
         let ids = RustIDTable(stripsUUIDPrefixes: false)
-        return Self.validationError(refusal, payload: try RustJSON.object(command.payload), in: state, ids: ids)
+        return Self.validationError(refusal, payload: payload, in: state, ids: ids)
     }
 
     /// An encoding lookup view of the shown records, not a projected state.
