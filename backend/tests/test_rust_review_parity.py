@@ -1126,7 +1126,7 @@ JOURNEYS: dict[str, Callable[[Scenario], None]] = {
 
 
 @pytest.mark.parametrize("name", sorted(JOURNEYS))
-def test_026_FR_002_flag_on_and_off_give_identical_review_http_and_rows(
+def test_026_FR_002_026_FR_016_flag_on_and_off_give_identical_review_http_and_rows(
     apps: Apps, caplog: pytest.LogCaptureFixture, name: str
 ) -> None:
     """026-SC-001: one journey, two engines, the same statuses, bodies and rows."""
