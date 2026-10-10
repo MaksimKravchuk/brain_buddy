@@ -926,6 +926,27 @@ fn queries_026_fr_009_needs_next_action_uses_whole_project_counts_before_paging(
             ("p-ended", 0, 0)
         ]
     );
+    // Pure/server summaries omit native-only metadata; the fixture gives the
+    // four whole-state counts explicitly for each native page.
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|mut row| {
+            row.counts_by_state = Some(match row.project.id.as_str() {
+                "p-waiting" => bb_domain::types::TaskCounts {
+                    inbox: 1,
+                    next: 0,
+                    waiting: 1,
+                    someday: 1,
+                },
+                "p-someday" => bb_domain::types::TaskCounts {
+                    someday: 1,
+                    ..Default::default()
+                },
+                _ => bb_domain::types::TaskCounts::default(),
+            });
+            row
+        })
+        .collect();
     for limit in [1, 2, 200] {
         let mut after = None;
         let mut listed = Vec::new();
