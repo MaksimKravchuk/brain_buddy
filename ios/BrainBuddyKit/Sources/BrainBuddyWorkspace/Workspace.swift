@@ -333,7 +333,7 @@ public final class Workspace {
         }
         var result = GTDQueries.list(destination, options: options, in: state, today: today)
         if let search = options.search, !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let matches = Set(GTDQueries.list(.search(search), in: state, today: today).sections.flatMap(\.tasks).map(\.id))
+            let matches = Set(GTDQueries.list(.search(search), options: ListOptions(), in: state, today: today).sections.flatMap(\.tasks).map(\.id))
             result.sections = result.sections.compactMap { section in
                 var narrowed = section
                 narrowed.tasks = section.tasks.filter { matches.contains($0.id) }
@@ -1489,7 +1489,7 @@ extension Workspace {
     func rustQueryFormulation(_ id: TaskID, key: Data) -> RustWorkspaceFormulation? {
         guard let facade = rustFacade, let page = rustPage(for: key) else { return nil }
         let canonical = rustIdentityBindings.first { $0.entityType == "task" && $0.localID == id.rawValue }
-            .map { TaskID($0.canonicalID) } ?? id
+            .flatMap { $0.canonicalID }.map { TaskID($0) } ?? id
         do { return try facade.workspaceTaskFormulation(canonical, from: page) }
         catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
     }

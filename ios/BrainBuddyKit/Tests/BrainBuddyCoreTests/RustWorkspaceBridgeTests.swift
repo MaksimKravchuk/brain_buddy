@@ -279,7 +279,7 @@ extension RustWorkspaceBridgeTests {
                 "unavailable_local_facts": ["weekly_review_unavailable"]
             ]]]]
         ]))
-        let facts = try #require(facade.workspaceTaskFormulation(id, from: page))
+        let facts = try #require(try facade.workspaceTaskFormulation(id, from: page))
         #expect(facts.classification == .none)
         #expect(facts.derived == nil)
         #expect(facts.unavailableLocalFacts == ["weekly_review_unavailable"])
