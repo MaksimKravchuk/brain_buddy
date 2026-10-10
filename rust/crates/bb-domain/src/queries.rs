@@ -171,7 +171,7 @@ pub(crate) fn task_view(
 }
 
 /// Python's `name.strip().casefold()`: the project and tag order key (C-06).
-fn name_key(name: &str) -> String {
+pub(crate) fn name_key(name: &str) -> String {
     normalization::casefold(normalization::strip(name))
 }
 
@@ -179,7 +179,7 @@ fn name_key(name: &str) -> String {
 
 /// One position of a sort key. Every position holds the same variant for all
 /// tasks of one sort, so the derived order is Python's tuple order.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub(crate) enum KeyPart {
     Int(u64),
     Text(String),

@@ -935,3 +935,91 @@ fn execute_026_fr_001_only_typed_reference_fields_create_dependencies() {
         .collect();
     assert_eq!(depends, [vec![], vec![], vec![cmd(1).as_str().to_string()]]);
 }
+
+#[test]
+fn bulk_item_after_command_uses_actual_result_and_retry_keeps_original_fingerprint() {
+    use bb_protocol::command::{AfterCommandPrecondition, CommandRef};
+    let path = scratch("bulk-after-result");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let created = execute(&mut store, &mut ids, &create_task(cmd(70), "Inbox item")).unwrap();
+    let task_id = created.entity_id.as_str();
+    let shown_revision = task(&mut store, task_id)["revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let edit = request(
+        cmd(71),
+        CommandType::TaskUpdate,
+        Some(task_id),
+        json!({"title":"Clarified item"}),
+        vec![shown(EntityType::Task, task_id, &shown_revision)],
+    );
+    let reference = Precondition::AfterCommand(AfterCommandPrecondition {
+        after_command: CommandRef {
+            command_id: cmd(71),
+            entity_type: EntityType::Task,
+            entity_id: created.entity_id.clone(),
+        },
+    });
+    let bulk_id = "bulk_00000000-0000-4000-8000-000000000073";
+    let mut release = request(
+        cmd(72),
+        CommandType::ReviewBulkRelease,
+        Some(bulk_id),
+        json!({"kind":"inbox_remainder","items":[{"task_id":task_id,"expected_revision":shown_revision}]}),
+        vec![reference.clone()],
+    );
+    release.context.policy.weekly_review = true;
+    let results = execute_batch(&mut store, &mut ids, &[edit, release.clone()]).unwrap();
+    assert_eq!(results.len(), 2);
+    assert_eq!(task(&mut store, task_id)["state"], "someday");
+    let queued = queue(&mut store);
+    assert_eq!(
+        queued[2].envelope["payload"]["items"][0]["expected_revision"],
+        "2"
+    );
+    assert!(queued[2].depends_on.contains(&cmd(71).as_str().to_owned()));
+    assert!(execute(&mut store, &mut ids, &release).unwrap().replayed);
+    let mut changed = release.clone();
+    changed.preconditions.clear();
+    assert_eq!(
+        execute(&mut store, &mut ids, &changed),
+        Err(ExecuteError::CommandIdReused)
+    );
+    let queue_len = queue(&mut store).len();
+    for (number, preconditions) in [
+        (73, vec![reference.clone(), reference]),
+        (
+            74,
+            vec![Precondition::AfterCommand(AfterCommandPrecondition {
+                after_command: CommandRef {
+                    command_id: cmd(71),
+                    entity_type: EntityType::Task,
+                    entity_id: Id::parse("task_missing").unwrap(),
+                },
+            })],
+        ),
+        (
+            75,
+            vec![Precondition::AfterCommand(AfterCommandPrecondition {
+                after_command: CommandRef {
+                    command_id: cmd(99),
+                    entity_type: EntityType::Task,
+                    entity_id: created.entity_id.clone(),
+                },
+            })],
+        ),
+    ] {
+        let mut invalid = release.clone();
+        invalid.command_id = cmd(number);
+        invalid.entity_id =
+            Some(Id::parse(format!("bulk_00000000-0000-4000-8000-{number:012}")).unwrap());
+        invalid.preconditions = preconditions;
+        assert!(matches!(
+            execute(&mut store, &mut ids, &invalid),
+            Err(ExecuteError::Refused(_))
+        ));
+        assert_eq!(queue(&mut store).len(), queue_len);
+    }
+}
