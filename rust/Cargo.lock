@@ -125,7 +125,9 @@ dependencies = [
 name = "bb-swift"
 version = "0.1.0"
 dependencies = [
+ "bb-domain",
  "bb-protocol",
+ "serde",
  "serde_json",
  "uniffi",
 ]
