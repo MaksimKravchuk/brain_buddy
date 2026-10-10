@@ -485,6 +485,22 @@ public final class RustBridgeRuntime: Sendable {
         }
     }
 
+    /// Hash the same owned bytes that the importer decodes, in bounded chunks.
+    /// This ephemeral digest is integrity evidence, never workspace authority.
+    public func importSourceSHA256(_ data: Data) async throws -> String {
+        try await offActor { _ in
+            let digest = BridgeDigest()
+            let chunkLimit = 8 * 1024 * 1024
+            var offset = 0
+            while offset < data.count {
+                let end = min(data.count, offset + chunkLimit)
+                try digest.update(data: Data(data[offset..<end]))
+                offset = end
+            }
+            return try digest.digest()
+        }
+    }
+
     /// The old sends a receipt lookup is still needed for, read from the Rust store (spec 026,
     /// T042): the legacy file is not read again. Only the workspace, the path and the busy timeout
     /// of `request` are used.
@@ -759,10 +775,45 @@ public struct RustWorkspaceLegacyReview: Sendable {
     public let alreadyActive: Bool
 }
 
+public struct RustWorkspaceLegacyReviewMetadata: Sendable {
+    public let token: Data
+    public let sourceCounts: Data
+    public let alreadyActive: Bool
+}
+
 public struct RustWorkspaceReviewActivated: Sendable {
     public let projectionGeneration: String
     public let alreadyActive: Bool
     public let aliases: Data
+}
+
+/// Original legacy identity only; private bodies stay in the retained source.
+public struct RustWorkspaceLocalReviewSource: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Hashable, Sendable {
+        case decision, bulkRelease = "bulk_release", taskPark = "task_park", session, settings
+    }
+    public let sourceKind: Kind
+    public let sourceID: String
+
+    public init(_ sourceKind: Kind, sourceID: String) {
+        self.sourceKind = sourceKind
+        self.sourceID = sourceID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sourceKind = "source_kind", sourceID = "source_id"
+    }
+}
+
+public struct RustWorkspaceLocalReviewFragment: Sendable {
+    public let page: Data
+    public let nextCursor: String?
+}
+
+public enum RustWorkspaceLocalReviewAdmission: Equatable, Sendable {
+    case pending(nextOrdinal: UInt32)
+    case admitted
+    case alreadyAdmitted
 }
 
 public struct RustWorkspaceInvalidation: Equatable, Sendable {
@@ -813,12 +864,105 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
+    /// Explicit trusted lifecycle choice, independently verified by Rust.
+    public func establishAccountless() async throws {
+        try await committing { workspace, operation in try workspace.establishAccountLess(operation: operation) }
+    }
+
+    public func establishAccountlessFromImport(retainedSourceURL: URL) async throws {
+        guard retainedSourceURL.isFileURL else { throw RustBridgeError(code: "INVALID_REQUEST", field: "retained_source_path") }
+        let path = retainedSourceURL.path
+        try await committing { workspace, operation in
+            try workspace.establishAccountLessFromImport(retainedSourcePath: path, operation: operation)
+        }
+    }
+
+    public func pruneLocalReviewPrivate(now: Date, limit: UInt32 = 200) async throws -> UInt32 {
+        let instant = RustInstant.format(now)
+        return try await committing { workspace, operation in
+            try workspace.pruneLocalReviewPrivate(now: instant, limit: limit, operation: operation)
+        }
+    }
+
+    public func captureLocalReviewPrivateFragment(retainedSourceURL: URL, selected: RustWorkspaceLocalReviewSource,
+                                                after: String? = nil, now: Date) async throws -> RustWorkspaceLocalReviewFragment? {
+        guard retainedSourceURL.isFileURL else { throw RustBridgeError(code: "INVALID_REQUEST", field: "retained_source_path") }
+        let path = retainedSourceURL.path
+        let selection = try JSONEncoder().encode(selected)
+        let instant = RustInstant.format(now)
+        return try await offActor { workspace in
+            let page = try workspace.captureLocalReviewPrivateFragment(retainedSourcePath: path, selected: selection,
+                after: after, now: instant)
+            guard page.count <= 8 * 1024 * 1024 else { throw RustBridgeError(code: "MALFORMED_QUERY_RESULT") }
+            let decoded = try JSONSerialization.jsonObject(with: page, options: [.fragmentsAllowed])
+            if decoded is NSNull { return nil }
+            guard let object = decoded as? [String: Any],
+                  object["next_cursor"] is NSNull || object["next_cursor"] is String else {
+                throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
+            }
+            return RustWorkspaceLocalReviewFragment(page: page, nextCursor: object["next_cursor"] as? String)
+        }
+    }
+
+    public func localReviewPrivateSourceCompleted(retainedSourceURL: URL,
+                                                 selected: RustWorkspaceLocalReviewSource) async throws -> Bool {
+        guard retainedSourceURL.isFileURL else { throw RustBridgeError(code: "INVALID_REQUEST", field: "retained_source_path") }
+        let path = retainedSourceURL.path
+        let selection = try JSONEncoder().encode(selected)
+        return try await offActor { workspace in
+            try workspace.localReviewPrivateSourceCompleted(retainedSourcePath: path, selected: selection)
+        }
+    }
+
+    public func admitLocalReviewPrivateFragment(retainedSourceURL: URL,
+                                               prepared: RustWorkspaceLegacyReviewPrivatePreparation,
+                                               now: Date) async throws -> RustWorkspaceLocalReviewAdmission {
+        guard retainedSourceURL.isFileURL else { throw RustBridgeError(code: "INVALID_REQUEST", field: "retained_source_path") }
+        let path = retainedSourceURL.path
+        let payload = prepared.payload
+        let instant = RustInstant.format(now)
+        return try await committing { workspace, operation in
+            let bytes = try workspace.admitLocalReviewPrivateFragment(retainedSourcePath: path, prepared: payload,
+                now: instant, operation: operation)
+            guard let object = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else {
+                throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
+            }
+            switch object["status"] as? String {
+            case "pending":
+                guard let ordinal = object["next_ordinal"] as? NSNumber,
+                      let next = UInt32(ordinal.stringValue) else { throw RustBridgeError(code: "MALFORMED_QUERY_RESULT") }
+                return .pending(nextOrdinal: next)
+            case "admitted": return .admitted
+            case "already_admitted": return .alreadyAdmitted
+            default: throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
+            }
+        }
+    }
+
     public func captureLegacyReview() async throws -> RustWorkspaceLegacyReview {
         try await offActor { workspace in
             let source = try workspace.captureLegacyReview()
             return RustWorkspaceLegacyReview(token: source.token, review: source.review, aliases: source.aliases,
                 sourceCounts: source.sourceCounts, alreadyActive: source.alreadyActive)
         }
+    }
+
+    /// The importer already owns the verified source document. Only immutable
+    /// token/count metadata crosses this port; no private legacy body does.
+    public func captureLegacyReviewMetadata() async throws -> RustWorkspaceLegacyReviewMetadata {
+        try await offActor { workspace in
+            let source = try workspace.captureLegacyReviewMetadata()
+            return RustWorkspaceLegacyReviewMetadata(token: source.token, sourceCounts: source.sourceCounts,
+                alreadyActive: source.alreadyActive)
+        }
+    }
+
+    public func activateLegacyReview(_ source: RustWorkspaceLegacyReviewMetadata,
+                                    prepared: RustWorkspaceReviewPreparation,
+                                    context: RustWorkspaceContext) async throws -> RustWorkspaceReviewActivated {
+        let metadata = RustWorkspaceLegacyReview(token: source.token, review: Data(), aliases: Data(),
+            sourceCounts: source.sourceCounts, alreadyActive: source.alreadyActive)
+        return try await activateLegacyReview(metadata, prepared: prepared, context: context)
     }
 
     public func activateLegacyReview(_ source: RustWorkspaceLegacyReview,

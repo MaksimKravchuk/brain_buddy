@@ -9,20 +9,40 @@ import Observation
 /// account cutover install this configuration; the default initializer remains
 /// in the legacy epoch. A selected runtime never opens the retired document.
 public struct RustWorkspaceSelection: Sendable {
+    /// Authority is an explicit lifecycle choice, never inferred from a flag
+    /// or missing account. Rust verifies that fresh setup is still unchosen.
+    public enum Startup: Sendable {
+        case prepared
+        case freshAccountless
+    }
+
     public let runtime: RustWorkspaceRuntime
     public let facade: RustDomainFacade
     public let transport: any SyncRuntimePort
     public let account: LinkedAccount?
     public let reviewEnabled: Bool
+    public let startup: Startup
 
     public init(runtime: RustWorkspaceRuntime, facade: RustDomainFacade,
                 transport: any SyncRuntimePort = PendingRustSyncRuntimePort(),
-                account: LinkedAccount? = nil, reviewEnabled: Bool = false) {
+                account: LinkedAccount? = nil, reviewEnabled: Bool = false,
+                startup: Startup = .prepared) {
         self.runtime = runtime
         self.facade = facade
         self.transport = transport
         self.account = account
         self.reviewEnabled = reviewEnabled
+        self.startup = startup
+    }
+
+    /// Prepare the importer-owned accountless runtime before any Workspace UI
+    /// binding. Production selection remains the separately gated T044 choice.
+    public static func importAccountless(using importer: RustStoreImporter, facade: RustDomainFacade,
+                                         transport: any SyncRuntimePort = PendingRustSyncRuntimePort(),
+                                         reviewEnabled: Bool = false) async throws -> RustWorkspaceSelection {
+        let runtime = try await importer.prepareAccountlessRuntime(facade: facade, reviewEnabled: reviewEnabled)
+        return RustWorkspaceSelection(runtime: runtime, facade: facade, transport: transport,
+            reviewEnabled: reviewEnabled)
     }
 }
 
@@ -1265,6 +1285,12 @@ extension Workspace {
             guard case .ready = try await selection.runtime.status() else {
                 throw RustBridgeError(code: "READ_ONLY_RECOVERY")
             }
+            switch selection.startup {
+            case .prepared: break
+            case .freshAccountless:
+                guard selection.account == nil else { throw RustBridgeError(code: "INVALID_REQUEST", field: "account_less_setup") }
+                try await selection.runtime.establishAccountless()
+            }
             guard binding == runtimeBindingID else { return }
             rustRuntime = selection.runtime
             rustFacade = selection.facade
@@ -2126,6 +2152,9 @@ extension Workspace {
         rustPruningDrafts = true
         defer { if binding == runtimeBindingID { rustPruningDrafts = false } }
         do {
+            let removed = try await runtime.pruneLocalReviewPrivate(now: now())
+            guard binding == runtimeBindingID else { return }
+            if removed > 0 { invalidateRustPrivateQueries() }
             let result = try await runtime.pruneReviewForms(now: now())
             guard binding == runtimeBindingID,
                   let generation = UInt64(result.projectionGeneration), generation >= (rustQueries?.generationFloor ?? 0) else { return }
@@ -2135,6 +2164,14 @@ extension Workspace {
             guard binding == runtimeBindingID else { return }
             presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_MAINTENANCE_FAILED"
         }
+    }
+
+    /// Private admission and expiry do not advance the public projection.
+    /// Reuse the owned cache's dirty fence so formulation metadata is reread.
+    private func invalidateRustPrivateQueries() {
+        let inputs = try? rustFacade?.workspaceQueryInputs(at: now(), zone: deviceTimeZone().identifier,
+            reviewExposed: rustSelection?.reviewEnabled == true)
+        rustQueries?.invalidate(generation: rustQueries?.generationFloor ?? 0, inputs: inputs)
     }
 }
 

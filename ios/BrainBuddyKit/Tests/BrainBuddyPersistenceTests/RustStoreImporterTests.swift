@@ -92,6 +92,13 @@ struct RustStoreImporterTests {
         #expect(try Data(contentsOf: workspace.directory.appendingPathComponent(report.backupFile)) == before)
         #expect(try workspace.backups() == [report.backupFile, report.manifestFile].sorted())
         #expect(FileManager.default.fileExists(atPath: workspace.database.path))
+        do {
+            _ = try await workspace.importer(runtime: runtime).prepareAccountlessRuntime(
+                facade: RustDomainFacade(runtime: runtime), reviewEnabled: true)
+            Issue.record("A Review flag cannot turn the imported owner's work into accountless authority")
+        } catch {
+            #expect((error as? RustStoreImportError) == .failed(RustBridgeError(code: "INVALID_REQUEST", field: "account_less_import")))
+        }
     }
 
     @Test("026-FR-010: importing the same file again does nothing")
@@ -109,6 +116,29 @@ struct RustStoreImporterTests {
         #expect(second.sourceSHA256 == first.sourceSHA256)
         #expect(second.counts == first.counts)
         #expect(try workspace.backups().count == 2)
+    }
+
+    @Test("A same-length retained backup edit is refused before decoding or Review activation")
+    func retainedSourceRequiresOriginalBytes() async throws {
+        let lane = try LegacyLane()
+        defer { removeTemporaryDirectory(lane.directory) }
+        let bridge = try RustBridgeRuntime()
+        var original = Fixtures.richDocument()
+        original.base.tasks[TaskID("task-1")]?.title = "Original title"
+        try await lane.write(original)
+        let importer = lane.importer(runtime: bridge)
+        let report = try await importer.run()
+        let backup = lane.directory.appendingPathComponent(report.backupFile)
+        let bytes = try Data(contentsOf: backup)
+        let changed = try #require(String(data: bytes, encoding: .utf8)).replacingOccurrences(of: "Original title", with: "Modified title")
+        #expect(Data(changed.utf8).count == bytes.count)
+        #expect(RustImportCounts(counting: try StoreDocumentCoding.decode(Data(changed.utf8))) == report.counts)
+        try Data(changed.utf8).write(to: backup)
+        let failure = await importFailure { _ = try await importer.retainedDocument(report) }
+        #expect(failure == .sourceChanged)
+        let workspace = try await bridge.openStore(workspaceID: "workspace-local", databaseURL: lane.database)
+        #expect(try await workspace.captureLegacyReviewMetadata().alreadyActive == false)
+        try await workspace.close()
     }
 
     @Test("026-FR-013: a different file after an import is refused and never merged")
