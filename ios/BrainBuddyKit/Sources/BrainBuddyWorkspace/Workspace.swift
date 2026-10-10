@@ -770,7 +770,13 @@ public final class Workspace {
     public func setForegroundActive(_ active: Bool) async {
         guard active != isForeground else { return }
         isForeground = active
-        if isRustSelected { if active { await wakeRustTransport(.foreground) }; return }
+        if isRustSelected {
+            if active {
+                await maintainRuntimeDrafts()
+                await wakeRustTransport(.foreground)
+            }
+            return
+        }
         foregroundTicker?.setActive(active)
         if active { await sync?.request(.foreground) }
     }

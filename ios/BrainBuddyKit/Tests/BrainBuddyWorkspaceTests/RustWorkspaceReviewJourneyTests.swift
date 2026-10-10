@@ -85,10 +85,12 @@ struct RustWorkspaceReviewJourneyTests {
             formulationID: record.formulation?.id, expectedTask: workspace.shownTask(of: record), editorID: "scene:expiry:decision")
         let generation = try await runtime.snapshot().projectionGeneration
         await workspace.closeRuntime()
-        clock.advance(by: ReviewRetention.snapshotWindow + 1)
+        clock.advance(by: 1)
         let (hidden, hiddenRuntime, retired) = try await self.workspace(at: directory, clock: clock, reviewEnabled: false)
         #expect(hidden.isRustBound)
         #expect(!hidden.reviewExposed)
+        clock.advance(by: ReviewRetention.snapshotWindow)
+        await hidden.setForegroundActive(true)
         #expect(try await hiddenRuntime.snapshot().projectionGeneration == generation)
         await hidden.prepareList(.list(.waiting))
         #expect(hidden.task(task)?.state == .waiting)
