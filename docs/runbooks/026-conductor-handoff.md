@@ -81,7 +81,7 @@ These are pushed as **draft WIP PRs** so nothing is lost. Each PR body lists the
 
 1. **Merge the green PRs in stack order: #347, #349 and #351, then #352.**
    - Use `merge_method: merge` and the exact 40-char head SHA from `git ls-remote`.
-   - Merging pre-approval: the owner pre-approved merging every slice PR, ASK-class included.
+   - The owner pre-approved slice merges, including ASK-class PRs. This supplies the merge decision only: preserve exact-head CI, resolved review findings and the documented ASK landing procedure, including the audited temporary ruleset intervention when required. It does not authorize a storage cutover, flag activation, ad-hoc production deployment or bypass of protected-main controls.
    - Before merging a stacked PR whose base has moved, merge `origin/main` into it and push. The Gitleaks secret scan fails with "could not verify a safe commit range" unless current `main` is an ancestor of the PR head.
 2. **Land #352 (PR-64).** Both review findings are fixed in `748b1c96`:
    - **Boot recovery ordering.** `AgentRecoveryAdapter.boot_sweep()` now marks interrupted exchanges synchronously in `create_app()` before the worker starts and before any request is served, so only the per-run lookups run on the worker.
@@ -101,7 +101,7 @@ These are pushed as **draft WIP PRs** so nothing is lost. Each PR body lists the
 
 ## Decisions already made by the owner (do not re-ask)
 
-- **Merging** is pre-approved, including ASK-class PRs.
+- **Slice merging** is pre-approved, including ASK-class PRs; exact-SHA checks and ASK landing controls remain required. Migration activation and cutover gates retain their separate recorded authorization.
 - **Slice size budgets are advisory** for feature 026 (owner decision 2026-10-09 in tasks.md). Decline reviewer "split this slice" comments with that citation.
 - **Parallel lanes** (owner decision 2026-10-10 in tasks.md):
   - PR-41 depends on PR-39, not PR-40.
