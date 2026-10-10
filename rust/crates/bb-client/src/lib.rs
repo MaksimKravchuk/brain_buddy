@@ -107,7 +107,7 @@ pub use local_review_fragments::{
     LocalReviewFragmentPage, LocalReviewSessionWitness, LocalReviewTaskWitness,
     PreparedLocalDecisionScalar, PreparedLocalFragmentFields, PreparedLocalReviewFragment,
     admit_local_review_private_fragment_with, capture_local_review_private_fragment,
-    lookup_local_review_private_fragment,
+    local_review_private_source_completed, lookup_local_review_private_fragment,
 };
 pub use local_review_import::{
     LocalReviewPrivateBinding, LocalReviewPublicPin, LocalReviewSourceEvidence,
@@ -124,3 +124,25 @@ pub use local_review::{
     establish_account_less_from_import_with, establish_account_less_with,
     prune_local_review_private_with,
 };
+
+/// Ephemeral ordered-byte digest; it grants no store or import authority.
+#[derive(Clone)]
+pub struct DigestStream(execute::Sha256);
+impl Default for DigestStream {
+    fn default() -> Self {
+        Self(execute::Sha256::new())
+    }
+}
+impl DigestStream {
+    pub fn update(&mut self, data: &[u8]) {
+        self.0.update(data);
+    }
+    pub fn digest(&self) -> String {
+        self.0
+            .clone()
+            .finish()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+}

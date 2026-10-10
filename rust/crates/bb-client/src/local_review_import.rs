@@ -133,7 +133,7 @@ pub(crate) fn execute_error(error: crate::ExecuteError) -> LegacyReviewError {
     }
 }
 
-fn source_section(kind: LocalReviewSourceKind) -> (&'static str, EntityType) {
+pub(crate) fn source_section(kind: LocalReviewSourceKind) -> (&'static str, EntityType) {
     match kind {
         LocalReviewSourceKind::Decision => ("decisions", EntityType::ReviewDecision),
         LocalReviewSourceKind::BulkRelease => ("bulkReleases", EntityType::ReviewBulkRelease),
@@ -210,17 +210,15 @@ pub(crate) fn original_identity(
     if let Some(record) = base.get(section).and_then(|items| items.get(id))
         && record.get("id").and_then(Value::as_str) == Some(id)
         && let Some(server) = record.get("serverID").and_then(Value::as_str)
-    {
-        if !aliases
+        && !aliases
             .iter()
             .any(|alias| alias.entity_type == kind && alias.local_id == id)
-        {
-            aliases.push(LegacyReviewAlias {
-                entity_type: kind,
-                local_id: id.to_owned(),
-                server_id: server.to_owned(),
-            });
-        }
+    {
+        aliases.push(LegacyReviewAlias {
+            entity_type: kind,
+            local_id: id.to_owned(),
+            server_id: server.to_owned(),
+        });
     }
     crate::legacy_review::canonical(kind.as_str(), id, aliases)
 }
