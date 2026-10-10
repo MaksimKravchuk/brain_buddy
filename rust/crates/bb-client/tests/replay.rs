@@ -1178,6 +1178,48 @@ fn replay_026_fr_007_a_settings_conflict_finds_its_singleton_record_and_revision
 }
 
 #[test]
+fn replay_026_fr_001_an_upgraded_store_rebuilds_its_projection_before_the_next_gesture() {
+    let path = scratch("upgrade");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let task_id = confirmed_task(&mut store, &mut ids);
+    offline_edit(&mut store, &mut ids, &task_id);
+    store.close().unwrap();
+    // Take the file back to what the first release wrote: confirmed rows and a
+    // queued edit, but no visible projection.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "DROP TABLE visible_records;
+             ALTER TABLE outbox DROP COLUMN projection_generation;
+             ALTER TABLE outbox DROP COLUMN local_result;
+             ALTER TABLE sync_meta DROP COLUMN projection_stale;
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+
+    let mut store = open(&path).unwrap();
+    // The next edit is decided against the rebuilt projection: the record is
+    // there, shown with the queued edit applied, and the edit builds on it.
+    let next = request(
+        cmd(3),
+        CommandType::TaskUpdate,
+        Some(&task_id),
+        json!({ "details": "After the upgrade" }),
+        vec![shown(EntityType::Task, &task_id, "2")],
+    );
+    execute(&mut store, &mut SeqIds(100), &next).unwrap();
+    let projected = task(&mut store, &task_id).unwrap();
+    assert_eq!(projected["title"], "Mine");
+    assert_eq!(projected["details"], "After the upgrade");
+    assert_eq!(visible(&mut store, "task").len(), 1);
+    assert_eq!(
+        envelope(&mut store, 3)["preconditions"][0]["after_command"]["command_id"],
+        cmd(2).as_str()
+    );
+}
+
+#[test]
 fn replay_026_fr_007_a_replacement_must_be_a_new_command_or_nothing_is_closed() {
     let path = scratch("reused");
     let mut store = open(&path).unwrap();

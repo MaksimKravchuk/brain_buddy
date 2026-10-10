@@ -228,12 +228,11 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
     issues::refresh_dependents(tx, &workspace_id)?;
     let writes = base.save(tx, &workspace_id)?;
     let generation = generation + i64::from(writes > 0);
-    if writes > 0 {
-        tx.execute(
-            "UPDATE sync_meta SET projection_generation = ?1",
-            [generation],
-        )?;
-    }
+    // The projection is whole now, whatever state the store was upgraded from.
+    tx.execute(
+        "UPDATE sync_meta SET projection_generation = ?1, projection_stale = 0",
+        [generation],
+    )?;
     report.projection_generation = u64::try_from(generation).map_err(corrupt)?;
     Ok(report)
 }

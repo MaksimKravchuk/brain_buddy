@@ -25,6 +25,7 @@
 //! is still `pending_registration` is reused by the app, the widget and App
 //! Intents until registration (sync-v1 section 5).
 
+use crate::replay::{ReplayError, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::dispatch;
 use bb_domain::types::{
@@ -320,6 +321,9 @@ struct Meta {
     epoch_state: String,
     next_local_seq: i64,
     projection_generation: i64,
+    /// The store was upgraded from a schema without the visible projection and
+    /// nothing has rebuilt it yet.
+    projection_stale: bool,
 }
 
 /// SQLite integers are signed; the counters stored in them never are.
@@ -330,7 +334,7 @@ pub(crate) fn unsigned(value: i64) -> Result<u64, ExecuteError> {
 fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
     Ok(tx.query_row(
         "SELECT workspace_id, scope_id, device_id, device_epoch, device_epoch_state,
-                next_local_seq, projection_generation FROM sync_meta",
+                next_local_seq, projection_generation, projection_stale FROM sync_meta",
         [],
         |row| {
             Ok(Meta {
@@ -341,6 +345,7 @@ fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
                 epoch_state: row.get(4)?,
                 next_local_seq: row.get(5)?,
                 projection_generation: row.get(6)?,
+                projection_stale: row.get::<_, i64>(7)? != 0,
             })
         },
     )?)
@@ -353,7 +358,16 @@ fn run(
     supersedes: Option<&CommandId>,
     hook: &mut impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
-    let meta = read_meta(tx)?;
+    let mut meta = read_meta(tx)?;
+    if meta.projection_stale {
+        // An upgraded store holds confirmed rows and queued work but no visible
+        // projection yet: build it before deciding anything against it.
+        replay_in(tx, &request.context).map_err(|error| match error {
+            ReplayError::Store(error) => ExecuteError::Store(error),
+            _ => ExecuteError::Store(StoreError::Corrupt),
+        })?;
+        meta = read_meta(tx)?;
+    }
     let digest = sha256(request_canonical(request).as_bytes());
     if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
         return if known.digest == digest {
