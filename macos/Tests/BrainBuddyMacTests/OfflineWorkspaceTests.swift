@@ -322,6 +322,7 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "Garden")
         let tag = try app.workspace.createTag(name: "outside")
         let source = try app.add("Garden redesign", .someday, project: project, tags: [tag])
+        let authoredTitle = "  Sketch the first garden bed  "
         await app.workspace.flush()
         #expect(!app.workspace.isRustSelected)
         let store = FileDocumentStore(fileURL: app.folder.store)
@@ -336,11 +337,11 @@ struct OfflineWorkspaceTests {
             return
         }
         #expect(!expectedOutbox[creationIndex].hasBeenSent)
-        creation.title = "Sketch the first garden bed"
+        creation.title = authoredTitle
         creation.list = .next
         expectedOutbox[creationIndex].command = .createTask(creation)
 
-        #expect(await app.model.activateSomeday(source, title: "  Sketch the first garden bed  "))
+        #expect(await app.model.activateSomeday(source, title: authoredTitle))
         // Awaited success already persisted both effects in one write. With Review off,
         // the legacy compactor folds the edit and move into the unsent creation.
         let saved = try #require(try await store.load())
