@@ -39,7 +39,7 @@ use crate::replay::{ReplayError, Replayed, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::calendar::UtcInstant;
 use bb_protocol::feed::{
-    Change, ChangeStreamDecoder, ChangesPage, Operation, Transaction as FeedTransaction,
+    BytePage, Change, ChangeStreamDecoder, ChangesPage, Operation, Transaction as FeedTransaction,
     TransferManifest, TransferPage,
 };
 use bb_protocol::wire::{CommandId, CommonResponse, Id, Instant, Wire};
@@ -83,7 +83,7 @@ pub enum TransferFault {
 
 impl TransferFault {
     /// Whether the staged bytes are worthless and are dropped.
-    fn discards(&self) -> bool {
+    pub(crate) fn discards(&self) -> bool {
         matches!(self, Self::Expired | Self::Corrupt | Self::Conflict)
     }
 }
@@ -225,7 +225,7 @@ pub fn capture_fence(store: &mut Store) -> Result<Fence, StoreError> {
     })
 }
 
-fn unsigned(value: i64) -> u64 {
+pub(crate) fn unsigned(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
@@ -240,7 +240,7 @@ pub(crate) struct Base {
 
 impl Base {
     /// The cursor and watermark of the confirmed base.
-    fn feed(&self) -> Result<(&str, u64), ApplyError> {
+    pub(crate) fn feed(&self) -> Result<(&str, u64), ApplyError> {
         match (&self.cursor, self.watermark) {
             (Some(cursor), Some(watermark)) => Ok((cursor, watermark)),
             _ => Err(ApplyError::NoBase),
@@ -249,6 +249,14 @@ impl Base {
 
     pub(crate) fn watermark(&self) -> Option<u64> {
         self.watermark
+    }
+
+    pub(crate) fn scope_id(&self) -> Option<&str> {
+        self.scope_id.as_deref()
+    }
+
+    pub(crate) fn server_generation(&self) -> Option<&str> {
+        self.server_generation.as_deref()
     }
 }
 
@@ -518,7 +526,7 @@ fn page_in(
 }
 
 /// Replays the pending queue over the new base and stores the cursor.
-fn finish_in(
+pub(crate) fn finish_in(
     tx: &Transaction<'_>,
     context: &ExecuteContext,
     cursor: &str,
@@ -554,7 +562,7 @@ fn newer(candidate: &str, stored: &str) -> bool {
     (candidate.len(), candidate) > (stored.len(), stored)
 }
 
-fn install_change(
+pub(crate) fn install_change(
     tx: &Transaction<'_>,
     workspace_id: &str,
     change: &Change,
@@ -665,7 +673,7 @@ impl TransferProgress {
     }
 }
 
-fn expired(expires_at: &Instant, now: &Instant) -> Result<bool, ApplyError> {
+pub(crate) fn expired(expires_at: &Instant, now: &Instant) -> Result<bool, ApplyError> {
     let parse = |instant: &Instant| {
         UtcInstant::parse_rfc3339(instant.as_str()).map_err(|_| ApplyError::Malformed("instant"))
     };
@@ -735,7 +743,11 @@ fn stage_manifest(
     Ok(manifest.transfer_id.clone())
 }
 
-fn abandon_in(tx: &Transaction<'_>, workspace_id: &str, id: &str) -> rusqlite::Result<()> {
+pub(crate) fn abandon_in(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    id: &str,
+) -> rusqlite::Result<()> {
     tx.execute(
         "DELETE FROM staging_pages WHERE workspace_id = ?1 AND activation_id = ?2",
         params![workspace_id, id],
@@ -829,66 +841,82 @@ pub fn stage_transfer_page(
         if expired(&staged.manifest.expires_at, &context.now)? {
             return Err(ApplyError::Transfer(TransferFault::Expired));
         }
-        let total = staged.manifest.page_count;
-        let index = page.page.page_index;
-        let corrupt = ApplyError::Transfer(TransferFault::PageCorrupt { page_index: index });
-        let bytes = base64_decode(&page.page.payload_base64).ok_or(corrupt.clone())?;
-        let digest = sha256(&bytes);
-        if index >= total
-            || bytes.len() > MAX_CHUNK_BYTES
-            || page.page.has_more != (index + 1 < total)
-            || !page.page.page_sha256.eq_ignore_ascii_case(&hex(&digest))
-        {
-            return Err(corrupt);
-        }
-        let key = i64::try_from(index).map_err(|_| corrupt.clone())?;
-        let kept: Option<Vec<u8>> = tx
-            .query_row(
-                "SELECT page_digest FROM staging_pages
-                 WHERE workspace_id = ?1 AND activation_id = ?2 AND page_index = ?3",
-                params![base.workspace_id, page.transfer_id.as_str(), key],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match kept {
-            Some(kept) if kept != digest => {
-                return Err(ApplyError::Transfer(TransferFault::Conflict));
-            }
-            Some(_) => {}
-            None => {
-                tx.execute(
-                    "INSERT INTO staging_pages (workspace_id, activation_id, page_index,
-                        page_digest, body)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![
-                        base.workspace_id,
-                        page.transfer_id.as_str(),
-                        key,
-                        digest.as_slice(),
-                        bytes
-                    ],
-                )?;
-            }
-        }
-        let received: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM staging_pages WHERE workspace_id = ?1 AND activation_id = ?2",
-            params![base.workspace_id, page.transfer_id.as_str()],
-            |row| row.get(0),
+        let received = stage_page(
+            tx,
+            &base.workspace_id,
+            page.transfer_id.as_str(),
+            staged.manifest.page_count,
+            &page.page,
         )?;
-        let received = unsigned(received);
-        if received == total {
-            tx.execute(
-                "UPDATE staging_bases SET state = 'complete'
-                 WHERE workspace_id = ?1 AND activation_id = ?2",
-                params![base.workspace_id, page.transfer_id.as_str()],
-            )?;
-        }
         Ok(TransferProgress {
             transfer_id: page.transfer_id.clone(),
             received,
-            total,
+            total: staged.manifest.page_count,
         })
     })
+}
+
+/// Verifies one byte page against a staged manifest's page count and keeps it;
+/// returns how many pages are staged now. Shared by oversized transactions and
+/// snapshots, whose pages are the same bounded byte chunks (sync-v1 section 11).
+/// The page is refused, not kept, when its index, size, continuation flag or
+/// digest is wrong; a repeated page is kept once; a different page for a kept
+/// index is a conflict. The staging becomes `complete` with its last page.
+pub(crate) fn stage_page(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    activation_id: &str,
+    total: u64,
+    page: &BytePage,
+) -> Result<u64, ApplyError> {
+    let index = page.page_index;
+    let corrupt = ApplyError::Transfer(TransferFault::PageCorrupt { page_index: index });
+    let bytes = base64_decode(&page.payload_base64).ok_or(corrupt.clone())?;
+    let digest = sha256(&bytes);
+    if index >= total
+        || bytes.len() > MAX_CHUNK_BYTES
+        || page.has_more != (index + 1 < total)
+        || !page.page_sha256.eq_ignore_ascii_case(&hex(&digest))
+    {
+        return Err(corrupt);
+    }
+    let key = i64::try_from(index).map_err(|_| corrupt.clone())?;
+    let kept: Option<Vec<u8>> = tx
+        .query_row(
+            "SELECT page_digest FROM staging_pages
+             WHERE workspace_id = ?1 AND activation_id = ?2 AND page_index = ?3",
+            params![workspace_id, activation_id, key],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match kept {
+        Some(kept) if kept != digest => {
+            return Err(ApplyError::Transfer(TransferFault::Conflict));
+        }
+        Some(_) => {}
+        None => {
+            tx.execute(
+                "INSERT INTO staging_pages (workspace_id, activation_id, page_index,
+                    page_digest, body)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![workspace_id, activation_id, key, digest.as_slice(), bytes],
+            )?;
+        }
+    }
+    let received: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM staging_pages WHERE workspace_id = ?1 AND activation_id = ?2",
+        params![workspace_id, activation_id],
+        |row| row.get(0),
+    )?;
+    let received = unsigned(received);
+    if received == total {
+        tx.execute(
+            "UPDATE staging_bases SET state = 'complete'
+             WHERE workspace_id = ?1 AND activation_id = ?2",
+            params![workspace_id, activation_id],
+        )?;
+    }
+    Ok(received)
 }
 
 /// Applies a fully staged oversized transaction: the stream is checked against
@@ -983,80 +1011,111 @@ fn transfer_in(
 }
 
 /// Installs the staged transaction page by page, inside the caller's write
-/// transaction. Memory is one page plus the record being assembled across a
-/// page boundary: each record is decoded, validated and written as soon as it
-/// is complete, while the page indices, page digests, byte count, whole-stream
-/// digest and record count the manifest promises are checked as the bytes go
-/// by. Any disagreement is `Corrupt` and rolls the whole transaction back, so
-/// nothing of a transaction that fails its checks is ever visible. Returns the
-/// commands the transaction completed.
+/// transaction (see [`stream_pages`] for the checks). Returns the commands the
+/// transaction completed.
 fn install_stream(
     tx: &Transaction<'_>,
     base: &Base,
     transfer_id: &Id,
     manifest: &TransferManifest,
 ) -> Result<Vec<CommandId>, ApplyError> {
+    stream_pages(
+        tx,
+        &base.workspace_id,
+        transfer_id.as_str(),
+        &Promised {
+            page_count: manifest.page_count,
+            record_count: manifest.record_count,
+            total_bytes: manifest.total_bytes,
+            sha256: &manifest.sha256,
+        },
+        |change| install_change(tx, &base.workspace_id, change),
+    )?;
+    complete_source(tx, &base.workspace_id, &manifest.source_command_id)
+}
+
+/// What a manifest promises of the stream its pages make up.
+pub(crate) struct Promised<'a> {
+    pub page_count: u64,
+    pub record_count: u64,
+    pub total_bytes: u64,
+    pub sha256: &'a str,
+}
+
+/// Reads the staged pages of a transfer or snapshot in order and hands each
+/// change to `install` as soon as it is complete. Memory is one page plus the
+/// record being assembled across a page boundary: the page indices, page
+/// digests, byte count, whole-stream digest and record count the manifest
+/// promises are checked as the bytes go by. Any disagreement is `Corrupt`; the
+/// caller's transaction then rolls back, so nothing of a stream that fails its
+/// checks is ever visible. Missing pages are `Incomplete` and lose nothing.
+pub(crate) fn stream_pages(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    activation_id: &str,
+    promised: &Promised<'_>,
+    mut install: impl FnMut(&Change) -> Result<(), ApplyError>,
+) -> Result<(), ApplyError> {
     let corrupt = || ApplyError::Transfer(TransferFault::Corrupt);
     let present: std::collections::BTreeSet<u64> = {
         let mut statement = tx.prepare(
             "SELECT page_index FROM staging_pages WHERE workspace_id = ?1 AND activation_id = ?2",
         )?;
-        let rows = statement
-            .query_map(params![base.workspace_id, transfer_id.as_str()], |row| {
-                row.get::<_, i64>(0)
-            })?;
+        let rows = statement.query_map(params![workspace_id, activation_id], |row| {
+            row.get::<_, i64>(0)
+        })?;
         let mut present = std::collections::BTreeSet::new();
         for row in rows {
             present.insert(u64::try_from(row?).map_err(|_| corrupt())?);
         }
         present
     };
-    let missing: Vec<u64> = (0..manifest.page_count)
+    let missing: Vec<u64> = (0..promised.page_count)
         .filter(|index| !present.contains(index))
         .collect();
     if !missing.is_empty() {
         return Err(ApplyError::Transfer(TransferFault::Incomplete { missing }));
     }
-    if u64::try_from(present.len()).ok() != Some(manifest.page_count) {
+    if u64::try_from(present.len()).ok() != Some(promised.page_count) {
         return Err(corrupt());
     }
 
     let mut decoder = ChangeStreamDecoder::new();
     let mut digest = Sha256::new();
     let mut bytes = 0_u64;
-    for index in 0..manifest.page_count {
+    for index in 0..promised.page_count {
         let (page_digest, body): (Vec<u8>, Vec<u8>) = tx.query_row(
             "SELECT page_digest, body FROM staging_pages
              WHERE workspace_id = ?1 AND activation_id = ?2 AND page_index = ?3",
             params![
-                base.workspace_id,
-                transfer_id.as_str(),
+                workspace_id,
+                activation_id,
                 i64::try_from(index).map_err(|_| corrupt())?
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         bytes += u64::try_from(body.len()).map_err(|_| corrupt())?;
-        if sha256(&body).as_slice() != page_digest.as_slice() || bytes > manifest.total_bytes {
+        if sha256(&body).as_slice() != page_digest.as_slice() || bytes > promised.total_bytes {
             return Err(corrupt());
         }
         digest.update(&body);
         for change in decoder.push(&body).map_err(|_| corrupt())? {
-            install_change(tx, &base.workspace_id, &change)?;
+            install(&change)?;
         }
     }
     let records = decoder.finish().map_err(|_| corrupt())?;
-    if records != manifest.record_count
-        || bytes != manifest.total_bytes
-        || !manifest.sha256.eq_ignore_ascii_case(&hex(&digest.finish()))
+    if records != promised.record_count
+        || bytes != promised.total_bytes
+        || !promised.sha256.eq_ignore_ascii_case(&hex(&digest.finish()))
     {
         return Err(corrupt());
     }
-    complete_source(tx, &base.workspace_id, &manifest.source_command_id)
+    Ok(())
 }
 
 // ----------------------------------------------------------------------- encoding
 
-fn hex(digest: &[u8; 32]) -> String {
+pub(crate) fn hex(digest: &[u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -1069,7 +1128,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 /// Standard base64 with padding; any other character, a misplaced `=` or
 /// nonzero padding bits is refused.
-fn base64_decode(text: &str) -> Option<Vec<u8>> {
+pub(crate) fn base64_decode(text: &str) -> Option<Vec<u8>> {
     let (quads, tail) = text.as_bytes().as_chunks::<4>();
     if !tail.is_empty() {
         return None;

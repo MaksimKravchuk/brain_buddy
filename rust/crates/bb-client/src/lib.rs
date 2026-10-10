@@ -9,8 +9,10 @@
 //! still progressing. [`apply_changes`] and [`receipts`] move the confirmed
 //! base forward: whole feed transactions in commit order (gaps and duplicates
 //! detected, oversized ones staged and verified first), and receipts that
-//! settle a command but never write after-images or move the cursor. Snapshot
-//! activation and the sync session build on these in later slices.
+//! settle a command but never write after-images or move the cursor. [`snapshot`]
+//! rebuilds the base from a staged, verified snapshot in one activation that
+//! keeps everything saved while it downloaded. The sync session builds on these
+//! in a later slice.
 
 mod apply_changes;
 mod execute;
@@ -18,6 +20,7 @@ mod issues;
 mod locking;
 mod receipts;
 mod replay;
+mod snapshot;
 mod storage;
 
 pub use apply_changes::{
@@ -38,4 +41,8 @@ pub use issues::{
 pub use locking::{LockMode, MigrationLock};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
 pub use replay::{ReplayError, Replayed, replay, replay_in};
+pub use snapshot::{
+    Activated, SnapshotProgress, abandon_snapshot, activate_snapshot, activate_snapshot_with,
+    begin_snapshot, stage_snapshot_page,
+};
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
