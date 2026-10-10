@@ -1178,6 +1178,43 @@ fn replay_026_fr_007_a_settings_conflict_finds_its_singleton_record_and_revision
 }
 
 #[test]
+fn replay_026_fr_007_a_conflict_shows_the_record_of_its_own_type_when_keys_are_shared() {
+    let path = scratch("shared-key");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let task_id = confirmed_task(&mut store, &mut ids);
+    offline_edit(&mut store, &mut ids, &task_id);
+    server_edit(&mut store, &task_id, |task| task["title"] = json!("Theirs"));
+    let replayed = replay(&mut store, &context()).unwrap();
+    assert_eq!(replayed.rejected, [cmd(2)]);
+
+    // Records of different types can share a key (a Review session and its
+    // decision queue are both `[session_id]`). One that sorts first must not be
+    // shown as the task's current version.
+    store
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO confirmed_records (workspace_id, record_type, record_key,
+                    record_version, edit_revision, body)
+                 SELECT workspace_id, 'project', record_key, '9', '9', ?2
+                 FROM confirmed_records WHERE record_key = ?1",
+                params![
+                    json!([task_id]).to_string(),
+                    json!({ "name": "Decoy" }).to_string().into_bytes()
+                ],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+    let view = issue(&mut store, &issue_id(2)).unwrap().unwrap();
+    assert_eq!(view.issue.reason, IssueReason::RevisionConflict);
+    let current = view.current.expect("the task's current record");
+    assert_eq!(current.entity_type, "task");
+    assert_eq!(current.record.unwrap()["title"], "Theirs");
+}
+
+#[test]
 fn replay_026_fr_001_an_upgraded_store_rebuilds_its_projection_before_the_next_gesture() {
     let path = scratch("upgrade");
     let mut store = open(&path).unwrap();
