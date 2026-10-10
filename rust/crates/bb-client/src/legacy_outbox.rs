@@ -1056,11 +1056,12 @@ fn conversion_progress(
     header: &ConversionHeader,
 ) -> Result<LegacyConversionProgress, ExecuteError> {
     let processed_count = if header.atomic_group && !header.completed {
-        tx.query_row(
+        let count: i64 = tx.query_row(
             "SELECT COUNT(*) FROM drafts WHERE workspace_id=?1 AND editor_kind=?2",
             params![header.workspace, CONVERSION_ITEM_KIND],
             |r| r.get(0),
-        )?
+        )?;
+        u64::try_from(count).map_err(|_| conversion_invalid())?
     } else {
         let mut count = 0;
         conversion_sources(tx, &header.workspace, |_, _, standing, _| {
