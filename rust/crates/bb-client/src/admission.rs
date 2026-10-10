@@ -67,12 +67,20 @@ fn detail_known(conn: &Connection, workspace: &str, task: &TaskId) -> Result<boo
         }
     }
     // An omitted alias is not proof: imported serverID may equal localID.
-    // Only retained local creation or a complete active server snapshot proves
-    // absence of children that were not returned by an imported partial frame.
+    // Both constructors refuse an existing task and create an empty child set.
+    // Their retained result must prove this exact task was actually produced;
+    // command type alone cannot turn an imported partial frame into a full one.
+    // A complete active server snapshot independently proves source completeness.
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM outbox WHERE workspace_id=?1
-           AND json_extract(CAST(envelope AS TEXT),'$.type')='task.create'
-           AND json_extract(CAST(envelope AS TEXT),'$.entity_id')=?2)
+        "SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.workspace_id=?1
+           AND o.state NOT IN ('rejected','blocked_dependency') AND o.superseded_by IS NULL
+           AND json_extract(CAST(o.envelope AS TEXT),'$.type') IN ('task.create','task.smart_add')
+           AND json_extract(CAST(o.envelope AS TEXT),'$.entity_id')=?2
+           AND EXISTS(SELECT 1 FROM json_each(CAST(o.local_result AS TEXT),'$.versions') v
+             WHERE json_extract(v.value,'$.entity_type')='task'
+               AND json_array_length(json_extract(v.value,'$.record_key'))=1
+               AND json_extract(v.value,'$.record_key[0]')=?2
+               AND json_extract(v.value,'$.edit_revision') IS NOT NULL))
          OR EXISTS(SELECT 1 FROM staging_bases b JOIN sync_meta m USING(workspace_id)
            WHERE b.workspace_id=?1 AND b.kind='snapshot' AND b.state='activated'
            AND b.target_generation=m.server_generation

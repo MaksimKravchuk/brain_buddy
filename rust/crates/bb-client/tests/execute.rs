@@ -1786,6 +1786,86 @@ fn detail_completeness_requires_positive_source_proof_even_without_alias() {
     assert!(!captured_frame(&mut store, &target, true).children_known);
     store.write(|tx| tx.execute("INSERT INTO drafts(workspace_id,draft_id,editor_kind,record_type,record_key,fields,updated_at) VALUES (?1,'hydrated-source','legacy_task_local','task',?2,?3,?4)", rusqlite::params![WORKSPACE,json!([target.as_str()]).to_string(),serde_json::to_vec(&json!({"childrenSyncedAt":NOW})).unwrap(),NOW])).unwrap();
     assert!(captured_frame(&mut store, &target, true).children_known);
+
+    // The real native Capture path is Smart Add in explicit account-less mode.
+    store
+        .write(|tx| tx.execute("UPDATE sync_meta SET account_link_state='account_less'", []))
+        .unwrap();
+    let smart = request(
+        cmd(371),
+        CommandType::TaskSmartAdd,
+        None,
+        json!({"title":"Native Capture"}),
+        vec![],
+    );
+    let created = execute(&mut store, &mut ids, &smart).unwrap().entity_id;
+    assert_eq!(
+        queue(&mut store)
+            .iter()
+            .find(|row| row.command_id == cmd(371).as_str())
+            .unwrap()
+            .envelope["type"],
+        "task.smart_add"
+    );
+    assert!(captured_frame(&mut store, &created, true).children_known);
+    let retained: Vec<u8> = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT local_result FROM outbox WHERE command_id=?1",
+                [cmd(371).as_str()],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    store.write(|tx| tx.execute("UPDATE outbox SET local_result=?2 WHERE command_id=?1", rusqlite::params![cmd(371).as_str(), serde_json::to_vec(&json!({"versions":[{"entity_type":"task","record_key":[target.as_str()],"edit_revision":"1"}],"id_bindings":[]})).unwrap()])).unwrap();
+    assert!(!captured_frame(&mut store, &created, true).children_known);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE outbox SET local_result=NULL WHERE command_id=?1",
+                [cmd(371).as_str()],
+            )
+        })
+        .unwrap();
+    assert!(!captured_frame(&mut store, &created, true).children_known);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE outbox SET local_result=?2 WHERE command_id=?1",
+                rusqlite::params![cmd(371).as_str(), retained],
+            )
+        })
+        .unwrap();
+    assert!(captured_frame(&mut store, &created, true).children_known);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE outbox SET state='rejected' WHERE command_id=?1",
+                [cmd(371).as_str()],
+            )
+        })
+        .unwrap();
+    assert!(!captured_frame(&mut store, &created, true).children_known);
+    store
+        .write(|tx| {
+            tx.execute(
+                "DELETE FROM outbox WHERE command_id=?1",
+                [cmd(371).as_str()],
+            )
+        })
+        .unwrap();
+    assert!(!captured_frame(&mut store, &created, true).children_known);
+    let retry_create = request(
+        cmd(372),
+        CommandType::TaskSmartAdd,
+        Some(created.as_str()),
+        json!({"title":"Existing imported-like task"}),
+        vec![],
+    );
+    assert!(
+        matches!(execute(&mut store, &mut ids, &retry_create), Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::IdAlreadyExists)
+    );
+    assert!(!captured_frame(&mut store, &created, true).children_known);
 }
 
 #[test]
