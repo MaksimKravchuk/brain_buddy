@@ -62,6 +62,13 @@ from .review_domain import (
     task_clock,
     with_clock,
 )
+from .rust_review_facade import (
+    DecisionOutcome,
+    ReviewRefused,
+    RustReviewFacade,
+    StateAnswer,
+    UndoOutcome,
+)
 from .service import TaskService, serialized_write
 
 logger = logging.getLogger("app.modules.tasks.review")
@@ -223,14 +230,30 @@ class ReviewService:
         tasks: TaskService,
         *,
         is_exposed: Callable[[str], bool] = _no_exposure,
+        rust_facade: RustReviewFacade | None = None,
+        rust_core_enabled: Callable[[str], bool] | None = None,
     ) -> None:
         self.tasks = tasks
+        # Spec 026 T019: with ``rust_core_sync`` effective for the owner, the
+        # Review and formulation-clock decisions come from the shared Rust core
+        # through this facade. Without both seams (or with the flag off) every
+        # command keeps its Python rules, byte for byte.
+        self._rust_facade = rust_facade
+        self._rust_core_enabled = rust_core_enabled
         # Resolves the owner's ``User`` and asks ``FeatureFlagService`` whether
         # ``weekly_review`` is effective (http §9); a missing user is False.
         self.is_exposed = is_exposed
         # The idle-run close belongs to the review flow (slice PR-11); the
         # container points this at ``ReviewFlowService`` (a no-op until then).
         self.idle_session_closer: Callable[[str, datetime], int] = _no_idle_close
+
+    def rust(self, owner_id: str) -> RustReviewFacade | None:
+        """The Rust facade when ``rust_core_sync`` is effective for this owner."""
+
+        facade = self._rust_facade
+        if facade is None or self._rust_core_enabled is None:
+            return None
+        return facade if self._rust_core_enabled(owner_id) else None
 
     # The one clock seam (research R21): the review service reads the task
     # service's injected clock, so ``frozen_clock`` drives both.
@@ -278,6 +301,18 @@ class ReviewService:
         )
         if record is not None:
             return DecisionResultDocument.model_validate(record.response_body)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            return self._decide_with_rust(
+                rust,
+                task_id,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         if payload.decision_id is not None:
             existing = self.task_repo.get_review_decision(owner_id, payload.decision_id)
             if existing is not None:
@@ -332,6 +367,73 @@ class ReviewService:
             response=result,
         )
         self._write_decision(result, owner_id=owner_id, previous=task)
+        self._log_decision(result, outcome="applied", started=started)
+        return result
+
+    def _decide_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        task_id: str,
+        payload: DecisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> DecisionResultDocument:
+        """The decision of one card, asked of the shared core exactly once.
+
+        The core settles, in the order Python always did: a stored decision of
+        this id, the task, the auto-park yield or the revision, the list, the
+        formulation and the type's own rule. Everything it returns is written
+        here, in this owner-locked transaction.
+        """
+
+        try:
+            outcome = rust.decide(task_id, payload, owner_id=owner_id, now=self.clock())
+        except ConflictError:
+            self._log_rejection(owner_id, task_id, payload.type, "stale")
+            raise
+        except ReviewRefused as refused:
+            raise self._refuse(
+                "review_decision", owner_id, task_id, refused.reason
+            ) from None
+        if outcome.kind != "applied":
+            assert outcome.stored is not None
+            answer = self._stored_decision_result(outcome.stored, owner_id=owner_id)
+            if outcome.kind == "repeated":
+                # Recorded under this request's own key, so a retry replays it
+                # even after the winning decision is undone (FR-048).
+                self.tasks._store_idempotency(
+                    owner_id=owner_id,
+                    key=idempotency_key,
+                    command=command,
+                    request_hash=request_hash,
+                    resource_id=answer.decision.id,
+                    response=answer,
+                )
+            self._log_decision(answer, outcome="already_applied", started=started)
+            return answer
+        assert outcome.result is not None and outcome.previous is not None
+        result = outcome.result.model_copy(
+            update={
+                "formulation_settings": FormulationSettingsDocument.of(
+                    self.settings_for(owner_id).clock_settings()
+                )
+            }
+        )
+        self.tasks._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=result.decision.id,
+            response=result,
+        )
+        self._write_decision(
+            result, owner_id=owner_id, previous=outcome.previous, decided=outcome
+        )
         self._log_decision(result, outcome="applied", started=started)
         return result
 
@@ -629,14 +731,28 @@ class ReviewService:
         *,
         owner_id: str,
         previous: TaskDocument,
+        decided: DecisionOutcome | None = None,
     ) -> None:
+        """Write a decision; ``decided`` carries what the shared core wrote.
+
+        Without it (the Python rules, and the reconcilers that re-apply a
+        stored result) the park rows and the run's counters are derived here.
+        """
+
         if result.task != previous or result.task.revision != previous.revision:
             self.task_repo.save(result.task)
-            self.tasks._note_park_return(
-                previous, result.task, owner_id=owner_id, now=result.decision.decided_at
-            )
+            if decided is None:
+                self.tasks._note_park_return(
+                    previous,
+                    result.task,
+                    owner_id=owner_id,
+                    now=result.decision.decided_at,
+                )
         decision = result.decision
-        if decision.yielded_auto_park and decision.formulation_id is not None:
+        if decided is not None:
+            for ack in decided.acks:
+                self.task_repo.save_park_ack(ack)
+        elif decision.yielded_auto_park and decision.formulation_id is not None:
             # A yield reverses the park itself; it is not a return (E6).
             self._set_park_returned(owner_id, decision.task_id, decision.formulation_id)
         if result.created_task is not None:
@@ -644,7 +760,10 @@ class ReviewService:
         if result.receipt is not None:
             self.task_repo.save_review_receipt(result.receipt)
         self.task_repo.save_review_decision(result.decision)
-        self._update_session(owner_id, result.decision, result.session_counts)
+        if decided is None:
+            self._update_session(owner_id, result.decision, result.session_counts)
+        elif decided.session is not None:
+            self.task_repo.save_review_session(decided.session)
 
     def _update_session(
         self,
@@ -722,6 +841,18 @@ class ReviewService:
         )
         if record is not None:
             return UndoResultDocument.model_validate(record.response_body)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            return self._undo_with_rust(
+                rust,
+                decision_id,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+                started=started,
+            )
         decision = self.task_repo.get_review_decision(owner_id, decision_id)
         if decision is None:
             raise NotFoundError("Review decision", decision_id)
@@ -764,6 +895,53 @@ class ReviewService:
             decision.task_id,
             decision.type,
             undo.created_task_id is not None,
+            _elapsed_ms(started),
+        )
+        return result
+
+    def _undo_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        decision_id: str,
+        payload: UndoDecisionRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+        started: float,
+    ) -> UndoResultDocument:
+        """The Undo of one decision, with the shared core's availability rules."""
+
+        try:
+            outcome = rust.undo_decision(
+                decision_id, payload, owner_id=owner_id, now=self.clock()
+            )
+        except ReviewRefused as refused:
+            raise self._refuse(
+                "review_undo", owner_id, refused.entity_id or "-", refused.reason
+            ) from None
+        decision = outcome.decision
+        result = outcome.result.model_copy(
+            update={"formulation_settings": self.tasks.formulation_settings(owner_id)}
+        )
+        self.tasks._store_idempotency(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=decision.id,
+            response=result,
+        )
+        self._write_undo(result, decision, owner_id=owner_id, undone=outcome)
+        logger.info(
+            "review_undo owner_id=%s decision_id=%s task_id=%s type=%s "
+            "deleted_task=%s outcome=applied duration_ms=%d",
+            owner_id,
+            decision.id,
+            decision.task_id,
+            decision.type,
+            result.deleted_task_id is not None,
             _elapsed_ms(started),
         )
         return result
@@ -824,14 +1002,19 @@ class ReviewService:
         *,
         owner_id: str,
         task_written: bool = False,
+        undone: UndoOutcome | None = None,
     ) -> None:
         """Write an Undo; with ``task_written`` (a replay that found the task
-        already restored) only the rows after the task write, idempotently."""
+        already restored) only the rows after the task write, idempotently.
+        ``undone`` carries what the shared core wrote (park rows, the run)."""
 
         if not task_written:
             self.task_repo.save(result.task)
         parked = result.task.parked
-        if result.task.state == "someday" and parked is not None:
+        if undone is not None:
+            for ack in undone.acks:
+                self.task_repo.save_park_ack(ack)
+        elif result.task.state == "someday" and parked is not None:
             # Back in its park (e.g. Undo of return_to_next): the row reads as
             # it did while the task was parked, not returned (E6).
             self._set_park_returned(owner_id, result.task.id, parked.formulation_id)
@@ -849,8 +1032,10 @@ class ReviewService:
         self.task_repo.delete_review_decision(owner_id, decision.id)
         if task_written:
             self._complete_session(owner_id, decision, result.session_counts, delta=-1)
-        else:
+        elif undone is None:
             self._update_session(owner_id, decision, result.session_counts)
+        elif undone.session is not None:
+            self.task_repo.save_review_session(undone.session)
 
     # ------------------------------------------------------------- settings
     @serialized_write
@@ -876,6 +1061,16 @@ class ReviewService:
         )
         if record is not None:
             return ReviewSettingsDocument.model_validate(record.response_body)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            return self._update_settings_with_rust(
+                rust,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
         current = self.settings_for(owner_id)
         if payload.expected_revision != current.revision:
             raise ConflictError(
@@ -916,6 +1111,52 @@ class ReviewService:
         )
         return updated
 
+    def _update_settings_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        payload: ReviewSettingsUpdateRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+    ) -> ReviewSettingsDocument:
+        """The settings update, with the shared core's clock-floor bookkeeping."""
+
+        try:
+            outcome = rust.update_settings(payload, owner_id=owner_id, now=self.clock())
+        except ReviewRefused as refused:
+            raise self._refuse(
+                "review_settings", owner_id, "-", refused.reason
+            ) from None
+        current, updated = outcome.current, outcome.updated
+        self._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=owner_id,
+            response=updated,
+        )
+        if not outcome.changed:
+            return current
+        self.task_repo.save_review_settings(updated)
+        for task in outcome.tasks:
+            self.task_repo.save(task)
+        logger.info(
+            "review_settings_changed owner_id=%s threshold_old=%d threshold_new=%d "
+            "zone_changed=%s due_floors=%d schedule_changed=%s onboarded=%s",
+            owner_id,
+            current.threshold_days,
+            updated.threshold_days,
+            updated.time_zone != current.time_zone,
+            len(outcome.tasks),
+            (updated.review_weekday, updated.review_time)
+            != (current.review_weekday, current.review_time),
+            updated.onboarded_at is not None,
+        )
+        return updated
+
     # ----------------------------------------------------------- activation
     @serialized_write
     def acknowledge_explainer(
@@ -940,6 +1181,16 @@ class ReviewService:
         )
         if record is not None:
             return self.settings_for(owner_id)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            return self._acknowledge_with_rust(
+                rust,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                command=command,
+                request_hash=request_hash,
+            )
         if payload.time_zone is not None and not is_iana_zone(payload.time_zone):
             raise self._refuse("review_activated", owner_id, "-", "invalid_time_zone")
         settings = self.settings_for(owner_id)
@@ -958,6 +1209,45 @@ class ReviewService:
         if self.settings_for(owner_id).activated_at is None:
             self._activate(settings)
         return settings
+
+    def _acknowledge_with_rust(  # noqa: PLR0913 - the command's whole context
+        self,
+        rust: RustReviewFacade,
+        payload: ExplainerAcknowledgeRequest,
+        *,
+        owner_id: str,
+        idempotency_key: str,
+        command: str,
+        request_hash: str,
+    ) -> ReviewSettingsDocument:
+        """The activation, settings and every Next clock published together."""
+
+        try:
+            outcome = rust.acknowledge_explainer(
+                payload, owner_id=owner_id, now=self.clock()
+            )
+        except ReviewRefused as refused:
+            raise self._refuse(
+                "review_activated", owner_id, "-", refused.reason
+            ) from None
+        self._store(
+            owner_id=owner_id,
+            key=idempotency_key,
+            command=command,
+            request_hash=request_hash,
+            resource_id=owner_id,
+            response=outcome.updated,
+        )
+        if outcome.changed:
+            self.task_repo.save_review_settings(outcome.updated)
+            for task in outcome.tasks:
+                self.task_repo.save(task)
+            logger.info(
+                "review_activated owner_id=%s tasks_clamped=%d",
+                owner_id,
+                len(outcome.tasks),
+            )
+        return outcome.updated
 
     @staticmethod
     def _activated_settings(
@@ -1020,13 +1310,19 @@ class ReviewService:
         if record is not None:
             return AutoParkResultDocument.model_validate(record.response_body)
         task = self.tasks.get_task(task_id, owner_id=owner_id)
-        result: AutoParkResultDocument | None = None
-        if exposed and self.settings_for(owner_id).activated_at is not None:
-            self._note_effective_sweep(owner_id, self.clock())
-        if exposed and task.formulation_id == payload.formulation_id:
-            result = self._parked(task, owner_id=owner_id, source="device")
-        if result is None:
-            result = AutoParkResultDocument(applied=False, task=task)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            outcome = rust.auto_park(
+                task, payload, owner_id=owner_id, now=self.clock(), exposed=exposed
+            )
+            result = outcome.result
+            if outcome.settings is not None:
+                # The sweep-gap bookkeeping, before the snapshot below reads it.
+                self.task_repo.save_review_settings(outcome.settings)
+        else:
+            result = self._device_park(
+                task, payload, owner_id=owner_id, exposed=exposed
+            )
         # After the sweep-gap bookkeeping above, which can raise the owner floor.
         result = result.model_copy(
             update={"formulation_settings": self.tasks.formulation_settings(owner_id)}
@@ -1041,6 +1337,25 @@ class ReviewService:
         )
         self._write_park(result)
         _log_park(owner_id, task.id, applied=result.applied, source="device")
+        return result
+
+    def _device_park(
+        self,
+        task: TaskDocument,
+        payload: AutoParkRequest,
+        *,
+        owner_id: str,
+        exposed: bool,
+    ) -> AutoParkResultDocument:
+        """The Python rules of a device park: gap bookkeeping, then the park."""
+
+        result: AutoParkResultDocument | None = None
+        if exposed and self.settings_for(owner_id).activated_at is not None:
+            self._note_effective_sweep(owner_id, self.clock())
+        if exposed and task.formulation_id == payload.formulation_id:
+            result = self._parked(task, owner_id=owner_id, source="device")
+        if result is None:
+            result = AutoParkResultDocument(applied=False, task=task)
         return result
 
     def _parked(
@@ -1108,15 +1423,24 @@ class ReviewService:
         )
         if record is not None:
             return
-        keys = {(item.task_id, item.formulation_id): None for item in payload.items}
-        marked = []
-        for task_id, formulation_id in keys:
-            ack = self.task_repo.get_park_ack(owner_id, task_id, formulation_id)
-            if ack is not None and ack.seen_at is None:
-                marked.append(
-                    ParkAckKeyDocument(task_id=task_id, formulation_id=formulation_id)
-                )
-        result = ParkAcknowledgeResultDocument(seen_at=self.clock(), marked=marked)
+        rust = self.rust(owner_id)
+        if rust is not None:
+            result = rust.acknowledge_parks(
+                payload, owner_id=owner_id, now=self.clock()
+            )
+            marked = result.marked
+        else:
+            keys = {(item.task_id, item.formulation_id): None for item in payload.items}
+            marked = []
+            for task_id, formulation_id in keys:
+                ack = self.task_repo.get_park_ack(owner_id, task_id, formulation_id)
+                if ack is not None and ack.seen_at is None:
+                    marked.append(
+                        ParkAckKeyDocument(
+                            task_id=task_id, formulation_id=formulation_id
+                        )
+                    )
+            result = ParkAcknowledgeResultDocument(seen_at=self.clock(), marked=marked)
         self._store(
             owner_id=owner_id,
             key=idempotency_key,
@@ -1710,6 +2034,11 @@ class ReviewService:
         """The review state of one owner at the service clock (http §5)."""
 
         now = self.clock()
+        rust = self.rust(owner_id)
+        if rust is not None:
+            # The facade reads the settings once and answers with them, so the
+            # response is derived from the one snapshot it describes.
+            return self._state_from(rust.state(owner_id=owner_id, now=now))
         settings = self.settings_for(owner_id)
         clock_settings = settings.clock_settings()
         tasks = self.task_repo.list_for_owner(owner_id=owner_id)
@@ -1758,6 +2087,26 @@ class ReviewService:
                 and revisions.get(receipt.task_id) == receipt.task_revision
             ],
             server_now=now,
+        )
+
+    @staticmethod
+    def _state_from(answer: StateAnswer) -> ReviewStateView:
+        """The core's answer as this module's view of ``GET /review/state``."""
+
+        return ReviewStateView(
+            settings=answer.settings,
+            explainer_seen=answer.explainer_seen,
+            grace_until=answer.grace_until,
+            last_counted_review_at=answer.last_counted_review_at,
+            last_counted_review=answer.last_counted_review,
+            next_review_at=answer.next_review_at,
+            restart_mode=answer.restart_mode,
+            open_session=answer.open_session,
+            unseen_parks=[UnseenPark(*park) for park in answer.unseen_parks],
+            asks_for_decision=answer.asks_for_decision,
+            moves_tomorrow=answer.moves_tomorrow,
+            receipts=answer.receipts,
+            server_now=answer.server_now,
         )
 
     def _unseen_parks(

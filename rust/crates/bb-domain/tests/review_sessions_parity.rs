@@ -1888,20 +1888,25 @@ fn review_sessions_026_fr_016_equal_values_are_no_change_and_onboarding_is_recor
 #[test]
 fn review_sessions_026_fr_016_a_zone_that_is_not_iana_is_invalid_time_zone() {
     let read_set = Store::default().read_set();
-    for command in [
-        settings_command(json!({"time_zone": "Mars/Olympus"}), 1),
-        command(
-            "review.explainer_ack",
-            SCOPE,
-            json!({"time_zone": "Mars/Olympus"}),
-            vec![],
-        ),
-    ] {
-        let error = refusal(&read_set, &command, NOW);
-        assert_eq!(
-            (error.reason, error.field.as_deref()),
-            (Reason::InvalidTimeZone, Some("time_zone"))
-        );
+    // `Factory` is in the tz database, so `zoneinfo` loads it; the server's
+    // `is_iana_zone` (`_NOT_IANA`) still refuses it, and so must the core.
+    for zone in ["Mars/Olympus", "Factory", "localtime", "posixrules"] {
+        for command in [
+            settings_command(json!({ "time_zone": zone }), 1),
+            command(
+                "review.explainer_ack",
+                SCOPE,
+                json!({ "time_zone": zone }),
+                vec![],
+            ),
+        ] {
+            let error = refusal(&read_set, &command, NOW);
+            assert_eq!(
+                (error.reason, error.field.as_deref()),
+                (Reason::InvalidTimeZone, Some("time_zone")),
+                "{zone}"
+            );
+        }
     }
 }
 

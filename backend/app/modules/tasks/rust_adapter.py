@@ -2,8 +2,9 @@
 
 The ``bb-protocol`` command codec and, since T018, the shared rule dispatch
 (:meth:`RustCore.decide`, :meth:`RustCore.query`) cross the bridge as owned JSON
-bytes. ``TaskService`` reaches them only through ``RustTaskFacade`` while the
-``rust_core_sync`` flag is on; with it off the Python rules stay the writer.
+bytes. ``TaskService`` and ``ReviewService`` reach them only through
+``RustTaskFacade`` and ``RustReviewFacade`` while the ``rust_core_sync`` flag is
+on; with it off the Python rules stay the writer.
 
 Bridge failures arrive as ``bb_core.BridgeError(code, retryable, field)`` and
 carry no payload text. They are translated here into the application's own

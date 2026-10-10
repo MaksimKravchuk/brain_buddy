@@ -824,6 +824,11 @@ class TaskService:
             updated = rust.update_task(
                 task, payload, owner_id=owner_id, now=self.clock()
             )
+            if task.state == "next" and updated.due_date != task.due_date:
+                # The Python rule logs this where it moves the floor (FR-046).
+                review_logger.info(
+                    "review_due_date_moved owner_id=%s task_id=%s", owner_id, task.id
+                )
         else:
             updated = self._python_updated_task(task, payload, owner_id=owner_id)
         snapshot = self.formulation_settings(owner_id)

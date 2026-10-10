@@ -272,6 +272,12 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Rust task facade",
         "Flag ON and OFF give identical task HTTP",
     ),
+    # Spec 026 (T019): the Rust-backed Review facade behind ``rust_core_sync``.
+    "rust_review_parity": (
+        EPIC_TASKS,
+        "Rust review facade",
+        "Flag ON and OFF give identical Review HTTP",
+    ),
     "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_job_worker": (
         EPIC_TASKS,

@@ -47,6 +47,7 @@ from app.modules.tasks.navigator import (
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import RustCore
+from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.repositories import (
     CrtCommandRepository,
@@ -470,10 +471,12 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
             return False
         return feature_flag_service.is_effective("rust_core_sync", user)
 
+    # One bridge runtime serves the task and the Review facades.
+    rust_core = RustCore()
     task_service = TaskService(
         task_repo,
         clock=utcnow,
-        rust_facade=RustTaskFacade(RustCore(), task_repo),
+        rust_facade=RustTaskFacade(rust_core, task_repo),
         rust_core_enabled=_rust_core_sync_for_owner,
     )
     task_title_autocomplete_service = TaskTitleAutocompleteService(
@@ -500,7 +503,10 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
     # Spec 020: the review service reads ``task_service.clock``, so the one
     # ``frozen_clock`` seam drives decisions, activation and the sweep too.
     review_service = ReviewService(
-        task_service, is_exposed=_weekly_review_exposed_for_owner
+        task_service,
+        is_exposed=_weekly_review_exposed_for_owner,
+        rust_facade=RustReviewFacade(rust_core, task_repo),
+        rust_core_enabled=_rust_core_sync_for_owner,
     )
     review_flow_service = ReviewFlowService(review_service)
     review_service.idle_session_closer = review_flow_service.close_idle_sessions
