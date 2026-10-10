@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import shutil
 import sqlite3
 import threading
 import unicodedata
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, TypeVar
+from typing import ClassVar, TextIO, TypeVar
 
 from pydantic import BaseModel
 
@@ -33,7 +34,7 @@ from .domain import (
     TaskDocument,
     TaskSubtaskDocument,
 )
-from .review_repository import ReviewRepositoryMixin
+from .review_repository import ReviewRepositoryMixin, WriteScope
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -80,17 +81,112 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
 
     @contextmanager
     def command_lock(self, owner_id: str) -> Iterator[None]:
-        """Serialize owner-scoped commands and wrap writes in one transaction."""
+        """Serialize owner-scoped commands and wrap writes in one transaction.
 
-        with super()._command_lock(
-            owner_id,
-            lock=self._process_lock,
-            thread_state=self._thread_state,
-            resource="Task command",
-            operational_message="Task storage is temporarily unavailable; retry the request.",
-            repository_message=f"Task storage failed while writing Task command '{owner_id}'.",
+        Not re-entrant: it opens its own write connection, so inside a unit of
+        work (``sync.unit_of_work``) it is refused rather than left to wait out
+        the busy timeout against the lock its own thread holds.
+        """
+
+        if self.active_unit() is not None:
+            raise RepositoryError(
+                "A unit of work is already open on this thread; "
+                "the owner lock is not re-entrant."
+            )
+        with (
+            self.writer_guard(),
+            super()._command_lock(
+                owner_id,
+                lock=self._process_lock,
+                thread_state=self._thread_state,
+                resource="Task command",
+                operational_message="Task storage is temporarily unavailable; retry the request.",
+                repository_message=f"Task storage failed while writing Task command '{owner_id}'.",
+            ),
         ):
             yield
+
+    @contextmanager
+    def writer_guard(self) -> Iterator[None]:
+        """Serialize one database's SQLite commit and mirror publication.
+
+        The process RLock handles threads. A stable sibling lock file adds the
+        same exclusion across workers and processes. Re-entry is allowed only
+        on this thread and for the same canonical database path, so a unit can
+        enclose ``command_lock`` without opening a second lock description.
+        """
+
+        database = self.db_path.expanduser().resolve()
+        active: tuple[Path, int, TextIO] | None = getattr(
+            self._thread_state, "writer_guard", None
+        )
+        if active is not None:
+            active_database, depth, active_lock_file = active
+            if active_database != database:
+                raise RepositoryError(
+                    "A TaskRepository writer guard cannot nest for a different database."
+                )
+            self._thread_state.writer_guard = (
+                active_database,
+                depth + 1,
+                active_lock_file,
+            )
+            try:
+                yield
+            finally:
+                self._thread_state.writer_guard = (
+                    active_database,
+                    depth,
+                    active_lock_file,
+                )
+            return
+
+        self._process_lock.acquire()
+        lock_file: TextIO | None = None
+        try:
+            lock_path = database.with_name(f".{database.name}.writer.lock")
+            try:
+                lock_file = lock_path.open("a+")
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            except OSError as exc:
+                if lock_file is not None:
+                    with suppress(OSError):
+                        lock_file.close()
+                raise RepositoryError(
+                    "Task storage writer lock is temporarily unavailable."
+                ) from exc
+
+            self._thread_state.writer_guard = (database, 1, lock_file)
+            try:
+                yield
+            finally:
+                del self._thread_state.writer_guard
+        finally:
+            try:
+                if lock_file is not None and not lock_file.closed:
+                    lock_file.close()
+            finally:
+                self._process_lock.release()
+
+    def active_connection(self) -> sqlite3.Connection:
+        """The connection of the owner lock this thread holds (spec 026 PR-25).
+
+        Every write entry point already joins it; a unit of work takes the same
+        object so job intents are inserted on it too.
+        """
+
+        conn: sqlite3.Connection | None = getattr(self._thread_state, "conn", None)
+        if conn is None:
+            raise RepositoryError("No owner lock is held on this thread.")
+        return conn
+
+    def holds_owner_lock(self) -> bool:
+        return getattr(self._thread_state, "conn", None) is not None
+
+    def bind_unit(self, unit: WriteScope | None) -> None:
+        """Make ``unit`` (or none) the scope this thread's writes join."""
+
+        self._thread_state.unit = unit
 
     @contextmanager
     def _sqlite_guard(self, resource: str, identifier: str) -> Iterator[None]:
@@ -308,6 +404,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
     def _upsert_project(
         self, conn: sqlite3.Connection, project: ProjectDocument
     ) -> None:
+        self._note_write(project.owner_id, "Project", project.id)
         conn.execute(
             """
             INSERT INTO projects (owner_id, id, normalized_name, state, payload)
@@ -325,11 +422,10 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 self._payload(project),
             ),
         )
-        BaseRepository.dump_model(
-            self.project_path(project.owner_id, project.id), project
-        )
+        self._write_mirror(self.project_path(project.owner_id, project.id), project)
 
     def _upsert_tag(self, conn: sqlite3.Connection, tag: TagDocument) -> None:
+        self._note_write(tag.owner_id, "Tag", tag.id)
         conn.execute(
             """
             INSERT INTO tags (owner_id, id, normalized_name, state, payload)
@@ -341,9 +437,10 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             """,
             (tag.owner_id, tag.id, tag.normalized_name, tag.state, self._payload(tag)),
         )
-        BaseRepository.dump_model(self.context_path(tag.owner_id, tag.id), tag)
+        self._write_mirror(self.context_path(tag.owner_id, tag.id), tag)
 
     def _upsert_task(self, conn: sqlite3.Connection, task: TaskDocument) -> None:
+        self._note_write(task.owner_id, "Task", task.id)
         conn.execute(
             """
             INSERT INTO tasks
@@ -374,7 +471,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             "INSERT INTO task_tags (owner_id, task_id, tag_id) VALUES (?, ?, ?)",
             [(task.owner_id, task.id, tag_id) for tag_id in task.tag_ids],
         )
-        BaseRepository.dump_model(self.task_path(task.owner_id, task.id), task)
+        self._write_mirror(self.task_path(task.owner_id, task.id), task)
 
     def create_project(self, project: ProjectDocument) -> None:
         with (
@@ -460,6 +557,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         return int(value)
 
     def create_subtask(self, subtask: TaskSubtaskDocument) -> None:
+        self._note_write(subtask.owner_id, "Task subtask", subtask.id)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Task subtask", subtask.id),
@@ -468,11 +566,12 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 "INSERT INTO subtasks (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (subtask.owner_id, subtask.task_id, subtask.id, self._payload(subtask)),
             )
-        BaseRepository.dump_model(
+        self._write_mirror(
             self.subtask_path(subtask.owner_id, subtask.task_id, subtask.id), subtask
         )
 
     def save_subtask(self, subtask: TaskSubtaskDocument) -> None:
+        self._note_write(subtask.owner_id, "Task subtask", subtask.id)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Task subtask", subtask.id),
@@ -484,7 +583,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 """,
                 (self._payload(subtask), subtask.owner_id, subtask.task_id, subtask.id),
             )
-        BaseRepository.dump_model(
+        self._write_mirror(
             self.subtask_path(subtask.owner_id, subtask.task_id, subtask.id), subtask
         )
 
@@ -517,6 +616,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         return TaskSubtaskDocument.model_validate(json.loads(row["payload"]))
 
     def create_comment(self, comment: TaskCommentDocument) -> None:
+        self._note_write(comment.owner_id, "Task comment", comment.id)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Task comment", comment.id),
@@ -525,11 +625,12 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 "INSERT INTO comments (owner_id, task_id, id, payload) VALUES (?, ?, ?, ?)",
                 (comment.owner_id, comment.task_id, comment.id, self._payload(comment)),
             )
-        BaseRepository.dump_model(
+        self._write_mirror(
             self.comment_path(comment.owner_id, comment.task_id, comment.id), comment
         )
 
     def save_comment(self, comment: TaskCommentDocument) -> None:
+        self._note_write(comment.owner_id, "Task comment", comment.id)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Task comment", comment.id),
@@ -541,7 +642,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 """,
                 (self._payload(comment), comment.owner_id, comment.task_id, comment.id),
             )
-        BaseRepository.dump_model(
+        self._write_mirror(
             self.comment_path(comment.owner_id, comment.task_id, comment.id), comment
         )
 
@@ -596,6 +697,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
 
     def save_idempotency(self, *, owner_id: str, record: IdempotencyRecord) -> None:
         key_hash = idempotency_key_digest(record.key)
+        self._note_write(owner_id, "Idempotency-Key", record.key)
         with (
             self._connection(self._thread_state) as conn,
             self._sqlite_guard("Idempotency-Key", record.key),
@@ -618,7 +720,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                     record.created_at.isoformat(),
                 ),
             )
-        BaseRepository.dump_model(self.idempotency_path(owner_id, record.key), record)
+        self._write_mirror(self.idempotency_path(owner_id, record.key), record)
 
     def purge_expired_idempotency(self, *, owner_id: str, now: datetime) -> int:
         """Drop idempotency records past retention so history stays bounded.
@@ -646,6 +748,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             ).fetchall()
             if not rows:
                 return 0
+            self._note_write(owner_id, "Idempotency-Key", owner_id)
             conn.execute(
                 """
                 DELETE FROM idempotency_records
@@ -655,7 +758,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 (owner_id, cutoff),
             )
         for row in rows:
-            self.idempotency_path(owner_id, row["key"]).unlink(missing_ok=True)
+            self._remove_mirror(self.idempotency_path(owner_id, row["key"]))
         return len(rows)
 
     def list_idempotency_for_owner(self, *, owner_id: str) -> list[IdempotencyRecord]:
@@ -691,34 +794,38 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         is unchanged.
         """
 
-        with self.command_lock(owner_id), self._connection(self._thread_state) as conn:
-            self._delete_review_rows(conn, owner_id)
-            for table in (
-                "task_tags",
-                "subtasks",
-                "comments",
-                "tasks",
-                "tags",
-                "projects",
-                "idempotency_records",
+        with self.writer_guard():
+            with (
+                self.command_lock(owner_id),
+                self._connection(self._thread_state) as conn,
             ):
-                # noqa justification: `table` is bound by the literal tuple
-                # directly above, never by caller input. The owner filter is
-                # parameterised. If `table` ever becomes caller-controlled,
-                # this suppression must go.
-                conn.execute(
-                    f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
-                    (owner_id,),
-                )
-        for dirname in (
-            "tasks",
-            "projects",
-            "contexts",
-            "task-subtasks",
-            "task-comments",
-            "task-commands",
-        ):
-            shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
+                self._delete_review_rows(conn, owner_id)
+                for table in (
+                    "task_tags",
+                    "subtasks",
+                    "comments",
+                    "tasks",
+                    "tags",
+                    "projects",
+                    "idempotency_records",
+                ):
+                    # noqa justification: `table` is bound by the literal tuple
+                    # directly above, never by caller input. The owner filter is
+                    # parameterised. If `table` ever becomes caller-controlled,
+                    # this suppression must go.
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
+                        (owner_id,),
+                    )
+            for dirname in (
+                "tasks",
+                "projects",
+                "contexts",
+                "task-subtasks",
+                "task-comments",
+                "task-commands",
+            ):
+                shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
 
     def next_order_key(self, *, owner_id: str, state: str) -> int:
         with self._connection(self._thread_state) as conn:
