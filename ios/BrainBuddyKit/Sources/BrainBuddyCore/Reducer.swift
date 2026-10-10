@@ -14,7 +14,9 @@ import Foundation
 /// task creation or edit keeps whatever part of it still applies
 /// (`Reducer+Replay.swift`).
 public enum GTDReducer {
-    /// Applies `command` as if issued at `date`.
+    /// Applies `command` as if issued at `date` with the Swift rules of this module: the
+    /// compatible image of a file written before the cutover to the shared Rust core
+    /// (`apply(_:at:to:mode:rules:)` selects the rules for a workspace).
     /// - Throws: `GTDValidationError` and leaves `state` untouched. Every
     ///   handler validates before its first write, so no copy is needed.
     @discardableResult
@@ -218,6 +220,27 @@ public enum GTDReducer {
         task.completedAt = nil
         task.cancelledAt = nil
         task.lastOpenList = nil
+    }
+}
+
+extension GTDReducer {
+    /// Applies `command` with the rules `rules` selects, and only those. In the migrated
+    /// epoch (`.rust`) the shared Rust core decides and none of the handlers above runs;
+    /// until a file is migrated (`.legacy`) they do and the core is not asked. A command is
+    /// never decided by both.
+    /// - Throws: `GTDValidationError` and leaves `state` untouched on a refusal; with `.rust`
+    ///   also `RustDomainError` and `RustBridgeError`.
+    @discardableResult
+    public static func apply(
+        _ command: GTDCommand, at date: Date, to state: inout GTDState, mode: ApplyMode = .interactive,
+        rules: RuleEpoch
+    ) async throws -> ApplyOutcome {
+        switch rules {
+        case .legacy:
+            return try apply(command, at: date, to: &state, mode: mode)
+        case .rust(let facade):
+            return try await facade.apply(command, at: date, to: &state, mode: mode)
+        }
     }
 }
 

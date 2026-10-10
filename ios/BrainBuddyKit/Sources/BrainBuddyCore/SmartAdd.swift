@@ -162,3 +162,43 @@ public enum CapturePlanner {
         return CapturePlan(commands: commands, taskID: taskID)
     }
 }
+
+extension CapturePlanner {
+    /// What capture would do right now, from the rules `rules` selects: the Swift grammar and
+    /// resolution (`.legacy`) or the shared core's (`.rust`).
+    public static func preview(_ draft: CaptureDraft, in state: GTDState, rules: RuleEpoch) async throws
+        -> CapturePreview
+    {
+        switch rules {
+        case .legacy:
+            return preview(draft, in: state)
+        case .rust(let facade):
+            return try await facade.preview(draft, in: state)
+        }
+    }
+
+    /// Captures `draft` at `date` with the rules `rules` selects and returns the new task's id.
+    /// `.legacy` plans `createProject` / `createTag` / `createTask` commands and applies them
+    /// with the Swift reducer; `.rust` has the core decide one atomic `task.smart_add`.
+    /// All or nothing: a refusal throws and leaves `state` untouched.
+    @discardableResult
+    public static func capture(
+        _ draft: CaptureDraft, at date: Date, to state: inout GTDState, rules: RuleEpoch,
+        makeTaskID: () -> TaskID = { .random() }, makeProjectID: () -> ProjectID = { .random() },
+        makeTagID: () -> TagID = { .random() }
+    ) async throws -> TaskID {
+        switch rules {
+        case .legacy:
+            let planned = try plan(
+                draft, in: state, makeTaskID: makeTaskID, makeProjectID: makeProjectID, makeTagID: makeTagID)
+            var next = state
+            for command in planned.commands { try GTDReducer.apply(command, at: date, to: &next, mode: .interactive) }
+            state = next
+            return planned.taskID
+        case .rust(let facade):
+            return try await facade.capture(
+                draft, at: date, to: &state, makeTaskID: makeTaskID, makeProjectID: makeProjectID,
+                makeTagID: makeTagID)
+        }
+    }
+}
