@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import shutil
 import sqlite3
 import threading
 import unicodedata
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, TypeVar
+from typing import ClassVar, TextIO, TypeVar
 
 from pydantic import BaseModel
 
@@ -92,15 +93,80 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 "A unit of work is already open on this thread; "
                 "the owner lock is not re-entrant."
             )
-        with super()._command_lock(
-            owner_id,
-            lock=self._process_lock,
-            thread_state=self._thread_state,
-            resource="Task command",
-            operational_message="Task storage is temporarily unavailable; retry the request.",
-            repository_message=f"Task storage failed while writing Task command '{owner_id}'.",
+        with (
+            self.writer_guard(),
+            super()._command_lock(
+                owner_id,
+                lock=self._process_lock,
+                thread_state=self._thread_state,
+                resource="Task command",
+                operational_message="Task storage is temporarily unavailable; retry the request.",
+                repository_message=f"Task storage failed while writing Task command '{owner_id}'.",
+            ),
         ):
             yield
+
+    @contextmanager
+    def writer_guard(self) -> Iterator[None]:
+        """Serialize one database's SQLite commit and mirror publication.
+
+        The process RLock handles threads. A stable sibling lock file adds the
+        same exclusion across workers and processes. Re-entry is allowed only
+        on this thread and for the same canonical database path, so a unit can
+        enclose ``command_lock`` without opening a second lock description.
+        """
+
+        database = self.db_path.expanduser().resolve()
+        active: tuple[Path, int, TextIO] | None = getattr(
+            self._thread_state, "writer_guard", None
+        )
+        if active is not None:
+            active_database, depth, active_lock_file = active
+            if active_database != database:
+                raise RepositoryError(
+                    "A TaskRepository writer guard cannot nest for a different database."
+                )
+            self._thread_state.writer_guard = (
+                active_database,
+                depth + 1,
+                active_lock_file,
+            )
+            try:
+                yield
+            finally:
+                self._thread_state.writer_guard = (
+                    active_database,
+                    depth,
+                    active_lock_file,
+                )
+            return
+
+        self._process_lock.acquire()
+        lock_file: TextIO | None = None
+        try:
+            lock_path = database.with_name(f".{database.name}.writer.lock")
+            try:
+                lock_file = lock_path.open("a+")
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            except OSError as exc:
+                if lock_file is not None:
+                    with suppress(OSError):
+                        lock_file.close()
+                raise RepositoryError(
+                    "Task storage writer lock is temporarily unavailable."
+                ) from exc
+
+            self._thread_state.writer_guard = (database, 1, lock_file)
+            try:
+                yield
+            finally:
+                del self._thread_state.writer_guard
+        finally:
+            try:
+                if lock_file is not None and not lock_file.closed:
+                    lock_file.close()
+            finally:
+                self._process_lock.release()
 
     def active_connection(self) -> sqlite3.Connection:
         """The connection of the owner lock this thread holds (spec 026 PR-25).
@@ -728,34 +794,38 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
         is unchanged.
         """
 
-        with self.command_lock(owner_id), self._connection(self._thread_state) as conn:
-            self._delete_review_rows(conn, owner_id)
-            for table in (
-                "task_tags",
-                "subtasks",
-                "comments",
-                "tasks",
-                "tags",
-                "projects",
-                "idempotency_records",
+        with self.writer_guard():
+            with (
+                self.command_lock(owner_id),
+                self._connection(self._thread_state) as conn,
             ):
-                # noqa justification: `table` is bound by the literal tuple
-                # directly above, never by caller input. The owner filter is
-                # parameterised. If `table` ever becomes caller-controlled,
-                # this suppression must go.
-                conn.execute(
-                    f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
-                    (owner_id,),
-                )
-        for dirname in (
-            "tasks",
-            "projects",
-            "contexts",
-            "task-subtasks",
-            "task-comments",
-            "task-commands",
-        ):
-            shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
+                self._delete_review_rows(conn, owner_id)
+                for table in (
+                    "task_tags",
+                    "subtasks",
+                    "comments",
+                    "tasks",
+                    "tags",
+                    "projects",
+                    "idempotency_records",
+                ):
+                    # noqa justification: `table` is bound by the literal tuple
+                    # directly above, never by caller input. The owner filter is
+                    # parameterised. If `table` ever becomes caller-controlled,
+                    # this suppression must go.
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE owner_id = ?",  # noqa: S608
+                        (owner_id,),
+                    )
+            for dirname in (
+                "tasks",
+                "projects",
+                "contexts",
+                "task-subtasks",
+                "task-comments",
+                "task-commands",
+            ):
+                shutil.rmtree(self.resolve(dirname, owner_id), ignore_errors=True)
 
     def next_order_key(self, *, owner_id: str, state: str) -> int:
         with self._connection(self._thread_state) as conn:

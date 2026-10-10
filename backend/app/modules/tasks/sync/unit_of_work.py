@@ -275,18 +275,20 @@ class TaskUnitOfWork:
                 "A unit of work is already open on this thread; "
                 "the owner lock is not re-entrant."
             )
-        with owner_write_lock(self._repo, owner_id, cleanup=cleanup):
-            unit = OwnerUnitOfWork(
-                owner_id, self._repo, self._jobs, self._repo.active_connection()
-            )
-            self._repo.bind_unit(unit)
-            try:
-                yield unit
-            finally:
-                self._repo.bind_unit(None)
-                unit._end()
-        # Reached only after the commit: a failed body never gets here.
-        unit._run_after_commit()
+        with self._repo.writer_guard():
+            with owner_write_lock(self._repo, owner_id, cleanup=cleanup):
+                unit = OwnerUnitOfWork(
+                    owner_id, self._repo, self._jobs, self._repo.active_connection()
+                )
+                self._repo.bind_unit(unit)
+                try:
+                    yield unit
+                finally:
+                    self._repo.bind_unit(None)
+                    unit._end()
+            # The SQLite transaction has committed; keep the writer guard until
+            # every mirror is published so newer writes and purges follow it.
+            unit._run_after_commit()
 
 
 __all__ = [

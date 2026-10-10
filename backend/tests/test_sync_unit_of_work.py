@@ -10,8 +10,12 @@ one is refused; and that a stale or revoked job never opens a unit.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import subprocess
+import sys
 import threading
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -306,6 +310,207 @@ def test_026_FR_006_a_mirror_failure_after_commit_does_not_undo_the_commit(
 
     assert counts(repo.db_path)["tasks"] == 1
     assert mirror_files(repo) == []
+
+
+def test_026_FR_006_a_newer_write_cannot_be_overwritten_by_a_delayed_mirror(
+    repo: TaskRepository,
+    uow: TaskUnitOfWork,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    callback_started = threading.Event()
+    release_callback = threading.Event()
+    newer_finished = threading.Event()
+    errors: list[BaseException] = []
+    path = repo.task_path(OWNER, "mirror-order")
+    flush = repo._flush_mirror
+
+    def pause_older_mirror(payload_path: Path, payload: object) -> None:
+        if (
+            payload_path == path
+            and isinstance(payload, dict)
+            and payload.get("title") == "Older"
+        ):
+            callback_started.set()
+            if not release_callback.wait(timeout=5):
+                raise TimeoutError("the mirror callback was never released")
+        flush(payload_path, payload)
+
+    monkeypatch.setattr(repo, "_flush_mirror", pause_older_mirror)
+
+    def save(task: TaskDocument, finished: threading.Event | None = None) -> None:
+        try:
+            with uow.begin(OWNER):
+                repo.save(task)
+        except BaseException as exc:  # surfaced in the parent test thread below
+            errors.append(exc)
+        finally:
+            if finished is not None:
+                finished.set()
+
+    older = threading.Thread(
+        target=save, args=(make_task("mirror-order", title="Older"),)
+    )
+    newer = threading.Thread(
+        target=save,
+        args=(make_task("mirror-order", title="Newer"), newer_finished),
+    )
+    older.start()
+    try:
+        assert callback_started.wait(timeout=5)
+        newer.start()
+        newer_finished_before_release = newer_finished.wait(timeout=0.1)
+    finally:
+        release_callback.set()
+        older.join(timeout=5)
+        if newer.ident is not None:
+            newer.join(timeout=5)
+
+    assert not older.is_alive()
+    assert not newer.is_alive()
+    assert not errors
+    assert not newer_finished_before_release
+    assert json.loads(path.read_text(encoding="utf-8"))["title"] == "Newer"
+
+
+def test_026_FR_006_a_delayed_mirror_cannot_recreate_content_after_purge(
+    repo: TaskRepository,
+    uow: TaskUnitOfWork,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    callback_started = threading.Event()
+    release_callback = threading.Event()
+    purge_started = threading.Event()
+    purge_finished = threading.Event()
+    errors: list[BaseException] = []
+    path = repo.task_path(OWNER, "purged-mirror")
+    flush = repo._flush_mirror
+
+    def pause_mirror(payload_path: Path, payload: object) -> None:
+        if payload_path == path:
+            callback_started.set()
+            if not release_callback.wait(timeout=5):
+                raise TimeoutError("the mirror callback was never released")
+        flush(payload_path, payload)
+
+    monkeypatch.setattr(repo, "_flush_mirror", pause_mirror)
+
+    def create_task() -> None:
+        try:
+            with uow.begin(OWNER):
+                repo.create(make_task("purged-mirror"))
+        except BaseException as exc:  # surfaced in the parent test thread below
+            errors.append(exc)
+
+    def purge_owner() -> None:
+        purge_started.set()
+        try:
+            repo.delete_all_for_owner(owner_id=OWNER)
+        except BaseException as exc:  # surfaced in the parent test thread below
+            errors.append(exc)
+        finally:
+            purge_finished.set()
+
+    writer = threading.Thread(target=create_task)
+    purger = threading.Thread(target=purge_owner)
+    writer.start()
+    try:
+        assert callback_started.wait(timeout=5)
+        purger.start()
+        assert purge_started.wait(timeout=5)
+        purge_finished_while_callback_paused = purge_finished.wait(timeout=0.1)
+    finally:
+        release_callback.set()
+        writer.join(timeout=5)
+        if purger.ident is not None:
+            purger.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not purger.is_alive()
+    assert not errors
+    assert not purge_finished_while_callback_paused
+    assert counts(repo.db_path)["tasks"] == 0
+    assert not path.exists()
+
+
+def test_026_FR_015_writer_guard_is_shared_across_processes(
+    repo: TaskRepository, tmp_path: Path
+) -> None:
+    child_attempted = tmp_path / "child-attempted"
+    child_acquired = tmp_path / "child-acquired"
+    release_child = tmp_path / "release-child"
+    child_script = """
+import sys
+import time
+from pathlib import Path
+from app.modules.tasks import TaskRepository
+
+root = Path(sys.argv[1])
+attempted = Path(sys.argv[2])
+acquired = Path(sys.argv[3])
+release = Path(sys.argv[4])
+repo = TaskRepository(root)
+attempted.touch()
+with repo.writer_guard():
+    acquired.touch()
+    deadline = time.monotonic() + 5
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if not release.exists():
+        raise TimeoutError("parent never released the writer guard")
+"""
+
+    with repo.writer_guard():
+        process = (
+            subprocess.Popen(  # noqa: S603 - fixed interpreter and inline test script
+                [
+                    sys.executable,
+                    "-c",
+                    child_script,
+                    str(repo.root),
+                    str(child_attempted),
+                    str(child_acquired),
+                    str(release_child),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while not child_attempted.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert child_attempted.exists()
+            assert not child_acquired.exists()
+        finally:
+            release_child.touch()
+
+    stdout, stderr = process.communicate(timeout=5)
+    assert process.returncode == 0, f"child failed: {stdout}\n{stderr}"
+    assert child_acquired.exists()
+
+
+def test_026_FR_015_writer_guard_rejects_nested_different_databases(
+    repo: TaskRepository, tmp_path: Path
+) -> None:
+    other = TaskRepository(tmp_path / "other")
+
+    with (
+        repo.writer_guard(),
+        pytest.raises(RepositoryError, match="different database"),
+        other.writer_guard(),
+    ):
+        pass  # pragma: no cover - rejected before the body runs
+
+
+def test_026_FR_015_writer_guard_releases_after_an_exception(
+    repo: TaskRepository,
+) -> None:
+    with pytest.raises(RuntimeError, match="boom"), repo.writer_guard():
+        raise RuntimeError("boom")
+
+    with repo.writer_guard():
+        pass
 
 
 def test_026_FR_006_undoing_a_created_task_removes_its_mirror_only_on_commit(
