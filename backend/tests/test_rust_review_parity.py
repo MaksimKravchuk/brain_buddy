@@ -26,7 +26,8 @@ import os
 import re
 import uuid
 from collections import Counter
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -101,6 +102,24 @@ def _without_owner(value: Any) -> Any:
     return value
 
 
+def _leaf_diff(off: Any, on: Any, path: str = "") -> list[tuple[str, Any, Any]]:
+    """Where two decoded bodies differ, as (path, OFF value, ON value)."""
+
+    if isinstance(off, dict) and isinstance(on, dict):
+        return [
+            diff
+            for key in sorted(off.keys() | on.keys())
+            for diff in _leaf_diff(off.get(key), on.get(key), f"{path}/{key}")
+        ]
+    if isinstance(off, list) and isinstance(on, list) and len(off) == len(on):
+        return [
+            diff
+            for index, (a, b) in enumerate(zip(off, on, strict=True))
+            for diff in _leaf_diff(a, b, f"{path}[{index}]")
+        ]
+    return [] if off == on else [(path, off, on)]
+
+
 @dataclass
 class Exchange:
     method: str
@@ -130,13 +149,13 @@ class Scenario:
                 decoded.pop("reference_id", None)
             params = kwargs.get("params") or {}
             path = url + "".join(f"?{k}={v}" for k, v in sorted(params.items()))
+            body = self.namer.data(decoded)
+            if isinstance(body, dict) and isinstance(body.get("receipts"), list):
+                # Receipts are listed by task ID, which each app generates at
+                # random, so only their set is comparable.
+                body["receipts"].sort(key=lambda r: json.dumps(r, sort_keys=True))
             self.exchanges.append(
-                Exchange(
-                    method,
-                    self.namer(path),
-                    response.status_code,
-                    self.namer.data(decoded),
-                )
+                Exchange(method, self.namer(path), response.status_code, body)
             )
             self.deltas.append(
                 (
@@ -148,6 +167,18 @@ class Scenario:
             return response
 
         client.request = recording  # type: ignore[method-assign]
+
+    @contextmanager
+    def step(self, name: str) -> Iterator[None]:
+        """An Allure step that carries the requests it made as its evidence."""
+
+        first = len(self.exchanges)
+        with allure.step(name):
+            yield
+            attach_json(
+                "requests",
+                [(e.method, e.path, e.status) for e in self.exchanges[first:]],
+            )
 
     # ----------------------------------------------------------- ids, time
     def nid(self, prefix: str) -> str:
@@ -435,11 +466,15 @@ def _compare(
     with allure.step("every status and body is identical"):
         assert len(apps.off.exchanges) == len(apps.on.exchanges) > 10
         for expected, actual in zip(apps.off.exchanges, apps.on.exchanges, strict=True):
-            assert (actual.method, actual.path, actual.status, actual.body) == (
+            same = (actual.method, actual.path, actual.status, actual.body) == (
                 expected.method,
                 expected.path,
                 expected.status,
                 expected.body,
+            )
+            assert same, (
+                f"{expected.method} {expected.path} {expected.status}/{actual.status}: "
+                f"{_leaf_diff(expected.body, actual.body)}"
             )
         _evidence("compared", f"{len(apps.on.exchanges)} requests")
     with allure.step("the stored rows are identical"):
@@ -512,7 +547,7 @@ def decisions(s: Scenario) -> None:
     fresh_next = s.task("not due yet", state="next")
     d = s.decide
 
-    with allure.step("each type moves its task and counts in the run"):
+    with s.step("each type moves its task and counts in the run"):
         d(ask["complete me"], "complete", session_id=sid, stall_reason="unclear")
         d(
             ask["reformulate me"],
@@ -536,7 +571,7 @@ def decisions(s: Scenario) -> None:
         d(ask["extend me"], "extend", session_id=sid, reason="Quote due Friday")
         d(s.fresh(ask["extend me"]), "extend", reason="Again")
         d(fresh_next, "extend", reason="Too early")
-    with allure.step("keep, follow-up and return decisions, repeats and clashes"):
+    with s.step("keep, follow-up and return decisions, repeats and clashes"):
         keep = waiting["keep it"]
         d(keep, "keep_waiting", session_id=sid)
         d(keep, "keep_waiting", session_id=sid)
@@ -564,20 +599,20 @@ def decisions(s: Scenario) -> None:
             title=someday["return sd"]["title"],
         )
         d(someday["cancel sd"], "cancel", session_id=sid)
-    with allure.step("refusals are reported in the order Python reports them"):
+    with s.step("refusals are reported in the order Python reports them"):
         wrong = ask["wrong formulation"]
         bad = {**wrong, "formulation": {**wrong["formulation"], "id": s.nid("form")}}
         d(bad, "reformulate", title="Different formulation")
         d({**wrong, "revision": wrong["revision"] + 5}, "complete")
         d({**wrong, "id": "task_000000000000"}, "complete")
         d(keep, "reformulate", title="Not allowed", formulation_id=s.nid("form"))
-    with allure.step("a stored decision id answers as it always did"):
+    with s.step("a stored decision id answers as it always did"):
         decision_id = s.nid("decision")
         again = s.fresh(wrong)
         d(again, "cancel", decision_id=decision_id)
         d(again, "cancel", decision_id=decision_id)
         d(s.fresh(keep), "keep_waiting", decision_id=decision_id)
-    with allure.step("a stored decision of a task that has gone is a missing task"):
+    with s.step("a stored decision of a task that has gone is a missing task"):
         gone_id = s.nid("decision")
         gone = s.task("gone soon", state="waiting", waiting_for="Ann")
         d(gone, "keep_waiting", decision_id=gone_id)
@@ -585,7 +620,18 @@ def decisions(s: Scenario) -> None:
         with repo.command_lock(api.owner_id):
             repo.delete_task_record(api.owner_id, gone["id"])
         d(gone, "keep_waiting", decision_id=gone_id)
-    with allure.step("the same key replays, another body conflicts"):
+    with s.step("a decision names the request that proposed it"):
+        proposed = s.task("proposed", state="next")
+        s.tick(days=15)
+        d(
+            s.fresh(proposed),
+            "cancel",
+            ai_use="as_is",
+            navigator_request_id=str(uuid.uuid5(_NAMESPACE, "navigator")),
+            client_decided_at=(s.clock() + timedelta(minutes=5)).isoformat(),
+        )
+        s.get("/review/state")
+    with s.step("the same key replays, another body conflicts"):
         headers = api.key()
         task = s.fresh(someday["keep sd"])
         body = {"type": "keep_someday", "expected_revision": task["revision"]}
@@ -627,12 +673,12 @@ def undo(s: Scenario) -> None:
         )
     ]
     headers = api.key()
-    with allure.step("Undo restores the task, its receipt and its counters"):
+    with s.step("Undo restores the task, its receipt and its counters"):
         s.undo(results[0], headers=headers)
         s.undo(results[0], headers=headers)
         for index in (1, 2, 3, 6):
             s.undo(results[index])
-    with allure.step("Undo refuses what changed since"):
+    with s.step("Undo refuses what changed since"):
         s.post(f"/tasks/{results[4]['created_task']['id']}/subtasks", {"title": "Mine"})
         s.undo(results[4])
         s.post(f"/tasks/{results[11]['created_task']['id']}/comments", {"body": "Mine"})
@@ -645,7 +691,7 @@ def undo(s: Scenario) -> None:
         )
         s.undo(results[5])
         s.undo(results[5])
-    with allure.step("Undo copes with rows that vanished since the decision"):
+    with s.step("Undo copes with rows that vanished since the decision"):
         repo, owner = api.container.task_repo, api.owner_id
         with repo.command_lock(owner):
             repo.delete_task_record(owner, results[7]["created_task"]["id"])
@@ -657,7 +703,7 @@ def undo(s: Scenario) -> None:
         with repo.command_lock(owner):
             repo.delete_task_record(owner, results[10]["task"]["id"])
         s.undo(results[10])
-    with allure.step("an Undo past its seven days is refused after the retention"):
+    with s.step("an Undo past its seven days is refused after the retention"):
         result = ok(s.decide(s.fresh(asking[3]), "cancel"))
         s.tick(days=8)
         sweep(api.container)
@@ -679,14 +725,18 @@ def parks(s: Scenario) -> None:
         "gap",
         "undo return",
     )
-    created = {name: s.task(name, state="next") for name in names}
-    created["no row"] = s.task("no row", state="next")
+    # Seeded under fixed IDs: the sweep parks several at one instant, and parks
+    # that share an instant are listed by task ID.
+    created = {
+        name: s.seed(n, "next", title=name)
+        for n, name in enumerate((*names, "no row"), start=1)
+    }
     s.tick(days=21)
     keep_alive(api.container)
-    due = {name: s.fresh(task) for name, task in created.items()}
-    young = s.task("not due", state="next")
+    due = {name: s.fresh({"id": task.id}) for name, task in created.items()}
+    young = s.fresh({"id": s.seed(40, "next", title="not due").id})
 
-    with allure.step("a device park applies once and never conflicts"):
+    with s.step("a device park applies once and never conflicts"):
         s.park(due["device"])
         s.park(due["device"])
         for task in ("yield extend", "yield someday", "no row", "undo return"):
@@ -694,19 +744,19 @@ def parks(s: Scenario) -> None:
         headers = api.key()
         s.park(due["replay"], headers=headers)
         s.park(due["replay"], headers=headers)
-    with allure.step("the server must agree with the device"):
+    with s.step("the server must agree with the device"):
         s.park(due["wrong"], form=s.nid("form"))
         s.park(young)
         s.park({"id": "task_000000000000", "formulation": {"id": s.nid("form")}})
         api.flag("off")
         s.park(due["off"])
         api.flag("on")
-    with allure.step("a decision made before the park yields it"):
+    with s.step("a decision made before the park yields it"):
         before = (s.clock() - timedelta(hours=1)).isoformat()
         s.decide(due["yield extend"], "extend", reason="Away", client_decided_at=before)
         s.decide(due["yield someday"], "someday", client_decided_at=before)
         s.get("/review/state")
-    with allure.step("park rows are acknowledged once and returning stamps the row"):
+    with s.step("park rows are acknowledged once and returning stamps the row"):
         row = {
             "task_id": due["device"]["id"],
             "formulation_id": due["device"]["formulation"]["id"],
@@ -729,19 +779,29 @@ def parks(s: Scenario) -> None:
             )
         )
         s.get("/review/state")
-    with allure.step("Undo of a return puts the task back in its park"):
+    with s.step("Undo of a return puts the task back in its park"):
         parked = s.fresh(due["undo return"])
         returned = ok(s.decide(parked, "return_to_next", title=parked["title"]))
         s.undo(returned)
         s.get("/review/state")
-    with allure.step("a return without its park row writes none and warns"):
+    with s.step("a return without its park row writes none and warns"):
         s.drop_park_rows()
         s.decide(
             s.fresh(due["no row"]),
             "return_to_next",
             title=due["no row"]["title"],
         )
-    with allure.step("a sweep gap floors the park before the park is judged"):
+    with s.step("a park the sweep made yields to an earlier decision too"):
+        swept = s.seed(41, "next", title="swept")
+        s.tick(days=21)
+        keep_alive(api.container)
+        due_swept = s.fresh({"id": swept.id})
+        sweep(api.container)
+        s.get("/review/state")
+        before = (s.clock() - timedelta(hours=1)).isoformat()
+        s.decide(due_swept, "extend", reason="Away", client_decided_at=before)
+        s.get("/review/state")
+    with s.step("a sweep gap floors the park before the park is judged"):
         repo = api.container.task_repo
         settings = repo.get_review_settings(api.owner_id)
         assert settings is not None
@@ -768,12 +828,12 @@ def settings(s: Scenario) -> None:
         due_date=(now + 3 * DAY).date(),
         formulation_park_floor_at=now + 30 * DAY,
     )
-    with allure.step("a refused settings change or activation changes nothing"):
+    with s.step("a refused settings change or activation changes nothing"):
         s.put("/review/settings", {"expected_revision": 5, "threshold_days": 21})
         s.put("/review/settings", {"expected_revision": 1, "time_zone": "Mars/Olympus"})
         s.put("/review/settings", {"expected_revision": 1, "time_zone": "localtime"})
         s.post("/review/explainer/acknowledge", {"time_zone": "Mars/Olympus"})
-    with allure.step("the first acknowledgement activates and clamps every Next clock"):
+    with s.step("the first acknowledgement activates and clamps every Next clock"):
         headers = api.key()
         s.post(
             "/review/explainer/acknowledge",
@@ -789,9 +849,7 @@ def settings(s: Scenario) -> None:
         s.post("/review/explainer/acknowledge", {"time_zone": "Pacific/Honolulu"})
         s.post("/review/explainer/acknowledge", {})
         s.get("/review/state")
-    with allure.step(
-        "a changed value moves the revision and the floors, an equal one not"
-    ):
+    with s.step("a changed value moves the revision and the floors, an equal one not"):
         put = s.put
         put("/review/settings", {"expected_revision": 2, "threshold_days": 21})
         put("/review/settings", {"expected_revision": 3, "threshold_days": 21})
@@ -830,6 +888,7 @@ def sessions(s: Scenario) -> None:
     api, ok = s.api, s.ok
     now = s.clock()
     api.activate_at(now - 60 * DAY)
+    api.put_settings(time_zone="Pacific/Auckland")
     s.seed(1, "completed", completed_at=now - 2 * DAY)
     s.seed(2, "inbox")
     s.seed(3, "inbox")
@@ -855,7 +914,7 @@ def sessions(s: Scenario) -> None:
     s.seed(21, "waiting", waiting_for="Ann", due_date=(now + 5 * DAY).date())
     ok(s.post("/projects", {"name": "Kitchen"}))
     s.get("/review/state")
-    with allure.step("a second open run needs replace_open, a reused id is matched"):
+    with s.step("a second open run needs replace_open, a reused id is matched"):
         first = ok(s.start(id=s.nid("review"), mode="full"))
         s.start()
         replaced = ok(s.start(id=s.nid("review"), replace_open=True))
@@ -864,7 +923,7 @@ def sessions(s: Scenario) -> None:
         s.start(id=sid, mode="full")
         s.start(id=first["id"], mode="quick")
         s.get(f"/review/sessions/{first['id']}")
-    with allure.step("every step has a queue, with and without a run"):
+    with s.step("every step has a queue, with and without a run"):
         for step in (
             "wins",
             "inbox",
@@ -880,7 +939,7 @@ def sessions(s: Scenario) -> None:
             s.get(f"/review/queues/{step}")
             s.get(f"/review/queues/{step}", session_id=sid)
         s.get("/review/queues/wins", session_id=s.nid("review"))
-    with allure.step("progress merges and is replay-safe by its id"):
+    with s.step("progress merges and is replay-safe by its id"):
         steps = ("wins", "inbox", "decisions", "summary")
         for call in (
             {"current_step": "decisions"},
@@ -911,13 +970,13 @@ def sessions(s: Scenario) -> None:
         s.progress(sid, progress_id=same, current_step="summary")
         s.progress(s.nid("review"), current_step="wins")
         s.progress(sid)
-    with allure.step("a card decided or set aside shows in its queue"):
+    with s.step("a card decided or set aside shows in its queue"):
         card = s.fresh({"id": f"task_{5:012x}"})
         s.decide(card, "complete", session_id=sid)
         s.get("/review/queues/decisions", session_id=sid)
         s.get("/review/queues/rest_of_next", session_id=sid)
         s.get("/review/state")
-    with allure.step("a full run finishes every kind of step"):
+    with s.step("a full run finishes every kind of step"):
         full = ok(s.start(mode="full", replace_open=True, id=s.nid("review")))["id"]
         for code in (
             "mind_sweep",
@@ -937,7 +996,7 @@ def sessions(s: Scenario) -> None:
         s.progress(full, current_step="wins")
         s.post(f"/review/sessions/{s.nid('review')}/finish", {})
         s.get("/review/state")
-    with allure.step("a run with nothing done ends empty, an idle one is closed"):
+    with s.step("a run with nothing done ends empty, an idle one is closed"):
         empty = ok(s.start(id=s.nid("review")))["id"]
         replay = api.key()
         for _ in range(2):
@@ -952,7 +1011,7 @@ def sessions(s: Scenario) -> None:
         sweep(api.container)
         s.get("/review/state")
         s.get(f"/review/sessions/{idle}")
-    with allure.step("a captured-empty decision queue stays empty"):
+    with s.step("a captured-empty decision queue stays empty"):
         for n in (4, 6, 7, 20):
             s.decide(s.fresh({"id": f"task_{n:012x}"}), "cancel")
         again = ok(s.start(id=s.nid("review")))["id"]
@@ -989,16 +1048,16 @@ def bulk(s: Scenario) -> None:
     bumped = {"id": stale.id, "revision": stale.revision + 1}
     sid = ok(s.start(entry="restart"))["id"]
     bulk_id = s.nid("bulk")
-    with allure.step("eligibility is the server's, per item"):
+    with s.step("eligibility is the server's, per item"):
         s.bulk(
             "restart",
             [extended, floored, paused, young, waiting, bumped, ghost],
             id=bulk_id,
             session_id=sid,
         )
-    with allure.step("a run the owner does not hold is recorded without it"):
+    with s.step("a run the owner does not hold is recorded without it"):
         s.bulk("restart", [young], session_id=s.nid("review"))
-    with allure.step("a stored id is matched before eligibility"):
+    with s.step("a stored id is matched before eligibility"):
         s.bulk("restart", [young, extended], id=bulk_id)
         s.bulk(
             "restart",
@@ -1009,7 +1068,7 @@ def bulk(s: Scenario) -> None:
         headers = api.key()
         for _ in range(2):
             s.bulk("restart", [young], headers=headers)
-    with allure.step("Undo restores each clock and skips what changed"):
+    with s.step("Undo restores each clock and skips what changed"):
         task = s.fresh({"id": paused.id})
         s.ok(
             s.patch(
@@ -1022,7 +1081,7 @@ def bulk(s: Scenario) -> None:
         s.undo_bulk(bulk_id, headers=undo_headers)
         s.undo_bulk(bulk_id)
         s.undo_bulk(s.nid("bulk"))
-    with allure.step("an Undo skips a released task that is gone"):
+    with s.step("an Undo skips a released task that is gone"):
         pair = [
             s.seed(n, formulation_started_at=s.clock() - 40 * DAY) for n in (30, 31)
         ]
@@ -1031,7 +1090,7 @@ def bulk(s: Scenario) -> None:
         with repo.command_lock(api.owner_id):
             repo.delete_task_record(api.owner_id, pair[1].id)
         s.undo_bulk(both["id"])
-    with allure.step("the Inbox remainder releases and undoes"):
+    with s.step("the Inbox remainder releases and undoes"):
         captured = [s.seed(n, "inbox") for n in (10, 11, 12)]
         processed = s.seed(13, "inbox")
         s.ok(
@@ -1044,7 +1103,7 @@ def bulk(s: Scenario) -> None:
             "inbox_remainder", [*captured, processed, young], session_id=sid
         )
         s.undo_bulk(ok(released)["id"])
-    with allure.step("an Undo past its seven days is refused, with or without a sweep"):
+    with s.step("an Undo past its seven days is refused, with or without a sweep"):
         late = s.bulk(
             "restart", [s.seed(20, formulation_started_at=s.clock() - 40 * DAY)]
         )
