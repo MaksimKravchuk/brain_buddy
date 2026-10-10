@@ -211,6 +211,186 @@ fn workspace_026_fr_026_catalog_collections_are_bounded_and_query_bound() {
     );
 }
 
+fn detail_query(task_id: &str) -> Vec<u8> {
+    json!({"kind":"task_detail","task_id":task_id})
+        .to_string()
+        .into_bytes()
+}
+
+/// Numeric manual keys and duplicate timestamps exercise both tie-breaks;
+/// insertion order deliberately differs from the canonical child order.
+fn detail_children(
+    options: &OpenOptions,
+    task_id: &str,
+    subtasks: u32,
+    comments: u32,
+) -> Vec<String> {
+    let mut expected = Vec::new();
+    let mut store = Store::open(options).unwrap();
+    store.write(|tx| {
+        for n in (0..subtasks).rev() {
+            let id = format!("subtask_{n:03}");
+            let order_key = u64::from(n % 7) * 10;
+            let row = json!({"id":id,"task_id":task_id,"title":"Child","state":"open","order_key":order_key.to_string(),"revision":"1"});
+            tx.execute("INSERT INTO visible_records(workspace_id,record_type,record_key,edit_revision,body) VALUES('local','subtask',?1,'1',CAST(?2 AS BLOB))", [json!([id]).to_string(), row.to_string()])?;
+            expected.push((0, order_key, id));
+        }
+        for n in (0..comments).rev() {
+            let id = format!("comment_{n:03}");
+            let second = n % 59;
+            let row = json!({"id":id,"task_id":task_id,"body":"Comment","actor_id":"device","created_at":format!("2026-10-10T09:00:{second:02}Z"),"edited_at":null,"revision":"1"});
+            tx.execute("INSERT INTO visible_records(workspace_id,record_type,record_key,edit_revision,body) VALUES('local','comment',?1,'1',CAST(?2 AS BLOB))", [json!([id]).to_string(), row.to_string()])?;
+            expected.push((1, u64::from(second), id));
+        }
+        tx.execute("UPDATE sync_meta SET projection_generation = projection_generation + 1", [])?;
+        Ok(())
+    }).unwrap();
+    expected.sort();
+    expected.into_iter().map(|(_, _, id)| id).collect()
+}
+
+#[test]
+fn workspace_026_fr_026_detail_has_one_shared_bounded_child_budget() {
+    for (subtasks, comments) in [(0, 0), (101, 99), (101, 100)] {
+        let (workspace, options) = open(&format!("detail-budget-{subtasks}-{comments}"));
+        let BridgeExecution::Saved { results } = workspace
+            .execute(vec![command(1, "Parent")], context(), operation())
+            .unwrap()
+        else {
+            panic!("saved parent");
+        };
+        let task_id = &results[0].entity_id;
+        let expected = detail_children(&options, task_id, subtasks, comments);
+        for limit in [200, 3] {
+            let mut cursor = None;
+            let mut seen = Vec::new();
+            let mut generation = None;
+            loop {
+                let BridgeWorkspaceAnswer::Answered { page } = workspace
+                    .query(detail_query(task_id), inputs(), limit, cursor)
+                    .unwrap()
+                else {
+                    panic!("detail page");
+                };
+                assert_eq!(
+                    generation.get_or_insert(page.projection_generation.clone()),
+                    &page.projection_generation
+                );
+                let result: Value = serde_json::from_slice(&page.result).unwrap();
+                assert_eq!(result["kind"], "task_detail");
+                let value = &result["value"];
+                assert_eq!(value["id"], task_id.as_str());
+                assert_eq!(value["title"], "Parent");
+                assert_eq!(value["revision"], "1");
+                let subtasks = value["subtasks"].as_array().unwrap();
+                let comments = value["comments"].as_array().unwrap();
+                assert!(subtasks.len() + comments.len() <= limit as usize);
+                seen.extend(
+                    subtasks
+                        .iter()
+                        .chain(comments)
+                        .map(|row| row["id"].as_str().unwrap().to_owned()),
+                );
+                cursor = page.collection_next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+                assert_eq!(subtasks.len() + comments.len(), limit as usize);
+            }
+            assert_eq!(
+                seen, expected,
+                "no omissions/duplicates across the child-kind boundary"
+            );
+        }
+        for limit in [0, 201] {
+            assert!(matches!(
+                workspace
+                    .query(detail_query(task_id), inputs(), limit, None)
+                    .unwrap(),
+                BridgeWorkspaceAnswer::Refused { .. }
+            ));
+        }
+    }
+}
+
+#[test]
+fn workspace_026_fr_026_detail_continuation_fences_task_inputs_and_generation() {
+    let (workspace, options) = open("detail-fences");
+    let BridgeExecution::Saved { results } = workspace
+        .execute(
+            vec![command(1, "Parent"), command(2, "Other")],
+            context(),
+            operation(),
+        )
+        .unwrap()
+    else {
+        panic!("parents");
+    };
+    let task_id = &results[0].entity_id;
+    detail_children(&options, task_id, 1, 1);
+    let BridgeWorkspaceAnswer::Answered { page } = workspace
+        .query(detail_query(task_id), inputs(), 1, None)
+        .unwrap()
+    else {
+        panic!("detail");
+    };
+    let cursor = page.collection_next_cursor.unwrap();
+    let mut changed_inputs: Value = serde_json::from_slice(&inputs()).unwrap();
+    changed_inputs["now"] = json!("2026-10-10T10:00:00Z");
+    for (query, inputs) in [
+        (detail_query(&results[1].entity_id), inputs()),
+        (br#"{"kind":"tags"}"#.to_vec(), inputs()),
+        (
+            detail_query(task_id),
+            changed_inputs.to_string().into_bytes(),
+        ),
+    ] {
+        assert_eq!(
+            code(
+                workspace
+                    .query(query, inputs, 1, Some(cursor.clone()))
+                    .unwrap_err()
+            ),
+            "QUERY_RESTART_REQUIRED"
+        );
+    }
+    for (field, value) in [("offset", json!(1)), ("key", json!("invalid child cursor"))] {
+        let mut invalid: Value = serde_json::from_str(&cursor).unwrap();
+        invalid[field] = value;
+        assert_eq!(
+            code(
+                workspace
+                    .query(
+                        detail_query(task_id),
+                        inputs(),
+                        1,
+                        Some(invalid.to_string())
+                    )
+                    .unwrap_err()
+            ),
+            "QUERY_RESTART_REQUIRED"
+        );
+    }
+    let mut neighbor = Store::open(&options).unwrap();
+    neighbor
+        .write(|tx| {
+            tx.execute(
+                "UPDATE sync_meta SET projection_generation = projection_generation + 1",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        code(
+            workspace
+                .query(detail_query(task_id), inputs(), 1, Some(cursor))
+                .unwrap_err()
+        ),
+        "QUERY_RESTART_REQUIRED"
+    );
+}
+
 #[test]
 fn workspace_026_fr_004_issues_and_status_invalidate_without_projection_change() {
     let (workspace, options) = open("subscription");

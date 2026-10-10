@@ -9,6 +9,7 @@ use bb_domain::{
     types::{DomainError, Query, QueryInputs, QueryResult},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BinaryHeap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryError {
@@ -61,6 +62,94 @@ struct Cursor {
     fingerprint: String,
 }
 
+/// Child kinds concatenate in this order; numeric keys never compare as text.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum DetailChildKey {
+    Subtask {
+        order_key: u64,
+        id: bb_domain::types::SubtaskId,
+    },
+    Comment {
+        created_at: i64,
+        id: bb_domain::types::CommentId,
+    },
+}
+
+/// Retain only the next page and one lookahead child. The canonical detail
+/// mapper still owns the parent/advisory projection and child wire values.
+fn native_task_detail(
+    state: &bb_domain::types::ReadSet,
+    task_id: &bb_domain::types::TaskId,
+    limit: u32,
+    after: Option<&DetailChildKey>,
+) -> Result<(bb_domain::types::TaskView, Option<DetailChildKey>), DomainError> {
+    let Some(task) = state.tasks.get(task_id) else {
+        return bb_domain::queries::task_detail(state, task_id).map(|view| (view, None));
+    };
+    let mut selected = BinaryHeap::new();
+    let mut consider = |key: DetailChildKey| {
+        if after.is_none_or(|after| &key > after) {
+            if selected.len() < limit as usize + 1 {
+                selected.push(key);
+            } else if selected.peek().is_some_and(|largest| &key < largest) {
+                selected.pop();
+                selected.push(key);
+            }
+        }
+    };
+    for subtask in state
+        .subtasks
+        .values()
+        .filter(|row| &row.task_id == task_id)
+    {
+        consider(DetailChildKey::Subtask {
+            order_key: subtask.order_key.to_u64().ok_or_else(|| {
+                DomainError::field(bb_domain::types::Reason::InvalidValue, "order_key")
+            })?,
+            id: subtask.id.clone(),
+        });
+    }
+    for comment in state
+        .comments
+        .values()
+        .filter(|row| &row.task_id == task_id)
+    {
+        consider(DetailChildKey::Comment {
+            created_at: bb_domain::calendar::UtcInstant::parse_rfc3339(comment.created_at.as_str())
+                .map_err(|_| {
+                    DomainError::field(bb_domain::types::Reason::InvalidValue, "created_at")
+                })?
+                .unix_micros(),
+            id: comment.id.clone(),
+        });
+    }
+    let mut selected = selected.into_sorted_vec();
+    let more = selected.len() > limit as usize;
+    if more {
+        selected.pop();
+    }
+    let next = if more { selected.last().cloned() } else { None };
+    let mut page = bb_domain::types::ReadSet {
+        settings: state.settings.clone(),
+        ..Default::default()
+    };
+    page.tasks.insert(task_id.clone(), task.clone());
+    for key in selected {
+        match key {
+            DetailChildKey::Subtask { id, .. } => {
+                page.subtasks
+                    .insert(id.clone(), state.subtasks[&id].clone());
+            }
+            DetailChildKey::Comment { id, .. } => {
+                page.comments
+                    .insert(id.clone(), state.comments[&id].clone());
+            }
+        }
+    }
+    bb_domain::queries::task_detail(&page, task_id).map(|view| (view, next))
+}
+
 /// List pages keep the domain's 1..200 bound. Their opaque continuation embeds
 /// the generation: a later write requires restarting, never skipping/repeating.
 /// Non-page reads keep the frozen domain shape; large list destinations must
@@ -73,7 +162,7 @@ pub fn query_page(
     query_collection_page(store, query, inputs, 200, None)
 }
 
-/// Page canonical projects, tags and Review queue results at the runtime port.
+/// Page canonical detail children, projects, tags and Review collections.
 /// Keep query/inputs unchanged while following a collection continuation.
 pub fn query_collection_page(
     store: &mut Store,
@@ -137,6 +226,46 @@ pub fn query_collection_page(
                 cursor.generation != generation || cursor.fingerprint != fingerprint
             }) {
                 return Err(QueryError::RestartRequired);
+            }
+            if let Query::TaskDetail { task_id } = &query {
+                if cursor
+                    .as_ref()
+                    .is_some_and(|cursor| cursor.offset != 0 || cursor.key.is_none())
+                {
+                    return Err(QueryError::RestartRequired);
+                }
+                let after = cursor
+                    .as_ref()
+                    .and_then(|cursor| cursor.key.as_deref())
+                    .map(serde_json::from_str::<DetailChildKey>)
+                    .transpose()
+                    .map_err(|_| QueryError::RestartRequired)?;
+                let (view, next) =
+                    native_task_detail(&state, task_id, collection_limit, after.as_ref()).map_err(
+                        |error| QueryError::RefusedAt {
+                            error,
+                            projection_generation: generation,
+                        },
+                    )?;
+                let collection_next_cursor = next
+                    .map(|key| {
+                        serde_json::to_string(&CollectionCursor {
+                            generation,
+                            fingerprint,
+                            offset: 0,
+                            key: Some(
+                                serde_json::to_string(&key)
+                                    .map_err(|_| QueryError::Store(StoreError::Corrupt))?,
+                            ),
+                        })
+                        .map_err(|_| QueryError::Store(StoreError::Corrupt))
+                    })
+                    .transpose()?;
+                return Ok(QueryPage {
+                    projection_generation: generation,
+                    result: QueryResult::TaskDetail(view),
+                    collection_next_cursor,
+                });
             }
             if matches!(
                 query,
