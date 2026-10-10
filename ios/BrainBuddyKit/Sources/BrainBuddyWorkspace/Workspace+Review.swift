@@ -2,12 +2,23 @@ import BrainBuddyCore
 import BrainBuddyPersistence
 import Foundation
 
+/// A canonical Review read. Collection methods expose one page; the UI asks
+/// for another explicitly and renders readiness separately from emptiness.
+public enum WorkspaceReviewRead: Hashable, Sendable {
+    case state
+    case summary(ReviewSessionID?)
+    case formulation(TaskID)
+    case queue(ReviewStep, ReviewSessionID?)
+    case restart
+    case projects
+    case parkReturn(TaskID, ParkAck?)
+    case releases(BulkReleaseKindCode, ReviewSessionID?)
+}
+
 /// The weekly review on the workspace (spec 020, contracts/ios-commands.md
-/// §2, §5 – §8). Every rule is decided in Core (`GTDReducer`, `GTDQueries`,
-/// the planners); this extension mints ids, picks the instant and zone the
-/// rule is evaluated with, and keeps the device-local state
-/// (`StoreDocument.local`), which is written with the next write and never
-/// synced.
+/// §2, §5 – §8). Legacy workspaces retain their established commands and
+/// local document state. Selected workspaces render bounded canonical pages
+/// and await durable runtime saves; this extension owns presentation only.
 extension Workspace {
     // MARK: - Exposure and clocks
 
@@ -15,6 +26,7 @@ extension Workspace {
     public var localReview: LocalReviewState { local }
 
     var local: LocalReviewState {
+        if isRustSelected { return rustLocalReview }
         guard !pendingEdits.isEmpty else { return document.local }
         var pending = document
         for edit in pendingEdits { edit(&pending) }
@@ -25,6 +37,7 @@ extension Workspace {
     /// flag answered on `GET /review/state`; account-less, the release switch.
     /// Core's `ReviewState.isExposed` with the same input the reducer gets.
     public var reviewExposed: Bool {
+        if isRustSelected { return isRustBound && rustReviewState?.server.exposed == true }
         var review = state.review
         review.accountlessReleaseSwitch = accountlessReleaseSwitch
         return review.isExposed
@@ -56,6 +69,7 @@ extension Workspace {
     // MARK: - Reading
 
     public func formulationClass(of id: TaskID) -> FormulationClass? {
+        if isRustSelected { return rustFormulation(id)?.classification }
         guard let task = state.tasks[id] else { return nil }
         return GTDQueries.formulationClass(
             of: task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone
@@ -63,47 +77,98 @@ extension Workspace {
     }
 
     public func derivedInstants(of id: TaskID) -> DerivedInstants? {
+        if isRustSelected { return rustFormulation(id)?.derived }
         guard let task = state.tasks[id] else { return nil }
         return GTDQueries.derivedInstants(of: task, settings: state.review.settings, timeZone: classificationZone)
     }
 
     public func decisionQueue() -> [TaskRecord] {
-        GTDQueries.decisionQueue(in: state, now: reviewNow, timeZone: classificationZone)
+        if isRustSelected { return rustQueue(.decisions)?.tasks ?? [] }
+        return GTDQueries.decisionQueue(in: state, now: reviewNow, timeZone: classificationZone)
     }
 
-    public func askCount() -> Int { GTDQueries.askCount(in: state, now: reviewNow, timeZone: classificationZone) }
-    public func unseenParks() -> [TaskRecord] { GTDQueries.unseenParks(in: state) }
+    public func askCount() -> Int {
+        if isRustSelected { return rustReviewState?.askCount ?? 0 }
+        return GTDQueries.askCount(in: state, now: reviewNow, timeZone: classificationZone)
+    }
+    public func unseenParks() -> [TaskRecord] {
+        if isRustSelected { return (rustReviewState?.unseenParks ?? []).compactMap { state.tasks[$0.taskID] } }
+        return GTDQueries.unseenParks(in: state)
+    }
 
     public func restartCandidates() -> [TaskRecord] {
-        GTDQueries.restartCandidates(in: state, now: reviewNow, timeZone: classificationZone)
+        if isRustSelected { return rustRead(.restart) { try $0.workspaceTasks(from: $1, keeping: state, at: now()) } ?? [] }
+        return GTDQueries.restartCandidates(in: state, now: reviewNow, timeZone: classificationZone)
     }
 
     public func restartMode() -> Bool {
-        state.review.server?.restartMode == true || GTDQueries.restartMode(in: state, now: reviewNow)
+        if isRustSelected { return rustReviewState?.server.restartMode == true }
+        return state.review.server?.restartMode == true || GTDQueries.restartMode(in: state, now: reviewNow)
     }
 
-    public func wins() -> [TaskRecord] { GTDQueries.wins(in: state, now: now()) }
-    public func capacityMirror() -> CapacityMirror { GTDQueries.capacityMirror(in: state, now: now()) }
-    public func waitingDue() -> [TaskRecord] { GTDQueries.waitingDue(in: state, now: now()) }
-    public func somedayDue() -> SomedayQueue { GTDQueries.somedayDue(in: state, now: now()) }
-    public func projectsNeedingNextAction() -> [ProjectSummary] { GTDQueries.projectsNeedingNextAction(in: state) }
-    public func datesAhead() -> [DueDay] { GTDQueries.datesAhead(in: state, today: today) }
-    public func lastCountedReview() -> Date? { GTDQueries.lastCountedReview(in: state) }
-    public func daysSinceLastReview() -> Int? { GTDQueries.daysSinceLastReview(in: state, today: today) }
-    public func reviewEntryNotice() -> ReviewEntryNotice? { GTDQueries.entryNotice(in: state) }
-    public func openRestartReleases() -> [BulkReleaseRecord] { GTDQueries.openRestartReleases(in: state) }
+    public func wins() -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.wins)?.tasks ?? [] }
+        return GTDQueries.wins(in: state, now: now())
+    }
+    public func capacityMirror() -> CapacityMirror {
+        if isRustSelected {
+            return rustQueue(.restOfNext)?.capacity ?? CapacityMirror(nextCount: 0, weeksOfHistory: 0, weeklyAverage4w: nil, impliedWeeks: nil)
+        }
+        return GTDQueries.capacityMirror(in: state, now: now())
+    }
+    public func waitingDue() -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.waiting)?.tasks ?? [] }
+        return GTDQueries.waitingDue(in: state, now: now())
+    }
+    public func somedayDue() -> SomedayQueue {
+        if isRustSelected {
+            let queue = rustQueue(.someday)
+            return SomedayQueue(eligibleTotal: queue?.somedayTotal ?? 0, shown: queue?.tasks ?? [])
+        }
+        return GTDQueries.somedayDue(in: state, now: now())
+    }
+    public func projectsNeedingNextAction() -> [ProjectSummary] {
+        if isRustSelected { return rustRead(.projects) { try $0.workspaceProjects(from: $1, keeping: state, at: now()) } ?? [] }
+        return GTDQueries.projectsNeedingNextAction(in: state)
+    }
+    public func datesAhead() -> [DueDay] {
+        if isRustSelected { return rustQueue(.dates)?.dueDays ?? [] }
+        return GTDQueries.datesAhead(in: state, today: today)
+    }
+    public func lastCountedReview() -> Date? {
+        if isRustSelected { return rustReviewState?.server.lastCountedReviewAt }
+        return GTDQueries.lastCountedReview(in: state)
+    }
+    public func daysSinceLastReview() -> Int? {
+        if isRustSelected { return rustSummary()?.daysSinceLastReview }
+        return GTDQueries.daysSinceLastReview(in: state, today: today)
+    }
+    public func reviewEntryNotice() -> ReviewEntryNotice? {
+        if isRustSelected { return rustSummary()?.entryNotice }
+        return GTDQueries.entryNotice(in: state)
+    }
+    public func openRestartReleases() -> [BulkReleaseRecord] {
+        if isRustSelected { return rustReleases(.restart) }
+        return GTDQueries.openRestartReleases(in: state)
+    }
 
     public func openInboxReleases(in session: ReviewSession) -> [BulkReleaseRecord] {
-        GTDQueries.openInboxReleases(in: state, session: session)
+        if isRustSelected { return rustReleases(.inboxRemainder, session: session.id) }
+        return GTDQueries.openInboxReleases(in: state, session: session)
     }
 
     public func decisionStep(in session: ReviewSession) -> DecisionStepOutcome {
-        GTDQueries.decisionStep(in: state, session: session, now: reviewNow, timeZone: classificationZone)
+        if isRustSelected { return rustSummary(session: session.id)?.decisionStep ?? .nothingAsks }
+        return GTDQueries.decisionStep(in: state, session: session, now: reviewNow, timeZone: classificationZone)
     }
-    public var explainerNeeded: Bool { GTDQueries.explainerNeeded(in: state, local: local) }
+    public var explainerNeeded: Bool {
+        if isRustSelected { return rustSummary()?.explainerNeeded ?? false }
+        return GTDQueries.explainerNeeded(in: state, local: local)
+    }
 
     /// FR-005: whether the card shows the third-stall offer for `id`.
     public func isThirdStall(_ id: TaskID) -> Bool {
+        if isRustSelected { return rustFormulation(id)?.thirdStall ?? false }
         guard let task = state.tasks[id] else { return false }
         return GTDQueries.isThirdStall(task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone)
     }
@@ -111,6 +176,7 @@ extension Workspace {
     /// FR-009: what "Keep 7 more days" would give `id` now (M-04), in the
     /// classification zone; nil when it is not allowed.
     public func extensionInstants(of id: TaskID) -> DerivedInstants? {
+        if isRustSelected { return rustFormulation(id)?.extensionInstants }
         guard let task = state.tasks[id] else { return nil }
         return GTDQueries.extensionInstants(
             of: task, now: reviewNow, settings: state.review.settings, timeZone: classificationZone
@@ -119,7 +185,8 @@ extension Workspace {
 
     /// FR-015: why `id` cannot return to Next from "While you were away".
     public func parkReturnProblem(of id: TaskID, shown: ParkAck? = nil) -> ParkReturnProblem? {
-        GTDQueries.parkReturnProblem(of: id, shown: shown, in: state)
+        if isRustSelected { return rustRead(.parkReturn(id, shown)) { try $0.workspaceParkReturnProblem(from: $1) } ?? nil }
+        return GTDQueries.parkReturnProblem(of: id, shown: shown, in: state)
     }
 
     /// Tasks listed once on "While you were away" because linking dropped
@@ -132,7 +199,7 @@ extension Workspace {
             for: entry,
             state: ReviewEntryState(
                 explainerNeeded: explainerNeeded, onboarded: state.review.settings.onboardedAt != nil,
-                hasUnseenParks: !unseenParks().isEmpty || !local.linkedExtensionNotices.isEmpty,
+                hasUnseenParks: hasUnseenReviewParks || !local.linkedExtensionNotices.isEmpty,
                 restartMode: restartMode(), openSession: state.review.openSession
             )
         )
@@ -142,7 +209,7 @@ extension Workspace {
     public func whileAwayShouldShowAtAppOpen() -> Bool {
         WhileAwayPresentation.shouldShowAtAppOpen(
             lastShownDay: local.wywaLastShownDay, today: today,
-            hasUnseen: !unseenParks().isEmpty || !local.linkedExtensionNotices.isEmpty
+            hasUnseen: hasUnseenReviewParks || !local.linkedExtensionNotices.isEmpty
         )
     }
 
@@ -173,6 +240,7 @@ extension Workspace {
         stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
         sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: ShownTask? = nil
     ) throws(GTDValidationError) -> DecisionID {
+        guard !isRustSelected else { throw .asynchronousSaveRequired }
         guard let task = state.tasks[taskID] else { throw .taskNotFound }
         let decisionID = DecisionID.make(makeID())
         let startsFormulation: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
@@ -244,6 +312,7 @@ extension Workspace {
     /// whether a change was queued.
     @discardableResult
     public func sendDeviceTimeZoneIfChanged() -> Bool {
+        guard !isRustSelected else { return false }
         let current = deviceTimeZone()
         let lastObserved = local.lastObservedTimeZone
         guard let lastObserved else {
@@ -266,6 +335,7 @@ extension Workspace {
     /// recorded while the review is not exposed: a sheet the flag took away
     /// was not shown.
     public func markWhileAwayShown() {
+        guard !isRustSelected else { presentationDraftError = "ASYNCHRONOUS_SAVE_REQUIRED"; return }
         guard reviewExposed else { return }
         let day = today
         edit { $0.local.wywaLastShownDay = day }
@@ -273,7 +343,10 @@ extension Workspace {
 
     /// The unseen parks as M-09 lists them; pass the ones a sheet showed to
     /// `dismissWhileAway(shown:)`.
-    public func unseenParkAcks() -> [ParkAck] { GTDQueries.unseenParkAcks(in: state) }
+    public func unseenParkAcks() -> [ParkAck] {
+        if isRustSelected { return rustReviewState?.unseenParks ?? [] }
+        return GTDQueries.unseenParkAcks(in: state)
+    }
 
     /// Continue on "While you were away" (M-09): the parks it `shown` are
     /// seen (a park that arrived while it was open is not), linking notices
@@ -299,6 +372,7 @@ extension Workspace {
     /// caused by the review no longer being exposed (the flag turned off
     /// while the sheet was up) records nothing.
     public func closeWhileAway() {
+        guard !isRustSelected else { presentationDraftError = "ASYNCHRONOUS_SAVE_REQUIRED"; return }
         guard reviewExposed else { return }
         let day = today
         edit { document in
@@ -371,7 +445,8 @@ extension Workspace {
     }
 
     public func navigatorAllowsCloud(provider: String) -> Bool {
-        state.review.navigatorConsents[provider]?.allowsCloud == true
+        if isRustSelected { return state.review.navigatorConsents[provider]?.allowsCloud == true }
+        return state.review.navigatorConsents[provider]?.allowsCloud == true
     }
 
     // MARK: - Form drafts (FR-052)
@@ -379,6 +454,7 @@ extension Workspace {
     /// Keeps unsaved form text on this device only: never sent, never in an
     /// outbox operation, never logged.
     public func saveDraft(_ text: String, for key: DraftKey) {
+        guard !isRustSelected else { presentationDraftError = "ASYNCHRONOUS_SAVE_REQUIRED"; return }
         let savedAt = now()
         edit { document in
             if text.isEmpty {
@@ -391,11 +467,13 @@ extension Workspace {
 
     /// The draft for `key`, unless it expired or its formulation changed.
     public func draft(for key: DraftKey) -> String? {
+        if isRustSelected { return nil }
         guard let draft = local.formDrafts[key], Self.isLive(key, draft, in: state, now: now()) else { return nil }
         return draft.text
     }
 
     public func discardDraft(for key: DraftKey) {
+        guard !isRustSelected else { presentationDraftError = "ASYNCHRONOUS_SAVE_REQUIRED"; return }
         edit { $0.local.formDrafts[key] = nil }
     }
 
@@ -403,6 +481,7 @@ extension Workspace {
     /// 021, FR-018): the drafts still shown (`draft(for:)`), not expired or outdated ones. They live
     /// in the store the sign-out destroys, and are never synced.
     public var unsavedReviewDraftCount: Int {
+        if isRustSelected { return rustReviewDraftCount }
         let instant = now()
         let current = state
         return local.formDrafts.filter { Self.isLive($0.key, $0.value, in: current, now: instant) }.count
@@ -429,6 +508,7 @@ extension Workspace {
     /// retention, FR-043), whether or not the review is shown; the formulation
     /// ids, the zone and auto-park only while it is exposed.
     public func runReviewUpkeep() {
+        guard !isRustSelected else { return }
         guard isLoaded, loadError == nil else { return }
         runLocalReviewMaintenance()
         guard reviewExposed else { return }
@@ -443,6 +523,7 @@ extension Workspace {
     /// refused as stale (operations queued before exposure, a store migrated
     /// from v1). Sent operations keep the body their key is bound to.
     func stampUnsentFormulationIDs() {
+        guard !isRustSelected else { return }
         let pending = (document.outbox + unpersisted).filter { !$0.hasBeenSent }
         guard pending.contains(where: { ReviewAccountLinking.stampingDerivedFormulationID($0) != $0 }) else { return }
         edit { document in
@@ -459,6 +540,7 @@ extension Workspace {
     /// Returns how many parks were issued.
     @discardableResult
     public func applyDueAutoParks() -> Int {
+        guard !isRustSelected else { return 0 }
         guard isLoaded, reviewExposed else { return 0 }
         let instant = Self.storedPrecision(reviewNow)
         let zone = classificationZone
@@ -516,6 +598,7 @@ extension Workspace {
     /// unless a queued Undo needs them), open runs idle for 7 days are
     /// closed, and expired or orphaned drafts go.
     public func runLocalReviewMaintenance() {
+        guard !isRustSelected else { return }
         let instant = now()
         let signedIn = account != nil
         let idle = ReviewSessionUpkeep.idleSessions(in: state, now: instant)
@@ -556,6 +639,7 @@ extension Workspace {
     /// (`WorkspaceError.storage`): uploading the unconverted outbox would send
     /// parks the server answers `applied: false`.
     func convertLocalAutoParksForLinking() async throws {
+        guard !isRustSelected else { return }
         guard accountlessReviewEnabled || local.activatedAt != nil else { return }
         let pending = document.outbox + unpersisted
         let affected = pending.contains { operation in
@@ -577,5 +661,491 @@ extension Workspace {
             throw WorkspaceError.storage(Self.storageMessage(for: error))
         }
         await refreshFromStore()
+    }
+}
+
+extension Workspace {
+    // MARK: Canonical Review reads
+
+    private var hasUnseenReviewParks: Bool {
+        isRustSelected ? (rustReviewState?.unseenParkTotal ?? 0) > 0 : !unseenParks().isEmpty
+    }
+
+    private func rustReviewQuery(_ read: WorkspaceReviewRead) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let bindings = rustIdentityBindings
+        switch read {
+        case .state: return try facade.workspaceReadQuery("review_state")
+        case .summary(let session):
+            return try facade.workspaceReviewSummaryQuery(session: session,
+                explainerSeenLocally: local.explainerSeenLocally, activatedAt: local.activatedAt, bindings: bindings)
+        case .formulation(let task):
+            return try facade.workspaceReadQuery("task_formulation", taskID: task, bindings: bindings)
+        case .queue(let step, let session):
+            return try facade.workspaceReviewQueueQuery(step, session: session, bindings: bindings)
+        case .projects: return try facade.workspaceReadQuery("projects", filter: "needs_next_action")
+        case .restart: return try facade.workspaceReadQuery("restart_candidates")
+        case .parkReturn(let task, let shown):
+            return try facade.workspaceParkReturnQuery(task, shown: shown, bindings: bindings)
+        case .releases(let kind, let session):
+            return try facade.workspaceOpenReleasesQuery(kind, session: session, bindings: bindings)
+        }
+    }
+
+    private func rustRead<Value>(_ read: WorkspaceReviewRead,
+                                 decode: (RustDomainFacade, Data) throws -> Value) -> Value? {
+        guard let facade = rustFacade, let query = try? rustReviewQuery(read),
+              let page = rustPage(for: query) else { return nil }
+        // Publication validated this owned page. Failure is represented by
+        // query readiness, never another implementation of the read.
+        return try? decode(facade, page.result)
+    }
+
+    private func rustQueue(_ step: ReviewStep, session: ReviewSessionID? = nil) -> RustWorkspaceReviewQueue? {
+        rustRead(.queue(step, session)) { try $0.workspaceReviewQueue(from: $1, keeping: state, at: now()) }
+    }
+
+    private func rustFormulation(_ task: TaskID) -> RustWorkspaceFormulation? {
+        rustRead(.formulation(task)) { try $0.workspaceFormulation(from: $1) }
+    }
+
+    private func rustSummary(session: ReviewSessionID? = nil) -> RustWorkspaceReviewSummary? {
+        rustRead(.summary(session)) { try $0.workspaceReviewSummary(from: $1) }
+    }
+
+    private func rustReleases(_ kind: BulkReleaseKindCode, session: ReviewSessionID? = nil) -> [BulkReleaseRecord] {
+        rustRead(.releases(kind, session)) { try $0.workspaceOpenReleases(from: $1, keeping: state, at: now()) } ?? []
+    }
+
+    public func reviewReadiness(_ read: WorkspaceReviewRead) -> WorkspaceQueryReadiness {
+        guard isRustSelected else { return .ready }
+        guard let query = try? rustReviewQuery(read) else { return .failed("WORKSPACE_NOT_READY") }
+        _ = rustPage(for: query)
+        return rustReadiness(for: query)
+    }
+
+    public func prepareReviewRead(_ read: WorkspaceReviewRead) async throws {
+        guard isRustSelected else { return }
+        let query = try rustReviewQuery(read)
+        await prepareRustQuery(query)
+        if case .state = read { try await hydrateShownParks(query) }
+    }
+
+    public func nextReviewPage(_ read: WorkspaceReviewRead) async throws {
+        let query = try rustReviewQuery(read)
+        await rustQueries?.nextPage(query)
+        if case .state = read { try await hydrateShownParks(query) }
+    }
+
+    public func previousReviewPage(_ read: WorkspaceReviewRead) async throws {
+        let query = try rustReviewQuery(read)
+        await rustQueries?.previousPage(query)
+        if case .state = read { try await hydrateShownParks(query) }
+    }
+
+    private func hydrateShownParks(_ query: Data) async throws {
+        guard let facade = rustFacade, let page = rustPage(for: query),
+              rustReadiness(for: query) == .ready else { return }
+        let review = try facade.workspaceReviewState(from: page.result, keeping: state, at: now())
+        let requests = review.unseenParks.map {
+            facade.workspaceRecordRequest("task", localID: $0.taskID.rawValue, bindings: rustIdentityBindings)
+        }
+        guard !requests.isEmpty else { rustAdoptTasks([], for: query); return }
+        let binding = runtimeBindingID
+        let records = try await rustReadRecords(requests)
+        guard binding == runtimeBindingID, rustPage(for: query) == page else { return }
+        var owned = GTDState.empty
+        try facade.workspaceApplyRecords(from: records.result, requests: requests, to: &owned, at: now())
+        rustAdoptTasks(review.unseenParks.compactMap { owned.tasks[$0.taskID] }, for: query)
+    }
+
+    /// Called only after the lifecycle/cache generation fence has passed.
+    func adoptRustReviewPage(query: Data, page: RustWorkspacePage) throws {
+        guard let facade = rustFacade,
+              let root = try JSONSerialization.jsonObject(with: query) as? [String: Any],
+              let kind = root["kind"] as? String else { throw RustDomainError.malformedResult }
+        switch kind {
+        case "review_state":
+            let review = try facade.workspaceReviewState(from: page.result, keeping: state, at: now())
+            rustReviewState = review
+            rustMutateShown {
+                $0.review.settings = review.settings
+                $0.review.server = review.server
+                $0.review.sessions = review.openSession.map { [$0.id: $0] } ?? [:]
+            }
+        case "review_queue":
+            let queue = try facade.workspaceReviewQueue(from: page.result, keeping: state, at: now())
+            rustAdoptTasks(queue.tasks, for: query)
+        case "restart_candidates":
+            rustAdoptTasks(try facade.workspaceTasks(from: page.result, keeping: state, at: now()), for: query)
+        case "task_formulation": _ = try facade.workspaceFormulation(from: page.result)
+        case "park_return_shown": _ = try facade.workspaceParkReturnProblem(from: page.result)
+        case "review_summary": _ = try facade.workspaceReviewSummary(from: page.result)
+        case "open_releases": _ = try facade.workspaceOpenReleases(from: page.result, keeping: state, at: now())
+        default: break
+        }
+    }
+
+    // MARK: Durable Review actions
+
+    private func reviewIntent(_ kind: String, _ fields: [String: Any] = [:]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["kind": kind, "fields": fields], options: [.sortedKeys])
+    }
+
+    private func reviewSave(_ commands: [GTDCommand], editorID: String, intent: Data,
+                            shown: GTDState) async throws -> RustWorkspaceSavedGesture {
+        try await performAsync(commands, editorID: editorID, authoredIntent: intent, shown: shown)
+    }
+
+    @discardableResult
+    public func decide(
+        _ type: DecisionType, on taskID: TaskID, title: String? = nil, waitingFor: String? = nil, reason: String? = nil,
+        stallReason: StallReason? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
+        sessionID: ReviewSessionID? = nil, formulationID opened: FormulationID? = nil, expectedTask: ShownTask? = nil,
+        editorID: String
+    ) async throws -> DecisionID {
+        guard isRustSelected else {
+            return try decide(type, on: taskID, title: title, waitingFor: waitingFor, reason: reason,
+                stallReason: stallReason, aiUse: aiUse, navigatorRequestID: navigatorRequestID,
+                sessionID: sessionID, formulationID: opened, expectedTask: expectedTask)
+        }
+        let shown = state
+        let binding = runtimeBindingID
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let task = shown.tasks[taskID]
+        let formulation = opened ?? expectedTask?.content.formulation?.id ?? task?.formulation?.id ?? task?.parked?.formulationID
+        let starts: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
+        let command = GTDCommand.DecideTask(decisionID: .make(makeID()), taskID: taskID, type: type,
+            formulationID: type.decidesOnFormulation ? formulation : nil,
+            newFormulationID: starts.contains(type) ? .make(makeID()) : nil,
+            stallReason: stallReason, title: title, waitingFor: waitingFor, reason: reason, sessionID: sessionID,
+            aiUse: aiUse, navigatorRequestID: navigatorRequestID,
+            followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil, expectedTask: expectedTask)
+        let intent = try reviewIntent("decide", ["task": taskID.rawValue, "type": type.rawValue,
+            "title": title as Any? ?? NSNull(), "waiting_for": waitingFor as Any? ?? NSNull(),
+            "reason": reason as Any? ?? NSNull(), "stall_reason": stallReason?.rawValue as Any? ?? NSNull(),
+            "ai_use": aiUse.rawValue, "navigator_request": navigatorRequestID as Any? ?? NSNull(),
+            "session": sessionID?.rawValue as Any? ?? NSNull(), "formulation": opened?.rawValue as Any? ?? NSNull()])
+        let saved = try await reviewSave([.decideTask(command)], editorID: editorID, intent: intent, shown: shown)
+        guard let actual = saved.commands.first(where: { $0.commandType == "review.decide" }),
+              let payload = try? JSONSerialization.jsonObject(with: actual.payload) as? [String: Any],
+              let rawID = payload["decision_id"] as? String else {
+            throw RustBridgeError(code: "SAVED_RESULT_UNAVAILABLE")
+        }
+        let id = DecisionID(facade.workspaceLocalID(rawID))
+        if binding == runtimeBindingID, let actualTask = actual.entityID {
+            await clearSavedTaskDrafts(TaskID(facade.workspaceLocalID(actualTask)))
+        }
+        return id
+    }
+
+    public func undoDecision(_ id: DecisionID, editorID: String) async throws {
+        guard isRustSelected else { try undoDecision(id); return }
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let frozen = state
+        let request = facade.workspaceRecordRequest("review_decision", localID: id.rawValue, bindings: rustIdentityBindings)
+        // The decision identifies its task; its canonical public record is not
+        // a private Undo snapshot. Never fabricate the unavailable snapshot.
+        let page = try await rustReadRecords([request])
+        var shown = frozen
+        try facade.workspaceApplyRecords(from: page.result, requests: [request], to: &shown, at: now())
+        _ = try await reviewSave([.undoDecision(id)], editorID: editorID,
+            intent: reviewIntent("undo_decision", ["id": id.rawValue]), shown: shown)
+    }
+
+    public func acknowledgeExplainer(editorID: String) async throws {
+        guard isRustSelected else { try acknowledgeExplainer(); return }
+        let shown = state, zone = deviceTimeZone().identifier, instant = Self.storedPrecision(now())
+        let binding = runtimeBindingID, accountless = account == nil
+        _ = try await reviewSave([.review(.acknowledgeExplainer(timeZone: zone))], editorID: editorID,
+            intent: reviewIntent("explainer", ["zone": zone]), shown: shown)
+        await maintainReviewPresentation(binding: binding) {
+            if accountless, $0.activatedAt == nil { $0.activatedAt = instant }
+            $0.explainerSeenLocally = true
+            $0.lastObservedTimeZone = zone
+        }
+    }
+
+    public func completeReviewOnboarding(
+        thresholdDays: Int? = nil, reviewWeekday: Int? = nil, reviewTime: String? = nil, editorID: String
+    ) async throws {
+        guard isRustSelected else {
+            try completeReviewOnboarding(thresholdDays: thresholdDays, reviewWeekday: reviewWeekday, reviewTime: reviewTime)
+            return
+        }
+        try await updateReviewSettings(ReviewSettingsChange(thresholdDays: thresholdDays,
+            reviewWeekday: reviewWeekday, reviewTime: reviewTime, timeZone: deviceTimeZone().identifier, onboarded: true), editorID: editorID)
+    }
+
+    public func updateReviewSettings(_ change: ReviewSettingsChange, editorID: String) async throws {
+        guard isRustSelected else { try updateReviewSettings(change); return }
+        guard !change.isEmpty else { return }
+        let shown = state
+        let binding = runtimeBindingID
+        let intent = try reviewIntent("settings", ["threshold": change.thresholdDays as Any? ?? NSNull(),
+            "weekday": change.reviewWeekday as Any? ?? NSNull(), "time": change.reviewTime as Any? ?? NSNull(),
+            "zone": change.timeZone as Any? ?? NSNull(), "onboarded": change.onboarded])
+        _ = try await reviewSave([.review(.updateSettings(change))], editorID: editorID, intent: intent, shown: shown)
+        if let zone = change.timeZone { await maintainReviewPresentation(binding: binding) { $0.lastObservedTimeZone = zone } }
+    }
+
+    @discardableResult
+    public func sendDeviceTimeZoneIfChanged(editorID: String) async throws -> Bool {
+        guard isRustSelected else { return sendDeviceTimeZoneIfChanged() }
+        let current = deviceTimeZone(), observed = local.lastObservedTimeZone
+        guard let observed else {
+            try await saveReviewPresentation { $0.lastObservedTimeZone = current.identifier }
+            return false
+        }
+        guard let zone = DeviceZoneTracker.change(lastObserved: observed, current: current) else { return false }
+        try await updateReviewSettings(ReviewSettingsChange(timeZone: zone.identifier), editorID: editorID)
+        return true
+    }
+
+    public func dismissWhileAway(shown: [ParkAck], editorID: String) async throws {
+        guard isRustSelected else { try dismissWhileAway(shown: shown); return }
+        let current = state, day = today
+        let binding = runtimeBindingID
+        let chunks = stride(from: 0, to: shown.count, by: ReviewLimits.parkAcknowledgements).map {
+            Array(shown[$0..<min($0 + ReviewLimits.parkAcknowledgements, shown.count)])
+        }
+        if !chunks.isEmpty {
+            let rows = shown.map { ["task": $0.taskID.rawValue, "formulation": $0.formulationID.rawValue] }
+            _ = try await reviewSave(chunks.map { .review(.acknowledgeParks($0)) }, editorID: editorID,
+                intent: reviewIntent("parks", ["shown": rows]), shown: current)
+        }
+        await maintainReviewPresentation(binding: binding) {
+            $0.linkedExtensionNotices = []; $0.parkBatchWaiting = false; $0.wywaLastShownDay = day
+        }
+    }
+
+    public func markWhileAwayShown(editorID: String) async throws {
+        guard isRustSelected else { markWhileAwayShown(); return }
+        guard reviewExposed else { return }
+        let day = today
+        try await saveReviewPresentation { $0.wywaLastShownDay = day }
+    }
+
+    public func closeWhileAway(editorID: String) async throws {
+        guard isRustSelected else { closeWhileAway(); return }
+        guard reviewExposed else { return }
+        let day = today
+        try await saveReviewPresentation { $0.linkedExtensionNotices = []; $0.wywaLastShownDay = day }
+    }
+
+    @discardableResult
+    public func startReview(mode: ReviewMode, entry: ReviewEntry, skipping skipSteps: [ReviewStep] = [], editorID: String) async throws -> ReviewSessionID {
+        guard isRustSelected else { return try startReview(mode: mode, entry: entry, skipping: skipSteps) }
+        let shown = state
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let command = StartSession(sessionID: .make(makeID()), mode: mode, entry: entry, skipSteps: skipSteps)
+        let result = try await reviewSave([.review(.startSession(command))], editorID: editorID,
+            intent: reviewIntent("start", ["mode": mode.rawValue, "entry": entry.rawValue, "skip": skipSteps.map(\.rawValue)]), shown: shown)
+        guard let actual = result.receipts.first else { throw RustBridgeError(code: "SAVED_RESULT_UNAVAILABLE") }
+        return ReviewSessionID(facade.workspaceLocalID(actual.entityID))
+    }
+
+    public func recordReviewProgress(
+        _ sessionID: ReviewSessionID, currentStep: ReviewStep? = nil, step: ReviewStep? = nil,
+        stepStatus: StepStatus? = nil, activeStep: ReviewStep? = nil, activeSeconds: Int? = nil,
+        setAsideTaskID: TaskID? = nil, inboxProcessedDelta: Int? = nil, snapshotDecisionQueue: Bool = false, editorID: String
+    ) async throws {
+        guard isRustSelected else {
+            try recordReviewProgress(sessionID, currentStep: currentStep, step: step, stepStatus: stepStatus,
+                activeStep: activeStep, activeSeconds: activeSeconds, setAsideTaskID: setAsideTaskID,
+                inboxProcessedDelta: inboxProcessedDelta, snapshotDecisionQueue: snapshotDecisionQueue)
+            return
+        }
+        let shown = state
+        let command = SessionProgress(sessionID: sessionID, progressID: .make(makeID()), currentStep: currentStep,
+            step: step, stepStatus: stepStatus, activeStep: activeStep, activeSeconds: activeSeconds,
+            setAsideTaskID: setAsideTaskID, inboxProcessedDelta: inboxProcessedDelta, snapshotDecisionQueue: snapshotDecisionQueue)
+        let intent = try reviewIntent("progress", ["session": sessionID.rawValue,
+            "current": currentStep?.rawValue as Any? ?? NSNull(), "step": step?.rawValue as Any? ?? NSNull(),
+            "status": stepStatus?.rawValue as Any? ?? NSNull(), "active": activeStep?.rawValue as Any? ?? NSNull(),
+            "seconds": activeSeconds as Any? ?? NSNull(), "aside": setAsideTaskID?.rawValue as Any? ?? NSNull(),
+            "inbox": inboxProcessedDelta as Any? ?? NSNull(), "snapshot": snapshotDecisionQueue])
+        _ = try await reviewSave([.review(.progressSession(command))], editorID: editorID,
+            intent: intent, shown: shown)
+    }
+
+    public func finishReview(_ sessionID: ReviewSessionID, clearStart: ClearStart? = nil, editorID: String) async throws {
+        guard isRustSelected else { try finishReview(sessionID, clearStart: clearStart); return }
+        let shown = state
+        _ = try await reviewSave([.review(.finishSession(FinishSession(sessionID: sessionID, clearStart: clearStart)))],
+            editorID: editorID,
+            intent: reviewIntent("finish", ["session": sessionID.rawValue, "clear": clearStart?.rawValue as Any? ?? NSNull()]), shown: shown)
+    }
+
+    @discardableResult
+    public func bulkRelease(_ kind: BulkReleaseKindCode, taskIDs: [TaskID], sessionID: ReviewSessionID? = nil, editorID: String) async throws -> [BulkID] {
+        guard isRustSelected else { return try bulkRelease(kind, taskIDs: taskIDs, sessionID: sessionID) }
+        let shown = state
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let commands = stride(from: 0, to: taskIDs.count, by: ReviewLimits.bulkReleaseItems).map {
+            GTDCommand.bulkRelease(GTDCommand.BulkRelease(bulkID: .make(makeID()), kind: kind, sessionID: sessionID,
+                taskIDs: Array(taskIDs[$0..<min($0 + ReviewLimits.bulkReleaseItems, taskIDs.count)])))
+        }
+        guard !commands.isEmpty else { return [] }
+        let result = try await reviewSave(commands, editorID: editorID,
+            intent: reviewIntent("bulk", ["kind": kind.rawValue, "tasks": taskIDs.map(\.rawValue),
+                "session": sessionID?.rawValue as Any? ?? NSNull()]), shown: shown)
+        return result.receipts.map { BulkID(facade.workspaceLocalID($0.entityID)) }
+    }
+
+    public func undoBulkRelease(_ ids: [BulkID], editorID: String) async throws {
+        guard isRustSelected else { try undoBulkRelease(ids); return }
+        let shown = state
+        guard !ids.isEmpty else { return }
+        _ = try await reviewSave(ids.map { .undoBulkRelease($0) }, editorID: editorID,
+            intent: reviewIntent("bulk_undo", ["ids": ids.map(\.rawValue)]), shown: shown)
+    }
+
+    public func grantNavigatorConsent(provider: String, consentTextVersion: Int, editorID: String) async throws {
+        guard isRustSelected else { try grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion); return }
+        let shown = state
+        let binding = runtimeBindingID
+        _ = try await reviewSave([.review(.grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion))],
+            editorID: editorID,
+            intent: reviewIntent("consent", ["provider": provider, "version": consentTextVersion]), shown: shown)
+        await refreshSavedConsent(provider, binding: binding)
+    }
+
+    public func revokeNavigatorConsent(provider: String, editorID: String) async throws {
+        guard isRustSelected else { try revokeNavigatorConsent(provider: provider); return }
+        let shown = state
+        let binding = runtimeBindingID
+        _ = try await reviewSave([.review(.revokeNavigatorConsent(provider: provider))], editorID: editorID,
+            intent: reviewIntent("revoke", ["provider": provider]), shown: shown)
+        await refreshSavedConsent(provider, binding: binding)
+    }
+}
+
+extension Workspace {
+    /// Only presentation facts share this draft. Form text has independent
+    /// runtime rows and a store-owned live count, so it never becomes a blob
+    /// or a second frontend index.
+    private func saveReviewPresentation(_ edit: (inout LocalReviewState) -> Void) async throws {
+        guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        guard !rustReviewPresentationSaving else { throw RustBridgeError(code: "BUSY", retryable: true) }
+        let binding = runtimeBindingID
+        rustReviewPresentationSaving = true
+        defer { if binding == runtimeBindingID { rustReviewPresentationSaving = false } }
+        var next = rustLocalReview
+        next.formDrafts = [:]
+        edit(&next)
+        let fields = try StoreDocumentCoding.makeEncoder().encode(next)
+        do {
+            try await runtime.saveDraft(RustWorkspaceDraft(draftID: "runtime:local-review", editorKind: "runtime_review_local",
+                fields: fields, updatedAt: ISO8601DateFormatter().string(from: now())))
+            guard binding == runtimeBindingID else { return }
+            rustLocalReview = next
+            presentationDraftError = nil
+        } catch {
+            if binding == runtimeBindingID { presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_SAVE_FAILED" }
+            throw error
+        }
+    }
+
+    /// A presentation cleanup failure is separate from the known committed
+    /// command result. Its text/error remains available for explicit retry.
+    private func maintainReviewPresentation(binding: UUID, _ edit: (inout LocalReviewState) -> Void) async {
+        guard binding == runtimeBindingID else { return }
+        do { try await saveReviewPresentation(edit) }
+        catch {
+            if binding == runtimeBindingID { presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_SAVE_FAILED" }
+        }
+    }
+}
+
+extension Workspace {
+    public func prepareNavigatorConsent(provider: String) async throws {
+        guard isRustSelected else { return }
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let binding = runtimeBindingID
+        let request = RustWorkspaceRecordRequest(entityType: "review_navigator_consent", recordKey: [provider])
+        let page = try await rustReadRecords([request])
+        guard binding == runtimeBindingID else { return }
+        var owned = GTDState.empty
+        try facade.workspaceApplyRecords(from: page.result, requests: [request], to: &owned, at: now())
+        rustMutateShown { $0.review.navigatorConsents[provider] = owned.review.navigatorConsents[provider] }
+    }
+
+    private func refreshSavedConsent(_ provider: String, binding: UUID) async {
+        guard binding == runtimeBindingID else { return }
+        do { try await prepareNavigatorConsent(provider: provider) }
+        catch {
+            if binding == runtimeBindingID { markRustQueryError((error as? RustBridgeError)?.code ?? "CONSENT_QUERY_FAILED") }
+        }
+    }
+}
+
+extension Workspace {
+    // MARK: Runtime form drafts
+
+    public func draft(for key: DraftKey, editorID: String) async throws -> String? {
+        guard isRustSelected else { return draft(for: key) }
+        guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let binding = runtimeBindingID
+        let loaded = try await runtime.loadReviewForm(key.rawValue, now: now())
+        guard binding == runtimeBindingID else { throw RustBridgeError(code: "WORKSPACE_CLOSED") }
+        publishReviewDraftCount(loaded.liveCount, generation: loaded.projectionGeneration)
+        return loaded.draft?.text
+    }
+
+    public func saveDraft(_ text: String, for key: DraftKey, editorID: String) async throws {
+        guard isRustSelected else { saveDraft(text, for: key); return }
+        guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let binding = runtimeBindingID, instant = now()
+        do {
+            // This resolves immutable imported identity proof, not a new task
+            // revision or a replacement of the card's displayed frame.
+            let loaded = try await runtime.loadReviewForm(key.rawValue, now: instant)
+            guard binding == runtimeBindingID else { throw RustBridgeError(code: "WORKSPACE_CLOSED") }
+            let form = text.isEmpty ? nil : FormDraft(text: text, savedAt: instant)
+            let result = try await runtime.saveReviewForm(key.rawValue, sourceKey: loaded.sourceKey, draft: form, now: instant)
+            guard binding == runtimeBindingID else { return }
+            publishReviewDraftCount(result.liveCount, generation: result.projectionGeneration)
+            presentationDraftError = nil
+        } catch {
+            if binding == runtimeBindingID { presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_SAVE_FAILED" }
+            throw error
+        }
+    }
+
+    public func discardDraft(for key: DraftKey, editorID: String) async throws {
+        try await saveDraft("", for: key, editorID: editorID)
+    }
+
+    public func prepareReviewDraftCount() async throws {
+        guard isRustSelected else { return }
+        guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        let binding = runtimeBindingID
+        let result = try await runtime.reviewFormCount(now: now())
+        guard binding == runtimeBindingID else { return }
+        publishReviewDraftCount(result.liveCount, generation: result.projectionGeneration)
+    }
+
+    private func publishReviewDraftCount(_ count: Int, generation: String) {
+        guard let generation = UInt64(generation), generation >= (rustQueries?.generationFloor ?? 0) else {
+            markRustQueryError("DRAFT_COUNT_REFRESH_REQUIRED")
+            return
+        }
+        rustReviewDraftCount = count
+    }
+
+    private func clearSavedTaskDrafts(_ taskID: TaskID) async {
+        guard let runtime = rustRuntime, isRustBound else { return }
+        let binding = runtimeBindingID
+        do {
+            // One store transaction shadows all matching imported/runtime
+            // forms. Their absent text cannot reappear after reopening.
+            let result = try await runtime.clearReviewFormsForTask(taskID.rawValue, now: now())
+            guard binding == runtimeBindingID else { return }
+            publishReviewDraftCount(result.liveCount, generation: result.projectionGeneration)
+            presentationDraftError = nil
+        } catch {
+            if binding == runtimeBindingID { presentationDraftError = (error as? RustBridgeError)?.code ?? "DRAFT_CLEAR_FAILED" }
+        }
     }
 }
