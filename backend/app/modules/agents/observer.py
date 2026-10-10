@@ -19,10 +19,13 @@ bug can never hide in a thread.
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
@@ -54,6 +57,68 @@ SCHEDULER_JOIN_SECONDS = 5.0
 
 class SchedulerOverlapError(RuntimeError):
     """The observer's own scheduler thread and a durable job would both observe."""
+
+
+class AuthorityLostError(RuntimeError):
+    """A durable job lost its lease between a read and the write it would feed."""
+
+
+#: The authority check of the durable job running on this thread, if any. The
+#: legacy scheduler and the request path never set it, so for them the guard
+#: installed by `_guard_repo_writes` is a plain pass-through.
+_WRITE_AUTHORITY: ContextVar[Callable[[], bool] | None] = ContextVar(
+    "agent_write_authority", default=None
+)
+_GUARDED = "_bb_authority_guarded"
+
+
+def _assert_authority() -> None:
+    check = _WRITE_AUTHORITY.get()
+    if check is not None and not check():
+        raise AuthorityLostError("The job no longer holds authority for this write.")
+
+
+@contextmanager
+def _write_authority(keep_going: Callable[[], bool] | None) -> Iterator[None]:
+    token = _WRITE_AUTHORITY.set(keep_going)
+    try:
+        yield
+    finally:
+        _WRITE_AUTHORITY.reset(token)
+
+
+def _guard_repo_writes(repo: Any) -> None:
+    """Make the repository's write entry points re-check a bound job's authority.
+
+    Every relay write funnels through ``command_lock`` (observation, failed
+    contact, task-missing, recovery) or the two audit appenders. The check runs
+    *inside* the lock, after the write transaction is open, so it cannot be
+    overtaken by a reclaimed worker between the check and the commit; raising
+    there rolls the transaction back and writes nothing. Idempotent.
+    """
+
+    if getattr(repo, _GUARDED, False):
+        return
+    command_lock = repo.command_lock
+
+    @contextmanager
+    def guarded_lock(owner_id: str) -> Iterator[None]:
+        with command_lock(owner_id):
+            _assert_authority()
+            yield
+
+    def guarded(method: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(method)
+        def call(*args: Any, **kwargs: Any) -> Any:
+            _assert_authority()
+            return method(*args, **kwargs)
+
+        return call
+
+    repo.command_lock = guarded_lock
+    repo.append_audit = guarded(repo.append_audit)
+    repo.append_bounded_audit = guarded(repo.append_bounded_audit)
+    setattr(repo, _GUARDED, True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,16 +333,32 @@ class AgentObserver:
             submitted += 1
         return submitted
 
-    def resolve_interrupted_exchange(self, owner_id: str, run_id: str) -> bool:
+    def resolve_interrupted_exchange(
+        self,
+        owner_id: str,
+        run_id: str,
+        *,
+        keep_going: Callable[[], bool] | None = None,
+    ) -> bool:
         """The lookup for one marked exchange, on the caller's own thread.
 
         The same ``ListTasks`` the pooled resolver makes, for a caller that has to
         know how it ended. ``True`` once the exchange is no longer interrupted
         (the lookup settled it, or the run is gone); ``False`` while the agent
         gave no proof, which is the state the run honestly keeps.
+
+        With ``keep_going``, authority is re-checked after the lookup returns and
+        again inside every write it would make; a lookup that finishes without it
+        is discarded: `AuthorityLostError` is raised, and any write it would have made
+        was refused inside the write transaction.
         """
 
-        self.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+        if keep_going is not None:
+            _guard_repo_writes(self.service.agent_repo)
+        with _write_authority(keep_going):
+            self.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+        if keep_going is not None and not keep_going():
+            raise AuthorityLostError("The lookup finished after the lease was lost.")
         try:
             run = self.service.agent_repo.get_run(run_id, owner_id=owner_id)
         except NotFoundError:
@@ -340,6 +421,8 @@ class AgentObserver:
             raise SchedulerOverlapError(
                 "The observer's own scheduler is running; one owner at a time."
             )
+        if keep_going is not None:
+            _guard_repo_writes(self.service.agent_repo)
         groups = self._claim_due(now if now is not None else self._now())
         claimed = sum(len(run_ids) for run_ids in groups.values())
         handled = 0
@@ -436,20 +519,26 @@ class AgentObserver:
         """Observe one connection's due runs, stopping at the first silence.
 
         Returns how many runs it got through; fewer than all only when
-        ``keep_going`` said stop, and then the rest are untouched.
+        ``keep_going`` said stop, and then the rest are untouched. It is asked
+        before each read and again inside the write the read would feed, so a
+        lease lost during the network call discards that result: the run is
+        neither updated nor counted, and stays due for the next pass.
         """
 
         unreachable = False
         handled = 0
         try:
-            for run_id in run_ids:
-                if keep_going is not None and not keep_going():
-                    break
-                if unreachable:
-                    self.service.record_failed_contact(run_id, owner_id=owner_id)
-                else:
-                    unreachable = self._observe(owner_id, run_id) is False
-                handled += 1
+            with _write_authority(keep_going):
+                for run_id in run_ids:
+                    if keep_going is not None and not keep_going():
+                        break
+                    if unreachable:
+                        self.service.record_failed_contact(run_id, owner_id=owner_id)
+                    else:
+                        unreachable = self._observe(owner_id, run_id) is False
+                    handled += 1
+        except AuthorityLostError:
+            logger.warning("Agent observation discarded: job authority lost")
         finally:
             for run_id in run_ids:
                 self._release(run_id)
@@ -578,6 +667,7 @@ __all__ = [
     "DEFAULT_OBSERVATION_INTERVAL",
     "SCHEDULER_JOIN_SECONDS",
     "AgentObserver",
+    "AuthorityLostError",
     "ExchangePool",
     "ObservationPass",
     "SchedulerOverlapError",
