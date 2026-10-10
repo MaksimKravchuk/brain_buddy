@@ -574,6 +574,9 @@ struct ReviewDraftField: View {
     /// The newest text requested while a durable draft write is in flight.
     /// The active writer drains this slot after its immutable snapshot settles.
     @State private var pendingDraftText: String?
+    /// Unstructured so canceling a superseded debounce task cannot cancel the
+    /// durable writer that owns this field's queued latest text.
+    @State private var draftSaveTask: Task<Void, Never>?
 
     init(
         prompt: String, key: DraftKey, text: Binding<String>, fields: ReviewFields,
@@ -625,15 +628,20 @@ struct ReviewDraftField: View {
 
     @MainActor private func persistDraft() async {
         guard hasLoaded else { return }
-        let requestedText = text
-        guard !isSaving else {
-            pendingDraftText = requestedText
+        pendingDraftText = text
+        if let draftSaveTask {
+            await draftSaveTask.value
             return
         }
         isSaving = true
-        var nextText: String? = requestedText
-        while let submittedText = nextText {
-            nextText = nil
+        let writer = Task { @MainActor in await drainDraftSaves() }
+        draftSaveTask = writer
+        await writer.value
+    }
+
+    @MainActor private func drainDraftSaves() async {
+        while let submittedText = pendingDraftText {
+            pendingDraftText = nil
             do {
                 if submittedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     if try await workspace.draft(for: key, editorID: editorID) != nil {
@@ -646,11 +654,10 @@ struct ReviewDraftField: View {
             } catch {
                 problem = TaskCommandRunner.message(for: error)
             }
-            // The save task owns this drain even if its debounce task was
-            // cancelled by newer typing. Never overlap writes for this key.
-            nextText = pendingDraftText
-            pendingDraftText = nil
         }
+        // This unstructured MainActor task owns the full drain, even when the
+        // debounce task that requested it is cancelled by newer typing.
+        draftSaveTask = nil
         isSaving = false
     }
 
