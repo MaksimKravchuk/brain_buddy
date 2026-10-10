@@ -637,6 +637,20 @@ pub enum Query {
     Projects {
         filter: ProjectFilter,
     },
+    /// Runtime-only bounded catalog selector; the server Projects shape stays unchanged.
+    NativeProjects {
+        filter: ProjectFilter,
+        #[serde(default)]
+        search: Option<String>,
+        #[serde(default)]
+        project_id: Option<ProjectId>,
+    },
+    NativeTags {
+        #[serde(default)]
+        search: Option<String>,
+        #[serde(default)]
+        sort: NativeTagSort,
+    },
     ProjectDisplay {
         project_id: ProjectId,
     },
@@ -706,6 +720,15 @@ pub enum ListMode {
     },
 }
 
+/// Native tag catalog order. Default/server ordering is unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeTagSort {
+    #[default]
+    Name,
+    OpenCount,
+}
+
 /// `ListOptions` of `Queries.swift`; every field is optional on the wire.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -724,6 +747,8 @@ pub struct ListOptions {
     /// Narrow to tasks carrying this tag. A tag the read set lacks matches
     /// nothing; it is not an error.
     pub tag_filter: Option<TagId>,
+    /// Optional title/notes search combined with this destination before paging.
+    pub search: Option<String>,
 }
 
 /// The explicit facts a query reads besides the state.

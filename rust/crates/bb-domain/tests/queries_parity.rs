@@ -19,7 +19,7 @@
 
 mod support;
 
-pub use bb_domain::{calendar, normalization, types};
+pub use bb_domain::{calendar, list_modes, normalization, types};
 
 #[allow(dead_code, unused_imports)]
 #[path = "../src/formulation.rs"]
@@ -1743,4 +1743,138 @@ fn queries_026_fr_009_a_cursor_key_of_the_wrong_shape_is_refused_for_every_sort(
             );
         }
     }
+}
+
+#[test]
+fn queries_026_fr_009_native_catalog_search_exact_summary_and_global_tag_rank() {
+    let mut store = Store::default();
+    for n in 0..230 {
+        store.projects.push(project(
+            &format!("project-native-{n:03}"),
+            &format!("A {n:03}"),
+            "active",
+        ));
+        store.tags.push(tag(
+            &format!("tag-native-{n:03}"),
+            &format!("A {n:03}"),
+            "active",
+        ));
+    }
+    store.projects.push(project(
+        "project-native-target",
+        "Z Café target",
+        "archived",
+    ));
+    store
+        .tags
+        .push(tag("tag-native-popular", "Z Café popular", "active"));
+    store
+        .tags
+        .push(tag("tag-native-deleted", "Z Café deleted", "deleted"));
+    for (state, count) in [
+        ("inbox", 201),
+        ("next", 2),
+        ("waiting", 3),
+        ("someday", 4),
+        ("completed", 5),
+    ] {
+        for n in 0..count {
+            let mut row = task(&format!("task-native-{state}-{n}"), "Member", state, n);
+            row["project_id"] = json!("project-native-target");
+            row["tag_ids"] = json!([
+                "tag-native-popular",
+                "tag-native-popular",
+                "tag-native-deleted"
+            ]);
+            store.tasks.push(row);
+        }
+    }
+    let read_set = store.read_set();
+    let ordinary: Query =
+        serde_json::from_value(json!({"kind":"projects","filter":"all"})).unwrap();
+    let (page, _) = queries::classification_page(&read_set, &ordinary, 200, None).unwrap();
+    let QueryResult::Projects(page) = page else {
+        panic!("projects")
+    };
+    assert!(
+        !page
+            .iter()
+            .any(|p| p.project.id.as_str() == "project-native-target")
+    );
+    let exact: Query = serde_json::from_value(
+        json!({"kind":"native_projects","filter":"all","project_id":"project-native-target"}),
+    )
+    .unwrap();
+    let (result, next) = queries::classification_page(&read_set, &exact, 200, None).unwrap();
+    let QueryResult::Projects(result) = result else {
+        panic!("projects")
+    };
+    assert!(next.is_none());
+    assert_eq!(result.len(), 1);
+    assert_eq!(
+        (result[0].open_task_count, result[0].next_action_count),
+        (210, 2)
+    );
+    let counts = result[0].counts_by_state.unwrap();
+    assert_eq!(
+        (counts.inbox, counts.next, counts.waiting, counts.someday),
+        (201, 2, 3, 4)
+    );
+    let search: Query =
+        serde_json::from_value(json!({"kind":"native_projects","filter":"all","search":"CAFE"}))
+            .unwrap();
+    assert_eq!(
+        queries::classification_page(&read_set, &search, 1, None)
+            .unwrap()
+            .0,
+        QueryResult::Projects(result.clone())
+    );
+    let missing: Query = serde_json::from_value(
+        json!({"kind":"native_projects","filter":"all","project_id":"project-missing"}),
+    )
+    .unwrap();
+    assert_eq!(
+        queries::classification_page(&read_set, &missing, 200, None)
+            .unwrap()
+            .0,
+        QueryResult::Projects(vec![])
+    );
+    let top: Query =
+        serde_json::from_value(json!({"kind":"native_tags","sort":"open_count"})).unwrap();
+    let (ranked, next) = queries::classification_page(&read_set, &top, 5, None).unwrap();
+    let QueryResult::Tags(ranked) = ranked else {
+        panic!("tags")
+    };
+    assert_eq!(ranked.len(), 5);
+    assert_eq!(ranked[0].tag.id.as_str(), "tag-native-popular");
+    assert_eq!(ranked[0].open_task_count, 210);
+    assert_eq!(ranked[1].tag.id.as_str(), "tag-native-000");
+    let QueryResult::Tags(continued) =
+        queries::classification_page(&read_set, &top, 5, next.as_deref())
+            .unwrap()
+            .0
+    else {
+        panic!("tags")
+    };
+    assert_eq!(continued[0].tag.id.as_str(), "tag-native-004");
+    let search: Query =
+        serde_json::from_value(json!({"kind":"native_tags","search":"cafe"})).unwrap();
+    let QueryResult::Tags(found) = queries::classification_page(&read_set, &search, 200, None)
+        .unwrap()
+        .0
+    else {
+        panic!("tags")
+    };
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].tag.id.as_str(), "tag-native-popular");
+    let pure = serde_json::to_value(projects(&read_set, ProjectFilter::All)).unwrap();
+    assert!(
+        pure.as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row.get("counts_by_state").is_none())
+    );
+    let QueryResult::TaskList(first_next)=queries::query(&read_set,&serde_json::from_value(json!({"kind":"task_list","list":"next","project_id":"project-native-target","tag_id":null,"sort":"manual","page":{"limit":1,"after":null}})).unwrap(),&inputs(CREATED,"UTC")).unwrap() else {panic!("tasks")};
+    assert_eq!(first_next.items.len(), 1);
+    assert_eq!(first_next.items[0].id.as_str(), "task-native-next-0");
 }

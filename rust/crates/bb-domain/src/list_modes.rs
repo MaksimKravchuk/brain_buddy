@@ -136,13 +136,38 @@ pub fn list_mode_with_origin_lookup(
     inputs: &QueryInputs,
     origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
 ) -> Result<ListModePage, DomainError> {
+    select_list_mode(read_set, mode, options, page, inputs, origin, false)
+}
+
+/// Native metadata uses the same placement/ordering, retaining counters only
+/// for the returned section identities. Pure/server serialization is unchanged.
+pub fn native_list_mode_with_origin_lookup(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+) -> Result<ListModePage, DomainError> {
+    select_list_mode(read_set, mode, options, page, inputs, origin, true)
+}
+
+fn select_list_mode(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+    native: bool,
+) -> Result<ListModePage, DomainError> {
     if !(1..=MAX_LIMIT).contains(&page.limit) {
         return Err(invalid("limit"));
     }
     let needle = match mode {
         ListMode::Search { text } => match search_query(text) {
             Some(needle) => Some(needle),
-            None => return Ok(empty_page()),
+            None => return Ok(empty_page(native)),
         },
         _ => None,
     };
@@ -159,6 +184,9 @@ pub fn list_mode_with_origin_lookup(
     let limit = usize::try_from(page.limit).unwrap_or(usize::MAX);
     let keep = limit.saturating_add(1);
     let mut open_count = 0u32;
+    let mut total_count = 0u32;
+    let mut completed_count = 0u32;
+    let mut cancelled_count = 0u32;
     let mut best: BinaryHeap<Candidate> =
         BinaryHeap::with_capacity(keep.min(MAX_LIMIT as usize + 1));
     for task in read_set.tasks.values() {
@@ -166,6 +194,11 @@ pub fn list_mode_with_origin_lookup(
             continue;
         };
         open_count = open_count.saturating_add(u32::from(placed.open));
+        total_count = total_count.saturating_add(1);
+        completed_count =
+            completed_count.saturating_add(u32::from(task.state == TaskState::Completed));
+        cancelled_count =
+            cancelled_count.saturating_add(u32::from(task.state == TaskState::Cancelled));
         let key = plan.key(task, &placed.section)?;
         if after.as_ref().is_some_and(|last| &key <= last) {
             continue;
@@ -207,18 +240,41 @@ pub fn list_mode_with_origin_lookup(
             )?);
         }
     }
+    if native {
+        // At most limit section counters, including sections split across pages.
+        let mut counts: std::collections::BTreeMap<String, u32> = sections
+            .iter()
+            .map(|section| (section.id.clone(), 0))
+            .collect();
+        for task in read_set.tasks.values() {
+            if let Some(placed) = plan.place(task)?
+                && let Some(count) = counts.get_mut(&Plan::section_id(&placed.section))
+            {
+                *count = count.saturating_add(1);
+            }
+        }
+        for section in &mut sections {
+            section.total_count = Some(counts[&section.id]);
+        }
+    }
     Ok(ListModePage {
         sections,
         open_count,
+        total_count: native.then_some(total_count),
+        completed_count: native.then_some(completed_count),
+        cancelled_count: native.then_some(cancelled_count),
         next_cursor,
         has_more,
     })
 }
 
-fn empty_page() -> ListModePage {
+fn empty_page(native: bool) -> ListModePage {
     ListModePage {
         sections: Vec::new(),
         open_count: 0,
+        total_count: native.then_some(0),
+        completed_count: native.then_some(0),
+        cancelled_count: native.then_some(0),
         next_cursor: None,
         has_more: false,
     }
@@ -355,6 +411,7 @@ struct Plan<'a> {
     options: &'a ListOptions,
     /// The folded Search query.
     needle: Option<String>,
+    search: Option<String>,
     /// The device's day; set for the Agenda and the date views only.
     today: Option<CalendarDay>,
     order: Order,
@@ -422,6 +479,7 @@ impl<'a> Plan<'a> {
             mode,
             options,
             needle,
+            search: options.search.as_deref().and_then(search_query),
             today,
             order,
             grouped,
@@ -443,7 +501,7 @@ impl<'a> Plan<'a> {
             ListMode::DateView { view } => ("date_view", Value::from(view.as_str())),
             ListMode::Search { .. } => ("search", Value::from(self.needle.clone())),
         };
-        json!({
+        let mut filters = json!({
             "screen": "list_mode",
             "mode": mode,
             "detail": detail,
@@ -454,7 +512,11 @@ impl<'a> Plan<'a> {
             "show_cancelled": self.show_cancelled,
             "priorities": self.priorities.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
             "tag_filter": self.options.tag_filter.as_ref().map(|tag| tag.as_str()),
-        })
+        });
+        if let Some(search) = &self.search {
+            filters["search"] = Value::from(search.clone());
+        }
+        filters
     }
 
     // ------------------------------------------------------------- placement
@@ -462,6 +524,11 @@ impl<'a> Plan<'a> {
     /// `TaskListBuilder`: the section a task belongs to, or none when the mode
     /// leaves it out.
     fn place(&self, task: &Task) -> Result<Option<Placed>, DomainError> {
+        if let Some(needle) = &self.search
+            && !search_haystack(task).contains(needle)
+        {
+            return Ok(None);
+        }
         if !self.priorities.is_empty() && !self.priorities.contains(&task.priority) {
             return Ok(None);
         }
@@ -749,6 +816,7 @@ impl<'a> Plan<'a> {
             title,
             kind,
             items: Vec::new(),
+            total_count: None,
         }
     }
 

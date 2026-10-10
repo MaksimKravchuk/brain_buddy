@@ -229,6 +229,13 @@ pub struct ListModePage {
     pub sections: Vec<PageSection>,
     /// Open tasks in the whole result, not the page (terminal rows excluded).
     pub open_count: u32,
+    /// Whole-result native counts; absent from pure/server list-mode results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancelled_count: Option<u32>,
     pub next_cursor: Option<String>,
     pub has_more: bool,
 }
@@ -244,6 +251,9 @@ pub struct PageSection {
     pub title: Option<String>,
     pub kind: SectionKind,
     pub items: Vec<TaskView>,
+    /// Whole matching count of this returned section, runtime only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_count: Option<u32>,
 }
 
 /// What a section holds (`TaskSection.Kind`).
@@ -287,6 +297,9 @@ pub struct ProjectSummary {
     pub project: Project,
     pub open_task_count: u32,
     pub next_action_count: u32,
+    /// Whole project counts, present only in native catalog pages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counts_by_state: Option<TaskCounts>,
 }
 
 impl ProjectSummary {

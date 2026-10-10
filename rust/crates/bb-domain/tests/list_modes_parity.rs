@@ -2045,3 +2045,148 @@ fn queries_026_fr_026_native_destinations_preserve_membership_sections_and_local
     .unwrap();
     assert_eq!(R(result).titles(), vec![vec!["Next"], vec!["Ended here"]]);
 }
+
+#[test]
+fn list_modes_026_fr_002_native_scoped_search_counts_split_sections_before_selection() {
+    use bb_domain::types::{ListMode, ListOptions, Page};
+    let mut fixture = Fixture::default();
+    let project = fixture.project("Target", "project-native-target", false);
+    let other = fixture.project("Other", "project-native-other", false);
+    let tag = fixture.tag("Context", "tag-native-context");
+    for _ in 0..210 {
+        fixture.add(
+            t("irrelevant")
+                .project(&project)
+                .tags(&[&tag])
+                .priority("high"),
+        );
+        fixture.add(
+            t("café wrong scope")
+                .project(&other)
+                .tags(&[&tag])
+                .priority("high"),
+        );
+    }
+    for _ in 0..205 {
+        fixture.add(
+            t("Café matched")
+                .project(&project)
+                .tags(&[&tag])
+                .priority("high"),
+        );
+    }
+    for (state, count) in [("completed", 3), ("cancelled", 2)] {
+        for _ in 0..count {
+            fixture.add(
+                t("Café ended")
+                    .state(state)
+                    .project(&project)
+                    .tags(&[&tag])
+                    .priority("high")
+                    .ended(1),
+            );
+        }
+    }
+    fixture.add(t("Café wrong priority").project(&project).tags(&[&tag]));
+    fixture.add(t("Café wrong tag").project(&project).priority("high"));
+    let state = fixture.read_set();
+    let mode = ListMode::Project {
+        project_id: bb_domain::types::ProjectId::parse(project).unwrap(),
+    };
+    let options: ListOptions = serde_json::from_value(json!({"search":"  CAFE  ","show_completed":true,"show_cancelled":true,"priorities":["high"],"tag_filter":tag})).unwrap();
+    let first = bb_domain::list_modes::native_list_mode_with_origin_lookup(
+        &state,
+        &mode,
+        &options,
+        &Page {
+            limit: 200,
+            after: None,
+        },
+        &inputs(TODAY, "UTC"),
+        &|_| None,
+    )
+    .unwrap();
+    assert_eq!(
+        (
+            first.open_count,
+            first.total_count,
+            first.completed_count,
+            first.cancelled_count
+        ),
+        (205, Some(210), Some(3), Some(2))
+    );
+    assert_eq!(first.sections.len(), 1);
+    assert_eq!(
+        (first.sections[0].items.len(), first.sections[0].total_count),
+        (200, Some(205))
+    );
+    let second = bb_domain::list_modes::native_list_mode_with_origin_lookup(
+        &state,
+        &mode,
+        &options,
+        &Page {
+            limit: 200,
+            after: first.next_cursor.clone(),
+        },
+        &inputs(TODAY, "UTC"),
+        &|_| None,
+    )
+    .unwrap();
+    assert_eq!(second.total_count, Some(210));
+    assert_eq!(
+        second
+            .sections
+            .iter()
+            .map(|s| (s.items.len(), s.total_count))
+            .collect::<Vec<_>>(),
+        vec![(5, Some(205)), (3, Some(3)), (2, Some(2))]
+    );
+    assert!(!second.has_more);
+    let ids: BTreeSet<_> = first
+        .sections
+        .iter()
+        .chain(&second.sections)
+        .flat_map(|s| s.items.iter().map(|task| task.id.clone()))
+        .collect();
+    assert_eq!(ids.len(), 210);
+    let changed = ListOptions {
+        search: Some("irrelevant".into()),
+        ..options.clone()
+    };
+    assert_eq!(
+        bb_domain::list_modes::native_list_mode_with_origin_lookup(
+            &state,
+            &mode,
+            &changed,
+            &Page {
+                limit: 200,
+                after: first.next_cursor
+            },
+            &inputs(TODAY, "UTC"),
+            &|_| None
+        )
+        .unwrap_err()
+        .reason,
+        Reason::InvalidValue
+    );
+    let pure = bb_domain::list_modes::list_mode_with_origin_lookup(
+        &state,
+        &mode,
+        &options,
+        &Page {
+            limit: 200,
+            after: None,
+        },
+        &inputs(TODAY, "UTC"),
+        &|_| None,
+    )
+    .unwrap();
+    let wire = serde_json::to_value(pure).unwrap();
+    assert!(wire.get("total_count").is_none());
+    assert!(wire["sections"][0].get("total_count").is_none());
+    let wire = serde_json::to_value(&second).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ListModePage>(wire).unwrap(),
+        second
+    );
+}

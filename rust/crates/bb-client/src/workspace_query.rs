@@ -282,6 +282,8 @@ pub fn query_collection_page(
                     | Query::AutoParkDue {}
                     | Query::Projects { .. }
                     | Query::Tags {}
+                    | Query::NativeProjects { .. }
+                    | Query::NativeTags { .. }
                     | Query::OpenReleases { .. }
             ) {
                 if cursor
@@ -291,7 +293,13 @@ pub fn query_collection_page(
                     return Err(QueryError::RestartRequired);
                 }
                 let after = cursor.as_ref().and_then(|cursor| cursor.key.as_deref());
-                let (result, next) = if matches!(query, Query::Projects { .. } | Query::Tags {}) {
+                let (result, next) = if matches!(
+                    query,
+                    Query::Projects { .. }
+                        | Query::Tags {}
+                        | Query::NativeProjects { .. }
+                        | Query::NativeTags { .. }
+                ) {
                     bb_domain::queries::classification_page(&state, &query, collection_limit, after)
                 } else if matches!(query, Query::OpenReleases { .. }) {
                     bb_domain::review_sessions::native_release_page(
@@ -406,7 +414,7 @@ pub fn query_collection_page(
                         None
                     }
                 };
-                let result = bb_domain::list_modes::list_mode_with_origin_lookup(
+                let result = bb_domain::list_modes::native_list_mode_with_origin_lookup(
                     &state, mode, options, page, inputs, &lookup,
                 )
                 .map(QueryResult::ListMode);

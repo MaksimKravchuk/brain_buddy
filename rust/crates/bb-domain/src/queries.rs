@@ -53,6 +53,8 @@ pub fn handles_query(query: &Query) -> bool {
             | Query::Projects { .. }
             | Query::ProjectDisplay { .. }
             | Query::Tags {}
+            | Query::NativeProjects { .. }
+            | Query::NativeTags { .. }
     )
 }
 
@@ -100,6 +102,7 @@ pub fn query(
             project_display(read_set, project_id).map(QueryResult::ProjectDisplay)
         }
         Query::Tags {} => Ok(QueryResult::Tags(tags(read_set))),
+        Query::NativeProjects { .. } | Query::NativeTags { .. } => Err(invalid("kind")),
         Query::ReviewState {}
         | Query::ReviewQueue { .. }
         | Query::ListMode { .. }
@@ -665,6 +668,7 @@ pub fn projects(read_set: &ReadSet, filter: ProjectFilter) -> Vec<ProjectSummary
                 project: project.clone(),
                 open_task_count,
                 next_action_count,
+                counts_by_state: None,
             }
         })
         .filter(|summary| filter != ProjectFilter::NeedsNextAction || summary.needs_next_action())
@@ -685,6 +689,7 @@ fn project_summary(read_set: &ReadSet, project: &Project) -> ProjectSummary {
         project: project.clone(),
         open_task_count,
         next_action_count,
+        counts_by_state: None,
     }
 }
 
@@ -755,12 +760,37 @@ pub fn classification_page(
     if !(1..=MAX_LIMIT).contains(&limit) {
         return Err(invalid("limit"));
     }
-    let after: Option<(String, String)> = after
+    use crate::types::NativeTagSort;
+    let (project_filter, exact_project, search, tag_sort) = match query {
+        Query::Projects { filter } => (Some(*filter), None, None, NativeTagSort::Name),
+        Query::NativeProjects {
+            filter,
+            project_id,
+            search,
+        } => (
+            Some(*filter),
+            project_id.as_ref(),
+            search.as_deref(),
+            NativeTagSort::Name,
+        ),
+        Query::Tags {} => (None, None, None, NativeTagSort::Name),
+        Query::NativeTags { search, sort } => (None, None, search.as_deref(), *sort),
+        _ => return Err(invalid("kind")),
+    };
+    // Native name search uses the canonical diacritic/case/width folding and
+    // whitespace normalization, not Foundation's locale-dependent comparison.
+    let needle = search.and_then(crate::list_modes::search_query);
+    let matches_name = |name: &str| {
+        needle.as_ref().is_none_or(|needle| {
+            crate::list_modes::search_query(name).is_some_and(|name| name.contains(needle))
+        })
+    };
+    let after: Option<(u32, String, String)> = after
         .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
         .transpose()?;
     let mut best = BinaryHeap::new();
-    let mut select = |name: &str, id: &str| {
-        let key = (name_key(name), id.to_owned());
+    let mut select = |rank: u32, name: &str, id: &str| {
+        let key = (rank, name_key(name), id.to_owned());
         if after.as_ref().is_some_and(|after| &key <= after)
             || (best.len() == limit as usize + 1 && best.peek().is_some_and(|worst| &key >= worst))
         {
@@ -771,33 +801,45 @@ pub fn classification_page(
         }
         best.push(key);
     };
-    match query {
-        Query::Projects { filter } => {
-            for project in read_set.projects.values().filter(|p| match filter {
-                ProjectFilter::All => true,
-                ProjectFilter::Active | ProjectFilter::NeedsNextAction => {
-                    p.state == ProjectState::Active
+    if let Some(filter) = project_filter {
+        for project in read_set.projects.values().filter(|p| {
+            exact_project.is_none_or(|id| id == &p.id)
+                && matches_name(p.name.as_str())
+                && match filter {
+                    ProjectFilter::All => true,
+                    ProjectFilter::Active | ProjectFilter::NeedsNextAction => {
+                        p.state == ProjectState::Active
+                    }
+                    ProjectFilter::Archived => p.state == ProjectState::Archived,
                 }
-                ProjectFilter::Archived => p.state == ProjectState::Archived,
-            }) {
-                if *filter == ProjectFilter::NeedsNextAction
-                    && !project_summary(read_set, project).needs_next_action()
-                {
-                    continue;
-                }
-                select(project.name.as_str(), project.id.as_str());
-            }
-        }
-        Query::Tags {} => {
-            for tag in read_set
-                .tags
-                .values()
-                .filter(|t| t.state == TagState::Active)
+        }) {
+            if filter == ProjectFilter::NeedsNextAction
+                && !project_summary(read_set, project).needs_next_action()
             {
-                select(tag.name.as_str(), tag.id.as_str());
+                continue;
             }
+            select(0, project.name.as_str(), project.id.as_str());
         }
-        _ => return Err(invalid("kind")),
+    } else {
+        for tag in read_set
+            .tags
+            .values()
+            .filter(|t| t.state == TagState::Active && matches_name(t.name.as_str()))
+        {
+            let rank = match tag_sort {
+                NativeTagSort::Name => 0,
+                NativeTagSort::OpenCount => {
+                    // One scalar count per candidate; no map of all tag counts.
+                    let count = read_set
+                        .tasks
+                        .values()
+                        .filter(|task| task.state.is_open() && task.tag_ids.contains(&tag.id))
+                        .count();
+                    u32::MAX - u32::try_from(count).unwrap_or(u32::MAX)
+                }
+            };
+            select(rank, tag.name.as_str(), tag.id.as_str());
+        }
     }
     let mut keys = best.into_sorted_vec();
     let more = keys.len() > limit as usize;
@@ -809,50 +851,51 @@ pub fn classification_page(
     } else {
         None
     };
-    let mut counts: BTreeMap<&str, (u32, u32)> =
-        keys.iter().map(|(_, id)| (id.as_str(), (0, 0))).collect();
+    // Only selected identities have counters. This memory stays O(limit).
+    let mut counts: BTreeMap<&str, (u32, TaskCounts)> = keys
+        .iter()
+        .map(|(_, _, id)| (id.as_str(), (0, TaskCounts::default())))
+        .collect();
     for task in read_set.tasks.values().filter(|task| task.state.is_open()) {
-        match query {
-            Query::Projects { .. } => {
-                if let Some(count) = task
-                    .project_id
-                    .as_ref()
-                    .and_then(|id| counts.get_mut(id.as_str()))
-                {
-                    count.0 += 1;
-                    count.1 += u32::from(task.state == TaskState::Next);
+        if project_filter.is_some() {
+            if let Some(count) = task
+                .project_id
+                .as_ref()
+                .and_then(|id| counts.get_mut(id.as_str()))
+            {
+                count.0 = count.0.saturating_add(1);
+                count_open(&mut count.1, task);
+            }
+        } else {
+            for (id, count) in &mut counts {
+                if task.tag_ids.iter().any(|tag| tag.as_str() == *id) {
+                    count.0 = count.0.saturating_add(1);
                 }
             }
-            Query::Tags {} => {
-                for (id, count) in &mut counts {
-                    if task.tag_ids.iter().any(|tag| tag.as_str() == *id) {
-                        count.0 += 1;
-                    }
-                }
-            }
-            _ => return Err(invalid("kind")),
         }
     }
-    let result = match query {
-        Query::Projects { .. } => QueryResult::Projects(
+    let result = if project_filter.is_some() {
+        QueryResult::Projects(
             keys.iter()
-                .map(|(_, id)| {
+                .map(|(_, _, id)| {
                     let project = read_set
                         .projects
                         .get(&ProjectId::parse(id).map_err(|_| invalid("project_id"))?)
                         .ok_or_else(|| invalid("project_id"))?;
-                    let (open_task_count, next_action_count) = counts[id.as_str()];
+                    let (open_task_count, counts_by_state) = counts[id.as_str()];
                     Ok(ProjectSummary {
                         project: project.clone(),
                         open_task_count,
-                        next_action_count,
+                        next_action_count: counts_by_state.next,
+                        counts_by_state: Some(counts_by_state),
                     })
                 })
                 .collect::<Result<Vec<_>, DomainError>>()?,
-        ),
-        Query::Tags {} => QueryResult::Tags(
+        )
+    } else {
+        QueryResult::Tags(
             keys.iter()
-                .map(|(_, id)| {
+                .map(|(_, _, id)| {
                     let tag = read_set
                         .tags
                         .get(&TagId::parse(id).map_err(|_| invalid("tag_id"))?)
@@ -863,8 +906,7 @@ pub fn classification_page(
                     })
                 })
                 .collect::<Result<Vec<_>, DomainError>>()?,
-        ),
-        _ => return Err(invalid("kind")),
+        )
     };
     Ok((result, next))
 }

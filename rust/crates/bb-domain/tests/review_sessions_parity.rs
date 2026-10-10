@@ -27,7 +27,7 @@
 
 mod support;
 
-pub use bb_domain::{calendar, normalization, types};
+pub use bb_domain::{calendar, list_modes, normalization, types};
 
 #[allow(dead_code, unused_imports)]
 #[path = "../src/formulation.rs"]

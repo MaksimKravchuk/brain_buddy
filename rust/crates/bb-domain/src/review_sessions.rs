@@ -2129,6 +2129,7 @@ pub fn native_queue_page(
                         project: project.clone(),
                         open_task_count: 1,
                         next_action_count: u32::from(has_next),
+                        counts_by_state: None,
                     })
                     .needs_next_action()
                     {
