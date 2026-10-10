@@ -1,0 +1,72 @@
+{
+ "schema": "brainbuddy-web-presentation-resolutions/v1",
+ "vectors": {
+  "path": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+  "schema": "brainbuddy-web-presentation-vectors/v1",
+  "rule_version": "smart-add-web/1"
+ },
+ "adapter_revision": "smart-add-web/1+r1",
+ "format": "PR-53 (tasks.md T053) decision ledger for every web/shared disagreement that PR-02 froze in web-presentation-vectors.json. The vectors file is a hash-pinned oracle and keeps the smart-add-web/1 outcomes of the web helpers as they were measured; this file records what PR-53 did about each one. resolved: smartAdd.ts was corrected and now returns the shared value (the divergence's fields for a parse case, the server verdict for a probe). accepted: the web outcome stays and the reason names why the Rust-backed server remains the final authority anyway. Every parse case with a divergence and every probe with agrees=false appears exactly once; the web suite (smartAddVectors.test.ts) and the Rust suite (bb-domain tests/web_presentation.rs) both fail on a missing, extra or mis-decided row. Versioning here is test/build evidence only: it is not an authorization token and adds no client API (command-catalog.md, web transition).",
+ "parse": [
+  {
+   "id": "WP-P-045",
+   "decision": "accepted",
+   "reason": "JavaScript lower-casing keeps U+00DF where the server's casefold gives 'ss', so the optimistic chip shows a new tag 'ß'. The web submits {name} and the server resolves it onto the stored 'ss', so the stored result is identical."
+  },
+  {
+   "id": "WP-P-051",
+   "decision": "resolved",
+   "reason": "The composer counted UTF-16 units against the 500 limit and refused a 300-emoji title the server accepts. Lengths are now counted in Unicode scalars, as the server, Swift and Rust do."
+  },
+  {
+   "id": "WP-P-052",
+   "decision": "resolved",
+   "reason": "The removal mask was built over UTF-16 indexes but applied to code points, so after one astral character the composer left the sigil in and deleted the wrong characters and would have submitted a corrupted title. The mask is now applied per UTF-16 unit."
+  },
+  {
+   "id": "WP-P-053",
+   "decision": "resolved",
+   "reason": "Same defect as WP-P-052 with two astral characters; the title is now 'text today' without the corrupted '@hoday'."
+  }
+ ],
+ "name_collision_probes": [
+  {
+   "id": "WP-K-001",
+   "decision": "accepted",
+   "reason": "Case folding of U+00DF to 'ss' is not available to JavaScript lower-casing. The typed tag is submitted by name and the server resolves it onto the stored tag, so no duplicate is stored."
+  },
+  {
+   "id": "WP-K-003",
+   "decision": "accepted",
+   "reason": "Case folding of U+1C80 to U+0432 is not available to JavaScript lower-casing. The typed tag is submitted by name and the server resolves it onto the stored tag, so no duplicate is stored."
+  },
+  {
+   "id": "WP-K-008",
+   "decision": "resolved",
+   "reason": "U+001C..U+001F are whitespace to the server but not to JavaScript \\s. The web now strips and collapses exactly the server whitespace set."
+  },
+  {
+   "id": "WP-K-009",
+   "decision": "resolved",
+   "reason": "U+FEFF is JavaScript \\s but not server whitespace; the web used to bind a typed tag to a stored one the server keeps apart. The web now uses the server whitespace set."
+  },
+  {
+   "id": "WP-K-010",
+   "decision": "resolved",
+   "reason": "U+0085 is whitespace to the server but not to JavaScript \\s. The web now strips and collapses exactly the server whitespace set."
+  }
+ ],
+ "server_whitespace": [
+  "0009-000d",
+  "001c-0020",
+  "0085",
+  "00a0",
+  "1680",
+  "2000-200a",
+  "2028",
+  "2029",
+  "202f",
+  "205f",
+  "3000"
+ ]
+}
