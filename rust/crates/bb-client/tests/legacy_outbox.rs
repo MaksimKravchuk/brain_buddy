@@ -481,6 +481,168 @@ fn legacy_outbox_026_fr_005_an_alias_that_contradicts_a_proven_one_is_not_proof(
 }
 
 #[test]
+fn legacy_outbox_026_fr_005_contradictory_aliases_in_one_receipt_install_nothing() {
+    let lane = lane("contradictory-receipt");
+    let entry = sent(1, "task-9", SENTINEL, LONG_AGO);
+    let mut store = lane.imported(&document(vec![entry.clone()], vec![]));
+    let mut proof = vec![ProvenAlias {
+        entity_type: EntityType::Task,
+        old_local_id: "task-9".into(),
+        server_id: "task_0123456789ab".into(),
+    }];
+    let mut contradiction = proof[0].clone();
+    contradiction.server_id = "task_ffffffffffff".into();
+    proof.push(contradiction);
+
+    let status = resolve(&mut store, NOW, |_| LegacyAnswer::Accepted {
+        aliases: proof.clone(),
+    });
+
+    assert_eq!(
+        (status.accepted, status.uncertain, status.aliases),
+        (0, 1, 0)
+    );
+    assert!(
+        aliases(&mut store).is_empty(),
+        "no partial alias proof is installed"
+    );
+    assert_eq!(
+        issue_rows(&mut store)[0].3,
+        json!({"legacy_outbox_entry": entry})
+    );
+    assert_eq!(count(&mut store, "outbox"), 0);
+    assert!(!status.fully_synced());
+}
+
+#[test]
+fn legacy_outbox_026_fr_005_identical_aliases_and_same_local_id_of_different_types_are_proof() {
+    let lane = lane("typed-duplicate-aliases");
+    let mut entry = sent(1, "shared-local-id", "x", LONG_AGO);
+    entry["command"]["createTask"]["_0"]["projectID"] = json!("shared-local-id");
+    let mut store = lane.imported(&document(vec![entry], vec![]));
+    let task = ProvenAlias {
+        entity_type: EntityType::Task,
+        old_local_id: "shared-local-id".into(),
+        server_id: "task_0123456789ab".into(),
+    };
+    let status = resolve(&mut store, NOW, |_| LegacyAnswer::Accepted {
+        aliases: vec![
+            task.clone(),
+            task.clone(),
+            ProvenAlias {
+                entity_type: EntityType::Project,
+                old_local_id: "shared-local-id".into(),
+                server_id: "project_0123456789ab".into(),
+            },
+        ],
+    });
+
+    assert_eq!(
+        (status.accepted, status.aliases, status.open_issues),
+        (1, 2, 0)
+    );
+    assert!(status.fully_synced());
+}
+
+#[test]
+fn legacy_outbox_026_fr_010_same_normalized_key_with_different_bodies_never_proves_either_send() {
+    let key = "abcdef01-2345-4000-8000-000000000001";
+    for (index, answer) in [
+        accepted("task-9", "task_0123456789ab"),
+        LegacyAnswer::Accepted { aliases: vec![] },
+        LegacyAnswer::Rejected {
+            code: "VALIDATION_FAILED".into(),
+        },
+        LegacyAnswer::Unproven,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let lane = lane(&format!("ambiguous-key-{index}"));
+        let mut first = sent(1, "task-9", SENTINEL, FIRST_SENT);
+        let mut second = sent(2, "task-9", "different original body", FIRST_SENT);
+        first["idempotencyKey"] = json!(key);
+        second["idempotencyKey"] = json!(key.to_uppercase());
+        let mut store = lane.imported(&document(vec![first.clone(), second.clone()], vec![]));
+        let before = carried(&mut store);
+        assert!(legacy_outbox_sends(&mut store).unwrap().is_empty());
+        let mut receipts = ProvidedReceipts::default();
+        receipts.insert(key, answer);
+
+        let waiting = resolve_legacy_outbox(&mut store, &mut receipts, &at(NOW)).unwrap();
+        assert_eq!(
+            (waiting.accepted, waiting.rejected, waiting.awaiting),
+            (0, 0, 2)
+        );
+        assert_eq!((waiting.aliases, waiting.open_issues), (0, 0));
+        assert!(!waiting.fully_synced());
+        // The same host-supplied answer remains unproven after the retention window.
+        let closed = resolve_legacy_outbox(&mut store, &mut receipts, &at(LATER)).unwrap();
+        assert_eq!(
+            (closed.accepted, closed.rejected, closed.uncertain),
+            (0, 0, 2)
+        );
+        assert_eq!((closed.aliases, closed.open_issues), (0, 2));
+        let rows = issue_rows(&mut store);
+        assert_eq!(rows[0].1, "OUTCOME_UNKNOWN");
+        assert_eq!(rows[1].1, "OUTCOME_UNKNOWN");
+        assert_eq!(rows[0].3, json!({"legacy_outbox_entry": first}));
+        assert_eq!(rows[1].3, json!({"legacy_outbox_entry": second}));
+        assert_eq!(carried(&mut store), before);
+        assert!(aliases(&mut store).is_empty());
+        assert_eq!(count(&mut store, "outbox"), 0);
+        assert!(!closed.fully_synced());
+        assert_eq!(resolve(&mut store, LATER, nothing), closed);
+    }
+}
+
+#[test]
+fn legacy_outbox_026_fr_010_key_ambiguity_includes_unsent_carried_entries() {
+    let lane = lane("ambiguous-unsent");
+    let first = sent(1, "task-9", SENTINEL, LONG_AGO);
+    let mut second = unsent(2, "task-8", "different body");
+    second["idempotencyKey"] = first["idempotencyKey"].clone();
+    let mut store = lane.imported(&document(vec![first.clone(), second], vec![]));
+
+    let status = resolve(&mut store, NOW, nothing);
+
+    assert_eq!((status.unsent, status.uncertain, status.aliases), (1, 1, 0));
+    assert_eq!(
+        issue_rows(&mut store)[0].3,
+        json!({"legacy_outbox_entry": first})
+    );
+    assert!(!status.may_run());
+    assert!(!status.fully_synced());
+    // The unsent entry now has a final standing; it still contributes its body.
+    assert_eq!(resolve(&mut store, NOW, nothing), status);
+}
+
+#[test]
+fn legacy_outbox_026_fr_005_identical_key_and_body_can_share_a_receipt() {
+    let lane = lane("shared-identical-body");
+    let mut first = sent(1, "task-9", SENTINEL, LONG_AGO);
+    first["idempotencyKey"] = json!("abcdef01-2345-4000-8000-000000000001");
+    let mut second = first.clone();
+    second["id"] = json!(uuid(2));
+    second["idempotencyKey"] = json!(first["idempotencyKey"].as_str().unwrap().to_uppercase());
+    let mut store = lane.imported(&document(vec![first.clone(), second], vec![]));
+    assert_eq!(legacy_outbox_sends(&mut store).unwrap().len(), 2);
+    let mut receipts = ProvidedReceipts::default();
+    receipts.insert(
+        first["idempotencyKey"].as_str().unwrap(),
+        accepted("task-9", "task_0123456789ab"),
+    );
+
+    let status = resolve_legacy_outbox(&mut store, &mut receipts, &at(NOW)).unwrap();
+
+    assert_eq!(
+        (status.accepted, status.aliases, status.open_issues),
+        (2, 1, 0)
+    );
+    assert!(status.fully_synced());
+}
+
+#[test]
 fn legacy_outbox_026_fr_010_a_provable_rejection_is_an_open_issue_with_the_preserved_intent() {
     let lane = lane("rejected");
     let entry = sent(1, "task-9", SENTINEL, LONG_AGO);
@@ -575,6 +737,54 @@ fn legacy_outbox_026_fr_010_a_key_that_was_never_used_is_never_waited_for() {
         (status.awaiting, status.uncertain, status.open_issues),
         (0, 1, 1)
     );
+}
+
+#[test]
+fn legacy_outbox_026_fr_010_a_receipt_for_another_send_cannot_prove_an_unused_rotated_key() {
+    for (index, answer) in [
+        accepted("task-9", "task_0123456789ab"),
+        LegacyAnswer::Rejected {
+            code: "VALIDATION_FAILED".into(),
+        },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let lane = lane(&format!("unused-key-shared-body-{index}"));
+        let used = sent(1, "task-9", SENTINEL, FIRST_SENT);
+        let mut rotated = used.clone();
+        rotated["id"] = json!(uuid(2));
+        rotated["attempts"] = json!(0);
+        // The old key may have reached the server, but this current key never did.
+        // The other entry genuinely used this same key/body and has a receipt.
+        let mut store = lane.imported(&document(vec![used.clone(), rotated.clone()], vec![]));
+        let before = carried(&mut store);
+        let sends = legacy_outbox_sends(&mut store).unwrap();
+        assert_eq!(sends.len(), 1);
+        assert_eq!(sends[0].entry_id, uuid(1));
+        let mut receipts = ProvidedReceipts::default();
+        receipts.insert(used["idempotencyKey"].as_str().unwrap(), answer);
+
+        let status = resolve_legacy_outbox(&mut store, &mut receipts, &at(NOW)).unwrap();
+
+        assert_eq!(
+            (status.accepted, status.rejected),
+            if index == 0 { (1, 0) } else { (0, 1) }
+        );
+        assert_eq!((status.awaiting, status.uncertain), (0, 1));
+        assert_eq!(status.aliases, if index == 0 { 1 } else { 0 });
+        let rows = issue_rows(&mut store);
+        let unknown = rows
+            .iter()
+            .find(|row| row.0 == format!("legacy_entry_{}", uuid(2)))
+            .unwrap();
+        assert_eq!(unknown.1, "OUTCOME_UNKNOWN");
+        assert_eq!(unknown.3, json!({"legacy_outbox_entry": rotated}));
+        assert_eq!(carried(&mut store), before);
+        assert_eq!(count(&mut store, "outbox"), 0);
+        assert!(!status.fully_synced());
+        assert_eq!(resolve(&mut store, LATER, nothing), status);
+    }
 }
 
 #[test]

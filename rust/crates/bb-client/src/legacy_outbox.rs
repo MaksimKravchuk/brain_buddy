@@ -27,7 +27,9 @@
 //!   the key and the body), is exported with the account's data, and is never
 //!   reissued under a new ID. A later receipt reconciles it.
 //!
-//! Matching is by idempotency key alone. A title, a list or a time is never proof.
+//! Matching requires the original key and body. If the carried source uses one key
+//! for different bodies, no key-only answer can prove either entry. A title, a list
+//! or a time is never proof.
 //! The lookup is a port ([`ReceiptLookup`]); it is called outside any
 //! transaction, and the verdicts are applied in one write transaction that
 //! re-reads what it depends on. Every entry is accounted for or nothing is saved.
@@ -41,7 +43,7 @@ use bb_protocol::catalog::EntityType;
 use bb_protocol::wire::{CommandId, Instant};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const KIND_RESOLUTION: &str = "legacy_outbox_resolution";
 const ALIAS_PROVENANCE: &str = "legacy-outbox:receipt";
@@ -67,7 +69,7 @@ const TEXT_MEMBERS: [&str; 8] = [
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LegacySend {
     pub entry_id: String,
-    /// The `Idempotency-Key` the send was made with: the only thing that matches.
+    /// The `Idempotency-Key` the send was made with, paired with its original body.
     pub idempotency_key: String,
     /// The old command, verbatim: the body the key was sent with. A lookup that finds
     /// the key under a different body proves nothing and answers `Unproven`.
@@ -107,7 +109,8 @@ impl<F: FnMut(&LegacySend) -> LegacyAnswer> ReceiptLookup for F {
 }
 
 /// Answers a caller already fetched, by idempotency key (case does not matter: a Swift
-/// `UUID` prints upper case). A key without an answer is `Unproven`.
+/// `UUID` prints upper case). A key without an answer is `Unproven`. Resolution
+/// refuses these answers when carried entries use the key for different bodies.
 #[derive(Clone, Debug, Default)]
 pub struct ProvidedReceipts(BTreeMap<String, LegacyAnswer>);
 
@@ -312,6 +315,34 @@ struct Loaded {
     workspace: String,
     entries: Vec<Entry>,
     standings: HashMap<String, String>,
+    ambiguous_keys: HashSet<String>,
+}
+
+/// Inspect the whole immutable source, including unsent and already settled entries:
+/// a key-only receipt cannot distinguish different original bodies under one key.
+fn ambiguous_keys(entries: &[Entry]) -> HashSet<String> {
+    let mut bodies = HashMap::new();
+    let mut ambiguous = HashSet::new();
+    for entry in entries {
+        let Some(key) = entry.key.as_ref().map(|key| key.to_ascii_lowercase()) else {
+            continue;
+        };
+        let command = entry.raw.get("command").unwrap_or(&Value::Null);
+        if bodies
+            .insert(key.clone(), command)
+            .is_some_and(|body| body != command)
+        {
+            ambiguous.insert(key);
+        }
+    }
+    ambiguous
+}
+
+fn ambiguous(entry: &Entry, keys: &HashSet<String>) -> bool {
+    entry
+        .key
+        .as_ref()
+        .is_some_and(|key| keys.contains(&key.to_ascii_lowercase()))
 }
 
 fn load(tx: &Transaction<'_>) -> Result<Loaded, LegacyOutboxError> {
@@ -332,7 +363,7 @@ fn load(tx: &Transaction<'_>) -> Result<Loaded, LegacyOutboxError> {
         }
         Ok(found)
     };
-    let entries = fields(KIND_OUTBOX)?
+    let entries: Vec<Entry> = fields(KIND_OUTBOX)?
         .into_iter()
         .map(|(_, raw)| Entry::read(raw))
         .collect::<Result<_, _>>()?;
@@ -342,6 +373,7 @@ fn load(tx: &Transaction<'_>) -> Result<Loaded, LegacyOutboxError> {
         .collect();
     Ok(Loaded {
         workspace,
+        ambiguous_keys: ambiguous_keys(&entries),
         entries,
         standings,
     })
@@ -379,10 +411,15 @@ pub fn resolve_legacy_outbox(
             if !Standing::open(known) {
                 continue;
             }
-            let answer = answers
-                .get(&entry.id)
-                .cloned()
-                .unwrap_or(LegacyAnswer::Unproven);
+            let answer =
+                if (entry.sent && !entry.key_used) || ambiguous(entry, &loaded.ambiguous_keys) {
+                    LegacyAnswer::Unproven
+                } else {
+                    answers
+                        .get(&entry.id)
+                        .cloned()
+                        .unwrap_or(LegacyAnswer::Unproven)
+                };
             settle(tx, &loaded.workspace, entry, &answer, (now.as_str(), at))?;
         }
         convert_issues(tx, &loaded.workspace, now.as_str())?;
@@ -404,6 +441,9 @@ pub(crate) fn has_remote_history_in(tx: &Transaction<'_>) -> Result<bool, Legacy
 /// The sends still to ask the server about: the carried entries a request may have reached
 /// the server for, with no final verdict. Read from the Rust store alone (the carried rows
 /// are immutable), so the legacy file is not read again and needs no lock.
+/// Keys carried with different command bodies are excluded: a key-only answer
+/// cannot distinguish their outcomes.
+/// A rotated current key that was never used cannot prove an earlier send either.
 ///
 /// # Errors
 ///
@@ -414,7 +454,8 @@ pub fn legacy_outbox_sends(store: &mut Store) -> Result<Vec<LegacySend>, LegacyO
     Ok(loaded
         .entries
         .iter()
-        .filter(|entry| entry.sent)
+        .filter(|entry| entry.sent && entry.key_used)
+        .filter(|entry| !ambiguous(entry, &loaded.ambiguous_keys))
         .filter(|entry| Standing::open(loaded.standings.get(&entry.id).map(String::as_str)))
         .filter_map(Entry::send)
         .collect())
@@ -1294,7 +1335,8 @@ fn settle(
 }
 
 /// A receipt proves an identity only when the old command uses the local ID as an identifier
-/// of that entity type (see [`names`]) and no different server ID was proven for it before.
+/// of that entity type (see [`names`]) and no different server ID was proven for it before
+/// or claimed for the same typed local ID by this receipt.
 fn provable(
     tx: &Transaction<'_>,
     workspace: &str,
@@ -1302,7 +1344,15 @@ fn provable(
     aliases: &[ProvenAlias],
 ) -> Result<bool, LegacyOutboxError> {
     let command = entry.raw.get("command").unwrap_or(&Value::Null);
+    let mut claimed = HashMap::new();
     for alias in aliases {
+        let typed_id = (alias.entity_type.as_str(), alias.old_local_id.as_str());
+        if claimed
+            .insert(typed_id, alias.server_id.as_str())
+            .is_some_and(|server| server != alias.server_id)
+        {
+            return Ok(false);
+        }
         let known: Option<String> = tx
             .query_row(
                 "SELECT server_id FROM identity_aliases

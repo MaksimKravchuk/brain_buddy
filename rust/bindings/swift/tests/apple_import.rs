@@ -361,6 +361,76 @@ fn apple_outbox_026_fr_005_a_receipt_given_by_key_settles_the_send_and_proves_th
 }
 
 #[test]
+fn apple_outbox_026_fr_010_same_normalized_key_with_different_bodies_refuses_host_proof() {
+    let key = "abcdef01-2345-4000-8000-000000000001";
+    let mut document = sent_document();
+    document["outbox"][0]["idempotencyKey"] = json!(key);
+    document["outbox"][0]["firstAttemptAt"] = json!("2026-10-10T03:00:00Z");
+    let mut second = document["outbox"][0].clone();
+    second["id"] = json!("00000000-0000-4000-8000-000000000002");
+    second["idempotencyKey"] = json!(key.to_uppercase());
+    second["command"]["createTask"]["_0"]["title"] = json!("different original body");
+    document["outbox"].as_array_mut().unwrap().push(second);
+    let (directory, runtime) = imported("outbox-ambiguous-key", &document);
+    assert!(
+        runtime
+            .legacy_outbox_sends(outbox_request(&directory, vec![]))
+            .expect("lists")
+            .is_empty()
+    );
+    // Even a caller supplying acceptance without any alias cannot prove either body.
+    let receipts = vec![BridgeLegacyReceipt {
+        idempotency_key: key.to_uppercase(),
+        answer: BridgeLegacyAnswer::Accepted { aliases: vec![] },
+    }];
+    let waiting = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, receipts.clone()))
+        .expect("waits");
+    assert_eq!(
+        (waiting.accepted, waiting.awaiting, waiting.aliases),
+        (0, 2, 0)
+    );
+    assert!(waiting.classified && !waiting.fully_synced);
+
+    let mut later = outbox_request(&directory, receipts);
+    later.now = "2026-10-11T04:00:00Z".into();
+    let closed = runtime.resolve_legacy_outbox(later).expect("keeps intent");
+    assert_eq!(
+        (closed.accepted, closed.uncertain, closed.open_issues),
+        (0, 2, 2)
+    );
+    assert!(closed.classified && !closed.fully_synced);
+}
+
+#[test]
+fn apple_outbox_026_fr_005_contradictory_typed_aliases_in_one_receipt_are_not_proof() {
+    let (directory, runtime) = imported("outbox-contradictory-aliases", &sent_document());
+    let mut aliases = vec![BridgeLegacyAlias {
+        entity_type: "task".into(),
+        old_local_id: "task-9".into(),
+        server_id: "task_0123456789ab".into(),
+    }];
+    let mut contradiction = aliases[0].clone();
+    contradiction.server_id = "task_ffffffffffff".into();
+    aliases.push(contradiction);
+    let receipts = vec![BridgeLegacyReceipt {
+        idempotency_key: KEY.into(),
+        answer: BridgeLegacyAnswer::Accepted { aliases },
+    }];
+
+    let status = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, receipts))
+        .expect("keeps unproven intent");
+
+    assert_eq!(
+        (status.accepted, status.uncertain, status.aliases),
+        (0, 1, 0)
+    );
+    assert_eq!(status.open_issues, 1);
+    assert!(!status.fully_synced);
+}
+
+#[test]
 fn apple_outbox_026_fr_010_a_send_without_a_receipt_stays_an_issue_and_never_looks_synced() {
     let (directory, runtime) = imported("outbox-uncertain", &sent_document());
 
