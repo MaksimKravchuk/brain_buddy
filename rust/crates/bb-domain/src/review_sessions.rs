@@ -489,7 +489,15 @@ fn next_counter(counter: &Counter, field: &str) -> Result<Counter, DomainError> 
         .ok_or_else(|| invalid(field))
 }
 
+/// Files some hosts keep beside the tz database that are not IANA zone names
+/// (`_NOT_IANA` of `review_service.py`): `zoneinfo` loads them, the Review
+/// settings refuse them.
+const NOT_A_ZONE_NAME: [&str; 3] = ["localtime", "posixrules", "Factory"];
+
 fn parse_zone(name: &str, field: &str) -> Result<TimeZone, DomainError> {
+    if NOT_A_ZONE_NAME.contains(&name) {
+        return Err(DomainError::field(Reason::InvalidTimeZone, field));
+    }
     TimeZone::named(name).map_err(|_| DomainError::field(Reason::InvalidTimeZone, field))
 }
 
