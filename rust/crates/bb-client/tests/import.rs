@@ -366,7 +366,7 @@ fn import_child_entry() {
     let source = PathBuf::from(std::env::var("BB_IMPORT_SOURCE").unwrap());
     let request = ImportRequest {
         store: options(&database, 5_000),
-        source,
+        source: source.clone(),
         backup_dir: None,
         now: Instant::parse(NOW).unwrap(),
         expected: None,
@@ -403,11 +403,159 @@ fn import_child_entry() {
             say("holding");
             std::thread::sleep(Duration::from_secs(60));
         }
+        // The writers below behave as `FileDocumentStore.update` does: the exclusive
+        // `flock` on the sibling lock file, then a temporary file renamed over the document.
+        "hold_document_lock" => {
+            let _lock = take_document_lock(&source);
+            say("holding");
+            std::thread::sleep(Duration::from_secs(60));
+        }
+        "write_then_release" => {
+            let _lock = take_document_lock(&source);
+            say("holding");
+            std::thread::sleep(Duration::from_millis(400));
+            rewrite_document(&source, 9);
+        }
+        "write_under_lock" => {
+            touch(&source, "attempting");
+            let _lock = take_document_lock(&source);
+            rewrite_document(&source, 99);
+            touch(&source, "wrote");
+        }
         other => panic!("unknown child role {other}"),
     }
 }
 
+fn take_document_lock(source: &Path) -> fs::File {
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(source.with_file_name(".store.json.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    lock
+}
+
+/// What a `FileDocumentStore` write does to the file: new content under a new inode.
+fn rewrite_document(source: &Path, generation: u64) {
+    let mut document: Value = serde_json::from_slice(&fs::read(source).unwrap()).unwrap();
+    document["generation"] = json!(generation);
+    let temporary = source.with_file_name(".store.json.writer.tmp");
+    fs::write(&temporary, serde_json::to_vec(&document).unwrap()).unwrap();
+    fs::rename(&temporary, source).unwrap();
+}
+
+fn touch(source: &Path, name: &str) {
+    fs::write(source.with_file_name(format!(".marker-{name}")), b"").unwrap();
+}
+
+fn marked(lane: &Lane, name: &str) -> bool {
+    lane.directory.join(format!(".marker-{name}")).exists()
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    for _ in 0..500 {
+        if done() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for {what}");
+}
+
 // ------------------------------------------------------------------------- tests
+
+#[test]
+fn import_026_sc_005_a_writer_holding_the_document_lock_makes_the_import_busy_never_stale() {
+    let lane = lane("document-lock-held");
+    let bytes = lane.write_source(&rich());
+    let mut child = spawn("hold_document_lock", &lane);
+    wait_for(&mut child, "holding");
+
+    let mut request = lane.request();
+    request.store.busy_timeout = Duration::from_millis(150);
+    let error = import_legacy_store(&request).unwrap_err();
+    assert_eq!(error, ImportError::Store(StoreError::Busy));
+    assert!(error.is_retryable());
+    // Nothing was read, backed up or created while a writer might be mid-write.
+    assert_eq!(fs::read(&lane.source).unwrap(), bytes);
+    assert!(lane.backups().is_empty());
+    assert!(!lane.database.exists());
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(import_legacy_store(&lane.request()).is_ok());
+}
+
+#[test]
+fn import_026_sc_005_the_import_waits_for_a_writer_and_imports_what_it_wrote() {
+    let lane = lane("document-lock-wait");
+    lane.write_source(&rich());
+    let mut child = spawn("write_then_release", &lane);
+    wait_for(&mut child, "holding");
+
+    // The writer finishes within the wait; the import reads the file after it, so the
+    // generation it imports is the writer's (9), not the older 4 it could have read first.
+    let mut request = lane.request();
+    request.store.busy_timeout = Duration::from_secs(10);
+    let report = import_legacy_store(&request).unwrap();
+    assert_eq!(report.marker.source_generation, 9);
+    child.wait().unwrap();
+    assert_eq!(
+        report.marker.source_sha256,
+        sha256_hex(&fs::read(&lane.source).unwrap())
+    );
+}
+
+#[test]
+fn import_026_fr_025_a_writer_during_the_import_blocks_until_the_commit() {
+    let lane = lane("document-lock-writer");
+    let original = lane.write_source(&rich());
+    let mut writer: Option<Child> = None;
+    let source = lane.source.clone();
+    let directory = lane.directory.clone();
+    let report = import_legacy_store_with(&lane.request(), |at, _| {
+        if at == ImportStage::Staged(0) {
+            // The import holds the document lock now: a widget starts a write.
+            writer = Some(spawn("write_under_lock", &lane));
+        }
+        if at == ImportStage::Verified {
+            wait_until("the writer to start", || {
+                directory.join(".marker-attempting").exists()
+            });
+            std::thread::sleep(Duration::from_millis(300));
+            // Everything is validated and uncommitted; the writer has not got in.
+            assert!(!directory.join(".marker-wrote").exists());
+            assert_eq!(fs::read(&source).unwrap(), original);
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(report.marker.source_sha256, sha256_hex(&original));
+    assert_eq!(report.marker.source_generation, 4);
+
+    // Committed and released: now the writer lands, and its file is a later file that is
+    // never merged (it is the caller's to carry across, not the import's to guess).
+    wait_until("the writer to finish", || marked(&lane, "wrote"));
+    writer.unwrap().wait().unwrap();
+    assert_ne!(fs::read(&lane.source).unwrap(), original);
+    assert_eq!(
+        import_legacy_store(&lane.request()).unwrap_err(),
+        ImportError::AlreadyImported
+    );
+}
+
+#[test]
+fn import_026_fr_025_a_missing_source_takes_no_lock_and_leaves_no_lock_file() {
+    let lane = lane("document-lock-missing");
+    assert_eq!(
+        import_legacy_store(&lane.request()).unwrap_err(),
+        ImportError::SourceMissing
+    );
+    assert!(!lane.directory.join(".store.json.lock").exists());
+}
 
 #[test]
 fn import_026_fr_013_golden_outbox_is_carried_whole_and_the_base_counts_equal_the_source() {

@@ -141,7 +141,23 @@ public struct RustStoreImporter: Sendable {
     }
 
     /// Runs the import. Throws `RustStoreImportError`.
+    ///
+    /// The core holds the document's own writer lock (the `.store.json.lock` sibling every
+    /// `FileDocumentStore` write takes) from its read of the file to the commit, so the app, a widget
+    /// or an App Intent cannot save in between; a writer waits for the commit, and the import waits
+    /// for a writer for at most `busyTimeoutMilliseconds` (`storeBusy`, retryable). This type takes no
+    /// lock of its own: a second handle on the same lock file in this process would only wait for the
+    /// core's. The Swift read below is outside that lock, so a save that lands between it and the
+    /// core's read shows up as a disagreement of counts; the run then reads once more.
     public func run() async throws -> RustLegacyImportReport {
+        do {
+            return try await attempt()
+        } catch let error as RustStoreImportError where error == .verificationFailed(check: "expected_counts") {
+            return try await attempt()
+        }
+    }
+
+    private func attempt() async throws -> RustLegacyImportReport {
         if Task.isCancelled { throw RustStoreImportError.failed(.cancelled) }
         let bytes: Data?
         do {

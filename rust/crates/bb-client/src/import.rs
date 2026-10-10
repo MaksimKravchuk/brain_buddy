@@ -6,6 +6,12 @@
 //! device-local Review state). The Rust runtime owns SQLite instead. This module
 //! moves the one into the other without ever making the original less safe:
 //!
+//! 0. **Lock the document.** The importer takes the exclusive `flock` on the file's
+//!    sibling `.<name>.lock`, the lock every writer of the legacy file (app, widget, App
+//!    Intents, through `FileDocumentStore`) takes, from before the read to after the
+//!    commit. No write can land in between, so the import never activates a snapshot
+//!    older than the file, and a writer waits for the commit instead of losing its data.
+//!    The wait is bounded by the store's busy timeout (`STORE_BUSY`, retryable).
 //! 1. **Read and plan** (no side effect). The file is parsed with every field
 //!    accounted for: a member this build does not know is a typed refusal, never a
 //!    silent drop. Records become typed `bb_domain` records (so the rules' own
@@ -59,10 +65,11 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fs::{self, File, OpenOptions as FileOptions};
+use std::fs::{self, File, OpenOptions as FileOptions, TryLockError};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant as Clock};
 
 const ACTIVATION_PREFIX: &str = "legacy-import-";
 const MARKER_SCHEMA: &str = "brainbuddy-legacy-import/v1";
@@ -358,6 +365,19 @@ pub fn import_legacy_store_with(
     request: &ImportRequest,
     mut hook: impl FnMut(ImportStage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<ImportReport, ImportError> {
+    // A missing file needs no lock (and leaves no lock file behind).
+    if let Err(error) = fs::metadata(&request.source) {
+        return Err(if error.kind() == io::ErrorKind::NotFound {
+            ImportError::SourceMissing
+        } else {
+            error.into()
+        });
+    }
+    // The document lock first, and held to the end (it is dropped last): the app, the
+    // widget and the App Intents write `store.json` under this same lock, so from the
+    // read below to the commit no writer can interleave and leave the import with a
+    // snapshot older than the file.
+    let _document = DocumentLock::acquire(&request.source, request.store.busy_timeout)?;
     let bytes = read_source(&request.source)?;
     let digest = hex(&sha256(&bytes));
     let plan = parse(&bytes, &request.now)?;
@@ -422,6 +442,62 @@ pub fn legacy_import_marker(store: &mut Store) -> Result<Option<ImportMarker>, S
 }
 
 // ------------------------------------------------------------------ the source file
+
+/// The advisory lock every writer of the legacy file takes: an exclusive `flock` on the
+/// sibling `.<name>.lock` file, exactly as Swift's `DocumentFile.lock()` does (readers take
+/// none, because every write replaces the file's inode). `flock` belongs to the open file
+/// description, so this excludes the app, a widget and an App Intent in other processes
+/// and Swift's own handles in this one. Dropping it closes the file, which releases it.
+#[derive(Debug)]
+struct DocumentLock {
+    _file: File,
+}
+
+impl DocumentLock {
+    fn path_for(source: &Path) -> PathBuf {
+        let name = source
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        source.with_file_name(format!(".{name}.lock"))
+    }
+
+    /// Waits at most `timeout`; running out is a retryable `STORE_BUSY`, never a stale read.
+    fn acquire(source: &Path, timeout: Duration) -> Result<Self, ImportError> {
+        let path = Self::path_for(source);
+        let deadline = Clock::now() + timeout;
+        loop {
+            let file = FileOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(&path)?;
+            loop {
+                match file.try_lock() {
+                    Ok(()) => break,
+                    Err(TryLockError::WouldBlock) if Clock::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(TryLockError::WouldBlock) => return Err(StoreError::Busy.into()),
+                    Err(TryLockError::Error(error)) => return Err(error.into()),
+                }
+            }
+            // A writer that removes the store removes the lock file while holding it
+            // (`FileDocumentStore.destroy`); a lock on an unlinked file excludes no one.
+            let held = file.metadata()?;
+            match fs::metadata(&path) {
+                Ok(current) if (current.dev(), current.ino()) == (held.dev(), held.ino()) => {
+                    return Ok(Self { _file: file });
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+}
 
 fn read_source(path: &Path) -> Result<Vec<u8>, ImportError> {
     match fs::read(path) {

@@ -193,6 +193,31 @@ struct RustStoreImporterTests {
         #expect(!FileManager.default.fileExists(atPath: workspace.database.path))
     }
 
+    @Test("026-SC-005: a writer holding the document lock makes the import wait, then report storeBusy")
+    func aWriterHoldingTheDocumentLockBlocksTheImport() async throws {
+        let workspace = try LegacyLane()
+        defer { removeTemporaryDirectory(workspace.directory) }
+        let runtime = try RustBridgeRuntime()
+        try await workspace.write(Fixtures.richDocument())
+        let before = try Data(contentsOf: workspace.legacy)
+        let importer = RustStoreImporter(
+            runtime: runtime, legacyFileURL: workspace.legacy, databaseURL: workspace.database,
+            workspaceID: "workspace-local", busyTimeoutMilliseconds: 150)
+
+        // What `FileDocumentStore.update` holds while it reads, transforms and replaces the file.
+        let held = try DocumentFile(url: workspace.legacy).lock()
+        let failure = await importFailure { _ = try await importer.run() }
+        held.release()
+
+        #expect(failure == .storeBusy)
+        #expect(failure?.isRetryable == true)
+        #expect(try Data(contentsOf: workspace.legacy) == before)
+        #expect(try workspace.backups().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: workspace.database.path))
+        // The writer is done: the same importer now imports.
+        #expect(try await importer.run().alreadyActive == false)
+    }
+
     @Test("026-FR-026: a cancelled task gets CANCELLED and nothing is imported")
     func cancellation() async throws {
         let workspace = try LegacyLane()
