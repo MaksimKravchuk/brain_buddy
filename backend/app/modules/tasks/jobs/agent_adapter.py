@@ -133,6 +133,7 @@ class AgentRecoveryAdapter:
         self._gate = gate
         self._ledger = ledger
         self._now = now
+        self._boot_swept = False
 
     def run(self, context: JobContext) -> JobOutcome:
         with self._gate.executing(context.lease) as execution:
@@ -174,7 +175,27 @@ class AgentRecoveryAdapter:
     def _sweep(self, context: JobContext) -> JobOutcome:
         if context.should_abandon():
             return JobOutcome(safe_error=_AUTHORITY_LOST)
+        if self._boot_swept:
+            # Marking already ran at boot, before any request was served. A job
+            # claimed later would also catch exchanges the live process opened.
+            return JobOutcome()
+        self._mark_and_record()
+        return JobOutcome()
 
+    def boot_sweep(self) -> None:
+        """Mark what a restart interrupted, now, on the caller's thread.
+
+        Recording and marking are the same as the job's sweep, but this must run
+        at boot before the app serves a request: ``interrupted_exchanges`` has no
+        boot cutoff, so a sweep run later would settle exchanges the live process
+        has just opened. Afterwards the ``agent.recover:boot`` occurrence is a
+        no-op and only the per-run lookup jobs it recorded do any work.
+        """
+
+        self._mark_and_record()
+        self._boot_swept = True
+
+    def _mark_and_record(self) -> None:
         def record_lookup(owner_id: str, run_id: str) -> None:
             self._ledger.ensure_scheduled(
                 job_type=self.job_type,
@@ -185,7 +206,6 @@ class AgentRecoveryAdapter:
             )
 
         self._observer.mark_interrupted_exchanges(before_marking=record_lookup)
-        return JobOutcome()
 
 
 __all__ = [

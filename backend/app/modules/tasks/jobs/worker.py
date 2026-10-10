@@ -435,6 +435,62 @@ class SchedulerHandoff:
         return self._owners.get(responsibility) is SchedulerOwner.DURABLE
 
 
+class WorkerLanes:
+    """Independent execution lanes over one ledger: one :class:`JobWorker` each.
+
+    A worker runs one job at a time, so a slow responsibility (a backlog of
+    unreachable agents) would hold back every other one on a shared worker. Each
+    lane claims only the job types registered with it, so lanes never contend for
+    a job and a stuck lane delays nothing outside itself -- the isolation the
+    legacy threads gave. A job type belongs to exactly one lane.
+    """
+
+    def __init__(self, lanes: Mapping[str, JobWorker]) -> None:
+        self.workers = dict(lanes)
+        self._lane_of: dict[str, JobWorker] = {}
+        for worker in self.workers.values():
+            for job_type in worker.registry.types:
+                if job_type in self._lane_of:
+                    raise ValueError(f"Job type in more than one lane: {job_type}")
+                self._lane_of[job_type] = worker
+
+    @property
+    def registry(self) -> JobRegistry:
+        """Every lane's adapters, as one registry."""
+
+        return JobRegistry(
+            adapter
+            for worker in self.workers.values()
+            for adapter in worker.registry.as_mapping().values()
+        )
+
+    @property
+    def running(self) -> bool:
+        return any(worker.running for worker in self.workers.values())
+
+    def ensure_schedules(self, *, due_now: bool = False) -> int:
+        return sum(w.ensure_schedules(due_now=due_now) for w in self.workers.values())
+
+    def wake(self, job_type: str) -> None:
+        """Make the job due now and rouse only the lane that owns it."""
+
+        worker = self._lane_of.get(job_type)
+        if worker is not None:
+            worker.wake(job_type)
+
+    def run_once(self) -> bool:
+        """Run at most one due job per lane, in turn. ``False`` if none ran."""
+
+        # Every lane gets its turn: a sum, not a short-circuiting any().
+        return sum(w.run_once() for w in self.workers.values()) > 0
+
+    def start(self) -> bool:
+        return sum(w.start() for w in self.workers.values()) > 0
+
+    def shutdown(self, timeout: float = SHUTDOWN_GRACE_SECONDS) -> bool:
+        return sum(not w.shutdown(timeout) for w in self.workers.values()) == 0
+
+
 __all__ = [
     "DuplicateSchedulerOwnerError",
     "JobAdapter",
@@ -444,4 +500,5 @@ __all__ = [
     "Responsibility",
     "SchedulerHandoff",
     "SchedulerOwner",
+    "WorkerLanes",
 ]
