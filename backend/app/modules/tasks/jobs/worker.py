@@ -7,8 +7,9 @@ recurring job. The ledger lease is what makes a second runner -- another thread,
 another process, a restart racing an old lease -- harmless: a job has one live
 claimant and a result is accepted only under its current fence.
 
-This module is deliberately not wired to anything. The caller builds a
-:class:`JobWorker`, starts it and stops it; no existing scheduler is touched.
+The worker owns nothing by itself. ``app.main`` builds one, registers the
+adapters of the responsibilities it has handed over, and records each hand-over
+in a :class:`SchedulerHandoff` so a responsibility has exactly one live owner.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Protocol
 
 from .domain import HEARTBEAT, LEASE, JobLease, JobOutcome
@@ -376,9 +378,127 @@ class JobWorker:
         return True
 
 
+class Responsibility(StrEnum):
+    """Every ``app.main`` scheduler responsibility that may move to the ledger.
+
+    Auth delivery, auth metadata cleanup and CRT command reconciliation are not
+    listed: they keep their existing owners.
+    """
+
+    REVIEW_SWEEP = "review_sweep"
+    VOICE_SWEEP = "voice_sweep"
+    PRIVACY_RETENTION = "privacy_retention"
+    AGENT_OBSERVATION = "agent_observation"
+    AGENT_RECOVERY = "agent_recovery"
+
+
+class SchedulerOwner(StrEnum):
+    LEGACY = "legacy"
+    DURABLE = "durable"
+
+
+class DuplicateSchedulerOwnerError(RuntimeError):
+    """A responsibility already has an owner; a second one is refused."""
+
+
+class SchedulerHandoff:
+    """Who owns each handed-off responsibility for this process's lifetime.
+
+    Default OFF: with ``enabled`` false the durable worker can own nothing and
+    the legacy loops stay the only owners, exactly as before the handoff. Each
+    responsibility is assigned once, at boot; a second assignment (to either
+    owner) raises, so a legacy loop and the worker can never both be live.
+    """
+
+    def __init__(self, *, enabled: bool = False) -> None:
+        self.enabled = enabled
+        self._owners: dict[Responsibility, SchedulerOwner] = {}
+
+    def assign(self, responsibility: Responsibility, owner: SchedulerOwner) -> None:
+        if responsibility in self._owners:
+            raise DuplicateSchedulerOwnerError(
+                f"{responsibility.value} is already owned by "
+                f"{self._owners[responsibility].value}."
+            )
+        if owner is SchedulerOwner.DURABLE and not self.enabled:
+            raise DuplicateSchedulerOwnerError("The durable handoff is not enabled.")
+        self._owners[responsibility] = owner
+
+    def assign_remaining_to_legacy(self) -> None:
+        for responsibility in Responsibility:
+            self._owners.setdefault(responsibility, SchedulerOwner.LEGACY)
+
+    def owner(self, responsibility: Responsibility) -> SchedulerOwner | None:
+        return self._owners.get(responsibility)
+
+    def durable(self, responsibility: Responsibility) -> bool:
+        return self._owners.get(responsibility) is SchedulerOwner.DURABLE
+
+
+class WorkerLanes:
+    """Independent execution lanes over one ledger: one :class:`JobWorker` each.
+
+    A worker runs one job at a time, so a slow responsibility (a backlog of
+    unreachable agents) would hold back every other one on a shared worker. Each
+    lane claims only the job types registered with it, so lanes never contend for
+    a job and a stuck lane delays nothing outside itself -- the isolation the
+    legacy threads gave. A job type belongs to exactly one lane.
+    """
+
+    def __init__(self, lanes: Mapping[str, JobWorker]) -> None:
+        self.workers = dict(lanes)
+        self._lane_of: dict[str, JobWorker] = {}
+        for worker in self.workers.values():
+            for job_type in worker.registry.types:
+                if job_type in self._lane_of:
+                    raise ValueError(f"Job type in more than one lane: {job_type}")
+                self._lane_of[job_type] = worker
+
+    @property
+    def registry(self) -> JobRegistry:
+        """Every lane's adapters, as one registry."""
+
+        return JobRegistry(
+            adapter
+            for worker in self.workers.values()
+            for adapter in worker.registry.as_mapping().values()
+        )
+
+    @property
+    def running(self) -> bool:
+        return any(worker.running for worker in self.workers.values())
+
+    def ensure_schedules(self, *, due_now: bool = False) -> int:
+        return sum(w.ensure_schedules(due_now=due_now) for w in self.workers.values())
+
+    def wake(self, job_type: str) -> None:
+        """Make the job due now and rouse only the lane that owns it."""
+
+        worker = self._lane_of.get(job_type)
+        if worker is not None:
+            worker.wake(job_type)
+
+    def run_once(self) -> bool:
+        """Run at most one due job per lane, in turn. ``False`` if none ran."""
+
+        # Every lane gets its turn: a sum, not a short-circuiting any().
+        return sum(w.run_once() for w in self.workers.values()) > 0
+
+    def start(self) -> bool:
+        return sum(w.start() for w in self.workers.values()) > 0
+
+    def shutdown(self, timeout: float = SHUTDOWN_GRACE_SECONDS) -> bool:
+        return sum(not w.shutdown(timeout) for w in self.workers.values()) == 0
+
+
 __all__ = [
+    "DuplicateSchedulerOwnerError",
     "JobAdapter",
     "JobContext",
     "JobRegistry",
     "JobWorker",
+    "Responsibility",
+    "SchedulerHandoff",
+    "SchedulerOwner",
+    "WorkerLanes",
 ]
