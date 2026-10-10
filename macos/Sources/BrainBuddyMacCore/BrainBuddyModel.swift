@@ -87,6 +87,8 @@ package final class BrainBuddyModel {
     @ObservationIgnored private let now: @Sendable () -> Date
     /// The sidecar as last read or written.
     package private(set) var localState: MacLocalState
+    package private(set) var isSaving = false
+    package private(set) var captureEditorID = UUID().uuidString
 
     package var destination: WorkspaceDestination = .list(.next)
     /// The list a capture from this screen goes to.
@@ -283,16 +285,22 @@ package final class BrainBuddyModel {
 
     package var capturePreview: CapturePreview { workspace.capturePreview(captureDraft) }
 
-    package func createTask() {
+    package func createTask() async {
+        guard !isSaving else { return }
         let captureList = selectedList
-        let preview = capturePreview
+        let authoredDraft = captureDraft
+        let preview = workspace.capturePreview(authoredDraft)
         if let message = preview.problemMessage, preview.problem != nil {
             error = message
             return
         }
         do {
-            let id = try workspace.capture(captureDraft)
+            let id = try await durableSave(editorID: captureEditorID) {
+                try await workspace.capture(authoredDraft, editorID: $0)
+            }
             error = nil
+            captureEditorID = UUID().uuidString
+            guard captureDraft == authoredDraft else { return }
             draft = ""
             waitingForDraft = ""
             let created = workspace.task(id)
@@ -305,23 +313,33 @@ package final class BrainBuddyModel {
                 captureNotice = "Saved to \(captureList.title). Search or priority filters may hide it from these results."
             }
         } catch {
-            self.error = error.message
+            self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."
         }
     }
 
     /// Quick Capture (⌃⌥⇧B): to Inbox, never touching the main window's draft or screen.
-    package func quickCaptureInbox(_ title: String) throws(GTDValidationError) {
-        try workspace.capture(CaptureDraft(text: title, list: .inbox))
+    package func quickCaptureInbox(_ title: String, editorID: String = UUID().uuidString) async throws {
+        try await durableSave(editorID: editorID) {
+            try await workspace.capture(CaptureDraft(text: title, list: .inbox), editorID: $0)
+        }
     }
 
     // MARK: Tasks
 
     /// Runs a write: on a refusal the kit's words become `error` and nothing changed.
     @discardableResult
-    private func run(_ body: () throws -> Void) -> Bool {
+    private func durableSave<Value>(editorID: String, _ body: (String) async throws -> Value) async throws -> Value {
+        guard !isSaving else { throw RustBridgeError(code: "STORE_BUSY") }
+        isSaving = true
+        defer { isSaving = false }
+        return try await body(editorID)
+    }
+
+    @discardableResult
+    private func run(editorID: String = UUID().uuidString, _ body: (String) async throws -> Void) async -> Bool {
         lastUnarchivedName = nil
         do {
-            try body()
+            try await durableSave(editorID: editorID, body)
             error = nil
             return true
         } catch let refusal as GTDValidationError {
@@ -334,26 +352,36 @@ package final class BrainBuddyModel {
     }
 
     @discardableResult
-    package func completeTask(_ id: TaskID) -> Bool { run { try workspace.completeTask(id) } }
-
-    @discardableResult
-    package func cancelTask(_ id: TaskID) -> Bool { run { try workspace.cancelTask(id) } }
-
-    @discardableResult
-    package func reopenTask(_ id: TaskID, to list: TaskList, waitingFor: String?) -> Bool {
-        run { try workspace.reopenTask(id, to: list, waitingFor: list == .waiting ? waitingFor : nil) }
+    package func completeTask(_ id: TaskID, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { try await workspace.completeTask(id, editorID: $0) }
     }
 
     @discardableResult
-    package func moveTask(_ id: TaskID, to list: TaskList, waitingFor: String? = nil) -> Bool {
+    package func cancelTask(_ id: TaskID, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { try await workspace.cancelTask(id, editorID: $0) }
+    }
+
+    @discardableResult
+    package func reopenTask(_ id: TaskID, to list: TaskList, waitingFor: String?, editorID: String = UUID().uuidString) async -> Bool {
+        let reason = list == .waiting ? waitingFor : nil
+        return await run(editorID: editorID) {
+            try await workspace.reopenTask(id, to: list, waitingFor: reason, editorID: $0)
+        }
+    }
+
+    @discardableResult
+    package func moveTask(_ id: TaskID, to list: TaskList, waitingFor: String? = nil, editorID: String = UUID().uuidString) async -> Bool {
         guard let task = workspace.task(id), task.state != list.taskState else { return false }
-        return run { try workspace.moveTask(id, to: list, waitingFor: list == .waiting ? waitingFor : nil) }
+        let reason = list == .waiting ? waitingFor : nil
+        return await run(editorID: editorID) {
+            try await workspace.moveTask(id, to: list, waitingFor: reason, editorID: $0)
+        }
     }
 
     /// The inline editor's save: the changed fields first, then the move, as one change
     /// (`Workspace.apply`, T047). Only touched fields are sent (FR-009).
     @discardableResult
-    package func saveTask(_ id: TaskID, changes: TaskChanges, moveTo list: TaskList? = nil) -> Bool {
+    package func saveTask(_ id: TaskID, changes: TaskChanges, moveTo list: TaskList? = nil, editorID: String = UUID().uuidString) async -> Bool {
         guard let task = workspace.task(id) else {
             error = GTDValidationError.taskNotFound.message
             return false
@@ -373,7 +401,7 @@ package final class BrainBuddyModel {
             )
         }
         guard !commands.isEmpty else { return true }
-        guard run({ try workspace.apply(commands) }) else { return false }
+        guard await run(editorID: editorID, { try await workspace.apply(commands, editorID: $0) }) else { return false }
         if destination == .list(.inbox), let updated = workspace.task(id), updated.state == .inbox, let projectID = updated.projectID {
             choose(.project(projectID))
         }
@@ -383,7 +411,7 @@ package final class BrainBuddyModel {
     /// The Waiting review's "Create follow-up…": a separate Next action in the same project, and the
     /// Waiting item marked reviewed in the sidecar (it returns after 7 days or a change).
     @discardableResult
-    package func createFollowUp(for id: TaskID, title: String) -> Bool {
+    package func createFollowUp(for id: TaskID, title: String, taskID: TaskID = .random(), editorID: String = UUID().uuidString) async -> Bool {
         guard let task = workspace.task(id), task.state == .waiting else {
             error = "This task is no longer in Waiting for. Refresh the review."
             return false
@@ -392,8 +420,8 @@ package final class BrainBuddyModel {
             error = "Unarchive this project before creating a follow-up in it."
             return false
         }
-        let command = GTDCommand.createTask(.init(taskID: .random(), title: title, list: .next, projectID: task.projectID))
-        guard run({ try workspace.apply([command]) }) else { return false }
+        let command = GTDCommand.createTask(.init(taskID: taskID, title: title, list: .next, projectID: task.projectID))
+        guard await run(editorID: editorID, { try await workspace.apply([command], editorID: $0) }) else { return false }
         markReviewed { $0.markWaitingReviewed(task, in: workspace.state, at: now()) }
         return true
     }
@@ -434,7 +462,7 @@ package final class BrainBuddyModel {
 
     /// "Make it a Next action…": the new title and the move, as one change.
     @discardableResult
-    package func activateSomeday(_ id: TaskID, title: String) -> Bool {
+    package func activateSomeday(_ id: TaskID, title: String, editorID: String = UUID().uuidString) async -> Bool {
         guard let task = workspace.task(id), task.state == .someday else {
             error = "This Someday task changed. Reopen the review to inspect it."
             return false
@@ -442,7 +470,9 @@ package final class BrainBuddyModel {
         var commands: [GTDCommand] = []
         if title != task.title { commands.append(.updateTask(.init(taskID: id, changes: TaskChanges(title: .set(title))))) }
         commands.append(.transitionTask(.init(taskID: id, action: .move, toList: .next)))
-        return run { try workspace.apply(commands) }
+        return await run(editorID: editorID) {
+            try await workspace.apply(commands, editorID: $0)
+        }
     }
 
     package func loadInboxClarificationTasks() -> [TaskRecord] {
@@ -452,22 +482,19 @@ package final class BrainBuddyModel {
     /// Inbox → a new project with its outcome (optional; blank is none) and the item as its first
     /// Next action, as one change.
     @discardableResult
-    package func clarifyInboxAsProject(_ id: TaskID, projectName: String, outcome: String?, firstAction: String) -> Bool {
+    package func clarifyInboxAsProject(_ id: TaskID, projectName: String, outcome: String?, firstAction: String,
+        projectID: ProjectID = .random(), editorID: String = UUID().uuidString) async -> Bool {
         guard let task = workspace.task(id), task.state == .inbox, task.projectID == nil else {
             error = "Only an unassigned Inbox item can start a new project."
             return false
         }
-        let projectID = ProjectID.random()
         let trimmedOutcome = outcome?.trimmingCharacters(in: .whitespacesAndNewlines)
         let desiredOutcome = trimmedOutcome?.isEmpty == false ? trimmedOutcome : nil
         var changes = TaskChanges(projectID: .set(projectID))
         if firstAction != task.title { changes.title = .set(firstAction) }
-        return run {
-            try workspace.apply([
-                .createProject(.init(projectID: projectID, name: projectName, desiredOutcome: desiredOutcome)),
-                .updateTask(.init(taskID: id, changes: changes)),
-                .transitionTask(.init(taskID: id, action: .move, toList: .next)),
-            ])
+        return await run(editorID: editorID) {
+            try await workspace.clarifyAsProject(id, projectName: projectName, outcome: desiredOutcome,
+                firstAction: firstAction, changes: changes, editorID: $0)
         }
     }
 
@@ -530,45 +557,53 @@ package final class BrainBuddyModel {
 
     // MARK: Projects and tags
 
-    package func createProject(_ name: String) -> ProjectID? {
+    package func createProject(_ name: String, editorID: String = UUID().uuidString) async -> ProjectID? {
         do {
-            let id = try workspace.createProject(name: name)
+            let id = try await durableSave(editorID: editorID) {
+                try await workspace.createProject(name: name, editorID: $0)
+            }
             error = nil
             return id
         } catch {
-            self.error = error.message
+            self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."
             return nil
         }
     }
 
-    package func createTag(_ name: String) -> TagID? {
+    package func createTag(_ name: String, editorID: String = UUID().uuidString) async -> TagID? {
         do {
-            let id = try workspace.createTag(name: name)
+            let id = try await durableSave(editorID: editorID) {
+                try await workspace.createTag(name: name, editorID: $0)
+            }
             error = nil
             return id
         } catch {
-            self.error = error.message
+            self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."
             return nil
         }
     }
 
     /// Rename, allowed on archived projects too (X-06 "rename archived project").
     @discardableResult
-    package func renameProject(_ id: ProjectID, to name: String) -> Bool {
+    package func renameProject(_ id: ProjectID, to name: String, editorID: String = UUID().uuidString) async -> Bool {
         guard let project = workspace.project(id) else { return false }
         if NameNormalizer.display(name) == project.name { return true }
-        let renamed = run { try workspace.renameProject(id, to: name) }
+        let renamed = await run(editorID: editorID) {
+            try await workspace.renameProject(id, to: name, editorID: $0)
+        }
         if renamed, unarchiveRefusal?.projectID == id { unarchiveRefusal = nil }
         return renamed
     }
 
     /// Sets or clears (blank) the desired outcome; the project's review mark goes with it, as before 021.
     @discardableResult
-    package func saveProjectOutcome(_ id: ProjectID, to outcome: String) -> Bool {
+    package func saveProjectOutcome(_ id: ProjectID, to outcome: String, editorID: String = UUID().uuidString) async -> Bool {
         guard let project = workspace.project(id) else { return false }
         let trimmed = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == (project.desiredOutcome ?? "") { return true }
-        guard run({ try workspace.setProjectOutcome(id, outcome: trimmed) }) else { return false }
+        guard await run(editorID: editorID, {
+            try await workspace.setProjectOutcome(id, outcome: trimmed.isEmpty ? nil : trimmed, editorID: $0)
+        }) else { return false }
         updateLocalState { $0.clearProjectReview(project) }
         return true
     }
@@ -582,12 +617,12 @@ package final class BrainBuddyModel {
     /// Archives, keeping every task's project (ADR-0020). On the open project the screen stays and
     /// becomes the archived view; the Archived section opens to show its row (X-06 "archived (just now)").
     @discardableResult
-    package func archiveProject(_ id: ProjectID) -> Bool {
+    package func archiveProject(_ id: ProjectID, editorID: String = UUID().uuidString) async -> Bool {
         guard canArchiveProject else {
             error = "Add or clear the current task draft before archiving a project."
             return false
         }
-        guard run({ try workspace.archiveProject(id) }) else { return false }
+        guard await run(editorID: editorID, { try await workspace.archiveProject(id, editorID: $0) }) else { return false }
         if destination == .project(id) { selectedList = .inbox }
         projectStateChanges += 1
         if !localState.sidebar.archivedProjectsExpanded { setArchivedProjectsExpanded(true) }
@@ -597,10 +632,12 @@ package final class BrainBuddyModel {
     /// Unarchives with every task. A name another active project has is refused at once, with
     /// "Rename…" and no Retry (X-06 "unarchive refused: name in use").
     @discardableResult
-    package func unarchiveProject(_ id: ProjectID) -> Bool {
+    package func unarchiveProject(_ id: ProjectID, editorID: String = UUID().uuidString) async -> Bool {
         guard let project = workspace.project(id) else { return false }
         do {
-            try workspace.unarchiveProject(id)
+            try await durableSave(editorID: editorID) {
+                try await workspace.unarchiveProject(id, editorID: $0)
+            }
             error = nil
             unarchiveRefusal = nil
             lastUnarchivedName = project.name
@@ -608,10 +645,10 @@ package final class BrainBuddyModel {
             updateLocalState { $0.clearProjectReview(project) }
             return true
         } catch {
-            if case .unarchiveNameInUse = error {
-                unarchiveRefusal = UnarchiveRefusal(projectID: id, message: error.message)
+            if let refusal = error as? GTDValidationError, case .unarchiveNameInUse = refusal {
+                unarchiveRefusal = UnarchiveRefusal(projectID: id, message: refusal.message)
             } else {
-                self.error = error.message
+                self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."
             }
             return false
         }
@@ -622,15 +659,15 @@ package final class BrainBuddyModel {
     }
 
     @discardableResult
-    package func renameTag(_ id: TagID, to name: String) -> Bool {
+    package func renameTag(_ id: TagID, to name: String, editorID: String = UUID().uuidString) async -> Bool {
         guard let tag = workspace.tag(id) else { return false }
         if NameNormalizer.tagDisplay(name) == tag.name { return true }
-        return run { try workspace.renameTag(id, to: name) }
+        return await run(editorID: editorID) { try await workspace.renameTag(id, to: name, editorID: $0) }
     }
 
     @discardableResult
-    package func deleteTag(_ id: TagID) -> Bool {
-        guard run({ try workspace.deleteTag(id) }) else { return false }
+    package func deleteTag(_ id: TagID, editorID: String = UUID().uuidString) async -> Bool {
+        guard await run(editorID: editorID, { try await workspace.deleteTag(id, editorID: $0) }) else { return false }
         if destination == .tag(id) { choose(.list(.next)) }
         return true
     }
@@ -642,27 +679,29 @@ package final class BrainBuddyModel {
     }
 
     @discardableResult
-    package func addSubtask(to id: TaskID, title: String) -> Bool {
-        run { _ = try workspace.addSubtask(to: id, title: title) }
+    package func addSubtask(to id: TaskID, title: String, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { _ = try await workspace.addSubtask(to: id, title: title, editorID: $0) }
     }
 
     @discardableResult
-    package func renameSubtask(_ subtaskID: SubtaskID, in id: TaskID, title: String) -> Bool {
-        run { try workspace.renameSubtask(subtaskID, in: id, to: title) }
+    package func renameSubtask(_ subtaskID: SubtaskID, in id: TaskID, title: String, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { try await workspace.renameSubtask(subtaskID, in: id, to: title, editorID: $0) }
     }
 
-    package func toggleSubtask(_ subtask: SubtaskRecord, in id: TaskID) {
-        run { try workspace.transitionSubtask(subtask.id, in: id, subtask.state == .open ? .complete : .reopen) }
-    }
-
-    @discardableResult
-    package func addComment(to id: TaskID, body: String) -> Bool {
-        run { _ = try workspace.addComment(to: id, body: body) }
+    package func toggleSubtask(_ subtask: SubtaskRecord, in id: TaskID, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) {
+            try await workspace.transitionSubtask(subtask.id, in: id, subtask.state == .open ? .complete : .reopen, editorID: $0)
+        }
     }
 
     @discardableResult
-    package func editComment(_ commentID: CommentID, in id: TaskID, body: String) -> Bool {
-        run { try workspace.editComment(commentID, in: id, body: body) }
+    package func addComment(to id: TaskID, body: String, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { _ = try await workspace.addComment(to: id, body: body, editorID: $0) }
+    }
+
+    @discardableResult
+    package func editComment(_ commentID: CommentID, in id: TaskID, body: String, editorID: String = UUID().uuidString) async -> Bool {
+        await run(editorID: editorID) { try await workspace.editComment(commentID, in: id, body: body, editorID: $0) }
     }
 
     package func isOwnComment(_ comment: CommentRecord) -> Bool { workspace.isOwnComment(comment) }

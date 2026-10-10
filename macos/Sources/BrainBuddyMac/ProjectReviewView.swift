@@ -71,7 +71,8 @@ struct ProjectReviewView: View {
         .confirmationDialog("Archive this completed project?", isPresented: $confirmingArchive) {
             Button("Archive project") {
                 guard index < items.count else { return }
-                if model.archiveProject(items[index].id) { removeCurrent() }
+                let id = items[index].id
+                Task { if await model.archiveProject(id) { removeCurrent() } }
             }
             Button("Keep project", role: .cancel) {}
         } message: {

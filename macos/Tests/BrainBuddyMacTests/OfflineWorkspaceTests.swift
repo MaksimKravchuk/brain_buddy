@@ -72,7 +72,7 @@ struct OfflineWorkspaceTests {
         _ = try app.workspace.addSubtask(to: id, title: "Find serial number")
         let opened = try #require(app.workspace.task(id))
 
-        #expect(app.model.saveTask(id, changes: TaskChanges(title: .set("Call workshop for a quote"))))
+        #expect(await app.model.saveTask(id, changes: TaskChanges(title: .set("Call workshop for a quote"))))
         await app.restart()
         let persisted = try app.task("Call workshop for a quote")
         #expect(persisted.details == "Bring the bike serial number" && persisted.state == .next)
@@ -83,7 +83,7 @@ struct OfflineWorkspaceTests {
         draft.priority = .high
         try app.workspace.updateTask(id, TaskChanges(details: .set("Serial number is on the frame")))
         let rebased = draft.rebased(onto: try #require(app.workspace.task(id)))
-        #expect(app.model.saveTask(id, changes: rebased.changes()))
+        #expect(await app.model.saveTask(id, changes: rebased.changes()))
         let current = try #require(app.workspace.task(id))
         #expect(current.title == "Call workshop for a quote", "an untouched field keeps the newer value")
         #expect(current.details == "Serial number is on the frame" && current.priority == .high)
@@ -93,7 +93,7 @@ struct OfflineWorkspaceTests {
     func quickCapture() async throws {
         let app = await App()
         app.model.draft = "Keep this unfinished Next draft"
-        try app.model.quickCaptureInbox("  Remember the idea  ")
+        try await app.model.quickCaptureInbox("  Remember the idea  ")
         #expect(app.titles(.inbox) == ["Remember the idea"])
         #expect(app.model.draft == "Keep this unfinished Next draft" && app.model.destination == .list(.next))
         await app.restart()
@@ -122,7 +122,7 @@ struct OfflineWorkspaceTests {
         let app = await App()
         #expect(app.model.syncLine.text == "On this Mac · Sign in to sync")
         app.model.draft = "Call the landlord"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.tasks.map(\.title) == ["Call the landlord"])
         await app.workspace.flush()
         #expect(MacFiles.exists(app.folder.store))
@@ -135,16 +135,16 @@ struct OfflineWorkspaceTests {
     func quickMoveToWaiting() async throws {
         let app = await App()
         let id = try app.add("Ask Sam for the draft")
-        #expect(!app.model.moveTask(id, to: .waiting, waitingFor: "  "))
+        #expect(await app.model.moveTask(id, to: .waiting, waitingFor: "  ") == false)
         #expect(app.model.error == GTDValidationError.waitingForRequired.message)
         #expect(app.workspace.task(id)?.state == .next)
-        #expect(app.model.moveTask(id, to: .waiting, waitingFor: "  Sam to reply  "))
+        #expect(await app.model.moveTask(id, to: .waiting, waitingFor: "  Sam to reply  "))
         #expect(app.workspace.task(id)?.waitingFor == "Sam to reply")
 
         await app.restart()
         app.model.choose(.list(.waiting))
         #expect(app.model.tasks.map(\.id) == [id])
-        #expect(app.model.moveTask(id, to: .next))
+        #expect(await app.model.moveTask(id, to: .next))
         let next = try #require(app.workspace.task(id))
         #expect(next.state == .next && next.waitingFor == nil && next.waitingSince == nil)
     }
@@ -158,9 +158,9 @@ struct OfflineWorkspaceTests {
 
         let review = app.model.loadWaitingReviewTasks()
         #expect(review.count == 101 && review.contains { $0.id == source })
-        #expect(!app.model.createFollowUp(for: source, title: "  "))
+        #expect(await app.model.createFollowUp(for: source, title: "  ") == false)
         #expect(app.titles(.next).isEmpty)
-        #expect(app.model.createFollowUp(for: source, title: "  Ask landlord for an update  "))
+        #expect(await app.model.createFollowUp(for: source, title: "  Ask landlord for an update  "))
         let original = try #require(app.workspace.task(source))
         #expect(original.state == .waiting && original.waitingFor == "Landlord")
         #expect(app.titles(.next) == ["Ask landlord for an update"])
@@ -171,7 +171,7 @@ struct OfflineWorkspaceTests {
         #expect(reopened.count == 100 && !reopened.contains { $0.id == source })
         #expect(app.model.sidebarCounts.next == 1)
         try app.workspace.archiveProject(project)
-        #expect(!app.model.createFollowUp(for: source, title: "Ask landlord again"))
+        #expect(await app.model.createFollowUp(for: source, title: "Ask landlord again") == false)
         #expect(app.model.error == "Unarchive this project before creating a follow-up in it.")
     }
 
@@ -182,7 +182,7 @@ struct OfflineWorkspaceTests {
         let before = try #require(app.workspace.task(source))
         await app.workspace.flush()
         let outbox = app.workspace.pendingChangeCount
-        #expect(app.model.createFollowUp(for: source, title: "Ask Sam for an update"))
+        #expect(await app.model.createFollowUp(for: source, title: "Ask Sam for an update"))
         #expect(app.workspace.pendingChangeCount == outbox + 1, "one command")
         #expect(app.workspace.task(source) == before)
         await app.restart()
@@ -195,9 +195,9 @@ struct OfflineWorkspaceTests {
         let app = await App()
         let returned = try app.add("Wait for revised draft", .waiting, waitingFor: "Sam")
         let cancelled = try app.add("Wait for obsolete quote", .waiting, waitingFor: "Vendor")
-        #expect(app.model.saveTask(returned, changes: TaskChanges(title: .set("Read Sam's revised draft")), moveTo: .next))
-        #expect(!app.model.createFollowUp(for: returned, title: "Ask Sam again"))
-        #expect(app.model.cancelTask(cancelled))
+        #expect(await app.model.saveTask(returned, changes: TaskChanges(title: .set("Read Sam's revised draft")), moveTo: .next))
+        #expect(await app.model.createFollowUp(for: returned, title: "Ask Sam again") == false)
+        #expect(await app.model.cancelTask(cancelled))
 
         await app.restart()
         #expect(app.model.loadWaitingReviewTasks().isEmpty)
@@ -250,14 +250,14 @@ struct OfflineWorkspaceTests {
         await app.workspace.flush()
         let outbox = app.workspace.pendingChangeCount
 
-        #expect(app.model.activateSomeday(source, title: "  Sketch the first garden bed  "))
+        #expect(await app.model.activateSomeday(source, title: "  Sketch the first garden bed  "))
         #expect(app.workspace.pendingChangeCount == outbox + 2, "the edit and the move, applied together")
         let activated = try #require(app.workspace.task(source))
         #expect(activated.title == "Sketch the first garden bed" && activated.state == .next)
         #expect(activated.projectID == project && activated.tagIDs == [tag])
         await app.restart()
         #expect(app.titles(.next) == ["Sketch the first garden bed"])
-        #expect(!app.model.activateSomeday(source, title: "Another action"))
+        #expect(await app.model.activateSomeday(source, title: "Another action") == false)
     }
 
     @Test("021-FR-024 a Someday item of an archived project keeps its project when it becomes a Next action")
@@ -266,7 +266,7 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "Garden")
         let source = try app.add("Redesign garden", .someday, project: project)
         try app.workspace.archiveProject(project)
-        #expect(app.model.activateSomeday(source, title: "Sketch garden beds"))
+        #expect(await app.model.activateSomeday(source, title: "Sketch garden beds"))
         await app.restart()
         let persisted = try #require(app.workspace.task(source))
         #expect(persisted.state == .next && persisted.projectID == project)
@@ -294,7 +294,7 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "Garage ready")
         for index in 0..<101 { try app.add("Unclarified item \(index)", .inbox, project: project) }
         let action = try app.add("Call Vasya about the fridge", project: project)
-        #expect(app.model.saveProjectOutcome(project, to: "  The car can be parked in the garage.  "))
+        #expect(await app.model.saveProjectOutcome(project, to: "  The car can be parked in the garage.  "))
 
         app.model.searchText = "Unclarified"
         app.model.choose(.project(project))
@@ -361,7 +361,7 @@ struct OfflineWorkspaceTests {
         let review = app.model.loadInboxClarificationTasks()
         #expect(review.count == 101 && review.contains { $0.id == source })
         #expect(
-            app.model.clarifyInboxAsProject(
+            await app.model.clarifyInboxAsProject(
                 source, projectName: "Garage ready", outcome: "The car fits inside the garage.", firstAction: "Call Vasya about the fridge"
             )
         )
@@ -382,8 +382,8 @@ struct OfflineWorkspaceTests {
         let blank = try app.add("Plan the offsite", .inbox)
         let missing = try app.add("Renew passports", .inbox)
 
-        #expect(app.model.clarifyInboxAsProject(blank, projectName: "Offsite", outcome: "  \n ", firstAction: "Pick dates"))
-        #expect(app.model.clarifyInboxAsProject(missing, projectName: "Passports", outcome: nil, firstAction: "Find old passports"))
+        #expect(await app.model.clarifyInboxAsProject(blank, projectName: "Offsite", outcome: "  \n ", firstAction: "Pick dates"))
+        #expect(await app.model.clarifyInboxAsProject(missing, projectName: "Passports", outcome: nil, firstAction: "Find old passports"))
         for (id, name) in [(blank, "Offsite"), (missing, "Passports")] {
             let task = try #require(app.workspace.task(id))
             let projectID = try #require(task.projectID)
@@ -399,7 +399,7 @@ struct OfflineWorkspaceTests {
     @Test("021-FR-028 a project chosen while clarifying is applied together with Next, Waiting for or Someday")
     func inboxClarificationWithStagedProject() async throws {
         let app = await App()
-        let project = try #require(app.model.createProject("House move"))
+        let project = try #require(await app.model.createProject("House move"))
         let next = try app.add("Call movers", .inbox)
         let waiting = try app.add("Quote from movers", .inbox)
         let someday = try app.add("Build a shed", .inbox)
@@ -407,13 +407,13 @@ struct OfflineWorkspaceTests {
 
         app.model.choose(.list(.inbox))
         #expect(app.model.loadInboxClarificationTasks().count == 4)
-        #expect(app.model.saveTask(next, changes: TaskChanges(projectID: .set(project)), moveTo: .next))
+        #expect(await app.model.saveTask(next, changes: TaskChanges(projectID: .set(project)), moveTo: .next))
         #expect(
-            app.model.saveTask(
+            await app.model.saveTask(
                 waiting, changes: TaskChanges(projectID: .set(project), waitingFor: .set("The mover")), moveTo: .waiting
             )
         )
-        #expect(app.model.saveTask(someday, changes: TaskChanges(projectID: .set(project)), moveTo: .someday))
+        #expect(await app.model.saveTask(someday, changes: TaskChanges(projectID: .set(project)), moveTo: .someday))
 
         let movedNext = try #require(app.workspace.task(next))
         #expect(movedNext.state == .next && movedNext.projectID == project)
@@ -433,7 +433,7 @@ struct OfflineWorkspaceTests {
         app.model.choose(.project(project))
         #expect(app.model.selectedList == .inbox)
         app.model.draft = "Call insurer"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == nil && app.model.destination == .project(project))
         let task = try app.task("Call insurer")
         #expect(app.model.tasks.map(\.title) == ["Call insurer"] && task.state == .inbox && task.projectID == project)
@@ -449,7 +449,7 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "House move")
         app.model.choose(.list(.inbox))
         app.model.draft = "Call insurer @\"House move\""
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == nil && app.model.destination == .project(project))
         #expect(app.model.tasks.map(\.title) == ["Call insurer"])
         #expect(try app.task("Call insurer").state == .inbox)
@@ -461,7 +461,7 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "House move")
         let id = try app.add("Call insurer", .inbox)
         app.model.choose(.list(.inbox))
-        #expect(app.model.saveTask(id, changes: TaskChanges(projectID: .set(project)), moveTo: .inbox))
+        #expect(await app.model.saveTask(id, changes: TaskChanges(projectID: .set(project)), moveTo: .inbox))
         #expect(app.model.destination == .project(project))
         #expect(app.model.tasks.map(\.title) == ["Call insurer"] && app.workspace.task(id)?.projectID == project)
     }
@@ -473,21 +473,21 @@ struct OfflineWorkspaceTests {
         let task = try app.add("Book a van", project: project)
         app.model.choose(.project(project))
         app.model.draft = "Call the landlord"
-        #expect(!app.model.archiveProject(project), "not while the capture draft holds text")
+        #expect(await app.model.archiveProject(project) == false, "not while the capture draft holds text")
         #expect(app.model.draft == "Call the landlord" && app.model.projects.map(\.id) == [project])
         app.model.draft = ""
 
-        #expect(app.model.archiveProject(project))
+        #expect(await app.model.archiveProject(project))
         #expect(app.model.destination == .project(project), "the screen stays on it, now archived (X-06 archived just now)")
         #expect(app.model.isArchivedProjectDestination && app.model.localState.sidebar.archivedProjectsExpanded)
         #expect(app.model.projects.isEmpty && app.model.archivedProjects.map(\.id) == [project])
         #expect(app.model.tasks.map(\.id) == [task], "every task keeps the project (ADR-0020)")
         #expect(app.model.projectLabel(project) == "House move · archived")
         app.model.draft = "Review moving plan"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == "Unarchive “House move” before adding a task to it.")
         app.model.choose(.list(.next))
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == nil)
         #expect(try app.task("Review moving plan").state == .next)
 
@@ -498,7 +498,7 @@ struct OfflineWorkspaceTests {
         app.model.reload()
         #expect(app.model.hasAppliedTaskFilter && app.model.tasks.isEmpty)
 
-        #expect(app.model.unarchiveProject(project))
+        #expect(await app.model.unarchiveProject(project))
         #expect(app.model.projects.map(\.id) == [project] && app.model.archivedProjects.isEmpty)
         #expect(app.transport.requests.isEmpty)
     }
@@ -511,16 +511,16 @@ struct OfflineWorkspaceTests {
         _ = try app.workspace.createProject(name: "Old flat")
         app.model.choose(.project(old))
 
-        #expect(!app.model.unarchiveProject(old))
+        #expect(await app.model.unarchiveProject(old) == false)
         #expect(app.model.unarchiveRefusal == UnarchiveRefusal(projectID: old, message: "Another active project is already called “Old flat”. Rename one first."))
         #expect(app.model.error == nil, "a refusal, not an error: no Retry")
         // The kit renames an archived project without a uniqueness check (the server's rule), so a
         // name that still clashes is saved and the next Unarchive is refused again.
-        #expect(app.model.renameProject(old, to: "old  flat") && app.model.unarchiveRefusal == nil)
-        #expect(!app.model.unarchiveProject(old) && app.model.unarchiveRefusal?.projectID == old)
-        #expect(app.model.renameProject(old, to: "Old flat (before the move)"))
+        #expect(await app.model.renameProject(old, to: "old  flat") && app.model.unarchiveRefusal == nil)
+        #expect((await app.model.unarchiveProject(old)) == false && app.model.unarchiveRefusal?.projectID == old)
+        #expect(await app.model.renameProject(old, to: "Old flat (before the move)"))
         #expect(app.model.unarchiveRefusal == nil)
-        #expect(app.model.unarchiveProject(old))
+        #expect(await app.model.unarchiveProject(old))
         #expect(app.workspace.project(old)?.state == .active)
     }
 
@@ -530,11 +530,11 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "Garden")
         #expect(app.model.canArchiveProject)
         app.model.taskEditInProgress = true
-        #expect(!app.model.canArchiveProject && !app.model.archiveProject(project))
+        #expect(!app.model.canArchiveProject && (await app.model.archiveProject(project)) == false)
         app.model.taskEditInProgress = false
         app.model.draft = "  "
         #expect(app.model.canArchiveProject, "a blank draft does not count")
-        #expect(app.model.archiveProject(project))
+        #expect(await app.model.archiveProject(project))
     }
 
     @Test("021-FR-010 deleting the tag on screen goes back to Next actions, where capture lands")
@@ -543,10 +543,10 @@ struct OfflineWorkspaceTests {
         let tag = try app.workspace.createTag(name: "home")
         app.model.choose(.tag(tag))
         #expect(app.model.selectedList == .inbox)
-        #expect(app.model.deleteTag(tag))
+        #expect(await app.model.deleteTag(tag))
         #expect(app.model.destination == .list(.next) && app.model.selectedList == .next)
         app.model.draft = "Call the landlord"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == nil && app.model.tasks.first?.title == "Call the landlord")
         #expect(app.model.tasks.first?.state == .next)
     }
@@ -557,7 +557,7 @@ struct OfflineWorkspaceTests {
         app.model.searchText = "unrelated"
         app.model.reload()
         app.model.draft = "Book a van"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.error == nil && app.model.tasks.isEmpty)
         #expect(app.model.captureNotice == "Saved to Next actions. Search or priority filters may hide it from these results.")
         #expect(app.titles(.next) == ["Book a van"])
@@ -568,13 +568,13 @@ struct OfflineWorkspaceTests {
         app.model.priorityFilter = .high
         app.model.reload()
         app.model.draft = "Get a quote"
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.tasks.isEmpty && app.model.captureNotice != nil)
         app.model.priorityFilter = .all
         app.model.reload()
         app.model.draft = "Visible task"
         #expect(app.model.captureNotice == nil)
-        app.model.createTask()
+        await app.model.createTask()
         #expect(app.model.tasks.contains { $0.title == "Visible task" } && app.model.captureNotice == nil)
     }
 
@@ -585,12 +585,12 @@ struct OfflineWorkspaceTests {
         #expect(EditorLimits.outcome == GTDLimits.outcome && EditorLimits.waitingFor == GTDLimits.waitingFor)
         let app = await App()
         let id = try app.add("Short")
-        #expect(app.model.saveTask(id, changes: TaskChanges(title: .set(String(repeating: "x", count: 500)))))
-        #expect(!app.model.saveTask(id, changes: TaskChanges(title: .set(String(repeating: "x", count: 501)))))
-        #expect(app.model.addComment(to: id, body: String(repeating: "c", count: 20_000)))
-        #expect(!app.model.addComment(to: id, body: String(repeating: "c", count: 20_001)))
-        let project = try #require(app.model.createProject("Garden"))
-        #expect(!app.model.saveProjectOutcome(project, to: String(repeating: "o", count: 1_001)))
+        #expect(await app.model.saveTask(id, changes: TaskChanges(title: .set(String(repeating: "x", count: 500)))))
+        #expect(await app.model.saveTask(id, changes: TaskChanges(title: .set(String(repeating: "x", count: 501)))) == false)
+        #expect(await app.model.addComment(to: id, body: String(repeating: "c", count: 20_000)))
+        #expect(await app.model.addComment(to: id, body: String(repeating: "c", count: 20_001)) == false)
+        let project = try #require(await app.model.createProject("Garden"))
+        #expect(await app.model.saveProjectOutcome(project, to: String(repeating: "o", count: 1_001)) == false)
         #expect(EditorLimits.fits("👍🏽", 2) && !EditorLimits.fits("👍🏽", 1), "scalars, as the server counts")
     }
 }
