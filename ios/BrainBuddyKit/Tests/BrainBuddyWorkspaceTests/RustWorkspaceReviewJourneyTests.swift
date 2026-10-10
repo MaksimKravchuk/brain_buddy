@@ -84,3 +84,37 @@ struct RustWorkspaceReviewJourneyTests {
         await workspace.closeRuntime()
     }
 }
+
+extension RustWorkspaceReviewJourneyTests {
+    @Test("The async legacy draft path waits for disk and preserves the original storage error and text")
+    func legacyDraftDurability() async throws {
+        let store = ControlledStore()
+        let workspace = await loadedWorkspace(store: store)
+        let key = DraftKey.reviewStep(session: "review-local", step: .mindSweep, item: "text")
+        await store.holdWrites()
+        var finished = false
+        let saving = Task {
+            try await workspace.saveDraft("Keep this text", for: key, editorID: "scene:legacy:form")
+            finished = true
+        }
+        await store.waitForHeldWrite()
+        #expect(!finished, "The caller cannot clear its field before the disk commit")
+        await store.releaseWrites()
+        try await saving.value
+        #expect(finished)
+        #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Keep this text")
+
+        await store.failWrites(with: .io("No space left on device"))
+        do {
+            try await workspace.saveDraft("Still authored", for: key, editorID: "scene:legacy:form")
+            Issue.record("A failed local write cannot be reported as saved")
+        } catch {
+            #expect(Workspace.saveMessage(for: error) == "No space left on device")
+        }
+        #expect(workspace.draft(for: key) == "Still authored")
+        #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Keep this text")
+        await store.failWrites(with: nil)
+        await workspace.flush()
+        #expect(try await store.base.load()?.local.formDrafts[key]?.text == "Still authored")
+    }
+}

@@ -788,6 +788,11 @@ extension Workspace {
 
     // MARK: Durable Review actions
 
+    private func finishLegacyReviewSave() async throws {
+        await flush()
+        if let storageError { throw WorkspaceError.storage(storageError) }
+    }
+
     private func reviewIntent(_ kind: String, _ fields: [String: Any] = [:]) throws -> Data {
         try JSONSerialization.data(withJSONObject: ["kind": kind, "fields": fields], options: [.sortedKeys])
     }
@@ -805,9 +810,11 @@ extension Workspace {
         editorID: String
     ) async throws -> DecisionID {
         guard isRustSelected else {
-            return try decide(type, on: taskID, title: title, waitingFor: waitingFor, reason: reason,
+            let id = try decide(type, on: taskID, title: title, waitingFor: waitingFor, reason: reason,
                 stallReason: stallReason, aiUse: aiUse, navigatorRequestID: navigatorRequestID,
                 sessionID: sessionID, formulationID: opened, expectedTask: expectedTask)
+            try await finishLegacyReviewSave()
+            return id
         }
         let shown = state
         let binding = runtimeBindingID
@@ -840,7 +847,11 @@ extension Workspace {
     }
 
     public func undoDecision(_ id: DecisionID, editorID: String) async throws {
-        guard isRustSelected else { try undoDecision(id); return }
+        guard isRustSelected else {
+            try undoDecision(id)
+            try await finishLegacyReviewSave()
+            return
+        }
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
         let frozen = state
         let request = facade.workspaceRecordRequest("review_decision", localID: id.rawValue, bindings: rustIdentityBindings)
@@ -854,7 +865,11 @@ extension Workspace {
     }
 
     public func acknowledgeExplainer(editorID: String) async throws {
-        guard isRustSelected else { try acknowledgeExplainer(); return }
+        guard isRustSelected else {
+            try acknowledgeExplainer()
+            try await finishLegacyReviewSave()
+            return
+        }
         let shown = state, zone = deviceTimeZone().identifier, instant = Self.storedPrecision(now())
         let binding = runtimeBindingID, accountless = account == nil
         _ = try await reviewSave([.review(.acknowledgeExplainer(timeZone: zone))], editorID: editorID,
@@ -871,6 +886,7 @@ extension Workspace {
     ) async throws {
         guard isRustSelected else {
             try completeReviewOnboarding(thresholdDays: thresholdDays, reviewWeekday: reviewWeekday, reviewTime: reviewTime)
+            try await finishLegacyReviewSave()
             return
         }
         try await updateReviewSettings(ReviewSettingsChange(thresholdDays: thresholdDays,
@@ -878,7 +894,11 @@ extension Workspace {
     }
 
     public func updateReviewSettings(_ change: ReviewSettingsChange, editorID: String) async throws {
-        guard isRustSelected else { try updateReviewSettings(change); return }
+        guard isRustSelected else {
+            try updateReviewSettings(change)
+            try await finishLegacyReviewSave()
+            return
+        }
         guard !change.isEmpty else { return }
         let shown = state
         let binding = runtimeBindingID
@@ -891,7 +911,11 @@ extension Workspace {
 
     @discardableResult
     public func sendDeviceTimeZoneIfChanged(editorID: String) async throws -> Bool {
-        guard isRustSelected else { return sendDeviceTimeZoneIfChanged() }
+        guard isRustSelected else {
+            let changed = sendDeviceTimeZoneIfChanged()
+            try await finishLegacyReviewSave()
+            return changed
+        }
         let current = deviceTimeZone(), observed = local.lastObservedTimeZone
         guard let observed else {
             try await saveReviewPresentation { $0.lastObservedTimeZone = current.identifier }
@@ -903,7 +927,11 @@ extension Workspace {
     }
 
     public func dismissWhileAway(shown: [ParkAck], editorID: String) async throws {
-        guard isRustSelected else { try dismissWhileAway(shown: shown); return }
+        guard isRustSelected else {
+            try dismissWhileAway(shown: shown)
+            try await finishLegacyReviewSave()
+            return
+        }
         let current = state, day = today
         let binding = runtimeBindingID
         let chunks = stride(from: 0, to: shown.count, by: ReviewLimits.parkAcknowledgements).map {
@@ -920,14 +948,22 @@ extension Workspace {
     }
 
     public func markWhileAwayShown(editorID: String) async throws {
-        guard isRustSelected else { markWhileAwayShown(); return }
+        guard isRustSelected else {
+            markWhileAwayShown()
+            try await finishLegacyReviewSave()
+            return
+        }
         guard reviewExposed else { return }
         let day = today
         try await saveReviewPresentation { $0.wywaLastShownDay = day }
     }
 
     public func closeWhileAway(editorID: String) async throws {
-        guard isRustSelected else { closeWhileAway(); return }
+        guard isRustSelected else {
+            closeWhileAway()
+            try await finishLegacyReviewSave()
+            return
+        }
         guard reviewExposed else { return }
         let day = today
         try await saveReviewPresentation { $0.linkedExtensionNotices = []; $0.wywaLastShownDay = day }
@@ -935,7 +971,11 @@ extension Workspace {
 
     @discardableResult
     public func startReview(mode: ReviewMode, entry: ReviewEntry, skipping skipSteps: [ReviewStep] = [], editorID: String) async throws -> ReviewSessionID {
-        guard isRustSelected else { return try startReview(mode: mode, entry: entry, skipping: skipSteps) }
+        guard isRustSelected else {
+            let id = try startReview(mode: mode, entry: entry, skipping: skipSteps)
+            try await finishLegacyReviewSave()
+            return id
+        }
         let shown = state
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
         let command = StartSession(sessionID: .make(makeID()), mode: mode, entry: entry, skipSteps: skipSteps)
@@ -954,6 +994,7 @@ extension Workspace {
             try recordReviewProgress(sessionID, currentStep: currentStep, step: step, stepStatus: stepStatus,
                 activeStep: activeStep, activeSeconds: activeSeconds, setAsideTaskID: setAsideTaskID,
                 inboxProcessedDelta: inboxProcessedDelta, snapshotDecisionQueue: snapshotDecisionQueue)
+            try await finishLegacyReviewSave()
             return
         }
         let shown = state
@@ -970,7 +1011,11 @@ extension Workspace {
     }
 
     public func finishReview(_ sessionID: ReviewSessionID, clearStart: ClearStart? = nil, editorID: String) async throws {
-        guard isRustSelected else { try finishReview(sessionID, clearStart: clearStart); return }
+        guard isRustSelected else {
+            try finishReview(sessionID, clearStart: clearStart)
+            try await finishLegacyReviewSave()
+            return
+        }
         let shown = state
         _ = try await reviewSave([.review(.finishSession(FinishSession(sessionID: sessionID, clearStart: clearStart)))],
             editorID: editorID,
@@ -979,7 +1024,11 @@ extension Workspace {
 
     @discardableResult
     public func bulkRelease(_ kind: BulkReleaseKindCode, taskIDs: [TaskID], sessionID: ReviewSessionID? = nil, editorID: String) async throws -> [BulkID] {
-        guard isRustSelected else { return try bulkRelease(kind, taskIDs: taskIDs, sessionID: sessionID) }
+        guard isRustSelected else {
+            let ids = try bulkRelease(kind, taskIDs: taskIDs, sessionID: sessionID)
+            try await finishLegacyReviewSave()
+            return ids
+        }
         let shown = state
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
         let commands = stride(from: 0, to: taskIDs.count, by: ReviewLimits.bulkReleaseItems).map {
@@ -994,7 +1043,11 @@ extension Workspace {
     }
 
     public func undoBulkRelease(_ ids: [BulkID], editorID: String) async throws {
-        guard isRustSelected else { try undoBulkRelease(ids); return }
+        guard isRustSelected else {
+            try undoBulkRelease(ids)
+            try await finishLegacyReviewSave()
+            return
+        }
         let shown = state
         guard !ids.isEmpty else { return }
         _ = try await reviewSave(ids.map { .undoBulkRelease($0) }, editorID: editorID,
@@ -1002,7 +1055,11 @@ extension Workspace {
     }
 
     public func grantNavigatorConsent(provider: String, consentTextVersion: Int, editorID: String) async throws {
-        guard isRustSelected else { try grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion); return }
+        guard isRustSelected else {
+            try grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion)
+            try await finishLegacyReviewSave()
+            return
+        }
         let shown = state
         let binding = runtimeBindingID
         _ = try await reviewSave([.review(.grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion))],
@@ -1012,7 +1069,11 @@ extension Workspace {
     }
 
     public func revokeNavigatorConsent(provider: String, editorID: String) async throws {
-        guard isRustSelected else { try revokeNavigatorConsent(provider: provider); return }
+        guard isRustSelected else {
+            try revokeNavigatorConsent(provider: provider)
+            try await finishLegacyReviewSave()
+            return
+        }
         let shown = state
         let binding = runtimeBindingID
         _ = try await reviewSave([.review(.revokeNavigatorConsent(provider: provider))], editorID: editorID,
@@ -1094,7 +1155,11 @@ extension Workspace {
     }
 
     public func saveDraft(_ text: String, for key: DraftKey, editorID: String) async throws {
-        guard isRustSelected else { saveDraft(text, for: key); return }
+        guard isRustSelected else {
+            saveDraft(text, for: key)
+            try await finishLegacyReviewSave()
+            return
+        }
         guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
         let binding = runtimeBindingID, instant = now()
         do {
