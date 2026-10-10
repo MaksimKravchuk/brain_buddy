@@ -129,7 +129,7 @@ enum TaskEntityLookup {
     }
 
     private static func openTasks(in result: TaskListResult) -> [TaskRecord] {
-        result.sections.flatMap(\.tasks).filter(\.isOpen)
+        result.sections.flatMap(\.tasks)
     }
 
     /// First occurrence of each task, capped at `limit`.

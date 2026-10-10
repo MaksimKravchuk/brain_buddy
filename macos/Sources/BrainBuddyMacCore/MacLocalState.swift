@@ -219,26 +219,26 @@ extension MacLocalState {
         Self.hex(HMAC<SHA256>.authenticationCode(for: Data(RecordContentForm.bytes(ofTasksIn: id, in: state)), using: key))
     }
 
-    package func waitingReviewDue(_ task: TaskRecord, stamp: String, now: Date) -> Bool {
+    package func waitingReviewDue(_ task: TaskRecord, stamp: String, recordKeys: [String], now: Date) -> Bool {
         guard task.state == .waiting else { return false }
-        guard let mark = waitingMark(for: task) else { return true }
+        guard let mark = mark(in: waitingReviews, candidates: recordKeys) else { return true }
         return mark.stamp != stamp || mark.reviewedAt.addingTimeInterval(Self.reviewValidity) <= now
     }
 
-    package func somedayReviewDue(_ task: TaskRecord, stamp: String, now: Date) -> Bool {
+    package func somedayReviewDue(_ task: TaskRecord, stamp: String, recordKeys: [String], now: Date) -> Bool {
         guard task.state == .someday else { return false }
-        guard let mark = somedayMark(for: task) else { return true }
+        guard let mark = mark(in: somedayReviews, candidates: recordKeys) else { return true }
         return mark.stamp != stamp || mark.reviewedAt.addingTimeInterval(Self.reviewValidity) <= now
     }
 
-    package func validProjectMark(for project: ProjectRecord, signature: String, now: Date) -> ProjectReviewMark? {
-        guard let mark = projectMark(for: project), mark.taskSignature == signature,
+    package func validProjectMark(for project: ProjectRecord, signature: String, recordKeys: [String], now: Date) -> ProjectReviewMark? {
+        guard let mark = mark(in: projectReviews, candidates: recordKeys), mark.taskSignature == signature,
               mark.reviewedAt.addingTimeInterval(Self.reviewValidity) > now else { return nil }
         return mark
     }
 
-    package func projectChangedSinceReview(_ project: ProjectRecord, signature: String) -> Bool {
-        guard let mark = projectMark(for: project) else { return false }
+    package func projectChangedSinceReview(_ project: ProjectRecord, signature: String, recordKeys: [String]) -> Bool {
+        guard let mark = mark(in: projectReviews, candidates: recordKeys) else { return false }
         return mark.taskSignature != signature
     }
 
@@ -267,8 +267,16 @@ extension MacLocalState {
         mark(in: projectReviews, serverID: project.serverID, clientID: project.id.rawValue)
     }
 
+    package func projectMark(recordKeys: [String]) -> ProjectReviewMark? {
+        mark(in: projectReviews, candidates: recordKeys)
+    }
+
     private func mark<Mark>(in marks: [String: Mark], serverID: String?, clientID: String) -> Mark? {
-        for key in RecordKey.candidates(serverID: serverID, clientID: clientID) {
+        mark(in: marks, candidates: RecordKey.candidates(serverID: serverID, clientID: clientID))
+    }
+
+    private func mark<Mark>(in marks: [String: Mark], candidates: [String]) -> Mark? {
+        for key in candidates {
             if let mark = marks[key] { return mark }
         }
         return nil
@@ -325,6 +333,16 @@ extension MacLocalState {
         Self.set(&somedayReviews, TaskReviewMark(reviewedAt: now, stamp: stamp), task: task)
     }
 
+    package mutating func markWaitingReviewed(_ stamp: String, recordKeys: [String], primaryRecordKey: String, at now: Date) {
+        for key in recordKeys { waitingReviews[key] = nil }
+        waitingReviews[primaryRecordKey] = TaskReviewMark(reviewedAt: now, stamp: stamp)
+    }
+
+    package mutating func markSomedayReviewed(_ stamp: String, recordKeys: [String], primaryRecordKey: String, at now: Date) {
+        for key in recordKeys { somedayReviews[key] = nil }
+        somedayReviews[primaryRecordKey] = TaskReviewMark(reviewedAt: now, stamp: stamp)
+    }
+
     package mutating func markProjectReviewed(
         _ project: ProjectRecord, decision: ProjectReviewDecision, signature: String, at now: Date
     ) {
@@ -334,10 +352,21 @@ extension MacLocalState {
         projectReviews[RecordKey.of(project)] = ProjectReviewMark(reviewedAt: now, decision: decision, taskSignature: signature)
     }
 
+    package mutating func markProjectReviewed(
+        decision: ProjectReviewDecision, signature: String, recordKeys: [String], primaryRecordKey: String, at now: Date
+    ) {
+        for key in recordKeys { projectReviews[key] = nil }
+        projectReviews[primaryRecordKey] = ProjectReviewMark(reviewedAt: now, decision: decision, taskSignature: signature)
+    }
+
     package mutating func clearProjectReview(_ project: ProjectRecord) {
         for key in RecordKey.candidates(serverID: project.serverID, clientID: project.id.rawValue) {
             projectReviews[key] = nil
         }
+    }
+
+    package mutating func clearProjectReview(recordKeys: [String]) {
+        for key in recordKeys { projectReviews[key] = nil }
     }
 
     private static func set(_ marks: inout [String: TaskReviewMark], _ mark: TaskReviewMark, task: TaskRecord) {

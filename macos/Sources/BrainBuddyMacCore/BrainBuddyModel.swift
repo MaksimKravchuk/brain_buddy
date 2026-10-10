@@ -32,8 +32,14 @@ package enum PriorityFilter: String, CaseIterable, Identifiable, Sendable {
 /// opened: a decision is refused once the tasks changed since (data-model E7.2).
 package struct ProjectReviewItem: Identifiable, Sendable {
     package let project: ProjectRecord
-    package let tasks: [TaskRecord]
+    /// One bounded project query page; counts/signature cover the complete canonical project.
+    package var tasks: [TaskRecord]
     package let signature: String
+    package let canonicalProjectID: ProjectID
+    package let recordKeys: [String]
+    package let primaryRecordKey: String
+    package let countsByState: [TaskState: Int]?
+    package var taskPageState: WorkspaceQueryPageState
     /// The last review, valid or not.
     package let lastReview: ProjectReviewMark?
     /// A review exists but the project's tasks changed since.
@@ -41,9 +47,17 @@ package struct ProjectReviewItem: Identifiable, Sendable {
 
     package var id: ProjectID { project.id }
     package var openTasks: [TaskRecord] { tasks.filter(\.isOpen) }
-    package var nextCount: Int { openTasks.filter { $0.state == .next }.count }
-    package var waitingCount: Int { openTasks.filter { $0.state == .waiting }.count }
-    package var somedayCount: Int { openTasks.filter { $0.state == .someday }.count }
+    package func count(_ state: TaskState) -> Int {
+        if let countsByState { return countsByState[state] ?? 0 }
+        return openTasks.filter { $0.state == state }.count
+    }
+    package var nextCount: Int { count(.next) }
+    package var waitingCount: Int { count(.waiting) }
+    package var somedayCount: Int { count(.someday) }
+    package var openTaskCount: Int {
+        if let countsByState { return OpenList.allCases.reduce(0) { $0 + (countsByState[$1.taskState] ?? 0) } }
+        return openTasks.count
+    }
 }
 
 /// The project header: what it is and what to do next, whatever the list filters.
@@ -112,6 +126,15 @@ package final class BrainBuddyModel {
     package private(set) var projectStateChanges = 0
     /// Invalidates SwiftUI after a prepared Workspace answer publishes.
     package private(set) var queryRevision = 0
+    package private(set) var waitingReviewStamps: [TaskID: RustWorkspaceTaskContentStamp] = [:]
+    package private(set) var somedayReviewStamps: [TaskID: RustWorkspaceTaskContentStamp] = [:]
+    package private(set) var waitingReviewStampReadiness: WorkspaceQueryReadiness = .notRequested
+    package private(set) var somedayReviewStampReadiness: WorkspaceQueryReadiness = .notRequested
+    package private(set) var waitingReviewStampGeneration: UInt64?
+    package private(set) var somedayReviewStampGeneration: UInt64?
+    package private(set) var projectReviewStamps: [ProjectID: RustWorkspaceProjectContentStamp] = [:]
+    package private(set) var projectReviewStampReadiness: WorkspaceQueryReadiness = .notRequested
+    package private(set) var projectReviewStampGeneration: UInt64?
     /// The search and priority the list shows: applied on submit, as before 021.
     package private(set) var appliedSearch: String?
     package private(set) var appliedPriority: TaskPriority?
@@ -171,8 +194,16 @@ package final class BrainBuddyModel {
     }
     package var projectReviewReadiness: WorkspaceQueryReadiness {
         _ = queryRevision
-        if workspace.isRustSelected { return .failed("EXACT_PROJECT_MEMBERSHIP_UNAVAILABLE") }
-        return workspace.projectsReadiness()
+        let readiness = workspace.projectsReadiness()
+        guard readiness == .ready, workspace.isRustSelected else { return readiness }
+        let ids = workspace.projects().map(\.project).filter { $0.state == .active }.map(\.id)
+        let stampReadiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, projects: ids)
+        if case .failed = projectReviewStampReadiness, stampReadiness == .ready { return projectReviewStampReadiness }
+        guard stampReadiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, projects: ids) else { return stampReadiness }
+        if let projectReviewStampGeneration, projectReviewStampGeneration != answer.generation {
+            return .failed("REVIEW_PAGE_CHANGED")
+        }
+        return stampReadiness
     }
     package var tagsPageState: WorkspaceQueryPageState {
         _ = queryRevision
@@ -380,7 +411,7 @@ package final class BrainBuddyModel {
             ? workspace.projects(search: term).map(\.project) : []
         let oldProjects = term.isEmpty || workspace.projectsReadiness(archived: true, search: term) == .ready
             ? workspace.projects(archived: true, search: term).map(\.project) : []
-        for project in activeProjects + oldProjects where matches(project.name) {
+        for project in activeProjects + oldProjects {
             results.append(
                 .init(
                     id: "project:\(project.id.rawValue)", title: project.name,
@@ -391,7 +422,7 @@ package final class BrainBuddyModel {
         }
         let matchingTags = term.isEmpty || workspace.tagsReadiness(search: term) == .ready
             ? workspace.tags(search: term).map(\.tag) : []
-        for tag in matchingTags where matches(tag.name) {
+        for tag in matchingTags {
             results.append(.init(id: "tag:\(tag.id.rawValue)", title: "#\(tag.name)", subtitle: "Tag", symbol: "tag", target: .tag(tag.id)))
         }
         guard !term.isEmpty else { return results }
@@ -575,8 +606,9 @@ package final class BrainBuddyModel {
     /// The Waiting review's "Create follow-up…": a separate Next action in the same project, and the
     /// Waiting item marked reviewed in the sidecar (it returns after 7 days or a change).
     @discardableResult
-    package func createFollowUp(for id: TaskID, title: String, taskID: TaskID = .random(), editorID: String = UUID().uuidString) async -> Bool {
-        guard let task = workspace.task(id), task.state == .waiting else {
+    package func createFollowUp(for id: TaskID, title: String, taskID: TaskID = .random(), editorID: String = UUID().uuidString, shownTask: TaskRecord? = nil) async -> Bool {
+        let task = workspace.isRustSelected ? shownTask : workspace.task(id)
+        guard let task, task.id == id, task.state == .waiting else {
             error = "This task is no longer in Waiting for. Refresh the review."
             return false
         }
@@ -584,9 +616,30 @@ package final class BrainBuddyModel {
             error = "Unarchive this project before creating a follow-up in it."
             return false
         }
+        let shownStamp = waitingReviewStamps[id]
+        if workspace.isRustSelected {
+            guard let shownStamp else {
+                error = "This Waiting review is no longer ready. Reopen it to inspect the task."
+                return false
+            }
+            do {
+                let current = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: [id])
+                guard let latest = Self.reviewStamp(for: id, in: current), latest.taskID == shownStamp.taskID, latest.stamp == shownStamp.stamp else {
+                    error = "This Waiting task changed. Reopen the review to inspect it."
+                    return false
+                }
+            } catch {
+                self.error = "This Waiting task could not be checked. Reopen the review to try again."
+                return false
+            }
+        }
         let command = GTDCommand.createTask(.init(taskID: taskID, title: title, list: .next, projectID: task.projectID))
         guard await run(editorID: editorID, { try await workspace.apply([command], editorID: $0) }) else { return false }
-        markReviewed { $0.markWaitingReviewed(task, in: workspace.state, at: now()) }
+        if workspace.isRustSelected, let shownStamp {
+            markReviewed { $0.markWaitingReviewed(shownStamp.stamp, recordKeys: shownStamp.recordKeys, primaryRecordKey: shownStamp.primaryRecordKey, at: now()) }
+        } else {
+            markReviewed { $0.markWaitingReviewed(task, in: workspace.state, at: now()) }
+        }
         return true
     }
 
@@ -594,34 +647,78 @@ package final class BrainBuddyModel {
 
     private var reviewNow: Date { now() }
 
-    package func loadWaitingReviewTasks() async -> [TaskRecord] {
-        guard !workspace.isRustSelected else {
-            queryRevision &+= 1
-            return []
+    private static func reviewStamp(for requestedID: TaskID, in answer: RustWorkspaceReviewContentStamps) -> RustWorkspaceTaskContentStamp? {
+        answer.tasks.values.first { stamp in
+            stamp.taskID == requestedID || stamp.recordKeys.contains("c:\(requestedID.rawValue)")
         }
+    }
+
+    package func loadWaitingReviewTasks() async -> [TaskRecord] {
+        waitingReviewStampReadiness = .loading
         await workspace.prepareList(.list(.waiting), options: ListOptions())
         guard workspace.listReadiness(.list(.waiting), options: ListOptions()) == .ready else {
+            waitingReviewStampReadiness = workspace.listReadiness(.list(.waiting), options: ListOptions())
             queryRevision &+= 1
             return []
         }
         let result = workspace.list(.list(.waiting), options: ListOptions())
         await prepareProjectDisplays(for: result)
+        let tasks = result.sections.flatMap(\.tasks)
+        if workspace.isRustSelected {
+            do {
+                let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: tasks.map(\.id))
+                let mappedStamps = tasks.compactMap { task in Self.reviewStamp(for: task.id, in: answer).map { (task.id, $0) } }
+                guard mappedStamps.count == tasks.count else {
+                    waitingReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
+                    waitingReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
+                waitingReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
+                waitingReviewStampGeneration = answer.generation
+                waitingReviewStampReadiness = .ready
+                queryRevision &+= 1
+                let reviewNow = self.reviewNow
+                return tasks.filter { task in
+                    guard let stamp = Self.reviewStamp(for: task.id, in: answer) else { return false }
+                    return localState.waitingReviewDue(task, stamp: stamp.stamp, recordKeys: stamp.recordKeys, now: reviewNow)
+                }
+            } catch {
+                waitingReviewStampReadiness = .failed((error as? RustBridgeError)?.code ?? "WORKSPACE_NOT_READY")
+                waitingReviewStamps = [:]
+                queryRevision &+= 1
+                return []
+            }
+        }
+        waitingReviewStampReadiness = .ready
         queryRevision &+= 1
         let state = self.state
-        return result.sections.flatMap(\.tasks)
-            .filter { localState.waitingReviewDue($0, in: state, now: reviewNow) }
+        return tasks.filter { localState.waitingReviewDue($0, in: state, now: reviewNow) }
     }
     package func reviewListReadiness(_ list: TaskList) -> WorkspaceQueryReadiness {
         _ = queryRevision
-        if workspace.isRustSelected && (list == .waiting || list == .someday) {
-            return .failed("CANONICAL_REVIEW_SIGNATURE_UNAVAILABLE")
-        }
         let readiness = workspace.listReadiness(.list(list), options: ListOptions())
         guard readiness == .ready else { return readiness }
         let result = workspace.list(.list(list), options: ListOptions())
         for id in Set(result.sections.flatMap(\.tasks).compactMap(\.projectID)) {
             let projectReadiness = workspace.projectDisplayReadiness(id)
             if projectReadiness != .ready { return projectReadiness }
+        }
+        if workspace.isRustSelected, list == .waiting {
+            let ids = result.sections.flatMap(\.tasks).map(\.id)
+            let readiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, tasks: ids)
+            if case .failed = waitingReviewStampReadiness, readiness == .ready { return waitingReviewStampReadiness }
+            guard readiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, tasks: ids) else { return readiness }
+            if let waitingReviewStampGeneration, waitingReviewStampGeneration != answer.generation { return .failed("REVIEW_PAGE_CHANGED") }
+            return readiness
+        }
+        if workspace.isRustSelected, list == .someday {
+            let ids = result.sections.flatMap(\.tasks).map(\.id)
+            let readiness = workspace.reviewContentStampsReadiness(key: localState.installSalt, tasks: ids)
+            if case .failed = somedayReviewStampReadiness, readiness == .ready { return somedayReviewStampReadiness }
+            guard readiness == .ready, let answer = workspace.reviewContentStamps(key: localState.installSalt, tasks: ids) else { return readiness }
+            if let somedayReviewStampGeneration, somedayReviewStampGeneration != answer.generation { return .failed("REVIEW_PAGE_CHANGED") }
+            return readiness
         }
         return .ready
     }
@@ -636,38 +733,105 @@ package final class BrainBuddyModel {
 
     @discardableResult
     package func keepWaiting(_ id: TaskID) -> Bool {
-        guard let task = workspace.task(id), task.state == .waiting else {
+        guard !workspace.isRustSelected, let task = workspace.task(id), task.state == .waiting else {
             error = "This Waiting task changed. Reopen the review to inspect it."
             return false
         }
         return markReviewed { $0.markWaitingReviewed(task, in: workspace.state, at: now()) }
     }
 
-    package func loadSomedayReviewTasks() async -> [TaskRecord] {
-        guard !workspace.isRustSelected else {
-            queryRevision &+= 1
-            return []
+    @discardableResult
+    package func keepWaiting(_ shownTask: TaskRecord) async -> Bool {
+        guard shownTask.state == .waiting, workspace.isRustSelected,
+              let shown = waitingReviewStamps[shownTask.id] else {
+            error = "This Waiting review is no longer ready. Reopen it to inspect the task."
+            return false
         }
+        do {
+            let current = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: [shownTask.id])
+            guard let latest = Self.reviewStamp(for: shownTask.id, in: current), latest.taskID == shown.taskID,
+                  latest.stamp == shown.stamp else {
+                error = "This Waiting task changed. Reopen the review to inspect it."
+                return false
+            }
+            return markReviewed { $0.markWaitingReviewed(shown.stamp, recordKeys: shown.recordKeys, primaryRecordKey: shown.primaryRecordKey, at: now()) }
+        } catch {
+            self.error = "This Waiting task could not be checked. Reopen the review to try again."
+            return false
+        }
+    }
+
+    package func loadSomedayReviewTasks() async -> [TaskRecord] {
+        somedayReviewStampReadiness = .loading
         await workspace.prepareList(.list(.someday), options: ListOptions())
         guard workspace.listReadiness(.list(.someday), options: ListOptions()) == .ready else {
+            somedayReviewStampReadiness = workspace.listReadiness(.list(.someday), options: ListOptions())
             queryRevision &+= 1
             return []
         }
         let result = workspace.list(.list(.someday), options: ListOptions())
         await prepareProjectDisplays(for: result)
+        let tasks = result.sections.flatMap(\.tasks)
+        if workspace.isRustSelected {
+            do {
+                let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: tasks.map(\.id))
+                let mappedStamps = tasks.compactMap { task in Self.reviewStamp(for: task.id, in: answer).map { (task.id, $0) } }
+                guard mappedStamps.count == tasks.count else {
+                    somedayReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
+                    somedayReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
+                somedayReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
+                somedayReviewStampGeneration = answer.generation
+                somedayReviewStampReadiness = .ready
+                queryRevision &+= 1
+                let reviewNow = self.reviewNow
+                return tasks.filter { task in
+                    guard let stamp = Self.reviewStamp(for: task.id, in: answer) else { return false }
+                    return localState.somedayReviewDue(task, stamp: stamp.stamp, recordKeys: stamp.recordKeys, now: reviewNow)
+                }
+            } catch {
+                somedayReviewStampReadiness = .failed((error as? RustBridgeError)?.code ?? "WORKSPACE_NOT_READY")
+                somedayReviewStamps = [:]
+                queryRevision &+= 1
+                return []
+            }
+        }
+        somedayReviewStampReadiness = .ready
         queryRevision &+= 1
         let state = self.state
-        return result.sections.flatMap(\.tasks)
-            .filter { localState.somedayReviewDue($0, in: state, now: reviewNow) }
+        return tasks.filter { localState.somedayReviewDue($0, in: state, now: reviewNow) }
     }
 
     @discardableResult
     package func keepSomeday(_ id: TaskID) -> Bool {
-        guard let task = workspace.task(id), task.state == .someday else {
+        guard !workspace.isRustSelected, let task = workspace.task(id), task.state == .someday else {
             error = "This Someday task changed. Reopen the review to inspect it."
             return false
         }
         return markReviewed { $0.markSomedayReviewed(task, in: workspace.state, at: now()) }
+    }
+
+    @discardableResult
+    package func keepSomeday(_ shownTask: TaskRecord) async -> Bool {
+        guard shownTask.state == .someday, workspace.isRustSelected,
+              let shown = somedayReviewStamps[shownTask.id] else {
+            error = "This Someday review is no longer ready. Reopen it to inspect the task."
+            return false
+        }
+        do {
+            let current = try await workspace.prepareReviewContentStamps(key: localState.installSalt, tasks: [shownTask.id])
+            guard let latest = Self.reviewStamp(for: shownTask.id, in: current), latest.taskID == shown.taskID,
+                  latest.stamp == shown.stamp else {
+                error = "This Someday task changed. Reopen the review to inspect it."
+                return false
+            }
+            return markReviewed { $0.markSomedayReviewed(shown.stamp, recordKeys: shown.recordKeys, primaryRecordKey: shown.primaryRecordKey, at: now()) }
+        } catch {
+            self.error = "This Someday task could not be checked. Reopen the review to try again."
+            return false
+        }
     }
 
     /// "Make it a Next action…": the new title and the move, as one change.
@@ -716,25 +880,84 @@ package final class BrainBuddyModel {
 
     /// The projects to review: active ones without a valid review mark, changed ones first.
     package func loadProjectReview() async -> [ProjectReviewItem] {
-        guard !workspace.isRustSelected else {
-            queryRevision &+= 1
-            return []
-        }
+        projectReviewStampReadiness = .loading
         await workspace.prepareProjects()
         queryRevision &+= 1
         guard workspace.projectsReadiness() == .ready else { return [] }
+        let activeProjects = projects.filter { $0.state == .active }
+        if workspace.isRustSelected {
+            do {
+                let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, projects: activeProjects.map(\.id))
+                let mappedStamps = activeProjects.compactMap { project in Self.projectStamp(for: project.id, in: answer).map { (project.id, $0) } }
+                guard mappedStamps.count == activeProjects.count else {
+                    projectReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
+                    projectReviewStamps = [:]
+                    queryRevision &+= 1
+                    return []
+                }
+                projectReviewStamps = Dictionary(uniqueKeysWithValues: mappedStamps)
+                projectReviewStampGeneration = answer.generation
+                projectReviewStampReadiness = .ready
+                queryRevision &+= 1
+                var items: [ProjectReviewItem] = []
+                for project in activeProjects {
+                    guard let stamp = Self.projectStamp(for: project.id, in: answer) else {
+                        projectReviewStampReadiness = .failed("CANONICAL_RECORD_UNAVAILABLE")
+                        continue
+                    }
+                    let mark = localState.projectMark(recordKeys: stamp.recordKeys)
+                    if localState.validProjectMark(for: project, signature: stamp.signature, recordKeys: stamp.recordKeys, now: reviewNow) != nil { continue }
+                    let options = projectReviewTaskOptions
+                    await workspace.prepareList(.project(project.id), options: options)
+                    let pageState = workspace.listPageState(.project(project.id), options: options)
+                    let taskPage = pageState.readiness == .ready
+                        ? workspace.list(.project(project.id), options: options).sections.flatMap(\.tasks) : []
+                    items.append(ProjectReviewItem(
+                        project: project, tasks: taskPage, signature: stamp.signature,
+                        canonicalProjectID: stamp.projectID, recordKeys: stamp.recordKeys, primaryRecordKey: stamp.primaryRecordKey,
+                        countsByState: stamp.countsByState, taskPageState: pageState,
+                        lastReview: mark,
+                        hasChanges: localState.projectChangedSinceReview(project, signature: stamp.signature, recordKeys: stamp.recordKeys)
+                    ))
+                }
+                return sortProjectReviewItems(items)
+            } catch {
+                projectReviewStampReadiness = .failed((error as? RustBridgeError)?.code ?? "WORKSPACE_NOT_READY")
+                projectReviewStamps = [:]
+                queryRevision &+= 1
+                return []
+            }
+        }
+        projectReviewStampReadiness = .ready
         let state = self.state
-        let now = reviewNow
-        let items = projects.compactMap { project -> ProjectReviewItem? in
-            guard localState.validProjectMark(for: project, in: state, now: now) == nil else { return nil }
+        let items = activeProjects.compactMap { project -> ProjectReviewItem? in
+            guard localState.validProjectMark(for: project, in: state, now: reviewNow) == nil else { return nil }
             let tasks = state.tasks.values.filter { $0.projectID == project.id }
                 .sorted { ($0.orderKey, $0.createdAt, $0.id) < ($1.orderKey, $1.createdAt, $1.id) }
+            let options = projectReviewTaskOptions
+            let pageState = WorkspaceQueryPageState(readiness: .ready)
             return ProjectReviewItem(
                 project: project, tasks: tasks, signature: localState.signature(ofProject: project.id, in: state),
+                canonicalProjectID: project.id, recordKeys: RecordKey.candidates(serverID: project.serverID, clientID: project.id.rawValue),
+                primaryRecordKey: RecordKey.of(project), countsByState: nil, taskPageState: pageState,
                 lastReview: localState.projectMark(for: project), hasChanges: localState.projectChangedSinceReview(project, in: state)
             )
         }
-        return items.sorted { lhs, rhs in
+        return sortProjectReviewItems(items)
+    }
+
+    private var projectReviewTaskOptions: ListOptions {
+        ListOptions(showCompleted: true, showCancelled: true)
+    }
+
+    private static func projectStamp(for requestedID: ProjectID, in answer: RustWorkspaceReviewContentStamps) -> RustWorkspaceProjectContentStamp? {
+        answer.projects.values.first { stamp in
+            stamp.projectID == requestedID || stamp.recordKeys.contains("c:\(requestedID.rawValue)")
+        }
+    }
+
+    private func sortProjectReviewItems(_ items: [ProjectReviewItem]) -> [ProjectReviewItem] {
+        items.sorted { lhs, rhs in
             if lhs.hasChanges != rhs.hasChanges { return lhs.hasChanges }
             let left = lhs.lastReview?.reviewedAt ?? .distantPast
             let right = rhs.lastReview?.reviewedAt ?? .distantPast
@@ -743,10 +966,36 @@ package final class BrainBuddyModel {
         }
     }
 
-    /// Records the decision, unless the project's tasks changed since the review opened.
+    package func projectReviewTaskPageState(_ item: ProjectReviewItem) -> WorkspaceQueryPageState {
+        guard workspace.isRustSelected else { return WorkspaceQueryPageState(readiness: .ready) }
+        return workspace.listPageState(.project(item.id), options: projectReviewTaskOptions)
+    }
+
+    package func nextProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+        await workspace.nextListPage(.project(item.id), options: projectReviewTaskOptions)
+        queryRevision &+= 1
+        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
+        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+    }
+
+    package func previousProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+        await workspace.previousListPage(.project(item.id), options: projectReviewTaskOptions)
+        queryRevision &+= 1
+        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
+        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+    }
+
+    package func reloadProjectReviewTaskPage(_ item: ProjectReviewItem) async -> [TaskRecord] {
+        await workspace.prepareList(.project(item.id), options: projectReviewTaskOptions)
+        queryRevision &+= 1
+        guard workspace.listReadiness(.project(item.id), options: projectReviewTaskOptions) == .ready else { return [] }
+        return workspace.list(.project(item.id), options: projectReviewTaskOptions).sections.flatMap(\.tasks)
+    }
+
+    /// Records a decision against the exact displayed signature. Legacy compatibility remains synchronous.
     @discardableResult
     package func markProjectReviewed(_ item: ProjectReviewItem, decision: ProjectReviewDecision) -> Bool {
-        guard let project = workspace.project(item.id), project.state == .active,
+        guard !workspace.isRustSelected, let project = workspace.project(item.id), project.state == .active,
             localState.signature(ofProject: item.id, in: state) == item.signature
         else {
             error = "Project changed elsewhere. Reopen the review to inspect its current actions."
@@ -754,6 +1003,44 @@ package final class BrainBuddyModel {
         }
         let signature = item.signature
         return markReviewed { $0.markProjectReviewed(project, decision: decision, signature: signature, at: now()) }
+    }
+
+    @discardableResult
+    private func clearNativeProjectReview(_ id: ProjectID) async {
+        do {
+            let answer = try await workspace.prepareReviewContentStamps(key: localState.installSalt, projects: [id])
+            guard let stamp = Self.projectStamp(for: id, in: answer) else { return }
+            updateLocalState { $0.clearProjectReview(recordKeys: stamp.recordKeys) }
+        } catch {
+            // The durable document write already succeeded; never fabricate sidecar identity keys.
+        }
+    }
+
+    package func markNativeProjectReviewed(_ item: ProjectReviewItem, decision: ProjectReviewDecision) async -> Bool {
+        guard workspace.isRustSelected else {
+            error = "Project review is no longer ready. Reopen it to inspect current actions."
+            return false
+        }
+        do {
+            let records = try await workspace.prepareRecords([.project(item.id)])
+            guard let project = records.projects[item.id], project.state == .active else {
+                error = "Project changed elsewhere. Reopen the review to inspect its current actions."
+                return false
+            }
+            let current = try await workspace.prepareReviewContentStamps(key: localState.installSalt, projects: [item.id])
+            guard let latest = Self.projectStamp(for: item.id, in: current), latest.projectID == item.canonicalProjectID,
+                  latest.signature == item.signature else {
+                error = "Project actions changed elsewhere. Reopen the review to inspect current actions."
+                return false
+            }
+            return markReviewed { $0.markProjectReviewed(
+                decision: decision, signature: item.signature, recordKeys: item.recordKeys,
+                primaryRecordKey: item.primaryRecordKey, at: now()
+            ) }
+        } catch {
+            self.error = "This project could not be checked. Reopen the review to try again."
+            return false
+        }
     }
 
     /// A sidecar write; marks never touch the document, so they are never an outbox operation.
@@ -767,7 +1054,7 @@ package final class BrainBuddyModel {
         let state = self.state
         do {
             localState = try localStateStore.update { local in
-                local.rekey(in: state)
+                if !workspace.isRustSelected { local.rekey(in: state) }
                 change(&local)
             }
             error = nil
@@ -827,7 +1114,8 @@ package final class BrainBuddyModel {
         guard await run(editorID: editorID, {
             try await workspace.setProjectOutcome(id, outcome: trimmed.isEmpty ? nil : trimmed, editorID: $0)
         }) else { return false }
-        updateLocalState { $0.clearProjectReview(project) }
+        if workspace.isRustSelected { await clearNativeProjectReview(id) }
+        else { updateLocalState { $0.clearProjectReview(project) } }
         return true
     }
 
@@ -865,7 +1153,8 @@ package final class BrainBuddyModel {
             unarchiveRefusal = nil
             lastUnarchivedName = project.name
             projectStateChanges += 1
-            updateLocalState { $0.clearProjectReview(project) }
+            if workspace.isRustSelected { await clearNativeProjectReview(id) }
+            else { updateLocalState { $0.clearProjectReview(project) } }
             return true
         } catch {
             if let refusal = error as? GTDValidationError, case .unarchiveNameInUse = refusal {

@@ -3006,13 +3006,6 @@ private struct WaitingReviewView: View {
             if !loaded {
                 ProgressView("Loading Waiting…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if case .failed("CANONICAL_REVIEW_SIGNATURE_UNAVAILABLE") = model.reviewListReadiness(.waiting) {
-                ContentUnavailableView(
-                    "Waiting review is unavailable",
-                    systemImage: "hourglass",
-                    description: Text("This review needs a complete task signature. Try again after the native review query is available.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.reviewListReadiness(.waiting) != .ready {
                 listQueryState(model.reviewListReadiness(.waiting), loading: "Loading Waiting…", retry: load)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3117,7 +3110,7 @@ private struct WaitingReviewView: View {
             .font(.headline)
         HStack(spacing: 10) {
             Button("Keep waiting") {
-                if model.keepWaiting(item.id) { advance() }
+                Task { if await model.keepWaiting(item) { advance() } }
             }
             .help("Review again after seven days or when this task changes")
             Button("Create follow-up…") {
@@ -3153,7 +3146,7 @@ private struct WaitingReviewView: View {
         let title = actionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         switch decision {
         case .followUp:
-            Task { if await model.createFollowUp(for: item.id, title: title, taskID: followUpTaskID, editorID: editorID) { advance() } }
+            Task { if await model.createFollowUp(for: item.id, title: title, taskID: followUpTaskID, editorID: editorID, shownTask: item) { advance() } }
             return
         case .returnToNext:
             let changes = title == item.title ? TaskChanges() : TaskChanges(title: .set(title))
@@ -3200,13 +3193,6 @@ private struct SomedayReviewView: View {
             if !loaded {
                 ProgressView("Loading Someday…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if case .failed("CANONICAL_REVIEW_SIGNATURE_UNAVAILABLE") = model.reviewListReadiness(.someday) {
-                ContentUnavailableView(
-                    "Someday review is unavailable",
-                    systemImage: "calendar.badge.checkmark",
-                    description: Text("This review needs a complete task signature. Try again after the native review query is available.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.reviewListReadiness(.someday) != .ready {
                 listQueryState(model.reviewListReadiness(.someday), loading: "Loading Someday…", retry: load)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3298,7 +3284,7 @@ private struct SomedayReviewView: View {
         Text("Is this relevant now?").font(.headline)
         HStack(spacing: 10) {
             Button("Keep in Someday") {
-                if model.keepSomeday(item.id) { advance() }
+                Task { if await model.keepSomeday(item) { advance() } }
             }
             .help("Review again after seven days or when this task changes")
             Button("Make it a Next action…") {
