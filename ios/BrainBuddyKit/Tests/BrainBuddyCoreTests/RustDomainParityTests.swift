@@ -127,7 +127,8 @@ struct RustDomainParityTests {
         #expect(ids.swift(wire) == uuid(1))
         // Deterministic: the read set and the command name a record the same way.
         #expect(ids.task(taskID(1)) == wire)
-        #expect(RustIDTable().task(taskID(1)) == wire)
+        var fresh = RustIDTable()
+        #expect(fresh.task(taskID(1)) == wire)
         #expect(ids.project(projectID(1)) == "project_" + uuid(1))
         #expect(ids.swift("project_" + uuid(1)) == uuid(1))
         // An identifier of the right shape, or of no shape the core could accept, is left alone.
