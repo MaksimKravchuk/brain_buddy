@@ -195,14 +195,16 @@ jobs:
                 # or read by its tests. Its sync tests run against the Swift
                 # fake server in ios/, so a backend change is not an input.
                 # The one outside input is the Rust bridge it links (spec 026):
-                # rust/bindings/swift is built into the kit by ios-kit/ios-app.
-                printf '%s\n' "${changed}" | grep -Eq '^(ios|rust/bindings/swift)/' || ios=false
+                # rust/bindings/swift is built into the kit by ios-kit/ios-app
+                # from the whole workspace (lockfile, toolchain pin and the
+                # crates it depends on), so any rust/ change is an input.
+                printf '%s\n' "${changed}" | grep -Eq '^(ios|rust)/' || ios=false
                 # The Mac app builds from macos/ and, from 021-mac-sync on,
                 # links the shared kit in ios/BrainBuddyKit/, so a kit change
                 # rebuilds and retests the Mac too. The rest of ios/ (the
                 # iPhone app, its widgets, the XcodeGen project) is not an
                 # input to the Mac and leaves this lane idle.
-                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust/bindings/swift)/' || macos=false
+                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust)/' || macos=false
                 # The shared Rust core builds from rust/ alone, plus the frozen
                 # sync contract its codec tests read: that schema is an input.
                 printf '%s\n' "${changed}" | grep -Eq '^(rust|specs/026-rust-core-sync/contracts)/' || rust=false
