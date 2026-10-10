@@ -1221,7 +1221,7 @@ public final class RustWorkspaceRuntime: Sendable {
     private static func boundedLegacyConversions(_ entries: [RustWorkspaceLegacyConversion]) throws -> [BridgeLegacyConversion] {
         guard entries.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS", field: "legacy_outbox") }
         let bytes = entries.reduce(0) { $0 + $1.command.payload.count + $1.command.preconditions.count
-            + $1.command.admissionTokens.count + $1.command.dependsOn.reduce(0) { $0 + $1.utf8.count }
+            + $1.command.admissionTokens.count + $1.command.dependsOn.reduce(0) { $0 + $1.utf8.count + 8 }
             + $1.entryID.utf8.count + $1.issuedAt.utf8.count + $1.command.commandID.utf8.count
             + $1.command.commandType.utf8.count + ($1.command.entityID?.utf8.count ?? 0) + 256 }
         guard bytes <= 8 * 1024 * 1024 else { throw RustBridgeError(code: "TOO_MANY_BYTES", field: "legacy_outbox") }

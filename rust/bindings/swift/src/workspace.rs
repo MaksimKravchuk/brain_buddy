@@ -360,7 +360,11 @@ fn bound_legacy_items(items: &[BridgeLegacyConversion]) -> Result<(), Failure> {
                 + i.command.command_id.len()
                 + i.command.command_type.len()
                 + i.command.entity_id.as_ref().map_or(0, String::len)
-                + i.command.depends_on.iter().map(String::len).sum::<usize>()
+                + i.command
+                    .depends_on
+                    .iter()
+                    .map(|id| id.len() + 8)
+                    .sum::<usize>()
                 + 256
         })
         .sum();

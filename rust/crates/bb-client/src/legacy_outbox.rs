@@ -892,7 +892,7 @@ fn conversion_page_in(
     let mut after_found = after_ordinal.is_none();
     let mut items = Vec::new();
     let mut last = String::new();
-    let mut bytes_used = 2;
+    let mut bytes_used = 2048;
     let mut more = false;
     let mut digest = crate::DigestStream::default();
     conversion_sources(tx, &header.workspace, |ordinal, entry, _, raw| {
@@ -902,7 +902,7 @@ fn conversion_page_in(
         }
         let item = legacy_source_item(entry).map_err(|_| conversion_invalid())?;
         let size = conversion_json(&item)?.len() + 64;
-        if size > CONVERSION_BYTES {
+        if size + 2048 > CONVERSION_BYTES {
             return Err(conversion_invalid());
         }
         if items.len() == 200 || (!items.is_empty() && bytes_used + size > CONVERSION_BYTES / 2) {
