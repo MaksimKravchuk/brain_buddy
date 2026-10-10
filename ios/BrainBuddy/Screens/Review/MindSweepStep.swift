@@ -21,6 +21,8 @@ struct MindSweepStep: View {
 
     var body: some View {
         let key = DraftKey.reviewStep(session: context.sessionID, step: .mindSweep, item: "line")
+        let submission = context.fields.submittedDrafts[key]
+        let addedIDs = added + (submission.map { added.contains($0.taskID) ? [] : [$0.taskID] } ?? [])
         ReviewStepFrame(
             title: ReviewCopy.stepTitle(.mindSweep), primaryTitle: ReviewCopy.next, onPrimary: context.advance
         ) {
@@ -38,15 +40,22 @@ struct MindSweepStep: View {
                 Text(ReviewCopy.addToInbox).frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
             }
             .buttonStyle(.bordered)
-            .disabled(line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(isSaving || submission != nil || line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if submission != nil {
+                Text("Added to Inbox. The saved draft still needs to be cleared.")
+                    .font(BBFont.meta)
+                Button("Retry draft cleanup") { retryCleanup(key) }
+                    .frame(minHeight: BBMetrics.hitTarget)
+                    .disabled(isSaving || context.fields.cleaningDrafts.contains(key))
+            }
             if let problem {
                 InlineProblemText(message: problem)
             }
-            if !added.isEmpty {
+            if !addedIDs.isEmpty {
                 Text(ReviewCopy.addedThisStep)
                     .font(BBFont.subtitle)
                     .foregroundStyle(BBColor.textSecondary)
-                ForEach(added, id: \.self) { id in
+                ForEach(addedIDs, id: \.self) { id in
                     if let task = workspace.task(id) {
                         Text(task.title)
                             .font(BBFont.body)
@@ -59,7 +68,7 @@ struct MindSweepStep: View {
     }
 
     private func add(_ key: DraftKey) {
-        guard !isSaving else { return }
+        guard !isSaving, context.fields.submittedDrafts[key] == nil else { return }
         isSaving = true
         let text = line
         let submittedEditorID = editorID
@@ -72,14 +81,34 @@ struct MindSweepStep: View {
         let id: TaskID
         do {
             id = try await workspace.capture(CaptureDraft(text: text, list: .inbox), editorID: submittedEditorID)
-            try await ReviewDraftField.submitted(key, in: workspace, fields: context.fields, editorID: submittedEditorID)
         } catch {
             problem = TaskCommandRunner.message(for: error)
             return
         }
+        // Capture returned a known durable result. Any later retry is cleanup only.
+        context.fields.recordSubmission(key, taskID: id, editorID: submittedEditorID)
         added.append(id)
         line = ""
-        editorID = UUID().uuidString
+        await cleanDraft(key)
+    }
+
+    private func retryCleanup(_ key: DraftKey) {
+        guard !isSaving, !context.fields.cleaningDrafts.contains(key) else { return }
+        isSaving = true
+        Task {
+            await cleanDraft(key)
+            isSaving = false
+        }
+    }
+
+    @MainActor private func cleanDraft(_ key: DraftKey) async {
+        problem = nil
+        do {
+            try await context.fields.cleanSubmittedDraft(key, in: workspace)
+            if context.fields.submittedDrafts[key] == nil { editorID = UUID().uuidString }
+        } catch {
+            problem = "Added to Inbox. " + TaskCommandRunner.message(for: error)
+        }
     }
 }
 

@@ -71,6 +71,9 @@ struct DecisionFormView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var text = ""
     @State private var hasLoaded = false
+    @State private var isLoadingDraft = false
+    @State private var loadGeneration = 0
+    @State private var inputRevision = 0
     @State private var restoredDraft = false
     @State private var problem: String?
     @State private var confirmsDiscard = false
@@ -117,7 +120,10 @@ struct DecisionFormView: View {
                     .foregroundStyle(BBColor.textTertiary)
             }
             Section {
-                TextField(placeholder, text: $text, axis: .vertical)
+                TextField(placeholder, text: Binding(get: { text }, set: {
+                    inputRevision += 1
+                    text = $0
+                }), axis: .vertical)
                     .lineLimit(1...8)
                     .focused($isFieldFocused)
                     .submitLabel(.done)
@@ -178,8 +184,13 @@ struct DecisionFormView: View {
             Button(ReviewCopy.keepEditing, role: .cancel) {}
             Button(ReviewCopy.discard, role: .destructive, action: discardAndLeave)
         }
-        .onAppear { Task { await load() } }
+        .task { await load() }
+        .onDisappear {
+            loadGeneration += 1
+            isLoadingDraft = false
+        }
         .onChange(of: text) { _, newValue in
+            if !isLoadingDraft, inputRevision > 0 { hasLoaded = true }
             // Every field is one line: Return (or a pasted line break) ends the edit.
             if newValue.contains(where: \.isNewline) {
                 text = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
@@ -312,21 +323,37 @@ struct DecisionFormView: View {
     private var draftKey: DraftKey { DraftKey.decisionForm(form.draftKind, task: taskID, formulation: formulationID) }
 
     @MainActor private func load() async {
-        guard !hasLoaded else { return }
+        guard !hasLoaded, !isLoadingDraft, !Task.isCancelled else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
+        isLoadingDraft = true
+        defer { if loadGeneration == generation { isLoadingDraft = false } }
         let title = shownRecord?.title ?? ""
         if let seedText {
             text = seedText
             hasLoaded = true
         } else {
+            if inputRevision == 0, text.isEmpty { text = form == .reformulate ? title : "" }
+            let loadedRevision = inputRevision
+            let loadedEditorID = editorID
             do {
-                if let draft = try await workspace.draft(for: draftKey, editorID: editorID) {
-                    text = draft
-                    restoredDraft = true
-                } else { text = form == .reformulate ? title : "" }
+                let draft = try await workspace.draft(for: draftKey, editorID: loadedEditorID)
+                guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID, !didSave else { return }
                 hasLoaded = true
+                if loadedRevision == 0, inputRevision == loadedRevision, !isSaving {
+                    if let draft {
+                        text = draft
+                        restoredDraft = true
+                    }
+                } else {
+                    await persistDraft()
+                }
             } catch {
+                guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID, !didSave else { return }
+                // An untouched editor retries the read; authored input retries
+                // persistence directly, without replacing it from storage.
+                hasLoaded = inputRevision > 0
                 problem = TaskCommandRunner.message(for: error)
-                text = form == .reformulate ? title : ""
             }
         }
         isDirty = Self.hasUnsavedText(text, form: form, title: title)
@@ -334,9 +361,8 @@ struct DecisionFormView: View {
     }
 
     @MainActor private func retryDraft() async {
-        hasLoaded = false
-        await load()
-        await persistDraft()
+        if hasLoaded { await persistDraft() }
+        else { await load() }
     }
 
     @MainActor private func persistDraft(force: Bool = false) async {

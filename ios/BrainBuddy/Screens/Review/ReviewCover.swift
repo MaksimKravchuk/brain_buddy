@@ -33,9 +33,21 @@ struct ReviewStepContext {
 @MainActor
 @Observable
 final class ReviewFields {
+    struct SubmittedDraft {
+        let taskID: TaskID
+        let editorID: String
+        let projectID: ProjectID?
+    }
+
     private(set) var dirty: Set<DraftKey> = []
     private var messages: [DraftKey: String] = [:]
     private var editorID = UUID().uuidString
+    /// Known captures awaiting only draft cleanup, retained when a step unmounts.
+    private(set) var submittedDrafts: [DraftKey: SubmittedDraft] = [:]
+    private var cleanupTasks: [DraftKey: Task<Void, Error>] = [:]
+    private var draftWriters: [DraftKey: Task<Void, Never>] = [:]
+
+    var cleaningDrafts: Set<DraftKey> { Set(cleanupTasks.keys) }
 
     init() {}
 
@@ -45,8 +57,34 @@ final class ReviewFields {
     var unsavedMessage: String { messages.values.first ?? ReviewCopy.discardTypedTitle }
 
     func set(_ key: DraftKey, dirty isDirty: Bool, message: String? = nil) {
+        guard submittedDrafts[key] == nil else { return }
         if isDirty { dirty.insert(key) } else { dirty.remove(key) }
         messages[key] = isDirty ? message : nil
+    }
+
+    func draftWriter(_ writer: Task<Void, Never>?, for key: DraftKey) {
+        draftWriters[key] = writer
+    }
+
+    func recordSubmission(_ key: DraftKey, taskID: TaskID, editorID: String, projectID: ProjectID? = nil) {
+        submittedDrafts[key] = SubmittedDraft(taskID: taskID, editorID: editorID, projectID: projectID)
+        dirty.remove(key)
+        messages[key] = nil
+    }
+
+    func cleanSubmittedDraft(_ key: DraftKey, in workspace: Workspace) async throws {
+        if let cleanup = cleanupTasks[key] { try await cleanup.value; return }
+        guard let submission = submittedDrafts[key] else { return }
+        let cleanup = Task<Void, Error> { @MainActor in
+            // Settle the existing durable writer before deletion; do not cancel
+            // accepted writes or let one restore the submitted draft afterward.
+            if let writer = draftWriters[key] { await writer.value }
+            try await workspace.discardDraft(for: key, editorID: submission.editorID)
+            submittedDrafts[key] = nil
+        }
+        cleanupTasks[key] = cleanup
+        defer { cleanupTasks[key] = nil }
+        try await cleanup.value
     }
 
     /// Discard: the drafts go with the text.
@@ -341,6 +379,23 @@ struct ReviewCover: View {
     // MARK: Moving on
 
     private func attempt(_ exit: Exit) {
+        if !fields.submittedDrafts.isEmpty {
+            guard !isSaving else { return }
+            isSaving = true
+            Task {
+                do {
+                    for key in Array(fields.submittedDrafts.keys) {
+                        try await fields.cleanSubmittedDraft(key, in: workspace)
+                    }
+                    isSaving = false
+                    attempt(exit)
+                } catch {
+                    isSaving = false
+                    problem = "Your tasks were added. " + TaskCommandRunner.message(for: error)
+                }
+            }
+            return
+        }
         if fields.hasUnsavedText {
             pendingExit = exit
             asksToDiscard = true
@@ -568,6 +623,9 @@ struct ReviewDraftField: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasLoaded = false
+    @State private var isLoadingDraft = false
+    @State private var loadGeneration = 0
+    @State private var inputRevision = 0
     @State private var problem: String?
     @State private var editorID = UUID().uuidString
     @State private var isSaving = false
@@ -591,21 +649,37 @@ struct ReviewDraftField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField(prompt, text: $text, axis: .vertical)
+            TextField(prompt, text: Binding(get: { text }, set: {
+                inputRevision += 1
+                text = $0
+            }), axis: .vertical)
                 .lineLimit(1...4)
                 .submitLabel(.done)
                 .padding(BBSpacing.s3)
                 .frame(minHeight: BBMetrics.hitTarget)
                 .bbCard()
                 .accessibilityLabel(prompt)
-            if let problem {
+                .disabled(fields.submittedDrafts[key] != nil)
+            if let problem, fields.submittedDrafts[key] == nil {
                 InlineProblemText(message: problem)
-                Button("Retry draft save") { Task { await loadDraft(); await persistDraft() } }
+                Button("Retry draft save") {
+                    Task {
+                        if hasLoaded { await persistDraft() }
+                        else { await loadDraft() }
+                    }
+                }
                     .frame(minHeight: BBMetrics.hitTarget)
             }
         }
             .task { await loadDraft() }
-            .onChange(of: text) { _, _ in report() }
+            .onDisappear {
+                loadGeneration += 1
+                isLoadingDraft = false
+            }
+            .onChange(of: text) { _, _ in
+                if !isLoadingDraft, inputRevision > 0 { hasLoaded = true }
+                report()
+            }
             .task(id: text) {
                 // Kept a moment after typing stops, and when the app leaves the foreground.
                 try? await Task.sleep(for: .milliseconds(500))
@@ -618,16 +692,41 @@ struct ReviewDraftField: View {
     }
 
     @MainActor private func loadDraft() async {
-        guard !hasLoaded else { return }
-        do {
-            if text.isEmpty, let draft = try await workspace.draft(for: key, editorID: editorID) { text = draft }
+        guard !hasLoaded, !isLoadingDraft, !Task.isCancelled else { return }
+        if fields.submittedDrafts[key] != nil {
+            text = ""
             hasLoaded = true
+            return
+        }
+        loadGeneration += 1
+        let generation = loadGeneration
+        isLoadingDraft = true
+        defer { if loadGeneration == generation { isLoadingDraft = false } }
+        let loadedRevision = inputRevision
+        let loadedEditorID = editorID
+        let initialText = text
+        do {
+            let draft = initialText.isEmpty ? try await workspace.draft(for: key, editorID: loadedEditorID) : nil
+            guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID else { return }
+            hasLoaded = true
+            guard fields.submittedDrafts[key] == nil else { return }
+            if loadedRevision == 0, inputRevision == loadedRevision, text == initialText {
+                if let draft { text = draft }
+            } else {
+                await persistDraft()
+            }
             report()
-        } catch { problem = TaskCommandRunner.message(for: error) }
+        } catch {
+            guard loadGeneration == generation, !Task.isCancelled, editorID == loadedEditorID,
+                  fields.submittedDrafts[key] == nil else { return }
+            hasLoaded = inputRevision > 0
+            problem = TaskCommandRunner.message(for: error)
+            report()
+        }
     }
 
     @MainActor private func persistDraft() async {
-        guard hasLoaded else { return }
+        guard hasLoaded, fields.submittedDrafts[key] == nil else { return }
         pendingDraftText = text
         if let draftSaveTask {
             await draftSaveTask.value
@@ -636,12 +735,14 @@ struct ReviewDraftField: View {
         isSaving = true
         let writer = Task { @MainActor in await drainDraftSaves() }
         draftSaveTask = writer
+        fields.draftWriter(writer, for: key)
         await writer.value
     }
 
     @MainActor private func drainDraftSaves() async {
         while let submittedText = pendingDraftText {
             pendingDraftText = nil
+            guard fields.submittedDrafts[key] == nil else { break }
             do {
                 if submittedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     if try await workspace.draft(for: key, editorID: editorID) != nil {
@@ -658,6 +759,7 @@ struct ReviewDraftField: View {
         // This unstructured MainActor task owns the full drain, even when the
         // debounce task that requested it is cancelled by newer typing.
         draftSaveTask = nil
+        fields.draftWriter(nil, for: key)
         isSaving = false
     }
 
@@ -666,11 +768,5 @@ struct ReviewDraftField: View {
     private func report() {
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         fields.set(key, dirty: !isBlank, message: unsavedMessage?(line))
-    }
-
-    /// The text was saved elsewhere: the draft and the unsaved flag go.
-    static func submitted(_ key: DraftKey, in workspace: Workspace, fields: ReviewFields, editorID: String) async throws {
-        try await workspace.discardDraft(for: key, editorID: editorID)
-        fields.set(key, dirty: false)
     }
 }

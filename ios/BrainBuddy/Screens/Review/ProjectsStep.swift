@@ -23,6 +23,9 @@ struct ProjectsStep: View {
         let read = WorkspaceReviewRead.projects
         let page = workspace.reviewPageState(read)
         let projects = workspace.projectsNeedingNextAction()
+        let cleanupKeys = context.fields.submittedDrafts.keys.filter {
+            context.fields.submittedDrafts[$0]?.projectID != nil
+        }.sorted { $0.rawValue < $1.rawValue }
         ReviewStepFrame(
             title: projects.isEmpty ? ReviewCopy.projectsEmpty : ReviewCopy.stepTitle(.projects),
             primaryTitle: ReviewCopy.next, onPrimary: context.advance
@@ -50,8 +53,18 @@ struct ProjectsStep: View {
                         Text(ReviewCopy.addNextAction).frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(savingProjects.contains(summary.id) || (texts[summary.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(savingProjects.contains(summary.id) || context.fields.submittedDrafts[key] != nil
+                        || (texts[summary.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+            }
+            // A committed next action can remove its project from the query.
+            // Keep its cleanup retry outside those rows, including after remount.
+            ForEach(cleanupKeys, id: \.self) { key in
+                Text("Next action added. The saved draft still needs to be cleared.")
+                    .font(BBFont.meta)
+                Button("Retry draft cleanup") { retryCleanup(key) }
+                    .frame(minHeight: BBMetrics.hitTarget)
+                    .disabled(context.fields.cleaningDrafts.contains(key))
             }
             if let problem {
                 InlineProblemText(message: problem)
@@ -75,7 +88,7 @@ struct ProjectsStep: View {
     }
 
     private func add(to id: ProjectID, key: DraftKey) {
-        guard !savingProjects.contains(id) else { return }
+        guard !savingProjects.contains(id), context.fields.submittedDrafts[key] == nil else { return }
         savingProjects.insert(id)
         let text = texts[id] ?? ""
         let submittedEditorID = editorIDs[id] ?? UUID().uuidString
@@ -86,14 +99,31 @@ struct ProjectsStep: View {
     @MainActor private func addDurably(to id: ProjectID, key: DraftKey, text: String, editorID: String) async {
         problem = nil
         defer { savingProjects.remove(id) }
+        let taskID: TaskID
         do {
-            try await workspace.capture(CaptureDraft(text: text, list: .next, contextProjectID: id), editorID: editorID)
-            try await ReviewDraftField.submitted(key, in: workspace, fields: context.fields, editorID: editorID)
+            taskID = try await workspace.capture(CaptureDraft(text: text, list: .next, contextProjectID: id), editorID: editorID)
         } catch {
             problem = TaskCommandRunner.message(for: error)
             return
         }
+        context.fields.recordSubmission(key, taskID: taskID, editorID: editorID, projectID: id)
         texts[id] = nil
-        editorIDs[id] = UUID().uuidString
+        await cleanDraft(key, projectID: id)
+    }
+
+    private func retryCleanup(_ key: DraftKey) {
+        guard !context.fields.cleaningDrafts.contains(key),
+              let id = context.fields.submittedDrafts[key]?.projectID else { return }
+        Task { await cleanDraft(key, projectID: id) }
+    }
+
+    @MainActor private func cleanDraft(_ key: DraftKey, projectID: ProjectID) async {
+        problem = nil
+        do {
+            try await context.fields.cleanSubmittedDraft(key, in: workspace)
+            if context.fields.submittedDrafts[key] == nil { editorIDs[projectID] = UUID().uuidString }
+        } catch {
+            problem = "Next action added. " + TaskCommandRunner.message(for: error)
+        }
     }
 }
