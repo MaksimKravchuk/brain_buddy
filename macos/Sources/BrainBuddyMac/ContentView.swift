@@ -2070,6 +2070,7 @@ private struct TaskInlineEditor<Extras: View>: View {
     @State private var showingProjectCreator = false
     @State private var newProjectName = ""
     @State private var newProjectEditorID = UUID().uuidString
+    @State private var isCreatingProject = false
     @State private var showProperties: Bool
 
     init(
@@ -2132,7 +2133,10 @@ private struct TaskInlineEditor<Extras: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .leading, spacing: 4) {
                     projectPicker
-                    Button("New project…") { showingProjectCreator = true }
+                    Button("New project…") {
+                        newProjectEditorID = UUID().uuidString
+                        showingProjectCreator = true
+                    }
                         .font(.caption)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2162,7 +2166,12 @@ private struct TaskInlineEditor<Extras: View>: View {
         .textFieldStyle(.roundedBorder)
         .padding(.top, 12)
         // presentation-region: project creator sheet
-        .sheet(isPresented: $showingProjectCreator) { projectCreator }
+        .sheet(isPresented: $showingProjectCreator, onDismiss: {
+            newProjectEditorID = UUID().uuidString
+            isCreatingProject = false
+        }) {
+            projectCreator.interactiveDismissDisabled(isCreatingProject)
+        }
         // presentation-region-end
         .onAppear { onEditorStateChange(isDirty, !saveDisabled) }
         .onChange(of: isDirty) { _, _ in onEditorStateChange(isDirty, !saveDisabled) }
@@ -2247,24 +2256,35 @@ private struct TaskInlineEditor<Extras: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New project").font(.title2.bold())
             TextField("Project name", text: $newProjectName)
+                .disabled(isCreatingProject)
             HStack {
                 Spacer()
-                Button("Cancel") { showingProjectCreator = false; newProjectEditorID = UUID().uuidString }
+                Button("Cancel") {
+                    showingProjectCreator = false
+                    newProjectEditorID = UUID().uuidString
+                }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(isCreatingProject)
                 Button("Add project") {
+                    guard !isCreatingProject else { return }
                     let authored = newProjectName
+                    let editorID = newProjectEditorID
+                    isCreatingProject = true
                     Task {
-                        if let id = await onCreateProject(authored, newProjectEditorID) {
-                            draft.projectID = id
-                            newProjectName = ""
-                            showingProjectCreator = false
-                            newProjectEditorID = UUID().uuidString
-                        }
+                        let projectID = await onCreateProject(authored, editorID)
+                        guard newProjectEditorID == editorID, isCreatingProject else { return }
+                        isCreatingProject = false
+                        guard showingProjectCreator, newProjectName == authored,
+                              let projectID else { return }
+                        draft.projectID = projectID
+                        newProjectName = ""
+                        showingProjectCreator = false
+                        newProjectEditorID = UUID().uuidString
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isCreatingProject || newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
