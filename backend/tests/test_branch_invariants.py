@@ -427,9 +427,9 @@ def test_privacy_retention_runs_when_voice_sweep_is_disabled(
     get_config.cache_clear()
     real_start = main_module._start_privacy_maintenance_thread
 
-    def start_privacy(container, stop_event, *, interval_seconds):
+    def start_privacy(container, stop_event, *, interval_seconds, **kwargs):
         assert interval_seconds == 1
-        return real_start(container, stop_event, interval_seconds=0.01)
+        return real_start(container, stop_event, interval_seconds=0.01, **kwargs)
 
     monkeypatch.setattr(main_module, "_start_privacy_maintenance_thread", start_privacy)
     app = create_app()
