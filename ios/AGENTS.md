@@ -54,9 +54,21 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   read of the file to the commit, so no app, widget or App Intent write can interleave, backs the
   file up with a schema manifest, stages and validates under the migration lock, and switches the
   store in one transaction or changes nothing; the legacy file is never modified. Its outbox entries and issues
-  are carried whole but not converted (`legacy_outbox`), so nothing may run on the Rust store
-  before that import has consumed them. Change the import's counts or errors in Rust, the facade
+  are carried whole, not converted. Change the import's counts or errors in Rust, the facade
   and the importer together.
+- `BrainBuddyPersistence/RustOutboxImporter` is the one caller of
+  `RustBridgeRuntime.legacyOutboxSends` / `resolveLegacyOutbox`, run after `RustStoreImporter`
+  (`bb-client` `legacy_outbox.rs`). It lists the old sends from the Rust store (not from
+  `store.json`, so it reads and locks nothing of the legacy file), asks a `LegacyReceiptLookup`
+  about each (`NoLegacyReceipts` until the transport exists) and has the core classify, in one
+  transaction: *unsent* (never left the device; still a pending intent), *accepted* / *rejected*
+  (a receipt for the send's own idempotency key says so; only proven aliases are written),
+  *awaiting* (sent, no proof, key still kept for 24 hours) and *uncertain* (an issue keeping
+  `everSent`, `issuedAt`, `attempts`, key and body). Nothing is ever sent again or rebuilt as a new
+  command, and a title, list or time never matches. The workspace must not run on the Rust store
+  until the status says `mayRun` (every entry classified, no `unsent` intent left), and the UI must
+  not say "synced" unless `fullySynced`. The `unsent` intents are the runtime's to turn into new
+  commands (use the entry's idempotency key as the command ID so a retry is idempotent).
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.

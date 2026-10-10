@@ -3,7 +3,10 @@
 //! it throws. The import itself is tested in `bb-client`; these tests are about the
 //! boundary: owned values, the `guarded` seam, error codes and no payload text.
 
-use bb_swift::{BridgeError, BridgeImportCounts, BridgeImportRequest, BridgeRuntime};
+use bb_swift::{
+    BridgeError, BridgeImportCounts, BridgeImportRequest, BridgeLegacyAlias, BridgeLegacyAnswer,
+    BridgeLegacyOutboxRequest, BridgeLegacyReceipt, BridgeRuntime,
+};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -268,4 +271,164 @@ fn apple_import_026_sc_005_a_busy_store_is_retryable() {
     assert_eq!(error, ("STORE_BUSY".to_owned(), true, None));
     lock.unlock().unwrap();
     assert!(runtime.import_legacy_store(request).is_ok());
+}
+
+// ---------------------------------------------------------------- the legacy outbox (T042)
+
+const KEY: &str = "00000000-0000-4000-8000-000000000091";
+
+fn outbox_request(
+    directory: &Path,
+    receipts: Vec<BridgeLegacyReceipt>,
+) -> BridgeLegacyOutboxRequest {
+    let import = request(directory);
+    BridgeLegacyOutboxRequest {
+        workspace_id: import.workspace_id,
+        database_path: import.database_path,
+        now: NOW.to_owned(),
+        busy_timeout_ms: 2_000,
+        receipts,
+    }
+}
+
+fn accepted_alias(entity_type: &str) -> BridgeLegacyAnswer {
+    BridgeLegacyAnswer::Accepted {
+        aliases: vec![BridgeLegacyAlias {
+            entity_type: entity_type.to_owned(),
+            old_local_id: "task-9".to_owned(),
+            server_id: "task_0123456789ab".to_owned(),
+        }],
+    }
+}
+
+/// The document with its one pending send made a send that reached the server's door twice.
+fn sent_document() -> Value {
+    let mut document = document();
+    document["outbox"][0]["attempts"] = json!(2);
+    document["outbox"][0]["everSent"] = json!(true);
+    document["outbox"][0]["firstAttemptAt"] = json!(T0);
+    document
+}
+
+fn imported(name: &str, document: &Value) -> (PathBuf, BridgeRuntime) {
+    let directory = lane(name);
+    fs::write(
+        directory.join("store.json"),
+        serde_json::to_vec(document).unwrap(),
+    )
+    .unwrap();
+    let runtime = runtime();
+    runtime
+        .import_legacy_store(request(&directory))
+        .expect("imports");
+    (directory, runtime)
+}
+
+#[test]
+fn apple_outbox_026_fr_005_a_receipt_given_by_key_settles_the_send_and_proves_the_alias() {
+    let (directory, runtime) = imported("outbox-accepted", &sent_document());
+    // The sends to look up come from the Rust store, with the key and the old body.
+    let sends = runtime
+        .legacy_outbox_sends(outbox_request(&directory, vec![]))
+        .expect("lists");
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].idempotency_key, KEY);
+    let command: Value = serde_json::from_slice(&sends[0].command).unwrap();
+    assert_eq!(command["createTask"]["_0"]["taskID"], "task-9");
+    // A Swift `UUID` prints upper case; the key still matches.
+    let receipts = vec![BridgeLegacyReceipt {
+        idempotency_key: KEY.to_uppercase(),
+        answer: accepted_alias("task"),
+    }];
+
+    let status = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, receipts.clone()))
+        .expect("classifies");
+
+    assert_eq!((status.carried, status.accepted, status.aliases), (1, 1, 1));
+    assert!(status.classified && status.may_run && status.fully_synced);
+    // Again: the verdict is final and nothing changes.
+    let again = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, receipts))
+        .expect("idempotent");
+    assert_eq!(again, status);
+    assert!(
+        runtime
+            .legacy_outbox_sends(outbox_request(&directory, vec![]))
+            .expect("lists")
+            .is_empty()
+    );
+}
+
+#[test]
+fn apple_outbox_026_fr_010_a_send_without_a_receipt_stays_an_issue_and_never_looks_synced() {
+    let (directory, runtime) = imported("outbox-uncertain", &sent_document());
+
+    let status = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, vec![]))
+        .expect("classifies");
+
+    assert_eq!((status.uncertain, status.open_issues), (1, 1));
+    assert!(status.classified && status.may_run && !status.fully_synced);
+}
+
+#[test]
+fn apple_outbox_026_fr_013_a_never_sent_intent_blocks_the_run_until_it_is_a_command() {
+    let (directory, runtime) = imported("outbox-unsent", &document());
+
+    let status = runtime
+        .resolve_legacy_outbox(outbox_request(&directory, vec![]))
+        .expect("classifies");
+
+    assert_eq!(status.unsent, 1);
+    assert!(status.classified && !status.may_run && !status.fully_synced);
+}
+
+#[test]
+fn apple_outbox_026_fr_022_failures_are_typed_and_carry_no_user_text() {
+    let directory = lane("outbox-errors");
+    let runtime = runtime();
+
+    // Nothing imported yet.
+    let error = failed(
+        runtime
+            .resolve_legacy_outbox(outbox_request(&directory, vec![]))
+            .expect_err("not imported"),
+    );
+    assert_eq!(
+        error,
+        ("LEGACY_OUTBOX_NOT_IMPORTED".to_owned(), false, None)
+    );
+
+    let (directory, runtime) = imported("outbox-errors-2", &sent_document());
+    let bad_type = vec![BridgeLegacyReceipt {
+        idempotency_key: KEY.to_owned(),
+        answer: accepted_alias("not-a-type"),
+    }];
+    let error = failed(
+        runtime
+            .resolve_legacy_outbox(outbox_request(&directory, bad_type))
+            .expect_err("bad entity type"),
+    );
+    assert_eq!(
+        error,
+        (
+            "INVALID_REQUEST".to_owned(),
+            false,
+            Some("entity_type".to_owned())
+        )
+    );
+    let mut bad_now = outbox_request(&directory, vec![]);
+    bad_now.now = SENTINEL.to_owned();
+    let error = failed(runtime.resolve_legacy_outbox(bad_now).expect_err("bad now"));
+    assert_eq!(error.0, "INVALID_REQUEST");
+    assert!(!format!("{error:?}").contains(SENTINEL));
+
+    runtime.close();
+    let error = failed(
+        runtime
+            .resolve_legacy_outbox(outbox_request(&directory, vec![]))
+            .expect_err("closed"),
+    );
+    assert_eq!(error.0, "WORKSPACE_CLOSED");
 }
