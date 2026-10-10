@@ -197,11 +197,17 @@ impl From<ReplayError> for ApplyError {
 /// The request generations a response was issued under (sync-v1 section 7). A
 /// response is applied only while they are still the store's: the check runs
 /// inside the applying transaction, so a restart or reset cannot slip between.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `server_generation` is the generation of the base the request was issued
+/// against (`None` before any base). A restore that activates another
+/// generation therefore fences a request issued before it, even when no
+/// reset happened in between.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fence {
     pub workspace_generation: u64,
     pub session_generation: u64,
     pub local_sync_generation: u64,
+    pub server_generation: Option<String>,
 }
 
 /// The fences as they stand now: what a request captures when it is sent.
@@ -210,20 +216,25 @@ pub struct Fence {
 ///
 /// [`StoreError`] when the store cannot be read.
 pub fn capture_fence(store: &mut Store) -> Result<Fence, StoreError> {
-    store.read(|tx| {
-        tx.query_row(
-            "SELECT workspace_generation, session_generation, local_sync_generation
-             FROM sync_meta",
-            [],
-            |row| {
-                Ok(Fence {
-                    workspace_generation: unsigned(row.get(0)?),
-                    session_generation: unsigned(row.get(1)?),
-                    local_sync_generation: unsigned(row.get(2)?),
-                })
-            },
-        )
-    })
+    store.read(fence_in)
+}
+
+/// The fences as they stand inside a transaction.
+pub(crate) fn fence_in(tx: &Transaction<'_>) -> rusqlite::Result<Fence> {
+    tx.query_row(
+        "SELECT workspace_generation, session_generation, local_sync_generation,
+                server_generation
+         FROM sync_meta",
+        [],
+        |row| {
+            Ok(Fence {
+                workspace_generation: unsigned(row.get(0)?),
+                session_generation: unsigned(row.get(1)?),
+                local_sync_generation: unsigned(row.get(2)?),
+                server_generation: row.get(3)?,
+            })
+        },
+    )
 }
 
 pub(crate) fn unsigned(value: i64) -> u64 {
@@ -290,11 +301,12 @@ pub(crate) fn read_base(tx: &Transaction<'_>, fence: &Fence) -> Result<Base, App
     )?;
     let (workspace_id, scope_id, server_generation, cursor, watermark, generations) = row;
     let [workspace, session, local_sync] = generations.map(unsigned);
-    if (workspace, session, local_sync)
+    if (workspace, session, local_sync, &server_generation)
         != (
             fence.workspace_generation,
             fence.session_generation,
             fence.local_sync_generation,
+            &fence.server_generation,
         )
     {
         return Err(ApplyError::Stale);
