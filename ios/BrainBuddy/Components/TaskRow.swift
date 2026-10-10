@@ -332,6 +332,8 @@ private struct CompletionControl: View {
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isCompleting = false
+    @State private var isSavingCompletion = false
+    @State private var completionEditorID = UUID().uuidString
 
     var body: some View {
         if task.isOpen {
@@ -351,18 +353,19 @@ private struct CompletionControl: View {
     }
 
     private func complete() {
-        guard !isCompleting else { return }
-        isCompleting = true
+        guard !isCompleting, !isSavingCompletion else { return }
+        isSavingCompletion = true
         let task = task
         let workspace = workspace
         let toasts = toasts
         let pause: Duration = reduceMotion ? .milliseconds(150) : .milliseconds(300)
         Task {
             try? await Task.sleep(for: pause)
-            let completed = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts)
+            let completed = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts, editorID: completionEditorID)
             if completed {
                 withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) { isCompleting = true }
-            } else { isCompleting = false }
+            }
+            isSavingCompletion = false
         }
     }
 }

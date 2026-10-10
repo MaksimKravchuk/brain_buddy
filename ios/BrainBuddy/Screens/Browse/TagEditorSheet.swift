@@ -22,6 +22,8 @@ struct TagEditorSheet: View {
     private let mode: Mode
     @State private var name: String
     @State private var message: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isNameFocused: Bool
 
     init(mode: Mode) {
@@ -45,7 +47,7 @@ struct TagEditorSheet: View {
                             .autocorrectionDisabled()
                             .submitLabel(.done)
                             .focused($isNameFocused)
-                            .onSubmit { Task { await save() } }
+                            .onSubmit { save() }
                     }
                 } footer: {
                     if let message {
@@ -55,6 +57,7 @@ struct TagEditorSheet: View {
                     }
                 }
             }
+            .disabled(isSaving)
             .navigationTitle(isCreating ? "New tag" : "Rename tag")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,8 +65,8 @@ struct TagEditorSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreating ? "Add" : "Save") { Task { await save() } }
-                        .disabled(cleanedName.isEmpty)
+                    Button(isCreating ? "Add" : "Save") { save() }
+                        .disabled(cleanedName.isEmpty || isSaving)
                 }
             }
             .onChange(of: name) { message = nil }
@@ -84,23 +87,27 @@ struct TagEditorSheet: View {
         return value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    @MainActor private func save() async {
+    private func save() {
+        guard !isSaving else { return }
         let newName = cleanedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
-        let editorID = UUID().uuidString
+        isSaving = true
+        let submittedEditorID = editorID
+        Task { await saveDurably(name: newName, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(name newName: String, editorID: String) async {
+        defer { isSaving = false }
         do {
             switch mode {
             case .create:
                 try await workspace.createTag(name: newName, editorID: editorID)
             case .rename(let original):
-                guard let current = workspace.tag(original.id) else {
-                    throw GTDValidationError.tagNotFound
-                }
-                if newName != current.name {
-                    try await workspace.renameTag(current.id, to: newName, editorID: editorID)
+                if newName != original.name {
+                    try await workspace.renameTag(original.id, to: newName, editorID: editorID)
                 }
             }
             dismiss()

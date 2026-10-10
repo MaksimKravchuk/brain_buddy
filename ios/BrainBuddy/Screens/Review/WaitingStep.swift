@@ -75,6 +75,8 @@ struct ReviewItemStep: View {
     @State private var asking: ReviewItemChoice?
     @State private var text = ""
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(
         context: ReviewStepContext, step: ReviewStep, list: TaskState, emptyTitle: String,
@@ -131,31 +133,42 @@ struct ReviewItemStep: View {
     }
 
     private func decide(_ type: DecisionType, _ task: TaskRecord, title: String?) {
+        guard !isSaving else { return }
+        isSaving = true
+        let expectedTask = shown
+        let submittedEditorID = editorID
+        Task { await decideDurably(type, task, title: title, expectedTask: expectedTask, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func decideDurably(_ type: DecisionType, _ task: TaskRecord, title: String?, expectedTask: ShownTask?, editorID: String) async {
+        defer { isSaving = false }
         let typed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let decisionID: DecisionID
         do {
-            decisionID = try workspace.decide(
-                type, on: task.id, title: typed, sessionID: context.sessionID, expectedTask: shown
+            decisionID = try await workspace.decide(
+                type, on: task.id, title: typed, sessionID: context.sessionID, expectedTask: expectedTask,
+                editorID: editorID
             )
         } catch {
-            switch error {
+            guard let validation = error as? GTDValidationError else {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
+            switch validation {
             case .formulationChanged, .taskNotFound:
                 problem = ReviewCopy.stale
-                shown = workspace.task(task.id).map { workspace.shownTask(of: $0) }
             case .projectArchived where type == .followUp:
                 problem = ReviewCopy.archivedFollowUp
             default:
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
             return
         }
         problem = nil
         asking = nil
         text = ""
-        ReviewDraftField.submitted(
-            .reviewStep(session: context.sessionID, step: step, item: task.id.rawValue), in: workspace,
-            fields: context.fields
-        )
+        context.fields.set(.reviewStep(session: context.sessionID, step: step, item: task.id.rawValue), dirty: false)
+        editorID = UUID().uuidString
         DecisionUndoToast.show(
             decisionID, decision: type, title: typed ?? task.title, taskID: task.id, workspace: workspace, toasts: toasts
         )

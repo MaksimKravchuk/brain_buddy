@@ -28,6 +28,8 @@ struct ProjectEditorSheet: View {
     @State private var color: String?
     @State private var hasPreparedColor: Bool
     @State private var message: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isNameFocused: Bool
 
     init(mode: Mode, onCreate: ((ProjectID) -> Void)? = nil) {
@@ -51,6 +53,7 @@ struct ProjectEditorSheet: View {
                 nameSection
                 colorSection
             }
+            .disabled(isSaving)
             .navigationTitle(isCreating ? "New project" : "Edit project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -58,8 +61,8 @@ struct ProjectEditorSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isCreating ? "Add" : "Save") { Task { await save() } }
-                        .disabled(trimmedName.isEmpty)
+                    Button(isCreating ? "Add" : "Save") { save() }
+                        .disabled(trimmedName.isEmpty || isSaving)
                 }
             }
             .onChange(of: name) { message = nil }
@@ -80,7 +83,7 @@ struct ProjectEditorSheet: View {
             TextField("Project name", text: $name)
                 .submitLabel(.done)
                 .focused($isNameFocused)
-                .onSubmit { Task { await save() } }
+                .onSubmit { save() }
         } footer: {
             if let message {
                 EditorValidationMessage(text: message)
@@ -148,27 +151,32 @@ struct ProjectEditorSheet: View {
         }
     }
 
-    @MainActor private func save() async {
+    private func save() {
+        guard !isSaving else { return }
         let newName = trimmedName
         guard !newName.isEmpty else {
             message = GTDValidationError.emptyName.message
             return
         }
-        let editorID = UUID().uuidString
+        isSaving = true
+        let submittedColor = color
+        let submittedEditorID = editorID
+        Task { await saveDurably(name: newName, color: submittedColor, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func saveDurably(name newName: String, color submittedColor: String?, editorID: String) async {
+        defer { isSaving = false }
         do {
             switch mode {
             case .create:
-                let id = try await workspace.createProject(name: newName, color: color, editorID: editorID)
+                let id = try await workspace.createProject(name: newName, color: submittedColor, editorID: editorID)
                 onCreate?(id)
             case .edit(let original):
-                guard let current = workspace.project(original.id) else {
-                    throw GTDValidationError.projectNotFound
+                if newName != original.name {
+                    try await workspace.renameProject(original.id, to: newName, editorID: editorID)
                 }
-                if newName != current.name {
-                    try await workspace.renameProject(current.id, to: newName, editorID: editorID)
-                }
-                if !ProjectColorNames.same(color, current.color) {
-                    try await workspace.setProjectColor(current.id, color: color, editorID: editorID)
+                if !ProjectColorNames.same(submittedColor, original.color) {
+                    try await workspace.setProjectColor(original.id, color: submittedColor, editorID: editorID)
                 }
             }
             dismiss()

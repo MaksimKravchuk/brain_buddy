@@ -15,6 +15,7 @@ struct MoveSheet: View {
     @State private var waitingFor = ""
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
 
     /// `initialList` preselects a destination, for example Waiting for chosen
     /// from a context menu.
@@ -86,10 +87,10 @@ struct MoveSheet: View {
         isSaving = true
         defer { isSaving = false }
         do {
-            try await TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            try await TaskListMover.move(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts, editorID: editorID)
             dismiss()
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }

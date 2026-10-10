@@ -10,6 +10,8 @@ struct TagsScreen: View {
     @State private var editorMode: TagEditorSheet.Mode?
     @State private var deleteCandidate: TagRecord?
     @State private var isConfirmingDelete = false
+    @State private var isSavingAction = false
+    @State private var editorIDs: [TagID: String] = [:]
 
     init() {}
 
@@ -108,14 +110,24 @@ struct TagsScreen: View {
     }
 
     @MainActor private func deleteDurably(_ tag: TagRecord) async {
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
         let name = tag.name
         let deleted = await TaskCommandRunner.run(toasts) {
-            try await workspace.deleteTag(tag.id, editorID: UUID().uuidString)
+            try await workspace.deleteTag(tag.id, editorID: editorIDs[tag.id] ?? newEditorID(for: tag.id))
         }
         if deleted {
+            editorIDs[tag.id] = UUID().uuidString
             deleteCandidate = nil
             toasts.show("Deleted #\(name)", actionTitle: nil, action: nil)
         }
+    }
+
+    private func newEditorID(for id: TagID) -> String {
+        let value = UUID().uuidString
+        editorIDs[id] = value
+        return value
     }
 }
 

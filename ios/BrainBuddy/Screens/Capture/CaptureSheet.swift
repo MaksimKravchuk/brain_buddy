@@ -41,6 +41,8 @@ struct CaptureSheet: View {
     /// Set once Add has added the task and the sheet is closing, so a second
     /// tap during the dismissal can't add it again.
     @State private var isClosing = false
+    @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
     /// The measured height of the panel's content; zero until first layout.
     @State private var contentHeight: CGFloat = 0
     /// The sheet's height until the content has been measured.
@@ -183,6 +185,7 @@ struct CaptureSheet: View {
                     .captureFieldStyle()
             }
         }
+        .disabled(isSaving)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, BBSpacing.s4)
     }
@@ -292,7 +295,7 @@ struct CaptureSheet: View {
     }
 
     private func addButton(_ preview: CapturePreview) -> some View {
-        let isEnabled = preview.isValid && !isClosing
+        let isEnabled = preview.isValid && !isClosing && !isSaving
         return Button {
             add(keepOpen: false)
         } label: {
@@ -326,27 +329,32 @@ struct CaptureSheet: View {
     }
 
     private func add(keepOpen: Bool) {
-        Task { await addDurably(keepOpen: keepOpen) }
+        guard !isSaving, !isClosing else { return }
+        isSaving = true
+        let submittedDraft = draft
+        let submittedEditorID = editorID
+        Task { await addDurably(keepOpen: keepOpen, draft: submittedDraft, editorID: submittedEditorID) }
     }
 
-    @MainActor private func addDurably(keepOpen: Bool) async {
+    @MainActor private func addDurably(keepOpen: Bool, draft submittedDraft: CaptureDraft, editorID submittedEditorID: String) async {
         // A second tap while the sheet is closing would add the same task again.
-        guard !isClosing else { return }
-        let preview = workspace.capturePreview(draft)
+        defer { isSaving = false }
+        let preview = workspace.capturePreview(submittedDraft)
         if let problem = preview.problem {
             errorMessage = problem.message
             return
         }
         let destination = destinationName(preview)
         do {
-            try await workspace.capture(draft, editorID: UUID().uuidString)
+            try await workspace.capture(submittedDraft, editorID: submittedEditorID)
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
             return
         }
         let message = "Added to \(destination)"
         if keepOpen {
             draft = Self.freshDraft(list: draft.list, context: context)
+            editorID = UUID().uuidString
             showsNotes = false
             confirmation = message
             AccessibilityNotification.Announcement(message).post()

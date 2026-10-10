@@ -16,6 +16,8 @@ struct MindSweepStep: View {
     @State private var line = ""
     @State private var added: [TaskID] = []
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     var body: some View {
         let key = DraftKey.reviewStep(session: context.sessionID, step: .mindSweep, item: "line")
@@ -29,7 +31,7 @@ struct MindSweepStep: View {
             ReviewDraftField(
                 prompt: ReviewCopy.addToInbox, key: key, text: $line, fields: context.fields,
                 unsavedMessage: ReviewCopy.notInInboxYet
-            )
+            ).disabled(isSaving)
             Button {
                 add(key)
             } label: {
@@ -57,17 +59,27 @@ struct MindSweepStep: View {
     }
 
     private func add(_ key: DraftKey) {
+        guard !isSaving else { return }
+        isSaving = true
+        let text = line
+        let submittedEditorID = editorID
+        Task { await addDurably(key, text: text, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func addDurably(_ key: DraftKey, text: String, editorID submittedEditorID: String) async {
+        defer { isSaving = false }
         problem = nil
         let id: TaskID
         do {
-            id = try workspace.capture(CaptureDraft(text: line, list: .inbox))
+            id = try await workspace.capture(CaptureDraft(text: text, list: .inbox), editorID: submittedEditorID)
+            try await ReviewDraftField.submitted(key, in: workspace, fields: context.fields, editorID: submittedEditorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         added.append(id)
         line = ""
-        ReviewDraftField.submitted(key, in: workspace, fields: context.fields)
+        editorID = UUID().uuidString
     }
 }
 

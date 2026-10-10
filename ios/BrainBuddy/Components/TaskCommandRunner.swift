@@ -60,14 +60,15 @@ enum TaskCommandRunner {
     /// Motion), a success haptic and a "Completed" toast whose Undo reopens
     /// it into the list it came from (Waiting for keeps its note).
     @discardableResult
-    static func complete(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
+    static func complete(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter, editorID: String = UUID().uuidString) async -> Bool {
         guard let origin = task.openList else { return false }
         let waitingFor = task.waitingFor
-        let completed = await run(toasts) { try await workspace.completeTask(task.id, editorID: UUID().uuidString) }
+        let undoEditorID = UUID().uuidString
+        let completed = await run(toasts) { try await workspace.completeTask(task.id, editorID: editorID) }
         guard completed else { return false }
         Haptics.success()
         toasts.show("Completed", actionTitle: "Undo") {
-            reopen(task.id, into: origin, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            Task { _ = await run(toasts) { try await workspace.reopenTask(task.id, to: origin, waitingFor: origin == .waiting ? waitingFor : nil, editorID: undoEditorID) } }
         }
         return true
     }
@@ -75,14 +76,15 @@ enum TaskCommandRunner {
     /// Cancels an open task ("won't do"), with an Undo that reopens it into
     /// the list it came from.
     @discardableResult
-    static func cancel(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
+    static func cancel(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter, editorID: String = UUID().uuidString) async -> Bool {
         guard let origin = task.openList else { return false }
         let waitingFor = task.waitingFor
-        let cancelled = await run(toasts) { try await workspace.cancelTask(task.id, editorID: UUID().uuidString) }
+        let undoEditorID = UUID().uuidString
+        let cancelled = await run(toasts) { try await workspace.cancelTask(task.id, editorID: editorID) }
         guard cancelled else { return false }
         Haptics.light()
         toasts.show("Cancelled", actionTitle: "Undo") {
-            Task { _ = await reopen(task.id, into: origin, waitingFor: waitingFor, workspace: workspace, toasts: toasts) }
+            Task { _ = await run(toasts) { try await workspace.reopenTask(task.id, to: origin, waitingFor: origin == .waiting ? waitingFor : nil, editorID: undoEditorID) } }
         }
         return true
     }
@@ -91,15 +93,17 @@ enum TaskCommandRunner {
     /// back. Moving to Waiting for needs `waitingFor`.
     @discardableResult
     static func move(
-        _ task: TaskRecord, to list: OpenList, waitingFor: String? = nil, workspace: Workspace, toasts: ToastCenter
+        _ task: TaskRecord, to list: OpenList, waitingFor: String? = nil, workspace: Workspace, toasts: ToastCenter,
+        editorID: String = UUID().uuidString
     ) async -> Bool {
         guard let origin = task.openList else { return false }
         let originalWaitingFor = task.waitingFor
-        let moved = await run(toasts) { try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString) }
+        let undoEditorID = UUID().uuidString
+        let moved = await run(toasts) { try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: editorID) }
         guard moved else { return false }
         Haptics.light()
         toasts.show("Moved to \(list.title)", actionTitle: "Undo") {
-            Task { _ = await run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originalWaitingFor : nil, editorID: UUID().uuidString) } }
+            Task { _ = await run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originalWaitingFor : nil, editorID: undoEditorID) } }
         }
         return true
     }
@@ -108,11 +112,11 @@ enum TaskCommandRunner {
     /// (Next actions when that is unknown, as `ReopenSheet` preselects; Inbox
     /// when it was Waiting for and the note is gone), and says where it went.
     @discardableResult
-    static func reopen(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter) async -> Bool {
+    static func reopen(_ task: TaskRecord, workspace: Workspace, toasts: ToastCenter, editorID: String = UUID().uuidString) async -> Bool {
         let preferred = task.lastOpenList ?? .next
         let note = task.waitingFor?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let list: OpenList = preferred == .waiting && note.isEmpty ? .inbox : preferred
-        let reopened = await reopen(task.id, into: list, waitingFor: note, workspace: workspace, toasts: toasts)
+        let reopened = await reopen(task.id, into: list, waitingFor: note, workspace: workspace, toasts: toasts, editorID: editorID)
         if reopened { toasts.show("Reopened in \(list.title)") }
         return reopened
     }
@@ -121,17 +125,13 @@ enum TaskCommandRunner {
     /// Waiting for.
     @discardableResult
     static func reopen(
-        _ taskID: TaskID, into list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
+        _ taskID: TaskID, into list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter,
+        editorID: String = UUID().uuidString
     ) async -> Bool {
-        await run(toasts) { try await workspace.reopenTask(taskID, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString) }
+        await run(toasts) { try await workspace.reopenTask(taskID, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: editorID) }
     }
 
     // MARK: Private
-
-    /// Rows leaving or arriving: the brand curve at 250 ms, none with Reduce Motion.
-    private static var transitionAnimation: Animation? {
-        BBMotion.animation(.settle, reduceMotion: UIAccessibility.isReduceMotionEnabled)
-    }
 
     private static func report(_ error: any Error, toasts: ToastCenter) {
         Haptics.warning()

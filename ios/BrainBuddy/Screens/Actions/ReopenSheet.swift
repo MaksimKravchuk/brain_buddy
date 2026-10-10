@@ -15,6 +15,7 @@ struct ReopenSheet: View {
     @State private var waitingFor: String
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
 
     init(task: TaskRecord, initialList: OpenList? = nil) {
         self.task = task
@@ -79,7 +80,7 @@ struct ReopenSheet: View {
         isSaving = true
         defer { isSaving = false }
         do {
-            try await TaskListMover.reopen(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts)
+            try await TaskListMover.reopen(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts, editorID: editorID)
             dismiss()
         } catch {
             errorMessage = error.message

@@ -25,6 +25,8 @@ private struct TaskActionsModifier: ViewModifier {
     @State private var isMoving = false
     @State private var moveInitialList: OpenList?
     @State private var isReopening = false
+    @State private var isPerforming = false
+    @State private var actionEditorID = UUID().uuidString
 
     func body(content: Content) -> some View {
         content
@@ -72,7 +74,15 @@ private struct TaskActionsModifier: ViewModifier {
     /// (or no list yet, from the swipe) opens the sheet.
     private func requestMove(_ list: OpenList?) {
         if let list, list != .waiting {
-            Task { _ = await TaskCommandRunner.run(toasts) { try await TaskListMover.move(task, to: list, waitingFor: nil, workspace: workspace, toasts: toasts) } }
+            guard !isPerforming else { return }
+            isPerforming = true
+            Task {
+                let succeeded = await TaskCommandRunner.run(toasts) {
+                    try await TaskListMover.move(task, to: list, waitingFor: nil, workspace: workspace, toasts: toasts, editorID: actionEditorID)
+                }
+                isPerforming = false
+                if succeeded { actionEditorID = UUID().uuidString }
+            }
         } else {
             moveInitialList = list
             isMoving = true
@@ -84,11 +94,23 @@ private struct TaskActionsModifier: ViewModifier {
     }
 
     private func complete() {
-        Task { _ = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts) }
+        guard !isPerforming else { return }
+        isPerforming = true
+        Task {
+            let succeeded = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts, editorID: actionEditorID)
+            isPerforming = false
+            if succeeded { actionEditorID = UUID().uuidString }
+        }
     }
 
     private func cancel() {
-        Task { _ = await TaskCommandRunner.cancel(task, workspace: workspace, toasts: toasts) }
+        guard !isPerforming else { return }
+        isPerforming = true
+        Task {
+            let succeeded = await TaskCommandRunner.cancel(task, workspace: workspace, toasts: toasts, editorID: actionEditorID)
+            isPerforming = false
+            if succeeded { actionEditorID = UUID().uuidString }
+        }
     }
 }
 
@@ -136,30 +158,34 @@ enum TaskListMover {
     /// Moves an open task to another open list and offers Undo back to the
     /// list it came from (restoring its waiting note when that was Waiting for).
     static func move(
-        _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
+        _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter,
+        editorID: String = UUID().uuidString
     ) async throws {
-        guard let origin = task.openList else { throw .taskNotOpen }
+        guard let origin = task.openList else { throw GTDValidationError.taskNotOpen }
         let originWaitingFor = task.waitingFor
-        try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString)
+        let undoEditorID = UUID().uuidString
+        try await workspace.moveTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: editorID)
         toasts.show("Moved to \(list.title)", actionTitle: "Undo") {
-            Task { _ = await TaskCommandRunner.run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originWaitingFor : nil, editorID: UUID().uuidString) } }
+            Task { _ = await TaskCommandRunner.run(toasts) { try await workspace.moveTask(task.id, to: origin, waitingFor: origin == .waiting ? originWaitingFor : nil, editorID: undoEditorID) } }
         }
     }
 
     /// Reopens a completed or cancelled task into `list` and offers Undo,
     /// which completes or cancels it again.
     static func reopen(
-        _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter
+        _ task: TaskRecord, to list: OpenList, waitingFor: String?, workspace: Workspace, toasts: ToastCenter,
+        editorID: String = UUID().uuidString
     ) async throws {
-        guard task.state.isTerminal else { throw .taskNotClosed }
+        guard task.state.isTerminal else { throw GTDValidationError.taskNotClosed }
         let wasCancelled = task.state == .cancelled
-        try await workspace.reopenTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: UUID().uuidString)
+        let undoEditorID = UUID().uuidString
+        try await workspace.reopenTask(task.id, to: list, waitingFor: list == .waiting ? waitingFor : nil, editorID: editorID)
         toasts.show("Reopened in \(list.title)", actionTitle: "Undo") {
             Task { _ = await TaskCommandRunner.run(toasts) {
                 if wasCancelled {
-                    try await workspace.cancelTask(task.id, editorID: UUID().uuidString)
+                    try await workspace.cancelTask(task.id, editorID: undoEditorID)
                 } else {
-                    try await workspace.completeTask(task.id, editorID: UUID().uuidString)
+                    try await workspace.completeTask(task.id, editorID: undoEditorID)
                 }
             } }
         }

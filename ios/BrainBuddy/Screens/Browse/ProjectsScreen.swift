@@ -30,6 +30,8 @@ private struct ActiveProjectsList: View {
     @State private var editorMode: ProjectEditorSheet.Mode?
     @State private var archiveCandidate: ProjectRecord?
     @State private var isConfirmingArchive = false
+    @State private var isSavingAction = false
+    @State private var editorIDs: [ProjectID: String] = [:]
 
     var body: some View {
         let summaries = workspace.projects()
@@ -140,11 +142,15 @@ private struct ActiveProjectsList: View {
     }
 
     @MainActor private func archiveDurably(_ project: ProjectRecord) async {
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
         let name = project.name
         let archived = await TaskCommandRunner.run(toasts) {
-            try await workspace.archiveProject(project.id, editorID: UUID().uuidString)
+            try await workspace.archiveProject(project.id, editorID: editorIDs[project.id] ?? newEditorID(for: project.id))
         }
         if archived {
+            editorIDs[project.id] = UUID().uuidString
             archiveCandidate = nil
             toasts.show("Archived “\(name)”", actionTitle: nil, action: nil)
         }
@@ -155,11 +161,21 @@ private struct ActiveProjectsList: View {
     }
 
     @MainActor private func setColorDurably(_ color: String?, of project: ProjectRecord) async {
-        let current = workspace.project(project.id)?.color
+        guard !isSavingAction else { return }
+        isSavingAction = true
+        defer { isSavingAction = false }
+        let current = project.color
         guard !ProjectColorNames.same(color, current) else { return }
-        _ = await TaskCommandRunner.run(toasts) {
-            try await workspace.setProjectColor(project.id, color: color, editorID: UUID().uuidString)
+        let saved = await TaskCommandRunner.run(toasts) {
+            try await workspace.setProjectColor(project.id, color: color, editorID: editorIDs[project.id] ?? newEditorID(for: project.id))
         }
+        if saved { editorIDs[project.id] = UUID().uuidString }
+    }
+
+    private func newEditorID(for id: ProjectID) -> String {
+        let value = UUID().uuidString
+        editorIDs[id] = value
+        return value
     }
 }
 

@@ -72,6 +72,8 @@ struct DecisionCardSheet: View {
     @State private var problem: String?
     @State private var isStale = false
     @State private var hasDecided = false
+    @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
 
     init(taskID: TaskID, review: ReviewDecisionContext? = nil) {
         self.taskID = taskID
@@ -179,7 +181,7 @@ struct DecisionCardSheet: View {
     // MARK: Deciding
 
     private func choose(_ decision: DecisionType) {
-        problem = nil
+        guard !isSaving else { return }
         if let form = DecisionForm(decision) {
             path.append(form)
             return
@@ -188,21 +190,35 @@ struct DecisionCardSheet: View {
             isStale = true
             return
         }
+        isSaving = true
+        let openedAtTap = opened
+        let submittedStallReason = stallReason
+        let submittedEditorID = editorID
+        Task { await chooseDurably(decision, task: task, opened: openedAtTap, stallReason: submittedStallReason, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func chooseDurably(_ decision: DecisionType, task: TaskRecord, opened: OpenedWording?, stallReason: StallReason?, editorID: String) async {
+        defer { isSaving = false }
+        problem = nil
         let title = task.title
         do {
-            let decisionID = try workspace.decide(
+            let decisionID = try await workspace.decide(
                 decision, on: taskID, stallReason: stallReason, sessionID: review?.sessionID,
-                formulationID: opened?.formulationID, expectedTask: opened?.stamp
+                formulationID: opened?.formulationID, expectedTask: opened?.stamp, editorID: editorID
             )
             finish(decisionID, decision: decision, title: title)
         } catch {
-            switch error {
+            guard let validation = error as? GTDValidationError else {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
+            switch validation {
             case .formulationChanged, .taskNotFound:
                 isStale = true
             case .decisionNotAllowed:
                 problem = ReviewCopy.decisionNotAllowed
             default:
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
         }
     }
@@ -241,15 +257,17 @@ enum DecisionUndoToast {
         let announcement = ReviewCopy.decisionAnnouncement(decision)
         // "Released to Someday. Undo available." → "Released to Someday".
         let reverts = String(announcement.prefix { $0 != "." })
+        let editorID = UUID().uuidString
         toasts.showUndo(
             ReviewCopy.decisionToast(decision, title: title), announcement: announcement,
             undoAccessibilityLabel: "\(ReviewCopy.undo): \(reverts) \(title)"
         ) {
-            do {
-                try workspace.undoDecision(decisionID)
-            } catch {
+            Task {
+                do { try await workspace.undoDecision(decisionID, editorID: editorID) }
+                catch {
                 let current = workspace.task(taskID)
                 toasts.show(ReviewCopy.undoUnavailable(title: current?.title ?? title, list: current?.openList))
+                }
             }
         }
     }

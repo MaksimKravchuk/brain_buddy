@@ -67,10 +67,14 @@ struct InboxClarifier: View {
     @State private var isMakingProject = false
     /// True for a moment after each decision (the double-tap guard).
     @State private var isSettling = false
+    @State private var isSaving = false
+    @State private var commandEditorIDs: [TaskID: String] = [:]
     @AccessibilityFocusState private var isTitleFocused: Bool
 
     private let fixedQueue: [TaskID]?
-    private let onProcessed: ((Int) -> Void)?
+    private let onProcessed: ((Int) async -> Void)?
+    private let progressProblem: String?
+    private let onRetryProgress: (() -> Void)?
     private let onDone: (() -> Void)?
     private let onClose: () -> Void
     /// Process inbox puts Skip in its toolbar. The weekly review's Inbox step
@@ -82,11 +86,14 @@ struct InboxClarifier: View {
     private static let settleDelay: Duration = .milliseconds(300)
 
     init(
-        queue: [TaskID]? = nil, onProcessed: ((Int) -> Void)? = nil, onDone: (() -> Void)? = nil,
-        showsSkipInToolbar: Bool = true, onClose: @escaping () -> Void
+        queue: [TaskID]? = nil, onProcessed: ((Int) async -> Void)? = nil, onDone: (() -> Void)? = nil,
+        showsSkipInToolbar: Bool = true, progressProblem: String? = nil, onRetryProgress: (() -> Void)? = nil,
+        onClose: @escaping () -> Void
     ) {
         fixedQueue = queue
         self.onProcessed = onProcessed
+        self.progressProblem = progressProblem
+        self.onRetryProgress = onRetryProgress
         self.onDone = onDone
         self.showsSkipInToolbar = showsSkipInToolbar
         self.onClose = onClose
@@ -107,6 +114,7 @@ struct InboxClarifier: View {
                     }
             }
         }
+        .disabled(isSaving)
         .onAppear(perform: takeSnapshot)
         .onChange(of: hasSnapshot && current == nil) { _, isDone in
             if isDone { onDone?() }
@@ -134,8 +142,8 @@ struct InboxClarifier: View {
         }
         .sheet(isPresented: $isMakingProject) {
             if let item = current {
-                MakeProjectSheet(taskTitle: item.task.title) { name, outcome, firstAction in
-                    try makeProject(of: item, name: name, outcome: outcome, firstAction: firstAction)
+                MakeProjectSheet(taskTitle: item.task.title) { name, outcome, firstAction, editorID in
+                    try await makeProject(of: item, name: name, outcome: outcome, firstAction: firstAction, editorID: editorID)
                 }
             }
         }
@@ -228,6 +236,17 @@ struct InboxClarifier: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                 }
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if let progressProblem {
+                VStack(alignment: .leading, spacing: 6) {
+                    InlineProblemText(message: progressProblem)
+                    Button("Retry progress save") { onRetryProgress?() }
+                        .frame(minHeight: 44)
+                }
+                .padding(.horizontal, 16)
+                .background(.regularMaterial)
             }
         }
     }
@@ -448,42 +467,55 @@ struct InboxClarifier: View {
     }
 
     private func apply(_ action: ClarifyAction, to item: InboxItem) {
-        guard !isSettling else { return }
+        guard !isSettling, !isSaving else { return }
+        isSaving = true
         let original = item.task
         let changes = stage.changes(for: original)
-        let succeeded = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
+        let editorID = commandEditorIDs[original.id] ?? UUID().uuidString
+        commandEditorIDs[original.id] = editorID
+        Task { await applyDurably(action, to: item, original: original, changes: changes, editorID: editorID) }
+    }
+
+    @MainActor private func applyDurably(
+        _ action: ClarifyAction, to item: InboxItem, original: TaskRecord, changes: TaskChanges, editorID: String
+    ) async {
+        defer { isSaving = false }
+        let succeeded = await TaskCommandRunner.run(toasts) {
             if changes.hasChanges {
-                try workspace.updateTask(original.id, changes)
+                try await workspace.updateTask(original.id, changes, editorID: editorID)
             }
             switch action {
             case .move(let list):
-                try workspace.moveTask(original.id, to: list)
+                try await workspace.moveTask(original.id, to: list, editorID: editorID)
             case .waiting(let note):
-                try workspace.moveTask(original.id, to: .waiting, waitingFor: note)
+                try await workspace.moveTask(original.id, to: .waiting, waitingFor: note, editorID: editorID)
             case .complete:
-                try workspace.completeTask(original.id)
+                try await workspace.completeTask(original.id, editorID: editorID)
             case .cancel:
-                try workspace.cancelTask(original.id)
+                try await workspace.cancelTask(original.id, editorID: editorID)
             }
         }
         guard succeeded else { return }
-        onProcessed?(1)
+        commandEditorIDs[original.id] = UUID().uuidString
+        await onProcessed?(1)
         beginSettling()
         moveCursor(to: item.index + 1)
+        let undoEditorID = UUID().uuidString
         toasts.show(action.confirmation, actionTitle: "Undo") {
-            undo(original: original, changes: changes, index: item.index)
+            undo(original: original, changes: changes, index: item.index, editorID: undoEditorID)
         }
     }
 
     /// "Make it a project": a new project whose first Next action is the item,
     /// titled `firstAction`, with the staged tags and due date. Throws, and
     /// changes nothing, when the workspace refuses it (the sheet shows why).
-    private func makeProject(of item: InboxItem, name: String, outcome: String?, firstAction: String) throws {
+    @MainActor private func makeProject(of item: InboxItem, name: String, outcome: String?, firstAction: String, editorID: String) async throws {
         let original = item.task
         var staged = stage.changes(for: original)
         staged.projectID = .unchanged
-        let projectID = try workspace.clarifyAsProject(
-            original.id, projectName: name, outcome: outcome, firstAction: firstAction, changes: staged
+        let projectID = try await workspace.clarifyAsProject(
+            original.id, projectName: name, outcome: outcome, firstAction: firstAction, changes: staged,
+            editorID: editorID
         )
         var changes = staged
         changes.projectID = .set(projectID)
@@ -491,8 +523,9 @@ struct InboxClarifier: View {
         onProcessed?(1)
         beginSettling()
         moveCursor(to: item.index + 1)
+        let undoEditorID = UUID().uuidString
         toasts.show("Project created", actionTitle: "Undo") {
-            undo(original: original, changes: changes, index: item.index, createdProject: projectID)
+            undo(original: original, changes: changes, index: item.index, createdProject: projectID, editorID: undoEditorID)
         }
     }
 
@@ -507,13 +540,20 @@ struct InboxClarifier: View {
     /// and due date — and back in front of the cursor if this screen is still
     /// open. A project made from the item is archived again unless it has
     /// other open tasks by now.
-    private func undo(original: TaskRecord, changes: TaskChanges, index: Int, createdProject: ProjectID? = nil) {
-        let restored = TaskCommandRunner.run(toasts) { () throws(GTDValidationError) in
-            guard let latest = workspace.task(original.id) else { throw .taskNotFound }
+    private func undo(original: TaskRecord, changes: TaskChanges, index: Int, createdProject: ProjectID? = nil, editorID: String) {
+        Task { await undoDurably(original: original, changes: changes, index: index, createdProject: createdProject, editorID: editorID) }
+    }
+
+    @MainActor private func undoDurably(original: TaskRecord, changes: TaskChanges, index: Int, createdProject: ProjectID?, editorID: String) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let restored = await TaskCommandRunner.run(toasts) {
+            guard let latest = workspace.task(original.id) else { throw GTDValidationError.taskNotFound }
             if latest.state.isTerminal {
-                try workspace.reopenTask(original.id, to: .inbox)
+                try await workspace.reopenTask(original.id, to: .inbox, editorID: editorID)
             } else if latest.state != .inbox {
-                try workspace.moveTask(original.id, to: .inbox)
+                try await workspace.moveTask(original.id, to: .inbox, editorID: editorID)
             }
             let revert = TaskChanges(
                 title: changes.title.isChanged ? .set(original.title) : .unchanged,
@@ -522,16 +562,16 @@ struct InboxClarifier: View {
                 dueDate: changes.dueDate.isChanged ? setOrClear(original.dueDate) : .unchanged
             )
             if revert.hasChanges {
-                try workspace.updateTask(original.id, revert)
+                try await workspace.updateTask(original.id, revert, editorID: editorID)
             }
             if let createdProject,
                 workspace.projects().first(where: { $0.id == createdProject })?.openTaskCount == 0
             {
-                try workspace.archiveProject(createdProject)
+                try await workspace.archiveProject(createdProject, editorID: editorID)
             }
         }
         guard restored else { return }
-        onProcessed?(-1)
+        await onProcessed?(-1)
         skipped.removeAll { $0 == original.id }
         moveCursor(to: min(cursor, index))
     }
@@ -710,20 +750,22 @@ private struct StagedTagsSheet: View {
 /// becomes in Next actions.
 private struct MakeProjectSheet: View {
     let taskTitle: String
-    let onCreate: (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
+    let onCreate: (_ name: String, _ outcome: String?, _ firstAction: String, _ editorID: String) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var outcome = ""
     @State private var firstAction = ""
     @State private var message: String?
+    @State private var isSaving = false
+    @State private var editorID = UUID().uuidString
     @FocusState private var focus: Field?
 
     private enum Field { case name, outcome, firstAction }
 
     init(
         taskTitle: String,
-        onCreate: @escaping (_ name: String, _ outcome: String?, _ firstAction: String) throws -> Void
+        onCreate: @escaping (_ name: String, _ outcome: String?, _ firstAction: String, _ editorID: String) async throws -> Void
     ) {
         self.taskTitle = taskTitle
         self.onCreate = onCreate
@@ -755,7 +797,7 @@ private struct MakeProjectSheet: View {
                         .textInputAutocapitalization(.sentences)
                         .submitLabel(.done)
                         .focused($focus, equals: .firstAction)
-                        .onSubmit(create)
+                        .onSubmit { Task { await create() } }
                         .accessibilityLabel("First next action")
                 } header: {
                     Text("First next action")
@@ -774,8 +816,8 @@ private struct MakeProjectSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create", action: create)
-                        .disabled(trimmed(name).isEmpty || trimmed(firstAction).isEmpty)
+                    Button("Create") { Task { await create() } }
+                        .disabled(trimmed(name).isEmpty || trimmed(firstAction).isEmpty || isSaving)
                 }
             }
             .onChange(of: name) { message = nil }
@@ -791,13 +833,15 @@ private struct MakeProjectSheet: View {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func create() {
+    @MainActor private func create() async {
         let projectName = trimmed(name)
         let action = trimmed(firstAction)
         let desiredOutcome = trimmed(outcome)
-        guard !projectName.isEmpty, !action.isEmpty else { return }
+        guard !projectName.isEmpty, !action.isEmpty, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action)
+            try await onCreate(projectName, desiredOutcome.isEmpty ? nil : desiredOutcome, action, editorID)
             dismiss()
         } catch {
             message = TaskCommandRunner.message(for: error)

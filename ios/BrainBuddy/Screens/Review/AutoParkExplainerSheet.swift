@@ -17,6 +17,9 @@ struct AutoParkExplainerSheet: View {
     @State private var threshold: Int?
     @State private var choosesDays = false
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
+    @State private var didAcknowledge = false
 
     init() {}
 
@@ -51,17 +54,28 @@ struct AutoParkExplainerSheet: View {
     }
 
     private func acknowledge() {
-        do {
-            try workspace.acknowledgeExplainer()
-        } catch {
-            problem = error.message
-            return
+        Task { await acknowledgeDurably() }
+    }
+
+    @MainActor private func acknowledgeDurably() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        if !didAcknowledge {
+            do {
+                try await workspace.acknowledgeExplainer(editorID: editorID)
+                didAcknowledge = true
+            } catch {
+                problem = TaskCommandRunner.message(for: error)
+                return
+            }
         }
         if let threshold, threshold != workspace.state.review.settings.thresholdDays {
             do {
-                try workspace.updateReviewSettings(ReviewSettingsChange(thresholdDays: threshold))
+                try await workspace.updateReviewSettings(ReviewSettingsChange(thresholdDays: threshold), editorID: editorID)
             } catch {
-                // The explainer is recorded; the threshold can be set in Settings.
+                problem = TaskCommandRunner.message(for: error)
+                return
             }
         }
         dismiss()

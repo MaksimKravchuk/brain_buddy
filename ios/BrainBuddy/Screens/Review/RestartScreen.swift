@@ -17,6 +17,8 @@ struct RestartScreen: View {
     /// The words about the last Undo, until the next release.
     @State private var undoMessage: String?
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(onStart: @escaping () -> Void) {
         self.onStart = onStart
@@ -50,21 +52,35 @@ struct RestartScreen: View {
     }
 
     private func release(_ candidates: [TaskRecord]) {
+        Task { await releaseDurably(candidates) }
+    }
+
+    @MainActor private func releaseDurably(_ candidates: [TaskRecord]) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.bulkRelease(.restart, taskIDs: candidates.map(\.id))
+            try await workspace.bulkRelease(.restart, taskIDs: candidates.map(\.id), editorID: editorID)
             undoMessage = nil
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
         }
     }
 
     private func undo(_ records: [BulkReleaseRecord]) {
+        Task { await undoDurably(records) }
+    }
+
+    @MainActor private func undoDurably(_ records: [BulkReleaseRecord]) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
         do {
-            try workspace.undoBulkRelease(records.map(\.id))
+            try await workspace.undoBulkRelease(records.map(\.id), editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         let results = records.compactMap { workspace.state.review.bulkReleases[$0.id]?.undoResult }

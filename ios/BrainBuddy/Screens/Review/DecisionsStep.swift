@@ -19,10 +19,22 @@ struct DecisionsStep: View {
     @Environment(ToastCenter.self) private var toasts
     /// The threshold when the step opened: a change elsewhere leaves the queue as it is.
     @State private var openedThreshold: Int?
+    @State private var problem: String?
+    @State private var pendingTaskID: TaskID?
+    @State private var pendingSnapshot = false
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     var body: some View {
         let settings = workspace.state.review.settings
         VStack(spacing: 0) {
+            if let problem {
+                VStack(spacing: 6) {
+                    InlineProblemText(message: problem)
+                    Button("Retry progress save") { Task { await retryProgress() } }
+                }
+                .padding(.horizontal, BBSpacing.s4)
+            }
             if let openedThreshold, openedThreshold != settings.thresholdDays {
                 Text(ReviewCopy.thresholdChangedMidReview(days: settings.thresholdDays))
                     .font(BBFont.meta)
@@ -57,7 +69,7 @@ struct DecisionsStep: View {
             openedThreshold = settings.thresholdDays
             // The queue is fixed for this run when the step first opens.
             if workspace.state.review.sessions[context.sessionID]?.decisionQueue == nil {
-                try? workspace.recordReviewProgress(context.sessionID, snapshotDecisionQueue: true)
+                await recordProgress(snapshot: true)
             }
         }
     }
@@ -73,14 +85,33 @@ struct DecisionsStep: View {
                             decisionID, decision: decision, title: title, taskID: id, workspace: workspace, toasts: toasts
                         )
                     },
-                    onNotNow: {
-                        try? workspace.recordReviewProgress(context.sessionID, setAsideTaskID: id)
-                    }
+                    onNotNow: { pendingTaskID = id; Task { await retryProgress() } }
                 )
             )
             .id(id)
             ToastHost()
         }
+    }
+
+    @MainActor private func retryProgress() async {
+        guard !isSaving else { return }
+        if let pendingTaskID { await recordProgress(setAside: pendingTaskID) }
+        else if pendingSnapshot { await recordProgress(snapshot: true) }
+    }
+
+    @MainActor private func recordProgress(snapshot: Bool = false, setAside: TaskID? = nil) async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            if snapshot { pendingSnapshot = true }
+            try await workspace.recordReviewProgress(
+                context.sessionID, snapshotDecisionQueue: snapshot, setAsideTaskID: setAside, editorID: editorID
+            )
+            problem = nil
+            if snapshot { pendingSnapshot = false }
+            if setAside != nil { pendingTaskID = nil }
+        } catch { problem = TaskCommandRunner.message(for: error) }
     }
 }
 

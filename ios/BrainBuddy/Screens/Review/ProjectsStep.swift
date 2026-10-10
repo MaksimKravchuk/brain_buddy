@@ -16,6 +16,8 @@ struct ProjectsStep: View {
     @Environment(Workspace.self) private var workspace
     @State private var texts: [ProjectID: String] = [:]
     @State private var problem: String?
+    @State private var editorIDs: [ProjectID: String] = [:]
+    @State private var savingProjects: Set<ProjectID> = []
 
     var body: some View {
         let projects = workspace.projectsNeedingNextAction()
@@ -39,14 +41,14 @@ struct ProjectsStep: View {
                     ReviewDraftField(
                         prompt: ReviewCopy.nextActionPlaceholder, key: key, text: binding(for: summary.id),
                         fields: context.fields
-                    )
+                    ).disabled(savingProjects.contains(summary.id))
                     Button {
                         add(to: summary.id, key: key)
                     } label: {
                         Text(ReviewCopy.addNextAction).frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
                     }
                     .buttonStyle(.bordered)
-                    .disabled((texts[summary.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(savingProjects.contains(summary.id) || (texts[summary.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             if let problem {
@@ -60,14 +62,25 @@ struct ProjectsStep: View {
     }
 
     private func add(to id: ProjectID, key: DraftKey) {
+        guard !savingProjects.contains(id) else { return }
+        savingProjects.insert(id)
+        let text = texts[id] ?? ""
+        let submittedEditorID = editorIDs[id] ?? UUID().uuidString
+        editorIDs[id] = submittedEditorID
+        Task { await addDurably(to: id, key: key, text: text, editorID: submittedEditorID) }
+    }
+
+    @MainActor private func addDurably(to id: ProjectID, key: DraftKey, text: String, editorID: String) async {
         problem = nil
+        defer { savingProjects.remove(id) }
         do {
-            try workspace.capture(CaptureDraft(text: texts[id] ?? "", list: .next, contextProjectID: id))
+            try await workspace.capture(CaptureDraft(text: text, list: .next, contextProjectID: id), editorID: editorID)
+            try await ReviewDraftField.submitted(key, in: workspace, fields: context.fields, editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         texts[id] = nil
-        ReviewDraftField.submitted(key, in: workspace, fields: context.fields)
+        editorIDs[id] = UUID().uuidString
     }
 }

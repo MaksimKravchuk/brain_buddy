@@ -87,6 +87,9 @@ private struct TaskDetailForm: View {
     @State private var priority: TaskPriority
     @State private var projectID: ProjectID?
     @State private var problem: DetailProblem?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
+    @State private var isTransitioning = false
     @State private var isMoving = false
     @State private var moveInitialList: OpenList?
     @State private var isReopening = false
@@ -127,20 +130,20 @@ private struct TaskDetailForm: View {
     private var savingForm: some View {
         syncedForm
             .onChange(of: focus) { previous, _ in
-                if let previous { commit(previous) }
+                if let previous { Task { await commit(previous) } }
             }
             .onChange(of: priority) { _, newValue in
                 guard newValue != task.priority else { return }
-                if !save(.organize, TaskChanges(priority: .set(newValue))) { priority = task.priority }
+                Task { await save(.organize, TaskChanges(priority: .set(newValue))) }
             }
             .onChange(of: projectID) { _, newValue in
                 guard newValue != task.projectID else { return }
-                if !save(.organize, TaskChanges(projectID: setOrClear(newValue))) { projectID = task.projectID }
+                Task { await save(.organize, TaskChanges(projectID: setOrClear(newValue))) }
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { commitAll() }
+                if phase != .active { Task { await commitAll() } }
             }
-            .onDisappear { commitAll() }
+            .onDisappear { Task { await commitAll() } }
     }
 
     /// Keeps the drafts in step with changes made elsewhere (sync, widgets),
@@ -177,8 +180,9 @@ private struct TaskDetailForm: View {
                 // the card's new wording (the field only follows the stored
                 // title while it is not being edited).
                 focus = nil
-                commitAll()
-                isDeciding = true
+                Task {
+                    if await commitAll() { isDeciding = true }
+                }
             }
             propertiesSection
             SubtasksSection(task: task, isReadOnly: isReadOnly)
@@ -290,7 +294,7 @@ private struct TaskDetailForm: View {
             projectRow
             DueDateQuickPicker(day: task.dueDate, today: workspace.today, isDisabled: isReadOnly) { day in
                 guard day != task.dueDate else { return }
-                save(.organize, TaskChanges(dueDate: setOrClear(day)))
+                Task { await save(.organize, TaskChanges(dueDate: setOrClear(day))) }
             }
             .labelStyle(.bbRow)
             priorityRow
@@ -556,73 +560,78 @@ private struct TaskDetailForm: View {
 
     // MARK: Saving
 
-    private func commit(_ field: DetailField) {
+    @MainActor private func commit(_ field: DetailField) async {
         switch field {
-        case .title: commitTitle()
-        case .notes: commitNotes()
-        case .waitingFor: commitWaitingFor()
+        case .title: _ = await commitTitle()
+        case .notes: _ = await commitNotes()
+        case .waitingFor: _ = await commitWaitingFor()
         case .organize, .tags: break
         }
     }
 
-    private func commitAll() {
-        commitTitle()
-        commitNotes()
-        commitWaitingFor()
+    @MainActor private func commitAll() async -> Bool {
+        let titleSaved = await commitTitle()
+        let notesSaved = await commitNotes()
+        let waitingSaved = await commitWaitingFor()
+        return titleSaved && notesSaved && waitingSaved
     }
 
-    private func commitTitle() {
-        guard task.isOpen else { return }
+    @MainActor private func commitTitle() async -> Bool {
+        guard task.isOpen else { return true }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == task.title {
             title = task.title
-            return
+            return true
         }
         if trimmed.isEmpty {
             title = task.title
             problem = DetailProblem(field: .title, message: "A task needs a title, so the previous one was kept.")
-            return
+            return false
         }
-        if save(.title, TaskChanges(title: .set(trimmed))) { title = trimmed }
+        return await save(.title, TaskChanges(title: .set(trimmed)))
     }
 
-    private func commitNotes() {
-        guard task.isOpen, notes != (task.details ?? "") else { return }
+    @MainActor private func commitNotes() async -> Bool {
+        guard task.isOpen, notes != (task.details ?? "") else { return true }
         if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if task.details == nil {
                 notes = ""
-            } else if save(.notes, TaskChanges(details: .clear)) {
+            } else if await save(.notes, TaskChanges(details: .clear)) {
                 notes = ""
-            }
+            } else { return false }
         } else {
-            save(.notes, TaskChanges(details: .set(notes)))
+            return await save(.notes, TaskChanges(details: .set(notes)))
         }
+        return true
     }
 
-    private func commitWaitingFor() {
-        guard task.state == .waiting else { return }
+    @MainActor private func commitWaitingFor() async -> Bool {
+        guard task.state == .waiting else { return true }
         let stored = task.waitingFor ?? ""
         let trimmed = waitingFor.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == stored {
             waitingFor = stored
-            return
+            return true
         }
         if trimmed.isEmpty {
             waitingFor = stored
             problem = DetailProblem(field: .waitingFor, message: GTDValidationError.waitingForRequired.message)
-            return
+            return false
         }
-        if save(.waitingFor, TaskChanges(waitingFor: .set(trimmed))) { waitingFor = trimmed }
+        return await save(.waitingFor, TaskChanges(waitingFor: .set(trimmed)))
     }
 
     @discardableResult
-    private func save(_ field: DetailField, _ changes: TaskChanges) -> Bool {
+    @MainActor private func save(_ field: DetailField, _ changes: TaskChanges) async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try workspace.updateTask(task.id, changes)
+            try await workspace.updateTask(task.id, changes, editorID: editorID)
             if problem?.field == field { problem = nil }
             return true
         } catch {
-            problem = DetailProblem(field: field, message: error.message)
+            problem = DetailProblem(field: field, message: TaskCommandRunner.message(for: error))
             return false
         }
     }
@@ -630,28 +639,35 @@ private struct TaskDetailForm: View {
     // MARK: Transitions
 
     /// The task as stored right now, after any pending text edit was saved.
-    private func committedTask() -> TaskRecord {
-        commitAll()
-        return workspace.task(task.id) ?? task
-    }
-
     private func requestMove(_ list: OpenList) {
-        if list == .waiting {
-            commitAll()
-            moveInitialList = .waiting
-            isMoving = true
-            return
+        Task {
+            guard !isTransitioning else { return }
+            isTransitioning = true
+            defer { isTransitioning = false }
+            guard await commitAll() else { return }
+            if list == .waiting { moveInitialList = .waiting; isMoving = true; return }
+            _ = await TaskCommandRunner.run(toasts) { try await TaskListMover.move(task, to: list, waitingFor: nil, workspace: workspace, toasts: toasts, editorID: editorID) }
         }
-        let current = committedTask()
-        Task { _ = await TaskCommandRunner.run(toasts) { try await TaskListMover.move(current, to: list, waitingFor: nil, workspace: workspace, toasts: toasts) } }
     }
 
     private func complete() {
-        Task { _ = await TaskCommandRunner.complete(committedTask(), workspace: workspace, toasts: toasts) }
+        Task {
+            guard !isTransitioning else { return }
+            isTransitioning = true
+            defer { isTransitioning = false }
+            guard await commitAll() else { return }
+            _ = await TaskCommandRunner.complete(task, workspace: workspace, toasts: toasts, editorID: editorID)
+        }
     }
 
     private func cancel() {
-        Task { _ = await TaskCommandRunner.cancel(committedTask(), workspace: workspace, toasts: toasts) }
+        Task {
+            guard !isTransitioning else { return }
+            isTransitioning = true
+            defer { isTransitioning = false }
+            guard await commitAll() else { return }
+            _ = await TaskCommandRunner.cancel(task, workspace: workspace, toasts: toasts, editorID: editorID)
+        }
     }
 }
 
@@ -755,6 +771,9 @@ struct TaskTagsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var newTagName = ""
     @State private var errorMessage: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
+    @State private var stagedIDs: [TagID]?
 
     init(taskID: TaskID) {
         self.taskID = taskID
@@ -769,11 +788,11 @@ struct TaskTagsSheet: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .submitLabel(.done)
-                            .onSubmit(createTag)
-                        Button("Add", action: createTag)
+                            .onSubmit { Task { await createTag() } }
+                        Button("Add") { Task { await createTag() } }
                             .buttonStyle(.borderless)
                             .frame(minWidth: 44, minHeight: 44)
-                            .disabled(trimmedNewName.isEmpty)
+                            .disabled(trimmedNewName.isEmpty || isSaving)
                     }
                 } footer: {
                     if let errorMessage {
@@ -804,13 +823,13 @@ struct TaskTagsSheet: View {
     }
 
     private var selectedIDs: [TagID] {
-        workspace.task(taskID)?.tagIDs ?? []
+        stagedIDs ?? (workspace.task(taskID)?.tagIDs ?? [])
     }
 
     private func tagRow(_ tag: TagRecord) -> some View {
         let isSelected = selectedIDs.contains(tag.id)
         return Button {
-            toggle(tag.id)
+            Task { await toggle(tag.id) }
         } label: {
             HStack {
                 Text(tag.name)
@@ -828,41 +847,52 @@ struct TaskTagsSheet: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func toggle(_ id: TagID) {
+    @MainActor private func toggle(_ id: TagID) async {
+        guard !isSaving else { return }
         var ids = selectedIDs
         if let index = ids.firstIndex(of: id) {
             ids.remove(at: index)
         } else {
             ids.append(id)
         }
-        apply(ids)
+        await apply(ids)
     }
 
-    private func apply(_ ids: [TagID]) {
+    @MainActor private func apply(_ ids: [TagID]) async -> Bool {
+        guard !isSaving else { return false }
+        stagedIDs = ids
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try workspace.updateTask(taskID, TaskChanges(tagIDs: .set(ids)))
+            try await workspace.updateTask(taskID, TaskChanges(tagIDs: .set(ids)), editorID: editorID)
             errorMessage = nil
+            return true
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
+            return false
         }
     }
 
     /// Adds the typed tag, reusing an active tag with the same name.
-    private func createTag() {
+    @MainActor private func createTag() async {
         let name = trimmedNewName
-        guard !name.isEmpty else { return }
+        guard !name.isEmpty, !isSaving else { return }
         let key = NameNormalizer.tag(name)
         if let existing = workspace.tags().first(where: { NameNormalizer.tag($0.tag.name) == key }) {
-            if !selectedIDs.contains(existing.id) { apply(selectedIDs + [existing.id]) }
-            newTagName = ""
+            if !selectedIDs.contains(existing.id), await apply(selectedIDs + [existing.id]) { newTagName = "" }
             return
         }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            let id = try workspace.createTag(name: name)
+            let id = try await workspace.createTag(name: name, editorID: editorID)
+            let submittedIDs = selectedIDs + [id]
+            stagedIDs = submittedIDs
+            try await workspace.updateTask(taskID, TaskChanges(tagIDs: .set(submittedIDs)), editorID: editorID)
             newTagName = ""
-            apply(selectedIDs + [id])
+            errorMessage = nil
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }

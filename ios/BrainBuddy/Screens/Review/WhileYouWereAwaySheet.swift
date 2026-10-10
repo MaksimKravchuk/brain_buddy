@@ -25,6 +25,8 @@ struct WhileYouWereAwaySheet: View {
     @State private var outcomes: [TaskID: WhileAwayRow.Outcome] = [:]
     @State private var summary: String?
     @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @State private var hasContinued = false
     @State private var hasLoaded = false
 
@@ -101,8 +103,17 @@ struct WhileYouWereAwaySheet: View {
     /// cannot (archived project, changed elsewhere), as Core answers it.
     @discardableResult
     private func returnTask(_ id: TaskID) -> Bool {
+        let shown = shownPark(id)
+        Task { await returnTaskDurably(id, shown: shown) }
+        return false
+    }
+
+    @MainActor private func returnTaskDurably(_ id: TaskID, shown: ParkAck?) async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        defer { isSaving = false }
         problem = nil
-        switch workspace.parkReturnProblem(of: id, shown: shownPark(id)) {
+        switch workspace.parkReturnProblem(of: id, shown: shown) {
         case .changedElsewhere?:
             outcomes[id] = .changedElsewhere
             if let task = workspace.task(id) { summary = ReviewCopy.returnChangedElsewhere(title: task.title) }
@@ -114,7 +125,7 @@ struct WhileYouWereAwaySheet: View {
             break
         }
         do {
-            try workspace.moveTask(id, to: .next)
+            try await workspace.moveTask(id, to: .next, editorID: editorID)
             outcomes[id] = .returned
             return true
         } catch {
@@ -122,18 +133,23 @@ struct WhileYouWereAwaySheet: View {
                 let name = workspace.task(id)?.projectID.flatMap { workspace.project($0)?.name } ?? ""
                 outcomes[id] = .archived(project: name)
             } else {
-                problem = error.message
+                problem = TaskCommandRunner.message(for: error)
             }
             return false
         }
     }
 
     private func returnAll() {
+        let shownByID = Dictionary(uniqueKeysWithValues: shownParks.map { ($0.taskID, $0) })
+        Task { await returnAllDurably(shownByID: shownByID) }
+    }
+
+    @MainActor private func returnAllDurably(shownByID: [TaskID: ParkAck]) async {
         let pending = rows.filter { $0.outcome.offersReturn }
         var returned = 0
         var blocked: [WhileAwayRow] = []
         for row in pending {
-            if returnTask(row.id) { returned += 1 } else { blocked.append(row) }
+            if await returnTaskDurably(row.id, shown: shownByID[row.id]) { returned += 1 } else { blocked.append(row) }
         }
         let archivedRows = blocked.compactMap { row -> String? in
             guard case .archived(let project)? = outcomes[row.id] else { return nil }
@@ -152,11 +168,19 @@ struct WhileYouWereAwaySheet: View {
     /// Continue: the listed parks are seen; held-back parks may now apply,
     /// and when they do the sheet shows the next batch instead of closing.
     private func continueReview() {
+        guard !isSaving else { return }
+        isSaving = true
+        let shown = shownParks
         let batchWaiting = workspace.localReview.parkBatchWaiting
+        Task { await continueReviewDurably(shown: shown, batchWaiting: batchWaiting) }
+    }
+
+    @MainActor private func continueReviewDurably(shown: [ParkAck], batchWaiting: Bool) async {
+        defer { isSaving = false }
         do {
-            try workspace.dismissWhileAway(shown: shownParks)
+            try await workspace.dismissWhileAway(shown: shown, editorID: editorID)
         } catch {
-            problem = error.message
+            problem = TaskCommandRunner.message(for: error)
             return
         }
         hasContinued = true

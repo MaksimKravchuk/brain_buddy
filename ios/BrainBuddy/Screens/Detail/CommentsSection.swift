@@ -12,6 +12,8 @@ struct CommentsSection: View {
     @Environment(Workspace.self) private var workspace
     @State private var newBody = ""
     @State private var errorMessage: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isComposing: Bool
 
     init(task: TaskRecord, isReadOnly: Bool = false) {
@@ -57,6 +59,7 @@ struct CommentsSection: View {
             Label {
                 TextField("Add a comment", text: $newBody, axis: .vertical)
                     .lineLimit(1...8)
+                    .disabled(isSaving)
                     .focused($isComposing)
                     .accessibilityLabel("New comment")
             } icon: {
@@ -69,20 +72,24 @@ struct CommentsSection: View {
                 Button("Add comment") { Task { await add() } }
                     .buttonStyle(.borderless)
                     .frame(minHeight: 44)
+                    .disabled(isSaving)
             }
         }
     }
 
     @MainActor private func add() async {
         let text = trimmedBody
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try await workspace.addComment(to: task.id, body: text, editorID: UUID().uuidString)
+            try await workspace.addComment(to: task.id, body: text, editorID: editorID)
             newBody = ""
+            editorID = UUID().uuidString
             errorMessage = nil
             isComposing = false
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }
@@ -96,6 +103,8 @@ private struct DetailCommentRow: View {
     @Environment(Workspace.self) private var workspace
     @State private var isEditing = false
     @State private var draft = ""
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
     @FocusState private var isFocused: Bool
 
     init(taskID: TaskID, comment: CommentRecord, canEdit: Bool, onProblem: @escaping (String?) -> Void) {
@@ -134,6 +143,7 @@ private struct DetailCommentRow: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Comment", text: $draft, axis: .vertical)
                 .lineLimit(1...12)
+                .disabled(isSaving)
                 .focused($isFocused)
                 .accessibilityLabel("Comment")
             HStack {
@@ -145,7 +155,7 @@ private struct DetailCommentRow: View {
                 Button("Save") { Task { await save() } }
                     .fontWeight(.semibold)
                     .frame(minHeight: 44)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
             }
             .buttonStyle(.borderless)
         }
@@ -167,17 +177,20 @@ private struct DetailCommentRow: View {
 
     @MainActor private func save() async {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isSaving else { return }
         guard text != comment.body else {
             isEditing = false
             return
         }
+        isSaving = true
+        defer { isSaving = false }
         do {
-            try await workspace.editComment(comment.id, in: taskID, body: text, editorID: UUID().uuidString)
+            try await workspace.editComment(comment.id, in: taskID, body: text, editorID: editorID)
+            editorID = UUID().uuidString
             isEditing = false
             onProblem(nil)
         } catch {
-            onProblem(error.message)
+            onProblem(TaskCommandRunner.message(for: error))
         }
     }
 }
