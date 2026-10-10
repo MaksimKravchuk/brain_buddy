@@ -1,0 +1,7 @@
+# Swift binding names: the generated module is BrainBuddyRustBindings and it imports the
+# C module BrainBuddyRustFFI (the XCFramework on Apple, a SwiftPM C target on Linux).
+[bindings.swift]
+module_name = "BrainBuddyRustBindings"
+ffi_module_name = "BrainBuddyRustFFI"
+ffi_module_filename = "BrainBuddyRustFFI"
+generate_module_map = false
