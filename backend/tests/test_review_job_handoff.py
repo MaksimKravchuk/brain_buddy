@@ -28,9 +28,12 @@ from app.modules.tasks.jobs import (
 from app.modules.tasks.jobs.domain import SYSTEM_SCOPE
 from app.modules.tasks.jobs.execution import (
     JobExecutionGate,
+    ScopeRevokedError,
+    StaleExecutorError,
     WriterOrigin,
     current_execution,
     current_writer_origin,
+    owner_write_lock,
 )
 from app.modules.tasks.jobs.review_adapter import (
     DEFAULT_CADENCE,
@@ -99,6 +102,7 @@ class Rig:
         self.gate = JobExecutionGate(
             self.ledger,
             owner_current=lambda owner_id: _is_live(users.get_by_id(owner_id)),
+            owner_exists=lambda owner_id: users.get_by_id(owner_id) is not None,
             now=clock,
         )
         self.adapter = ReviewJobAdapter(container.review_service, self.gate)
@@ -468,25 +472,15 @@ def test_026_FR_022_retention_runs_with_the_flag_off_for_inactive_owners(
     assert settled is not None and settled.status is JobStatus.QUEUED
 
 
-@pytest.mark.parametrize("departure", ["removed", "deletion_requested"])
-def test_026_SC_007_a_departing_owner_is_not_written_while_others_are_swept(
-    two_owner_rig: tuple[Rig, ReviewApi], departure: str
+def test_026_SC_007_a_removed_owner_is_not_written_while_others_are_swept(
+    two_owner_rig: tuple[Rig, ReviewApi],
 ) -> None:
-    """Scope authority holds for retention too: that owner is skipped, the run succeeds."""
+    """Scope authority holds for retention too: a purged owner is skipped, the run succeeds."""
 
     rig, gone = two_owner_rig
     rig.seed_expired_idempotency(rig.api.owner_id)
     rig.seed_expired_idempotency(gone.owner_id)
-    users = rig.container.user_repo
-    if departure == "removed":
-        users.delete(gone.owner_id)
-    else:
-        users.mutate(
-            gone.owner_id,
-            lambda fresh: fresh.model_copy(
-                update={"deletion_requested_at": rig.clock()}
-            ),
-        )
+    rig.container.user_repo.delete(gone.owner_id)
     worker = rig.worker()
     rig.schedule_due(worker)
     claimed = rig.occurrence()
@@ -497,3 +491,76 @@ def test_026_SC_007_a_departing_owner_is_not_written_while_others_are_swept(
     assert rig.has_expired_idempotency(gone.owner_id)
     settled = rig.ledger.get(claimed.job_id)
     assert settled is not None and settled.status is JobStatus.SUCCEEDED
+
+
+def test_026_FR_022_retention_cleans_a_deletion_pending_owner_but_never_parks_it(
+    two_owner_rig: tuple[Rig, ReviewApi],
+) -> None:
+    """Grace period: expired rows still go on schedule, while exposure stays revoked."""
+
+    rig, pending = two_owner_rig
+    rig.api.flag("on")
+    assert acknowledge(rig.api).status_code == 200
+    assert acknowledge(pending).status_code == 200
+    live_task = rig.api.create("Live", state="next")["id"]
+    pending_task = pending.create("Pending", state="next")["id"]
+    rig.clock.advance(days=22)
+    keep_alive(rig.container)
+    _seed_retention_rows(rig, rig.api.owner_id)
+    _seed_retention_rows(rig, pending.owner_id)
+    rig.container.user_repo.mutate(
+        pending.owner_id,
+        lambda fresh: fresh.model_copy(update={"deletion_requested_at": rig.clock()}),
+    )
+    worker = rig.worker()
+    rig.schedule_due(worker)
+
+    assert worker.run_once() is True
+
+    repo = rig.container.task_repo
+    kept_day = (rig.clock() - 34 * DAY).date()
+    for owner_id in (rig.api.owner_id, pending.owner_id):
+        assert not rig.has_expired_idempotency(owner_id)
+        assert [u.day for u in repo.list_navigator_usage(owner_id)] == [kept_day]
+    assert rig.state_of(live_task) == "someday"
+    assert pending.stored(pending_task).state == "next"
+    assert repo.list_park_acks(pending.owner_id) == []
+
+
+def test_026_FR_022_cleanup_authority_still_needs_the_fence_and_the_scope(
+    rig: Rig,
+) -> None:
+    """Cleanup widens only the owner check: stale, cancelled or out-of-scope is refused."""
+
+    repo = rig.container.task_repo
+    owner_id = rig.api.owner_id
+    pending = rig.container.user_repo
+    pending.mutate(
+        owner_id,
+        lambda fresh: fresh.model_copy(update={"deletion_requested_at": rig.clock()}),
+    )
+    worker = rig.worker()
+    rig.schedule_due(worker)
+    lease = rig.ledger.claim_due(
+        owner="w1", types=(REVIEW_MAINTENANCE_JOB_TYPE,), now=rig.clock()
+    )
+    assert lease is not None
+
+    with rig.gate.executing(lease):
+        with owner_write_lock(repo, owner_id, cleanup=True):
+            pass  # pending deletion: cleanup is allowed ...
+        with pytest.raises(ScopeRevokedError), owner_write_lock(repo, owner_id):
+            pass  # ... any other write is not
+        with (
+            pytest.raises(ScopeRevokedError),
+            owner_write_lock(repo, "user_other", cleanup=True),
+        ):
+            pass  # an owner that does not exist is never cleaned up
+
+    rig.ledger.cancel(lease.job_id)
+    with (
+        rig.gate.executing(lease),
+        pytest.raises(StaleExecutorError),
+        owner_write_lock(repo, owner_id, cleanup=True),
+    ):
+        pass

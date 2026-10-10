@@ -1553,7 +1553,7 @@ class ReviewService:
             if any(item.clock_before is not None for item in release.released)
         ]
         nulled = 0
-        with owner_write_lock(self.task_repo, owner_id):
+        with owner_write_lock(self.task_repo, owner_id, cleanup=True):
             # The records hold whole result documents (titles, notes, an
             # extension reason in ``clock_before``): they go at 24 h, not 7 d.
             self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
