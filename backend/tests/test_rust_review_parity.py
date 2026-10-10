@@ -1115,7 +1115,43 @@ def bulk(s: Scenario) -> None:
         s.get("/review/state")
 
 
+def due_dates(s: Scenario) -> None:
+    """A due date set, moved, removed or kept on tasks in and out of Next."""
+
+    api, ok = s.api, s.ok
+    api.activate_at(s.clock() - 30 * DAY)
+    in_next = s.task("in next", state="next")
+    in_inbox = s.task("in inbox")
+    with s.step("a due date changed in Next raises the floor and is logged"):
+        for due in ("2026-11-01", "2026-11-05", None, None):
+            fresh = s.fresh(in_next)
+            s.ok(
+                s.patch(
+                    f"/tasks/{in_next['id']}",
+                    {"due_date": due, "expected_revision": fresh["revision"]},
+                )
+            )
+        s.ok(s.get(f"/tasks/{in_next['id']}"))
+    with s.step("outside Next, or with the date kept, nothing is logged"):
+        fresh = s.fresh(in_inbox)
+        s.ok(
+            s.patch(
+                f"/tasks/{in_inbox['id']}",
+                {"due_date": "2026-11-02", "expected_revision": fresh["revision"]},
+            )
+        )
+        fresh = s.fresh(in_next)
+        s.ok(
+            s.patch(
+                f"/tasks/{in_next['id']}",
+                {"details": "Notes only", "expected_revision": fresh["revision"]},
+            )
+        )
+    assert ok(s.get("/review/state"))["explainer_seen"] is True
+
+
 JOURNEYS: dict[str, Callable[[Scenario], None]] = {
+    "due_dates": due_dates,
     "decisions": decisions,
     "undo": undo,
     "parks": parks,
@@ -1642,3 +1678,25 @@ def test_026_FR_024_a_follow_up_reads_its_project_only_when_it_exists(
         _evidence("read set", read_set)
         assert read_set["projects"] == {}
         assert facade._project_or_none(owner, "project_00000000dead") is None
+
+
+def test_026_FR_016_a_due_date_moved_in_next_logs_the_same_line_with_the_flag_on_and_off(
+    apps: Apps, caplog: pytest.LogCaptureFixture
+) -> None:
+    """FR-046: the content-free event is written where the floor moves."""
+
+    caplog.set_level(logging.INFO, logger="app.modules.tasks.review")
+    lines: dict[str, list[str]] = {}
+    with allure.step("run the due-date journey with rust_core_sync OFF and ON"):
+        for label, scenario in (("OFF", apps.off), ("ON", apps.on)):
+            caplog.clear()
+            due_dates(scenario)
+            lines[label] = [
+                _OWNER.sub("<owner>", scenario.namer(r.getMessage()))
+                for r in caplog.records
+                if "review_due_date_moved" in r.getMessage()
+            ]
+        _evidence("lines", lines)
+    with allure.step("three changes in Next are logged identically"):
+        check_equal("ON lines", lines["ON"], lines["OFF"])
+        assert len(lines["ON"]) == 3
