@@ -35,7 +35,6 @@ from sqlite3 import Connection
 from pydantic import BaseModel
 
 from app.exceptions import ConflictError, NotFoundError, RepositoryError
-
 from app.modules.tasks.domain import ProjectDocument, TagDocument, TaskDocument
 from app.modules.tasks.jobs import JobRepository
 from app.modules.tasks.jobs.domain import MAX_ATTEMPTS, SYSTEM_SCOPE

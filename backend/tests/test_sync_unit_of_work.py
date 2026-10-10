@@ -454,9 +454,11 @@ def test_026_FR_006_a_read_set_cannot_be_verified_for_another_owner(
     with uow.begin(OTHER) as unit:
         foreign = unit.load(tasks=("x",))
 
-    with pytest.raises(UnitOfWorkError, match="another owner"):
-        with uow.begin(OWNER) as unit:
-            unit.verify(foreign)
+    with (
+        pytest.raises(UnitOfWorkError, match="another owner"),
+        uow.begin(OWNER) as unit,
+    ):
+        unit.verify(foreign)
 
 
 # --- boundaries that keep the unit honest ---------------------------------------
@@ -495,12 +497,13 @@ def test_026_FR_015_units_do_not_nest_on_one_thread(
     repo: TaskRepository, uow: TaskUnitOfWork
 ) -> None:
     with uow.begin(OWNER):
-        with pytest.raises(UnitOfWorkError, match="already open"):
-            with uow.begin(OWNER):
-                pass  # pragma: no cover - refused before the body runs
-        with pytest.raises(RepositoryError, match="unit of work"):
-            with repo.command_lock(OWNER):
-                pass  # pragma: no cover - refused before the body runs
+        with pytest.raises(UnitOfWorkError, match="already open"), uow.begin(OWNER):
+            pass  # pragma: no cover - refused before the body runs
+        with (
+            pytest.raises(RepositoryError, match="unit of work"),
+            repo.command_lock(OWNER),
+        ):
+            pass  # pragma: no cover - refused before the body runs
         repo.create(make_task("still-fine"))
 
     assert counts(repo.db_path)["tasks"] == 1
@@ -511,10 +514,12 @@ def test_026_FR_015_units_do_not_nest_on_one_thread(
 def test_026_FR_015_a_unit_is_refused_while_the_thread_holds_the_owner_lock(
     repo: TaskRepository, uow: TaskUnitOfWork
 ) -> None:
-    with repo.command_lock(OWNER):
-        with pytest.raises(UnitOfWorkError, match="already open"):
-            with uow.begin(OWNER):
-                pass  # pragma: no cover - refused before the body runs
+    with (
+        repo.command_lock(OWNER),
+        pytest.raises(UnitOfWorkError, match="already open"),
+        uow.begin(OWNER),
+    ):
+        pass  # pragma: no cover - refused before the body runs
 
 
 def test_026_FR_006_the_container_wires_the_unit_over_its_own_repositories(
@@ -586,9 +591,12 @@ def test_026_SC_007_a_stale_executor_cannot_open_a_unit_or_leave_an_intent(
     jobs.cancel(lease.job_id)
     before = counts(repo.db_path)
 
-    with gate.executing(lease), pytest.raises(StaleExecutorError):
-        with uow.begin(OWNER) as unit:
-            write_aggregate(unit, repo)  # pragma: no cover
+    with (
+        gate.executing(lease),
+        pytest.raises(StaleExecutorError),
+        uow.begin(OWNER) as unit,
+    ):
+        write_aggregate(unit, repo)  # pragma: no cover
 
     assert counts(repo.db_path) == before
 
