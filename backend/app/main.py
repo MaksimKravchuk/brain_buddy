@@ -23,6 +23,7 @@ from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
 from app.modules.tasks.jobs.agent_adapter import (
     OBSERVE_JOB_TYPE,
+    RECOVER_JOB_TYPE,
     AgentObservationAdapter,
     AgentRecoveryAdapter,
 )
@@ -36,6 +37,7 @@ from app.modules.tasks.jobs.worker import (
     Responsibility,
     SchedulerHandoff,
     SchedulerOwner,
+    WorkerLanes,
 )
 from app.modules.tasks.review_service import ReviewSweepResult
 from app.utils.time import utcnow
@@ -316,12 +318,18 @@ def _start_auth_dispatch_thread(
     return thread
 
 
-def _wake_job(worker: JobWorker, job_type: str) -> Callable[[], None]:
+def _recovery_adapter(lanes: WorkerLanes) -> AgentRecoveryAdapter:
+    adapter = lanes.registry.get(RECOVER_JOB_TYPE)
+    assert isinstance(adapter, AgentRecoveryAdapter)
+    return adapter
+
+
+def _wake_job(lanes: WorkerLanes, job_type: str) -> Callable[[], None]:
     """A push into the ledger that never fails the request or push that made it."""
 
     def wake() -> None:
         try:
-            worker.wake(job_type)
+            lanes.wake(job_type)
         except Exception:  # noqa: BLE001 - the periodic occurrence still runs
             logger.warning("Durable job wake deferred for %s", job_type)
 
@@ -336,25 +344,33 @@ def _install_durable_scheduler(
     privacy_interval_seconds: float,
     gate: JobExecutionGate | None = None,
     now: Callable[[], datetime] = utcnow,
-) -> JobWorker | None:
+) -> WorkerLanes | None:
     """Register the completed adapters and take over their responsibilities.
 
     ``None`` (and nothing assigned) unless the handoff is enabled. Each adapter
-    is registered and its responsibility assigned to the worker in one step, so
-    the legacy loop for it never starts. Call before any legacy loop starts: the
-    observation adapter refuses a live observer thread. Registers no effect of
-    its own; the adapters call the existing ports under the execution context.
+    is registered and its responsibility assigned to its lane's worker in one
+    step, so the legacy loop for it never starts. Call before any legacy loop
+    starts: the observation adapter refuses a live observer thread. Registers no
+    effect of its own; the adapters call the existing ports under the execution
+    context.
+
+    Three lanes keep the isolation the legacy threads had: agent (observation and
+    recovery lookups, which can take a deadline per unreachable endpoint), voice,
+    and maintenance (privacy retention and Review). Each is its own worker over
+    the same ledger and claims only its own job types.
     """
 
     if not handoff.enabled:
         return None
     gate = gate or container.job_execution
-    registry = JobRegistry()
     owned = SchedulerOwner.DURABLE
     privacy = timedelta(seconds=privacy_interval_seconds)
-    registry.register(ReviewJobAdapter(container.review_service, gate, cadence=privacy))
+    maintenance, agent, voice = JobRegistry(), JobRegistry(), JobRegistry()
+    maintenance.register(
+        ReviewJobAdapter(container.review_service, gate, cadence=privacy)
+    )
     handoff.assign(Responsibility.REVIEW_SWEEP, owned)
-    registry.register(
+    maintenance.register(
         PrivacyMaintenanceAdapter(
             container.account_service,
             container.agent_relay_service,
@@ -365,14 +381,14 @@ def _install_durable_scheduler(
     )
     handoff.assign(Responsibility.PRIVACY_RETENTION, owned)
     observer = container.agent_observer
-    registry.register(AgentObservationAdapter(observer, gate))
+    agent.register(AgentObservationAdapter(observer, gate))
     handoff.assign(Responsibility.AGENT_OBSERVATION, owned)
-    registry.register(
+    agent.register(
         AgentRecoveryAdapter(observer, gate, container.job_repository, now=now)
     )
     handoff.assign(Responsibility.AGENT_RECOVERY, owned)
     if voice_interval_seconds > 0:
-        registry.register(
+        voice.register(
             VoiceMaintenanceAdapter(
                 container.voice_brain_dump_service,
                 gate,
@@ -380,13 +396,23 @@ def _install_durable_scheduler(
             )
         )
         handoff.assign(Responsibility.VOICE_SWEEP, owned)
-    worker = JobWorker(container.job_repository, registry, now=now)
-    observer.wake_listener = _wake_job(worker, OBSERVE_JOB_TYPE)
+    lanes = WorkerLanes(
+        {
+            name: JobWorker(container.job_repository, registry, now=now)
+            for name, registry in (
+                ("maintenance", maintenance),
+                ("agent", agent),
+                ("voice", voice),
+            )
+            if registry.types
+        }
+    )
+    observer.wake_listener = _wake_job(lanes, OBSERVE_JOB_TYPE)
     if handoff.durable(Responsibility.VOICE_SWEEP):
         container.voice_brain_dump_service.runner_wake = _wake_job(
-            worker, VOICE_JOB_TYPE
+            lanes, VOICE_JOB_TYPE
         )
-    return worker
+    return lanes
 
 
 def create_app() -> FastAPI:
@@ -473,9 +499,15 @@ def create_app() -> FastAPI:
         # sweeps are: the test suite builds many short-lived apps in one
         # process, and a boot-time scan over a shared, process-wide lock would
         # race unrelated tests.
-        # With the worker owning recovery, the same marking is its boot job.
+        # With the worker owning recovery the marking still happens right here,
+        # in both modes: `interrupted_exchanges` has no boot cutoff, so a
+        # sweep run on the worker after the app serves would also settle
+        # exchanges the live process opened. Only each open exchange's lookup
+        # is the worker's (a ledger job recorded before the exchange is marked).
         interrupted: list[tuple[str, str]] = []
-        if not handoff.durable(Responsibility.AGENT_RECOVERY):
+        if app.state.durable_worker is not None:
+            _recovery_adapter(app.state.durable_worker).boot_sweep()
+        elif not handoff.durable(Responsibility.AGENT_RECOVERY):
             interrupted = (
                 app.state.container.agent_observer.mark_interrupted_exchanges()
             )

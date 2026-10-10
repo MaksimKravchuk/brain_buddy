@@ -36,7 +36,11 @@ from app.main import (
 from app.modules.agents.observer import AgentObserver, SchedulerOverlapError
 from app.modules.agents.service import AgentRelayService
 from app.modules.tasks.jobs import JobRepository, JobStatus
-from app.modules.tasks.jobs.agent_adapter import OBSERVE_JOB_TYPE, RECOVER_JOB_TYPE
+from app.modules.tasks.jobs.agent_adapter import (
+    OBSERVE_JOB_TYPE,
+    RECOVER_JOB_TYPE,
+    AgentRecoveryAdapter,
+)
 from app.modules.tasks.jobs.execution import JobExecutionGate
 from app.modules.tasks.jobs.privacy_adapter import (
     PRIVACY_JOB_TYPE,
@@ -49,10 +53,12 @@ from app.modules.tasks.jobs.review_adapter import (
 from app.modules.tasks.jobs.voice_adapter import VOICE_JOB_TYPE, VOICE_SCHEDULE_KEY
 from app.modules.tasks.jobs.worker import (
     DuplicateSchedulerOwnerError,
+    JobRegistry,
     JobWorker,
     Responsibility,
     SchedulerHandoff,
     SchedulerOwner,
+    WorkerLanes,
 )
 from app.services.modern_auth_service import ModernAuthService
 
@@ -165,7 +171,7 @@ class Rig:
         handoff: SchedulerHandoff,
         *,
         voice_interval: float = VOICE_INTERVAL,
-    ) -> JobWorker | None:
+    ) -> WorkerLanes | None:
         return _install_durable_scheduler(
             self.container,
             handoff,
@@ -188,10 +194,16 @@ class Rig:
         assert worker is not None
         return worker
 
-    def drain(self, worker: JobWorker) -> int:
+    def drain(self, worker: JobWorker | WorkerLanes) -> int:
+        """Run every due job, lane by lane; returns the number of jobs run."""
+
+        workers = (
+            worker.workers.values() if isinstance(worker, WorkerLanes) else [worker]
+        )
         ran = 0
-        while worker.run_once():
-            ran += 1
+        for each in workers:
+            while each.run_once():
+                ran += 1
         return ran
 
     def active(self, key: str):  # type: ignore[no-untyped-def]
@@ -506,6 +518,143 @@ def test_026_FR_015_boot_recovery_marks_interrupted_exchanges_through_the_ledger
     assert lookups is None  # settled, not left behind
 
 
+# --- execution lanes ---------------------------------------------------------------
+
+
+LANES = {
+    "agent": {OBSERVE_JOB_TYPE, RECOVER_JOB_TYPE},
+    "voice": {VOICE_JOB_TYPE},
+    "maintenance": {REVIEW_MAINTENANCE_JOB_TYPE, PRIVACY_JOB_TYPE},
+}
+PORTS_OF = {
+    "voice": {p for p in HANDED_OFF if p.startswith("voice.")},
+    "maintenance": {
+        "review.sweep",
+        "account.purge",
+        "relay.retention",
+        "crt.receipt_retention",
+    },
+    "agent": set(),
+}
+
+
+def test_026_SC_007_each_lane_claims_only_its_own_job_types(rig: Rig) -> None:
+    lanes = rig.install(_enabled())
+    assert lanes is not None
+    assert {name: set(w.registry.types) for name, w in lanes.workers.items()} == LANES
+    lanes.ensure_schedules(due_now=True)
+
+    pending = dict(LANES)
+    for name, worker in lanes.workers.items():
+        before = set(rig.journal)
+        while worker.run_once():
+            pass
+        del pending[name]
+        # Only this lane's ports ran, and the lanes not yet drained still hold
+        # their own due jobs, untouched.
+        assert set(rig.journal) - before == PORTS_OF[name]
+        for types in pending.values():
+            for job_type in types:
+                waiting = rig.ledger.find_active(
+                    lanes.registry.get(job_type).schedule_key  # type: ignore[union-attr]
+                )
+                assert waiting is not None and waiting.status is JobStatus.QUEUED
+    assert set(rig.journal) >= set(HANDED_OFF)
+
+
+def test_026_SC_007_two_lanes_never_claim_the_same_job(rig: Rig) -> None:
+    lanes = rig.install(_enabled())
+    assert lanes is not None
+    types = [t for w in lanes.workers.values() for t in w.registry.types]
+    assert len(types) == len(set(types))
+
+    # A job type registered in two lanes is refused outright.
+    duplicate = JobWorker(rig.ledger, JobRegistry([lanes.registry.get(VOICE_JOB_TYPE)]))  # type: ignore[list-item]
+    with pytest.raises(ValueError, match=VOICE_JOB_TYPE):
+        WorkerLanes({**lanes.workers, "again": duplicate})
+
+    # Every lane asking at once: each due job is leased to exactly one owner.
+    lanes.ensure_schedules(due_now=True)
+    leases = [
+        rig.ledger.claim_due(
+            owner=name,
+            types=tuple(worker.registry.types),
+            now=rig.clock(),
+            lease_for=LEASE,
+        )
+        for name, worker in lanes.workers.items()
+        for _ in worker.registry.types
+    ]
+    assert all(lease is not None for lease in leases)
+    assert len({lease.job_id for lease in leases if lease}) == len(leases) == 5
+
+
+def test_026_SC_007_a_blocked_agent_observation_does_not_delay_other_lanes(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent lane is stuck inside an observation pass; voice and maintenance
+    jobs that are due are claimed and finished by their own lanes meanwhile."""
+
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked_observe(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert release.wait(timeout=5), "the test never released the observation"
+        return SimpleNamespace(complete=True)
+
+    monkeypatch.setattr(rig.observer, "observe_due", blocked_observe)
+    lanes = rig.install(_enabled())
+    assert lanes is not None
+    lanes.ensure_schedules(due_now=True)
+
+    def agent_lane() -> None:
+        while lanes.workers["agent"].run_once():
+            pass
+
+    agent = threading.Thread(target=agent_lane, name="test-agent-lane")
+    agent.start()
+    try:
+        assert entered.wait(timeout=5), "the observation never started"
+        observing = rig.ledger.find_active("agent.observe:schedule")
+        assert observing is not None and observing.status is JobStatus.LEASED
+
+        before = set(rig.journal)
+        assert rig.drain(WorkerLanes({"voice": lanes.workers["voice"]})) == 1
+        assert rig.drain(WorkerLanes({"m": lanes.workers["maintenance"]})) == 2
+        assert set(rig.journal) - before == PORTS_OF["voice"] | PORTS_OF["maintenance"]
+        # Still blocked: the agent lane did not finish for them.
+        assert (
+            rig.ledger.find_active("agent.observe:schedule").status  # type: ignore[union-attr]
+            is JobStatus.LEASED
+        )
+    finally:
+        release.set()
+        agent.join(timeout=5)
+    assert not agent.is_alive()
+
+
+def test_026_SC_007_wakes_reach_only_the_owning_lane_and_shutdown_stops_all(
+    rig: Rig,
+) -> None:
+    lanes = rig.install(_enabled())
+    assert lanes is not None
+    lanes.ensure_schedules()
+    woken: list[str] = []
+    for name, worker in lanes.workers.items():
+        worker.wake = lambda job_type=None, n=name: woken.append(f"{n}:{job_type}")  # type: ignore[method-assign]
+
+    lanes.wake(VOICE_JOB_TYPE)
+    lanes.wake(OBSERVE_JOB_TYPE)
+    lanes.wake("no.such.job")
+
+    assert woken == [f"voice:{VOICE_JOB_TYPE}", f"agent:{OBSERVE_JOB_TYPE}"]
+    assert lanes.start() is True
+    assert lanes.running
+    assert lanes.start() is False  # already running
+    assert lanes.shutdown() is True
+    assert not lanes.running
+
+
 # --- wake and the push paths ----------------------------------------------------
 
 
@@ -543,11 +692,8 @@ def test_026_FR_015_a_failed_wake_never_fails_the_request_that_made_it(
 # --- the whole application ----------------------------------------------------------
 
 
-def test_026_SC_007_the_application_boots_with_one_durable_owner_per_responsibility(
-    monkeypatch: pytest.MonkeyPatch, data_dir: Path
-) -> None:
-    """Gate on with background maintenance: the worker runs retention once and the
-    legacy privacy loop keeps only auth cleanup and CRT reconciliation."""
+def _production_env(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> None:
+    """Background maintenance on, durable gate on, nothing firing within the test."""
 
     monkeypatch.setenv("BRAIN_BUDDY_DATA_DIR", str(data_dir))
     monkeypatch.setenv("BRAIN_BUDDY_ENV", "production")
@@ -560,6 +706,87 @@ def test_026_SC_007_the_application_boots_with_one_durable_owner_per_responsibil
     monkeypatch.setenv("BRAIN_BUDDY_AGENT_RETENTION_SWEEP_INTERVAL_SECONDS", "3600")
     monkeypatch.setattr(main_module, "_VOICE_SWEEP_INTERVAL_SECONDS", 3600)
     get_config.cache_clear()
+
+
+def test_026_SC_007_restart_marking_runs_before_the_worker_and_the_first_request(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """Gate on: ``create_app`` itself marks interrupted exchanges, before the worker
+    exists as a running thread and before any request can be served."""
+
+    _production_env(monkeypatch, data_dir)
+    events: list[str] = []
+    real_mark = AgentObserver.mark_interrupted_exchanges
+    real_worker_start = JobWorker.start
+
+    def mark(self: AgentObserver, **kwargs: Any) -> list[tuple[str, str]]:
+        events.append("mark")
+        return real_mark(self, **kwargs)
+
+    def start(self: JobWorker) -> bool:
+        events.append("worker_start")
+        return real_worker_start(self)
+
+    monkeypatch.setattr(AgentObserver, "mark_interrupted_exchanges", mark)
+    monkeypatch.setattr(JobWorker, "start", start)
+    try:
+        app = create_app()
+        # No TestClient yet: nothing has been served, and marking already ran.
+        assert events[0] == "mark"
+        assert events[1:] == ["worker_start"] * 3  # one per lane, all after marking
+        with TestClient(app):
+            pass
+    finally:
+        get_config.cache_clear()
+
+
+def test_026_SC_007_the_boot_sweep_job_never_marks_what_the_live_process_opened(
+    rig: Rig,
+) -> None:
+    """Marking happens once, at boot. The worker's later boot occurrence is a no-op
+    even though ``interrupted_exchanges`` has no cutoff and now lists a live run."""
+
+    interrupted = rig.service.agent_repo.interrupted_exchanges
+    interrupted.return_value = [(OWNER, "run_pre", "started")]
+    worker = rig.install(_enabled())
+    assert worker is not None
+    recovery = worker.registry.get(RECOVER_JOB_TYPE)
+    assert isinstance(recovery, AgentRecoveryAdapter)
+
+    recovery.boot_sweep()  # create_app, before a request is served
+    rig.service.mark_exchange_interrupted.assert_called_once_with(
+        "run_pre", owner_id=OWNER
+    )
+    assert rig.ledger.find_active(f"{RECOVER_JOB_TYPE}:run_pre", scope=OWNER)
+
+    # A request now opens an exchange; the repository would list it as open.
+    interrupted.return_value = [
+        (OWNER, "run_pre", "started"),
+        (OWNER, "run_live", "started"),
+        (OWNER, "run_live_queued", "queued"),
+    ]
+    worker.ensure_schedules(due_now=True)
+    assert rig.drain(worker) == 6  # five boot occurrences plus run_pre's lookup
+
+    # Exactly one marking and one lookup: the pre-boot run, never the live ones.
+    rig.service.mark_exchange_interrupted.assert_called_once_with(
+        "run_pre", owner_id=OWNER
+    )
+    rig.service.settle_restarted_before_send.assert_not_called()
+    rig.service.resolve_interrupted_exchange.assert_called_once_with(
+        "run_pre", owner_id=OWNER
+    )
+    for live in ("run_live", "run_live_queued"):
+        assert rig.ledger.find_active(f"{RECOVER_JOB_TYPE}:{live}", scope=OWNER) is None
+
+
+def test_026_SC_007_the_application_boots_with_one_durable_owner_per_responsibility(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """Gate on with background maintenance: the worker runs retention once and the
+    legacy privacy loop keeps only auth cleanup and CRT reconciliation."""
+
+    _production_env(monkeypatch, data_dir)
     # Patched on the classes: the worker's boot occurrence starts inside
     # ``create_app`` and must not run the real port first.
     retention_runs: list[int] = []
