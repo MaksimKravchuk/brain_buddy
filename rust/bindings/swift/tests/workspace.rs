@@ -46,6 +46,7 @@ fn command(n: u64, title: &str) -> BridgeWorkspaceCommand {
         payload: json!({"title":title}).to_string().into_bytes(),
         preconditions: b"[]".to_vec(),
         depends_on: vec![],
+        admission_tokens: Vec::new(),
     }
 }
 
@@ -803,4 +804,106 @@ fn imported_presentation_carriers_are_individually_readable_and_immutable() {
             .is_err()
     );
     assert!(workspace.load_draft(form.draft_id).unwrap().is_some());
+}
+
+#[test]
+fn original_query_frame_token_is_owned_content_free_and_retry_survives_frame_change() {
+    let (workspace, _) = open("original-query-frame");
+    let created = match workspace
+        .execute(
+            vec![command(901, "Private shown task title")],
+            context(),
+            operation(),
+        )
+        .unwrap()
+    {
+        BridgeExecution::Saved { results } => results[0].clone(),
+        other => panic!("{other:?}"),
+    };
+    let page = match workspace
+        .query(
+            json!({"kind":"task_detail","task_id":created.entity_id})
+                .to_string()
+                .into_bytes(),
+            inputs(),
+            200,
+            None,
+        )
+        .unwrap()
+    {
+        BridgeWorkspaceAnswer::Answered { page } => page,
+        other => panic!("{other:?}"),
+    };
+    let frames: Value = serde_json::from_slice(&page.task_frames).unwrap();
+    assert_eq!(frames[0]["token"]["task_id"], created.entity_id);
+    assert!(frames[0]["last_open_list"].is_null());
+    assert!(
+        !String::from_utf8(page.task_frames.clone())
+            .unwrap()
+            .contains("Private shown task title")
+    );
+    let token = frames[0]["token"].clone();
+    let parsed: bb_client::ShownFrameToken = serde_json::from_value(token.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), token);
+    let mut edit = command(902, "Preserved authored text");
+    edit.command_type = "task.update".into();
+    edit.entity_id = Some(created.entity_id.clone());
+    edit.preconditions =
+        json!([{"entity_type":"task","entity_id":created.entity_id,"edit_revision":"1"}])
+            .to_string()
+            .into_bytes();
+    edit.admission_tokens = json!([token]).to_string().into_bytes();
+    assert!(matches!(
+        workspace
+            .execute(vec![edit.clone()], context(), operation())
+            .unwrap(),
+        BridgeExecution::Saved { .. }
+    ));
+    assert!(
+        matches!(workspace.execute(vec![edit.clone()],context(),operation()).unwrap(),BridgeExecution::Saved {results} if results[0].replayed)
+    );
+    edit.command_id = "01900000-0000-4000-8000-000000000903".into();
+    edit.preconditions =
+        json!([{"entity_type":"task","entity_id":created.entity_id,"edit_revision":"2"}])
+            .to_string()
+            .into_bytes();
+    assert!(
+        matches!(workspace.execute(vec![edit],context(),operation()).unwrap(),BridgeExecution::Refused {refusal} if refusal.reason=="formulation_changed")
+    );
+}
+
+#[test]
+fn old_prepared_batch_known_only_port_never_executes_unknown_suffix() {
+    use bb_swift::BridgeKnownBatch;
+    let (workspace, _) = open("known-only-prepared");
+    let known = command(920, "Original prepared command");
+    workspace
+        .execute(vec![known.clone()], context(), operation())
+        .unwrap();
+    let mut future = context();
+    future.now = "2040-10-10T09:00:00Z".into();
+    assert!(
+        matches!(workspace.lookup_known_batch(vec![known.clone()],future).unwrap(),BridgeKnownBatch::Known {results} if results.len()==1&&results[0].replayed)
+    );
+    let unknown = command(921, "Preserved unknown prepared command");
+    assert_eq!(
+        workspace
+            .lookup_known_batch(vec![known.clone(), unknown.clone()], context())
+            .unwrap(),
+        BridgeKnownBatch::NotKnown
+    );
+    let mut changed = known;
+    changed.payload = json!({"title":"Different known command"})
+        .to_string()
+        .into_bytes();
+    assert_eq!(
+        code(
+            workspace
+                .lookup_known_batch(vec![unknown, changed], context())
+                .unwrap_err()
+        ),
+        "IDEMPOTENCY_KEY_REUSED"
+    );
+    let snapshot = workspace.snapshot().unwrap();
+    assert_eq!(snapshot.pending, "1");
 }

@@ -482,6 +482,7 @@ fn apple_import_026_fr_013_prepared_conversion_preserves_source_identity_and_com
                 .into_bytes(),
             preconditions: b"[]".to_vec(),
             depends_on: vec![],
+            admission_tokens: Vec::new(),
         },
     };
     let context = BridgeExecuteContext {now:NOW.into(),time_zone:"UTC".into(),actor_id:"device".into(),policy:json!({"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}).to_string().into_bytes()};

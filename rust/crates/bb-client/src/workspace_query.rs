@@ -42,6 +42,7 @@ impl From<ExecuteError> for QueryError {
 pub struct QueryPage {
     pub projection_generation: u64,
     pub result: QueryResult,
+    pub task_frames: Vec<crate::ShownTaskFrame>,
     pub collection_next_cursor: Option<String>,
 }
 
@@ -261,9 +262,17 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
+                let result = QueryResult::TaskDetail(view);
                 return Ok(QueryPage {
                     projection_generation: generation,
-                    result: QueryResult::TaskDetail(view),
+                    task_frames: crate::admission::query_frames(
+                        tx,
+                        &workspace,
+                        &state,
+                        &result,
+                        collection_after.is_none() && collection_next_cursor.is_none(),
+                    )?,
+                    result,
                     collection_next_cursor,
                 });
             }
@@ -318,6 +327,13 @@ pub fn query_collection_page(
                     .transpose()?;
                 return Ok(QueryPage {
                     projection_generation: generation,
+                    task_frames: crate::admission::query_frames(
+                        tx,
+                        &workspace,
+                        &state,
+                        &result,
+                        collection_after.is_none() && collection_next_cursor.is_none(),
+                    )?,
                     result,
                     collection_next_cursor,
                 });
@@ -363,6 +379,13 @@ pub fn query_collection_page(
                     .transpose()?;
                 return Ok(QueryPage {
                     projection_generation: generation,
+                    task_frames: crate::admission::query_frames(
+                        tx,
+                        &workspace,
+                        &state,
+                        &result,
+                        collection_after.is_none() && collection_next_cursor.is_none(),
+                    )?,
                     result,
                     collection_next_cursor,
                 });
@@ -408,6 +431,13 @@ pub fn query_collection_page(
                 _ => {
                     return Ok(QueryPage {
                         projection_generation: generation,
+                        task_frames: crate::admission::query_frames(
+                            tx,
+                            &workspace,
+                            &state,
+                            &result,
+                            collection_after.is_none() && collection_next_cursor.is_none(),
+                        )?,
                         result,
                         collection_next_cursor,
                     });
@@ -425,6 +455,13 @@ pub fn query_collection_page(
             }
             Ok(QueryPage {
                 projection_generation: generation,
+                task_frames: crate::admission::query_frames(
+                    tx,
+                    &workspace,
+                    &state,
+                    &result,
+                    collection_after.is_none() && collection_next_cursor.is_none(),
+                )?,
                 result,
                 collection_next_cursor,
             })
@@ -759,6 +796,13 @@ pub fn delete_workspace_draft_with(
     })
 }
 
+/// Generation, exact public rows and their same-read task-frame companions.
+pub type WorkspaceRecordPage = (
+    u64,
+    Vec<Option<bb_domain::types::Record>>,
+    Vec<crate::ShownTaskFrame>,
+);
+
 /// Exact canonical public records, in request order, under one generation.
 /// No SQL table names, private bodies or runtime metadata cross this port.
 pub fn workspace_records(
@@ -767,7 +811,7 @@ pub fn workspace_records(
         bb_protocol::catalog::EntityType,
         bb_protocol::wire::RecordKey,
     )],
-) -> Result<(u64, Vec<Option<bb_domain::types::Record>>), QueryError> {
+) -> Result<WorkspaceRecordPage, QueryError> {
     use bb_domain::types::*;
     use bb_protocol::catalog::EntityType;
     use rusqlite::{OptionalExtension, params};
@@ -825,6 +869,15 @@ pub fn workspace_records(
             let body:Option<Vec<u8>>=statement.query_row(params![workspace,kind.as_str(),serde_json::json!(key).to_string()],|row|row.get(0)).optional().map_err(StoreError::from)?;
             records.push(body.map(|body|crate::execute::record_from(kind.as_str(),&body).map(|record|record.public()).map_err(QueryError::from)).transpose()?);
         }
-        Ok((unsigned(generation)?,records))
+        let mut task_frames = Vec::new();
+        for record in records.iter().flatten() {
+            if let Record::Task(task) = record {
+                let mut state = ReadSet::default();
+                state.tasks.insert(task.id.clone(),task.clone());
+                let view = TaskView::new(task,Vec::new(),Vec::new());
+                task_frames.push(crate::admission::capture_frame(tx,&workspace,&state,&view,false)?);
+            }
+        }
+        Ok((unsigned(generation)?,records,task_frames))
     })()))?
 }

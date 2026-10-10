@@ -85,6 +85,7 @@ fn request(
         payload: payload.as_object().unwrap().clone(),
         preconditions,
         depends_on: Vec::new(),
+        admission_tokens: Vec::new(),
         context: context(NOW),
     }
 }
@@ -1100,4 +1101,789 @@ fn same_batch_bulk_skip_keeps_frozen_guard_and_dependency_without_inventing_resu
         Err(ExecuteError::Refused(_))
     ));
     assert_eq!(queue(&mut store).len(), before);
+}
+
+fn tagged_task(store: &mut Store, ids: &mut SeqIds) -> (Id, Id) {
+    let tag = execute(
+        store,
+        ids,
+        &request(
+            cmd(200),
+            CommandType::TagCreate,
+            None,
+            json!({"name":"Guarded tag"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    let task = execute(
+        store,
+        ids,
+        &request(
+            cmd(201),
+            CommandType::TaskCreate,
+            None,
+            json!({"title":"Shown task","tag_ids":[tag.as_str()]}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    (tag, task)
+}
+
+#[test]
+fn fresh_tag_delete_batch_uses_exact_task_guards_and_latest_producer() {
+    let path = scratch("fresh-tag-delete");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let (tag, target) = tagged_task(&mut store, &mut ids);
+    let edit = |n, revision, title| {
+        request(
+            cmd(n),
+            CommandType::TaskUpdate,
+            Some(target.as_str()),
+            json!({"title":title}),
+            vec![shown(EntityType::Task, target.as_str(), revision)],
+        )
+    };
+    let delete = request(
+        cmd(203),
+        CommandType::TagDelete,
+        Some(tag.as_str()),
+        json!({}),
+        vec![
+            shown(EntityType::Tag, tag.as_str(), "1"),
+            shown(EntityType::Task, target.as_str(), "1"),
+        ],
+    );
+    let batch = vec![
+        edit(202, "1", "First edit"),
+        delete,
+        edit(204, "1", "Final edit"),
+    ];
+    execute_batch(&mut store, &mut ids, &batch).unwrap();
+    let queued = queue(&mut store);
+    assert_eq!(
+        queued[3].envelope["preconditions"][1]["after_command"]["command_id"],
+        cmd(202).as_str()
+    );
+    assert_eq!(
+        queued[4].envelope["preconditions"][0]["after_command"]["command_id"],
+        cmd(203).as_str()
+    );
+    assert_eq!(task(&mut store, target.as_str())["revision"], "4");
+    execute(
+        &mut store,
+        &mut ids,
+        &edit(205, "4", "Changed after commit"),
+    )
+    .unwrap();
+    assert!(
+        execute_batch(&mut store, &mut ids, &batch)
+            .unwrap()
+            .iter()
+            .all(|saved| saved.replayed)
+    );
+}
+
+#[test]
+fn unguarded_or_historical_tag_delete_cannot_freshen_new_task_update() {
+    use bb_protocol::command::{AfterCommandPrecondition, CommandRef};
+    let path = scratch("historical-tag-delete");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let (tag, target) = tagged_task(&mut store, &mut ids);
+    let delete = request(
+        cmd(210),
+        CommandType::TagDelete,
+        Some(tag.as_str()),
+        json!({}),
+        vec![shown(EntityType::Tag, tag.as_str(), "1")],
+    );
+    let edit = |n, revision| {
+        request(
+            cmd(n),
+            CommandType::TaskUpdate,
+            Some(target.as_str()),
+            json!({"title":"Preserved editor input"}),
+            vec![shown(EntityType::Task, target.as_str(), revision)],
+        )
+    };
+    let before = queue(&mut store).len();
+    for revision in ["1", "2"] {
+        assert!(matches!(
+            execute_batch(&mut store, &mut ids, &[delete.clone(), edit(211, revision)]),
+            Err(ExecuteError::Refused(_))
+        ));
+        assert_eq!(queue(&mut store).len(), before);
+        assert_eq!(task(&mut store, target.as_str())["revision"], "1");
+    }
+    execute(&mut store, &mut ids, &delete).unwrap();
+    assert!(matches!(
+        execute_batch(&mut store, &mut ids, &[delete.clone(), edit(212, "1")]),
+        Err(ExecuteError::Refused(_))
+    ));
+    let after = request(
+        cmd(213),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"title":"Preserved editor input"}),
+        vec![Precondition::AfterCommand(AfterCommandPrecondition {
+            after_command: CommandRef {
+                command_id: delete.command_id.clone(),
+                entity_type: EntityType::Task,
+                entity_id: target.clone(),
+            },
+        })],
+    );
+    assert!(matches!(
+        execute_batch(&mut store, &mut ids, &[delete.clone(), after]),
+        Err(ExecuteError::Refused(_))
+    ));
+    let valid = edit(214, "2");
+    execute_batch(&mut store, &mut ids, &[delete, valid]).unwrap();
+    assert_eq!(
+        queue(&mut store).last().unwrap().envelope["preconditions"][0]["after_command"]["command_id"],
+        cmd(210).as_str()
+    );
+}
+
+fn captured_frame(store: &mut Store, task_id: &Id, detail: bool) -> bb_client::ShownFrameToken {
+    let query = if detail {
+        json!({"kind":"task_detail","task_id":task_id.as_str()})
+    } else {
+        json!({"kind":"task_list","list":"inbox","sort":"manual","page":{"limit":200}})
+    };
+    let inputs = bb_domain::types::QueryInputs {
+        now: context(NOW).now,
+        device_zone: context(NOW).time_zone,
+        policy: context(NOW).policy,
+    };
+    bb_client::query_page(store, &serde_json::from_value(query).unwrap(), &inputs)
+        .unwrap()
+        .task_frames
+        .into_iter()
+        .find(|frame| frame.token.task_id.as_str() == task_id.as_str())
+        .unwrap()
+        .token
+}
+
+fn guarded_edit(
+    n: u64,
+    target: &Id,
+    revision: &str,
+    token: bb_client::ShownFrameToken,
+) -> ExecuteRequest {
+    let mut edit = request(
+        cmd(n),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"title":"Authored choice"}),
+        vec![shown(EntityType::Task, target.as_str(), revision)],
+    );
+    edit.admission_tokens.push(token);
+    edit
+}
+
+#[test]
+fn original_frame_known_retry_precedes_changed_content_and_batch_admits_original_frames() {
+    let path = scratch("frame-known-retry");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(300), "Original frame"),
+    )
+    .unwrap()
+    .entity_id;
+    let token = captured_frame(&mut store, &target, true);
+    let batch = [
+        guarded_edit(301, &target, "1", token.clone()),
+        guarded_edit(302, &target, "1", token.clone()),
+    ];
+    execute_batch(&mut store, &mut ids, &batch).unwrap();
+    assert!(
+        execute_batch(&mut store, &mut ids, &batch)
+            .unwrap()
+            .iter()
+            .all(|saved| saved.replayed)
+    );
+    let mut changed_token = batch[0].clone();
+    changed_token.admission_tokens[0].semantic_digest = "changed".into();
+    assert_eq!(
+        execute(&mut store, &mut ids, &changed_token),
+        Err(ExecuteError::CommandIdReused)
+    );
+    assert!(
+        matches!(execute(&mut store,&mut ids,&guarded_edit(303,&target,"3",token)),Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::FormulationChanged)
+    );
+    for queued in queue(&mut store) {
+        assert!(queued.envelope.get("admission_tokens").is_none());
+    }
+}
+
+#[test]
+fn local_child_edit_insert_revert_and_ack_do_not_replace_the_original_frame() {
+    let path = scratch("local-child-frame");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(310), "Original frame"),
+    )
+    .unwrap()
+    .entity_id;
+    let empty = captured_frame(&mut store, &target, false);
+    let child = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(311),
+            CommandType::SubtaskCreate,
+            None,
+            json!({"task_id":target.as_str(),"title":"Shown child"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    assert!(
+        matches!(execute(&mut store,&mut ids,&guarded_edit(312,&target,"1",empty)),Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::FormulationChanged)
+    );
+    let original = captured_frame(&mut store, &target, true);
+    for (n, revision, title) in [(313, "1", "Edited child"), (314, "2", "Shown child")] {
+        execute(
+            &mut store,
+            &mut ids,
+            &request(
+                cmd(n),
+                CommandType::SubtaskUpdate,
+                Some(child.as_str()),
+                json!({"task_id":target.as_str(),"title":title}),
+                vec![shown(EntityType::Subtask, child.as_str(), revision)],
+            ),
+        )
+        .unwrap();
+    }
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE outbox SET state='completed' WHERE command_id IN (?1,?2)",
+                rusqlite::params![cmd(313).as_str(), cmd(314).as_str()],
+            )
+        })
+        .unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&guarded_edit(315,&target,"1",original)),Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::FormulationChanged)
+    );
+    let after_edits = captured_frame(&mut store, &target, true);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE outbox SET state='completed' WHERE command_id=?1",
+                [cmd(311).as_str()],
+            )
+        })
+        .unwrap();
+    execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(316), "Unrelated task"),
+    )
+    .unwrap();
+    execute(
+        &mut store,
+        &mut ids,
+        &guarded_edit(317, &target, "1", after_edits),
+    )
+    .unwrap();
+}
+
+#[test]
+fn partial_frame_allows_unseen_hydration_but_checks_subset_relative_order_and_body() {
+    let path = scratch("partial-frame-hydration");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(320), "Original frame"),
+    )
+    .unwrap()
+    .entity_id;
+    let a = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(321),
+            CommandType::SubtaskCreate,
+            None,
+            json!({"task_id":target.as_str(),"title":"A"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    let b = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(322),
+            CommandType::SubtaskCreate,
+            None,
+            json!({"task_id":target.as_str(),"title":"B"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    store.write(|tx| tx.execute("INSERT INTO identity_aliases(workspace_id,entity_type,old_local_id,server_id,provenance) VALUES (?1,'task','imported-old',?2,'test:imported')",rusqlite::params![WORKSPACE,target.as_str()])).unwrap();
+    // Simulate a pre-existing imported task, without retained local creation.
+    store
+        .write(|tx| {
+            tx.execute(
+                "DELETE FROM outbox WHERE command_id=?1",
+                [cmd(320).as_str()],
+            )
+        })
+        .unwrap();
+    let partial = captured_frame(&mut store, &target, true);
+    assert!(!partial.children_known);
+    let old_a = visible(&mut store, "subtask")
+        .into_iter()
+        .find(|v| v["id"] == a.as_str())
+        .unwrap();
+    let mut hydrated = old_a.clone();
+    hydrated["id"] = json!("hydrated-child");
+    hydrated["title"] = json!("Unseen hydration");
+    hydrated["order_key"] = json!("0");
+    store.write(|tx| {
+        tx.execute("INSERT INTO visible_records(workspace_id,record_type,record_key,edit_revision,body,source_command_id) VALUES (?1,'subtask',?2,'1',?3,NULL)",rusqlite::params![WORKSPACE,json!(["hydrated-child"]).to_string(),serde_json::to_vec(&hydrated).unwrap()])?;
+        // Absolute keys may move while the captured subset's order stays A,B.
+        tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.order_key','100','$.revision','88') AS BLOB) WHERE record_type='subtask' AND record_key=?1",[json!([b.as_str()]).to_string()])?;
+        Ok(())
+    }).unwrap();
+    let edit = guarded_edit(323, &target, "1", partial.clone());
+    assert!(matches!(
+        execute_with(&mut store, &mut ids, &edit, |_, _| Err(
+            rusqlite::Error::InvalidQuery
+        )),
+        Err(ExecuteError::Store(_))
+    ));
+    let mut opposite = old_a;
+    opposite["order_key"] = json!("200");
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE visible_records SET body=?1 WHERE record_type='subtask' AND record_key=?2",
+                rusqlite::params![
+                    serde_json::to_vec(&opposite).unwrap(),
+                    json!([a.as_str()]).to_string()
+                ],
+            )
+        })
+        .unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&guarded_edit(324,&target,"1",partial)),Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::FormulationChanged)
+    );
+}
+
+#[test]
+fn full_frame_ignores_ack_metadata_and_rejects_remote_child_body_or_set_changes() {
+    let path = scratch("full-frame-semantics");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(330), "Original frame"),
+    )
+    .unwrap()
+    .entity_id;
+    let comment = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(331),
+            CommandType::CommentCreate,
+            None,
+            json!({"task_id":target.as_str(),"body":"Shown comment"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    let token = captured_frame(&mut store, &target, true);
+    assert!(token.children_known);
+    let key = json!([comment.as_str()]).to_string();
+    store.write(|tx| {
+        tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.revision','99','$.actor_id','server-actor','$.created_at','2026-10-11T09:00:00Z','$.edited_at','2026-10-11T09:00:00Z') AS BLOB) WHERE record_type='comment' AND record_key=?1",[&key])?;
+        tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.updated_at','2026-10-11T09:00:00Z','$.order_key','999') AS BLOB) WHERE record_type='task' AND record_key=?1",[json!([target.as_str()]).to_string()])?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(
+        captured_frame(&mut store, &target, true).semantic_digest,
+        token.semantic_digest
+    );
+    let edit = guarded_edit(332, &target, "1", token.clone());
+    assert!(matches!(
+        execute_with(&mut store, &mut ids, &edit, |_, _| Err(
+            rusqlite::Error::InvalidQuery
+        )),
+        Err(ExecuteError::Store(_))
+    ));
+    store.write(|tx| tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.body','Changed remotely') AS BLOB) WHERE record_type='comment' AND record_key=?1",[&key])).unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&edit),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::FormulationChanged)
+    );
+    let mut inserted = visible(&mut store, "comment").into_iter().next().unwrap();
+    inserted["id"] = json!("remote-comment");
+    store.write(|tx| {
+        tx.execute("UPDATE visible_records SET body=CAST(json_set(CAST(body AS TEXT),'$.body','Shown comment') AS BLOB) WHERE record_type='comment' AND record_key=?1",[&key])?;
+        tx.execute("INSERT INTO visible_records(workspace_id,record_type,record_key,edit_revision,body,source_command_id) VALUES (?1,'comment',?2,'1',?3,NULL)",rusqlite::params![WORKSPACE,json!(["remote-comment"]).to_string(),serde_json::to_vec(&inserted).unwrap()])?;
+        Ok(())
+    }).unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&edit),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::FormulationChanged)
+    );
+}
+
+#[test]
+fn known_batch_lookup_is_read_only_complete_and_checks_later_id_mismatch() {
+    use bb_client::{KnownBatch, lookup_known_batch};
+    let path = scratch("known-only-recovery");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let originals = vec![
+        create_task(cmd(340), "Known A"),
+        create_task(cmd(341), "Known B"),
+    ];
+    let saved = execute_batch(&mut store, &mut ids, &originals).unwrap();
+    store.write(|tx| tx.execute("UPDATE sync_meta SET projection_stale=1,projection_generation=projection_generation+9",[])).unwrap();
+    let before = meta(&mut store);
+    let mut later_context = originals.clone();
+    for request in &mut later_context {
+        request.context = context("2040-10-10T09:00:00Z");
+    }
+    let KnownBatch::Known { results } = lookup_known_batch(&mut store, &later_context).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result.local_sequence)
+            .collect::<Vec<_>>(),
+        saved
+            .iter()
+            .map(|result| result.local_sequence)
+            .collect::<Vec<_>>()
+    );
+    assert!(results.iter().all(|result| result.replayed));
+    let unknown = create_task(cmd(342), "Unknown suffix must not execute");
+    assert_eq!(
+        lookup_known_batch(&mut store, &[originals[0].clone(), unknown.clone()]).unwrap(),
+        KnownBatch::NotKnown
+    );
+    let mut mismatch = originals[1].clone();
+    mismatch
+        .payload
+        .insert("title".into(), json!("Changed known fingerprint"));
+    assert_eq!(
+        lookup_known_batch(&mut store, &[unknown, originals[0].clone(), mismatch]),
+        Err(ExecuteError::CommandIdReused)
+    );
+    assert_eq!(queue(&mut store).len(), 2);
+    assert_eq!(meta(&mut store), before);
+    assert_eq!(
+        store
+            .read(
+                |tx| tx.query_row("SELECT projection_stale FROM sync_meta", [], |row| row
+                    .get::<_, i64>(0))
+            )
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn tag_delete_frozen_dependents_refuse_interference_but_other_affected_tasks_do_not_conflict() {
+    let path = scratch("tag-delete-interference");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let (tag, target) = tagged_task(&mut store, &mut ids);
+    let other = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(220),
+            CommandType::TaskCreate,
+            None,
+            json!({"title":"Other affected task","tag_ids":[tag.as_str()]}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    let guarded_delete = |n, revision| {
+        request(
+            cmd(n),
+            CommandType::TagDelete,
+            Some(tag.as_str()),
+            json!({}),
+            vec![
+                shown(EntityType::Tag, tag.as_str(), "1"),
+                shown(EntityType::Task, target.as_str(), revision),
+            ],
+        )
+    };
+    let edit = |n, target: &Id, revision, title| {
+        request(
+            cmd(n),
+            CommandType::TaskUpdate,
+            Some(target.as_str()),
+            json!({"title":title}),
+            vec![shown(EntityType::Task, target.as_str(), revision)],
+        )
+    };
+    execute(
+        &mut store,
+        &mut ids,
+        &edit(221, &target, "1", "Changed before delete"),
+    )
+    .unwrap();
+    execute(
+        &mut store,
+        &mut ids,
+        &edit(222, &other, "1", "Unrelated affected task changed"),
+    )
+    .unwrap();
+    let before = queue(&mut store).len();
+    assert!(matches!(
+        execute_batch(
+            &mut store,
+            &mut ids,
+            &[
+                guarded_delete(223, "1"),
+                edit(224, &target, "1", "Frozen editor")
+            ]
+        ),
+        Err(ExecuteError::Refused(_))
+    ));
+    assert_eq!(queue(&mut store).len(), before);
+    assert_eq!(visible(&mut store, "tag")[0]["state"], "active");
+    let delete = guarded_delete(225, "2");
+    execute_batch(
+        &mut store,
+        &mut ids,
+        &[
+            delete.clone(),
+            edit(226, &target, "2", "Explicit new frame"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(task(&mut store, other.as_str())["revision"], "3");
+    execute(
+        &mut store,
+        &mut ids,
+        &edit(227, &target, "4", "Changed after delete"),
+    )
+    .unwrap();
+    assert!(matches!(
+        execute_batch(
+            &mut store,
+            &mut ids,
+            &[delete, edit(228, &target, "2", "Old frozen editor")]
+        ),
+        Err(ExecuteError::Refused(_))
+    ));
+    assert_eq!(
+        task(&mut store, target.as_str())["title"],
+        "Changed after delete"
+    );
+}
+
+#[test]
+fn detail_completeness_requires_positive_source_proof_even_without_alias() {
+    let path = scratch("detail-source-proof");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(
+        &mut store,
+        &mut ids,
+        &create_task(cmd(370), "Equal local/server identity"),
+    )
+    .unwrap()
+    .entity_id;
+    assert!(captured_frame(&mut store, &target, true).children_known);
+    // An imported canonical ID can equal serverID, so the importer omits its
+    // redundant alias. No retained local create means completeness is unknown.
+    store
+        .write(|tx| {
+            tx.execute(
+                "DELETE FROM outbox WHERE command_id=?1",
+                [cmd(370).as_str()],
+            )
+        })
+        .unwrap();
+    assert!(!captured_frame(&mut store, &target, true).children_known);
+    store.write(|tx| tx.execute("INSERT INTO drafts(workspace_id,draft_id,editor_kind,record_type,record_key,fields,updated_at) VALUES (?1,'hydrated-source','legacy_task_local','task',?2,?3,?4)", rusqlite::params![WORKSPACE,json!([target.as_str()]).to_string(),serde_json::to_vec(&json!({"childrenSyncedAt":NOW})).unwrap(),NOW])).unwrap();
+    assert!(captured_frame(&mut store, &target, true).children_known);
+}
+
+#[test]
+fn batch_preserves_ordinary_historical_exact_shown_pending_revision_chain() {
+    let path = scratch("ordinary-historical-chain");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let target = execute(&mut store, &mut ids, &create_task(cmd(380), "Original"))
+        .unwrap()
+        .entity_id;
+    let first = request(
+        cmd(381),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"details":"First saved edit"}),
+        vec![shown(EntityType::Task, target.as_str(), "1")],
+    );
+    execute(&mut store, &mut ids, &first).unwrap();
+    let next = request(
+        cmd(382),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"title":"Shown after first edit"}),
+        vec![shown(EntityType::Task, target.as_str(), "2")],
+    );
+    execute_batch(&mut store, &mut ids, &[next]).unwrap();
+    assert_eq!(
+        queue(&mut store).last().unwrap().envelope["preconditions"][0]["after_command"]["command_id"],
+        cmd(381).as_str()
+    );
+}
+
+#[test]
+fn fresh_auto_park_with_ignored_extra_guard_cannot_authorize_numeric_task_update() {
+    let path = scratch("unguarded-auto-park-producer");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let mut create = create_task(cmd(390), "Due Next task");
+    create.context = context("2026-09-01T09:00:00Z");
+    let target = execute(&mut store, &mut ids, &create).unwrap().entity_id;
+    let mut move_next = request(
+        cmd(391),
+        CommandType::TaskTransition,
+        Some(target.as_str()),
+        json!({"action":"move","to_state":"next"}),
+        vec![shown(EntityType::Task, target.as_str(), "1")],
+    );
+    move_next.context = create.context;
+    execute(&mut store, &mut ids, &move_next).unwrap();
+    store.write(|tx| tx.execute("INSERT INTO visible_records(workspace_id,record_type,record_key,edit_revision,body,source_command_id) VALUES (?1,'review_settings','[]','1',?2,NULL)",rusqlite::params![WORKSPACE,serde_json::to_vec(&json!({"threshold_days":14,"review_weekday":5,"review_time":"16:00","time_zone":"UTC","onboarded_at":null,"activated_at":"2026-08-01T00:00:00Z","owner_park_floor_at":null,"revision":"1","private":{"last_effective_sweep_at":NOW,"threshold_changed_at":null}})).unwrap()])).unwrap();
+    let form = task(&mut store, target.as_str())["formulation"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut park = request(
+        cmd(392),
+        CommandType::ReviewAutoPark,
+        Some(target.as_str()),
+        json!({"formulation_id":form}),
+        vec![shown(EntityType::Task, target.as_str(), "2")],
+    );
+    park.context.policy.weekly_review = true;
+    let edit = request(
+        cmd(393),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"details":"Preserved editor input"}),
+        vec![shown(EntityType::Task, target.as_str(), "2")],
+    );
+    let before = queue(&mut store).len();
+    let refused = execute_batch(&mut store, &mut ids, &[park.clone(), edit]);
+    assert!(
+        matches!(&refused,Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::InvalidPayload),
+        "{refused:?}"
+    );
+    assert_eq!(queue(&mut store).len(), before);
+    assert_eq!(task(&mut store, target.as_str())["state"], "next");
+    execute(&mut store, &mut ids, &park).unwrap();
+    assert_eq!(task(&mut store, target.as_str())["state"], "someday");
+}
+
+#[test]
+fn new_tag_delete_task_guard_cannot_launder_historical_tag_delete_result() {
+    use bb_protocol::command::{AfterCommandPrecondition, CommandRef};
+    let path = scratch("historical-tag-delete-laundering");
+    let mut store = open(&path, 1_000).unwrap();
+    let mut ids = SeqIds(0);
+    let (tag, target) = tagged_task(&mut store, &mut ids);
+    let second_tag = execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(400),
+            CommandType::TagCreate,
+            None,
+            json!({"name":"Second tag"}),
+            vec![],
+        ),
+    )
+    .unwrap()
+    .entity_id;
+    execute(
+        &mut store,
+        &mut ids,
+        &request(
+            cmd(401),
+            CommandType::TaskTags,
+            Some(target.as_str()),
+            json!({"add_tag_ids":[second_tag.as_str()],"remove_tag_ids":[]}),
+            vec![shown(EntityType::Task, target.as_str(), "1")],
+        ),
+    )
+    .unwrap();
+    let old_delete = request(
+        cmd(402),
+        CommandType::TagDelete,
+        Some(tag.as_str()),
+        json!({}),
+        vec![shown(EntityType::Tag, tag.as_str(), "1")],
+    );
+    execute(&mut store, &mut ids, &old_delete).unwrap();
+    let new_delete = request(
+        cmd(403),
+        CommandType::TagDelete,
+        Some(second_tag.as_str()),
+        json!({}),
+        vec![
+            shown(EntityType::Tag, second_tag.as_str(), "1"),
+            Precondition::AfterCommand(AfterCommandPrecondition {
+                after_command: CommandRef {
+                    command_id: old_delete.command_id.clone(),
+                    entity_type: EntityType::Task,
+                    entity_id: target.clone(),
+                },
+            }),
+        ],
+    );
+    let edit = request(
+        cmd(404),
+        CommandType::TaskUpdate,
+        Some(target.as_str()),
+        json!({"title":"Preserved editor input"}),
+        vec![shown(EntityType::Task, target.as_str(), "3")],
+    );
+    let before = queue(&mut store).len();
+    assert!(
+        matches!(execute_batch(&mut store,&mut ids,&[old_delete,new_delete,edit]),Err(ExecuteError::Refused(error)) if error.reason==bb_domain::types::Reason::InvalidPayload)
+    );
+    assert_eq!(queue(&mut store).len(), before);
+    assert_eq!(
+        task(&mut store, target.as_str())["tag_ids"],
+        json!([second_tag.as_str()])
+    );
 }
