@@ -59,6 +59,135 @@ pub fn decode_change_stream(bytes: &[u8]) -> Result<Vec<Change>, CodecError> {
     crate::wire::decode(text)
 }
 
+/// Incremental form of [`decode_change_stream`]: the canonical JSON array is fed
+/// in byte chunks (a chunk may end inside a record, even inside a multi-byte
+/// character) and each [`Change`] is returned as soon as its object is
+/// complete. Memory is one record in progress plus the set of record keys seen,
+/// never the whole stream.
+///
+/// It is exactly as strict as the whole-stream decoder: every element must be a
+/// duplicate-key-free JSON object that is a valid [`Change`], the stream must be
+/// exactly one array, and a record key may appear once (a transaction and a
+/// snapshot both carry each key's final after-image only). The caller owns
+/// integrity (digests, counts); a stream is complete only when
+/// [`ChangeStreamDecoder::finish`] succeeds.
+#[derive(Debug, Default)]
+pub struct ChangeStreamDecoder {
+    state: StreamState,
+    /// The bytes of the record in progress.
+    carry: Vec<u8>,
+    depth: usize,
+    in_string: bool,
+    escaped: bool,
+    keys: HashSet<(EntityType, RecordKey)>,
+    count: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum StreamState {
+    /// Before the opening `[`.
+    #[default]
+    Start,
+    /// After `[`: a record or `]`.
+    Opened,
+    /// Inside a record.
+    Record,
+    /// After a record: `,` or `]`.
+    Closed,
+    /// After `,`: a record.
+    Separated,
+    /// After `]`: nothing but whitespace.
+    Done,
+}
+
+const BAD_STREAM: CodecError = CodecError::Invalid("change stream");
+
+impl ChangeStreamDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Consumes the next chunk and returns the changes it completed.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError`] for anything the whole-stream decoder would refuse. After
+    /// an error the decoder must be discarded.
+    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<Change>, CodecError> {
+        let mut done = Vec::new();
+        for &byte in chunk {
+            match self.state {
+                StreamState::Record => {
+                    self.carry.push(byte);
+                    if self.in_string {
+                        if self.escaped {
+                            self.escaped = false;
+                        } else if byte == b'\\' {
+                            self.escaped = true;
+                        } else if byte == b'"' {
+                            self.in_string = false;
+                        }
+                    } else {
+                        match byte {
+                            b'"' => self.in_string = true,
+                            b'{' | b'[' => self.depth += 1,
+                            b'}' | b']' => {
+                                self.depth = self.depth.checked_sub(1).ok_or(BAD_STREAM)?;
+                                if self.depth == 0 {
+                                    done.push(self.finish_record()?);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ if matches!(byte, b' ' | b'\t' | b'\n' | b'\r') => {}
+                StreamState::Start if byte == b'[' => self.state = StreamState::Opened,
+                StreamState::Opened | StreamState::Separated if byte == b'{' => {
+                    self.carry.clear();
+                    self.carry.push(byte);
+                    self.depth = 1;
+                    self.state = StreamState::Record;
+                }
+                StreamState::Opened | StreamState::Closed if byte == b']' => {
+                    self.state = StreamState::Done;
+                }
+                StreamState::Closed if byte == b',' => self.state = StreamState::Separated,
+                _ => return Err(BAD_STREAM),
+            }
+        }
+        Ok(done)
+    }
+
+    fn finish_record(&mut self) -> Result<Change, CodecError> {
+        let text = std::str::from_utf8(&self.carry).map_err(|_| BAD_STREAM)?;
+        let change: Change = crate::wire::decode(text)?;
+        if !self
+            .keys
+            .insert((change.entity_type, change.record_key.clone()))
+        {
+            return Err(CodecError::Invalid("change stream repeats a record key"));
+        }
+        self.count += 1;
+        self.carry.clear();
+        self.state = StreamState::Closed;
+        Ok(change)
+    }
+
+    /// Ends the stream and returns how many changes it held.
+    ///
+    /// # Errors
+    ///
+    /// [`CodecError`] when the array was not closed.
+    pub fn finish(self) -> Result<u64, CodecError> {
+        if self.state == StreamState::Done {
+            Ok(self.count)
+        } else {
+            Err(BAD_STREAM)
+        }
+    }
+}
+
 /// One complete logical transaction; never partially applied or exposed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {

@@ -484,4 +484,10 @@ CREATE TABLE visible_records (
     PRIMARY KEY (workspace_id, record_type, record_key)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX visible_by_key ON visible_records (workspace_id, record_key);
+
+-- A store upgraded with confirmed rows or queued work has no projection yet:
+-- the next write rebuilds it (replay) before deciding against it.
+ALTER TABLE sync_meta ADD COLUMN projection_stale INTEGER NOT NULL DEFAULT 0;
+UPDATE sync_meta SET projection_stale = 1
+WHERE EXISTS (SELECT 1 FROM confirmed_records) OR EXISTS (SELECT 1 FROM outbox);
 ";
