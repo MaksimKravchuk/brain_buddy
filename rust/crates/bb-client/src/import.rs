@@ -87,8 +87,8 @@ const IMPORTED_VERSION: u64 = 0;
 /// The newest `StoreDocument.version` this build reads (`StoreDocument.currentVersion`).
 pub const SUPPORTED_SOURCE_VERSION: i64 = 2;
 
-const KIND_OUTBOX: &str = "legacy_outbox_entry";
-const KIND_ISSUE: &str = "legacy_sync_issue";
+pub(crate) const KIND_OUTBOX: &str = "legacy_outbox_entry";
+pub(crate) const KIND_ISSUE: &str = "legacy_sync_issue";
 const KIND_REVIEW: &str = "legacy_review_base";
 const KIND_LOCAL: &str = "legacy_local_review";
 const KIND_SYNC: &str = "legacy_sync_metadata";

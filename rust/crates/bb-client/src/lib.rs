@@ -18,13 +18,16 @@
 //! without rewriting an envelope, replaced for new independent work. [`import`]
 //! moves the legacy `StoreDocument` JSON file into the store: backed up, staged,
 //! validated against the source and switched in one transaction under the migration
-//! lock, or not at all.
+//! lock, or not at all. [`legacy_outbox`] then classifies the pending sends and issues
+//! that import carried: a send whose receipt proves its outcome is settled, one that
+//! may have reached the server stays an issue and is never reissued.
 
 mod apply_changes;
 mod epochs;
 mod execute;
 mod import;
 mod issues;
+mod legacy_outbox;
 mod locking;
 mod receipts;
 mod replay;
@@ -55,6 +58,10 @@ pub use issues::{
     IssueError, IssueReason, IssueState, IssueView, LoadedDraft, Replacement, ResolveRequest,
     Resolved, issue, load_draft, open_issues, record_rejection, record_rejection_in, resolve_issue,
     save_draft,
+};
+pub use legacy_outbox::{
+    LegacyAnswer, LegacyOutboxError, LegacyOutboxStatus, LegacySend, ProvenAlias, ProvidedReceipts,
+    ReceiptLookup, legacy_outbox_sends, legacy_outbox_status, resolve_legacy_outbox,
 };
 pub use locking::{LockMode, MigrationLock};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
