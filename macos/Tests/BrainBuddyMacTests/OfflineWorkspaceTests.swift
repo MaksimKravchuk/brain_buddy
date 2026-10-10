@@ -323,16 +323,39 @@ struct OfflineWorkspaceTests {
         let tag = try app.workspace.createTag(name: "outside")
         let source = try app.add("Garden redesign", .someday, project: project, tags: [tag])
         await app.workspace.flush()
-        let outbox = app.workspace.pendingChangeCount
+        #expect(!app.workspace.isRustSelected)
+        let store = FileDocumentStore(fileURL: app.folder.store)
+        let before = try #require(try await store.load())
+        var expectedOutbox = before.outbox
+        let creationIndex = try #require(expectedOutbox.firstIndex {
+            if case .createTask(let create) = $0.command { return create.taskID == source }
+            return false
+        })
+        guard case .createTask(var creation) = expectedOutbox[creationIndex].command else {
+            Issue.record("The offline task must have an unsent creation")
+            return
+        }
+        #expect(!expectedOutbox[creationIndex].hasBeenSent)
+        creation.title = "Sketch the first garden bed"
+        creation.list = .next
+        expectedOutbox[creationIndex].command = .createTask(creation)
 
         #expect(await app.model.activateSomeday(source, title: "  Sketch the first garden bed  "))
-        #expect(app.workspace.pendingChangeCount == outbox + 2, "the edit and the move, applied together")
+        // Awaited success already persisted both effects in one write. With Review off,
+        // the legacy compactor folds the edit and move into the unsent creation.
+        let saved = try #require(try await store.load())
+        #expect(saved.generation == before.generation + 1)
+        #expect(saved.outbox == expectedOutbox)
+        #expect(app.workspace.pendingChangeCount == saved.outbox.count)
         let activated = try #require(app.workspace.task(source))
         #expect(activated.title == "Sketch the first garden bed" && activated.state == .next)
         #expect(activated.projectID == project && activated.tagIDs == [tag])
         await app.restart()
         #expect(app.titles(.next) == ["Sketch the first garden bed"])
+        #expect(app.workspace.task(source) == activated)
         #expect(await app.model.activateSomeday(source, title: "Another action") == false)
+        #expect(try await store.load() == saved, "a refused second activation writes nothing")
+        #expect(app.transport.requests.isEmpty)
     }
 
     @Test("021-FR-024 a Someday item of an archived project keeps its project when it becomes a Next action")
