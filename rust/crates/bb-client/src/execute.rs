@@ -773,6 +773,86 @@ fn apply(
     Ok(())
 }
 
+// ----------------------------------------------------------------------- snapshot
+
+/// What a screen reads: the visible projection of the workspace at one
+/// projection generation, and how much of the queue still waits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VisibleSnapshot {
+    pub projection_generation: u64,
+    /// Every visible record, in a stable order.
+    pub records: Vec<Record>,
+    /// Queued intents the server has not settled (everything but `completed`
+    /// and `rejected`, which an issue keeps).
+    pub pending: u64,
+    /// Sync issues still waiting for the user.
+    pub open_issues: u64,
+}
+
+/// Reads the visible projection in one read transaction, so the records, the
+/// generation and the counts belong together. Takes no write lock, so a screen
+/// never waits for a gesture and a gesture never waits for a screen.
+///
+/// # Errors
+///
+/// [`ExecuteError::Store`]; a projection an upgrade left to be rebuilt is
+/// `Corrupt` here, because only a write (which has the instant and the policy
+/// the rebuild needs) can repair it.
+pub fn visible_snapshot(store: &mut Store) -> Result<VisibleSnapshot, ExecuteError> {
+    let (generation, stale, pending, open_issues, rows) = store.read(|tx| {
+        let (generation, stale, workspace_id): (i64, i64, String) = tx.query_row(
+            "SELECT projection_generation, projection_stale, workspace_id FROM sync_meta",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        let pending: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM outbox WHERE workspace_id = ?1
+             AND state NOT IN ('completed', 'rejected')",
+            [&workspace_id],
+            |row| row.get(0),
+        )?;
+        let open_issues: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_issues WHERE workspace_id = ?1 AND resolution = 'open'",
+            [&workspace_id],
+            |row| row.get(0),
+        )?;
+        let mut statement = tx.prepare(
+            "SELECT record_type, body FROM visible_records WHERE workspace_id = ?1
+             ORDER BY record_type, record_key",
+        )?;
+        let rows = statement
+            .query_map([&workspace_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, Vec<u8>)>, _>>()?;
+        Ok((generation, stale, pending, open_issues, rows))
+    })?;
+    if stale != 0 {
+        return Err(StoreError::Corrupt.into());
+    }
+    Ok(VisibleSnapshot {
+        projection_generation: unsigned(generation)?,
+        records: rows
+            .iter()
+            .map(|(kind, body)| record_from(kind, body))
+            .collect::<Result<_, _>>()?,
+        pending: unsigned(pending)?,
+        open_issues: unsigned(open_issues)?,
+    })
+}
+
+/// The projection generation alone: the cheap read a subscription polls.
+///
+/// # Errors
+///
+/// [`ExecuteError::Store`].
+pub fn projection_generation(store: &mut Store) -> Result<u64, ExecuteError> {
+    let generation = store.read(|tx| {
+        tx.query_row("SELECT projection_generation FROM sync_meta", [], |row| {
+            row.get(0)
+        })
+    })?;
+    unsigned(generation)
+}
+
 // ------------------------------------------------------------------- dependencies
 
 fn push_unique(list: &mut Vec<CommandId>, id: &CommandId) {

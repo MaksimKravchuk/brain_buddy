@@ -46,7 +46,7 @@ pub use epochs::{
 };
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
-    Stage, execute, execute_with,
+    Stage, VisibleSnapshot, execute, execute_with, projection_generation, visible_snapshot,
 };
 pub use import::{
     ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,
