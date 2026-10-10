@@ -1,0 +1,35 @@
+[package]
+name = "bb-swift"
+description = "UniFFI bridge exposing the shared Rust core to the Apple clients and the Linux Swift tests (spec 026)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# `staticlib` is what BrainBuddyKit links (an XCFramework on Apple, a plain
+# archive on Linux); `rlib` lets `cargo test` and clippy build the crate.
+name = "bb_swift"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+# Generates the Swift bindings from the compiled library (ios/scripts/build-rust-bridge.sh).
+# Behind a feature so the `uniffi` CLI dependencies never reach the shipped library.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
+
+[dependencies]
+bb-protocol.workspace = true
+serde_json.workspace = true
+uniffi.workspace = true
+
+# No `unsafe` exception: the `uniffi` macros expand to the `extern "C"` scaffolding
+# without tripping the workspace's `unsafe_code = "forbid"` (checked on 0.32.2, as
+# with PyO3), and this crate writes no `unsafe` itself.
+[lints]
+workspace = true

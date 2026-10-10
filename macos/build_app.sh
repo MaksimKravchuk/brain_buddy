@@ -19,6 +19,8 @@ for asset in \
 done
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$(pwd)/.build/ModuleCache}"
 export SWIFT_MODULE_CACHE_PATH="${SWIFT_MODULE_CACHE_PATH:-$(pwd)/.build/SwiftModuleCache}"
+# The shared kit links the Rust core (spec 026); the Mac needs only its own slice.
+BB_APPLE_TARGETS="${BB_APPLE_TARGETS:-aarch64-apple-darwin x86_64-apple-darwin}" sh ../ios/scripts/build-rust-bridge.sh apple
 swift build --disable-sandbox -c debug
 app_dir="$(pwd)/.build/BrainBuddyMac.app"
 mkdir -p "$app_dir/Contents/MacOS"
