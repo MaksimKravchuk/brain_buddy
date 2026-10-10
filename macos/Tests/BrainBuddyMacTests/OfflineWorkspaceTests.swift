@@ -605,7 +605,8 @@ struct OfflineWorkspaceTests {
         let project = try app.workspace.createProject(name: "Garden")
         #expect(app.model.canArchiveProject)
         app.model.taskEditInProgress = true
-        #expect(!app.model.canArchiveProject && (await app.model.archiveProject(project)) == false)
+        #expect(!app.model.canArchiveProject)
+        #expect(await app.model.archiveProject(project) == false)
         app.model.taskEditInProgress = false
         app.model.draft = "  "
         #expect(app.model.canArchiveProject, "a blank draft does not count")
