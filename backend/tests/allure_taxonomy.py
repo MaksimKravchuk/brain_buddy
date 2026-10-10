@@ -289,6 +289,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Durable job ledger",
         "Job authority before compatible writes",
     ),
+    "review_job_handoff": (
+        EPIC_TASKS,
+        "Durable job ledger",
+        "Review job adapter preserves fenced effects",
+    ),
     "agent_job_handoff": (
         EPIC_TASKS,
         "Durable job ledger",
