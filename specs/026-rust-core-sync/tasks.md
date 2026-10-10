@@ -199,15 +199,15 @@ Every FR-001…026 and SC-001…008 is assigned explicitly in the JSON. PR-54 is
 > **Owner decision, 2026-10-10 (implementation session):** to run more slices in parallel, the owner relaxed two ordering edges that were release order rather than code dependencies.
 >
 > - **PR-41** depends on PR-39, not PR-40. Legacy JSON import into a staging store needs the merged client store, replay, snapshot and session fencing, but not transport. PR-42 uses a lookup port with test fakes until PR-40 lands. This opens the client/Apple lane (PR-41 → PR-42 → PR-43 → PR-44) alongside the server chain.
-> - **PR-55** depends on PR-25, not PR-54. The PostgreSQL adapter is written and tested against the unit of work that PR-25 freezes, but it still **lands only after the PR-54 pilot passes**. Activation, migration and cutover (PR-56, PR-57) keep their order.
+> - **PR-55** may start once PR-25 merges, not after PR-54. The PostgreSQL adapter is written and tested against the unit of work that PR-25 freezes. It still **lands only after the PR-54 pilot passes**, so its `depends_on` keeps PR-54 as the landing gate and adds PR-25. This is the one slice the conductor launches before every `depends_on` entry has merged: its worker starts when PR-25 merges, and its PR does not merge until PR-54 has. Activation, migration and cutover (PR-56, PR-57) keep their order.
 >
 > Slices that write the same files stay ordered, which takes three new edges:
 >
 > - PR-40 now depends on PR-41 and PR-42. Those two entries move ahead of PR-40 in the map, and they share `bb-client/src/lib.rs`.
 > - PR-51 now depends on PR-40.
-> - PR-56 now depends on PR-54, so migration still follows the pilot.
+> - PR-55 now depends on PR-25 as well as PR-54.
 >
-> All other edges, gates and merge order are unchanged.
+> The graph has 98 edges, up from 94. All other edges, gates and merge order are unchanged.
 
 Each `T###` belongs to exactly one `PR-NN`; each PR delivers one named, independently checkable outcome and its necessary evidence. Contract foundations and dark modules may merge before exposure. Do not bundle another slice, unrelated cleanup, a broad rewrite or later platform work to fill a budget. The listed product caps remain at most 390 changed lines (repository ceiling 400); tests/docs exemptions in the repository checker do **not** exempt them from this feature's **800 total added + deleted text-line cap**. Count lockfiles and committed generated output; never split an unbuildable half of a lockfile. Binary/generated build artifacts are published by CI, not used to hide a large source diff.
 
@@ -2475,7 +2475,8 @@ The Russian heading is the required repository parser key; the map and prose are
         "backend/tests/test_sync_postgres.py"
       ],
       "depends_on": [
-        "PR-25"
+        "PR-25",
+        "PR-54"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_postgres.py"
@@ -2509,8 +2510,7 @@ The Russian heading is the required repository parser key; the map and prose are
         "specs/026-rust-core-sync/recovery.md"
       ],
       "depends_on": [
-        "PR-55",
-        "PR-54"
+        "PR-55"
       ],
       "tests": [
         "cd backend && pytest tests/test_sync_postgres_migration.py tests/test_sync_postgres.py"
