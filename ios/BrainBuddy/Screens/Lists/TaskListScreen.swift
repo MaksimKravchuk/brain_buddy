@@ -15,6 +15,7 @@ struct TaskListScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     @Environment(\.appTab) private var tab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Read so date views and due chips redraw on a new day.
     @Environment(\.dayChangeCount) private var dayChangeCount
     /// JSON-encoded `ListOptions`, one key per destination (see `ListOptionsStore`).
@@ -115,6 +116,10 @@ struct TaskListScreen: View {
         }
         .listStyle(.plain)
         .bbDenseList()
+        .animation(
+            BBMotion.animation(.settle, reduceMotion: reduceMotion),
+            value: result.sections.flatMap(\.tasks).map(\.id)
+        )
         .overlay {
             if result.isEmpty {
                 if case .list(.next) = destination {

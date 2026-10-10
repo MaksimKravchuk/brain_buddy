@@ -87,6 +87,7 @@ private struct SearchIdleView: View {
 private struct SearchResultsView: View {
     let text: String
     let sections: [TaskSection]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if sections.isEmpty {
@@ -115,6 +116,10 @@ private struct SearchResultsView: View {
                 }
             }
             .bbDenseList()
+            .animation(
+                BBMotion.animation(.settle, reduceMotion: reduceMotion),
+                value: sections.flatMap(\.tasks).map(\.id)
+            )
         }
     }
 }

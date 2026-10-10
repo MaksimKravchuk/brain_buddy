@@ -9,6 +9,7 @@ struct TodayScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     @Environment(\.dayChangeCount) private var dayChangeCount
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init() {}
 
@@ -36,6 +37,10 @@ struct TodayScreen: View {
         }
         .listStyle(.plain)
         .bbDenseList()
+        .animation(
+            BBMotion.animation(.settle, reduceMotion: reduceMotion),
+            value: agenda.sections.flatMap(\.tasks).map(\.id)
+        )
         .bbScreenTitle("Today")
         .bbScreenSubtitle(subtitle(summary: Self.summary(of: agenda)))
         .toolbar {
