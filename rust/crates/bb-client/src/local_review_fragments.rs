@@ -180,6 +180,8 @@ struct Pending {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
+    #[serde(default)]
+    source_completion_sha256: Option<String>,
     header_sha256: String,
     digests: Vec<String>,
 }
@@ -578,7 +580,7 @@ fn make_page(
             .source_session
             .as_ref()
             .map(|s| {
-                Ok(LocalReviewSessionWitness {
+                Ok::<_, LegacyReviewError>(LocalReviewSessionWitness {
                     id: s
                         .get("id")
                         .and_then(Value::as_str)
@@ -618,6 +620,36 @@ fn make_page(
     page.fragment_sha256 = hash(&page)?;
     Ok(page)
 }
+fn original_source<'a>(
+    proof: &'a AccountlessImportProof,
+    selected: &LocalReviewSourceId,
+) -> Result<Option<&'a Value>, LegacyReviewError> {
+    if selected.source_kind == LocalReviewSourceKind::Settings && selected.source_id != "settings" {
+        return Err(invalid());
+    }
+    let base = proof.source.get("base").ok_or_else(invalid)?;
+    let (section, _) = migration::source_section(selected.source_kind);
+    let container = if selected.source_kind == LocalReviewSourceKind::TaskPark {
+        base.get(section)
+    } else {
+        base.get("review").and_then(|review| review.get(section))
+    };
+    let source = if selected.source_kind == LocalReviewSourceKind::Settings {
+        container
+    } else {
+        container.and_then(|v| v.get(&selected.source_id))
+    };
+    let Some(source) = source.filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    if selected.source_kind != LocalReviewSourceKind::Settings
+        && source.get("id").and_then(Value::as_str) != Some(selected.source_id.as_str())
+    {
+        return Err(invalid());
+    }
+    Ok(Some(source))
+}
+
 fn page_in(
     tx: &Transaction<'_>,
     proof: &AccountlessImportProof,
@@ -625,6 +657,13 @@ fn page_in(
     after: Option<&str>,
     now: &Instant,
 ) -> Result<Option<LocalReviewFragmentPage>, LegacyReviewError> {
+    if !crate::local_review::account_less(tx)? {
+        return Err(invalid());
+    }
+    crate::local_review::recheck_import_proof(tx, proof).map_err(migration::execute_error)?;
+    if original_source(proof, selected)?.is_none() {
+        return Ok(None);
+    }
     let captured =
         migration::capture_raw_in(tx, proof, std::slice::from_ref(selected), usize::MAX)?;
     let header = header_in(&captured)?;
@@ -691,6 +730,73 @@ pub fn capture_local_review_private_fragment(
     now: &Instant,
 ) -> Result<Option<LocalReviewFragmentPage>, LegacyReviewError> {
     store.read(|tx| Ok(page_in(tx, proof, selected, after, now)))?
+}
+
+fn completion_hash(
+    proof: &AccountlessImportProof,
+    selected: &LocalReviewSourceId,
+    fragment_sha256: &str,
+) -> Result<String, LegacyReviewError> {
+    hash(&(
+        &proof.workspace,
+        &proof.activation,
+        &proof.marker_sha256,
+        &proof.source_sha256,
+        selected,
+        fragment_sha256,
+    ))
+}
+
+/// Original-source completion survives later local public edits. The import
+/// proof and immutable source identity are checked without repinning any row.
+/// Pending components never count as completion.
+pub fn local_review_private_source_completed(
+    store: &mut Store,
+    proof: &AccountlessImportProof,
+    selected: &LocalReviewSourceId,
+) -> Result<bool, LegacyReviewError> {
+    store.read(|tx| {
+        Ok((|| {
+            if !crate::local_review::account_less(tx)? {
+                return Err(invalid());
+            }
+            crate::local_review::recheck_import_proof(tx, proof)
+                .map_err(migration::execute_error)?;
+            let mut capture = crate::legacy_review::capture_in(tx)?;
+            if !capture.already_active || capture.token.import_source_sha256 != proof.source_sha256
+            {
+                return Err(invalid());
+            }
+            let base = proof.source.get("base").ok_or_else(invalid)?;
+            let (_, kind) = migration::source_section(selected.source_kind);
+            let Some(source) = original_source(proof, selected)? else {
+                return Ok(false);
+            };
+            let record_key = if selected.source_kind == LocalReviewSourceKind::Settings {
+                vec![]
+            } else {
+                vec![migration::original_identity(
+                    kind,
+                    &selected.source_id,
+                    base,
+                    &mut capture.aliases,
+                )]
+            };
+            let draft_id = format!(
+                "runtime:local-review-private:manifest:{}",
+                hash(&(kind, &record_key))?
+            );
+            let manifest: Option<Vec<u8>> = tx.query_row(
+            "SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+            params![proof.workspace, draft_id, MANIFEST_KIND], |r| r.get(0)).optional()?;
+            let Some(manifest) = manifest else {
+                return Ok(false);
+            };
+            let manifest: Manifest = decode(&manifest)?;
+            Ok(manifest.source_completion_sha256
+                == Some(completion_hash(proof, selected, &hash(source)?)?))
+        })())
+    })?
 }
 
 fn known_in(
@@ -828,6 +934,14 @@ pub fn admit_local_review_private_fragment_with(
             MANIFEST_KIND,
             "manifest",
             &Manifest {
+                source_completion_sha256: Some(completion_hash(
+                    proof,
+                    &LocalReviewSourceId {
+                        source_kind: pending.header.binding.source_kind,
+                        source_id: pending.header.binding.source_id.clone(),
+                    },
+                    &pending.header.binding.source_fragment_sha256,
+                )?),
                 header_sha256: hash(&pending.header)?,
                 digests: pending.digests,
             },

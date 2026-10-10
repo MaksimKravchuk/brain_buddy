@@ -1031,3 +1031,95 @@ fn old_prepared_batch_known_only_port_never_executes_unknown_suffix() {
     let snapshot = workspace.snapshot().unwrap();
     assert_eq!(snapshot.pending, "1");
 }
+
+#[test]
+fn legacy_review_metadata_omits_private_source_and_preserves_token_counts() {
+    let directory = std::env::temp_dir().join(format!("bb-metadata-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir_all(&directory).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../crates/bb-client/tests/fixtures/legacy-review-activation.json"
+    ))
+    .unwrap();
+    let mut source: Value = serde_json::from_slice(&fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/Resources/legacy-import-golden.json")).unwrap()).unwrap();
+    source["base"]["review"] = fixture["source_review"].clone();
+    source["base"]["tasks"] = fixture["source_tasks"].clone();
+    source["outbox"] = json!([]);
+    let decision = source["base"]["review"]["decisions"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .next()
+        .unwrap();
+    decision["undo"]["taskBefore"]["notes"] = json!("PRIVATE-BEFOREIMAGE-metadata-test");
+    let path = directory.join("store.json");
+    fs::write(&path, serde_json::to_vec(&source).unwrap()).unwrap();
+    let options = OpenOptions {
+        path: directory.join("store.sqlite3"),
+        workspace_id: "local".into(),
+        busy_timeout: Duration::from_secs(2),
+    };
+    bb_client::import_legacy_store(&bb_client::ImportRequest {
+        store: options.clone(),
+        source: path,
+        backup_dir: None,
+        now: bb_protocol::wire::Instant::parse(NOW).unwrap(),
+        expected: None,
+    })
+    .unwrap();
+    let mut store = Store::open(&options).unwrap();
+    let capture = bb_client::capture_legacy_review(&mut store).unwrap();
+    assert!(
+        capture
+            .review
+            .to_string()
+            .contains("PRIVATE-BEFOREIMAGE-metadata-test")
+    );
+    drop(store);
+    let metadata = workspace(&options)
+        .capture_legacy_review_metadata()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&metadata.token).unwrap(),
+        serde_json::to_value(capture.token).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&metadata.source_counts).unwrap(),
+        serde_json::to_value(capture.source_counts).unwrap()
+    );
+    assert_eq!(metadata.already_active, capture.already_active);
+    for bytes in [&metadata.token, &metadata.source_counts] {
+        let text = std::str::from_utf8(bytes).unwrap();
+        for forbidden in [
+            "PRIVATE-BEFOREIMAGE",
+            "taskBefore",
+            "undo",
+            "\"review\":",
+            "notes",
+        ] {
+            assert!(!text.contains(forbidden));
+        }
+    }
+}
+
+#[test]
+fn owned_digest_stream_is_repeatable_bounded_and_ordered() {
+    let digest = bb_swift::BridgeDigest::new();
+    assert_eq!(
+        digest.digest().unwrap(),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    digest.update(b"a".to_vec()).unwrap();
+    digest.update(b"bc".to_vec()).unwrap();
+    let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    assert_eq!(digest.digest().unwrap(), expected);
+    assert_eq!(digest.digest().unwrap(), expected);
+    assert_eq!(
+        code(digest.update(vec![0; 8 * 1024 * 1024 + 1]).unwrap_err()),
+        "INVALID_REQUEST"
+    );
+    assert_eq!(digest.digest().unwrap(), expected);
+    let once = bb_swift::BridgeDigest::new();
+    once.update(b"abc".to_vec()).unwrap();
+    assert_eq!(once.digest().unwrap(), digest.digest().unwrap());
+}

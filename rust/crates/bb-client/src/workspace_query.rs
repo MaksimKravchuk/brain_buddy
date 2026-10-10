@@ -6,7 +6,7 @@ use crate::execute::{ExecuteError, read_projection, unsigned};
 use crate::{Store, StoreError, sha256_hex};
 use bb_domain::{
     dispatch,
-    types::{DomainError, Query, QueryInputs, QueryResult},
+    types::{DomainError, Query, QueryInputs, QueryResult, ReadSet, TaskView},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BinaryHeap;
@@ -961,9 +961,8 @@ fn decorate_task_views(
     if views.is_empty() {
         return Ok(());
     }
-    let private;
-    if crate::local_review::account_less(tx)? {
-        private = crate::local_review::private_read_set(tx, workspace, state, &inputs.now)?;
+    let private = if crate::local_review::account_less(tx)? {
+        crate::local_review::private_read_set(tx, workspace, state, &inputs.now)?
     } else {
         for view in views {
             view.formulation_state = Some(
@@ -975,7 +974,7 @@ fn decorate_task_views(
             );
         }
         return Ok(());
-    }
+    };
     for view in views {
         view.formulation_state = Some(
             bb_domain::review_sessions::task_formulation_view(&private, &view.id, inputs).map_err(

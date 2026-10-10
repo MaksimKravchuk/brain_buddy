@@ -135,6 +135,13 @@ pub struct BridgeLegacyConversion {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeLegacyReviewMetadata {
+    pub token: Vec<u8>,
+    pub source_counts: Vec<u8>,
+    pub already_active: bool,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeLegacyReviewCapture {
     pub token: Vec<u8>,
     pub review: Vec<u8>,
@@ -744,6 +751,34 @@ impl BridgeWorkspace {
             )
         })?)
     }
+    /// Completed source provenance only; no current public pins are captured.
+    pub fn local_review_private_source_completed(
+        &self,
+        retained_source_path: String,
+        selected: Vec<u8>,
+    ) -> Result<bool, BridgeError> {
+        if retained_source_path.is_empty()
+            || retained_source_path.len() > 4096
+            || selected.len() > 4096
+        {
+            return Err(Failure::new("INVALID_REQUEST", Some("local_review_private")).into());
+        }
+        let selected: bb_client::LocalReviewSourceId = parse_json(&selected, "selected")?;
+        Ok(self.with_store(|store| {
+            let proof = bb_client::verify_accountless_import(
+                store,
+                std::path::Path::new(&retained_source_path),
+            )
+            .map_err(|error| Failure {
+                code: error.code(),
+                retryable: error.is_retryable(),
+                field: error.field(),
+            })?;
+            bb_client::local_review_private_source_completed(store, &proof, &selected)
+                .map_err(review_failure)
+        })?)
+    }
+
     /// Incomplete typed components remain reserved drafts. Complete native
     /// coverage and all original pins install private evidence atomically.
     pub fn admit_local_review_private_fragment(
@@ -1122,6 +1157,21 @@ impl BridgeWorkspace {
         operation: Arc<BridgeOperation>,
     ) -> Result<(), BridgeError> {
         Ok(self.mutate_draft(&draft_id, None, operation)?)
+    }
+
+    /// Metadata only: immutable Review bodies and private beforeimages remain
+    /// inside Rust. Hosts decode their independently verified original backup.
+    pub fn capture_legacy_review_metadata(
+        &self,
+    ) -> Result<BridgeLegacyReviewMetadata, BridgeError> {
+        Ok(self.with_store(|store| {
+            let capture = bb_client::capture_legacy_review(store).map_err(review_failure)?;
+            Ok(BridgeLegacyReviewMetadata {
+                token: to_json(&capture.token)?,
+                source_counts: to_json(&capture.source_counts)?,
+                already_active: capture.already_active,
+            })
+        })?)
     }
 
     pub fn capture_legacy_review(&self) -> Result<BridgeLegacyReviewCapture, BridgeError> {

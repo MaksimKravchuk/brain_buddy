@@ -1155,3 +1155,41 @@ mod bridge_tests {
         assert!(!format!("{error:?}{error}").contains(secret));
     }
 }
+
+/// Hash the exact owned bytes the host will decode, in caller-defined order.
+#[derive(uniffi::Object)]
+pub struct BridgeDigest {
+    state: std::sync::Mutex<bb_client::DigestStream>,
+    lifecycle: AtomicU8,
+}
+#[uniffi::export]
+impl BridgeDigest {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            state: std::sync::Mutex::new(bb_client::DigestStream::default()),
+            lifecycle: AtomicU8::new(OPEN),
+        })
+    }
+    pub fn update(&self, data: Vec<u8>) -> Result<(), BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            if data.len() > 8 * 1024 * 1024 {
+                return Err(Failure::new("INVALID_REQUEST", Some("digest_chunk")));
+            }
+            self.state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .update(&data);
+            Ok(())
+        })?)
+    }
+    pub fn digest(&self) -> Result<String, BridgeError> {
+        Ok(guarded(&self.lifecycle, || {
+            Ok(self
+                .state
+                .lock()
+                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?
+                .digest())
+        })?)
+    }
+}

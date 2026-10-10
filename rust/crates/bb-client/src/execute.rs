@@ -1831,6 +1831,7 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// Incremental SHA-256, for streams too large to hold whole.
+#[derive(Clone)]
 pub(crate) struct Sha256 {
     state: [u32; 8],
     /// Fewer than 64 bytes between calls.

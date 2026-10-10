@@ -2083,6 +2083,14 @@ fn accountless_private_import_original_nil_stamp_pins_native_zero_and_undo_survi
         wire::{CommandId, Counter, Id},
     };
     let (lane, mut store, proof) = local_private_lane_custom("local-private-nil-stamp", |_| {});
+    let selected = bb_client::LocalReviewSourceId {
+        source_kind: bb_client::LocalReviewSourceKind::Decision,
+        source_id: "00000000-0000-4000-8000-000000000014".into(),
+    };
+    assert!(
+        !bb_client::local_review_private_source_completed(&mut store, &proof, &selected).unwrap()
+    );
+
     let page = capture_fragment(
         &mut store,
         &proof,
@@ -2137,7 +2145,7 @@ fn accountless_private_import_original_nil_stamp_pins_native_zero_and_undo_survi
     drop(store);
     let mut store = open(&lane.database);
     let request = ExecuteRequest {
-        command_id: CommandId::parse("cmd_00000000-0000-4000-8000-000000000099").unwrap(),
+        command_id: CommandId::parse("00000000-0000-4000-8000-000000000099").unwrap(),
         command_type: CommandType::ReviewUndoDecision,
         entity_id: Some(Id::parse("decision_00000000-0000-4000-8000-000000000014").unwrap()),
         payload: json!({}).as_object().unwrap().clone(),
@@ -2152,7 +2160,7 @@ fn accountless_private_import_original_nil_stamp_pins_native_zero_and_undo_survi
     };
     execute(&mut store, &mut RandomIds, &request).unwrap();
     assert_eq!(
-        bodies(&mut store, "task")["task_history_proven"]["revision"],
+        bodies(&mut store, "task")["[\"task_history_proven\"]"]["revision"],
         json!("1")
     );
     let before = bb_client::visible_snapshot(&mut store).unwrap();
@@ -2162,6 +2170,19 @@ fn accountless_private_import_original_nil_stamp_pins_native_zero_and_undo_survi
         before.records
     );
     assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
+    assert!(
+        bb_client::capture_local_review_private_fragment(
+            &mut store,
+            &proof,
+            &selected,
+            None,
+            &Instant::parse(NOW).unwrap()
+        )
+        .is_err()
+    ); // public versions now changed
+    assert!(
+        bb_client::local_review_private_source_completed(&mut store, &proof, &selected).unwrap()
+    );
 }
 
 #[test]
@@ -2263,7 +2284,7 @@ fn prepare_fragment(
                 .iter()
                 .map(|_| {
                     Some(bb_domain::types::ReleasedPrivate {
-                        previous_state: bb_domain::types::TaskState::Waiting,
+                        previous_state: bb_domain::types::OpenList::Waiting,
                         clock_before: None,
                         local_receipt_replaced: None,
                         local_source_task_unchanged: Some(true),
@@ -2367,6 +2388,17 @@ fn accountless_private_fragments_require_complete_tags_and_all_original_pins_the
         A::Pending { next_ordinal: 1 }
     ));
     assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    assert!(
+        !bb_client::local_review_private_source_completed(
+            &mut store,
+            &proof,
+            &bb_client::LocalReviewSourceId {
+                source_kind: K::Decision,
+                source_id: decision.into()
+            }
+        )
+        .unwrap()
+    );
     assert!(matches!(
         admit_fragment(&mut store, &proof, &prepared),
         A::Pending { next_ordinal: 1 }
@@ -2561,7 +2593,7 @@ fn accountless_private_import_pages_five_hundred_bulk_rows_without_partial_undo_
     assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
     let public = bb_client::visible_snapshot(&mut store).unwrap();
     assert!(
-        !serde_json::to_string(&public)
+        !serde_json::to_string(&public.records)
             .unwrap()
             .contains("local_source_task_unchanged")
     );
@@ -2609,6 +2641,36 @@ fn accountless_private_settings_preserve_null_and_session_progress_uses_bounded_
             .unwrap()
             .len(),
         201
+    );
+}
+
+#[test]
+fn accountless_private_absent_original_settings_is_not_completed_or_captured() {
+    let (_lane, mut store, proof) =
+        local_private_lane_custom("private-absent-settings", |fixture| {
+            fixture["source_review"]
+                .as_object_mut()
+                .unwrap()
+                .remove("settings");
+            fixture["expected_read_set"]["settings"] = Value::Null;
+        });
+    let selected = bb_client::LocalReviewSourceId {
+        source_kind: bb_client::LocalReviewSourceKind::Settings,
+        source_id: "settings".into(),
+    };
+    assert!(
+        !bb_client::local_review_private_source_completed(&mut store, &proof, &selected).unwrap()
+    );
+    assert!(
+        bb_client::capture_local_review_private_fragment(
+            &mut store,
+            &proof,
+            &selected,
+            None,
+            &Instant::parse(NOW).unwrap()
+        )
+        .unwrap()
+        .is_none()
     );
 }
 

@@ -300,3 +300,24 @@ Native task pages also attach optional `TaskView.formulation_state` from the
 owning formulation helper using the same read transaction and matching LOCAL
 private evidence. This is a closed public DTO and avoids per-row bridge reads.
 Pure/server task views omit the field; ordinary record reads remain public.
+
+
+Bootstrap uses `capture_legacy_review_metadata()`, returning an owned
+`BridgeLegacyReviewMetadata { token, source_counts, already_active }`. It exposes
+no Review/source bodies, private beforeimages or alias collection. The host
+resolves required identities through the existing bounded identity port.
+`BridgeDigest` is an ephemeral, ordered SHA-256 stream over owned byte chunks:
+`update` refuses a chunk larger than 8 MiB before changing state, and `digest`
+returns repeatable lowercase hexadecimal without consuming state. It grants no
+store authority. The host compares byte count and digest of the same immutable
+Data it will decode with the admitted import report before bootstrap effects.
+
+`local_review_private_source_completed(retained_source_path, selected_source)`
+verifies the existing immutable import proof and reads a content-free completion
+manifest. It returns true only for that exact original source, even after later
+local public edits; it never repins edited records, promotes pending fragments,
+installs an overlay or mutates generation. Pending/unknown sources return false.
+A manifest retains a source-provenance digest alongside the existing header and
+request digests. Successful private admission/upkeep requires host cache
+invalidation because these private changes do not advance public projection
+generation.
