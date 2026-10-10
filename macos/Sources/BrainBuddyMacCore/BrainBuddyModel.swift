@@ -880,7 +880,7 @@ package final class BrainBuddyModel {
             return []
         }
         queryRevision &+= 1
-        workspace.list(.list(.inbox), options: ListOptions()).sections.flatMap(\.tasks)
+        return workspace.list(.list(.inbox), options: ListOptions()).sections.flatMap(\.tasks)
     }
 
     /// Inbox → a new project with its outcome (optional; blank is none) and the item as its first

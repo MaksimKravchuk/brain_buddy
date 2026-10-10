@@ -121,7 +121,7 @@ struct TaskListScreen: View {
                 ProjectStatusRow(projectID: projectID)
             }
             ForEach(result.sections) { section in
-                taskSection(section)
+                taskSection(section, options: options)
             }
         }
         .listStyle(.plain)
@@ -155,7 +155,7 @@ struct TaskListScreen: View {
         DecisionIssuesNote()
     }
 
-    private func taskSection(_ section: TaskSection) -> some View {
+    private func taskSection(_ section: TaskSection, options: ListOptions) -> some View {
         Section {
             ForEach(section.tasks) { task in
                 NavigationLink(value: AppRoute.task(task.id)) {

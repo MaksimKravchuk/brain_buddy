@@ -152,14 +152,14 @@ struct ReviewItemStep: View {
         Task { await decideDurably(type, task, title: title, expectedTask: expectedTask, editorID: submittedEditorID) }
     }
 
-    @MainActor private func decideDurably(_ type: DecisionType, _ task: TaskRecord, title: String?, expectedTask: ShownTask?, editorID: String) async {
+    @MainActor private func decideDurably(_ type: DecisionType, _ task: TaskRecord, title: String?, expectedTask: ShownTask?, editorID submittedEditorID: String) async {
         defer { isSaving = false }
         let typed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let decisionID: DecisionID
         do {
             decisionID = try await workspace.decide(
                 type, on: task.id, title: typed, sessionID: context.sessionID, expectedTask: expectedTask,
-                editorID: editorID
+                editorID: submittedEditorID
             )
         } catch {
             guard let validation = error as? GTDValidationError else {

@@ -119,7 +119,7 @@ struct DecisionsStep: View {
         do {
             if snapshot { pendingSnapshot = true }
             try await workspace.recordReviewProgress(
-                context.sessionID, snapshotDecisionQueue: snapshot, setAsideTaskID: setAside, editorID: editorID
+                context.sessionID, setAsideTaskID: setAside, snapshotDecisionQueue: snapshot, editorID: editorID
             )
             problem = nil
             if snapshot { pendingSnapshot = false }

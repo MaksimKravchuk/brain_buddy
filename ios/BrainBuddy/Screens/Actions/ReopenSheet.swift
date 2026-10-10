@@ -83,7 +83,7 @@ struct ReopenSheet: View {
             try await TaskListMover.reopen(current, to: destination, waitingFor: waitingFor, workspace: workspace, toasts: toasts, editorID: editorID)
             dismiss()
         } catch {
-            errorMessage = error.message
+            errorMessage = TaskCommandRunner.message(for: error)
         }
     }
 }

@@ -43,11 +43,7 @@ struct TaskDetailScreen: View {
         let reads = task.map(taskIdentityReads) ?? []
         let projectReadiness = workspace.projectsReadiness()
         let catalogReadiness = projectReadiness == .ready ? workspace.tagsReadiness() : projectReadiness
-        let detailReadiness: WorkspaceQueryReadiness
-        if page.readiness != .ready { detailReadiness = page.readiness }
-        else if workspace.isRustSelected && catalogReadiness != .ready { detailReadiness = catalogReadiness }
-        else if !reads.isEmpty && workspace.isRustSelected { detailReadiness = workspace.recordsReadiness(reads) }
-        else { detailReadiness = .ready }
+        let detailReadiness = readiness(page: page, catalog: catalogReadiness, reads: reads)
         Group {
             WorkspaceQueryContent(readiness: detailReadiness, retry: {
                 Task {
@@ -99,6 +95,13 @@ struct TaskDetailScreen: View {
         .padding()
         .navigationTitle("Task")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func readiness(page: WorkspaceQueryPageState, catalog: WorkspaceQueryReadiness, reads: [WorkspaceRecordRead]) -> WorkspaceQueryReadiness {
+        if page.readiness != .ready { return page.readiness }
+        if workspace.isRustSelected && catalog != .ready { return catalog }
+        if !reads.isEmpty && workspace.isRustSelected { return workspace.recordsReadiness(reads) }
+        return .ready
     }
 }
 
@@ -209,7 +212,7 @@ private struct TaskDetailForm: View {
 
     private var form: some View {
         let projectPage = workspace.projectsPageState()
-        Form {
+        return Form {
             titleSection
             // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
             FormulationSection(task: task) {

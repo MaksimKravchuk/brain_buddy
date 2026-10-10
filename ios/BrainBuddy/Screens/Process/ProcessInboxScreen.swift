@@ -559,7 +559,7 @@ struct InboxClarifier: View {
         var changes = staged
         changes.projectID = .set(projectID)
         changes.title = firstAction == original.title ? .unchanged : .set(firstAction)
-        onProcessed?(1)
+        await onProcessed?(1)
         beginSettling()
         moveCursor(to: item.index + 1)
         let undoEditorID = UUID().uuidString
@@ -618,7 +618,7 @@ struct InboxClarifier: View {
     // MARK: Finish
 
     private var finishedView: some View {
-        let stillSkipped = skipped.filter { id in workspace.task(id).map(Self.isInInbox) ?? false }
+        let stillSkipped = skipped.filter { id in workspace.task(id)?.state == .inbox }
         let copy = finishCopy(skippedCount: stillSkipped.count, inboxCount: workspace.counts().inbox)
         return VStack(spacing: 20) {
             EmptyStateView(title: copy.title, message: copy.message, systemImage: copy.systemImage)

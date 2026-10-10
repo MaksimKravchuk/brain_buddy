@@ -91,7 +91,7 @@ struct ListOptionsMenu: View {
             if page.readiness != .ready {
                 Button("Retry loading tags") { Task { await workspace.prepareTags() } }
             }
-            Picker(selection: $options.tagFilter) {
+            Picker("Tag", selection: $options.tagFilter) {
                 Text("Any tag").tag(TagID?.none)
                 ForEach(workspace.tags()) { summary in
                     Text(summary.tag.name).tag(Optional(summary.id))

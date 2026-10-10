@@ -97,10 +97,6 @@ struct ReviewCover: View {
     @State private var asksToDiscard = false
     @State private var asksToLeave = false
     @State private var movedOnNote: String?
-    @State private var problem: String?
-    @State private var editorID = UUID().uuidString
-    @State private var isSaving = false
-
     private enum Exit {
         case leave
         case skip
@@ -572,6 +568,9 @@ struct ReviewDraftField: View {
     @Environment(Workspace.self) private var workspace
     @Environment(\.scenePhase) private var scenePhase
     @State private var hasLoaded = false
+    @State private var problem: String?
+    @State private var editorID = UUID().uuidString
+    @State private var isSaving = false
 
     init(
         prompt: String, key: DraftKey, text: Binding<String>, fields: ReviewFields,

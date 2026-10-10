@@ -95,7 +95,7 @@ enum TaskEntityLookup {
         for batch in stride(from: 0, to: identifiers.count, by: 200).map({ start in
             Array(identifiers[start ..< min(start + 200, identifiers.count)])
         }) {
-            let ids = batch.map(TaskID.init)
+            let ids = batch.map { TaskID($0) }
             let page = try await workspace.prepareTaskRecords(ids)
             result.append(contentsOf: ids.compactMap { page.tasks[$0].map(TaskEntity.init(record:)) })
         }

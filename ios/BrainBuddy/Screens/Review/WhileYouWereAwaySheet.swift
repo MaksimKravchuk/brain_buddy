@@ -168,9 +168,11 @@ struct WhileYouWereAwaySheet: View {
             outcomes[id] = .returned
             return true
         } catch {
-            if error == .projectArchived || error == .projectNotActive {
-            let projectID = workspace.reviewShownTask(id, read: .state)?.content.projectID
-            let name = projectID.flatMap { workspace.records(projectReads)?.projects[$0]?.name } ?? ""
+            if let validation = error as? GTDValidationError,
+                validation == .projectArchived || validation == .projectNotActive
+            {
+                let projectID = workspace.reviewShownTask(id, read: .state)?.content.projectID
+                let name = projectID.flatMap { workspace.records(projectReads)?.projects[$0]?.name } ?? ""
                 outcomes[id] = .archived(project: name)
             } else {
                 problem = TaskCommandRunner.message(for: error)
