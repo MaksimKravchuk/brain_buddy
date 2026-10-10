@@ -479,6 +479,17 @@ pub fn convert_legacy_unsent_with(
     requests: &[ExecuteRequest],
     before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
 ) -> Result<Vec<Executed>, ExecuteError> {
+    convert_legacy_prepared_with(store, ids, requests, None, before_commit)
+}
+
+/// The native prepared port also fences immutable source entry identities.
+pub fn convert_legacy_prepared_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    entry_ids: Option<&[String]>,
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ExecuteError> {
     let invalid =
         || ExecuteError::Refused(DomainError::field(Reason::InvalidPayload, "legacy_outbox"));
     legacy_import_marker(store)
@@ -500,7 +511,12 @@ pub fn convert_legacy_unsent_with(
                         .is_some_and(|s| matches!(s.as_str(), "unsent" | "converted"))
             })
             .collect();
-        if entries.len() != requests.len() {
+        if entries.len() != requests.len()
+            || entry_ids.is_some_and(|ids| {
+                ids.len() != entries.len()
+                    || entries.iter().zip(ids).any(|(entry, id)| &entry.id != id)
+            })
+        {
             return Err(invalid());
         }
         for (entry, request) in entries.iter().zip(requests) {

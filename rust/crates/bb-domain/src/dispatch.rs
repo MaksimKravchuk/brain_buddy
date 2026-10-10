@@ -119,11 +119,17 @@ pub enum QueryKind {
     ReviewState,
     ReviewQueue,
     ListMode,
+    TaskFormulation,
+    ParkReturnShown,
+    RestartCandidates,
+    AutoParkDue,
+    ReviewSummary,
+    OpenReleases,
 }
 
 impl QueryKind {
     /// Every query kind of the catalog.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 15] = [
         Self::TaskList,
         Self::TaskDetail,
         Self::ListCounts,
@@ -133,6 +139,12 @@ impl QueryKind {
         Self::ReviewState,
         Self::ReviewQueue,
         Self::ListMode,
+        Self::TaskFormulation,
+        Self::ParkReturnShown,
+        Self::RestartCandidates,
+        Self::AutoParkDue,
+        Self::ReviewSummary,
+        Self::OpenReleases,
     ];
 
     /// The wire spelling of `Query`'s `kind` tag.
@@ -147,6 +159,12 @@ impl QueryKind {
             Self::ReviewState => "review_state",
             Self::ReviewQueue => "review_queue",
             Self::ListMode => "list_mode",
+            Self::TaskFormulation => "task_formulation",
+            Self::ParkReturnShown => "park_return_shown",
+            Self::RestartCandidates => "restart_candidates",
+            Self::AutoParkDue => "auto_park_due",
+            Self::ReviewSummary => "review_summary",
+            Self::OpenReleases => "open_releases",
         }
     }
 }
@@ -163,6 +181,12 @@ pub fn query_kind(query: &Query) -> QueryKind {
         Query::ReviewState {} => QueryKind::ReviewState,
         Query::ReviewQueue { .. } => QueryKind::ReviewQueue,
         Query::ListMode { .. } => QueryKind::ListMode,
+        Query::TaskFormulation { .. } => QueryKind::TaskFormulation,
+        Query::ParkReturnShown { .. } => QueryKind::ParkReturnShown,
+        Query::RestartCandidates { .. } => QueryKind::RestartCandidates,
+        Query::AutoParkDue { .. } => QueryKind::AutoParkDue,
+        Query::ReviewSummary { .. } => QueryKind::ReviewSummary,
+        Query::OpenReleases { .. } => QueryKind::OpenReleases,
     }
 }
 

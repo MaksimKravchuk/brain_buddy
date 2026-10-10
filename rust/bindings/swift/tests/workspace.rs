@@ -255,3 +255,238 @@ fn workspace_026_fr_022_errors_have_no_authored_payload() {
     assert!(!format!("{error:?}").contains("SECRET"));
     assert_eq!(code(error), "INVALID_REQUEST");
 }
+
+#[test]
+fn workspace_026_fr_009_draft_proposal_fences_generation_and_cursor_fences_frozen_inputs() {
+    let (workspace, _) = open("smart-fence");
+    let draft = json!({"text":"Call Sam #phone","list":"next"})
+        .to_string()
+        .into_bytes();
+    let BridgeWorkspaceAnswer::Answered { page } =
+        workspace.smart_add_resolve(draft.clone()).unwrap()
+    else {
+        panic!("resolution")
+    };
+    let result: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(result["title"], "Call Sam");
+    assert_eq!(result["tags"][0]["type"], "new");
+    workspace
+        .execute(
+            vec![command(1, "One"), command(2, "Two"), command(3, "Three")],
+            context(),
+            operation(),
+        )
+        .unwrap();
+    assert_eq!(
+        code(
+            workspace
+                .smart_add_propose(
+                    draft.clone(),
+                    b"{\"tags\":[\"tag-phone\"]}".to_vec(),
+                    page.projection_generation
+                )
+                .unwrap_err()
+        ),
+        "QUERY_RESTART_REQUIRED"
+    );
+    let BridgeWorkspaceAnswer::Answered { page } = workspace
+        .smart_add_propose(draft, b"{\"tags\":[\"tag-phone\"]}".to_vec(), "3".into())
+        .unwrap()
+    else {
+        panic!("proposal")
+    };
+    let payload: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(payload["tags"][0]["proposed_id"], "tag-phone");
+    let BridgeWorkspaceAnswer::Answered { page } =
+        workspace.query(list(None), inputs(), 200, None).unwrap()
+    else {
+        panic!("list")
+    };
+    let result: Value = serde_json::from_slice(&page.result).unwrap();
+    let after = result["value"]["next_cursor"].clone();
+    let mut changed: Value = serde_json::from_slice(&inputs()).unwrap();
+    changed["now"] = json!("2026-10-10T10:00:00Z");
+    assert_eq!(
+        code(
+            workspace
+                .query(
+                    list(Some(after)),
+                    serde_json::to_vec(&changed).unwrap(),
+                    200,
+                    None
+                )
+                .unwrap_err()
+        ),
+        "QUERY_RESTART_REQUIRED"
+    );
+}
+
+#[test]
+fn workspace_026_fr_013_touched_identity_lookup_prefers_owned_canonical_and_proven_alias() {
+    use bb_swift::BridgeIdentityRequest;
+    let (workspace, options) = open("identity-proof");
+    let mut store = Store::open(&options).unwrap();
+    store.write(|tx| {
+        tx.execute("INSERT INTO identity_aliases(workspace_id,entity_type,old_local_id,server_id,provenance) VALUES ('local','task','old-task','server-task','import')",[])?;
+        Ok(())
+    }).unwrap();
+    let bindings = workspace
+        .resolve_identities(vec![
+            BridgeIdentityRequest {
+                entity_type: "task".into(),
+                local_id: "old-task".into(),
+            },
+            BridgeIdentityRequest {
+                entity_type: "project".into(),
+                local_id: "old-task".into(),
+            },
+        ])
+        .unwrap();
+    assert_eq!(bindings[0].canonical_id.as_deref(), Some("server-task"));
+    assert_eq!(bindings[1].canonical_id, None);
+    let BridgeExecution::Saved { results } = workspace
+        .execute(vec![command(1, "One")], context(), operation())
+        .unwrap()
+    else {
+        panic!("save")
+    };
+    let id = results[0].entity_id.clone();
+    let bindings = workspace
+        .resolve_identities(vec![BridgeIdentityRequest {
+            entity_type: "task".into(),
+            local_id: id.clone(),
+        }])
+        .unwrap();
+    assert_eq!(bindings[0].canonical_id, Some(id));
+    assert_eq!(
+        code(
+            workspace
+                .resolve_identities(vec![
+                    BridgeIdentityRequest {
+                        entity_type: "task".into(),
+                        local_id: "old-task".into()
+                    };
+                    201
+                ])
+                .unwrap_err()
+        ),
+        "INVALID_REQUEST"
+    );
+}
+
+#[test]
+fn workspace_026_fr_001_prepared_gesture_draft_survives_reopen_and_cancel_preserves_it() {
+    use bb_swift::BridgeWorkspaceDraft;
+    let (workspace, options) = open("gesture-draft");
+    let draft = BridgeWorkspaceDraft {draft_id:"runtime:prepared:gesture-1".into(),editor_kind:"runtime_gesture".into(),record_type:Some("task".into()),record_key:Some("[\"task-1\"]".into()),base_revision:Some("4".into()),fields:json!({"original_command_id":"01900000-0000-4000-8000-000000000111","context":{"now":NOW},"payload":{"title":"Authored draft"}}).to_string().into_bytes(),updated_at:NOW.into()};
+    let cancelled = operation();
+    cancelled.cancel();
+    assert_eq!(
+        code(workspace.save_draft(draft.clone(), cancelled).unwrap_err()),
+        "CANCELLED"
+    );
+    assert!(
+        workspace
+            .load_draft(draft.draft_id.clone())
+            .unwrap()
+            .is_none()
+    );
+    let committed = operation();
+    workspace
+        .save_draft(draft.clone(), committed.clone())
+        .unwrap();
+    assert!(committed.is_committed());
+    assert!(!committed.cancel());
+    workspace.close().unwrap();
+    let reopened = crate::workspace(&options);
+    let saved = reopened
+        .load_draft(draft.draft_id.clone())
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.fields, draft.fields);
+    assert_eq!(saved.base_revision, draft.base_revision);
+    let cancelled = operation();
+    cancelled.cancel();
+    assert_eq!(
+        code(
+            reopened
+                .delete_draft(draft.draft_id.clone(), cancelled)
+                .unwrap_err()
+        ),
+        "CANCELLED"
+    );
+    assert!(
+        reopened
+            .load_draft(draft.draft_id.clone())
+            .unwrap()
+            .is_some()
+    );
+    reopened
+        .delete_draft(draft.draft_id.clone(), operation())
+        .unwrap();
+    assert!(reopened.load_draft(draft.draft_id).unwrap().is_none());
+    assert_eq!(
+        code(
+            reopened
+                .delete_draft("legacy-task-local:task-1".into(), operation())
+                .unwrap_err()
+        ),
+        "VALIDATION_FAILED"
+    );
+}
+
+#[test]
+fn workspace_026_fr_004_issue_pages_fence_independent_changes_and_not_found_has_generation() {
+    let (workspace, options) = open("issue-pages");
+    let mut store = Store::open(&options).unwrap();
+    store.write(|tx| {
+        for id in ["issue-1","issue-2"] {
+            tx.execute("INSERT INTO sync_issues(workspace_id,issue_id,command_id,reason,local_intent,dependent_ids,resolution,created_at) VALUES ('local',?1,'01900000-0000-4000-8000-000000000199','REVISION_CONFLICT',CAST('{}' AS BLOB),'[]','open',?2)",[id,NOW])?;
+        }
+        Ok(())
+    }).unwrap();
+    let BridgeWorkspaceAnswer::Answered { page } = workspace.workspace_issues(1, None).unwrap()
+    else {
+        panic!("page")
+    };
+    let data: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(data["value"].as_array().unwrap().len(), 1);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE sync_issues SET reason='ENTITY_DELETED' WHERE issue_id='issue-1'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        code(
+            workspace
+                .workspace_issues(1, page.collection_next_cursor)
+                .unwrap_err()
+        ),
+        "QUERY_RESTART_REQUIRED"
+    );
+    let status: Value = serde_json::from_slice(&workspace.sync_status().unwrap()).unwrap();
+    assert_eq!(status["open_issues"], "2");
+    let answer = workspace
+        .query(
+            json!({"kind":"task_detail","task_id":"missing"})
+                .to_string()
+                .into_bytes(),
+            inputs(),
+            200,
+            None,
+        )
+        .unwrap();
+    let BridgeWorkspaceAnswer::Refused {
+        refusal,
+        projection_generation,
+    } = answer
+    else {
+        panic!("refusal")
+    };
+    assert_eq!(refusal.reason, "not_found");
+    assert_eq!(projection_generation.as_deref(), Some("0"));
+}

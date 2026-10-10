@@ -35,6 +35,12 @@ pub enum QueryResult {
     ReviewState(Box<ReviewStateView>),
     ReviewQueue(QueueView),
     ListMode(ListModePage),
+    TaskFormulation(TaskFormulationView),
+    ParkReturnShown(Option<ParkReturnProblem>),
+    RestartCandidates(Vec<TaskView>),
+    AutoParkDue(Vec<TaskView>),
+    ReviewSummary(ReviewSummaryView),
+    OpenReleases(Vec<super::BulkRelease>),
 }
 
 // ----------------------------------------------------------------------- tasks
@@ -62,6 +68,8 @@ pub struct TaskView {
     pub revision: Counter,
     pub subtasks: Vec<SubtaskView>,
     pub comments: Vec<CommentView>,
+    #[serde(default)]
+    pub consecutive_stalled_formulations: u32,
     pub formulation: Option<FormulationView>,
     pub parked: Option<ParkView>,
 }
@@ -90,6 +98,7 @@ impl TaskView {
             revision: task.revision.clone(),
             subtasks,
             comments,
+            consecutive_stalled_formulations: task.consecutive_stalled_formulations,
             formulation: task.formulation.as_ref().map(|clock| {
                 FormulationView::from_clock(clock, task.consecutive_stalled_formulations)
             }),
@@ -242,6 +251,9 @@ pub struct PageSection {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SectionKind {
     Open {},
+    List {
+        list: super::OpenList,
+    },
     /// `project_id` is none for the "No project" section.
     Project {
         project_id: Option<ProjectId>,
@@ -431,3 +443,62 @@ pub struct DecisionsMeta {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NoMeta {}
+
+/// Clock-derived native helpers, read from the same protected generation as tasks.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerivedView {
+    pub start: Instant,
+    pub ageing_at: Instant,
+    pub ask_at: Instant,
+    pub park_due_at: Instant,
+    pub tomorrow_at: Instant,
+    pub paused_until: Option<Instant>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFormulationView {
+    pub task_id: TaskId,
+    pub class: String,
+    pub derived: Option<DerivedView>,
+    pub third_stall: bool,
+    pub extension: Option<DerivedView>,
+    pub parked_after_days: Option<i64>,
+    pub unavailable_local_facts: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ParkReturnProblem {
+    ChangedElsewhere,
+    ProjectArchived { name: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DecisionStepView {
+    Card {
+        task_id: TaskId,
+        position: u32,
+        total: u32,
+    },
+    NothingAsks,
+    AllDecided {
+        decided: u32,
+        kept_wording: u32,
+    },
+    SomeLeft {
+        decided: u32,
+        total: u32,
+        still_asking: u32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewSummaryView {
+    /// The public session does not carry the local end reason. Do not guess it.
+    pub entry_notice: Option<serde_json::Value>,
+    pub explainer_needed: bool,
+    pub days_since_last_review: Option<i64>,
+    pub decision_step: Option<DecisionStepView>,
+    pub unavailable_local_facts: Vec<String>,
+}

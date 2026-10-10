@@ -8,8 +8,8 @@
 
 use super::errors::{DomainError, Reason};
 use super::primitives::{
-    ActorId, BulkId, CommentId, DecisionId, ProjectId, ProviderName, SessionId, SubtaskId, TagId,
-    TaskId, ZoneName,
+    ActorId, BulkId, CommentId, DecisionId, FormulationId, ProjectId, ProviderName, SessionId,
+    SubtaskId, TagId, TaskId, ZoneName,
 };
 use super::references::{AliasRef, Dependencies, ProjectRef, TagRef};
 use super::review_commands::{
@@ -26,7 +26,8 @@ use super::tasks::{
     TaskTransition, TaskUpdate,
 };
 use super::vocabulary::{
-    DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort, WriterOrigin,
+    BulkKind, DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort,
+    WriterOrigin,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{CommandEnvelope, CommandRef, Precondition};
@@ -641,6 +642,25 @@ pub enum Query {
     },
     Tags {},
     ReviewState {},
+    TaskFormulation {
+        task_id: TaskId,
+    },
+    ParkReturnShown {
+        task_id: TaskId,
+        parked_at: Option<Instant>,
+        formulation_id: Option<FormulationId>,
+    },
+    RestartCandidates {},
+    AutoParkDue {},
+    ReviewSummary {
+        session_id: Option<SessionId>,
+        #[serde(default)]
+        local: Option<ReviewPresentation>,
+    },
+    OpenReleases {
+        release_kind: BulkKind,
+        session_id: Option<SessionId>,
+    },
     ReviewQueue {
         step: StepCode,
         session_id: Option<SessionId>,
@@ -661,14 +681,29 @@ pub enum Query {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ListMode {
+    OpenList {
+        list: OpenList,
+    },
+    Project {
+        project_id: ProjectId,
+    },
+    Tag {
+        tag_id: TagId,
+    },
     /// Completed or cancelled tasks, most recent first.
-    History { kind: HistoryKind },
+    History {
+        kind: HistoryKind,
+    },
     /// Open dated tasks as Overdue, Today and Upcoming sections.
     Agenda {},
     /// One of the agenda's sections on its own.
-    DateView { view: DateView },
+    DateView {
+        view: DateView,
+    },
     /// Title and notes, NFKC and case- and diacritic-insensitive, all states.
-    Search { text: String },
+    Search {
+        text: String,
+    },
 }
 
 /// `ListOptions` of `Queries.swift`; every field is optional on the wire.
@@ -698,4 +733,13 @@ pub struct QueryInputs {
     pub now: Instant,
     pub device_zone: ZoneName,
     pub policy: Policy,
+}
+
+/// Device presentation marks supplied explicitly; never canonical task/session state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReviewPresentation {
+    pub explainer_seen_locally: bool,
+    pub activated_at: Option<Instant>,
+    pub ended_elsewhere_session: Option<SessionId>,
 }
