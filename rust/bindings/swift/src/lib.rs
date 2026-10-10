@@ -23,12 +23,24 @@
 //! typed outcome out), the shapes of the Python bridge. An expected domain refusal is
 //! a value ([`BridgeDecision::Refused`], [`BridgeAnswer::Refused`] with a content-free
 //! [`BridgeRefusal`]), never a [`BridgeError`].
+//!
+//! Since T041 the legacy import (`bb_client::import_legacy_store`, the move of the
+//! Swift `StoreDocument` JSON file into the Rust store) is exported as
+//! [`BridgeRuntime::import_legacy_store`] through the same [`guarded`] seam. It crosses
+//! as owned records (paths, an instant, counts) and fails as a [`BridgeError`] whose
+//! `code` is the import's own (`IMPORT_*`, `STORE_*`) and whose `field` names a section
+//! or check, never content. Only the Swift facade imports the generated module.
 
 use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::Once;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::Duration;
 
+use bb_client::{
+    ImportError, ImportReport, ImportRequest, OpenOptions, SourceCounts, import_legacy_store,
+};
 use bb_domain::dispatch;
 use bb_domain::smart_add::{self, Classification, Draft, Resolution, TokenKind};
 use bb_domain::types::{
@@ -37,7 +49,7 @@ use bb_domain::types::{
 };
 use bb_protocol::command::{self, Decoded, Unsupported};
 use bb_protocol::receipt::Receipt;
-use bb_protocol::wire::{CodecError, PROTOCOL_VERSION};
+use bb_protocol::wire::{CodecError, Instant, PROTOCOL_VERSION};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -453,6 +465,160 @@ fn propose_smart_add(
     })
 }
 
+/// What the legacy file held, counted by the means any reader of the file has. The Swift
+/// importer counts the same file with its own decoder and passes the result in, so the two
+/// readers must agree before anything is switched (`SourceCounts` in `bb-client`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeImportCounts {
+    pub tasks: u64,
+    pub subtasks: u64,
+    pub comments: u64,
+    pub projects: u64,
+    pub tags: u64,
+    pub outbox_entries: u64,
+    pub issues: u64,
+    pub review_sessions: u64,
+    pub review_decisions: u64,
+    pub review_receipts: u64,
+    pub review_park_acks: u64,
+    pub review_bulk_releases: u64,
+    pub review_navigator_consents: u64,
+    pub form_drafts: u64,
+}
+
+impl From<BridgeImportCounts> for SourceCounts {
+    fn from(counts: BridgeImportCounts) -> Self {
+        Self {
+            tasks: counts.tasks,
+            subtasks: counts.subtasks,
+            comments: counts.comments,
+            projects: counts.projects,
+            tags: counts.tags,
+            outbox_entries: counts.outbox_entries,
+            issues: counts.issues,
+            review_sessions: counts.review_sessions,
+            review_decisions: counts.review_decisions,
+            review_receipts: counts.review_receipts,
+            review_park_acks: counts.review_park_acks,
+            review_bulk_releases: counts.review_bulk_releases,
+            review_navigator_consents: counts.review_navigator_consents,
+            form_drafts: counts.form_drafts,
+        }
+    }
+}
+
+impl From<SourceCounts> for BridgeImportCounts {
+    fn from(counts: SourceCounts) -> Self {
+        Self {
+            tasks: counts.tasks,
+            subtasks: counts.subtasks,
+            comments: counts.comments,
+            projects: counts.projects,
+            tags: counts.tags,
+            outbox_entries: counts.outbox_entries,
+            issues: counts.issues,
+            review_sessions: counts.review_sessions,
+            review_decisions: counts.review_decisions,
+            review_receipts: counts.review_receipts,
+            review_park_acks: counts.review_park_acks,
+            review_bulk_releases: counts.review_bulk_releases,
+            review_navigator_consents: counts.review_navigator_consents,
+            form_drafts: counts.form_drafts,
+        }
+    }
+}
+
+/// The import of the legacy `StoreDocument` file into the Rust store of one workspace.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeImportRequest {
+    pub workspace_id: String,
+    /// The Rust store file. Created when it does not exist.
+    pub database_path: String,
+    /// The legacy JSON file. It is only read.
+    pub source_path: String,
+    /// Where the backup and the schema manifest go; beside the source when absent.
+    pub backup_directory: Option<String>,
+    /// The instant of the import (RFC 3339).
+    pub now: String,
+    /// The bound on every lock wait; running out is a retryable `STORE_BUSY`.
+    pub busy_timeout_ms: u32,
+    /// The counts an independent reader took from the same file.
+    pub expected: Option<BridgeImportCounts>,
+}
+
+/// The activation marker of a finished import.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeImportReport {
+    /// The same file had already been imported: nothing was done.
+    pub already_active: bool,
+    pub source_sha256: String,
+    pub source_bytes: u64,
+    pub source_version: i64,
+    pub source_generation: i64,
+    /// File names, beside the source (or in the requested directory).
+    pub backup_file: String,
+    pub manifest_file: String,
+    pub imported_at: String,
+    pub counts: BridgeImportCounts,
+    /// Identity aliases written (a server ID the file proved for a local ID).
+    pub aliases: u64,
+    /// Tasks whose local-only facts were kept.
+    pub local_task_facts: u64,
+}
+
+impl From<ImportReport> for BridgeImportReport {
+    fn from(report: ImportReport) -> Self {
+        let marker = report.marker;
+        Self {
+            already_active: report.already_active,
+            source_sha256: marker.source_sha256,
+            source_bytes: marker.source_bytes,
+            source_version: marker.source_version,
+            source_generation: marker.source_generation,
+            backup_file: marker.backup_file,
+            manifest_file: marker.manifest_file,
+            imported_at: marker.imported_at,
+            counts: marker.counts.into(),
+            aliases: marker.aliases,
+            local_task_facts: marker.local_task_facts,
+        }
+    }
+}
+
+impl From<&ImportError> for Failure {
+    fn from(error: &ImportError) -> Self {
+        Self {
+            code: error.code(),
+            retryable: error.is_retryable(),
+            field: error.field(),
+        }
+    }
+}
+
+/// Runs the import for one request. A request that cannot be read fails as
+/// `INVALID_REQUEST` naming the argument; the import's own failures keep their codes.
+fn run_import(request: &BridgeImportRequest) -> Result<BridgeImportReport, Failure> {
+    let now = Instant::parse(request.now.as_str())
+        .map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+    if request.workspace_id.is_empty() {
+        return Err(Failure::new("INVALID_REQUEST", Some("workspace_id")));
+    }
+    let request = ImportRequest {
+        store: OpenOptions {
+            path: PathBuf::from(&request.database_path),
+            workspace_id: request.workspace_id.clone(),
+            busy_timeout: Duration::from_millis(u64::from(request.busy_timeout_ms)),
+        },
+        source: PathBuf::from(&request.source_path),
+        backup_dir: request.backup_directory.as_ref().map(PathBuf::from),
+        now,
+        expected: request.expected.map(SourceCounts::from),
+    };
+    import_legacy_store(&request)
+        .map(BridgeImportReport::from)
+        .map_err(|error| Failure::from(&error))
+}
+
 /// One bridge runtime handle. `close` is idempotent and final.
 #[derive(uniffi::Object)]
 pub struct BridgeRuntime {
@@ -517,6 +683,17 @@ impl BridgeRuntime {
         Ok(guarded(&self.state, || {
             answer_query(&read_set, &query, &inputs)
         })?)
+    }
+
+    /// Import the legacy `StoreDocument` file into the Rust store (spec 026 T041). The
+    /// source is backed up and only read; the store switches in one transaction after the
+    /// imported rows were checked against it, or not at all. Blocking disk work: call it
+    /// off the main actor.
+    pub fn import_legacy_store(
+        &self,
+        request: BridgeImportRequest,
+    ) -> Result<BridgeImportReport, BridgeError> {
+        Ok(guarded(&self.state, || run_import(&request))?)
     }
 
     /// Resolve a Smart Add draft (the capture sheet's preview) against an owned read set.
