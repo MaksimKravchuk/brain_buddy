@@ -1743,6 +1743,86 @@ describe("TaskListPage capture", () => {
   });
 });
 
+describe("026 web presentation compatibility in the composer", () => {
+  // Spec 026 (tasks.md T053): the composer keeps its synchronous helpers as a
+  // presentation adapter checked against web-presentation-vectors.json; the
+  // Rust-backed server stays the final authority over what a capture means.
+  const emoji = "\u{1F600}";
+
+  it("026-FR-002 026-SC-001 submits the shared-rule title when an astral character precedes a token (WP-P-052)", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByLabelText("New task title");
+    await user.click(field);
+    await user.paste(`Call ${emoji} mom #calls `);
+    expect(screen.getByText(`Title: “Call ${emoji} mom”`)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    await waitFor(() =>
+      expect(mocked.smartAddTask).toHaveBeenCalledWith(
+        { title: `Call ${emoji} mom`, state: "next", project: null, tags: [{ id: "tag-calls" }] },
+        expect.stringContaining("task-shell-smart-add")
+      )
+    );
+  });
+
+  it("026-FR-002 026-SC-001 lets a 300-emoji title through that the server accepts and refuses 501 scalars (WP-P-051)", async () => {
+    const user = userEvent.setup();
+    renderPage("/tasks/next");
+
+    const field = await screen.findByLabelText("New task title");
+    await user.click(field);
+    await user.paste(emoji.repeat(501));
+    expect(screen.getByRole("button", { name: "Add task" })).toBeDisabled();
+
+    await user.clear(field);
+    await user.paste(emoji.repeat(300));
+    expect(screen.getByRole("button", { name: "Add task" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledWith(expect.objectContaining({ title: emoji.repeat(300) }), expect.any(String)));
+  });
+
+  it("026-FR-024 026-FR-014 keeps the Smart Add draft, chips and request identity when the server rejects the capture, then retries", async () => {
+    const user = userEvent.setup();
+    mocked.smartAddTask.mockRejectedValueOnce(new ApiError("Unprocessable Entity", 422, { detail: "Title is not allowed." }, "corr-026"));
+    renderPage("/tasks/next");
+
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Call the bank #calls ");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Title is not allowed. (ref: corr-026)");
+    expect(field).toHaveValue("Call the bank #calls ");
+    expect(screen.getByLabelText("Smart Add classification chips")).toHaveTextContent("#calls");
+
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.smartAddTask).toHaveBeenCalledTimes(2));
+    expect(mocked.smartAddTask.mock.calls[1]).toEqual(mocked.smartAddTask.mock.calls[0]);
+    await waitFor(() => expect(field).toHaveValue(""));
+  });
+
+  it("026-FR-024 reports a server refusal of a plain capture without clearing it and mints a new identity after an edit", async () => {
+    const user = userEvent.setup();
+    mocked.createTask.mockRejectedValueOnce(new ApiError("Conflict", 409, { message: "Task changed elsewhere." }));
+    renderPage("/tasks/next");
+
+    const field = await screen.findByLabelText("New task title");
+    await user.type(field, "Plan the offsite");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Task changed elsewhere.");
+    expect(field).toHaveValue("Plan the offsite");
+
+    await user.type(field, " again");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await waitFor(() => expect(mocked.createTask).toHaveBeenCalledTimes(2));
+    expect(mocked.createTask.mock.calls[1][0]).toEqual(expect.objectContaining({ title: "Plan the offsite again" }));
+    expect(mocked.createTask.mock.calls[1][1]).not.toBe(mocked.createTask.mock.calls[0][1]);
+  });
+});
+
 describe("TaskListPage smart-add suggestions", () => {
   it("walks the suggestion list with the arrow keys and applies the selected one with Enter", async () => {
     const user = userEvent.setup();
