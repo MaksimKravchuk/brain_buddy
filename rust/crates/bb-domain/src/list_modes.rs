@@ -121,6 +121,21 @@ pub fn list_mode_with_local_facts(
     inputs: &QueryInputs,
     last_open_lists: &std::collections::BTreeMap<crate::types::TaskId, crate::types::OpenList>,
 ) -> Result<ListModePage, DomainError> {
+    list_mode_with_origin_lookup(read_set, mode, options, page, inputs, &|task| {
+        last_open_lists.get(&task.id).copied()
+    })
+}
+
+/// Store adapters can read one exact local carrier per terminal task without
+/// constructing an additional origin map over the entire projection.
+pub fn list_mode_with_origin_lookup(
+    read_set: &ReadSet,
+    mode: &ListMode,
+    options: &ListOptions,
+    page: &Page,
+    inputs: &QueryInputs,
+    origin: &dyn Fn(&Task) -> Option<crate::types::OpenList>,
+) -> Result<ListModePage, DomainError> {
     if !(1..=MAX_LIMIT).contains(&page.limit) {
         return Err(invalid("limit"));
     }
@@ -131,7 +146,7 @@ pub fn list_mode_with_local_facts(
         },
         _ => None,
     };
-    let plan = Plan::new(read_set, mode, options, needle, inputs, last_open_lists)?;
+    let plan = Plan::new(read_set, mode, options, needle, inputs, origin)?;
     let filters = plan.filters();
     let after = page
         .after
@@ -348,7 +363,7 @@ struct Plan<'a> {
     show_completed: bool,
     show_cancelled: bool,
     priorities: BTreeSet<Priority>,
-    last_open_lists: &'a std::collections::BTreeMap<crate::types::TaskId, crate::types::OpenList>,
+    origin: &'a dyn Fn(&Task) -> Option<crate::types::OpenList>,
 }
 
 impl<'a> Plan<'a> {
@@ -358,10 +373,7 @@ impl<'a> Plan<'a> {
         options: &'a ListOptions,
         needle: Option<String>,
         inputs: &QueryInputs,
-        last_open_lists: &'a std::collections::BTreeMap<
-            crate::types::TaskId,
-            crate::types::OpenList,
-        >,
+        origin: &'a dyn Fn(&Task) -> Option<crate::types::OpenList>,
     ) -> Result<Self, DomainError> {
         let uses_day = matches!(mode, ListMode::Agenda {} | ListMode::DateView { .. });
         let today = if uses_day {
@@ -406,7 +418,7 @@ impl<'a> Plan<'a> {
             );
         Ok(Self {
             read_set,
-            last_open_lists,
+            origin,
             mode,
             options,
             needle,
@@ -478,7 +490,7 @@ impl<'a> Plan<'a> {
                             Section::Open
                         })
                     })
-                } else if self.last_open_lists.get(&task.id) == Some(list) {
+                } else if (self.origin)(task) == Some(*list) {
                     self.by_state(task, open)
                 } else {
                     None

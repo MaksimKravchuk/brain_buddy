@@ -2966,3 +2966,112 @@ fn review_sessions_026_fr_016_native_summary_uses_canonical_idle_end_and_explici
     assert_eq!(notice["type"], "replaced_elsewhere");
     assert_eq!(notice["decisions"], 4);
 }
+
+#[test]
+fn native_review_queue_pages_match_owning_order_and_bound_metadata() {
+    let mut read = ReadSet::default();
+    read.settings =
+        Some(serde_json::from_value(settings_row(Some("2026-08-01T00:00:00Z"))).unwrap());
+    let p: types::Project =
+        serde_json::from_value(project("project_stuck", "No next action", "active")).unwrap();
+    read.projects.insert(p.id.clone(), p);
+    for n in 0..30 {
+        for state in ["inbox", "completed", "waiting", "someday"] {
+            let mut row = task(&format!("task_{state}_{n}"), state, (30 - n) as u64);
+            if state == "completed" {
+                row["completed_at"] = json!(format!("2026-10-08T09:{n:02}:00Z"));
+            }
+            if state == "waiting" {
+                row["waiting_since"] = json!(format!("2026-09-01T09:{n:02}:00Z"));
+            }
+            if state == "inbox" {
+                row["project_id"] = json!("project_stuck");
+                row["due_date"] = json!("2026-10-10");
+            }
+            let t: types::Task = serde_json::from_value(row).unwrap();
+            read.tasks.insert(t.id.clone(), t);
+        }
+        let row = next_task(
+            n + 100,
+            30 - n as u64,
+            if n < 15 {
+                "2026-08-01T09:00:00Z"
+            } else {
+                "2026-10-08T09:00:00Z"
+            },
+        );
+        let t: types::Task = serde_json::from_value(row).unwrap();
+        read.tasks.insert(t.id.clone(), t);
+    }
+    let inputs = query_inputs(NOW, true);
+    for step in [
+        StepCode::MindSweep,
+        StepCode::Wins,
+        StepCode::Inbox,
+        StepCode::Decisions,
+        StepCode::RestOfNext,
+        StepCode::Waiting,
+        StepCode::Projects,
+        StepCode::Someday,
+        StepCode::Dates,
+        StepCode::Summary,
+    ] {
+        let q = Query::ReviewQueue {
+            step,
+            session_id: None,
+        };
+        let QueryResult::ReviewQueue(expected) =
+            review_sessions::query(&read, &q, &inputs).unwrap()
+        else {
+            panic!()
+        };
+        let mut after = None;
+        let mut ids = Vec::new();
+        let mut pages = 0;
+        loop {
+            let (answer, next) =
+                review_sessions::native_queue_page(&read, &q, &inputs, 2, after.as_deref())
+                    .unwrap();
+            let QueryResult::ReviewQueue(page) = answer else {
+                panic!()
+            };
+            assert!(page.items.len() <= 2);
+            let page_ids = page
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>();
+            match page.meta {
+                QueueMeta::Dates(meta) => assert!(
+                    meta.days
+                        .iter()
+                        .flat_map(|day| &day.task_ids)
+                        .all(|id| page_ids.contains(id))
+                ),
+                QueueMeta::Decisions(meta) => assert!(
+                    meta.decided_task_ids
+                        .iter()
+                        .chain(&meta.set_aside_task_ids)
+                        .all(|id| page_ids.contains(id))
+                ),
+                meta => assert_eq!(meta, expected.meta),
+            }
+            ids.extend(page_ids);
+            pages += 1;
+            assert!(pages < 100);
+            if next.is_none() {
+                break;
+            }
+            after = next;
+        }
+        assert_eq!(
+            ids,
+            expected
+                .items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            "{step:?}"
+        );
+    }
+}

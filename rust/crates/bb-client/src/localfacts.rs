@@ -71,6 +71,30 @@ pub(crate) fn load(conn: &Connection, workspace: &str) -> Result<Facts, StoreErr
     Ok(facts)
 }
 
+/// Exact visible origin for one task, under the query's read transaction.
+pub fn local_task_origin_in(
+    conn: &Connection,
+    workspace: &str,
+    id: &TaskId,
+) -> Result<Option<OpenList>, StoreError> {
+    let row:Option<(String,Vec<u8>)>=conn.query_row(
+        "SELECT editor_kind, fields FROM drafts WHERE workspace_id=?1 AND record_key=?2 AND editor_kind IN ('runtime_task_local','legacy_task_local') ORDER BY editor_kind DESC LIMIT 1",
+        params![workspace,serde_json::json!([id.as_str()]).to_string()], |row|Ok((row.get(0)?,row.get(1)?))
+    ).optional()?;
+    match row {
+        Some((kind, body)) if kind == KIND => Ok(decode::<Fact>(&body)?.visible),
+        Some((_, body)) => {
+            let value: serde_json::Value = decode(&body)?;
+            value
+                .get("lastOpenList")
+                .filter(|value| !value.is_null())
+                .map(|value| serde_json::from_value(value.clone()).map_err(|_| StoreError::Corrupt))
+                .transpose()
+        }
+        None => Ok(None),
+    }
+}
+
 /// Current device-only origins, bounded by the tasks in the caller's read set.
 /// Call inside the same read transaction as the domain query.
 pub fn local_task_origins_in(
@@ -79,33 +103,10 @@ pub fn local_task_origins_in(
     read_set: &ReadSet,
 ) -> Result<BTreeMap<TaskId, OpenList>, StoreError> {
     let mut origins = BTreeMap::new();
-    let mut statement = conn.prepare(
-        "SELECT editor_kind, fields FROM drafts WHERE workspace_id = ?1 AND record_key = ?2
-         AND editor_kind IN ('runtime_task_local', 'legacy_task_local') ORDER BY editor_kind DESC LIMIT 1",
-    )?;
     for (id, task) in &read_set.tasks {
-        if task.state.is_open() {
-            continue;
-        }
-        let row: Option<(String, Vec<u8>)> = statement
-            .query_row(
-                params![workspace, serde_json::json!([id.as_str()]).to_string()],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?;
-        let origin = match row {
-            Some((kind, body)) if kind == KIND => decode::<Fact>(&body)?.visible,
-            Some((_, body)) => {
-                let value: serde_json::Value = decode(&body)?;
-                value
-                    .get("lastOpenList")
-                    .filter(|v| !v.is_null())
-                    .map(|v| serde_json::from_value(v.clone()).map_err(|_| StoreError::Corrupt))
-                    .transpose()?
-            }
-            None => None,
-        };
-        if let Some(origin) = origin {
+        if !task.state.is_open()
+            && let Some(origin) = local_task_origin_in(conn, workspace, id)?
+        {
             origins.insert(id.clone(), origin);
         }
     }

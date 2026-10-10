@@ -29,8 +29,9 @@ use crate::replay::{ReplayError, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::dispatch;
 use bb_domain::types::{
-    ActorId, AliasRef, Binding, ChangeOutcome, ChangeSet, Dependencies, DomainChange, DomainError,
-    ExecutionInputs, Policy, ReadSet, Reason, Record, WriterOrigin, ZoneName,
+    ActorId, AliasRef, Binding, BulkReleaseRequest, ChangeOutcome, ChangeSet, Dependencies,
+    DomainChange, DomainError, ExecutionInputs, Policy, ReadSet, Reason, Record, WriterOrigin,
+    ZoneName,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{
@@ -452,7 +453,7 @@ fn run(
         depends_on: depends_on.clone(),
         issued_at: request.context.now.clone(),
         supersedes_command_id: supersedes.cloned(),
-        payload: request.payload.clone(),
+        payload: resolved_bulk_payload(request, &results)?,
     };
     let envelope = match decode_command(&json!(stable).to_string()) {
         Ok(Decoded::Executable(envelope)) => envelope,
@@ -613,6 +614,55 @@ fn stored_envelope(stable: &StableEnvelope, meta: &Meta) -> Vec<u8> {
 
 /// The canonical form of the gesture a retry is compared with: everything the
 /// caller decides, and nothing the runtime assigns (sequence, epoch, instants).
+/// Bulk items carry independent shown revisions. An explicit typed reference
+/// may name the actual result of an earlier atomic batch command for that item.
+/// The original request remains the receipt fingerprint and is checked first.
+fn resolved_bulk_payload(
+    request: &ExecuteRequest,
+    results: &LocalResults,
+) -> Result<OpenObject, ExecuteError> {
+    if request.command_type != CommandType::ReviewBulkRelease {
+        return Ok(request.payload.clone());
+    }
+    let mut bulk: BulkReleaseRequest =
+        serde_json::from_value(Value::Object(request.payload.clone()))
+            .map_err(|_| refuse(Reason::InvalidPayload, "payload"))?;
+    let mut resolved = std::collections::BTreeSet::new();
+    for precondition in &request.preconditions {
+        let Precondition::AfterCommand(after) = precondition else {
+            continue;
+        };
+        let reference = &after.after_command;
+        if reference.entity_type != EntityType::Task {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        let matches = bulk
+            .items
+            .as_slice()
+            .iter()
+            .filter(|item| item.task_id.as_str() == reference.entity_id.as_str())
+            .count();
+        if matches != 1 || !resolved.insert(reference.entity_id.as_str().to_owned()) {
+            return Err(refuse(Reason::InvalidPayload, "preconditions"));
+        }
+        let revision = results.edit_revision(reference)?;
+        // Limited owns its sequence and exposes only a slice; rebuild through
+        // the typed constructor after replacing this exact matching item.
+        let mut items = bulk.items.as_slice().iter().cloned().collect::<Vec<_>>();
+        for item in &mut items {
+            if item.task_id.as_str() == reference.entity_id.as_str() {
+                item.expected_revision = revision.clone();
+            }
+        }
+        bulk.items = bb_domain::types::Limited::new(items).map_err(ExecuteError::Refused)?;
+    }
+    serde_json::to_value(bulk)
+        .map_err(|_| ExecuteError::Store(StoreError::Corrupt))?
+        .as_object()
+        .cloned()
+        .ok_or(ExecuteError::Store(StoreError::Corrupt))
+}
+
 fn request_canonical(request: &ExecuteRequest) -> String {
     let mut depends_on: Vec<&str> = request.depends_on.iter().map(CommandId::as_str).collect();
     depends_on.sort_unstable();

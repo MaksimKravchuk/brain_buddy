@@ -83,7 +83,7 @@ pub use workspace_query::{
     IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceSyncStatus, WorkspaceWatch,
     delete_workspace_draft_with, load_workspace_draft, query_collection_page, query_page,
     resolve_workspace_identities, save_workspace_draft_with, workspace_issues_page, workspace_read,
-    workspace_sync_status, workspace_watch,
+    workspace_records, workspace_sync_status, workspace_watch,
 };
 
-pub use localfacts::{local_task_origins, local_task_origins_in};
+pub use localfacts::{local_task_origin_in, local_task_origins, local_task_origins_in};

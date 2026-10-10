@@ -193,29 +193,31 @@ pub fn query_collection_page(
                     collection_next_cursor,
                 });
             }
-            if cursor.as_ref().is_some_and(|cursor| cursor.key.is_some()) {
-                return Err(QueryError::RestartRequired);
-            }
             if matches!(query, Query::ReviewQueue { .. }) {
-                let offset = cursor.as_ref().map_or(0, |cursor| cursor.offset);
+                if cursor
+                    .as_ref()
+                    .is_some_and(|cursor| cursor.offset != 0 || cursor.key.is_none())
+                {
+                    return Err(QueryError::RestartRequired);
+                }
                 let (result, next) = bb_domain::review_sessions::native_queue_page(
                     &state,
                     &query,
                     inputs,
                     collection_limit,
-                    offset,
+                    cursor.as_ref().and_then(|cursor| cursor.key.as_deref()),
                 )
                 .map_err(|error| QueryError::RefusedAt {
                     error,
                     projection_generation: generation,
                 })?;
                 let collection_next_cursor = next
-                    .map(|offset| {
+                    .map(|key| {
                         serde_json::to_string(&CollectionCursor {
                             generation,
                             fingerprint,
-                            offset,
-                            key: None,
+                            offset: 0,
+                            key: Some(key),
                         })
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
@@ -226,11 +228,37 @@ pub fn query_collection_page(
                     collection_next_cursor,
                 });
             }
-            let mut result =
-                dispatch::query(&state, &query, inputs).map_err(|error| QueryError::RefusedAt {
-                    error,
-                    projection_generation: generation,
-                })?;
+            let answered = if let Query::ListMode {
+                mode,
+                options,
+                page,
+            } = &query
+            {
+                let origin_error = std::cell::RefCell::new(None);
+                let lookup = |task: &bb_domain::types::Task| match crate::local_task_origin_in(
+                    tx, &workspace, &task.id,
+                ) {
+                    Ok(origin) => origin,
+                    Err(error) => {
+                        *origin_error.borrow_mut() = Some(error);
+                        None
+                    }
+                };
+                let result = bb_domain::list_modes::list_mode_with_origin_lookup(
+                    &state, mode, options, page, inputs, &lookup,
+                )
+                .map(QueryResult::ListMode);
+                if let Some(error) = origin_error.into_inner() {
+                    return Err(QueryError::Store(error));
+                }
+                result
+            } else {
+                dispatch::query(&state, &query, inputs)
+            };
+            let mut result = answered.map_err(|error| QueryError::RefusedAt {
+                error,
+                projection_generation: generation,
+            })?;
             if collection_after.is_some() {
                 return Err(QueryError::RestartRequired);
             }
@@ -551,4 +579,74 @@ pub fn delete_workspace_draft_with(
         tx.execute("DELETE FROM drafts WHERE workspace_id=(SELECT workspace_id FROM sync_meta) AND draft_id=?1 AND editor_kind LIKE 'runtime_%'",[id])?;
         before_commit()
     })
+}
+
+/// Exact canonical public records, in request order, under one generation.
+/// No SQL table names, private bodies or runtime metadata cross this port.
+pub fn workspace_records(
+    store: &mut Store,
+    items: &[(
+        bb_protocol::catalog::EntityType,
+        bb_protocol::wire::RecordKey,
+    )],
+) -> Result<(u64, Vec<Option<bb_domain::types::Record>>), QueryError> {
+    use bb_domain::types::*;
+    use bb_protocol::catalog::EntityType;
+    use rusqlite::{OptionalExtension, params};
+    if items.len() > 200 {
+        return Err(QueryError::Refused(DomainError::field(
+            Reason::InvalidValue,
+            "limit",
+        )));
+    }
+    for (kind, key) in items {
+        let one = || key.first().map(String::as_str).ok_or(());
+        let valid = match kind {
+            EntityType::ReviewSettings => key.is_empty(),
+            EntityType::ReviewReceipt => {
+                key.len() == 2
+                    && TaskId::parse(&key[0]).is_ok()
+                    && serde_json::from_value::<ReceiptKind>(serde_json::Value::String(
+                        key[1].clone(),
+                    ))
+                    .is_ok()
+            }
+            EntityType::ReviewParkAck => {
+                key.len() == 2
+                    && TaskId::parse(&key[0]).is_ok()
+                    && FormulationId::parse(&key[1]).is_ok()
+            }
+            _ if key.len() != 1 => false,
+            EntityType::Task => one().is_ok_and(|id| TaskId::parse(id).is_ok()),
+            EntityType::Project => one().is_ok_and(|id| ProjectId::parse(id).is_ok()),
+            EntityType::Tag => one().is_ok_and(|id| TagId::parse(id).is_ok()),
+            EntityType::Subtask => one().is_ok_and(|id| SubtaskId::parse(id).is_ok()),
+            EntityType::Comment => one().is_ok_and(|id| CommentId::parse(id).is_ok()),
+            EntityType::ReviewSession | EntityType::ReviewDecisionQueue => {
+                one().is_ok_and(|id| SessionId::parse(id).is_ok())
+            }
+            EntityType::ReviewDecision => one().is_ok_and(|id| DecisionId::parse(id).is_ok()),
+            EntityType::ReviewBulkRelease => one().is_ok_and(|id| BulkId::parse(id).is_ok()),
+            EntityType::ReviewNavigatorConsent => {
+                one().is_ok_and(|id| ProviderName::new(id).is_ok())
+            }
+        };
+        if !valid {
+            return Err(QueryError::Refused(DomainError::field(
+                Reason::InvalidValue,
+                "record_key",
+            )));
+        }
+    }
+    store.read(|tx| Ok((|| {
+        let (workspace,generation,stale):(String,i64,i64)=tx.query_row("SELECT workspace_id,projection_generation,projection_stale FROM sync_meta",[],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).map_err(StoreError::from)?;
+        if stale!=0 {return Err(QueryError::Store(StoreError::Corrupt));}
+        let mut statement=tx.prepare("SELECT body FROM visible_records WHERE workspace_id=?1 AND record_type=?2 AND record_key=?3").map_err(StoreError::from)?;
+        let mut records=Vec::with_capacity(items.len());
+        for (kind,key) in items {
+            let body:Option<Vec<u8>>=statement.query_row(params![workspace,kind.as_str(),serde_json::json!(key).to_string()],|row|row.get(0)).optional().map_err(StoreError::from)?;
+            records.push(body.map(|body|crate::execute::record_from(kind.as_str(),&body).map(|record|record.public()).map_err(QueryError::from)).transpose()?);
+        }
+        Ok((unsigned(generation)?,records))
+    })()))?
 }

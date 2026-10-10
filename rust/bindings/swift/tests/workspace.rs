@@ -490,3 +490,94 @@ fn workspace_026_fr_004_issue_pages_fence_independent_changes_and_not_found_has_
     assert_eq!(refusal.reason, "not_found");
     assert_eq!(projection_generation.as_deref(), Some("0"));
 }
+
+#[test]
+fn exact_public_record_reads_are_bounded_typed_missing_and_generation_bound() {
+    use bb_swift::BridgeRecordRequest;
+    let (workspace, _) = open("public-records");
+    let BridgeExecution::Saved { results } = workspace
+        .execute(vec![command(90, "Owned row")], context(), operation())
+        .unwrap()
+    else {
+        panic!()
+    };
+    let request = |kind: &str, key: Value| BridgeRecordRequest {
+        entity_type: kind.into(),
+        record_key: key.to_string().into_bytes(),
+    };
+    let BridgeWorkspaceAnswer::Answered { page } = workspace
+        .records(vec![
+            request("task", json!([results[0].entity_id])),
+            request("task", json!(["task_missing"])),
+        ])
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(page.projection_generation, results[0].projection_generation);
+    let result: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(result["value"][0]["entity_type"], "task");
+    assert_eq!(result["value"][0]["value"]["title"], "Owned row");
+    assert!(result["value"][1].is_null());
+    assert_eq!(
+        code(
+            workspace
+                .records(vec![request("sync_meta", json!([]))])
+                .unwrap_err()
+        ),
+        "INVALID_REQUEST"
+    );
+    for items in [
+        vec![request("task", json!([]))],
+        vec![request(
+            "review_receipt",
+            json!(["task_missing", "invalid_kind"]),
+        )],
+        (0..201)
+            .map(|_| request("task", json!(["task_missing"])))
+            .collect(),
+    ] {
+        assert!(matches!(
+            workspace.records(items).unwrap(),
+            BridgeWorkspaceAnswer::Refused { .. }
+        ));
+    }
+}
+
+#[test]
+fn native_open_list_uses_durable_origin_without_host_facts() {
+    let (workspace, options) = open("origin-native");
+    let BridgeExecution::Saved { results } = workspace
+        .execute(vec![command(92, "Finish this")], context(), operation())
+        .unwrap()
+    else {
+        panic!()
+    };
+    let mut complete = command(93, "");
+    complete.command_type = "task.transition".into();
+    complete.entity_id = Some(results[0].entity_id.clone());
+    complete.payload = b"{\"action\":\"complete\"}".to_vec();
+    complete.preconditions =
+        json!([{"entity_type":"task","entity_id":results[0].entity_id,"edit_revision":"1"}])
+            .to_string()
+            .into_bytes();
+    assert!(matches!(
+        workspace
+            .execute(vec![complete], context(), operation())
+            .unwrap(),
+        BridgeExecution::Saved { .. }
+    ));
+    workspace.close().unwrap();
+    let workspace = crate::workspace(&options);
+    let query=json!({"kind":"list_mode","mode":{"type":"open_list","list":"inbox"},"options":{"show_completed":true},"page":{"limit":1}}).to_string().into_bytes();
+    let BridgeWorkspaceAnswer::Answered { page } =
+        workspace.query(query, inputs(), 1, None).unwrap()
+    else {
+        panic!()
+    };
+    let result: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(
+        result["value"]["sections"][0]["items"][0]["id"],
+        results[0].entity_id
+    );
+}

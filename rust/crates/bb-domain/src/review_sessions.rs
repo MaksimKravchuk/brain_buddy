@@ -255,14 +255,31 @@ pub fn capacity_mirror(
     completed_at: &[UtcInstant],
     now: UtcInstant,
 ) -> CapacityMirror {
-    let weeks = completed_at.iter().min().map_or(0, |first| {
-        now.micros_since(*first).div_euclid(WEEK * MICROS)
-    });
+    capacity_mirror_iter(next_count, completed_at.iter().copied(), now)
+}
+
+fn capacity_mirror_iter(
+    next_count: u32,
+    completed_at: impl IntoIterator<Item = UtcInstant>,
+    now: UtcInstant,
+) -> CapacityMirror {
+    let mut first = None;
+    let mut recent = 0usize;
     let window_start = now.plus_seconds(-CAPACITY_WEEKS * WEEK);
-    let recent = completed_at
-        .iter()
-        .filter(|at| window_start <= **at && **at <= now)
-        .count();
+    for at in completed_at {
+        first = Some(first.map_or(at, |held: UtcInstant| held.min(at)));
+        recent += usize::from(window_start <= at && at <= now);
+    }
+    capacity_mirror_counts(next_count, first, recent, now)
+}
+
+fn capacity_mirror_counts(
+    next_count: u32,
+    first: Option<UtcInstant>,
+    recent: usize,
+    now: UtcInstant,
+) -> CapacityMirror {
+    let weeks = first.map_or(0, |first| now.micros_since(first).div_euclid(WEEK * MICROS));
     let weeks_of_history = u32::try_from(weeks.max(0)).unwrap_or(u32::MAX);
     if weeks < CAPACITY_WEEKS || recent == 0 {
         return CapacityMirror {
@@ -1786,15 +1803,21 @@ fn queue_parts<'a>(
     Ok((tasks, meta))
 }
 
-/// Native pages reuse the owning queue's order and metadata, and construct
-/// canonical TaskViews only for the requested page.
+/// Native queue selection keeps only `limit + 1` keys and constructs views
+/// after selection. Eligibility calls the same pure queue/clock functions as
+/// the ordinary family; metadata identity arrays contain this page only.
 pub fn native_queue_page(
     read_set: &ReadSet,
     query: &Query,
     inputs: &QueryInputs,
     limit: u32,
-    offset: usize,
-) -> Result<(QueryResult, Option<usize>), DomainError> {
+    after: Option<&str>,
+) -> Result<(QueryResult, Option<String>), DomainError> {
+    use queries::{
+        KeyPart::{Int, Text},
+        SortKey,
+    };
+    use std::collections::BinaryHeap;
     if !inputs.policy.weekly_review {
         return Err(DomainError::new(Reason::ReviewUnavailable));
     }
@@ -1804,21 +1827,263 @@ pub fn native_queue_page(
     let Query::ReviewQueue { step, session_id } = query else {
         return Err(invalid("kind"));
     };
+    let session = session_id
+        .as_ref()
+        .map(|id| {
+            read_set
+                .sessions
+                .get(id)
+                .ok_or_else(|| session_not_found(id))
+        })
+        .transpose()?;
     let now = instant(&inputs.now, "now")?;
-    let snapshot = Snapshot::new(read_set, now)?;
-    let (tasks, meta) = queue_parts(read_set, *step, session_id.as_ref(), now, &snapshot)?;
-    if offset > tasks.len() {
-        return Err(invalid("cursor"));
+    let settings = clock_settings(read_set)?;
+    let zone = parse_zone(settings.time_zone(), "time_zone")?;
+    let today = CalendarDay::of_instant(now.unix_seconds(), &zone);
+    let last = today.add_days(DATES_WINDOW_DAYS - 1);
+    let captured = session
+        .and_then(|session| read_set.decision_queues.get(&session.id))
+        .and_then(|queue| queue.task_ids.as_ref());
+    let after: Option<SortKey> = after
+        .map(|token| serde_json::from_str(token).map_err(|_| invalid("cursor")))
+        .transpose()?;
+    let keep = if *step == StepCode::Someday {
+        SOMEDAY_SHOWN
+    } else {
+        limit as usize + 1
+    };
+    let mut best = BinaryHeap::<SortKey>::new();
+    let mut total = 0u32;
+    let mut next_count = 0u32;
+    let mut first_completion = None;
+    let mut recent_completions = 0usize;
+    let mut offer = |key: SortKey| {
+        total = total.saturating_add(1);
+        if (*step != StepCode::Someday && after.as_ref().is_some_and(|after| &key <= after))
+            || (best.len() == keep && best.peek().is_some_and(|worst| &key >= worst))
+        {
+            return;
+        }
+        if best.len() == keep {
+            best.pop();
+        }
+        best.push(key);
+    };
+    let ordered_time = |at: UtcInstant| (at.unix_micros() as u64) ^ (1u64 << 63);
+    for task in read_set.tasks.values() {
+        let review = ReviewTask::from_task(task)?;
+        next_count = next_count.saturating_add(u32::from(task.state == TaskState::Next));
+        if let Some(at) = review.completed_at {
+            first_completion = Some(first_completion.map_or(at, |held: UtcInstant| held.min(at)));
+            recent_completions +=
+                usize::from(now.plus_seconds(-CAPACITY_WEEKS * WEEK) <= at && at <= now);
+        }
+        let receipt = read_set
+            .receipts
+            .iter()
+            .rev()
+            .find(|receipt| {
+                receipt.task_id == task.id
+                    && receipt.kind
+                        == if *step == StepCode::Waiting {
+                            ReceiptKind::Waiting
+                        } else {
+                            ReceiptKind::Someday
+                        }
+            })
+            .map(Receipt::from_row)
+            .transpose()?;
+        let receipts = receipt.as_ref().map(std::slice::from_ref).unwrap_or(&[]);
+        let id = Text(task.id.as_str().to_owned());
+        let key = match step {
+            StepCode::MindSweep | StepCode::Summary => None,
+            StepCode::Wins => (!wins(std::slice::from_ref(&review), now).is_empty()).then(|| {
+                vec![
+                    Int(u64::MAX - ordered_time(review.completed_at.unwrap())),
+                    id,
+                ]
+            }),
+            StepCode::Inbox => {
+                if task.state == TaskState::Inbox {
+                    Some(queries::sort_key(task, crate::types::TaskSort::Manual)?)
+                } else {
+                    None
+                }
+            }
+            StepCode::Decisions => {
+                if let Some(captured) = captured {
+                    captured
+                        .iter()
+                        .position(|held| held == &task.id)
+                        .map(|index| vec![Int(index as u64), id])
+                } else if task.state == TaskState::Next {
+                    let clock = TaskClock::from_task(task).map_err(stored)?;
+                    formulation::decision_key(&clock, &settings, now).map(|(ask, start)| {
+                        vec![Int(ordered_time(ask)), Int(ordered_time(start)), id]
+                    })
+                } else {
+                    None
+                }
+            }
+            StepCode::RestOfNext => {
+                let asking = match captured {
+                    Some(ids) => ids.contains(&task.id),
+                    None => {
+                        task.state == TaskState::Next
+                            && formulation::classify_task(task, &settings, now)
+                                .map_err(stored)?
+                                .asks_for_decision()
+                    }
+                };
+                if task.state == TaskState::Next && !asking {
+                    Some(queries::sort_key(task, crate::types::TaskSort::Manual)?)
+                } else {
+                    None
+                }
+            }
+            StepCode::Waiting => (!waiting_queue(std::slice::from_ref(&review), receipts, now)
+                .is_empty())
+            .then(|| vec![Int(ordered_time(review.waiting_since.unwrap())), id]),
+            StepCode::Someday => {
+                if someday_queue(std::slice::from_ref(&review), receipts, now, 1).eligible_total
+                    == 0
+                {
+                    None
+                } else {
+                    let updated = review.updated_at.unwrap_or(UtcInstant::EARLIEST);
+                    Some(match receipt {
+                        None => vec![Int(0), Int(ordered_time(updated)), Int(0), id],
+                        Some(receipt) => vec![
+                            Int(1),
+                            Int(ordered_time(receipt.reviewed_at)),
+                            Int(ordered_time(updated)),
+                            id,
+                        ],
+                    })
+                }
+            }
+            StepCode::Dates => {
+                let due = task
+                    .due_date
+                    .as_ref()
+                    .map(|due| {
+                        CalendarDay::parse_iso(due.as_str()).map_err(|_| invalid("due_date"))
+                    })
+                    .transpose()?;
+                match due {
+                    Some(day) if task.state.is_open() && today <= day && day <= last => Some(vec![
+                        Text(day.iso_string()),
+                        Int(queries::counter(&task.order_key, "order_key")?),
+                        id,
+                    ]),
+                    _ => None,
+                }
+            }
+            StepCode::Projects => {
+                if !task.state.is_open() {
+                    None
+                } else if let Some(project) = task
+                    .project_id
+                    .as_ref()
+                    .and_then(|id| read_set.projects.get(id))
+                {
+                    let has_next = read_set.tasks.values().any(|candidate| {
+                        candidate.project_id.as_ref() == Some(&project.id)
+                            && candidate.state == TaskState::Next
+                    });
+                    if !(crate::types::ProjectSummary {
+                        project: project.clone(),
+                        open_task_count: 1,
+                        next_action_count: u32::from(has_next),
+                    })
+                    .needs_next_action()
+                    {
+                        None
+                    } else {
+                        let mut key = vec![
+                            Text(queries::name_key(project.name.as_str())),
+                            Text(project.id.as_str().to_owned()),
+                        ];
+                        key.extend(queries::sort_key(task, crate::types::TaskSort::Manual)?);
+                        Some(key)
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(key) = key {
+            offer(key);
+        }
     }
-    let end = offset.saturating_add(limit as usize).min(tasks.len());
-    let next = (end < tasks.len()).then_some(end);
-    Ok((
-        QueryResult::ReviewQueue(QueueView {
-            items: snapshot.views(&tasks[offset..end])?,
-            meta,
+    let mut keys = best.into_sorted_vec();
+    // Someday's canonical pass shows at most SOMEDAY_SHOWN even when paged.
+    if *step == StepCode::Someday {
+        let shown = total.min(SOMEDAY_SHOWN as u32) as usize;
+        // The pass is small; select its prefix before any ordinary page split.
+        keys.truncate(shown.min(keys.len()));
+        keys.retain(|key| after.as_ref().is_none_or(|after| key > after));
+    }
+    let more = keys.len() > limit as usize;
+    keys.truncate(limit as usize);
+    let next = if more {
+        keys.last()
+            .map(|key| serde_json::to_string(key).map_err(|_| invalid("cursor")))
+            .transpose()?
+    } else {
+        None
+    };
+    let tasks = keys
+        .iter()
+        .map(|key| {
+            let Some(Text(id)) = key.last() else {
+                return Err(invalid("cursor"));
+            };
+            read_set
+                .tasks
+                .get(&TaskId::parse(id)?)
+                .ok_or_else(|| invalid("task_id"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let meta = match step {
+        StepCode::Wins => QueueMeta::Wins(WinsMeta { count: total }),
+        StepCode::Someday => QueueMeta::Someday(SomedayMeta {
+            eligible_total: total,
+            shown: total.min(SOMEDAY_SHOWN as u32),
         }),
-        next,
-    ))
+        StepCode::Decisions => QueueMeta::Decisions(handled_decisions(read_set, session, &tasks)),
+        StepCode::Dates => {
+            let mut days: Vec<DatesDay> = Vec::new();
+            for task in &tasks {
+                let day = task.due_date.clone().ok_or_else(|| invalid("due_date"))?;
+                if let Some(last) = days.last_mut().filter(|held| held.day == day) {
+                    last.task_ids.push(task.id.clone());
+                } else {
+                    days.push(DatesDay {
+                        day,
+                        task_ids: vec![task.id.clone()],
+                    });
+                }
+            }
+            QueueMeta::Dates(DatesMeta { days })
+        }
+        StepCode::RestOfNext => {
+            let mirror =
+                capacity_mirror_counts(next_count, first_completion, recent_completions, now);
+            QueueMeta::RestOfNext(RestOfNextMeta {
+                next_count: mirror.next_count,
+                weekly_average_4w: mirror.weekly_average_4w,
+                weeks_of_history: mirror.weeks_of_history,
+                implied_weeks: mirror.implied_weeks,
+            })
+        }
+        _ => QueueMeta::Empty(NoMeta {}),
+    };
+    let items = tasks
+        .iter()
+        .map(|task| queries::task_view(task, Vec::new(), Vec::new(), &settings))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((QueryResult::ReviewQueue(QueueView { items, meta }), next))
 }
 
 /// The run's snapshot once taken, else the live aggregate (http §6).
@@ -1849,26 +2114,24 @@ fn handled_decisions(
             set_aside_task_ids: Vec::new(),
         };
     };
-    let decided: BTreeSet<&TaskId> = read_set
-        .decisions
-        .values()
-        .filter(|decision| decision.session_id.as_ref() == Some(&session.id))
-        .map(|decision| &decision.task_id)
-        .collect();
-    let aside: BTreeSet<&TaskId> = read_set
-        .decision_queues
-        .get(&session.id)
-        .map(|queue| queue.set_aside_task_ids.iter().collect())
-        .unwrap_or_default();
+    let decided = |id: &TaskId| {
+        read_set.decisions.values().any(|decision| {
+            decision.session_id.as_ref() == Some(&session.id) && &decision.task_id == id
+        })
+    };
+    let aside = read_set.decision_queues.get(&session.id);
     DecisionsMeta {
         decided_task_ids: queue
             .iter()
-            .filter(|task| decided.contains(&task.id))
+            .filter(|task| decided(&task.id))
             .map(|task| task.id.clone())
             .collect(),
         set_aside_task_ids: queue
             .iter()
-            .filter(|task| aside.contains(&task.id) && !decided.contains(&task.id))
+            .filter(|task| {
+                aside.is_some_and(|queue| queue.set_aside_task_ids.contains(&task.id))
+                    && !decided(&task.id)
+            })
             .map(|task| task.id.clone())
             .collect(),
     }

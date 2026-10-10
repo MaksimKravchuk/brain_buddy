@@ -62,6 +62,12 @@ pub struct BridgeWorkspaceDraft {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeRecordRequest {
+    pub entity_type: String,
+    pub record_key: Vec<u8>,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeIdentityRequest {
     pub entity_type: String,
     pub local_id: String,
@@ -616,6 +622,38 @@ impl BridgeWorkspace {
         operation: Arc<BridgeOperation>,
     ) -> Result<(), BridgeError> {
         Ok(self.mutate_draft(&draft_id, None, operation)?)
+    }
+
+    pub fn records(
+        &self,
+        items: Vec<BridgeRecordRequest>,
+    ) -> Result<BridgeWorkspaceAnswer, BridgeError> {
+        let typed = items
+            .iter()
+            .map(|item| {
+                Ok((
+                    bb_protocol::catalog::EntityType::from_wire(&item.entity_type)
+                        .ok_or_else(|| Failure::new("INVALID_REQUEST", Some("entity_type")))?,
+                    parse_json::<bb_protocol::wire::RecordKey>(&item.record_key, "record_key")?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Failure>>()?;
+        Ok(
+            self.with_store(|store| match bb_client::workspace_records(store, &typed) {
+                Ok((generation, records)) => Ok(BridgeWorkspaceAnswer::Answered {
+                    page: BridgeWorkspacePage {
+                        projection_generation: generation.to_string(),
+                        result: to_json(&serde_json::json!({"kind":"records","value":records}))?,
+                        collection_next_cursor: None,
+                    },
+                }),
+                Err(QueryError::Refused(error)) => Ok(BridgeWorkspaceAnswer::Refused {
+                    refusal: error.into(),
+                    projection_generation: None,
+                }),
+                Err(error) => Err(query_failure(error)),
+            })?,
+        )
     }
 
     pub fn resolve_identities(
