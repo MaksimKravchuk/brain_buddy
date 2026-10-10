@@ -77,6 +77,49 @@ public struct RustDecodedCommand: Equatable, Sendable {
     }
 }
 
+/// A typed domain refusal: a stable reason code and, at most, the field or record it
+/// concerns. Never user text (026-FR-022).
+public struct RustRefusal: Equatable, Sendable {
+    /// The wire spelling of the core's refusal reason, such as `empty_title`.
+    public let reason: String
+    /// The request field or payload key concerned.
+    public let field: String?
+    /// The record type of `entityKey` (`task`, `project`, ...).
+    public let entityType: String?
+    public let entityKey: [String]
+    /// The revision a stale check saw, as a decimal string.
+    public let currentRevision: String?
+
+    public init(
+        reason: String, field: String? = nil, entityType: String? = nil, entityKey: [String] = [],
+        currentRevision: String? = nil
+    ) {
+        self.reason = reason
+        self.field = field
+        self.entityType = entityType
+        self.entityKey = entityKey
+        self.currentRevision = currentRevision
+    }
+
+    fileprivate init(_ refusal: BridgeRefusal) {
+        self.init(
+            reason: refusal.reason, field: refusal.field, entityType: refusal.entityType,
+            entityKey: refusal.entityKey, currentRevision: refusal.currentRevision)
+    }
+}
+
+/// What the core's `decide` answered: the change set as JSON bytes, or a refusal.
+public enum RustDecision: Equatable, Sendable {
+    case changed(Data)
+    case refused(RustRefusal)
+}
+
+/// What the core's `query` and Smart Add reads answered: the result as JSON bytes, or a refusal.
+public enum RustAnswer: Equatable, Sendable {
+    case answered(Data)
+    case refused(RustRefusal)
+}
+
 /// One bridge runtime handle. It is safe to share between tasks and threads; `close()`
 /// is final and idempotent, and later calls fail with `WORKSPACE_CLOSED`.
 public final class RustBridgeRuntime: Sendable {
@@ -119,5 +162,62 @@ public final class RustBridgeRuntime: Sendable {
         }.value
         if Task.isCancelled { throw RustBridgeError.cancelled }
         return RustDecodedCommand(try outcome.get())
+    }
+
+    /// Decides one command envelope against an owned read set, off the caller's actor. A
+    /// refusal of the rules is a value; only a bridge failure throws.
+    public func decide(readSet: Data, envelope: Data, receipts: Data, inputs: Data) async throws -> RustDecision {
+        try await offActor { (runtime: BridgeRuntime) throws -> RustDecision in
+            switch try runtime.decide(readSet: readSet, envelope: envelope, receipts: receipts, inputs: inputs) {
+            case .changed(let changeSet): return .changed(changeSet)
+            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            }
+        }
+    }
+
+    /// Answers one typed query over an owned read set, off the caller's actor.
+    public func query(readSet: Data, query: Data, inputs: Data) async throws -> RustAnswer {
+        try await offActor { (runtime: BridgeRuntime) throws -> RustAnswer in
+            switch try runtime.query(readSet: readSet, query: query, inputs: inputs) {
+            case .answered(let result): return .answered(result)
+            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            }
+        }
+    }
+
+    /// Resolves a Smart Add draft against an owned read set (the capture sheet's preview).
+    public func smartAddResolve(readSet: Data, draft: Data) async throws -> Data {
+        try await offActor { (runtime: BridgeRuntime) throws -> Data in
+            try runtime.smartAddResolve(readSet: readSet, draft: draft)
+        }
+    }
+
+    /// The `task.smart_add` payload a draft would send, given the IDs minted for the records
+    /// it creates; a blocked draft is a refusal.
+    public func smartAddPropose(readSet: Data, draft: Data, minted: Data) async throws -> RustAnswer {
+        try await offActor { (runtime: BridgeRuntime) throws -> RustAnswer in
+            switch try runtime.smartAddPropose(readSet: readSet, draft: draft, minted: minted) {
+            case .answered(let result): return .answered(result)
+            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            }
+        }
+    }
+
+    /// Runs one pure call off the caller's actor. A cancelled caller gets `CANCELLED` and
+    /// nothing is kept.
+    private func offActor<Output: Sendable>(
+        _ work: @escaping @Sendable (BridgeRuntime) throws -> Output
+    ) async throws -> Output {
+        if Task.isCancelled { throw RustBridgeError.cancelled }
+        let runtime = self.runtime
+        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<Output, RustBridgeError> in
+            do {
+                return .success(try work(runtime))
+            } catch {
+                return .failure(RustBridgeError(thrown: error))
+            }
+        }.value
+        if Task.isCancelled { throw RustBridgeError.cancelled }
+        return try outcome.get()
     }
 }

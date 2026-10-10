@@ -14,16 +14,32 @@
 //! * the runtime handle is bounded: `close` is final and idempotent, a call racing it
 //!   reports `CANCELLED`, and a closed handle reports `WORKSPACE_CLOSED`.
 //!
-//! Only completed codecs cross this early bridge. Rule dispatch (`decide` / `query`)
-//! is connected by a later slice; there is no placeholder export for it.
+//! Since T017 the shared rule dispatch (`bb_domain::dispatch::decide_envelope` / `query`,
+//! runtime-ffi.md "Pure core") is exported as [`BridgeRuntime::decide`] and
+//! [`BridgeRuntime::query`], with the Smart Add draft reads
+//! ([`BridgeRuntime::smart_add_resolve`], [`BridgeRuntime::smart_add_propose`]) the
+//! capture sheet needs. All of them go through the same [`guarded`] seam and cross as
+//! owned JSON bytes (read set, envelope, retained receipts and execution inputs in; a
+//! typed outcome out), the shapes of the Python bridge. An expected domain refusal is
+//! a value ([`BridgeDecision::Refused`], [`BridgeAnswer::Refused`] with a content-free
+//! [`BridgeRefusal`]), never a [`BridgeError`].
 
 use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Once;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+use bb_domain::dispatch;
+use bb_domain::smart_add::{self, Classification, Draft, Resolution, TokenKind};
+use bb_domain::types::{
+    DomainError, DueDay, ExecutionInputs, OpenList, Priority, ProjectId, Query, QueryInputs,
+    ReadSet, TagId,
+};
 use bb_protocol::command::{self, Decoded, Unsupported};
+use bb_protocol::receipt::Receipt;
 use bb_protocol::wire::{CodecError, PROTOCOL_VERSION};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
@@ -190,6 +206,253 @@ fn decode_command(data: &[u8]) -> Result<BridgeCommand, Failure> {
     })
 }
 
+/// A typed domain refusal: a canonical reason and, at most, the field or record it
+/// concerns. Never user text (026-FR-022).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeRefusal {
+    /// The wire spelling of `bb_domain::types::Reason`.
+    pub reason: String,
+    /// The request field or payload key concerned.
+    pub field: Option<String>,
+    /// The record type of `entity_key` (`task`, `project`, ...).
+    pub entity_type: Option<String>,
+    /// The key components of the record concerned; empty when none.
+    pub entity_key: Vec<String>,
+    /// The revision a stale check saw, as a decimal string.
+    pub current_revision: Option<String>,
+}
+
+impl From<DomainError> for BridgeRefusal {
+    fn from(error: DomainError) -> Self {
+        let (entity_type, entity_key) = match error.entity {
+            Some((entity_type, key)) => (Some(entity_type.as_str().to_owned()), key),
+            None => (None, Vec::new()),
+        };
+        Self {
+            reason: error.reason.as_str().to_owned(),
+            field: error.field,
+            entity_type,
+            entity_key,
+            current_revision: error
+                .current_revision
+                .map(|revision| revision.as_str().to_owned()),
+        }
+    }
+}
+
+/// What `decide` returns: the change set (JSON bytes) or a typed refusal.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeDecision {
+    Changed { change_set: Vec<u8> },
+    Refused { refusal: BridgeRefusal },
+}
+
+/// What `query` and the Smart Add reads return: the result (JSON bytes) or a typed
+/// refusal.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeAnswer {
+    Answered { result: Vec<u8> },
+    Refused { refusal: BridgeRefusal },
+}
+
+/// Parses one JSON input; the failure names the argument, never its content.
+fn parse_json<T: DeserializeOwned>(data: &[u8], field: &'static str) -> Result<T, Failure> {
+    serde_json::from_slice(data).map_err(|_| Failure::new("INVALID_REQUEST", Some(field)))
+}
+
+fn to_json<T: Serialize>(value: &T) -> Result<Vec<u8>, Failure> {
+    serde_json::to_vec(value).map_err(|_| Failure::new("INTERNAL_ERROR", None))
+}
+
+/// Decide one executable command envelope against an owned read set.
+fn decide_envelope(
+    read_set: &[u8],
+    envelope: &[u8],
+    receipts: &[u8],
+    inputs: &[u8],
+) -> Result<BridgeDecision, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let receipts: Vec<Receipt> = parse_json(receipts, "receipts")?;
+    let inputs: ExecutionInputs = parse_json(inputs, "execution_inputs")?;
+    let json = std::str::from_utf8(envelope).map_err(|_| Failure::new("INVALID_REQUEST", None))?;
+    let envelope = match command::decode_command(json)? {
+        Decoded::Executable(envelope) => envelope,
+        Decoded::Unsupported { .. } => {
+            return Err(Failure::new("UPGRADE_REQUIRED", Some("command_type")));
+        }
+    };
+    Ok(
+        match dispatch::decide_envelope(&read_set, &envelope, receipts.as_slice(), &inputs) {
+            Ok(change_set) => BridgeDecision::Changed {
+                change_set: to_json(&change_set)?,
+            },
+            Err(error) => BridgeDecision::Refused {
+                refusal: error.into(),
+            },
+        },
+    )
+}
+
+/// Answer one query over an owned read set.
+fn answer_query(read_set: &[u8], query: &[u8], inputs: &[u8]) -> Result<BridgeAnswer, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let query: Query = parse_json(query, "query")?;
+    let inputs: QueryInputs = parse_json(inputs, "query_inputs")?;
+    Ok(match dispatch::query(&read_set, &query, &inputs) {
+        Ok(result) => BridgeAnswer::Answered {
+            result: to_json(&result)?,
+        },
+        Err(error) => BridgeAnswer::Refused {
+            refusal: error.into(),
+        },
+    })
+}
+
+fn no_priority() -> Priority {
+    Priority::None
+}
+
+/// What the capture sheet holds (`bb_domain::smart_add::Draft`); every field but the
+/// text and the list is optional on the wire.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DraftInput {
+    text: String,
+    list: OpenList,
+    #[serde(default)]
+    waiting_for: String,
+    #[serde(default)]
+    details: String,
+    #[serde(default)]
+    due_date: Option<DueDay>,
+    #[serde(default = "no_priority")]
+    priority: Priority,
+    #[serde(default)]
+    context_project: Option<ProjectId>,
+    #[serde(default)]
+    context_tag: Option<TagId>,
+}
+
+impl From<DraftInput> for Draft {
+    fn from(input: DraftInput) -> Self {
+        Self {
+            text: input.text,
+            list: input.list,
+            waiting_for: input.waiting_for,
+            details: input.details,
+            due_date: input.due_date,
+            priority: input.priority,
+            context_project: input.context_project,
+            context_tag: input.context_tag,
+        }
+    }
+}
+
+/// The IDs the caller minted for the records a draft would create: the project (when
+/// the draft names a new one) and one tag ID per new tag, in token order.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MintedIds {
+    #[serde(default)]
+    project: Option<ProjectId>,
+    #[serde(default)]
+    tags: Vec<TagId>,
+}
+
+fn classification_json<I>(value: &Classification<I>, id: impl Fn(&I) -> &str) -> serde_json::Value {
+    match value {
+        Classification::Existing { id: found, name } => {
+            serde_json::json!({"type": "existing", "id": id(found), "name": name})
+        }
+        Classification::New { name } => serde_json::json!({"type": "new", "name": name}),
+    }
+}
+
+/// The preview of a draft as JSON: the clean title, the tokens to highlight, the
+/// project and tags capture would use or create, and the first problem.
+fn resolution_json(resolution: &Resolution) -> serde_json::Value {
+    let tokens: Vec<_> = resolution
+        .tokens
+        .iter()
+        .map(|token| {
+            serde_json::json!({
+                "kind": match token.kind {
+                    TokenKind::Project => "project",
+                    TokenKind::Tag => "tag",
+                },
+                "utf16_start": token.utf16_start,
+                "utf16_end": token.utf16_end,
+                "name": token.name,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "title": resolution.title,
+        "tokens": tokens,
+        "project": resolution
+            .project
+            .as_ref()
+            .map(|project| classification_json(project, ProjectId::as_str)),
+        "tags": resolution
+            .tags
+            .iter()
+            .map(|tag| classification_json(tag, TagId::as_str))
+            .collect::<Vec<_>>(),
+        "waiting_for": resolution.waiting_for,
+        "details": resolution.details,
+        "problem": resolution.problem,
+    })
+}
+
+/// Resolve a draft against an owned read set, as capture would right now.
+fn resolve_smart_add(read_set: &[u8], draft: &[u8]) -> Result<Vec<u8>, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let draft: Draft = parse_json::<DraftInput>(draft, "draft")?.into();
+    to_json(&resolution_json(&smart_add::resolve(&read_set, &draft)))
+}
+
+/// The `task.smart_add` payload capture would send, or the draft's first problem.
+fn propose_smart_add(
+    read_set: &[u8],
+    draft: &[u8],
+    minted: &[u8],
+) -> Result<BridgeAnswer, Failure> {
+    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    let draft: Draft = parse_json::<DraftInput>(draft, "draft")?.into();
+    let minted: MintedIds = parse_json(minted, "minted_ids")?;
+    let resolution = smart_add::resolve(&read_set, &draft);
+    if resolution.problem.is_none() {
+        // `propose` mints lazily and cannot fail on a short supply, so it is checked here.
+        let new_project = resolution
+            .project
+            .as_ref()
+            .is_some_and(Classification::is_new);
+        let new_tags = resolution.tags.iter().filter(|tag| tag.is_new()).count();
+        if (new_project && minted.project.is_none()) || minted.tags.len() < new_tags {
+            return Err(Failure::new("INVALID_REQUEST", Some("minted_ids")));
+        }
+    }
+    let spare_project =
+        ProjectId::parse("unused").map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+    let spare_tag = TagId::parse("unused").map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+    let mut project = minted.project;
+    let mut tags = minted.tags.into_iter();
+    let proposal = smart_add::propose(
+        &read_set,
+        &draft,
+        || project.take().unwrap_or_else(|| spare_project.clone()),
+        || tags.next().unwrap_or_else(|| spare_tag.clone()),
+    );
+    Ok(match proposal {
+        Ok(payload) => BridgeAnswer::Answered {
+            result: to_json(&payload)?,
+        },
+        Err(error) => BridgeAnswer::Refused {
+            refusal: error.into(),
+        },
+    })
+}
+
 /// One bridge runtime handle. `close` is idempotent and final.
 #[derive(uniffi::Object)]
 pub struct BridgeRuntime {
@@ -227,6 +490,57 @@ impl BridgeRuntime {
     /// Decode and validate one command envelope (sync-v1 section 3).
     pub fn decode_command(&self, data: Vec<u8>) -> Result<BridgeCommand, BridgeError> {
         Ok(guarded(&self.state, || decode_command(&data))?)
+    }
+
+    /// Decide one command envelope (runtime-ffi.md "Pure core"): JSON bytes in, the
+    /// change set as JSON bytes or a typed refusal out. The call works on copies of
+    /// every argument and shares nothing with the caller.
+    pub fn decide(
+        &self,
+        read_set: Vec<u8>,
+        envelope: Vec<u8>,
+        receipts: Vec<u8>,
+        inputs: Vec<u8>,
+    ) -> Result<BridgeDecision, BridgeError> {
+        Ok(guarded(&self.state, || {
+            decide_envelope(&read_set, &envelope, &receipts, &inputs)
+        })?)
+    }
+
+    /// Answer one query: JSON bytes in, the result as JSON bytes or a typed refusal out.
+    pub fn query(
+        &self,
+        read_set: Vec<u8>,
+        query: Vec<u8>,
+        inputs: Vec<u8>,
+    ) -> Result<BridgeAnswer, BridgeError> {
+        Ok(guarded(&self.state, || {
+            answer_query(&read_set, &query, &inputs)
+        })?)
+    }
+
+    /// Resolve a Smart Add draft (the capture sheet's preview) against an owned read set.
+    pub fn smart_add_resolve(
+        &self,
+        read_set: Vec<u8>,
+        draft: Vec<u8>,
+    ) -> Result<Vec<u8>, BridgeError> {
+        Ok(guarded(&self.state, || {
+            resolve_smart_add(&read_set, &draft)
+        })?)
+    }
+
+    /// The `task.smart_add` payload a draft would send, given the IDs minted for the
+    /// records it creates; a blocked draft is a typed refusal.
+    pub fn smart_add_propose(
+        &self,
+        read_set: Vec<u8>,
+        draft: Vec<u8>,
+        minted: Vec<u8>,
+    ) -> Result<BridgeAnswer, BridgeError> {
+        Ok(guarded(&self.state, || {
+            propose_smart_add(&read_set, &draft, &minted)
+        })?)
     }
 }
 
@@ -308,6 +622,68 @@ mod bridge_tests {
             Ok(7)
         });
         assert_eq!(result, Err(Failure::new("INTERNAL_ERROR", None)));
+    }
+
+    #[test]
+    fn bridge_026_fr_025_a_panic_in_dispatch_poisons_the_runtime_for_every_call() {
+        let runtime = BridgeRuntime::new(PROTOCOL_VERSION).expect("opens");
+        let panicked: Result<(), _> = guarded(&runtime.state, || {
+            let _ = decide_envelope(b"{}", b"{}", b"{}", b"{}");
+            panic!("payload must not leak")
+        });
+        assert_eq!(panicked, Err(Failure::new("INTERNAL_ERROR", None)));
+        assert!(!runtime.is_open());
+        let codes = [
+            runtime
+                .decide(b"{}".into(), b"{}".into(), b"[]".into(), b"{}".into())
+                .map(|_| ()),
+            runtime
+                .query(b"{}".into(), b"{}".into(), b"{}".into())
+                .map(|_| ()),
+            runtime
+                .smart_add_resolve(b"{}".into(), b"{}".into())
+                .map(|_| ()),
+            runtime
+                .smart_add_propose(b"{}".into(), b"{}".into(), b"{}".into())
+                .map(|_| ()),
+        ]
+        .map(|outcome| failed(outcome.expect_err("poisoned")).0);
+        assert!(
+            codes.iter().all(|code| code == "INTERNAL_ERROR"),
+            "{codes:?}"
+        );
+    }
+
+    #[test]
+    fn bridge_026_fr_025_a_close_during_dispatch_cancels_instead_of_returning_a_result() {
+        let runtime = BridgeRuntime::new(PROTOCOL_VERSION).expect("opens");
+        let result = guarded(&runtime.state, || {
+            runtime.close();
+            Ok(BridgeAnswer::Answered { result: Vec::new() })
+        });
+        assert_eq!(result, Err(Failure::new("CANCELLED", None)));
+    }
+
+    #[test]
+    fn bridge_026_fr_002_converts_a_domain_error_into_a_content_free_refusal() {
+        let refusal = BridgeRefusal::from(DomainError::stale(
+            bb_domain::types::EntityType::Task,
+            vec!["task-1".to_owned()],
+            bb_domain::types::Counter::from(4_u64),
+        ));
+        assert_eq!(
+            refusal,
+            BridgeRefusal {
+                reason: "revision_conflict".to_owned(),
+                field: None,
+                entity_type: Some("task".to_owned()),
+                entity_key: vec!["task-1".to_owned()],
+                current_revision: Some("4".to_owned()),
+            }
+        );
+        let plain = BridgeRefusal::from(DomainError::new(bb_domain::types::Reason::EmptyTitle));
+        assert_eq!(plain.entity_type, None);
+        assert!(plain.entity_key.is_empty());
     }
 
     #[test]
