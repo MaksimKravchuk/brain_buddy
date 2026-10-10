@@ -129,11 +129,16 @@ class JobExecutionGate:
         ledger: FenceLedger,
         *,
         owner_current: Callable[[str], bool],
+        owner_exists: Callable[[str], bool] | None = None,
         now: Callable[[], datetime] = utcnow,
     ) -> None:
         self._ledger = ledger
-        # Identity is the authority for owners: True while the owner resolves.
+        # Identity is the authority for owners: True while the owner is live.
         self._owner_current = owner_current
+        # The narrower check for cleanup: the owner only has to still exist, so
+        # retention can finish what an owner with a pending deletion is owed.
+        # Absent, cleanup is as strict as any other write.
+        self._owner_exists = owner_exists or owner_current
         self._now = now
 
     def begin(self, lease: JobLease) -> JobExecution:
@@ -159,14 +164,21 @@ class JobExecutionGate:
         finally:
             _BOUND.reset(token)
 
-    def authorize(self, execution: JobExecution, owner_id: str) -> None:
-        """Raise unless ``execution`` may write ``owner_id``'s data right now."""
+    def authorize(
+        self, execution: JobExecution, owner_id: str, *, cleanup: bool = False
+    ) -> None:
+        """Raise unless ``execution`` may write ``owner_id``'s data right now.
+
+        ``cleanup`` is for destructive retention only: the fence and the job's
+        scope are checked as always, but the owner need only still exist.
+        """
 
         if self._ledger.should_abandon(
             execution.job_id, fence=execution.fence, now=self._now()
         ):
             raise StaleExecutorError(execution.job_id, execution.fence)
-        if not execution.covers(owner_id) or not self._owner_current(owner_id):
+        allowed = self._owner_exists if cleanup else self._owner_current
+        if not execution.covers(owner_id) or not allowed(owner_id):
             raise ScopeRevokedError(execution.job_id)
 
 
@@ -199,7 +211,7 @@ def reject_caller_origin(kwargs: Mapping[str, object]) -> None:
         raise ForgedWriterOriginError()
 
 
-def authorize_bound_write(owner_id: str) -> None:
+def authorize_bound_write(owner_id: str, *, cleanup: bool = False) -> None:
     """Re-check a bound job's authority; a no-op for every other writer.
 
     Call with the owner's task writer lock held.
@@ -207,15 +219,21 @@ def authorize_bound_write(owner_id: str) -> None:
 
     binding = _BOUND.get()
     if binding is not None:
-        binding.gate.authorize(binding.execution, owner_id)
+        binding.gate.authorize(binding.execution, owner_id, cleanup=cleanup)
 
 
 @contextmanager
-def owner_write_lock(repo: TaskWriterLock, owner_id: str) -> Iterator[None]:
-    """The owner's task writer lock, with job authority re-checked inside it."""
+def owner_write_lock(
+    repo: TaskWriterLock, owner_id: str, *, cleanup: bool = False
+) -> Iterator[None]:
+    """The owner's task writer lock, with job authority re-checked inside it.
+
+    Pass ``cleanup=True`` only for retention that deletes or nulls expired
+    data, which must stay authorized while an owner's deletion is pending.
+    """
 
     with repo.command_lock(owner_id):
-        authorize_bound_write(owner_id)
+        authorize_bound_write(owner_id, cleanup=cleanup)
         yield
 
 
