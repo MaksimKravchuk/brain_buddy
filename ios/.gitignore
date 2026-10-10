@@ -21,3 +21,10 @@ private_keys/
 *.xcarchive/
 *.ipa
 *.xcresult/
+
+# The Rust bridge is built, not committed (ADR-0031, ios/AGENTS.md "Rust bridge"):
+# `sh ios/scripts/build-rust-bridge.sh` writes the static library / XCFramework, the
+# UniFFI-generated Swift and the generated C header into these paths.
+/BrainBuddyKit/Artifacts/
+/BrainBuddyKit/Sources/BrainBuddyRustBindings/
+/BrainBuddyKit/Sources/BrainBuddyRustFFI/include/
