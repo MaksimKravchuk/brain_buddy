@@ -157,6 +157,7 @@ struct ReviewCover: View {
     @State private var sentSeconds: [ReviewStep: Int] = [:]
     @State private var pendingExit: Exit?
     @State private var asksToDiscard = false
+    @State private var isDiscarding = false
     @State private var asksToLeave = false
     @State private var movedOnNote: String?
     private enum Exit {
@@ -173,6 +174,7 @@ struct ReviewCover: View {
 
     var body: some View {
         content
+            .disabled(isDiscarding)
             .bbScreenBackground()
             .toastMagicTap()
             .overlay {
@@ -203,11 +205,14 @@ struct ReviewCover: View {
                 // The cancel role makes "Keep editing" the default (FR-052).
                 Button(ReviewCopy.keepEditing, role: .cancel) { pendingExit = nil }
                 Button(ReviewCopy.discard, role: .destructive) {
+                    guard !isDiscarding else { return }
+                    isDiscarding = true
                     Task {
                         do {
                             try await fields.discard(in: workspace)
                             if let exit = pendingExit { perform(exit) }
                         } catch { problem = TaskCommandRunner.message(for: error) }
+                        isDiscarding = false
                     }
                 }
             }
@@ -403,6 +408,7 @@ struct ReviewCover: View {
     // MARK: Moving on
 
     private func attempt(_ exit: Exit) {
+        guard !isDiscarding else { return }
         if !fields.submittedDrafts.isEmpty {
             guard !isSaving else { return }
             isSaving = true
@@ -489,7 +495,7 @@ struct ReviewCover: View {
     }
 
     private func finish(_ clearStart: ClearStart?) {
-        guard !isSaving else { return }
+        guard !isSaving, !isDiscarding else { return }
         isSaving = true
         Task { await finishDurably(clearStart) }
     }
