@@ -58,8 +58,22 @@ const wrapperPairs = new Map([
   ["{", "}"]
 ]);
 
-const normalize = (value: string): string => value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
-const displayName = (value: string): string => value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+// The whitespace the server strips and collapses names with (Python `str.isspace`,
+// mirrored by Rust `normalization::is_space`; spec 026 smart-add-web/1 resolutions).
+// JavaScript `\s` differs from it: it adds U+FEFF and omits U+001C..U+001F and
+// U+0085, so a name typed with one of them would key differently from the server.
+const serverSpace = "\\t-\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+const serverSpaceEdges = new RegExp(`^[${serverSpace}]+|[${serverSpace}]+$`, "gu");
+const serverSpaceRuns = new RegExp(`[${serverSpace}]+`, "gu");
+
+// The server limits lengths in Unicode scalars; `String.length` counts UTF-16 units.
+const scalarLength = (value: string): number => Array.from(value).length;
+const maxNameLength = 500;
+
+const displayName = (value: string): string => value.normalize("NFKC").replace(serverSpaceEdges, "").replace(serverSpaceRuns, " ");
+// Lower-casing, unlike the server's full case folding, keeps U+00DF and U+1C80;
+// the resulting optimistic-chip differences are the recorded, accepted ones.
+const normalize = (value: string): string => displayName(value).toLocaleLowerCase();
 export const stripLegacySigil = (value: string): string => value.replace(/^[#@]/u, "");
 export const stripLegacyProjectSigil = (value: string): string => value.replace(/^@/u, "");
 
@@ -182,7 +196,9 @@ function cleanTitle(input: string, tokens: TokenSpan[], escapes: EscapeSpan[]): 
       remove[index] = true;
     }
   }
-  const kept = Array.from(input).filter((_, index) => !remove[index]).join("");
+  // `remove` is indexed by UTF-16 unit, like every span, so the filter must walk
+  // units too: a code-point walk shifts the mask after any astral character.
+  const kept = input.split("").filter((_, index) => !remove[index]).join("");
   return kept.replace(/\s+/gu, " ").replace(/\s+([,.;:!?\])}])/gu, "$1").trim();
 }
 
@@ -244,7 +260,7 @@ export function parseSmartAdd(input: string, options: SmartAddParseOptions): Sma
     tags,
     project,
     hasCompletedTokens,
-    isValid: title.length > 0 && title.length <= 500 && tags.every((tag) => !("name" in tag) || tag.name.length <= 500) && (!(project && "name" in project) || project.name.length <= 500)
+    isValid: title.length > 0 && scalarLength(title) <= maxNameLength && tags.every((tag) => !("name" in tag) || scalarLength(tag.name) <= maxNameLength) && (!(project && "name" in project) || scalarLength(project.name) <= maxNameLength)
   };
 }
 
