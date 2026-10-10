@@ -15,11 +15,15 @@
 //! answers still count (request fences over the workspace, session, local-sync
 //! and server generations, reset, sign-out, unsupported versions) and [`epochs`]
 //! owns the durable device epoch: registered under current authority, closed
-//! without rewriting an envelope, replaced for new independent work.
+//! without rewriting an envelope, replaced for new independent work. [`import`]
+//! moves the legacy `StoreDocument` JSON file into the store: backed up, staged,
+//! validated against the source and switched in one transaction under the migration
+//! lock, or not at all.
 
 mod apply_changes;
 mod epochs;
 mod execute;
+mod import;
 mod issues;
 mod locking;
 mod receipts;
@@ -40,6 +44,11 @@ pub use epochs::{
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
     Stage, execute, execute_with,
+};
+pub use import::{
+    ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,
+    SourceCounts, import_legacy_store, import_legacy_store_with, legacy_import_marker,
+    legacy_record_key,
 };
 pub use issues::{
     Choice, CurrentRecord, DecisionDraft, DependentChoice, DependentDraft, DraftAction, Issue,
