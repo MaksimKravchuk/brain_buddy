@@ -9,6 +9,18 @@ import Testing
 
 @testable import BrainBuddyWorkspace
 
+private actor RecordingSyncRuntimePort: SyncRuntimePort {
+    private(set) var triggers: [SyncTrigger] = []
+
+    func request(_ trigger: SyncTrigger) async -> SyncRuntimeWakeResult {
+        triggers.append(trigger)
+        return .transportUnavailable
+    }
+
+    func setNetworkAvailable(_ available: Bool) async {}
+    func close() async {}
+}
+
 /// Signing in and out, the sync service calls, and documents and statuses
 /// the sync service reports.
 @MainActor
@@ -32,6 +44,37 @@ import Testing
         let sync = FakeSyncService(store: store.base)
         let workspace = await loadedWorkspace(store: store, sync: sync)
         return SignedIn(workspace: workspace, sync: sync, store: store)
+    }
+
+    @Test func foregroundPullForwardsEverySelectedRustRequest() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "foreground",
+            databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let transport = RecordingSyncRuntimePort()
+        let workspace = Workspace(store: ControlledStore(), sync: nil,
+            rust: RustWorkspaceSelection(runtime: runtime,
+                facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC")),
+                transport: transport, startup: .freshAccountless))
+        await workspace.load()
+
+        await workspace.requestForegroundPull()
+        await workspace.requestForegroundPull()
+
+        #expect(await transport.triggers.suffix(2) == [.foreground, .foreground])
+        await workspace.closeRuntime()
+    }
+
+    @Test func foregroundPullForwardsEveryLegacyRequest() async {
+        let session = await signedIn()
+
+        await session.workspace.requestForegroundPull()
+        await session.workspace.requestForegroundPull()
+
+        #expect(await session.sync.calls.filter { $0 == .request(.foreground) }.count == 2)
     }
 
     // MARK: Starting

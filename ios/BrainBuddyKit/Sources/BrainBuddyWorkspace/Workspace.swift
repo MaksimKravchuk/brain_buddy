@@ -781,6 +781,15 @@ public final class Workspace {
         if active { await sync?.request(.foreground) }
     }
 
+    /// Requests one immediate pull for each foreground trigger.
+    public func requestForegroundPull() async {
+        if isRustSelected {
+            await wakeRustTransport(.foreground)
+        } else {
+            await sync?.request(.foreground)
+        }
+    }
+
     /// Everything the sync status line is told (`SyncStatusDescriber.describe`). A change counts as
     /// waiting from when it became sendable: the later of its issue time and the account's link time,
     /// so a first sign-in with months-old local data does not read as days of failure; the ones

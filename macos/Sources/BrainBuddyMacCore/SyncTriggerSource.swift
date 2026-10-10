@@ -184,7 +184,7 @@ extension WorkspaceHost: SyncTriggerTarget {
     package var isAccountLinked: Bool { workspace.account != nil }
     package func reloadIfChangedExternally() async { await workspace.reloadIfChangedExternally() }
     package func setForegroundActive(_ active: Bool) async { await workspace.setForegroundActive(active) }
-    package func requestForegroundPull() async { await engine.request(.foreground) }
+    package func requestForegroundPull() async { await workspace.requestForegroundPull() }
     package func networkAvailabilityChanged(isAvailable: Bool) { workspace.networkAvailabilityChanged(isAvailable: isAvailable) }
     package func syncNow() async { await workspace.syncNow() }
     package func flush() async { await workspace.flush() }
