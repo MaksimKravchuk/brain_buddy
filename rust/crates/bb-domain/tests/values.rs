@@ -204,6 +204,38 @@ fn values_026_fr_009_counters_stay_decimal_and_lossless() {
 // --------------------------------------------------------------- identifiers
 
 #[test]
+fn values_026_fr_016_imported_formulation_references_preserve_uuid_case_without_minting() {
+    let upper = UUID.to_ascii_uppercase();
+    let lower: FormulationId = from(json!(UUID));
+    let historical: FormulationId = from(json!(upper));
+    assert_eq!(serde_json::to_value(&lower).unwrap(), json!(UUID));
+    assert_eq!(serde_json::to_value(&historical).unwrap(), json!(upper));
+    assert_ne!(
+        lower, historical,
+        "existing identity comparisons remain exact"
+    );
+    for raw in [UUID, upper.as_str()] {
+        assert!(!FormulationId::parse(raw).unwrap().has_client_shape());
+        assert!(NewFormulationId::parse(raw).is_err());
+        assert!(FormulationId::parse_new(raw).is_err());
+        assert!(FormulationId::parse_allocated(raw).is_err());
+        assert!(SessionId::parse(raw).is_err());
+        assert!(DecisionId::parse(raw).is_err());
+        assert!(BulkId::parse(raw).is_err());
+    }
+    assert!(FormulationId::parse_allocated(format!("form_{UUID}")).is_ok());
+    assert!(FormulationId::parse_allocated("form_0a1b2c3d4e5f").is_ok());
+    for bad in [
+        "6b1e8a52_3f0c-4e7a-9d21-5c8b0f4a7e19",
+        "6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e1g",
+        "6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e1",
+        "6b1e8a52-3f0c-4e7a-9d21-5c8b0f4a7e190",
+    ] {
+        refused::<FormulationId>(json!(bad));
+    }
+}
+
+#[test]
 fn values_026_fr_016_review_id_prefixes_and_shapes_are_checked() {
     let uuid = format!("form_{UUID}");
     assert!(FormulationId::parse(&uuid).is_ok());

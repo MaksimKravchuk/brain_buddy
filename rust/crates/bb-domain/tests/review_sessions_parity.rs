@@ -1939,6 +1939,13 @@ fn review_sessions_026_fr_016_the_first_acknowledgement_activates_and_clamps_nex
     let starved = review_sessions::decide(&read_set, &ack, &exec(NOW)).expect_err("needs an id");
     assert_eq!(starved.reason, Reason::FormulationIdRequired);
 
+    let historical = "0b0e1f30-0000-4000-8000-0000000000aa";
+    let invalid_inputs = exec_with(NOW, true, None, &[historical]);
+    let invalid_allocation = review_sessions::decide(&read_set, &ack, &invalid_inputs)
+        .expect_err("historical references cannot allocate a new clock");
+    assert_eq!(invalid_allocation.reason, Reason::InvalidValue);
+    assert_eq!(invalid_allocation.field.as_deref(), Some("FormulationId"));
+
     let minted = form_id(0xaa);
     let inputs = exec_with(NOW, true, None, &[minted.as_str()]);
     let change_set = review_sessions::decide(&read_set, &ack, &inputs).expect("activated");

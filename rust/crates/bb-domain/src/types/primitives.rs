@@ -194,6 +194,15 @@ fn is_lower_uuid(value: &str) -> bool {
         })
 }
 
+/// Historical Swift formulation references retain their UUID text verbatim.
+fn is_legacy_formulation_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
 /// `<prefix>_<lowercase uuid>`, at most 64 characters: the shape a client mints.
 fn is_client_shape(value: &str, prefix: &str) -> bool {
     value.len() <= 64
@@ -331,9 +340,41 @@ macro_rules! review_id {
     )*};
 }
 
+id_type!(
+    /// An existing formulation reference, including imported Swift UUIDs.
+    FormulationId,
+    |s| is_reference_shape(s, "form") || is_legacy_formulation_uuid(s)
+);
+
+impl FormulationId {
+    pub const PREFIX: &'static str = "form";
+
+    /// A new ID as a native client mints it: `form_<lowercase uuid>`.
+    pub fn parse_new(value: impl Into<String>) -> Result<Self, DomainError> {
+        let value = value.into();
+        if is_client_shape(&value, Self::PREFIX) {
+            Ok(Self(value))
+        } else {
+            Err(DomainError::field(Reason::InvalidValue, "FormulationId"))
+        }
+    }
+
+    /// A newly allocated native or server ID; excludes historical bare UUIDs.
+    pub fn parse_allocated(value: impl Into<String>) -> Result<Self, DomainError> {
+        let value = value.into();
+        if is_reference_shape(&value, Self::PREFIX) {
+            Ok(Self(value))
+        } else {
+            Err(DomainError::field(Reason::InvalidValue, "FormulationId"))
+        }
+    }
+
+    pub fn has_client_shape(&self) -> bool {
+        is_client_shape(&self.0, Self::PREFIX)
+    }
+}
+
 review_id! {
-    /// A formulation reference.
-    FormulationId: "form";
     /// A Review session reference.
     SessionId: "review";
     /// A decision reference.

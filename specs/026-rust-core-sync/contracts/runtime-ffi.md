@@ -4,6 +4,16 @@ Status: **frozen-v1** (2026-10-09, PR-01; ADR-0031) first-launch Apple/Python co
 
 ## Pure core
 
+Historical native import compatibility: an existing formulation reference may
+be an exact 36-character ASCII UUID from the Swift store. Its hexadecimal case
+and value remain unchanged through task clocks, park markers, Review migration,
+draft keys and commands; identity is established by the admitted source and
+matched owning task/park, never by adding a prefix or an inferred alias. This is
+an exception to the prefixed reference wording for existing imported IDs only.
+New client IDs remain `form_<lowercase UUID>`; trusted allocations accept only
+that shape or the existing server `form_<12 lowercase hex>` shape. Other Review
+ID types and backend REST `FormulationRef` validation retain their contracts.
+
 `decide(read_set, command, execution_inputs) -> ChangeSet | DomainError` is deterministic. `execution_inputs` explicitly contains rule version, effective instant/time zone, allocated IDs and trusted policy/capability facts. It has no clock, network, filesystem, credential or random-number access. Read sets include required parents, unique-name candidates, memberships, Review settings/session/receipts and private Undo/park data **only on the authoritative side**. Missing required facts return a typed incomplete-read-set result; they are not silently defaulted.
 
 `ChangeSet` carries domain changes, affected keys, outcome/no-op, result references and durable effect intents. The server adapter authorizes and loads the protected read set under its scope transaction, invokes the core, assigns record/commit versions, and commits domain+receipt+feed+job intent together. Rust never commits a second independent transaction. PyO3 converts expected domain failures into typed values mapped to existing HTTP errors; panics cannot unwind into Python. Calls must not hold the Python GIL during CPU work that does not need Python objects. No provider/network call occurs while holding the scope lock.

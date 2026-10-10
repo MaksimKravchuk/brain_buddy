@@ -1169,7 +1169,7 @@ fn explainer_ack(
             let allocated = ids.next().ok_or_else(|| {
                 DomainError::field(Reason::FormulationIdRequired, "allocated_ids")
             })?;
-            FormulationId::parse(allocated.as_str())?.into_string()
+            FormulationId::parse_allocated(allocated.as_str())?.into_string()
         } else {
             String::new()
         };
