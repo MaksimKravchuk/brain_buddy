@@ -3,10 +3,13 @@ import Testing
 
 @testable import BrainBuddyCore
 
-@Suite("Original-source local Review private codec (026-FR-013, 026-FR-025)")
+@Suite("Bounded original-source private Review components (026-FR-013, 026-FR-025)")
 struct RustLegacyReviewPrivateCodecTests {
     private let instant = "2026-10-10T09:00:00Z"
     private let taskID = "00000000-0000-4000-8000-000000000011"
+    private let decisionID = "00000000-0000-4000-8000-000000000014"
+    private let bulkID = "00000000-0000-4000-8000-000000000015"
+    private let sessionID = "00000000-0000-4000-8000-000000000013"
 
     private func fixture() throws -> WireObject {
         var root = URL(fileURLWithPath: #filePath)
@@ -15,87 +18,98 @@ struct RustLegacyReviewPrivateCodecTests {
             "rust/crates/bb-client/tests/fixtures/legacy-review-activation.json")))
     }
 
-    private func entry(_ kind: String) throws -> WireObject {
+    private func page(kind: String, id: String, type: String, canonical: String, component: String,
+                      length: Int, offset: Int = 0, count: Int = 1, ordinal: Int = 0) -> WireObject {
+        ["header": ["codec_version": 1, "token": ["workspace_id": "local"],
+            "binding": ["source_kind": kind, "source_id": id, "source_fragment_sha256": "whole-original-source-digest",
+                "entity_type": type, "record_key": [canonical], "public_sha256": "runtime-public-digest",
+                "public_record_version": "0", "task_public": [:] as WireObject, "session_public": NSNull()] as WireObject,
+            "source_at": instant, "deadline": kind == "task_park" ? NSNull() : "2026-10-17T09:00:00Z" as Any,
+            "component_lengths": [component: length]] as WireObject,
+         "ordinal": ordinal, "component": component, "offset": offset, "count": count,
+         "fragment_sha256": "runtime-selected-component-digest", "aliases": [WireObject](),
+         "task_public": [:] as WireObject, "session_public": NSNull(), "source_tasks": [:] as WireObject,
+         "source_session": NSNull(), "next_cursor": "opaque-next-component"]
+    }
+
+    private func decisionPage() throws -> WireObject {
         let fixture = try fixture()
-        let family = kind == "decision" ? "decisions" : "bulkReleases"
-        let publicFamily = kind == "decision" ? "decisions" : "bulk_releases"
-        let source = try #require(try fixture.object("source_review").object(family).values.first as? WireObject)
-        let record = try #require(try fixture.object("expected_read_set").object(publicFamily).values.first as? WireObject)
-        let session = try #require(try fixture.object("source_review").object("sessions").values.first as? WireObject)
-        return ["source_kind": kind, "source_id": try source.string("id"),
-                "source_fragment_sha256": "runtime-owned-source-digest", "entity_type": "review_" + kind,
-                "record_key": [try record.string("id")], "public_sha256": "runtime-owned-public-digest",
-                "public_record_version": "9", "task_public": ["task_history_proven": ["record_version": "9",
-                    "public_sha256": "runtime-owned-task-digest", "edit_revision": "4"]] as WireObject,
-                "session_public": ["record_version": "9", "public_sha256": "runtime-owned-session-digest",
-                                   "edit_revision": "2"] as WireObject,
-                "source": source, "public": record,
-                "source_tasks": try fixture.object("source_tasks"), "source_session": session]
+        var source = try fixture.object("source_review").object("decisions").object(decisionID)
+        var undo = try source.object("undo")
+        var before = try undo.object("taskBefore")
+        for key in ["tagIDs", "subtasks", "comments", "childrenSyncedAt"] { before.removeValue(forKey: key) }
+        undo["taskBefore"] = before
+        source["undo"] = undo
+        var result = page(kind: "decision", id: decisionID, type: "review_decision", canonical: "decision_" + decisionID,
+                          component: "decision_scalar", length: 1)
+        result["source"] = source
+        result["public"] = try fixture.object("expected_read_set").object("decisions").object("decision_" + decisionID)
+        result["source_tasks"] = [taskID: ["id": taskID, "serverRevision": 5, "updatedAt": instant]] as WireObject
+        result["source_session"] = ["id": sessionID, "lastActivityAt": instant] as WireObject
+        result["aliases"] = [["entity_type": "task", "local_id": taskID, "server_id": "task_history_proven"]]
+        return result
     }
 
-    private func prepare(_ entry: WireObject, at instant: String = "2026-10-10T10:00:00Z") throws -> WireObject {
-        try RustLegacyReviewPrivateCodec.prepare(entry, bindings: [.init(entityType: "task", localID: taskID,
-            canonicalID: "task_history_proven")], now: #require(RustInstant.parse(instant)))
+    private func prepare(_ page: WireObject, at instant: String = "2026-10-10T10:00:00Z") throws -> WireObject {
+        let aliases = try page.objects("aliases").map { row in
+            RustWorkspaceIdentityBinding(entityType: try row.string("entity_type"), localID: try row.string("local_id"),
+                                         canonicalID: try row.string("server_id"))
+        }
+        return try RustLegacyReviewPrivateCodec.preparePage(page, bindings: aliases, now: #require(RustInstant.parse(instant)))
     }
 
-    @Test("Exact Undo snapshot and source receipt stamp are private; missing revisions require source match evidence")
-    func originalDecisionAndReceipt() throws {
-        var captured = try entry("decision")
+    @Test("Scalar Undo uses narrow witnesses; omitted children and tags never become empty or complete")
+    func scalarWitnessesAndReceipts() throws {
+        var captured = try decisionPage()
         var source = try captured.object("source")
         var undo = try source.object("undo")
         var before = try undo.object("taskBefore")
         before.removeValue(forKey: "serverRevision")
         undo["taskBefore"] = before
         undo["receiptReplaced"] = ["taskID": taskID, "kind": "waiting", "reviewedAt": instant,
-            "hiddenUntil": "2026-10-17T09:00:00Z", "source": "keep", "taskUpdatedAt": instant] as WireObject
+            "hiddenUntil": instant, "source": "keep", "taskUpdatedAt": instant] as WireObject
         source["undo"] = undo
         source["taskAfter"] = ["updatedAt": instant] as WireObject
         captured["source"] = source
-        var publicRecord = try captured.object("public")
-        publicRecord["task_revision_before"] = "0"
-        publicRecord["task_revision_after"] = "0"
-        captured["public"] = publicRecord
-        var tasks = try captured.object("source_tasks")
-        var original = try tasks.object(taskID)
-        original.removeValue(forKey: "serverRevision")
-        tasks[taskID] = original
-        captured["source_tasks"] = tasks
+        captured["source_tasks"] = [taskID: ["id": taskID, "updatedAt": instant]] as WireObject
         let result = try prepare(captured)
         let fields = try result.object("private").object("fields")
+        let taskBefore = try fields.object("task_before")
         #expect(try result.object("evidence").bool("task_matches"))
-        #expect(try fields.object("task_before").string("title") == before.string("title"))
-        #expect(try fields.object("task_before").string("revision") == captured.object("public").string("task_revision_before"))
+        #expect(taskBefore["tag_ids"] == nil)
+        #expect(taskBefore["subtasks"] == nil && taskBefore["comments"] == nil)
+        #expect(taskBefore["children_known"] == nil)
         #expect(try fields.object("local_before").object("receipt_replaced").bool("task_was_unchanged"))
-        #expect(fields["created_task_revision"] as? String == "1")
-        #expect(try result.string("source_fragment_sha256") == "runtime-owned-source-digest")
-        var ids = RustIDTable()
-        let decision = try decode(ReviewDecision.self, source)
-        #expect(RustReadSet.decision(decision, &ids)["private"] == nil)
-        #expect(RustReadSet.decision(decision, &ids)["local_before"] == nil)
-        original["updatedAt"] = "2026-10-10T09:00:01Z"
-        tasks[taskID] = original
-        captured["source_tasks"] = tasks
-        #expect(try !prepare(captured).object("evidence").bool("task_matches"))
-        var replaced = try undo.object("receiptReplaced")
-        replaced["taskRevision"] = 4
-        undo["receiptReplaced"] = replaced
+        #expect(try fields.object("local_before").object("receipt_replaced").object("receipt").string("hidden_until") == instant)
+        #expect(try result.string("fragment_sha256") == "runtime-selected-component-digest")
+        #expect(try result.object("header").object("binding").string("source_fragment_sha256") == "whole-original-source-digest")
+        var receipt = try undo.object("receiptReplaced")
+        receipt["taskUpdatedAt"] = "2026-10-10T09:00:01Z"
+        undo["receiptReplaced"] = receipt
         source["undo"] = undo
         captured["source"] = source
         #expect(try !prepare(captured).object("private").object("fields").object("local_before")
             .object("receipt_replaced").bool("task_was_unchanged"))
+        source["taskAfter"] = ["serverRevision": 5] as WireObject
+        captured["source"] = source
+        captured["source_tasks"] = [taskID: ["id": taskID, "serverRevision": 5, "updatedAt": "2026-10-10T10:00:00Z"]] as WireObject
+        #expect(try prepare(captured).object("evidence").bool("task_matches"))
+        // Only the witness crosses the seam; the full immutable digest binds
+        // the original store's irrelevant child and session collections.
+        let witness = try RustLegacyPrivateSourceDecoding.decode(RustLegacyTaskStampWitness.self,
+            ["id": taskID, "updatedAt": instant] as WireObject)
+        #expect(witness.serverRevision == nil)
+        #expect(TaskStamp(updatedAt: try #require(RustInstant.parse(instant)), serverRevision: nil).matchesLegacyWitness(witness))
     }
 
-    @Test("Only the frozen original session instant admits restoration; exact seven days never extends retention")
+    @Test("Original session activity and the exact seven-day deadline fence each prepared page")
     func sessionAndRetention() throws {
-        var captured = try entry("decision")
-        let mapped = try prepare(captured)
-        #expect(try mapped.object("evidence").bool("session_matches"))
-        let frozen = try mapped.object("private").object("fields").object("local_before").object("session_before")
-        #expect(try frozen.string("last_activity_after") == instant)
+        var captured = try decisionPage()
+        let result = try prepare(captured)
+        #expect(try result.object("evidence").bool("session_matches"))
+        let frozen = try result.object("private").object("fields").object("local_before").object("session_before")
         #expect(frozen["revision_after"] is NSNull)
-        var session = try captured.object("source_session")
-        session["lastActivityAt"] = "2026-10-10T09:00:01Z"
-        captured["source_session"] = session
+        captured["source_session"] = ["id": sessionID, "lastActivityAt": "2026-10-10T09:00:01Z"] as WireObject
         let later = try prepare(captured)
         #expect(try !later.object("evidence").bool("session_matches"))
         #expect(try later.object("private").object("fields").object("local_before")["session_before"] is NSNull)
@@ -103,96 +117,130 @@ struct RustLegacyReviewPrivateCodecTests {
         #expect(try prepare(captured, at: "2026-10-17T08:59:59Z")["private"] is WireObject)
     }
 
-    @Test("Bulk clock identity stays exact; a replaced receipt with no pre-release instant proof stays stale")
-    func bulkClockAndReceipt() throws {
-        var captured = try entry("bulk_release")
-        var source = try captured.object("source")
-        source.removeValue(forKey: "undoneAt")
-        source.removeValue(forKey: "undoResult")
-        var item = try #require(try source.objects("released").first)
-        item["clockKnown"] = true
-        item["previousState"] = "next"
-        item["clockBefore"] = ["clock": ["id": "00000000-0000-4000-8000-000000000016",
-            "startedAt": instant, "extensionReason": "Original private reason"], "stalledBefore": 2] as WireObject
-        item["receiptReplaced"] = ["taskID": taskID, "kind": "someday", "reviewedAt": instant,
-            "hiddenUntil": "2026-11-09T09:00:00Z", "source": "keep", "taskRevision": 6] as WireObject
-        source["released"] = [item]
-        captured["source"] = source
-        var tasks = try captured.object("source_tasks")
-        var task = try tasks.object(taskID)
-        task["serverRevision"] = 6
-        tasks[taskID] = task
-        captured["source_tasks"] = tasks
-        let fields = try #require(try prepare(captured).object("private")["fields"] as? [WireObject])
-        #expect(try fields[0].object("clock_before").string("formulation_id") == "00000000-0000-4000-8000-000000000016")
-        #expect(try fields[0].bool("local_source_task_unchanged"))
-        #expect(try fields[0].object("local_receipt_replaced").bool("task_was_unchanged"))
-        var receipt = try item.object("receiptReplaced")
-        receipt["taskUpdatedAt"] = instant
-        item["receiptReplaced"] = receipt
-        source["released"] = [item]
-        captured["source"] = source
-        let stale = try #require(try prepare(captured).object("private")["fields"] as? [WireObject])
-        #expect(try !stale[0].object("local_receipt_replaced").bool("task_was_unchanged"))
-        item["clockKnown"] = false
-        source["released"] = [item]
-        captured["source"] = source
-        let unknown = try #require(try prepare(captured).object("private")["fields"] as? [Any])
-        #expect(unknown[0] is NSNull)
-        task["serverRevision"] = 99
-        tasks[taskID] = task
-        captured["source_tasks"] = tasks
-        let knownStale = try #require(try prepare(captured).object("private")["fields"] as? [WireObject])
-        #expect(try !knownStale[0].bool("local_source_task_unchanged"))
-        #expect(knownStale[0]["clock_before"] is NSNull)
-        #expect(try prepare(captured, at: "2026-10-17T09:00:00Z")["private"] is NSNull)
+    @Test("201- and 500-item releases prepare independent bounded pages, preserving original stale flags")
+    func multiPageBulk() throws {
+        for total in [201, 500] {
+            for offset in stride(from: 0, to: total, by: 20) {
+                let count = min(20, total - offset)
+                var captured = page(kind: "bulk_release", id: bulkID, type: "review_bulk_release", canonical: "bulk_" + bulkID,
+                    component: "bulk_released", length: total, offset: offset, count: count, ordinal: offset / 20)
+                var sourceRows: [WireObject] = [], publicRows: [WireObject] = [], aliases: [WireObject] = []
+                var witnesses: WireObject = [:]
+                for item in offset..<(offset + count) {
+                    let id = String(format: "00000000-0000-4000-8000-%012x", 1_000 + item)
+                    sourceRows.append(["taskID": id, "previousState": "next", "clockKnown": false,
+                        "taskAfter": ["serverRevision": 6, "updatedAt": instant],
+                        "receiptReplaced": ["taskID": id, "kind": "someday", "reviewedAt": instant,
+                            "hiddenUntil": "2026-11-09T09:00:00Z", "source": "keep", "taskRevision": 6,
+                            "taskUpdatedAt": instant]] as WireObject)
+                    publicRows.append(["task_id": "task_" + id, "revision_after": "6"])
+                    witnesses[id] = ["id": id, "serverRevision": 99, "updatedAt": instant] as WireObject
+                    aliases.append(["entity_type": "task", "local_id": id, "server_id": "task_" + id])
+                }
+                captured["source"] = ["id": bulkID, "createdAt": instant, "released": sourceRows] as WireObject
+                captured["public"] = ["id": "bulk_" + bulkID, "released": publicRows] as WireObject
+                captured["source_tasks"] = witnesses
+                captured["aliases"] = aliases
+                let result = try prepare(captured)
+                let fields = try #require(try result.object("private")["fields"] as? [WireObject])
+                #expect(fields.count == count)
+                #expect(fields.allSatisfy { $0["local_source_task_unchanged"] as? Bool == false })
+                #expect(fields.allSatisfy { $0["clock_before"] is NSNull })
+                #expect(try !fields[0].object("local_receipt_replaced").bool("task_was_unchanged"))
+                #expect(try result.int("offset") == offset)
+                #expect(result["next_cursor"] == nil)
+                #expect(try RustJSON.data(result).count < 32_768)
+            }
+        }
     }
 
-    @Test("Original accountless park clocks retain an absent counter for Rust's explicit baseline anchor")
-    func originalParkAndNestedSnapshot() throws {
-        let fixture = try fixture()
-        var task = try fixture.object("source_tasks").object(taskID)
-        task.removeValue(forKey: "serverRevision")
-        task["state"] = "someday"
-        task.removeValue(forKey: "waitingFor")
-        task.removeValue(forKey: "waitingSince")
-        task["parked"] = ["at": instant, "formulationID": "00000000-0000-4000-8000-000000000016",
+    @Test("Meaningful tags stay in distinct components and use exact typed aliases")
+    func tagComponentsAndBounds() throws {
+        for offset in [0, 80, 160] {
+            let count = min(80, 201 - offset)
+            var captured = page(kind: "decision", id: decisionID, type: "review_decision", canonical: "decision_" + decisionID,
+                component: "decision_tags", length: 201, offset: offset, count: count, ordinal: 1 + offset / 80)
+            let ids = (offset..<(offset + count)).map { String(format: "00000000-0000-4000-8000-%012x", 2_000 + $0) }
+            captured["source"] = ids
+            captured["public"] = NSNull()
+            captured["aliases"] = ids.map { ["entity_type": "tag", "local_id": $0, "server_id": "tag_" + $0] }
+            let result = try prepare(captured)
+            #expect(try result.object("private").strings("fields") == ids.map { "tag_" + $0 })
+            #expect(try result.string("component") == "decision_tags")
+        }
+        var oversized = page(kind: "decision", id: decisionID, type: "review_decision", canonical: "decision_" + decisionID,
+            component: "decision_tags", length: 201, count: 201)
+        oversized["source"] = Array(repeating: taskID, count: 201)
+        #expect(throws: RustDomainError.malformedResult) { try prepare(oversized) }
+        var copiedChildren = try decisionPage()
+        var source = try copiedChildren.object("source"), undo = try source.object("undo"), before = try undo.object("taskBefore")
+        before["subtasks"] = [WireObject]()
+        undo["taskBefore"] = before
+        source["undo"] = undo
+        copiedChildren["source"] = source
+        #expect(throws: RustDomainError.malformedResult) { try prepare(copiedChildren) }
+    }
+
+    @Test("Standalone and nested parks retain an absent source counter for the explicit LOCAL anchor")
+    func parkComponents() throws {
+        let marker: WireObject = ["at": instant, "formulationID": "00000000-0000-4000-8000-000000000016",
             "clockBefore": ["id": "00000000-0000-4000-8000-000000000016", "startedAt": instant,
-                "extendedAt": instant, "extensionReason": "Exact private clock reason"], "stalledBefore": 2] as WireObject
-        let captured: WireObject = ["source_kind": "task_park", "source_id": taskID,
-            "source_fragment_sha256": "runtime-owned-source-digest", "entity_type": "task",
-            "record_key": ["task_history_proven"], "public_sha256": "runtime-owned-public-digest",
-            "public_record_version": "0", "task_public": [:] as WireObject,
-            "source": task, "source_tasks": [taskID: task], "public": ["id": "task_history_proven"] as WireObject]
-        let park = try prepare(captured).object("private").object("fields")
+                "extendedAt": instant, "extensionReason": "Exact private reason"], "stalledBefore": 2]
+        var captured = page(kind: "task_park", id: taskID, type: "task", canonical: "task_history_proven", component: "task_park", length: 1)
+        captured["source"] = ["id": taskID, "updatedAt": instant, "parked": marker] as WireObject
+        captured["source_tasks"] = [taskID: ["id": taskID, "updatedAt": instant]] as WireObject
+        captured["aliases"] = [["entity_type": "task", "local_id": taskID, "server_id": "task_history_proven"]]
+        let park = try prepare(captured, at: "2026-10-30T09:00:00Z").object("private").object("fields")
         #expect(park["from_revision"] is NSNull)
-        #expect(try park.object("clock_before").string("extension_reason") == "Exact private clock reason")
-        #expect(try park.object("clock_before").string("formulation_id") == "00000000-0000-4000-8000-000000000016")
-        // Park retention follows the existing marker policy, not a new retry TTL.
-        #expect(try prepare(captured, at: "2026-10-30T09:00:00Z").object("private").object("fields")["from_revision"] is NSNull)
-        var decision = try entry("decision")
-        var source = try decision.object("source")
-        var undo = try source.object("undo")
-        undo["taskBefore"] = task
-        undo["receiptReplaced"] = ["taskID": taskID, "kind": "waiting", "reviewedAt": instant,
-            "hiddenUntil": instant, "source": "keep"] as WireObject
+        #expect(try park.object("clock_before").string("extension_reason") == "Exact private reason")
+        var decision = try decisionPage()
+        var source = try decision.object("source"), undo = try source.object("undo"), before = try undo.object("taskBefore")
+        before["parked"] = marker
+        undo["taskBefore"] = before
         source["undo"] = undo
         decision["source"] = source
         let prepared = try prepare(decision)
         #expect(try prepared.object("task_before_park")["from_revision"] is NSNull)
         #expect(try prepared.object("private").object("fields").object("task_before").object("parked")["private"] == nil)
-        // An expired receipt keeps its original deadline; its task constraints
-        // are independently proven and never use a reconstructed revision.
-        #expect(try prepared.object("private").object("fields").object("local_before")
-            .object("receipt_replaced").bool("task_was_unchanged"))
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ object: WireObject) throws -> T {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let text = try decoder.singleValueContainer().decode(String.self)
-            return try #require(RustInstant.parse(text))
+    @Test("Imported progress IDs use their own components without payload digests; settings keep only source bookkeeping")
+    func sessionProgressAndSettings() throws {
+        var session = page(kind: "session", id: sessionID, type: "review_session", canonical: "review_" + sessionID,
+                           component: "session_scalar", length: 1)
+        var header = try session.object("header")
+        header["deadline"] = NSNull()
+        header["component_lengths"] = ["session_scalar": 1, "session_progress": 201]
+        session["header"] = header
+        session["source"] = ["id": sessionID, "status": "open", "qualifyingActivity": true] as WireObject
+        let scalar = try prepare(session).object("private").object("fields")
+        #expect(try scalar.object("applied_progress").isEmpty)
+        #expect(try scalar.strings("finished_empty").isEmpty)
+        #expect(try scalar.strings("local_imported_progress").isEmpty)
+        #expect(scalar["qualifying_activity"] == nil)
+        for offset in [0, 80, 160] {
+            var progress = session
+            let count = min(80, 201 - offset)
+            progress["ordinal"] = 1 + offset / 80
+            progress["component"] = "session_progress"
+            progress["offset"] = offset
+            progress["count"] = count
+            let ids = (offset..<(offset + count)).map { String(format: "00000000-0000-4000-8000-%012x", 3_000 + $0) }
+            progress["source"] = ids
+            let fields = try prepare(progress).object("private").strings("fields")
+            #expect(fields == ids.map { "progress_" + $0 })
         }
-        return try decoder.decode(type, from: RustJSON.data(object))
+        var settings = page(kind: "settings", id: "settings", type: "review_settings", canonical: "unused",
+                            component: "settings", length: 1)
+        header = try settings.object("header")
+        header["deadline"] = NSNull()
+        var binding = try header.object("binding")
+        binding["record_key"] = [String]()
+        header["binding"] = binding
+        settings["header"] = header
+        settings["source"] = try fixture().object("source_review").object("settings")
+        let fields = try prepare(settings).object("private").object("fields")
+        #expect(try fields.string("threshold_changed_at") == instant)
+        #expect(fields["last_effective_sweep_at"] is NSNull)
     }
 }
