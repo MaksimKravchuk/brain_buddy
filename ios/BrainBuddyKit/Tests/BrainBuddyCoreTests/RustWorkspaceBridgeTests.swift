@@ -284,5 +284,41 @@ extension RustWorkspaceBridgeTests {
         #expect(facts.derived == nil)
         #expect(facts.unavailableLocalFacts == ["weekly_review_unavailable"])
         #expect(try facade.workspaceTaskFormulation(TaskID("task_elsewhere"), from: page) == nil)
+        let explicit = RustWorkspacePage(projectionGeneration: "7", result: try RustJSON.data([
+            "kind": "task_formulation", "value": ["task_id": id.rawValue, "class": "none",
+                "derived": NSNull(), "third_stall": false, "extension": NSNull(), "parked_after_days": NSNull(),
+                "unavailable_local_facts": ["weekly_review_unavailable"]]
+        ]))
+        #expect(try facade.workspaceTaskFormulation(id, from: explicit)?.classification == FormulationClass.none)
+        #expect(throws: RustDomainError.self) { try facade.workspaceTaskFormulation(TaskID("task_elsewhere"), from: explicit) }
+
+    }
+}
+
+
+extension RustWorkspaceBridgeTests {
+    @Test("026-FR-025: keyed content facts decode scalar whole-project counts and exact lookup names")
+    func nativeContentStampsDecode() throws {
+        let facade = RustDomainFacade(runtime: try RustBridgeRuntime(), context: RustDomainContext(deviceTimeZone: "UTC"))
+        let task = TaskID("task_content"), project = ProjectID("project_content")
+        let page = RustWorkspacePage(projectionGeneration: "9", result: try RustJSON.data([
+            "kind": "review_content_stamps", "value": ["tasks": [["task_id": task.rawValue,
+                "stamp": String(repeating: "a", count: 64), "record_keys": ["s:task_content", "c:original"],
+                "primary_record_key": "s:task_content"]], "projects": [["project_id": project.rawValue,
+                "signature": String(repeating: "b", count: 64), "record_keys": ["c:original-project"],
+                "primary_record_key": "c:original-project", "counts_by_state": ["inbox": 0, "next": 0,
+                    "waiting": 1, "someday": 2, "completed": 202, "cancelled": 3]]]]
+        ]))
+        let value = try facade.workspaceReviewContentStamps(from: page)
+        #expect(value.generation == 9)
+        #expect(value.tasks[task]?.recordKeys == ["s:task_content", "c:original"])
+        #expect(value.projects[project]?.countsByState[.completed] == 202)
+        #expect(value.projects[project]?.countsByState[.cancelled] == 3)
+        let key = Data([0, 255, 7])
+        let request = try RustJSON.object(facade.workspaceReviewContentStampsQuery(key: key, tasks: [task], projects: [project]))
+        #expect(Data(base64Encoded: try request.string("key")) == key)
+        #expect(throws: RustBridgeError.self) {
+            try facade.workspaceReviewContentStampsQuery(key: key, tasks: Array(repeating: task, count: 201))
+        }
     }
 }

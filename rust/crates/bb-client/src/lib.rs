@@ -37,6 +37,7 @@ mod localfacts;
 mod locking;
 mod receipts;
 mod replay;
+mod review_content_stamps;
 mod review_forms;
 mod snapshot;
 mod storage;
@@ -146,3 +147,8 @@ impl DigestStream {
             .collect()
     }
 }
+
+pub use review_content_stamps::{
+    MAX_REVIEW_STAMP_KEY_BYTES, ProjectContentStamp, ReviewContentStamps, TaskContentStamp,
+    review_content_stamps,
+};

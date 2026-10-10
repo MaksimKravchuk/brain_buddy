@@ -1123,3 +1123,46 @@ fn owned_digest_stream_is_repeatable_bounded_and_ordered() {
     once.update(b"abc".to_vec()).unwrap();
     assert_eq!(once.digest().unwrap(), digest.digest().unwrap());
 }
+
+#[test]
+fn workspace_026_mac_content_stamps_are_owned_bounded_read_values() {
+    let (workspace, _) = open("content-stamps");
+    let BridgeExecution::Saved { results } = workspace
+        .execute(vec![command(1, "A")], context(), operation())
+        .unwrap()
+    else {
+        panic!("saved")
+    };
+    let id = results[0].entity_id.clone();
+    let BridgeWorkspaceAnswer::Answered { page } = workspace
+        .review_content_stamps(vec![7; 32], vec![id.clone()], vec![])
+        .unwrap()
+    else {
+        panic!("answered")
+    };
+    let value: Value = serde_json::from_slice(&page.result).unwrap();
+    assert_eq!(value["kind"], "review_content_stamps");
+    assert_eq!(value["value"]["tasks"][0]["task_id"], id);
+    assert_eq!(
+        value["value"]["tasks"][0]["stamp"],
+        "b698c2c2118f493cfc81f7817dbb5ee900cd3463bdd30bcfd46b2de42dea0bf1"
+    );
+    assert_eq!(page.task_frames, b"[]");
+    assert!(page.collection_next_cursor.is_none());
+    assert!(
+        workspace
+            .review_content_stamps(vec![], vec![id; 201], vec![])
+            .is_err()
+    );
+    assert!(
+        workspace
+            .review_content_stamps(vec![0; 8 * 1024 * 1024 + 1], vec![], vec![])
+            .is_err()
+    );
+    workspace.close().unwrap();
+    assert!(
+        workspace
+            .review_content_stamps(vec![7; 32], vec![], vec![])
+            .is_err()
+    );
+}

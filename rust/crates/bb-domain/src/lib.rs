@@ -53,6 +53,7 @@ pub mod ai_policy;
 pub mod archive;
 pub mod calendar;
 pub mod children;
+pub mod content_form;
 pub mod dispatch;
 pub mod formulation;
 pub mod list_modes;

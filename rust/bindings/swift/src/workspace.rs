@@ -1249,6 +1249,45 @@ impl BridgeWorkspace {
         Ok(result?)
     }
 
+    /// Keyed local presentation facts; neither key nor stamps enter durable records.
+    pub fn review_content_stamps(
+        &self,
+        key: Vec<u8>,
+        task_ids: Vec<String>,
+        project_ids: Vec<String>,
+    ) -> Result<BridgeWorkspaceAnswer, BridgeError> {
+        if key.len() > bb_client::MAX_REVIEW_STAMP_KEY_BYTES {
+            return Err(Failure::new("INVALID_REQUEST", Some("key")).into());
+        }
+        if task_ids.len().saturating_add(project_ids.len()) > 200 {
+            return Err(Failure::new("INVALID_REQUEST", Some("items")).into());
+        }
+        let tasks = task_ids
+            .into_iter()
+            .map(bb_domain::types::TaskId::parse)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| Failure::new("INVALID_REQUEST", Some("task_ids")))?;
+        let projects = project_ids
+            .into_iter()
+            .map(bb_domain::types::ProjectId::parse)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| Failure::new("INVALID_REQUEST", Some("project_ids")))?;
+        Ok(self.with_store(|store| {
+            let value = bb_client::review_content_stamps(store, &key, &tasks, &projects)
+                .map_err(query_failure)?;
+            Ok(BridgeWorkspaceAnswer::Answered {
+                page: BridgeWorkspacePage {
+                    projection_generation: value.projection_generation.to_string(),
+                    result: to_json(
+                        &serde_json::json!({"kind":"review_content_stamps","value":value}),
+                    )?,
+                    task_frames: b"[]".to_vec(),
+                    collection_next_cursor: None,
+                },
+            })
+        })?)
+    }
+
     pub fn records(
         &self,
         items: Vec<BridgeRecordRequest>,

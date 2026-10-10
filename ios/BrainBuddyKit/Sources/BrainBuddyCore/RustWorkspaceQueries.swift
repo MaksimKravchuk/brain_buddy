@@ -443,6 +443,12 @@ extension RustDomainFacade {
 
     /// Row metadata is paired with its query's actual returned task, not host state.
     public func workspaceTaskFormulation(_ id: TaskID, from page: RustWorkspacePage) throws -> RustWorkspaceFormulation? {
+        let root = try RustJSON.object(page.result)
+        if try root.string("kind") == "task_formulation" {
+            let value = try root.object("value")
+            guard try value.string("task_id") == id.rawValue else { throw RustDomainError.malformedResult }
+            return try workspaceFormulationValue(value)
+        }
         guard let row = try workspaceTaskRows(from: page).first(where: { try $0.string("id") == id.rawValue }),
               let facts = row.optionalObject("formulation_state") else { return nil }
         guard try facts.string("task_id") == id.rawValue else { throw RustDomainError.malformedResult }
@@ -517,5 +523,69 @@ extension RustDomainFacade {
         return ProjectDisplay(isArchived: try value.bool("is_archived"),
             acceptsNewTasks: try value.bool("accepts_new_tasks"),
             showsPreLosslessLine: try value.bool("shows_pre_lossless_line"), label: try value.string("label"))
+    }
+}
+
+public struct RustWorkspaceTaskContentStamp: Sendable {
+    public let taskID: TaskID
+    public let stamp: String
+    /// Exact private mark lookup names, not identity aliases or server-origin claims.
+    public let recordKeys: [String]
+    public let primaryRecordKey: String
+}
+public struct RustWorkspaceProjectContentStamp: Sendable {
+    public let projectID: ProjectID
+    public let signature: String
+    public let recordKeys: [String]
+    public let primaryRecordKey: String
+    public let countsByState: [TaskState: Int]
+}
+public struct RustWorkspaceReviewContentStamps: Sendable {
+    public let generation: UInt64
+    public let tasks: [TaskID: RustWorkspaceTaskContentStamp]
+    public let projects: [ProjectID: RustWorkspaceProjectContentStamp]
+}
+
+extension RustDomainFacade {
+    public func workspaceReviewContentStampsQuery(key: Data, tasks: [TaskID] = [], projects: [ProjectID] = [],
+                                                  bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
+        guard key.count <= 8 * 1024 * 1024 else { throw RustBridgeError(code: "INVALID_REQUEST", field: "key") }
+        guard tasks.count + projects.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
+        return try RustJSON.data(["kind": "review_content_stamps", "key": key.base64EncodedString(),
+                                 "task_ids": tasks.map { ids.task($0) }, "project_ids": projects.map { ids.project($0) }])
+    }
+
+    public func workspaceReviewContentStamps(from page: RustWorkspacePage) throws -> RustWorkspaceReviewContentStamps {
+        guard let generation = UInt64(page.projectionGeneration) else { throw RustDomainError.malformedResult }
+        let root = try RustJSON.object(page.result)
+        guard try root.string("kind") == "review_content_stamps" else { throw RustDomainError.malformedResult }
+        let value = try root.object("value")
+        let taskRows = try value.objects("tasks"), projectRows = try value.objects("projects")
+        guard taskRows.count + projectRows.count <= 200 else { throw RustDomainError.malformedResult }
+        func proof(_ row: WireObject, hashKey: String) throws -> (String, [String], String) {
+            let stamp = try row.string(hashKey), keys = try row.strings("record_keys"), primary = try row.string("primary_record_key")
+            guard stamp.utf8.count == 64, stamp.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                  !keys.isEmpty, keys.count <= 3, keys.contains(primary), keys.allSatisfy({ $0.hasPrefix("c:") || $0.hasPrefix("s:") }) else {
+                throw RustDomainError.malformedResult
+            }
+            return (stamp, keys, primary)
+        }
+        var tasks: [TaskID: RustWorkspaceTaskContentStamp] = [:]
+        for row in taskRows {
+            let id = TaskID(try row.string("task_id")), (stamp, keys, primary) = try proof(row, hashKey: "stamp")
+            guard tasks[id] == nil else { throw RustDomainError.malformedResult }
+            tasks[id] = RustWorkspaceTaskContentStamp(taskID: id, stamp: stamp, recordKeys: keys, primaryRecordKey: primary)
+        }
+        var projects: [ProjectID: RustWorkspaceProjectContentStamp] = [:]
+        for row in projectRows {
+            let id = ProjectID(try row.string("project_id")), (signature, keys, primary) = try proof(row, hashKey: "signature")
+            guard projects[id] == nil else { throw RustDomainError.malformedResult }
+            let counts = try row.object("counts_by_state")
+            var states: [TaskState: Int] = [:]
+            for state in TaskState.allCases { let count = try counts.int(state.rawValue); guard count >= 0 else { throw RustDomainError.malformedResult }; states[state] = count }
+            projects[id] = RustWorkspaceProjectContentStamp(projectID: id, signature: signature, recordKeys: keys, primaryRecordKey: primary, countsByState: states)
+        }
+        return RustWorkspaceReviewContentStamps(generation: generation, tasks: tasks, projects: projects)
     }
 }
