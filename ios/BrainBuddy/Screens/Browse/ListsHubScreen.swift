@@ -12,13 +12,15 @@ struct ListsHubScreen: View {
     @Environment(\.dayChangeCount) private var dayChangeCount
 
     /// How many tags the hub shows before "All tags".
-    private static let topTagLimit = 6
+    private static let topTagLimit = 5
 
     init() {}
 
     var body: some View {
         let _ = dayChangeCount
         let counts = workspace.counts()
+        let readiness = hubReadiness
+        WorkspaceQueryContent(readiness: readiness, retry: prepareHub) {
         List {
             listsSection(counts)
             datesSection(counts)
@@ -31,6 +33,25 @@ struct ListsHubScreen: View {
         .labelStyle(.bbRow)
         .bbDenseList()
         .bbScreenTitle("Lists")
+        }
+        .task { await prepareHub() }
+    }
+
+    private var hubReadiness: WorkspaceQueryReadiness {
+        [workspace.countsReadiness(), workspace.listReadiness(.dateView(.upcoming)),
+         workspace.projectsReadiness(), workspace.projectsReadiness(archived: true),
+         workspace.topTagsReadiness(limit: Self.topTagLimit)]
+            .first { $0 != .ready } ?? .ready
+    }
+
+    private func prepareHub() {
+        Task {
+            await workspace.prepareCounts()
+            await workspace.prepareList(.dateView(.upcoming))
+            await workspace.prepareProjects()
+            await workspace.prepareProjects(archived: true)
+            await workspace.prepareTopTags(limit: Self.topTagLimit)
+        }
     }
 
     private func listsSection(_ counts: ListCounts) -> some View {
@@ -74,7 +95,7 @@ struct ListsHubScreen: View {
         switch view {
         case .overdue: return counts.overdue
         case .today: return counts.today
-        case .upcoming: return workspace.list(.dateView(.upcoming)).openCount
+        case .upcoming: return workspace.list(.dateView(.upcoming)).totalCount
         }
     }
 
@@ -104,12 +125,12 @@ struct ListsHubScreen: View {
     }
 
     @ViewBuilder private var tagsSection: some View {
-        let tags = workspace.tags()
+        let tags = workspace.topTags(limit: Self.topTagLimit)
         Section {
             if tags.isEmpty {
                 EmptyHubRow(title: "No tags yet")
             } else {
-                TopTagsRow(tags: Self.topTags(tags, limit: Self.topTagLimit)) { id in
+                TopTagsRow(tags: tags) { id in
                     router.open(.destination(.tag(id)))
                 }
             }
@@ -165,14 +186,6 @@ struct ListsHubScreen: View {
         }
     }
 
-    /// The most-used tags first (by open tasks), then by name.
-    static func topTags(_ tags: [TagSummary], limit: Int) -> [TagSummary] {
-        let ranked = tags.sorted { lhs, rhs in
-            if lhs.openTaskCount != rhs.openTaskCount { return lhs.openTaskCount > rhs.openTaskCount }
-            return lhs.tag.name.localizedStandardCompare(rhs.tag.name) == .orderedAscending
-        }
-        return Array(ranked.prefix(limit))
-    }
 }
 
 /// A navigation row: symbol, verbatim name, optional count. Only the Inbox

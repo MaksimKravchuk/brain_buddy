@@ -117,6 +117,16 @@ struct ReviewCover: View {
         content
             .bbScreenBackground()
             .toastMagicTap()
+            .overlay {
+                let stateReadiness = workspace.reviewReadiness(.state)
+                let summaryReadiness = workspace.reviewReadiness(.summary(nil))
+                let readiness = stateReadiness == .ready ? summaryReadiness : stateReadiness
+                if readiness != .ready {
+                    WorkspaceQueryContent(readiness: readiness, retry: {
+                        Task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)); load() }
+                    }) { EmptyView() }
+                }
+            }
             .sheet(
                 isPresented: Binding(
                     get: { prelude.first == .whileAway },
@@ -143,7 +153,7 @@ struct ReviewCover: View {
                     }
                 }
             }
-            .onAppear(perform: load)
+            .task { try? await workspace.prepareReviewRead(.state); try? await workspace.prepareReviewRead(.summary(nil)); load() }
             .onChange(of: workspace.reviewExposed) { _, exposed in
                 if !exposed { dismiss() }
             }

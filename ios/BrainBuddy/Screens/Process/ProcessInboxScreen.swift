@@ -72,6 +72,7 @@ struct InboxClarifier: View {
     @AccessibilityFocusState private var isTitleFocused: Bool
 
     private let fixedQueue: [TaskID]?
+    private let reviewSessionID: ReviewSessionID?
     private let onProcessed: ((Int) async -> Void)?
     private let progressProblem: String?
     private let onRetryProgress: (() -> Void)?
@@ -88,9 +89,11 @@ struct InboxClarifier: View {
     init(
         queue: [TaskID]? = nil, onProcessed: ((Int) async -> Void)? = nil, onDone: (() -> Void)? = nil,
         showsSkipInToolbar: Bool = true, progressProblem: String? = nil, onRetryProgress: (() -> Void)? = nil,
+        reviewSessionID: ReviewSessionID? = nil,
         onClose: @escaping () -> Void
     ) {
         fixedQueue = queue
+        self.reviewSessionID = reviewSessionID
         self.onProcessed = onProcessed
         self.progressProblem = progressProblem
         self.onRetryProgress = onRetryProgress
@@ -100,6 +103,8 @@ struct InboxClarifier: View {
     }
 
     var body: some View {
+        let readiness = queryReadiness
+        WorkspaceQueryContent(readiness: readiness, retry: { Task { await prepareQueries() } }) {
         Group {
             if !hasSnapshot {
                 Color.clear
@@ -115,7 +120,7 @@ struct InboxClarifier: View {
             }
         }
         .disabled(isSaving)
-        .onAppear(perform: takeSnapshot)
+        .task { await prepareQueries() }
         .onChange(of: hasSnapshot && current == nil) { _, isDone in
             if isDone { onDone?() }
         }
@@ -147,6 +152,17 @@ struct InboxClarifier: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                WorkspaceQueryPageControls(page: workspace.projectsPageState(),
+                    previous: { await workspace.previousProjectsPage() },
+                    next: { await workspace.nextProjectsPage() })
+                WorkspaceQueryPageControls(page: workspace.tagsPageState(),
+                    previous: { await workspace.previousTagsPage() },
+                    next: { await workspace.nextTagsPage() })
+            }
+        }
+        }
     }
 
     // MARK: Queue
@@ -158,9 +174,11 @@ struct InboxClarifier: View {
 
     /// The first snapshotted item at or after the cursor that is still in the Inbox.
     private var current: InboxItem? {
+        let pageTasks = reviewSessionID.map { workspace.inboxReviewQueue(session: $0) }
+            ?? workspace.list(.list(.inbox)).sections.flatMap(\.tasks)
         var index = cursor
         while index < queue.count {
-            if let task = workspace.task(queue[index]), Self.isInInbox(task) {
+            if let task = pageTasks.first(where: { $0.id == queue[index] }) {
                 return InboxItem(index: index, task: task)
             }
             index += 1
@@ -168,14 +186,35 @@ struct InboxClarifier: View {
         return nil
     }
 
-    /// Inbox shows projectless inbox tasks only (docs/projectless-inbox-contract.md).
-    private static func isInInbox(_ task: TaskRecord) -> Bool {
-        task.state == .inbox && task.projectID == nil
+    private var queryReadiness: WorkspaceQueryReadiness {
+        if let reviewSessionID {
+            let queue = workspace.reviewReadiness(.queue(.inbox, reviewSessionID))
+            if queue != .ready { return queue }
+            let projects = workspace.projectsReadiness()
+            if projects != .ready { return projects }
+            return workspace.tagsReadiness()
+        }
+        let list = workspace.listReadiness(.list(.inbox))
+        if list != .ready { return list }
+        let projects = workspace.projectsReadiness()
+        if projects != .ready { return projects }
+        return workspace.tagsReadiness()
+    }
+
+    @MainActor private func prepareQueries() async {
+        if let reviewSessionID {
+            try? await workspace.prepareReviewRead(.queue(.inbox, reviewSessionID))
+        } else {
+            await workspace.prepareList(.list(.inbox))
+        }
+        await workspace.prepareProjects()
+        await workspace.prepareTags()
+        takeSnapshot()
     }
 
     private func takeSnapshot() {
         guard !hasSnapshot else { return }
-        queue = fixedQueue ?? workspace.list(.list(.inbox)).sections.flatMap(\.tasks).filter(Self.isInInbox).map(\.id)
+        queue = fixedQueue ?? workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.id)
         cursor = 0
         hasSnapshot = true
     }

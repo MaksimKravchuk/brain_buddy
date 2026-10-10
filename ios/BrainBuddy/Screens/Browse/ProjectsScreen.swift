@@ -35,7 +35,10 @@ private struct ActiveProjectsList: View {
 
     var body: some View {
         let summaries = workspace.projects()
-        let hasArchived = !workspace.projects(archived: true).isEmpty
+        let page = workspace.projectsPageState()
+        let archivedPage = workspace.projectsPageState(archived: true)
+        let readiness = page.readiness == .ready ? archivedPage.readiness : page.readiness
+        let hasArchived = archivedPage.readiness == .ready && !workspace.projects(archived: true).isEmpty
         List {
             if summaries.isEmpty {
                 EmptyStateView(
@@ -65,6 +68,19 @@ private struct ActiveProjectsList: View {
             }
         }
         .bbDenseList()
+        .overlay {
+            if readiness != .ready {
+                WorkspaceQueryContent(readiness: readiness, retry: { Task { await workspace.prepareProjects(); await workspace.prepareProjects(archived: true) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousProjectsPage() }, next: { await workspace.nextProjectsPage() })
+        }
+        .task {
+            await workspace.prepareProjects()
+            await workspace.prepareProjects(archived: true)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -225,6 +241,8 @@ private struct ArchivedProjectsList: View {
 
     var body: some View {
         let summaries = workspace.projects(archived: true)
+        let page = workspace.projectsPageState(archived: true)
+        WorkspaceQueryContent(readiness: page.readiness, retry: { Task { await workspace.prepareProjects(archived: true) } }) {
         if summaries.isEmpty {
             EmptyStateView(
                 title: "No archived projects",
@@ -243,6 +261,13 @@ private struct ArchivedProjectsList: View {
             }
             .bbDenseList()
         }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousProjectsPage(archived: true) },
+                next: { await workspace.nextProjectsPage(archived: true) })
+        }
+        .task { await workspace.prepareProjects(archived: true) }
     }
 }
 

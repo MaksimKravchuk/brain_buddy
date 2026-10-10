@@ -26,6 +26,8 @@ struct DecisionsStep: View {
     @State private var isSaving = false
 
     var body: some View {
+        let read = WorkspaceReviewRead.queue(.decisions, context.sessionID)
+        let page = workspace.reviewPageState(read)
         let settings = workspace.state.review.settings
         VStack(spacing: 0) {
             if let problem {
@@ -65,12 +67,23 @@ struct DecisionsStep: View {
             }
         }
         .task {
+            try? await workspace.prepareReviewRead(read)
             guard openedThreshold == nil else { return }
             openedThreshold = settings.thresholdDays
             // The queue is fixed for this run when the step first opens.
             if workspace.state.review.sessions[context.sessionID]?.decisionQueue == nil {
                 await recordProgress(snapshot: true)
             }
+        }
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read) },
+                next: { try? await workspace.nextReviewPage(read) })
         }
     }
 

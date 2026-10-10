@@ -20,6 +20,8 @@ struct ProjectsStep: View {
     @State private var savingProjects: Set<ProjectID> = []
 
     var body: some View {
+        let read = WorkspaceReviewRead.projects
+        let page = workspace.reviewPageState(read)
         let projects = workspace.projectsNeedingNextAction()
         ReviewStepFrame(
             title: projects.isEmpty ? ReviewCopy.projectsEmpty : ReviewCopy.stepTitle(.projects),
@@ -55,6 +57,17 @@ struct ProjectsStep: View {
                 InlineProblemText(message: problem)
             }
         }
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { try? await workspace.previousReviewPage(read) },
+                next: { try? await workspace.nextReviewPage(read) })
+        }
+        .task { try? await workspace.prepareReviewRead(read) }
     }
 
     private func binding(for id: ProjectID) -> Binding<String> {

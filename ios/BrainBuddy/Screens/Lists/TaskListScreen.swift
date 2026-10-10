@@ -37,8 +37,12 @@ struct TaskListScreen: View {
         let _ = dayChangeCount
         let options = effectiveOptions
         let result = workspace.list(destination, options: options)
+        let page = workspace.listPageState(destination, options: options)
+        let readiness = listReadiness(options: options, page: page.readiness)
         let card = $decisionCard
-        taskList(result, options: options)
+        WorkspaceQueryContent(readiness: readiness, retry: { Task { await prepareQueries(options: options) } }) {
+            taskList(result, options: options)
+        }
             // Marker chips (M-01) open the decision card over the list.
             .environment(\.openDecisionCard, OpenDecisionCardAction { taskID in
                 card.wrappedValue = DecisionCardTarget(taskID: taskID)
@@ -51,6 +55,12 @@ struct TaskListScreen: View {
                 ListSubtitle(summary: result.isEmpty ? nil : caption(for: result, options: options))
             )
             .toolbar { toolbarContent(result) }
+            .safeAreaInset(edge: .bottom) {
+                WorkspaceQueryPageControls(page: page,
+                    previous: { await workspace.previousListPage(destination, options: options) },
+                    next: { await workspace.nextListPage(destination, options: options) })
+            }
+            .task(id: options) { await prepareQueries(options: options) }
             .refreshable {
                 await workspace.syncNow()
             }
@@ -80,10 +90,10 @@ struct TaskListScreen: View {
         case .list(let list):
             return CaptureContext(list: list)
         case .project(let id):
-            guard workspace.project(id)?.state == .active else { return nil }
+            guard projectRecord(id)?.state == .active else { return nil }
             return CaptureContext(list: .next, projectID: id)
         case .tag(let id):
-            guard workspace.tag(id)?.state == .active else { return nil }
+            guard tagRecord(id)?.state == .active else { return nil }
             return CaptureContext(tagID: id)
         case .agenda, .dateView, .history, .search:
             return nil
@@ -99,7 +109,7 @@ struct TaskListScreen: View {
 
     private var isArchivedProject: Bool {
         guard case .project(let id) = destination else { return false }
-        return workspace.project(id)?.state == .archived
+        return projectRecord(id)?.state == .archived
     }
 
     private func taskList(_ result: TaskListResult, options: ListOptions) -> some View {
@@ -149,7 +159,8 @@ struct TaskListScreen: View {
         Section {
             ForEach(section.tasks) { task in
                 NavigationLink(value: AppRoute.task(task.id)) {
-                    TaskRow(task: task, showsProject: showsProject, showsList: showsList)
+                    TaskRow(task: task, showsProject: showsProject, showsList: showsList,
+                        preparedFormulation: workspace.listFormulation(task.id, destination: destination, options: options))
                 }
                 // The row carries its own affordance; the chevron would only
                 // take width from the title and its metadata.
@@ -161,7 +172,7 @@ struct TaskListScreen: View {
         } header: {
             if let title = section.title {
                 BBSectionHeader(
-                    title, count: section.tasks.count, dotColor: projectDotColor(for: section), countsTasks: true
+                    title, count: section.totalCount, dotColor: projectDotColor(for: section), countsTasks: true
                 )
                 .listRowInsets(Self.headerInsets)
             }
@@ -175,7 +186,7 @@ struct TaskListScreen: View {
     /// (and for "No project").
     private func projectDotColor(for section: TaskSection) -> Color? {
         guard case .project(let id?) = section.kind else { return nil }
-        return BBColor.project(workspace.project(id)?.color)
+        return BBColor.project(projectRecord(id)?.color)
     }
 
     @ToolbarContentBuilder
@@ -198,7 +209,7 @@ struct TaskListScreen: View {
 
     private var hasDanglingTagFilter: Bool {
         guard let tagID = storedOptions.listOptions.tagFilter else { return false }
-        return workspace.tag(tagID)?.state != .active
+        shouldRemoveTagFilter(tagID)
     }
 
     /// Stored options with anything that no longer applies removed: a tag
@@ -206,7 +217,7 @@ struct TaskListScreen: View {
     private var effectiveOptions: ListOptions {
         var options = storedOptions.listOptions
         if let tagID = options.tagFilter,
-            !ListOptionsRules.allowsTagFilter(destination) || workspace.tag(tagID)?.state != .active
+            !ListOptionsRules.allowsTagFilter(destination) || shouldRemoveTagFilter(tagID)
         {
             options.tagFilter = nil
         }
@@ -216,6 +227,44 @@ struct TaskListScreen: View {
             options.showCancelled = false
         }
         return options
+    }
+
+    private var identityReads: [WorkspaceRecordRead] {
+        var reads: [WorkspaceRecordRead] = []
+        if case .project(let id) = destination { reads.append(.project(id)) }
+        if case .tag(let id) = destination { reads.append(.tag(id)) }
+        if let id = storedOptions.listOptions.tagFilter { reads.append(.tag(id)) }
+        return Array(Set(reads))
+    }
+
+    private func projectRecord(_ id: ProjectID) -> ProjectRecord? {
+        workspace.isRustSelected ? workspace.records([.project(id)])?.projects[id] : workspace.project(id)
+    }
+
+    private func tagRecord(_ id: TagID) -> TagRecord? {
+        workspace.isRustSelected ? workspace.records([.tag(id)])?.tags[id] : workspace.tag(id)
+    }
+
+    private func shouldRemoveTagFilter(_ id: TagID) -> Bool {
+        guard workspace.isRustSelected else { return workspace.tag(id)?.state != .active }
+        guard let records = workspace.records([.tag(id)]) else { return false }
+        return records.exists(.tag(id)) == false || records.tags[id]?.state != .active
+    }
+
+    private func listReadiness(options: ListOptions, page: WorkspaceQueryReadiness) -> WorkspaceQueryReadiness {
+        guard page == .ready, workspace.isRustSelected else { return page }
+        if case .project(let id) = destination {
+            let display = workspace.projectDisplayReadiness(id)
+            if display != .ready { return display }
+        }
+        return identityReads.isEmpty ? .ready : workspace.recordsReadiness(identityReads)
+    }
+
+    @MainActor private func prepareQueries(options: ListOptions) async {
+        await workspace.prepareList(destination, options: options)
+        guard workspace.isRustSelected else { return }
+        if case .project(let id) = destination { await workspace.prepareProjectDisplay(id) }
+        if !identityReads.isEmpty { _ = try? await workspace.prepareRecords(identityReads) }
     }
 
     // MARK: Presentation
@@ -235,8 +284,8 @@ struct TaskListScreen: View {
         case .list(let list): list.title
         case .agenda: "Today"
         case .dateView(let view): view.title
-        case .project(let id): workspace.project(id)?.name ?? "Project"
-        case .tag(let id): workspace.tag(id)?.name ?? "Tag"
+        case .project(let id): projectRecord(id)?.name ?? "Project"
+        case .tag(let id): tagRecord(id)?.name ?? "Tag"
         case .history(let kind): kind.title
         case .search: "Search"
         }
@@ -246,10 +295,10 @@ struct TaskListScreen: View {
         var parts: [String] = []
         switch destination {
         case .history(let kind):
-            let count = result.sections.reduce(0) { $0 + $1.tasks.count }
+            let count = kind == .completed ? result.completedCount : result.cancelledCount
             parts.append("\(count) \(kind == .completed ? "completed" : "cancelled")")
         case .search:
-            let count = result.sections.reduce(0) { $0 + $1.tasks.count }
+            let count = result.totalCount
             parts.append(count == 1 ? "1 match" : "\(count) matches")
         default:
             parts.append(result.openCount == 1 ? "1 open task" : "\(result.openCount) open tasks")
@@ -317,7 +366,25 @@ private struct ProjectStatusRow: View {
     @Environment(Workspace.self) private var workspace
 
     var body: some View {
-        if let project = workspace.project(projectID), project.state == .archived {
+        if workspace.isRustSelected {
+            WorkspaceQueryContent(readiness: workspace.projectDisplayReadiness(projectID),
+                retry: { Task { await workspace.prepareProjectDisplay(projectID) } }) {
+                if let display = workspace.projectDisplay(projectID) {
+                    if display.isArchived {
+            Label("Archived project", systemImage: "archivebox")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
+                    } else if display.showsPreLosslessLine {
+                        Label("Archived before project history was preserved; its tasks remain in their lists.", systemImage: "info.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
+            .task { await workspace.prepareProjectDisplay(projectID) }
+        } else if let project = workspace.project(projectID), project.state == .archived {
             Label("Archived project", systemImage: "archivebox")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)

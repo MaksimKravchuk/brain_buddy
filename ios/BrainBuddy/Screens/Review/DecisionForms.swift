@@ -61,6 +61,8 @@ struct DecisionFormView: View {
     let onCloseCard: () -> Void
     /// The task as the card showed it: any change since makes the save stale.
     let expectedTask: ShownTask?
+    /// The exact task record shown by the card that opened this form.
+    let shownRecord: TaskRecord?
     /// Previews only: starts the field with this text instead of a draft.
     private let seedText: String?
 
@@ -89,9 +91,11 @@ struct DecisionFormView: View {
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
         sessionID: ReviewSessionID? = nil, isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
         onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: ShownTask? = nil,
+        shownRecord: TaskRecord? = nil,
         seedText: String? = nil
     ) {
         self.expectedTask = expectedTask
+        self.shownRecord = shownRecord
         self.form = form
         self.taskID = taskID
         self.formulationID = formulationID
@@ -105,7 +109,7 @@ struct DecisionFormView: View {
     }
 
     var body: some View {
-        let task = workspace.task(taskID)
+        let task = shownRecord
         Form {
             Section {
                 Text(subheader(task))
@@ -309,7 +313,7 @@ struct DecisionFormView: View {
 
     @MainActor private func load() async {
         guard !hasLoaded else { return }
-        let title = workspace.task(taskID)?.title ?? ""
+        let title = shownRecord?.title ?? ""
         if let seedText {
             text = seedText
             hasLoaded = true
@@ -340,7 +344,7 @@ struct DecisionFormView: View {
         let ownsBusyState = !isSaving
         if ownsBusyState { isSaving = true }
         defer { if ownsBusyState { isSaving = false } }
-        let title = workspace.task(taskID)?.title ?? ""
+        let title = shownRecord?.title ?? ""
         do {
             if Self.hasUnsavedText(text, form: form, title: title) {
                 try await workspace.saveDraft(text, for: draftKey, editorID: editorID)
@@ -360,7 +364,7 @@ struct DecisionFormView: View {
         do { try await workspace.discardDraft(for: draftKey, editorID: editorID) }
         catch { problem = TaskCommandRunner.message(for: error); return }
         restoredDraft = false
-        text = form == .reformulate ? (workspace.task(taskID)?.title ?? "") : ""
+        text = form == .reformulate ? (shownRecord?.title ?? "") : ""
     }
 
     // MARK: Leaving
@@ -402,7 +406,7 @@ struct DecisionFormView: View {
     /// refuses it (`.formulationChanged`), nothing is applied and the card
     /// shows the stale state (FR-011).
     private func save() {
-        guard !isSaving, !didSave, let task = workspace.task(taskID), canSave(task) else { return }
+        guard !isSaving, !didSave, let task = shownRecord, canSave(task) else { return }
         isSaving = true
         let value = trimmed
         let submittedEditorID = editorID

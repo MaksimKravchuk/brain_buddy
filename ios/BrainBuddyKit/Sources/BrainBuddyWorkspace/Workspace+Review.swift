@@ -88,6 +88,13 @@ extension Workspace {
         return GTDQueries.decisionQueue(in: state, now: reviewNow, timeZone: classificationZone)
     }
 
+    /// The inbox step's session-scoped queue. Rust owns the projectless Inbox
+    /// membership and bounded page; legacy workspaces retain their existing list.
+    public func inboxReviewQueue(session: ReviewSessionID? = nil) -> [TaskRecord] {
+        if isRustSelected { return rustQueue(.inbox, session: session)?.tasks ?? [] }
+        return list(.list(.inbox)).sections.flatMap(\.tasks)
+    }
+
     public func askCount() -> Int {
         if isRustSelected { return rustReviewState?.askCount ?? 0 }
         return GTDQueries.askCount(in: state, now: reviewNow, timeZone: classificationZone)

@@ -27,13 +27,23 @@ struct InboxStep: View {
     @State private var isSaving = false
 
     var body: some View {
+        let queueRead = WorkspaceReviewRead.queue(.inbox, context.sessionID)
+        let queuePage = workspace.reviewPageState(queueRead)
+        let releasesRead = WorkspaceReviewRead.releases(.inboxRemainder, context.sessionID)
+        let releasesReadiness = workspace.reviewReadiness(releasesRead)
+        let readiness = queuePage.readiness == .ready ? releasesReadiness : queuePage.readiness
         let session = workspace.state.review.sessions[context.sessionID]
         let releases = session.map { workspace.openInboxReleases(in: $0) } ?? []
         let items = inboxItems
+        WorkspaceQueryContent(readiness: readiness, retry: {
+            Task { try? await workspace.prepareReviewRead(queueRead); try? await workspace.prepareReviewRead(releasesRead) }
+        }) {
+        Group {
         if let queue, !isDone, releases.isEmpty {
             InboxClarifier(
                 queue: queue, onProcessed: processed, onDone: finishProcessing, showsSkipInToolbar: false,
-                progressProblem: problem, onRetryProgress: retryProgress, onClose: {}
+                progressProblem: problem, onRetryProgress: retryProgress,
+                reviewSessionID: context.sessionID, onClose: {}
             )
         } else if isDone || !releases.isEmpty {
             InboxDoneContent(
@@ -52,11 +62,19 @@ struct InboxStep: View {
         } else {
             Color.clear.onAppear { choose(nil, from: items) }
         }
+        }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: queuePage,
+                previous: { try? await workspace.previousReviewPage(queueRead); queue = nil },
+                next: { try? await workspace.nextReviewPage(queueRead); queue = nil })
+        }
+        .task { try? await workspace.prepareReviewRead(queueRead); try? await workspace.prepareReviewRead(releasesRead) }
     }
 
     /// The Inbox as Process inbox sees it: projectless inbox tasks.
     private var inboxItems: [TaskID] {
-        workspace.list(.list(.inbox)).sections.flatMap(\.tasks).filter { $0.state == .inbox && $0.projectID == nil }.map(\.id)
+        workspace.inboxReviewQueue(session: context.sessionID).map(\.id)
     }
 
     private func choose(_ choice: InboxChoice?, from items: [TaskID]) {
@@ -93,7 +111,8 @@ struct InboxStep: View {
         guard !isSaving else { return }
         isSaving = true
         defer { isSaving = false }
-        let remaining = rest.filter { workspace.task($0)?.state == .inbox }
+        let stillInbox = Set(workspace.inboxReviewQueue(session: context.sessionID).map(\.id))
+        let remaining = rest.filter { stillInbox.contains($0) }
         guard !remaining.isEmpty else { isDone = true; return }
         do {
             try await workspace.bulkRelease(.inboxRemainder, taskIDs: remaining, sessionID: context.sessionID, editorID: editorID)

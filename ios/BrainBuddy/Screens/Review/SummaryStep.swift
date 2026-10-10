@@ -19,6 +19,8 @@ struct SummaryStep: View {
     @State private var clearStart: ClearStart?
 
     var body: some View {
+        let read = WorkspaceReviewRead.summary(context.sessionID)
+        let page = workspace.reviewPageState(read)
         let session = workspace.state.review.sessions[context.sessionID]
         let counts = session?.counts ?? SessionCounts()
         let zone = TimeZone.current
@@ -31,6 +33,12 @@ struct SummaryStep: View {
             },
             isOffline: isOffline, clearStart: $clearStart, onDone: { context.finish(clearStart) }
         )
+        .overlay {
+            if page.readiness != .ready {
+                WorkspaceQueryContent(readiness: page.readiness, retry: { Task { try? await workspace.prepareReviewRead(read) } }) { EmptyView() }
+            }
+        }
+        .task { try? await workspace.prepareReviewRead(read) }
     }
 
     private var isOffline: Bool {

@@ -2,6 +2,13 @@ import BrainBuddyCore
 import BrainBuddyWorkspace
 import SwiftUI
 
+private func taskIdentityReads(_ task: TaskRecord) -> [WorkspaceRecordRead] {
+    var reads: [WorkspaceRecordRead] = []
+    if let id = task.projectID { reads.append(.project(id)) }
+    for id in task.tagIDs where !reads.contains(.tag(id)) { reads.append(.tag(id)) }
+    return reads
+}
+
 /// Task detail, pushed from any list.
 ///
 /// **Saving model (iOS): immediate save per field.** Unlike the macOS editor,
@@ -31,16 +38,46 @@ struct TaskDetailScreen: View {
     }
 
     var body: some View {
+        let page = workspace.taskDetailPageState(taskID)
+        let task = workspace.taskDetail(taskID)
+        let reads = task.map(taskIdentityReads) ?? []
+        let projectReadiness = workspace.projectsReadiness()
+        let catalogReadiness = projectReadiness == .ready ? workspace.tagsReadiness() : projectReadiness
+        let detailReadiness: WorkspaceQueryReadiness
+        if page.readiness != .ready { detailReadiness = page.readiness }
+        else if workspace.isRustSelected && catalogReadiness != .ready { detailReadiness = catalogReadiness }
+        else if !reads.isEmpty && workspace.isRustSelected { detailReadiness = workspace.recordsReadiness(reads) }
+        else { detailReadiness = .ready }
         Group {
-            if let task = workspace.task(taskID) {
-                TaskDetailForm(task: task)
-                    .id(task.id)
-            } else {
-                missingTask
+            WorkspaceQueryContent(readiness: detailReadiness, retry: {
+                Task {
+                    await workspace.prepareTaskDetail(taskID)
+                    await workspace.prepareProjects()
+                    await workspace.prepareTags()
+                    if let task = workspace.taskDetail(taskID) {
+                        let reads = taskIdentityReads(task)
+                        if !reads.isEmpty { _ = try? await workspace.prepareRecords(reads) }
+                    }
+                }
+            }) {
+                if let task {
+                    TaskDetailForm(task: task)
+                        .id(task.id)
+                } else {
+                    missingTask
+                }
             }
         }
         .task(id: taskID) {
-            await workspace.refreshTaskDetails(taskID)
+            await workspace.prepareTaskDetail(taskID)
+            await workspace.prepareProjects()
+            await workspace.prepareTags()
+        }
+        .task(id: reads) { if !reads.isEmpty { _ = try? await workspace.prepareRecords(reads) } }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousTaskDetailPage(taskID) },
+                next: { await workspace.nextTaskDetailPage(taskID) })
         }
     }
 
@@ -171,6 +208,7 @@ private struct TaskDetailForm: View {
     }
 
     private var form: some View {
+        let projectPage = workspace.projectsPageState()
         Form {
             titleSection
             // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
@@ -190,6 +228,11 @@ private struct TaskDetailForm: View {
             metadataSection
         }
         .bbDenseList()
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: projectPage,
+                previous: { await workspace.previousProjectsPage() },
+                next: { await workspace.nextProjectsPage() })
+        }
     }
 
     private var navigationTitle: String {
@@ -430,7 +473,7 @@ private struct TaskDetailForm: View {
                 } else {
                     WrappingChipLayout(spacing: 6) {
                         ForEach(task.tagIDs, id: \.self) { tagID in
-                            if let tag = workspace.tag(tagID) {
+                            if let tag = tagRecord(tagID) {
                                 TagPill(name: tag.name)
                             }
                         }
@@ -531,15 +574,28 @@ private struct TaskDetailForm: View {
     }
 
     private var tagsSpokenValue: String {
-        let names = task.tagIDs.compactMap { workspace.tag($0)?.name }
+        let names = task.tagIDs.compactMap { tagRecord($0)?.name }
         return names.isEmpty ? "None" : names.joined(separator: ", ")
     }
 
     private var archivedProject: ProjectRecord? {
-        guard let id = task.projectID, let project = workspace.project(id), project.state == .archived else {
+        guard let id = task.projectID, let project = projectRecord(id), project.state == .archived else {
             return nil
         }
         return project
+    }
+
+    private var exactRecords: WorkspaceRecordPage? {
+        guard workspace.isRustSelected else { return nil }
+        return workspace.records(taskIdentityReads(task))
+    }
+
+    private func tagRecord(_ id: TagID) -> TagRecord? {
+        workspace.isRustSelected ? exactRecords?.tags[id] : workspace.tag(id)
+    }
+
+    private func projectRecord(_ id: ProjectID) -> ProjectRecord? {
+        workspace.isRustSelected ? exactRecords?.projects[id] : workspace.project(id)
     }
 
     /// The rejected-change messages for `fields`, stacked; nothing when there are none.
@@ -780,6 +836,12 @@ struct TaskTagsSheet: View {
     }
 
     var body: some View {
+        let tagPage = workspace.tagsPageState()
+        let taskReadiness = workspace.taskDetailReadiness(taskID)
+        let readiness = taskReadiness == .ready ? tagPage.readiness : taskReadiness
+        WorkspaceQueryContent(readiness: readiness, retry: {
+            Task { await workspace.prepareTaskDetail(taskID); await workspace.prepareTags() }
+        }) {
         NavigationStack {
             List {
                 Section {
@@ -815,7 +877,13 @@ struct TaskTagsSheet: View {
                 }
             }
         }
+        }
         .presentationDetents([.medium, .large])
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: tagPage,
+                previous: { await workspace.previousTagsPage() }, next: { await workspace.nextTagsPage() })
+        }
+        .task { await workspace.prepareTaskDetail(taskID); await workspace.prepareTags() }
     }
 
     private var trimmedNewName: String {

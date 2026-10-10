@@ -67,6 +67,9 @@ struct CaptureSheet: View {
 
     var body: some View {
         let preview = workspace.capturePreview(draft)
+        let readiness = workspace.capturePreviewReadiness(draft)
+        WorkspaceQueryContent(readiness: readiness,
+            retry: { Task { await workspace.prepareCapturePreview(draft) } }) {
         ScrollView {
             VStack(spacing: 0) {
                 header
@@ -86,6 +89,8 @@ struct CaptureSheet: View {
         .toastMagicTap()
         .presentationDetents([.height(contentHeight > 0 ? contentHeight : fallbackHeight)])
         .interactiveDismissDisabled(!draft.isBlank)
+        }
+        .task(id: draft) { await workspace.prepareCapturePreview(draft) }
         .confirmationDialog("Discard this task?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}

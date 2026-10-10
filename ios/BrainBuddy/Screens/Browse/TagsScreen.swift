@@ -41,10 +41,13 @@ struct TagsScreen: View {
             } message: { _ in
                 Text("It's removed from every task. The tasks stay.")
             }
+        .task { await workspace.prepareTags() }
     }
 
     @ViewBuilder private var content: some View {
         let tags = workspace.tags()
+        let page = workspace.tagsPageState()
+        WorkspaceQueryContent(readiness: page.readiness, retry: { Task { await workspace.prepareTags() } }) {
         if tags.isEmpty {
             EmptyStateView(
                 title: "No tags yet",
@@ -58,6 +61,11 @@ struct TagsScreen: View {
                 }
             }
             .bbDenseList()
+        }
+        }
+        .safeAreaInset(edge: .bottom) {
+            WorkspaceQueryPageControls(page: page,
+                previous: { await workspace.previousTagsPage() }, next: { await workspace.nextTagsPage() })
         }
     }
 
