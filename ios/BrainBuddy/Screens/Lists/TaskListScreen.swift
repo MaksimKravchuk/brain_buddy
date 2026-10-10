@@ -209,7 +209,7 @@ struct TaskListScreen: View {
 
     private var hasDanglingTagFilter: Bool {
         guard let tagID = storedOptions.listOptions.tagFilter else { return false }
-        shouldRemoveTagFilter(tagID)
+        return shouldRemoveTagFilter(tagID)
     }
 
     /// Stored options with anything that no longer applies removed: a tag
