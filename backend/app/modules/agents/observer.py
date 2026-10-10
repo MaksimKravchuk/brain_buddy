@@ -23,6 +23,7 @@ import logging
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import Future
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -49,6 +50,28 @@ DEFAULT_OBSERVATION_INTERVAL = timedelta(seconds=60)
 #: because a shutdown that hangs is indistinguishable from a crash to whatever
 #: is restarting the process.
 SCHEDULER_JOIN_SECONDS = 5.0
+
+
+class SchedulerOverlapError(RuntimeError):
+    """The observer's own scheduler thread and a durable job would both observe."""
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationPass:
+    """What one synchronous observation pass did.
+
+    ``claimed`` runs were taken from the due list; ``handled`` of them were
+    actually read before the pass was told to stop. The rest are left exactly as
+    they were -- still due -- so a pass that lost its authority costs time, never
+    state.
+    """
+
+    claimed: int
+    handled: int
+
+    @property
+    def complete(self) -> bool:
+        return self.handled == self.claimed
 
 
 class ExchangePool(Protocol):
@@ -100,6 +123,12 @@ class AgentObserver:
         self._wake_event = threading.Event()
         self._stop = threading.Event()
         self.scheduler_thread: threading.Thread | None = None
+        # Set once the periodic pass belongs to a durable job: `start` then
+        # refuses, so the thread below and the job can never both observe.
+        self._scheduling_delegated = False
+        #: Told after a verified push queues a wake, so a durable owner of the
+        #: periodic pass can make its next occurrence due now.
+        self.wake_listener: Callable[[], None] | None = None
         # The service submits through here, so the bound below is not something
         # a dispatch can route around.
         service.exchange_pump = self.submit_exchange
@@ -179,7 +208,9 @@ class AgentObserver:
 
     # --- restart recovery ---------------------------------------------------
 
-    def mark_interrupted_exchanges(self) -> list[tuple[str, str]]:
+    def mark_interrupted_exchanges(
+        self, *, before_marking: Callable[[str, str], None] | None = None
+    ) -> list[tuple[str, str]]:
         """Settle what a restart can settle by itself. Called once, at boot.
 
         Pure state and no network, which is what makes it safe to run before the
@@ -196,6 +227,10 @@ class AgentObserver:
           asking anyone. What it *means* still has to be looked up, and that is
           `resolve_interrupted_exchanges`.
 
+        ``before_marking`` is told each open exchange *before* it is marked, so a
+        durable follow-up for its lookup can be recorded first: once marked, the
+        exchange is no longer listed here and a crash would orphan the lookup.
+
         Returns the `(owner_id, run_id)` pairs still owing a lookup.
         """
 
@@ -204,6 +239,8 @@ class AgentObserver:
             if state == "queued":
                 self.service.settle_restarted_before_send(run_id, owner_id=owner_id)
             else:
+                if before_marking is not None:
+                    before_marking(owner_id, run_id)
                 self.service.mark_exchange_interrupted(run_id, owner_id=owner_id)
                 pending.append((owner_id, run_id))
         return pending
@@ -230,6 +267,22 @@ class AgentObserver:
             )
             submitted += 1
         return submitted
+
+    def resolve_interrupted_exchange(self, owner_id: str, run_id: str) -> bool:
+        """The lookup for one marked exchange, on the caller's own thread.
+
+        The same ``ListTasks`` the pooled resolver makes, for a caller that has to
+        know how it ended. ``True`` once the exchange is no longer interrupted
+        (the lookup settled it, or the run is gone); ``False`` while the agent
+        gave no proof, which is the state the run honestly keeps.
+        """
+
+        self.service.resolve_interrupted_exchange(run_id, owner_id=owner_id)
+        try:
+            run = self.service.agent_repo.get_run(run_id, owner_id=owner_id)
+        except NotFoundError:
+            return True
+        return run.exchange_state != "interrupted"
 
     def recover_interrupted_exchanges(self) -> int:
         """Both halves of restart recovery, in one synchronous call.
@@ -259,12 +312,57 @@ class AgentObserver:
         Returns the number of runs this pass took responsibility for.
         """
 
-        moment = now if now is not None else self._now()
+        groups = self._claim_due(now if now is not None else self._now())
+        for (owner_id, _connection_id), run_ids in groups.items():
+            self.observation_executor.submit(self._observe_group, owner_id, run_ids)
+        return sum(len(run_ids) for run_ids in groups.values())
+
+    def observe_due(
+        self,
+        now: datetime | None = None,
+        *,
+        keep_going: Callable[[], bool] | None = None,
+    ) -> ObservationPass:
+        """One observation pass that ends before it returns, for a durable job.
+
+        The same selection, claiming and per-run observation as `run_once`, so
+        the lookup and retry rules are untouched; what differs is who waits. A
+        job must know when its effect has finished, and must stop starting reads
+        once its lease is gone, so this runs the groups one after another on the
+        caller's thread and asks ``keep_going`` before each read. Whatever it did
+        not reach stays due and is woken again for the next pass.
+
+        Refused while this observer's own scheduler thread is alive: that thread
+        and a job would observe the same runs twice (`SchedulerOverlapError`).
+        """
+
+        if self._scheduler_alive():
+            raise SchedulerOverlapError(
+                "The observer's own scheduler is running; one owner at a time."
+            )
+        groups = self._claim_due(now if now is not None else self._now())
+        claimed = sum(len(run_ids) for run_ids in groups.values())
+        handled = 0
+        stopped = False
+        for (owner_id, _connection_id), run_ids in groups.items():
+            if stopped or (keep_going is not None and not keep_going()):
+                stopped = True
+                self._requeue_wakes(run_ids)
+                for run_id in run_ids:
+                    self._release(run_id)
+                continue
+            done = self._observe_group(owner_id, run_ids, keep_going)
+            handled += done
+            if done < len(run_ids):
+                stopped = True
+                self._requeue_wakes(run_ids[done:])
+        return ObservationPass(claimed=claimed, handled=handled)
+
+    def _claim_due(self, moment: datetime) -> dict[tuple[str, str], list[str]]:
         due = list(self.service.agent_repo.due_observations(now=moment))
         due.extend(self._drain_wakes())
 
         groups: dict[tuple[str, str], list[str]] = {}
-        claimed = 0
         for owner_id, run_id in due:
             if not self._claim(run_id):
                 continue
@@ -273,11 +371,11 @@ class AgentObserver:
                 self._release(run_id)
                 continue
             groups.setdefault((owner_id, connection_id), []).append(run_id)
-            claimed += 1
+        return groups
 
-        for (owner_id, _connection_id), run_ids in groups.items():
-            self.observation_executor.submit(self._observe_group, owner_id, run_ids)
-        return claimed
+    def _requeue_wakes(self, run_ids: Iterable[str]) -> None:
+        with self._lock:
+            self._woken.update(run_ids)
 
     def wake(self, run_id: str) -> None:
         """The narrow port a verified push calls (FR-008).
@@ -289,6 +387,8 @@ class AgentObserver:
         with self._lock:
             self._woken.add(run_id)
         self._wake_event.set()
+        if self.wake_listener is not None:
+            self.wake_listener()
 
     def _drain_wakes(self) -> list[tuple[str, str]]:
         with self._lock:
@@ -327,19 +427,33 @@ class AgentObserver:
         except NotFoundError:  # pragma: no cover - purged between select and read
             return None
 
-    def _observe_group(self, owner_id: str, run_ids: list[str]) -> None:
-        """Observe one connection's due runs, stopping at the first silence."""
+    def _observe_group(
+        self,
+        owner_id: str,
+        run_ids: list[str],
+        keep_going: Callable[[], bool] | None = None,
+    ) -> int:
+        """Observe one connection's due runs, stopping at the first silence.
+
+        Returns how many runs it got through; fewer than all only when
+        ``keep_going`` said stop, and then the rest are untouched.
+        """
 
         unreachable = False
+        handled = 0
         try:
             for run_id in run_ids:
+                if keep_going is not None and not keep_going():
+                    break
                 if unreachable:
                     self.service.record_failed_contact(run_id, owner_id=owner_id)
-                    continue
-                unreachable = self._observe(owner_id, run_id) is False
+                else:
+                    unreachable = self._observe(owner_id, run_id) is False
+                handled += 1
         finally:
             for run_id in run_ids:
                 self._release(run_id)
+        return handled
 
     def _observe(self, owner_id: str, run_id: str) -> bool | None:
         """One authenticated read of one run. ``False`` means "could not reach".
@@ -388,6 +502,23 @@ class AgentObserver:
 
     # --- the scheduler thread -----------------------------------------------
 
+    def _scheduler_alive(self) -> bool:
+        return self.scheduler_thread is not None and self.scheduler_thread.is_alive()
+
+    def delegate_scheduling(self) -> None:
+        """Hand the periodic pass to a durable job, for good.
+
+        After this `start` never starts the thread, so exactly one mechanism
+        observes. Refused while the thread is already running: the caller must
+        stop it first, because a handoff that overlapped would double-observe.
+        """
+
+        if self._scheduler_alive():
+            raise SchedulerOverlapError(
+                "The observer's own scheduler is running; stop it before handing over."
+            )
+        self._scheduling_delegated = True
+
     def start(self) -> bool:
         """Start the periodic pass. ``False`` if it is already running.
 
@@ -396,7 +527,10 @@ class AgentObserver:
         observation the deployment makes.
         """
 
-        if self.scheduler_thread is not None and self.scheduler_thread.is_alive():
+        if self._scheduler_alive():
+            return False
+        if self._scheduling_delegated:
+            logger.warning("Agent observer scheduler not started: owned by a job")
             return False
 
         def _loop() -> None:
@@ -445,4 +579,6 @@ __all__ = [
     "SCHEDULER_JOIN_SECONDS",
     "AgentObserver",
     "ExchangePool",
+    "ObservationPass",
+    "SchedulerOverlapError",
 ]

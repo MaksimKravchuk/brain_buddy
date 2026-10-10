@@ -299,6 +299,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Durable job ledger",
         "Voice and privacy maintenance hand-off",
     ),
+    "agent_job_handoff": (
+        EPIC_TASKS,
+        "Durable job ledger",
+        "Agent observation and recovery as jobs",
+    ),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",
