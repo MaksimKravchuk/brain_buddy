@@ -1730,3 +1730,177 @@ mod snapshot {
         assert_eq!(position(&mut store), ("cursor-5".into(), "5".into()));
     }
 }
+
+fn native_origin(store: &mut Store, task_id: &str) -> Option<bb_domain::types::OpenList> {
+    let mut read_set = bb_domain::types::ReadSet::default();
+    for record in bb_client::visible_snapshot(store).unwrap().records {
+        if let bb_domain::types::Record::Task(task) = record {
+            read_set.tasks.insert(task.id.clone(), task);
+        }
+    }
+    bb_client::local_task_origins(store, &read_set)
+        .unwrap()
+        .get(&bb_domain::types::TaskId::parse(task_id).unwrap())
+        .copied()
+}
+
+fn completed_change(revision: u64, version: u64) -> Value {
+    let mut change = task_change(T, "Origin", revision, version);
+    change["value"]["state"] = json!("completed");
+    change["value"]["completed_at"] = json!(NOW);
+    change
+}
+
+#[test]
+fn snapshot_local_origin_requires_exact_confirmed_version_and_generation() {
+    use bb_domain::types::OpenList;
+    for (name, generation, version, retained) in [
+        ("same-version", GENERATION, 2, true),
+        ("new-version", GENERATION, 3, false),
+        ("new-generation", RESTORED, 2, false),
+    ] {
+        let mut store = linked(&scratch(name));
+        confirmed_task(&mut store, T, "Origin");
+        apply(
+            &mut store,
+            &feed_page(
+                "cursor-1",
+                vec![transaction(2, &external(2), vec![completed_change(2, 2)])],
+                "cursor-2",
+                2,
+            ),
+        )
+        .unwrap();
+        assert_eq!(native_origin(&mut store, T), Some(OpenList::Inbox));
+        install(
+            &mut store,
+            &snapshot(
+                "snapshot-origin",
+                generation,
+                2,
+                &[completed_change(2, version)],
+            ),
+        );
+        assert_eq!(
+            native_origin(&mut store, T),
+            retained.then_some(OpenList::Inbox),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn snapshot_local_origin_accepted_transition_requires_exact_receipt_result_version() {
+    use bb_domain::types::OpenList;
+    for (name, result_version, seq, version, watermark, generation, retained) in [
+        ("receipt-matching", 2, 2, 2, 2, GENERATION, true),
+        ("receipt-mismatch", 3, 2, 2, 2, GENERATION, false),
+        ("receipt-newer", 2, 3, 2, 2, GENERATION, false),
+        ("receipt-exhausted", 2, 2, 3, 3, GENERATION, false),
+        ("receipt-wrong-generation", 2, 2, 2, 2, RESTORED, false),
+    ] {
+        let mut store = linked(&scratch(name));
+        confirmed_task(&mut store, T, "Origin");
+        execute(
+            &mut store,
+            &mut SeqIds(0),
+            &request(
+                cmd(1),
+                CommandType::TaskTransition,
+                Some(T),
+                json!({"action":"complete"}),
+                vec![shown(T, "1")],
+            ),
+        )
+        .unwrap();
+        store
+            .write(|tx| {
+                tx.execute("UPDATE outbox SET state = 'sending', ever_sent = 1", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let mut accepted = receipt(GENERATION, &cmd(1), seq);
+        accepted
+            .result_versions
+            .push(bb_protocol::receipt::Version {
+                entity_type: EntityType::Task,
+                record_key: vec![T.to_owned()],
+                record_version: Counter::from(result_version),
+                edit_revision: Some(Counter::from(2)),
+            });
+        settle(&mut store, &accepted).unwrap();
+        install(
+            &mut store,
+            &snapshot(
+                "snapshot-origin",
+                generation,
+                watermark,
+                &[completed_change(2, version)],
+            ),
+        );
+        assert_eq!(
+            native_origin(&mut store, T),
+            retained.then_some(OpenList::Inbox),
+            "{name}"
+        );
+        let fields: Vec<u8> = store
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT fields FROM drafts WHERE editor_kind = 'runtime_task_local'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        let fact: Value = serde_json::from_slice(&fields).unwrap();
+        let candidate_kept = fact["candidates"].get(cmd(1).as_str()).is_some();
+        assert_eq!(
+            candidate_kept,
+            !matches!(name, "receipt-matching" | "receipt-exhausted"),
+            "only promoted or exhausted proof paths retire candidates: {name}"
+        );
+    }
+}
+
+#[test]
+fn snapshot_local_origin_cleared_overlay_never_reactivates_import_carrier() {
+    let mut store = linked(&scratch("origin-carrier-inactive"));
+    confirmed_task(&mut store, T, "Origin");
+    store.write(|tx| {
+        let body = serde_json::to_vec(&completed_change(1, 1)["value"]).unwrap();
+        tx.execute("UPDATE confirmed_records SET body = ?1 WHERE record_type = 'task'", [&body])?;
+        tx.execute("UPDATE visible_records SET body = ?1 WHERE record_type = 'task'", [&body])?;
+        tx.execute("DELETE FROM drafts WHERE editor_kind = 'runtime_task_local'", [])?;
+        tx.execute("INSERT INTO drafts (workspace_id,draft_id,editor_kind,record_type,record_key,fields,updated_at)
+            VALUES (?1,'legacy-origin','legacy_task_local','task',?2,?3,?4)",
+            params![WORKSPACE, json!([T]).to_string(), br#"{"lastOpenList":"someday"}"#.as_slice(), NOW])?;
+        Ok(())
+    }).unwrap();
+    let generation = bb_client::projection_generation(&mut store).unwrap();
+    bb_client::replay(&mut store, &context()).unwrap();
+    assert!(
+        bb_client::projection_generation(&mut store).unwrap() > generation,
+        "a local-fact-only seed invalidates the projection generation"
+    );
+    assert_eq!(
+        native_origin(&mut store, T),
+        Some(bb_domain::types::OpenList::Someday)
+    );
+    install(
+        &mut store,
+        &snapshot("snapshot-origin", RESTORED, 2, &[completed_change(2, 2)]),
+    );
+    assert_eq!(native_origin(&mut store, T), None);
+    bb_client::replay(&mut store, &context()).unwrap();
+    assert_eq!(native_origin(&mut store, T), None);
+    let carrier: Vec<u8> = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT fields FROM drafts WHERE draft_id = 'legacy-origin'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(carrier, br#"{"lastOpenList":"someday"}"#);
+}
