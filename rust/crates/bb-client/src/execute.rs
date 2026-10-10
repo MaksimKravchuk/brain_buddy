@@ -200,6 +200,41 @@ impl From<DomainError> for ExecuteError {
     }
 }
 
+/// LOCAL failure context for a batch caller. This never enters an envelope,
+/// fingerprint or durable result; the ordinary execute APIs discard it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReportedExecuteError {
+    pub error: ExecuteError,
+    /// Exact original request that refused; global and non-rule errors have none.
+    pub failed_command_id: Option<CommandId>,
+}
+
+impl ReportedExecuteError {
+    fn for_request(error: ExecuteError, request: &ExecuteRequest) -> Self {
+        let failed_command_id =
+            matches!(&error, ExecuteError::Refused(_)).then(|| request.command_id.clone());
+        Self {
+            error,
+            failed_command_id,
+        }
+    }
+}
+
+impl From<ExecuteError> for ReportedExecuteError {
+    fn from(error: ExecuteError) -> Self {
+        Self {
+            error,
+            failed_command_id: None,
+        }
+    }
+}
+
+impl From<StoreError> for ReportedExecuteError {
+    fn from(error: StoreError) -> Self {
+        ExecuteError::from(error).into()
+    }
+}
+
 fn refuse(reason: Reason, field: &str) -> ExecuteError {
     DomainError::field(reason, field).into()
 }
@@ -376,8 +411,19 @@ pub fn execute_batch_with(
     requests: &[ExecuteRequest],
     before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
 ) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_reported_with(store, ids, requests, before_commit).map_err(|error| error.error)
+}
+
+/// The same atomic batch execution with exact original-command context on a
+/// command-specific refusal. A failure of the commit callback is batch-global.
+pub fn execute_batch_reported_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
+) -> Result<Vec<Executed>, ReportedExecuteError> {
     store.try_write(|tx| {
-        let results = execute_batch_in(tx, ids, requests)?;
+        let results = execute_batch_reported_in(tx, ids, requests)?;
         before_commit(tx)?;
         Ok(results)
     })
@@ -388,6 +434,14 @@ pub(crate) fn execute_batch_in(
     ids: &mut impl IdSource,
     requests: &[ExecuteRequest],
 ) -> Result<Vec<Executed>, ExecuteError> {
+    execute_batch_reported_in(tx, ids, requests).map_err(|error| error.error)
+}
+
+fn execute_batch_reported_in(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+) -> Result<Vec<Executed>, ReportedExecuteError> {
     let mut evidence = BatchEvidence {
         batch: true,
         ..BatchEvidence::default()
@@ -399,7 +453,7 @@ pub(crate) fn execute_batch_in(
     for request in requests {
         if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
             if known.digest != sha256(request_canonical(request).as_bytes()) {
-                return Err(ExecuteError::CommandIdReused);
+                return Err(ExecuteError::CommandIdReused.into());
             }
         } else {
             unknown.push(request);
@@ -416,12 +470,16 @@ pub(crate) fn execute_batch_in(
         let state = read_projection(tx, &meta.workspace_id)?;
         evidence.start(&state);
         for request in unknown {
-            crate::admission::validate(tx, &meta.workspace_id, &state, &request.admission_tokens)?;
+            crate::admission::validate(tx, &meta.workspace_id, &state, &request.admission_tokens)
+                .map_err(|error| ReportedExecuteError::for_request(error, request))?;
         }
     }
     requests
         .iter()
-        .map(|request| run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence))
+        .map(|request| {
+            run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence)
+                .map_err(|error| ReportedExecuteError::for_request(error, request))
+        })
         .collect()
 }
 

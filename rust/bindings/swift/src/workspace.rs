@@ -5,12 +5,12 @@ use super::{
     BridgeError, BridgeRefusal, CLOSED, Failure, OPEN, POISONED, guarded, parse_json, to_json,
 };
 use bb_client::{
-    ExecuteContext, ExecuteError, ExecuteRequest, OpenOptions, QueryError, RandomIds, Store,
-    StoreError, StoreStatus, WorkspaceDraft, WorkspaceWatch, convert_legacy_prepared_with,
-    delete_workspace_draft_with, execute_batch_with, legacy_unsent, load_workspace_draft,
-    query_collection_page, resolve_workspace_identities, save_workspace_draft_with,
-    visible_snapshot, workspace_issues_page, workspace_read, workspace_sync_status,
-    workspace_watch,
+    ExecuteContext, ExecuteError, ExecuteRequest, OpenOptions, QueryError, RandomIds,
+    ReportedExecuteError, Store, StoreError, StoreStatus, WorkspaceDraft, WorkspaceWatch,
+    convert_legacy_prepared_with, delete_workspace_draft_with, execute_batch_reported_with,
+    legacy_unsent, load_workspace_draft, query_collection_page, resolve_workspace_identities,
+    save_workspace_draft_with, visible_snapshot, workspace_issues_page, workspace_read,
+    workspace_sync_status, workspace_watch,
 };
 use bb_domain::types::{ActorId, Policy, Query, QueryInputs, ZoneName};
 use bb_protocol::{
@@ -175,8 +175,13 @@ pub struct BridgeSaved {
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum BridgeExecution {
-    Saved { results: Vec<BridgeSaved> },
-    Refused { refusal: BridgeRefusal },
+    Saved {
+        results: Vec<BridgeSaved>,
+    },
+    Refused {
+        refusal: BridgeRefusal,
+        failed_command_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -437,8 +442,9 @@ impl BridgeWorkspace {
                     Some(entry_ids),
                     |_| before_commit(),
                 )
+                .map_err(ReportedExecuteError::from)
             } else {
-                execute_batch_with(store, &mut RandomIds, &requests, |_| before_commit())
+                execute_batch_reported_with(store, &mut RandomIds, &requests, |_| before_commit())
             };
             match result {
                 Ok(results) => {
@@ -458,10 +464,14 @@ impl BridgeWorkspace {
                             .collect(),
                     })
                 }
-                Err(ExecuteError::Refused(error)) => Ok(BridgeExecution::Refused {
+                Err(ReportedExecuteError {
+                    error: ExecuteError::Refused(error),
+                    failed_command_id,
+                }) => Ok(BridgeExecution::Refused {
                     refusal: error.into(),
+                    failed_command_id: failed_command_id.map(|id| id.as_str().to_owned()),
                 }),
-                Err(error) => Err(execute_failure(error)),
+                Err(error) => Err(execute_failure(error.error)),
             }
         });
         if result

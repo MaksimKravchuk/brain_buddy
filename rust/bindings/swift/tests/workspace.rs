@@ -80,11 +80,48 @@ fn workspace_026_fr_001_batch_refusal_preserves_everything() {
             operation(),
         )
         .unwrap();
-    assert!(matches!(result, BridgeExecution::Refused { .. }));
+    assert!(
+        matches!(result, BridgeExecution::Refused { failed_command_id: Some(id), .. } if id == command(2, "").command_id)
+    );
     let snapshot = workspace.snapshot().unwrap();
     assert_eq!(snapshot.pending, "0");
     assert_eq!(snapshot.projection_generation, "0");
     assert_eq!(snapshot.records, b"[]");
+}
+
+#[test]
+fn batch_duplicate_name_refusal_identifies_second_original_command_and_rolls_back() {
+    let (workspace, _) = open("batch-name-context");
+    let project = |n, name| {
+        let mut request = command(n, "");
+        request.command_type = "project.create".into();
+        request.payload = json!({"name":name}).to_string().into_bytes();
+        request
+    };
+    workspace
+        .execute(vec![project(10, "Taken")], context(), operation())
+        .unwrap();
+    let before = workspace.snapshot().unwrap();
+    let first = project(11, "Fresh");
+    let second = project(12, "Taken");
+    let BridgeExecution::Refused {
+        refusal,
+        failed_command_id,
+    } = workspace
+        .execute(vec![first, second.clone()], context(), operation())
+        .unwrap()
+    else {
+        panic!("duplicate name must refuse");
+    };
+    assert_eq!(refusal.reason, "duplicate_project_name");
+    assert_eq!(
+        failed_command_id.as_deref(),
+        Some(second.command_id.as_str())
+    );
+    let after = workspace.snapshot().unwrap();
+    assert_eq!(after.records, before.records);
+    assert_eq!(after.pending, before.pending);
+    assert_eq!(after.projection_generation, before.projection_generation);
 }
 
 #[test]
@@ -955,7 +992,7 @@ fn original_query_frame_token_is_owned_content_free_and_retry_survives_frame_cha
             .to_string()
             .into_bytes();
     assert!(
-        matches!(workspace.execute(vec![edit],context(),operation()).unwrap(),BridgeExecution::Refused {refusal} if refusal.reason=="formulation_changed")
+        matches!(workspace.execute(vec![edit],context(),operation()).unwrap(),BridgeExecution::Refused {refusal, ..} if refusal.reason=="formulation_changed")
     );
 }
 

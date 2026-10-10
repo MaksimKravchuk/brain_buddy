@@ -52,8 +52,9 @@ pub use epochs::{
 };
 pub use execute::{
     ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, KnownBatch, LocalStatus,
-    RandomIds, Stage, VisibleSnapshot, execute, execute_batch, execute_batch_with, execute_with,
-    lookup_known_batch, projection_generation, visible_snapshot,
+    RandomIds, ReportedExecuteError, Stage, VisibleSnapshot, execute, execute_batch,
+    execute_batch_reported_with, execute_batch_with, execute_with, lookup_known_batch,
+    projection_generation, visible_snapshot,
 };
 pub use import::{
     ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,

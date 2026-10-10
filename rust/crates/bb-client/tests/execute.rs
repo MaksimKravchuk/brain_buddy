@@ -7,8 +7,8 @@
 
 use bb_client::{
     ExecuteContext, ExecuteError, ExecuteRequest, IdSource, OpenOptions, RandomIds, SCHEMA_VERSION,
-    Stage, Store, StoreError, StoreStatus, execute, execute_batch, execute_batch_with,
-    execute_with,
+    Stage, Store, StoreError, StoreStatus, execute, execute_batch, execute_batch_reported_with,
+    execute_batch_with, execute_with,
 };
 use bb_domain::types::{ActorId, Policy, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -233,6 +233,28 @@ fn execute_026_fr_001_batch_cancel_before_commit_rolls_back() {
         |_| Err(ExecuteError::Cancelled),
     );
     assert_eq!(result.unwrap_err(), ExecuteError::Cancelled);
+    assert_untouched(&mut store);
+}
+
+#[test]
+fn reported_batch_global_refusal_has_no_guessed_command_and_rolls_back() {
+    let path = scratch("reported-global-refusal");
+    let mut store = open(&path, 2_000).unwrap();
+    let error = execute_batch_reported_with(
+        &mut store,
+        &mut SeqIds(0),
+        &[create_task(cmd(1), "One"), create_task(cmd(2), "Two")],
+        |_| {
+            Err(bb_domain::types::DomainError::field(
+                bb_domain::types::Reason::InvalidValue,
+                "batch",
+            )
+            .into())
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(error.error, ExecuteError::Refused(_)));
+    assert_eq!(error.failed_command_id, None);
     assert_untouched(&mut store);
 }
 
@@ -1304,7 +1326,7 @@ fn original_frame_known_retry_precedes_changed_content_and_batch_admits_original
         guarded_edit(301, &target, "1", token.clone()),
         guarded_edit(302, &target, "1", token.clone()),
     ];
-    execute_batch(&mut store, &mut ids, &batch).unwrap();
+    execute_batch_reported_with(&mut store, &mut ids, &batch, |_| Ok(())).unwrap();
     assert!(
         execute_batch(&mut store, &mut ids, &batch)
             .unwrap()
@@ -1317,11 +1339,28 @@ fn original_frame_known_retry_precedes_changed_content_and_batch_admits_original
         execute(&mut store, &mut ids, &changed_token),
         Err(ExecuteError::CommandIdReused)
     );
+    let before = meta(&mut store);
+    let count = queue(&mut store).len();
+    let failure = execute_batch_reported_with(
+        &mut store,
+        &mut ids,
+        &[
+            create_task(cmd(304), "Rolled back"),
+            guarded_edit(303, &target, "3", token),
+        ],
+        |_| Ok(()),
+    )
+    .unwrap_err();
+    assert_eq!(failure.failed_command_id, Some(cmd(303)));
     assert!(
-        matches!(execute(&mut store,&mut ids,&guarded_edit(303,&target,"3",token)),Err(ExecuteError::Refused(error)) if error.reason == bb_domain::types::Reason::FormulationChanged)
+        matches!(failure.error, ExecuteError::Refused(error) if error.reason == bb_domain::types::Reason::FormulationChanged)
     );
+    assert_eq!(meta(&mut store), before);
+    assert_eq!(queue(&mut store).len(), count);
+    assert_eq!(visible(&mut store, "task").len(), 1);
     for queued in queue(&mut store) {
         assert!(queued.envelope.get("admission_tokens").is_none());
+        assert!(queued.envelope.get("failed_command_id").is_none());
     }
 }
 

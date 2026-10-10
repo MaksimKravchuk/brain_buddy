@@ -59,6 +59,8 @@ The Swift facade owns one runtime handle per open workspace. Shared app-group pa
 
 All disk, query and network work runs off the UI thread. The Swift facade dispatches completion/invalidation onto its chosen actor/executor; Rust callbacks never synchronously re-enter `execute` while a DB lock is held. DTOs own their values across FFI; high-level UI receives no borrowed pointers or raw SQLite handles. Cancellation and errors are values; errors contain a stable code, retryability, safe reference and relevant version/field names, never raw payload/log strings.
 
+An `execute` batch refusal also carries optional LOCAL `failed_command_id`: the exact original prepared request whose command or admission check refused. Batch-global failures and migration conversion may omit it; callers must not guess an authored command when it is absent. This context is not part of the immutable envelope, fingerprint or durable result, and a refusal still rolls back the entire batch.
+
 Native task reads additionally return `task_frames`, sibling metadata for each
 original returned task: its content-free LOCAL `token` and `last_open_list`
 (including explicit null when unknown). A v1 token identifies the canonical
