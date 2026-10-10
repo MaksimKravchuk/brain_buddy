@@ -420,6 +420,13 @@ extension RustDomainFacade {
         try RustJSON.data(["kind": "native_tags", "search": wireNull(search), "sort": sort.rawValue])
     }
 
+    public func workspaceTaskViewsQuery(_ tasks: [TaskID],
+                                        bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
+        guard tasks.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        var ids = RustIDTable(bindings: bindings, preservesReferences: true)
+        return try RustJSON.data(["kind": "native_task_views", "task_ids": tasks.map { ids.task($0) }])
+    }
+
     public func workspaceFirstNextQuery(_ project: ProjectID,
                                         bindings: [RustWorkspaceIdentityBinding] = []) throws -> Data {
         var ids = RustIDTable(bindings: bindings, preservesReferences: true)

@@ -1899,3 +1899,73 @@ fn queries_026_fr_009_native_catalog_search_exact_summary_and_global_tag_rank() 
     assert_eq!(first_next.items.len(), 1);
     assert_eq!(first_next.items[0].id.as_str(), "task-native-next-0");
 }
+
+#[test]
+fn queries_026_fr_025_native_exact_views_are_bounded_ordered_and_partial() {
+    let state = Store {
+        tasks: vec![
+            task("task-a", "A", "inbox", 0),
+            task("task-b", "B", "next", 1),
+        ],
+        subtasks: vec![
+            json!({"id":"subtask-a","task_id":"task-a","title":"Owned child",
+            "state":"open","order_key":"1","revision":"1"}),
+        ],
+        ..Store::default()
+    }
+    .read_set();
+    let ids = ["task-b", "task-missing", "task-a", "task-b"]
+        .map(|id| bb_domain::types::TaskId::parse(id).unwrap());
+    let page = bb_domain::queries::native_task_views(&state, &ids).unwrap();
+    assert_eq!(
+        page.items
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>(),
+        ["task-b", "task-a"]
+    );
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.subtasks.is_empty() && row.comments.is_empty())
+    );
+    assert!(!page.has_more);
+    assert!(page.next_cursor.is_none());
+    assert_eq!(
+        (page.counts_by_state.inbox, page.counts_by_state.next),
+        (1, 1)
+    );
+    assert!(
+        bb_domain::queries::native_task_views(&state, &[])
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert_eq!(
+        bb_domain::queries::native_task_views(&state, &vec![ids[0].clone(); 200])
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    let error =
+        bb_domain::queries::native_task_views(&state, &vec![ids[0].clone(); 201]).unwrap_err();
+    assert_eq!(
+        (error.reason, error.field.as_deref()),
+        (Reason::InvalidValue, Some("task_ids"))
+    );
+    let native = Query::NativeTaskViews {
+        task_ids: ids.to_vec(),
+    };
+    assert_eq!(
+        bb_domain::dispatch::query_claims(&native),
+        [bb_domain::dispatch::QueryFamily::Queries]
+    );
+    assert_eq!(
+        queries::query(&state, &native, &inputs(CREATED, "UTC"))
+            .unwrap_err()
+            .field
+            .as_deref(),
+        Some("kind")
+    );
+}

@@ -96,8 +96,8 @@ extension Workspace {
         if isRustSelected {
             guard reviewReadiness(.state) == .ready, let query = try? rustReviewQuery(.state), let page = rustPage(for: query),
                   let facade = rustFacade, let review = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()),
-                  let records = records(review.unseenParks.map { .task($0.taskID) }) else { return [] }
-            return review.unseenParks.compactMap { records.tasks[$0.taskID] }
+                  let tasks = taskViews(review.unseenParks.map(\.taskID)) else { return [] }
+            return tasks
         }
         return GTDQueries.unseenParks(in: state)
     }
@@ -723,6 +723,10 @@ extension Workspace {
     public func reviewFormulation(_ id: TaskID, read: WorkspaceReviewRead) -> RustWorkspaceFormulation? {
         guard isRustSelected else { return legacyFormulation(id) }
         guard reviewReadiness(read) == .ready, let key = try? rustReviewQuery(read) else { return nil }
+        if case .state = read, let page = rustPage(for: key), let facade = rustFacade,
+           let review = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()) {
+            return taskViewsFormulation(id, ids: review.unseenParks.map(\.taskID))
+        }
         if case .formulation(let requested) = read {
             guard requested == id, let page = rustPage(for: key), let facade = rustFacade else { return nil }
             return try? facade.workspaceFormulation(from: page.result)
@@ -759,7 +763,7 @@ extension Workspace {
               let query = try? rustReviewQuery(read), let facade = rustFacade, let page = rustPage(for: query),
               let state = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()),
               !state.unseenParks.isEmpty else { return base }
-        let readiness = recordsReadiness(state.unseenParks.map { .task($0.taskID) })
+        let readiness = taskViewsReadiness(state.unseenParks.map(\.taskID))
         guard readiness == .ready else {
             return WorkspaceQueryPageState(readiness: readiness == .notRequested ? .loading : readiness)
         }
@@ -802,7 +806,7 @@ extension Workspace {
         guard reviewReadiness(read) == .ready, let query = try? rustReviewQuery(read) else { return nil }
         if case .state = read, let page = rustPage(for: query), let facade = rustFacade,
            let review = try? facade.workspaceReviewState(from: page.result, keeping: .empty, at: now()) {
-            return recordsShownTask(id, reads: review.unseenParks.map { .task($0.taskID) })
+            return taskViewsShownTask(id, ids: review.unseenParks.map(\.taskID))
         }
         return rustQueryShownTask(id, key: query)
     }
@@ -811,15 +815,14 @@ extension Workspace {
         guard let facade = rustFacade, let page = rustPage(for: query),
               rustReadiness(for: query) == .ready else { return }
         let review = try facade.workspaceReviewState(from: page.result, keeping: .empty, at: now())
-        let reads: [WorkspaceRecordRead] = review.unseenParks.map { .task($0.taskID) }
-        guard !reads.isEmpty else { rustAdoptTasks([], for: query); return }
+        let ids = review.unseenParks.map(\.taskID)
+        guard !ids.isEmpty else { rustAdoptTasks([], for: query); return }
         let binding = runtimeBindingID
-        let records = try await prepareRecords(reads)
+        let tasks = try await prepareTaskViews(ids)
         guard binding == runtimeBindingID, rustPage(for: query) == page else { return }
-        // prepareRecords owns the associated partial frames in its own answer.
-        // No old detail frame may turn these record rows into full children.
-        rustAdoptTasks(review.unseenParks.compactMap { records.tasks[$0.taskID] }, for: query,
-                       frames: [])
+        // These rows already carry their exact partial answer's presentation facts;
+        // a newer global detail frame cannot upgrade their empty child subset.
+        rustAdoptTasks(tasks, for: query, frames: [])
     }
 
     /// Called only after the lifecycle/cache generation fence has passed.

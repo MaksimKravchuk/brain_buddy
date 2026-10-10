@@ -55,6 +55,7 @@ pub fn handles_query(query: &Query) -> bool {
             | Query::Tags {}
             | Query::NativeProjects { .. }
             | Query::NativeTags { .. }
+            | Query::NativeTaskViews { .. }
     )
 }
 
@@ -102,7 +103,9 @@ pub fn query(
             project_display(read_set, project_id).map(QueryResult::ProjectDisplay)
         }
         Query::Tags {} => Ok(QueryResult::Tags(tags(read_set))),
-        Query::NativeProjects { .. } | Query::NativeTags { .. } => Err(invalid("kind")),
+        Query::NativeProjects { .. } | Query::NativeTags { .. } | Query::NativeTaskViews { .. } => {
+            Err(invalid("kind"))
+        }
         Query::ReviewState {}
         | Query::ReviewQueue { .. }
         | Query::ListMode { .. }
@@ -560,6 +563,44 @@ pub(crate) fn decode_cursor_key(cursor: &str, filters: &Value) -> Result<SortKey
 /// # Errors
 ///
 /// See [`query`].
+/// Exact native views for one bounded set of presentation identities. Missing
+/// tasks are omitted; duplicate identities retain their first requested place.
+/// Children are deliberately partial, even when a task has none in this set.
+pub fn native_task_views(
+    read_set: &ReadSet,
+    task_ids: &[TaskId],
+) -> Result<TaskListResult, DomainError> {
+    if task_ids.len() > MAX_LIMIT as usize {
+        return Err(invalid("task_ids"));
+    }
+    let settings = clock_settings(read_set)?;
+    let mut seen = BTreeSet::new();
+    let mut items = Vec::with_capacity(task_ids.len());
+    let mut counts = TaskCounts::default();
+    for id in task_ids {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(task) = read_set.tasks.get(id) else {
+            continue;
+        };
+        match task.state {
+            TaskState::Inbox => counts.inbox += 1,
+            TaskState::Next => counts.next += 1,
+            TaskState::Waiting => counts.waiting += 1,
+            TaskState::Someday => counts.someday += 1,
+            TaskState::Completed | TaskState::Cancelled => {}
+        }
+        items.push(task_view(task, Vec::new(), Vec::new(), &settings)?);
+    }
+    Ok(TaskListResult {
+        items,
+        next_cursor: None,
+        has_more: false,
+        counts_by_state: counts,
+    })
+}
+
 pub fn task_detail(read_set: &ReadSet, task_id: &TaskId) -> Result<TaskView, DomainError> {
     let task = read_set
         .tasks

@@ -201,7 +201,7 @@ impl QueryKind {
 /// The kind of a query. Exhaustive: a new variant must name its kind here.
 pub fn query_kind(query: &Query) -> QueryKind {
     match query {
-        Query::TaskList { .. } => QueryKind::TaskList,
+        Query::TaskList { .. } | Query::NativeTaskViews { .. } => QueryKind::TaskList,
         Query::TaskDetail { .. } => QueryKind::TaskDetail,
         Query::ListCounts {} => QueryKind::ListCounts,
         Query::Projects { .. } | Query::NativeProjects { .. } => QueryKind::Projects,

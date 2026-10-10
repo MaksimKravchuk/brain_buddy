@@ -2941,12 +2941,31 @@ fn review_sessions_026_fr_016_native_helpers_share_clock_and_shown_marker_rules(
     assert!(after.is_none());
     assert_eq!(page[0].consecutive_stalled_formulations, 2);
     let mut parked = task("parked", "someday", 11);
-    parked["parked"] = json!({"at":"2026-10-01T09:00:00Z","formulation_id":form_id(5)});
+    parked["parked"] = json!({"at":"2026-10-01T09:00:00Z","formulation_id":form_id(5),
+        "private":{"from_revision":"10","clock_before":{"formulation_id":form_id(5),
+            "started_at":"2026-09-01T09:00:00Z","extended_at":null,"extension_reason":null,
+            "park_floor_at":null,"stalled_before":0}}});
     let state = Store {
         tasks: vec![parked],
         ..Store::default()
     }
     .read_set();
+    let parked_id = types::TaskId::parse("parked").unwrap();
+    let facts = bb_domain::review_sessions::task_formulation_view(
+        &state,
+        &parked_id,
+        &query_inputs(NOW, true),
+    )
+    .unwrap();
+    assert_eq!(facts.parked_after_days, Some(30));
+    assert!(facts.unavailable_local_facts.is_empty());
+    let views = bb_domain::queries::native_task_views(&state, &[parked_id]).unwrap();
+    assert!(views.items[0].parked.is_some());
+    assert!(
+        serde_json::to_value(&views.items[0]).unwrap()["parked"]
+            .get("private")
+            .is_none()
+    );
     let query:Query=serde_json::from_value(json!({"kind":"park_return_shown","task_id":"parked","parked_at":"2026-09-30T09:00:00Z","formulation_id":form_id(5)})).unwrap();
     assert!(matches!(
         dispatch::query(&state, &query, &query_inputs(NOW, true)).unwrap(),

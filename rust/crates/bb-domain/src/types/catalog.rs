@@ -631,6 +631,10 @@ pub enum Query {
     TaskDetail {
         task_id: TaskId,
     },
+    /// Runtime-only exact public task views, with partial children and frozen rule facts.
+    NativeTaskViews {
+        task_ids: Vec<TaskId>,
+    },
     // Field-less variants are written `{}`: serde ignores unknown fields on a
     // unit variant of an internally tagged enum, a struct variant refuses them.
     ListCounts {},

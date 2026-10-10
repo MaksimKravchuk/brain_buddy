@@ -156,6 +156,14 @@ extension RustWorkspaceJourneyTests {
         #expect(workspace.taskDetail(id)?.subtasks.map(\.id) == [child])
 
         let missing = TaskID("task_missing")
+        let views = try await workspace.prepareTaskViews([id, missing, id])
+        #expect(workspace.taskViewsReadiness([id, missing, id]) == .ready)
+        #expect(views.map(\.id) == [id])
+        #expect(views.first?.subtasks.isEmpty == true)
+        #expect(workspace.taskViewsMissing([id, missing, id]) == [missing])
+        #expect(workspace.taskViewsShownTask(id, ids: [id, missing, id])?.childrenKnown == false)
+        #expect(workspace.taskViewsFormulation(id, ids: [id, missing, id])?.unavailableLocalFacts == ["weekly_review_unavailable"])
+        #expect(workspace.taskDetailShownTask(id) == detailShown)
         let reads: [WorkspaceRecordRead] = [.task(id), .task(missing)]
         let records = try await workspace.prepareRecords(reads)
         #expect(workspace.recordsReadiness(reads) == .ready)

@@ -263,6 +263,9 @@ extension RustWorkspaceBridgeTests {
         #expect(try top.string("kind") == "native_tags")
         #expect(try top.string("sort") == "open_count")
         #expect(try top.string("search") == "home")
+        let exactTasks = try RustJSON.object(facade.workspaceTaskViewsQuery([TaskID("task_exact")]))
+        #expect(try exactTasks.string("kind") == "native_task_views")
+        #expect(try exactTasks.strings("task_ids") == ["task_exact"])
     }
 
     @Test("026-FR-025: formulation metadata belongs only to its returned task and preserves unavailable facts")

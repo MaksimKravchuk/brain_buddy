@@ -1544,7 +1544,7 @@ extension Workspace {
             rustTagInterests[query] = Set(tags.map { $0.tag.id })
             for row in tags { state.tags[row.tag.id] = row.tag }
             pruneRustRecords(keeping: query)
-        case "task_list":
+        case "task_list", "native_task_views":
             rustAdoptTasks(try facade.workspaceRenderedTasks(from: page, at: now()), for: query)
         case "records":
             let requests = try Self.rustRecordRequests(from: query)
@@ -2342,5 +2342,68 @@ extension Workspace {
             }
         }
         return WorkspaceRecordPage(tasks: tasks, projects: projects, tags: tags, missing: missing, requested: Set(reads))
+    }
+}
+
+
+extension Workspace {
+    private func rustTaskViewsKey(_ ids: [TaskID]) throws -> Data {
+        guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
+        return try facade.workspaceTaskViewsQuery(ids, bindings: rustIdentityBindings)
+    }
+
+    @discardableResult
+    public func prepareTaskViews(_ ids: [TaskID]) async throws -> [TaskRecord] {
+        guard ids.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        guard isRustSelected else { return legacyTaskViews(ids) }
+        try await resolveRustIdentities(ids.map { .init(entityType: "task", localID: $0.rawValue) })
+        let key = try rustTaskViewsKey(ids)
+        await prepareRustQuery(key)
+        guard let rows = taskViews(ids) else {
+            if case .failed(let code) = rustReadiness(for: key) { throw RustBridgeError(code: code) }
+            throw RustBridgeError(code: Task.isCancelled ? "CANCELLED" : "WORKSPACE_NOT_READY")
+        }
+        return rows
+    }
+
+    public func taskViewsReadiness(_ ids: [TaskID]) -> WorkspaceQueryReadiness {
+        guard ids.count <= 200 else { return .failed("TOO_MANY_ITEMS") }
+        return rustQueryPageState { try rustTaskViewsKey(ids) }.readiness
+    }
+
+    public func taskViews(_ ids: [TaskID]) -> [TaskRecord]? {
+        guard ids.count <= 200 else { return nil }
+        guard isRustSelected else { return legacyTaskViews(ids) }
+        guard let key = try? rustTaskViewsKey(ids), let page = rustPage(for: key), let facade = rustFacade else { return nil }
+        do { return try facade.workspaceRenderedTasks(from: page, at: now()) }
+        catch { rustQueries?.recordFailure(key, code: Self.rustQueryCode(error)); markRustQueryError(error); return nil }
+    }
+
+    /// Only a ready exact answer proves these requested identities absent.
+    public func taskViewsMissing(_ ids: [TaskID]) -> Set<TaskID>? {
+        guard let rows = taskViews(ids) else { return nil }
+        let found = Set(rows.map(\.id))
+        return Set(ids.filter { id in
+            let canonical = rustIdentityBindings.first { $0.entityType == "task" && $0.localID == id.rawValue }
+                .map { TaskID($0.canonicalID) } ?? id
+            return !found.contains(canonical)
+        })
+    }
+
+    public func taskViewsShownTask(_ id: TaskID, ids: [TaskID]) -> ShownTask? {
+        guard isRustSelected else { return legacyTaskViews(ids).first { $0.id == id }.map { shownTask(of: $0) } }
+        guard let key = try? rustTaskViewsKey(ids) else { return nil }
+        return rustQueryShownTask(id, key: key)
+    }
+
+    public func taskViewsFormulation(_ id: TaskID, ids: [TaskID]) -> RustWorkspaceFormulation? {
+        guard isRustSelected else { return legacyTaskViews(ids).contains { $0.id == id } ? legacyFormulation(id) : nil }
+        guard let key = try? rustTaskViewsKey(ids) else { return nil }
+        return rustQueryFormulation(id, key: key)
+    }
+
+    private func legacyTaskViews(_ ids: [TaskID]) -> [TaskRecord] {
+        var seen: Set<TaskID> = []
+        return ids.compactMap { seen.insert($0).inserted ? task($0) : nil }
     }
 }
