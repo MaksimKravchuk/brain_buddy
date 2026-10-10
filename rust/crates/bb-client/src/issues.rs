@@ -895,6 +895,7 @@ fn replace(
         payload: payload.clone(),
         preconditions: replacement.shown.clone(),
         depends_on: replacement.depends_on.clone(),
+        admission_tokens: Vec::new(),
         context: context.clone(),
     };
     let queued = execute_in(tx, ids, &request, &old_id).map_err(|error| match error {

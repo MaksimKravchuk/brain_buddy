@@ -37,6 +37,7 @@ The Swift facade owns one runtime handle per open workspace. Shared app-group pa
 | --- | --- | --- |
 | `open` | workspace identity/path, supported storage epoch, OS transport/scheduler capabilities, explicit account/session generation → runtime handle + store status | Unknown/newer schema opens protected/read-only recovery state; no destructive fallback. Opening a different account requires a different workspace binding. |
 | `execute` | stable gesture command ID, typed command, shown revisions/dependencies → `{command_id, local_sequence, projection_generation, status: locally_saved}` | Success only after durable enqueue+projection commit. Retrying unknown local completion with the same ID returns the stored result; changed content gives typed ID reuse. Network confirmation is not implied. |
+| `lookup_known_batch` | original prepared commands/context → `Known { results }` or `NotKnown` | One read snapshot checks every original fingerprint. Any known ID with changed content gives ID reuse; any unknown ID gives whole-batch `NotKnown`. Never executes a suffix, validates admission, rebuilds/replays a projection, mints IDs or writes. |
 | `query` | typed list/detail/project/tag/Review/status query, page size/token → bounded rows + projection generation + continuation | Page token is bound to query and projection generation. Changed generation returns `QUERY_RESTART_REQUIRED`; UI restarts the query, not the sync engine. Never bridge all 10,000 rows for an ordinary list query. |
 | `subscribe` | query interests, callback executor → subscription handle | Emits bounded invalidations `{projection_generation, changed_kinds, sync_status_changed}`. Coalesce slow consumers to latest invalidation; they requery. Unsubscribe/close prevents future delivery; queued callbacks check handle/workspace generation. |
 | `sync_now` | reason (foreground, network, hint, manual), current authenticated transport context → operation handle | Coalesces concurrent wakes per scope. All request/response fences in sync-v1 §7 apply. Widget queues locally; app owns network work. |
@@ -45,6 +46,61 @@ The Swift facade owns one runtime handle per open workspace. Shared app-group pa
 | `close` | handle → completion after local transactions settle/roll back | Idempotent; cancels transport/subscriptions and invalidates queued callbacks. Durable commands survive. No callback into a released handle. |
 
 All disk, query and network work runs off the UI thread. The Swift facade dispatches completion/invalidation onto its chosen actor/executor; Rust callbacks never synchronously re-enter `execute` while a DB lock is held. DTOs own their values across FFI; high-level UI receives no borrowed pointers or raw SQLite handles. Cancellation and errors are values; errors contain a stable code, retryability, safe reference and relevant version/field names, never raw payload/log strings.
+
+Native task reads additionally return `task_frames`, sibling metadata for each
+original returned task: its content-free LOCAL `token` and `last_open_list`
+(including explicit null when unknown). A v1 token identifies the canonical
+workspace/task, child completeness, captured subtask IDs in relative order,
+sorted comment IDs, a domain-separated SHA-256 digest of visible task/child
+semantics, and the maximum retained committed local child-command sequence for
+that task. Rust captures it in the same SQLite read transaction as the original
+task response. Server revisions/ACK-only IDs, write timestamps and comment
+authors are excluded; formulation clock facts remain visible semantics.
+Full-known frames compare exact child sets and subtask order keys. Partial
+frames compare only captured children and their relative order, accepting unseen
+hydration; the local child witness still detects local insert/edit/revert.
+
+Interactive Review cards/forms retain that original token through awaits and
+send it unchanged in LOCAL `admission_tokens`; an old interactive card without
+its original token safely refuses/reloads while preserving authored input.
+Do not mint a replacement token by querying at save. `ShownTask` remains an
+ephemeral content-bearing snapshot, never encoded or stored. Only the
+content-free token and original request fingerprint accompany the existing
+durable prepared-gesture draft; neither token nor snapshot is a sync-envelope,
+receipt or server/replay field. No additional ledger or schema is introduced.
+Under the write lock, original fingerprint/known-result lookup precedes local
+admission and normalization: exact known retries return the durable result even
+after the frame changed; unknown token mismatch returns `formulation_changed`
+without enqueueing. Trusted noninteractive calls, legacy conversion and replay
+retain their existing semantics; Rust validates every token that is supplied.
+When an old restored interactive prepared gesture has no original token, the
+host first uses `lookup_known_batch`: a fully known result recovers its saved
+completion; `NotKnown` preserves its draft/input and refuses/reloads without
+executing any unknown suffix. Empty token arrays are omitted from fingerprints,
+so recovery compares old immutable requests unchanged.
+
+Ordinary list/Review tokens describe only the actual returned child subset;
+hosts replace older cached children and apply the associated knownness/origin.
+They cannot pair a partial token with a previously hydrated display. A native
+detail continuation repeats the parent with at most 200 total child rows per
+page; every continuation/truncated frame is partial, including the final
+continuation page. Only a source-complete first page without continuation may
+claim full-known children. Combining pages must not silently promote the newest
+page token into admission for an accumulated display.
+
+For a new atomic batch, the runtime captures batch-start task revisions after
+any stale-projection rebuild. A numeric shown task guard must match that start;
+only the latest exact fresh same-batch task producer with domain-enforced
+Task concurrency proof may substitute its actual result via `after_command`.
+Ordinary numeric guards genuinely shown after historical producers still use
+the existing exact-shown pending wire conversion; history cannot rebase a stale
+numeric guard or provide fresh-batch proof. An original fresh `tag.delete` may carry task guards
+only for explicit later dependents; its owning domain checks those guards before
+any mutation. Unguarded standalone deletion remains unchanged. Historical
+tag-delete results do not supply fresh producer proof or rebase a stale new
+update; their immutable envelopes are never retrofitted. Fresh skipped bulk
+items retain their separately proven original effective guard and dependency,
+without inventing a result version or normalizing onto the skipped bulk item.
 
 Expected local errors include `VALIDATION_FAILED`, `STORE_BUSY`, `STORE_FULL`, `STORE_CORRUPT`, `STORE_UPGRADE_REQUIRED`, `WORKSPACE_CLOSED`, `AUTH_REQUIRED`, `CANCELLED`, `QUERY_RESTART_REQUIRED` and typed sync issues. A bounded lock timeout is retryable and never reports local save success. Panic handling rolls back a live transaction and marks the runtime unusable if safety cannot be established; reopening follows normal recovery. Platform suspension may prevent a callback but cannot invalidate a committed gesture receipt.
 

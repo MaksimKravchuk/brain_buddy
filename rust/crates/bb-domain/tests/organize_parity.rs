@@ -1001,6 +1001,38 @@ fn organize_026_fr_008_deleting_a_tag_keeps_the_record_and_unlinks_every_task() 
 }
 
 #[test]
+fn tag_delete_checks_only_explicit_task_guards_before_unlinking() {
+    let original = world();
+    for (task_id, revision, reason) in [
+        ("open", 4, Reason::RevisionConflict),
+        ("missing", 1, Reason::NotFound),
+    ] {
+        let mut store = world();
+        let guarded = command(
+            "tag.delete",
+            "home",
+            json!({}),
+            vec![check("tag", "home", 1), check("task", task_id, revision)],
+        );
+        assert_eq!(refusal(store.run(&guarded)).reason, reason);
+        assert_eq!(
+            serde_json::to_value(&store.read_set).unwrap(),
+            serde_json::to_value(&original.read_set).unwrap()
+        );
+    }
+    let mut store = world();
+    let guarded = command(
+        "tag.delete",
+        "home",
+        json!({}),
+        vec![check("tag", "home", 1), check("task", "open", 5)],
+    );
+    accepted(store.run(&guarded));
+    assert_eq!(store.task("done").revision, Counter::from(3));
+    assert_eq!(store.task("open").revision, Counter::from(6));
+}
+
+#[test]
 fn organize_026_fr_009_tag_deletion_does_not_reorder_or_move_anything() {
     let original = world();
     let mut store = world();

@@ -22,6 +22,7 @@
 //! that import carried: a send whose receipt proves its outcome is settled, one that
 //! may have reached the server stays an issue and is never reissued.
 
+mod admission;
 mod apply_changes;
 mod epochs;
 mod execute;
@@ -38,6 +39,7 @@ mod storage;
 mod sync_session;
 mod workspace_query;
 
+pub use admission::{ShownFrameToken, ShownTaskFrame};
 pub use apply_changes::{
     Applied, ApplyError, ApplyStage, FeedStep, Fence, Recovery, TransferFault, TransferProgress,
     abandon_transfer, apply_changes, apply_changes_with, apply_transfer, apply_transfer_with,
@@ -48,9 +50,9 @@ pub use epochs::{
     send_candidates,
 };
 pub use execute::{
-    ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, LocalStatus, RandomIds,
-    Stage, VisibleSnapshot, execute, execute_batch, execute_batch_with, execute_with,
-    projection_generation, visible_snapshot,
+    ExecuteContext, ExecuteError, ExecuteRequest, Executed, IdSource, KnownBatch, LocalStatus,
+    RandomIds, Stage, VisibleSnapshot, execute, execute_batch, execute_batch_with, execute_with,
+    lookup_known_batch, projection_generation, visible_snapshot,
 };
 pub use import::{
     ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,
@@ -81,10 +83,10 @@ pub use sync_session::{
     SessionError, SyncSession,
 };
 pub use workspace_query::{
-    IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceSyncStatus, WorkspaceWatch,
-    delete_workspace_draft_with, load_workspace_draft, query_collection_page, query_page,
-    resolve_workspace_identities, save_workspace_draft_with, workspace_issues_page, workspace_read,
-    workspace_records, workspace_sync_status, workspace_watch,
+    IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceRecordPage, WorkspaceSyncStatus,
+    WorkspaceWatch, delete_workspace_draft_with, load_workspace_draft, query_collection_page,
+    query_page, resolve_workspace_identities, save_workspace_draft_with, workspace_issues_page,
+    workspace_read, workspace_records, workspace_sync_status, workspace_watch,
 };
 
 pub use localfacts::{local_task_origin_in, local_task_origins, local_task_origins_in};

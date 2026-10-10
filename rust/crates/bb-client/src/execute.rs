@@ -73,6 +73,8 @@ pub struct ExecuteRequest {
     /// The revisions the user was shown.
     pub preconditions: Vec<Precondition>,
     pub depends_on: Vec<CommandId>,
+    /// Original rendered frames; LOCAL only, never part of the sync envelope.
+    pub admission_tokens: Vec<crate::ShownFrameToken>,
     pub context: ExecuteContext,
 }
 
@@ -93,6 +95,43 @@ pub struct Executed {
     pub status: LocalStatus,
     /// True when this answers a retry from the stored result.
     pub replayed: bool,
+}
+
+/// Read-only recovery of an original immutable prepared batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KnownBatch {
+    Known { results: Vec<Executed> },
+    NotKnown,
+}
+
+/// Checks every original fingerprint in one read snapshot. An unknown suffix
+/// is never executed, and a later ID mismatch wins over any unknown earlier ID.
+pub fn lookup_known_batch(
+    store: &mut Store,
+    requests: &[ExecuteRequest],
+) -> Result<KnownBatch, ExecuteError> {
+    store.read(|tx| {
+        Ok((|| {
+            let meta = read_meta(tx)?;
+            let mut results = Vec::with_capacity(requests.len());
+            let mut unknown = false;
+            for request in requests {
+                if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+                    if known.digest != sha256(request_canonical(request).as_bytes()) {
+                        return Err(ExecuteError::CommandIdReused);
+                    }
+                    results.push(known.answer(&request.command_id, meta.projection_generation)?);
+                } else {
+                    unknown = true;
+                }
+            }
+            Ok(if unknown {
+                KnownBatch::NotKnown
+            } else {
+                KnownBatch::Known { results }
+            })
+        })())
+    })?
 }
 
 /// Why nothing was saved.
@@ -349,7 +388,37 @@ pub(crate) fn execute_batch_in(
     ids: &mut impl IdSource,
     requests: &[ExecuteRequest],
 ) -> Result<Vec<Executed>, ExecuteError> {
-    let mut evidence = BatchEvidence::default();
+    let mut evidence = BatchEvidence {
+        batch: true,
+        ..BatchEvidence::default()
+    };
+    let mut meta = read_meta(tx)?;
+    let mut unknown = Vec::new();
+    // All original fingerprints precede normalization and admission. Known
+    // results remain recoverable even after their original frame changed.
+    for request in requests {
+        if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+            if known.digest != sha256(request_canonical(request).as_bytes()) {
+                return Err(ExecuteError::CommandIdReused);
+            }
+        } else {
+            unknown.push(request);
+        }
+    }
+    if !unknown.is_empty() {
+        if meta.projection_stale {
+            replay_in(tx, &unknown[0].context).map_err(|error| match error {
+                ReplayError::Store(error) => ExecuteError::Store(error),
+                _ => ExecuteError::Store(StoreError::Corrupt),
+            })?;
+            meta = read_meta(tx)?;
+        }
+        let state = read_projection(tx, &meta.workspace_id)?;
+        evidence.start(&state);
+        for request in unknown {
+            crate::admission::validate(tx, &meta.workspace_id, &state, &request.admission_tokens)?;
+        }
+    }
     requests
         .iter()
         .map(|request| run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence))
@@ -417,7 +486,157 @@ fn read_meta(tx: &Transaction<'_>) -> Result<Meta, ExecuteError> {
 /// still protect a following edit without treating absence as a success result.
 #[derive(Default)]
 struct BatchEvidence {
+    batch: bool,
     skipped: HashMap<(String, String), Counter>,
+    start_revisions: Option<HashMap<String, Counter>>,
+    fresh_tasks: HashMap<String, FreshTask>,
+}
+
+struct FreshTask {
+    command: CommandId,
+    guarded: bool,
+}
+
+impl BatchEvidence {
+    fn start(&mut self, state: &ReadSet) {
+        self.start_revisions.get_or_insert_with(|| {
+            state
+                .tasks
+                .values()
+                .map(|task| (task.id.as_str().to_owned(), task.revision.clone()))
+                .collect()
+        });
+    }
+
+    fn produced(&mut self, request: &ExecuteRequest, changes: &ChangeSet) {
+        for change in &changes.changes {
+            if let DomainChange::Upsert(Record::Task(task)) = change {
+                let owns_guard = matches!(
+                    request.command_type,
+                    CommandType::TaskUpdate
+                        | CommandType::TaskTransition
+                        | CommandType::TaskTags
+                        | CommandType::TagDelete
+                        | CommandType::ReviewDecide
+                );
+                let bulk_item = request.command_type == CommandType::ReviewBulkRelease
+                    && request
+                        .payload
+                        .get("items")
+                        .and_then(Value::as_array)
+                        .is_some_and(|items| {
+                            items
+                                .iter()
+                                .filter(|item| {
+                                    item.get("task_id").and_then(Value::as_str)
+                                        == Some(task.id.as_str())
+                                })
+                                .count()
+                                == 1
+                        });
+                let guarded = bulk_item
+                    || (owns_guard
+                        && request.preconditions.iter().any(|guard| match guard {
+                            Precondition::Revision(guard) => {
+                                guard.entity_type == EntityType::Task
+                                    && guard.entity_id.as_str() == task.id.as_str()
+                            }
+                            Precondition::AfterCommand(guard) => {
+                                guard.after_command.entity_type == EntityType::Task
+                                    && guard.after_command.entity_id.as_str() == task.id.as_str()
+                            }
+                        }));
+                self.fresh_tasks.insert(
+                    task.id.as_str().to_owned(),
+                    FreshTask {
+                        command: request.command_id.clone(),
+                        guarded,
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn normalize_fresh_tasks(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    original: &ExecuteRequest,
+    mut normalized: ExecuteRequest,
+    evidence: &BatchEvidence,
+) -> Result<ExecuteRequest, ExecuteError> {
+    if !matches!(
+        original.command_type,
+        CommandType::TaskUpdate | CommandType::TagDelete
+    ) {
+        return Ok(normalized);
+    }
+    for (original_guard, guard) in original
+        .preconditions
+        .iter()
+        .zip(&mut normalized.preconditions)
+    {
+        match original_guard {
+            Precondition::Revision(shown) if shown.entity_type == EntityType::Task => {
+                if original.command_type == CommandType::TaskUpdate
+                    && original.entity_id.as_ref() != Some(&shown.entity_id)
+                {
+                    continue;
+                }
+                let start = evidence
+                    .start_revisions
+                    .as_ref()
+                    .and_then(|revisions| revisions.get(shown.entity_id.as_str()));
+                let Some(start) = start else {
+                    return Err(DomainError::about(
+                        Reason::NotFound,
+                        EntityType::Task,
+                        vec![shown.entity_id.as_str().to_owned()],
+                    )
+                    .into());
+                };
+                if start != &shown.edit_revision {
+                    return Err(DomainError::stale(
+                        EntityType::Task,
+                        vec![shown.entity_id.as_str().to_owned()],
+                        start.clone(),
+                    )
+                    .into());
+                }
+                if let Some(produced) = evidence.fresh_tasks.get(shown.entity_id.as_str()) {
+                    if !produced.guarded {
+                        return Err(refuse(Reason::InvalidPayload, "preconditions"));
+                    }
+                    *guard = Precondition::AfterCommand(AfterCommandPrecondition {
+                        after_command: CommandRef {
+                            command_id: produced.command.clone(),
+                            entity_type: EntityType::Task,
+                            entity_id: shown.entity_id.clone(),
+                        },
+                    });
+                    push_unique(&mut normalized.depends_on, &produced.command);
+                }
+            }
+            Precondition::AfterCommand(after)
+                if after.after_command.entity_type == EntityType::Task =>
+            {
+                let reference = &after.after_command;
+                let kind: Option<String> = tx.query_row("SELECT json_extract(CAST(envelope AS TEXT),'$.type') FROM outbox WHERE workspace_id=?1 AND command_id=?2", params![workspace,reference.command_id.as_str()], |row| row.get(0)).optional()?;
+                if kind.as_deref() == Some(CommandType::TagDelete.as_str())
+                    && !evidence
+                        .fresh_tasks
+                        .get(reference.entity_id.as_str())
+                        .is_some_and(|producer| {
+                            producer.command == reference.command_id && producer.guarded
+                        })
+                {
+                    return Err(refuse(Reason::InvalidPayload, "preconditions"));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(normalized)
 }
 
 fn normalize_skipped_bulk(
@@ -468,6 +687,14 @@ fn run(
     evidence: &mut BatchEvidence,
 ) -> Result<Executed, ExecuteError> {
     let mut meta = read_meta(tx)?;
+    let digest = sha256(request_canonical(request).as_bytes());
+    if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
+        return if known.digest == digest {
+            known.answer(&request.command_id, meta.projection_generation)
+        } else {
+            Err(ExecuteError::CommandIdReused)
+        };
+    }
     if meta.projection_stale {
         // An upgraded store holds confirmed rows and queued work but no visible
         // projection yet: build it before deciding anything against it.
@@ -477,16 +704,16 @@ fn run(
         })?;
         meta = read_meta(tx)?;
     }
-    let digest = sha256(request_canonical(request).as_bytes());
-    if let Some(known) = known_command(tx, &meta.workspace_id, &request.command_id)? {
-        return if known.digest == digest {
-            known.answer(&request.command_id, meta.projection_generation)
-        } else {
-            Err(ExecuteError::CommandIdReused)
-        };
-    }
-
     let visible = load_visible(tx, &meta.workspace_id)?;
+    evidence.start(&visible.read_set);
+    if !evidence.batch {
+        crate::admission::validate(
+            tx,
+            &meta.workspace_id,
+            &visible.read_set,
+            &request.admission_tokens,
+        )?;
+    }
     let mut local_facts = crate::localfacts::load(tx, &meta.workspace_id)?;
     let entity_id = match (&request.entity_id, new_entity_prefix(request.command_type)) {
         (Some(id), _) => id.clone(),
@@ -494,6 +721,7 @@ fn run(
         (None, None) => return Err(refuse(Reason::InvalidPayload, "entity_id")),
     };
     let normalized = normalize_skipped_bulk(request, evidence)?;
+    let normalized = normalize_fresh_tasks(tx, &meta.workspace_id, request, normalized, evidence)?;
     let (preconditions, depends_on) = wire(&normalized, &entity_id, &visible.pending);
     let results = load_dependencies(tx, &meta.workspace_id, &depends_on)?;
 
@@ -553,6 +781,7 @@ fn run(
         policy: request.context.policy.clone(),
     };
     let changes = dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)?;
+    evidence.produced(request, &changes);
 
     // What the rules resolved (a Smart Add name matched onto a queued project,
     // the tasks an archive touched) is a dependency on the command that wrote
@@ -758,14 +987,18 @@ fn resolved_bulk_payload(
 fn request_canonical(request: &ExecuteRequest) -> String {
     let mut depends_on: Vec<&str> = request.depends_on.iter().map(CommandId::as_str).collect();
     depends_on.sort_unstable();
-    json!({
+    let mut value = json!({
         "type": request.command_type.as_str(),
         "entity_id": request.entity_id.as_ref().map(Id::as_str),
         "preconditions": request.preconditions,
         "depends_on": depends_on,
         "payload": request.payload,
-    })
-    .to_string()
+    });
+    // Empty LOCAL metadata preserves fingerprints of existing durable IDs.
+    if !request.admission_tokens.is_empty() {
+        value["admission_tokens"] = json!(request.admission_tokens);
+    }
+    value.to_string()
 }
 
 struct Known {

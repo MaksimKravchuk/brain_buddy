@@ -215,6 +215,7 @@ fn prepared(store: &mut Store) -> Vec<ExecuteRequest> {
                     .clone(),
                 preconditions: vec![],
                 depends_on: vec![],
+                admission_tokens: Vec::new(),
                 context: ExecuteContext {
                     now: entry.issued_at,
                     time_zone: ZoneName::new("UTC").unwrap(),
@@ -831,6 +832,7 @@ fn review_unsent_conversion_requires_atomic_review_activation_first() {
         payload: json!({"provider":"openai"}).as_object().unwrap().clone(),
         preconditions: vec![],
         depends_on: vec![],
+        admission_tokens: Vec::new(),
         context: ExecuteContext {
             now: entry.issued_at,
             time_zone: ZoneName::new("UTC").unwrap(),

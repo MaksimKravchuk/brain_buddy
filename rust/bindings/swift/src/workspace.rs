@@ -48,6 +48,8 @@ pub struct BridgeWorkspaceCommand {
     pub payload: Vec<u8>,
     pub preconditions: Vec<u8>,
     pub depends_on: Vec<String>,
+    /// JSON token array; LOCAL only.
+    pub admission_tokens: Vec<u8>,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -140,10 +142,18 @@ pub enum BridgeExecution {
     Refused { refusal: BridgeRefusal },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeKnownBatch {
+    Known { results: Vec<BridgeSaved> },
+    NotKnown,
+}
+
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeWorkspacePage {
     pub projection_generation: String,
     pub result: Vec<u8>,
+    /// Original query frame token and local-origin siblings.
+    pub task_frames: Vec<u8>,
     pub collection_next_cursor: Option<String>,
 }
 
@@ -292,6 +302,11 @@ fn requests(
                     .iter()
                     .map(|id| CommandId::parse(id).map_err(|_| invalid("depends_on")))
                     .collect::<Result<_, _>>()?,
+                admission_tokens: if command.admission_tokens.is_empty() {
+                    Vec::new()
+                } else {
+                    parse_json(&command.admission_tokens, "admission_tokens")?
+                },
                 context: context.clone(),
             })
         })
@@ -487,6 +502,32 @@ impl BridgeWorkspace {
         Ok(self.save_requests(requests, operation, None)?)
     }
 
+    /// Recovers only a fully known original batch; it never executes a suffix.
+    pub fn lookup_known_batch(
+        &self,
+        commands: Vec<BridgeWorkspaceCommand>,
+        context: BridgeExecuteContext,
+    ) -> Result<BridgeKnownBatch, BridgeError> {
+        let requests = requests(&commands, &context)?;
+        Ok(self.with_store(|store| {
+            match bb_client::lookup_known_batch(store, &requests).map_err(execute_failure)? {
+                bb_client::KnownBatch::NotKnown => Ok(BridgeKnownBatch::NotKnown),
+                bb_client::KnownBatch::Known { results } => Ok(BridgeKnownBatch::Known {
+                    results: results
+                        .into_iter()
+                        .map(|saved| BridgeSaved {
+                            command_id: saved.command_id.as_str().to_owned(),
+                            entity_id: saved.entity_id.as_str().to_owned(),
+                            local_sequence: saved.local_sequence.to_string(),
+                            projection_generation: saved.projection_generation.to_string(),
+                            replayed: saved.replayed,
+                        })
+                        .collect(),
+                }),
+            }
+        })?)
+    }
+
     /// Source identities, keys and original issue times are checked again in
     /// the transaction that saves every command and every conversion marker.
     pub fn convert_legacy_unsent(
@@ -533,6 +574,7 @@ impl BridgeWorkspace {
                 page: BridgeWorkspacePage {
                     projection_generation: generation.to_string(),
                     result: result?,
+                    task_frames: b"[]".to_vec(),
                     collection_next_cursor: None,
                 },
             })
@@ -558,6 +600,7 @@ impl BridgeWorkspace {
                     page: BridgeWorkspacePage {
                         projection_generation: generation.to_string(),
                         result,
+                        task_frames: b"[]".to_vec(),
                         collection_next_cursor: None,
                     },
                 },
@@ -590,6 +633,7 @@ impl BridgeWorkspace {
                     page: BridgeWorkspacePage {
                         projection_generation: page.projection_generation.to_string(),
                         result: to_json(&page.result)?,
+                        task_frames: to_json(&page.task_frames)?,
                         collection_next_cursor: page.collection_next_cursor,
                     },
                 }),
@@ -750,10 +794,11 @@ impl BridgeWorkspace {
             .collect::<Result<Vec<_>, Failure>>()?;
         Ok(
             self.with_store(|store| match bb_client::workspace_records(store, &typed) {
-                Ok((generation, records)) => Ok(BridgeWorkspaceAnswer::Answered {
+                Ok((generation, records, task_frames)) => Ok(BridgeWorkspaceAnswer::Answered {
                     page: BridgeWorkspacePage {
                         projection_generation: generation.to_string(),
                         result: to_json(&serde_json::json!({"kind":"records","value":records}))?,
+                        task_frames: to_json(&task_frames)?,
                         collection_next_cursor: None,
                     },
                 }),
@@ -812,6 +857,7 @@ impl BridgeWorkspace {
                 page: BridgeWorkspacePage {
                     projection_generation: page.projection_generation.to_string(),
                     result: to_json(&serde_json::json!({"kind":"issues","value":page.items}))?,
+                    task_frames: b"[]".to_vec(),
                     collection_next_cursor: page.next_cursor,
                 },
             })
