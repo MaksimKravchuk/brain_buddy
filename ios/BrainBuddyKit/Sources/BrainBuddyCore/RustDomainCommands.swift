@@ -3,7 +3,8 @@ import Foundation
 // `GTDCommand` as a catalog command of the shared core (contracts/command-catalog.md):
 // the type, the target, the payload with its omitted / `null` / value distinction, the
 // revision check on the target, and the identifiers the rules may mint. Nothing here
-// decides a rule: it only says what the person asked for.
+// decides a rule: it only says what the person asked for. Every identifier it sends is the
+// canonical wire ID of `RustIDTable`, the same one the read set carries for that record.
 
 /// One command ready to be put in an envelope.
 struct RustEncodedCommand {
@@ -36,102 +37,105 @@ enum RustCommandEncoder {
         var encoded: RustEncodedCommand
         switch command {
         case .createProject(let create):
-            encoded = make("project.create", ids.new(create.projectID.rawValue, prefix: "project"), date)
+            encoded = make("project.create", ids.project(create.projectID), date)
             encoded.payload = [
                 "name": create.name, "color": wireNull(create.color), "desired_outcome": wireNull(create.desiredOutcome),
             ]
         case .updateProject(let update):
-            encoded = make("project.update", update.projectID.rawValue, date)
+            encoded = make("project.update", ids.project(update.projectID), date)
             if let name = update.name { encoded.payload["name"] = name }
             if let color = patch(update.color, { $0 }) { encoded.payload["color"] = color }
-            encoded.target = target("project", update.projectID.rawValue, revision(state.projects[update.projectID]))
+            encoded.target = target("project", encoded.entityID, revision(state.projects[update.projectID]))
         case .archiveProject(let id):
-            encoded = make("project.archive", id.rawValue, date)
-            encoded.target = target("project", id.rawValue, revision(state.projects[id]))
+            encoded = make("project.archive", ids.project(id), date)
+            encoded.target = target("project", encoded.entityID, revision(state.projects[id]))
         case .setProjectOutcome(let id, let outcome):
-            encoded = make("project.update", id.rawValue, date)
+            encoded = make("project.update", ids.project(id), date)
             encoded.payload = ["desired_outcome": wireNull(outcome)]
-            encoded.target = target("project", id.rawValue, revision(state.projects[id]))
+            encoded.target = target("project", encoded.entityID, revision(state.projects[id]))
         case .unarchiveProject(let id):
-            encoded = make("project.unarchive", id.rawValue, date)
-            encoded.target = target("project", id.rawValue, revision(state.projects[id]))
+            encoded = make("project.unarchive", ids.project(id), date)
+            encoded.target = target("project", encoded.entityID, revision(state.projects[id]))
         case .createTag(let create):
-            encoded = make("tag.create", ids.new(create.tagID.rawValue, prefix: "tag"), date)
+            encoded = make("tag.create", ids.tag(create.tagID), date)
             encoded.payload = ["name": create.name]
         case .renameTag(let rename):
-            encoded = make("tag.update", rename.tagID.rawValue, date)
+            encoded = make("tag.update", ids.tag(rename.tagID), date)
             encoded.payload = ["name": rename.name]
-            encoded.target = target("tag", rename.tagID.rawValue, revision(state.tags[rename.tagID]))
+            encoded.target = target("tag", encoded.entityID, revision(state.tags[rename.tagID]))
         case .deleteTag(let id):
-            encoded = make("tag.delete", id.rawValue, date)
-            encoded.target = target("tag", id.rawValue, revision(state.tags[id]))
+            encoded = make("tag.delete", ids.tag(id), date)
+            encoded.target = target("tag", encoded.entityID, revision(state.tags[id]))
         case .createTask(let create):
-            encoded = make("task.create", ids.new(create.taskID.rawValue, prefix: "task"), date)
+            encoded = make("task.create", ids.task(create.taskID), date)
             encoded.payload = [
                 "title": NameNormalizer.stripped(create.title),
                 "details": wireNull(create.details.flatMap { $0.isEmpty ? nil : $0 }),
-                "state": create.list.rawValue, "project_id": wireNull(create.projectID?.rawValue),
-                "tag_ids": create.tagIDs.map(\.rawValue), "due_date": wireNull(create.dueDate?.isoString),
+                "state": create.list.rawValue, "project_id": ids.optional(create.projectID?.rawValue, prefix: "project"),
+                "tag_ids": create.tagIDs.map { ids.tag($0) }, "due_date": wireNull(create.dueDate?.isoString),
                 "priority": create.priority.rawValue, "waiting_for": wireNull(create.waitingFor),
             ]
-            if let id = create.newFormulationID { encoded.payload["new_formulation_id"] = ids.new(id.rawValue, prefix: "form") }
+            if let id = create.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
             encoded.allocatedIDs = [derivedFormulation(create.taskID, date)]
         case .updateTask(let update):
-            encoded = make("task.update", update.taskID.rawValue, date)
-            try encodeTaskChanges(update.changes, of: state.tasks[update.taskID], into: &encoded.payload)
-            if let id = update.newFormulationID { encoded.payload["new_formulation_id"] = ids.new(id.rawValue, prefix: "form") }
+            encoded = make("task.update", ids.task(update.taskID), date)
+            try encodeTaskChanges(update.changes, of: state.tasks[update.taskID], into: &encoded.payload, ids: &ids)
+            if let id = update.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
             encoded.allocatedIDs = [derivedFormulation(update.taskID, date)]
-            encoded.target = target("task", update.taskID.rawValue, revision(state.tasks[update.taskID]))
+            encoded.target = target("task", encoded.entityID, revision(state.tasks[update.taskID]))
         case .transitionTask(let transition):
-            encoded = make("task.transition", transition.taskID.rawValue, date)
+            encoded = make("task.transition", ids.task(transition.taskID), date)
             encoded.payload = ["action": transition.action.rawValue]
             if let list = transition.toList { encoded.payload["to_state"] = list.rawValue }
             if let note = transition.waitingFor { encoded.payload["waiting_for"] = note }
-            if let id = transition.newFormulationID {
-                encoded.payload["new_formulation_id"] = ids.new(id.rawValue, prefix: "form")
-            }
+            if let id = transition.newFormulationID { encoded.payload["new_formulation_id"] = ids.formulation(id) }
             encoded.allocatedIDs = [derivedFormulation(transition.taskID, date)]
-            encoded.target = target("task", transition.taskID.rawValue, revision(state.tasks[transition.taskID]))
+            encoded.target = target("task", encoded.entityID, revision(state.tasks[transition.taskID]))
         case .createSubtask(let create):
-            encoded = make("subtask.create", ids.new(create.subtaskID.rawValue, prefix: "subtask"), date)
-            encoded.payload = ["task_id": create.taskID.rawValue, "title": NameNormalizer.stripped(create.title)]
+            encoded = make("subtask.create", ids.subtask(create.subtaskID), date)
+            encoded.payload = ["task_id": ids.task(create.taskID), "title": NameNormalizer.stripped(create.title)]
         case .updateSubtask(let update):
-            encoded = make("subtask.update", update.subtaskID.rawValue, date)
-            encoded.payload = ["task_id": update.taskID.rawValue, "title": NameNormalizer.stripped(update.title)]
-            encoded.target = target("subtask", update.subtaskID.rawValue, subtaskRevision(update.subtaskID, update.taskID, state))
-        case .transitionSubtask(let transition):
-            encoded = make("subtask.transition", transition.subtaskID.rawValue, date)
-            encoded.payload = ["task_id": transition.taskID.rawValue, "action": transition.action.rawValue]
+            encoded = make("subtask.update", ids.subtask(update.subtaskID), date)
+            encoded.payload = ["task_id": ids.task(update.taskID), "title": NameNormalizer.stripped(update.title)]
             encoded.target = target(
-                "subtask", transition.subtaskID.rawValue, subtaskRevision(transition.subtaskID, transition.taskID, state))
+                "subtask", encoded.entityID, subtaskRevision(update.subtaskID, update.taskID, state))
+        case .transitionSubtask(let transition):
+            encoded = make("subtask.transition", ids.subtask(transition.subtaskID), date)
+            encoded.payload = ["task_id": ids.task(transition.taskID), "action": transition.action.rawValue]
+            encoded.target = target(
+                "subtask", encoded.entityID, subtaskRevision(transition.subtaskID, transition.taskID, state))
         case .createComment(let create):
-            encoded = make("comment.create", ids.new(create.commentID.rawValue, prefix: "comment"), date)
-            encoded.payload = ["task_id": create.taskID.rawValue, "body": create.body]
+            encoded = make("comment.create", ids.comment(create.commentID), date)
+            encoded.payload = ["task_id": ids.task(create.taskID), "body": create.body]
         case .updateComment(let update):
-            encoded = make("comment.update", update.commentID.rawValue, date)
-            encoded.payload = ["task_id": update.taskID.rawValue, "body": update.body]
+            encoded = make("comment.update", ids.comment(update.commentID), date)
+            encoded.payload = ["task_id": ids.task(update.taskID), "body": update.body]
             let comment = state.tasks[update.taskID]?.comments.first { $0.id == update.commentID }
-            encoded.target = target("comment", update.commentID.rawValue, revision(comment))
+            encoded.target = target("comment", encoded.entityID, revision(comment))
         case .decideTask(let decide):
             encoded = try encodeDecision(decide, at: date, in: state, ids: &ids)
         case .undoDecision(let id):
-            encoded = make("review.undo_decision", id.rawValue, date)
+            encoded = make("review.undo_decision", ids.decision(id), date)
             if let decision = state.review.decisions[id] {
-                encoded.target = target("task", decision.taskID.rawValue, revision(state.tasks[decision.taskID]))
+                encoded.target = target("task", ids.task(decision.taskID), revision(state.tasks[decision.taskID]))
             }
         case .autoParkTask(let park):
-            encoded = make("review.auto_park", park.taskID.rawValue, park.observedAt ?? date)
-            encoded.payload = ["formulation_id": park.formulationID.rawValue]
+            encoded = make("review.auto_park", ids.task(park.taskID), park.observedAt ?? date)
+            encoded.payload = ["formulation_id": ids.formulation(park.formulationID)]
         case .bulkRelease(let release):
-            encoded = make("review.bulk_release", ids.new(release.bulkID.rawValue, prefix: "bulk"), date)
+            encoded = make("review.bulk_release", ids.bulk(release.bulkID), date)
+            var items: [WireObject] = []
+            for id in release.taskIDs {
+                items.append([
+                    "task_id": ids.task(id), "expected_revision": String(max(revision(state.tasks[id]) ?? 0, 0)),
+                ])
+            }
             encoded.payload = [
-                "kind": release.kind.rawValue, "session_id": wireNull(release.sessionID?.rawValue),
-                "items": release.taskIDs.map {
-                    ["task_id": $0.rawValue, "expected_revision": String(max(revision(state.tasks[$0]) ?? 0, 0))]
-                },
+                "kind": release.kind.rawValue, "session_id": ids.optional(release.sessionID?.rawValue, prefix: "review"),
+                "items": items,
             ]
         case .undoBulkRelease(let id):
-            encoded = make("review.bulk_undo", id.rawValue, date)
+            encoded = make("review.bulk_undo", ids.bulk(id), date)
         case .review(let review):
             encoded = try encodeReview(review, at: date, in: state, scopeID: scopeID, ids: &ids)
         }
@@ -179,7 +183,7 @@ enum RustCommandEncoder {
     }
 
     private static func encodeTaskChanges(
-        _ changes: TaskChanges, of task: TaskRecord?, into payload: inout WireObject
+        _ changes: TaskChanges, of task: TaskRecord?, into payload: inout WireObject, ids: inout RustIDTable
     ) throws {
         // A null title or priority is a request error the shared payloads cannot carry.
         switch changes.title {
@@ -193,7 +197,11 @@ enum RustCommandEncoder {
         case .set(let priority): payload["priority"] = priority.rawValue
         }
         if let value = patch(changes.details, { $0.isEmpty ? NSNull() : $0 as Any }) { payload["details"] = value }
-        if let value = patch(changes.projectID, { $0.rawValue }) { payload["project_id"] = value }
+        switch changes.projectID {
+        case .unchanged: break
+        case .clear: payload["project_id"] = NSNull()
+        case .set(let id): payload["project_id"] = ids.project(id)
+        }
         if let value = patch(changes.dueDate, { $0.isoString }) { payload["due_date"] = value }
         if let value = patch(changes.waitingFor, { $0 }) { payload["waiting_for"] = value }
         // The shared edit names the difference to the stored membership, not the whole list.
@@ -202,11 +210,11 @@ enum RustCommandEncoder {
         case .unchanged:
             break
         case .clear:
-            payload["tag_changes"] = ["add_tag_ids": [String](), "remove_tag_ids": current.map(\.rawValue)]
+            payload["tag_changes"] = ["add_tag_ids": [String](), "remove_tag_ids": current.map { ids.tag($0) }]
         case .set(let wanted):
             payload["tag_changes"] = [
-                "add_tag_ids": wanted.filter { !current.contains($0) }.map(\.rawValue),
-                "remove_tag_ids": current.filter { !wanted.contains($0) }.map(\.rawValue),
+                "add_tag_ids": wanted.filter { !current.contains($0) }.map { ids.tag($0) },
+                "remove_tag_ids": current.filter { !wanted.contains($0) }.map { ids.tag($0) },
             ]
         }
     }
@@ -214,24 +222,25 @@ enum RustCommandEncoder {
     private static func encodeDecision(
         _ decide: GTDCommand.DecideTask, at date: Date, in state: GTDState, ids: inout RustIDTable
     ) throws -> RustEncodedCommand {
-        var encoded = make("review.decide", decide.taskID.rawValue, date)
+        var encoded = make("review.decide", ids.task(decide.taskID), date)
         var payload: WireObject = [
-            "decision_id": ids.new(decide.decisionID.rawValue, prefix: "decision"), "type": decide.type.rawValue,
-            "formulation_id": wireNull(decide.formulationID?.rawValue),
+            "decision_id": ids.decision(decide.decisionID), "type": decide.type.rawValue,
+            "formulation_id": ids.optional(decide.formulationID?.rawValue, prefix: "form"),
             "stall_reason": wireNull(decide.stallReason?.rawValue),
             "title": wireNull(decide.title.map(NameNormalizer.stripped)), "waiting_for": wireNull(decide.waitingFor),
-            "reason": wireNull(decide.reason), "session_id": wireNull(decide.sessionID?.rawValue),
+            "reason": wireNull(decide.reason),
+            "session_id": ids.optional(decide.sessionID?.rawValue, prefix: "review"),
             "ai_use": decide.aiUse.rawValue, "navigator_request_id": wireNull(decide.navigatorRequestID),
             "client_decided_at": RustInstant.format(date),
         ]
-        if let id = decide.newFormulationID { payload["new_formulation_id"] = ids.new(id.rawValue, prefix: "form") }
+        if let id = decide.newFormulationID { payload["new_formulation_id"] = ids.formulation(id) }
         encoded.allocatedIDs = [derivedFormulation(decide.taskID, date)]
         if let followUp = decide.followUpTaskID {
-            payload["follow_up_task_id"] = ids.new(followUp.rawValue, prefix: "task")
+            payload["follow_up_task_id"] = ids.task(followUp)
             encoded.allocatedIDs.append(derivedFormulation(followUp, date))
         }
         encoded.payload = payload
-        encoded.target = target("task", decide.taskID.rawValue, revision(state.tasks[decide.taskID]))
+        encoded.target = target("task", encoded.entityID, revision(state.tasks[decide.taskID]))
         return encoded
     }
 
@@ -250,25 +259,31 @@ enum RustCommandEncoder {
             if let time = change.reviewTime { encoded.payload["review_time"] = time }
             if let zone = change.timeZone { encoded.payload["time_zone"] = zone }
             if change.onboarded { encoded.payload["onboarded"] = true }
+            // Settings nobody changed are not in the read set (`RustReadSet`); the core's default
+            // row for them is at revision 1.
+            let stored = state.review.settings != ReviewSettings()
             encoded.target = RustEncodedCommand.Target(
-                entityType: "review_settings", id: scopeID, revision: max(state.review.settings.revision ?? 0, 0))
+                entityType: "review_settings", id: scopeID,
+                revision: stored ? max(state.review.settings.revision ?? 0, 0) : 1)
             return encoded
         case .acknowledgeParks(let items):
             var encoded = make("review.parks_ack", scopeID, date)
-            encoded.payload = [
-                "items": items.map { ["task_id": $0.taskID.rawValue, "formulation_id": $0.formulationID.rawValue] }
-            ]
+            var keys: [WireObject] = []
+            for item in items {
+                keys.append(["task_id": ids.task(item.taskID), "formulation_id": ids.formulation(item.formulationID)])
+            }
+            encoded.payload = ["items": keys]
             return encoded
         case .startSession(let start):
-            var encoded = make("review.session_start", ids.new(start.sessionID.rawValue, prefix: "review"), date)
+            var encoded = make("review.session_start", ids.session(start.sessionID), date)
             encoded.payload = [
                 "mode": start.mode.rawValue, "entry": start.entry.rawValue, "origin": start.origin.rawValue,
                 "skip_steps": start.skipSteps.map(\.rawValue), "replace_open": true,
             ]
             return encoded
         case .progressSession(let progress):
-            var encoded = make("review.session_progress", progress.sessionID.rawValue, date)
-            var payload: WireObject = ["progress_id": ids.new(progress.progressID.rawValue, prefix: "progress")]
+            var encoded = make("review.session_progress", ids.session(progress.sessionID), date)
+            var payload: WireObject = ["progress_id": ids.progress(progress.progressID)]
             if let step = progress.currentStep { payload["current_step"] = step.rawValue }
             if let step = progress.step, let status = progress.stepStatus {
                 payload["step"] = ["code": step.rawValue, "status": status.rawValue]
@@ -276,13 +291,13 @@ enum RustCommandEncoder {
             if let step = progress.activeStep, let seconds = progress.activeSeconds {
                 payload["active_seconds"] = ["code": step.rawValue, "seconds": max(seconds, 0)]
             }
-            if let task = progress.setAsideTaskID { payload["set_aside_task_id"] = task.rawValue }
+            if let task = progress.setAsideTaskID { payload["set_aside_task_id"] = ids.task(task) }
             if let delta = progress.inboxProcessedDelta { payload["inbox_processed_delta"] = delta }
             if progress.snapshotDecisionQueue { payload["snapshot_decision_queue"] = true }
             encoded.payload = payload
             return encoded
         case .finishSession(let finish):
-            var encoded = make("review.session_finish", finish.sessionID.rawValue, date)
+            var encoded = make("review.session_finish", ids.session(finish.sessionID), date)
             encoded.payload = ["clear_start": wireNull(finish.clearStart?.rawValue)]
             return encoded
         case .grantNavigatorConsent(let provider, let version):

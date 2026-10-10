@@ -752,3 +752,172 @@ fn apple_wire_026_sc_001_smart_add_decides_atomically_from_the_proposed_payload(
         .collect();
     assert_eq!(kinds, ["project", "tag", "task"]);
 }
+
+#[test]
+fn apple_wire_026_fr_002_a_repeated_create_meets_the_canonical_id_in_the_read_set() {
+    // The facade sends every identifier in its canonical `<prefix>_<uuid>` form, the read set
+    // included, so a create of an ID the state holds is the core's `id_already_exists`.
+    let mut device = Device::new();
+    let project = wire("project", HOME);
+    let tag = wire("tag", ERRANDS);
+    let task = wire("task", MILK);
+    let subtask = wire("subtask", SUB);
+    let comment = wire("comment", NOTE);
+    let creates: Vec<(&str, String, Value)> = vec![
+        (
+            "project.create",
+            project.clone(),
+            json!({"name": "Home", "color": null, "desired_outcome": null}),
+        ),
+        ("tag.create", tag.clone(), json!({"name": "errands"})),
+        (
+            "task.create",
+            task.clone(),
+            json!({"title": "Buy milk", "details": null, "state": "inbox", "project_id": project,
+                   "tag_ids": [tag], "due_date": null, "priority": "none", "waiting_for": null}),
+        ),
+        (
+            "subtask.create",
+            subtask,
+            json!({"task_id": task, "title": "Oat milk"}),
+        ),
+        (
+            "comment.create",
+            comment,
+            json!({"task_id": task, "body": "Ask for the big bottle"}),
+        ),
+    ];
+    for (step, (kind, entity, payload)) in creates.iter().enumerate() {
+        device
+            .run(step as u32 + 1, kind, entity, payload, None, &[])
+            .unwrap_or_else(|refusal| panic!("{kind} refused: {refusal:?}"));
+    }
+    let before = device.read_set.clone();
+    for (step, (kind, entity, payload)) in creates.iter().enumerate() {
+        let refusal = device
+            .run(step as u32 + 10, kind, entity, payload, None, &[])
+            .expect_err("a second create of the same ID");
+        assert_eq!(refusal.reason, "id_already_exists", "{kind}");
+    }
+    assert_eq!(device.read_set, before, "a refusal changes nothing");
+}
+
+#[test]
+fn apple_wire_026_fr_016_an_observed_park_is_decided_by_the_core_without_a_snapshot() {
+    let device = Device::new();
+    let form = "form_5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d21";
+    let read_set = json!({
+        "settings": {
+            "threshold_days": 14, "review_weekday": 5, "review_time": "16:00", "time_zone": "UTC",
+            "onboarded_at": null, "activated_at": "2026-03-01T08:00:00Z",
+            "owner_park_floor_at": null, "revision": "1",
+            // The sweep ran an hour ago: without it the core sees a gap of 24 hours or more and
+            // floors every park for 7 days (SC-006), which is what a device without the
+            // server's sweep bookkeeping always gets.
+            "private": {"last_effective_sweep_at": "2026-10-09T11:00:00Z",
+                        "threshold_changed_at": null}
+        },
+        "tasks": { MILK: {
+            "id": MILK, "title": "Call Sam", "details": null, "state": "next", "project_id": null,
+            "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
+            "waiting_since": null, "order_key": "0", "source_capture_ids": [],
+            "created_at": "2026-06-01T08:00:00Z", "updated_at": "2026-06-01T08:00:00Z",
+            "completed_at": null, "cancelled_at": null, "revision": "1",
+            "consecutive_stalled_formulations": 0, "parked": null,
+            "formulation": {"id": form, "started_at": "2026-06-01T08:00:00Z", "extended_at": null,
+                            "extension_reason": null, "park_floor_at": null}
+        } }
+    });
+    let envelope = json!({
+        "protocol_version": 1, "command_id": "5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d11",
+        "scope_id": "local", "device_id": "device", "device_epoch": "epoch", "local_sequence": "1",
+        "type": "review.auto_park", "command_version": 1, "entity_id": MILK,
+        "preconditions": [], "depends_on": [], "issued_at": "2026-10-09T12:00:00Z",
+        "payload": {"formulation_id": form}
+    });
+    let inputs = json!({
+        "rule_version": 1, "now": "2026-10-09T12:00:00Z", "time_zone": "UTC", "origin": "device",
+        "actor_id": "device", "authoritative": false, "allocated_ids": [],
+        "policy": {"weekly_review": true, "navigator_provider": null,
+                   "navigator_available": false, "consent_text_version": 1}
+    });
+    let decision = device
+        .runtime
+        .decide(
+            bytes(&read_set),
+            bytes(&envelope),
+            bytes(&json!([])),
+            bytes(&inputs),
+        )
+        .expect("decides");
+    let BridgeDecision::Changed { change_set } = decision else {
+        panic!("the park was refused");
+    };
+    let change_set: Value = serde_json::from_slice(&change_set).expect("json");
+    assert_eq!(change_set["result"]["applied"], true);
+    let parked = change_set["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .find(|change| change["entity_type"] == "task")
+        .expect("the parked task");
+    assert_eq!(parked["value"]["state"], "someday");
+    assert_eq!(parked["value"]["parked"]["formulation_id"], form);
+    // The device is not authoritative: no private snapshot is written.
+    assert!(parked["value"]["parked"].get("private").is_none());
+
+    // Without the server's sweep bookkeeping the same park is `applied: false`.
+    let mut gap = read_set.clone();
+    gap["settings"]
+        .as_object_mut()
+        .expect("settings")
+        .remove("private");
+    let decision = device
+        .runtime
+        .decide(
+            bytes(&gap),
+            bytes(&envelope),
+            bytes(&json!([])),
+            bytes(&inputs),
+        )
+        .expect("decides");
+    let BridgeDecision::Changed { change_set } = decision else {
+        panic!("the park was refused");
+    };
+    let change_set: Value = serde_json::from_slice(&change_set).expect("json");
+    assert_eq!(change_set["result"]["applied"], false);
+}
+
+#[test]
+fn apple_wire_026_fr_016_settings_never_stored_are_checked_at_the_default_revision() {
+    // Settings nobody changed are left out of the read set; the core's default row is at
+    // revision 1, which is what the facade's revision check names for them.
+    let device = Device::new();
+    let envelope = |revision: &str| {
+        json!({
+            "protocol_version": 1, "command_id": "5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d11",
+            "scope_id": "local", "device_id": "device", "device_epoch": "epoch", "local_sequence": "1",
+            "type": "review.settings", "command_version": 1, "entity_id": "local",
+            "preconditions": [{"entity_type": "review_settings", "entity_id": "local",
+                               "edit_revision": revision}],
+            "depends_on": [], "issued_at": "2026-10-09T12:00:00Z",
+            "payload": {"threshold_days": 21}
+        })
+    };
+    for (revision, accepted) in [("1", true), ("0", false)] {
+        let decision = device
+            .runtime
+            .decide(
+                bytes(&device.read_set),
+                bytes(&envelope(revision)),
+                bytes(&json!([])),
+                device.inputs(&at(1), &[]),
+            )
+            .expect("decides");
+        assert_eq!(
+            matches!(decision, BridgeDecision::Changed { .. }),
+            accepted,
+            "{revision}"
+        );
+    }
+}

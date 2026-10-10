@@ -74,10 +74,14 @@ public struct RustDomainFacade: Sendable {
         }
         var ids = RustIDTable()
         let encoded = try RustCommandEncoder.encode(command, at: date, in: before, scopeID: context.scopeID, ids: &ids)
-        let changeSet = try await decide(encoded, in: before, ids: ids)
+        let changeSet = try await decide(encoded, in: before, ids: &ids)
         var next = before
         let outcome = try RustChangeApplier.apply(
             changeSet, to: &next, before: before, at: encoded.issuedAt, ids: ids, actorID: context.actorID)
+        // A park the device observed while online parks the task only once the server answers
+        // `applied: true` (contracts/ios-commands.md section 5): the core has checked it, and
+        // nothing changes on the device meanwhile, as in the Swift reducer.
+        if case .autoParkTask(let park) = command, !park.optimistic { return outcome }
         // Replay protection of a progress change is the device's record of what it sent.
         if case .review(.progressSession(let progress)) = command, var session = next.review.sessions[progress.sessionID] {
             session.appliedProgress.insert(progress.progressID)
@@ -111,8 +115,10 @@ public struct RustDomainFacade: Sendable {
     }
 
     /// Sends one encoded command to the core and returns its change set.
-    private func decide(_ encoded: RustEncodedCommand, in state: GTDState, ids: RustIDTable) async throws -> WireObject {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
+    private func decide(_ encoded: RustEncodedCommand, in state: GTDState, ids: inout RustIDTable) async throws
+        -> WireObject
+    {
+        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID, ids: &ids))
         let envelope = try RustJSON.data(envelopeObject(encoded))
         let inputs = try RustJSON.data(executionInputs(encoded, state))
         let receipts = try RustJSON.data([Any]())
@@ -120,7 +126,7 @@ public struct RustDomainFacade: Sendable {
         case .changed(let changeSet):
             return try RustJSON.object(changeSet)
         case .refused(let refusal):
-            throw Self.refusalError(refusal, payload: encoded.payload, in: state)
+            throw Self.refusalError(refusal, payload: encoded.payload, in: state, ids: ids)
         }
     }
 
@@ -144,7 +150,8 @@ public struct RustDomainFacade: Sendable {
         [
             "rule_version": 1, "now": RustInstant.format(encoded.issuedAt), "time_zone": context.deviceTimeZone,
             "origin": "device", "actor_id": context.actorID, "authoritative": false,
-            "allocated_ids": encoded.allocatedIDs, "policy": policy(state, provider: encoded.navigatorProvider, version: encoded.consentTextVersion),
+            "allocated_ids": encoded.allocatedIDs,
+            "policy": policy(state, provider: encoded.navigatorProvider, version: encoded.consentTextVersion),
         ]
     }
 
@@ -159,13 +166,19 @@ public struct RustDomainFacade: Sendable {
 
     /// The error for a refusal: the app's own wording where it has one, the core's typed
     /// reason otherwise.
-    static func refusalError(_ refusal: RustRefusal, payload: WireObject, in state: GTDState) -> any Error {
-        if let known = validationError(refusal, payload: payload, in: state) { return known }
+    static func refusalError(
+        _ refusal: RustRefusal, payload: WireObject, in state: GTDState, ids: RustIDTable
+    ) -> any Error {
+        if let known = validationError(refusal, payload: payload, in: state, ids: ids) { return known }
         return RustDomainError.refused(reason: refusal.reason, field: refusal.field)
     }
 
-    static func validationError(_ refusal: RustRefusal, payload: WireObject, in state: GTDState) -> GTDValidationError? {
+    static func validationError(
+        _ refusal: RustRefusal, payload: WireObject, in state: GTDState, ids: RustIDTable
+    ) -> GTDValidationError? {
         let name = payload["name"] as? String ?? ""
+        // The record a refusal is about, as the state keys it.
+        let subject = refusal.entityKey.first.map { ids.swift($0) }
         switch refusal.reason {
         case "text_length": return lengthError(refusal.field)
         case "invalid_payload": return payloadError(refusal.field, payload)
@@ -176,17 +189,17 @@ public struct RustDomainFacade: Sendable {
         case "waiting_for_only_on_waiting_tasks": return .waitingForOnlyOnWaitingTasks
         // The refusal names the active record that holds the name.
         case "duplicate_project_name":
-            let holder = refusal.entityKey.first.flatMap { state.projects[ProjectID($0)] }
+            let holder = subject.flatMap { state.projects[ProjectID($0)] }
             return .duplicateProjectName(holder?.name ?? NameNormalizer.display(name))
         case "duplicate_tag_name":
-            let holder = refusal.entityKey.first.flatMap { state.tags[TagID($0)] }
+            let holder = subject.flatMap { state.tags[TagID($0)] }
             return .duplicateTagName(holder?.name ?? NameNormalizer.tagDisplay(name))
         case "project_not_active": return .projectNotActive
         case "project_archived": return .projectArchived
         case "project_already_archived": return .projectAlreadyArchived
         case "unarchive_name_in_use":
-            let project = refusal.entityKey.first.flatMap { state.projects[ProjectID($0)] }
-            return .unarchiveNameInUse(project?.name ?? name)
+            let holder = subject.flatMap { state.projects[ProjectID($0)] }
+            return .unarchiveNameInUse(holder?.name ?? name)
         case "tag_not_active": return .tagNotActive
         case "tag_already_deleted": return .tagAlreadyDeleted
         case "duplicate_tag", "tag_changes_overlap": return .duplicateTag
@@ -252,17 +265,37 @@ public struct RustDomainFacade: Sendable {
         }
     }
 
-    /// The payload types refuse both an empty and an overlong value as one error; the
-    /// request says which it was.
+    /// The text members of a payload in the order the app checks them (title, notes and
+    /// waiting note; name, colour and outcome; comment), with the error each gives when it
+    /// is empty (where an empty value is refused) or over its limit.
+    private static let textRules: [(key: String, empty: GTDValidationError?, tooLong: GTDValidationError, limit: Int)] = [
+        ("title", .emptyTitle, .titleTooLong, GTDLimits.title),
+        ("details", nil, .detailsTooLong, GTDLimits.details),
+        ("waiting_for", nil, .waitingForTooLong, GTDLimits.waitingFor),
+        ("name", .emptyName, .nameTooLong, GTDLimits.name),
+        ("color", nil, .colorTooLong, GTDLimits.color),
+        ("desired_outcome", nil, .outcomeTooLong, GTDLimits.outcome),
+        ("body", .emptyComment, .commentTooLong, GTDLimits.comment),
+    ]
+
+    /// The payload types refuse both an empty and an overlong value as one error, and report
+    /// the first member they meet, which is not the first the app checks. The payload says
+    /// which member is at fault and how: the first one, in the app's order, that is empty or
+    /// over its limit.
     private static func payloadError(_ field: String?, _ payload: WireObject) -> GTDValidationError? {
-        let longest = payload.values.compactMap { ($0 as? String)?.unicodeScalars.count }.max() ?? 0
+        for rule in textRules {
+            guard let value = payload[rule.key] as? String else { continue }
+            let length = value.unicodeScalars.count
+            if length > rule.limit { return rule.tooLong }
+            if length == 0, let empty = rule.empty { return empty }
+        }
+        // A review decision's short texts and an extension reason.
+        let reason = (payload["reason"] as? String).map(NameNormalizer.stripped)
         switch field {
-        case "Title", "ShortText": return longest > GTDLimits.title ? .titleTooLong : .emptyTitle
-        case "Name": return longest > GTDLimits.name ? .nameTooLong : .emptyName
-        case "CommentBody": return longest > GTDLimits.comment ? .commentTooLong : .emptyComment
-        case "ReasonText": return longest > GTDLimits.title ? .extensionReasonTooLong : .extensionReasonRequired
-        case "Details", "WaitingFor", "Color", "DesiredOutcome": return lengthError(field)
-        default: return nil
+        case "ReasonText":
+            return (reason?.unicodeScalars.count ?? 0) > GTDLimits.title ? .extensionReasonTooLong : .extensionReasonRequired
+        default:
+            return nil
         }
     }
 
@@ -273,23 +306,35 @@ public struct RustDomainFacade: Sendable {
         ["now": RustInstant.format(now), "device_zone": zone, "policy": policy(state, provider: nil, version: nil)]
     }
 
+    /// The read set and inputs one query call sends, and the identifiers they use.
+    private struct Prepared {
+        var ids = RustIDTable()
+        var readSet = Data()
+        var inputs = Data()
+    }
+
+    private func prepare(_ state: GTDState, now: Date, zone: String) throws -> Prepared {
+        var prepared = Prepared()
+        prepared.readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID, ids: &prepared.ids))
+        prepared.inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
+        return prepared
+    }
+
     /// Asks the core one query; a refusal is a `RustDomainError`.
-    private func ask(_ query: WireObject, readSet: Data, inputs: Data) async throws -> WireObject {
+    private func ask(_ query: WireObject, _ prepared: Prepared) async throws -> WireObject {
         let data = try RustJSON.data(query)
-        switch try await runtime.query(readSet: readSet, query: data, inputs: inputs) {
+        switch try await runtime.query(readSet: prepared.readSet, query: data, inputs: prepared.inputs) {
         case .answered(let result): return try RustJSON.object(result)
         case .refused(let refusal): throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
         }
     }
 
     /// Every page of a paged query, following its cursor. The read set is encoded once.
-    private func pages(
-        readSet: Data, inputs: Data, _ build: (String?) -> WireObject
-    ) async throws -> [WireObject] {
+    private func pages(_ prepared: Prepared, _ build: (String?) -> WireObject) async throws -> [WireObject] {
         var values: [WireObject] = []
         var cursor: String?
         while true {
-            let value = try await ask(build(cursor), readSet: readSet, inputs: inputs).object("value")
+            let value = try await ask(build(cursor), prepared).object("value")
             values.append(value)
             guard try value.bool("has_more"), let next = value.optionalString("next_cursor") else { break }
             cursor = next
@@ -299,6 +344,11 @@ public struct RustDomainFacade: Sendable {
 
     private static func page(_ cursor: String?) -> WireObject {
         ["limit": 200, "after": wireNull(cursor)]
+    }
+
+    /// The task a query row names, as the state holds it.
+    private static func task(_ row: WireObject, _ state: GTDState, _ ids: RustIDTable) throws -> TaskRecord? {
+        state.tasks[TaskID(ids.swift(try row.string("id")))]
     }
 
     /// The tasks a destination shows. The shared queries answer the open lists, a project, the
@@ -311,27 +361,28 @@ public struct RustDomainFacade: Sendable {
     public func list(
         _ destination: Destination, options: ListOptions, in state: GTDState, now: Date, zone: String
     ) async throws -> TaskListResult {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
+        var prepared = try prepare(state, now: now, zone: zone)
+        let tag = prepared.ids.optional(options.tagFilter?.rawValue, prefix: "tag")
         switch destination {
         case .agenda:
-            return try await listMode(["type": "agenda"], options, state, readSet, inputs)
+            return try await listMode(["type": "agenda"], options, tag, state, prepared)
         case .dateView(let view):
-            return try await listMode(["type": "date_view", "view": view.rawValue], options, state, readSet, inputs)
+            return try await listMode(["type": "date_view", "view": view.rawValue], options, tag, state, prepared)
         case .history(let kind):
-            return try await listMode(["type": "history", "kind": kind.rawValue], options, state, readSet, inputs)
+            return try await listMode(["type": "history", "kind": kind.rawValue], options, tag, state, prepared)
         case .search(let text):
-            return try await listMode(["type": "search", "text": text], options, state, readSet, inputs)
+            return try await listMode(["type": "search", "text": text], options, tag, state, prepared)
         case .list(let list):
             try requirePlainOptions(options, "open list")
-            let tasks = try await openTasks(list, project: nil, options, state, readSet, inputs)
+            let tasks = try await openTasks(list, project: NSNull(), options, tag, state, prepared)
             let sections = tasks.isEmpty ? [] : [TaskSection(id: "open", title: nil, kind: .open, tasks: tasks)]
             return TaskListResult(sections: sections, openCount: tasks.count)
         case .project(let id):
             try requirePlainOptions(options, "project")
+            let project: Any = prepared.ids.project(id)
             var sections: [TaskSection] = []
             for list in GTDQueries.projectListOrder {
-                let tasks = try await openTasks(list, project: id, options, state, readSet, inputs)
+                let tasks = try await openTasks(list, project: project, options, tag, state, prepared)
                 if !tasks.isEmpty {
                     sections.append(TaskSection(id: "list:\(list.rawValue)", title: list.title, kind: .list(list), tasks: tasks))
                 }
@@ -350,51 +401,52 @@ public struct RustDomainFacade: Sendable {
     }
 
     private func openTasks(
-        _ list: OpenList, project: ProjectID?, _ options: ListOptions, _ state: GTDState, _ readSet: Data,
-        _ inputs: Data
+        _ list: OpenList, project: Any, _ options: ListOptions, _ tag: Any, _ state: GTDState, _ prepared: Prepared
     ) async throws -> [TaskRecord] {
-        let results = try await pages(readSet: readSet, inputs: inputs) { cursor in
+        let results = try await pages(prepared) { cursor in
             [
-                "kind": "task_list", "list": list.rawValue, "project_id": wireNull(project?.rawValue),
-                "tag_id": wireNull(options.tagFilter?.rawValue), "sort": options.sort.rawValue, "page": Self.page(cursor),
+                "kind": "task_list", "list": list.rawValue, "project_id": project, "tag_id": tag,
+                "sort": options.sort.rawValue, "page": Self.page(cursor),
             ]
         }
         var tasks: [TaskRecord] = []
         for result in results {
             for item in try result.objects("items") {
-                if let task = state.tasks[TaskID(try item.string("id"))] { tasks.append(task) }
+                if let task = try Self.task(item, state, prepared.ids) { tasks.append(task) }
             }
         }
         return tasks
     }
 
     private func listMode(
-        _ mode: WireObject, _ options: ListOptions, _ state: GTDState, _ readSet: Data, _ inputs: Data
+        _ mode: WireObject, _ options: ListOptions, _ tag: Any, _ state: GTDState, _ prepared: Prepared
     ) async throws -> TaskListResult {
         let wireOptions: WireObject = [
             "sort": options.sort.rawValue, "group_by_project": options.groupByProject,
             "show_completed": options.showCompleted, "show_cancelled": options.showCancelled,
-            "priorities": options.priorities.map(\.rawValue).sorted(), "tag_filter": wireNull(options.tagFilter?.rawValue),
+            "priorities": options.priorities.map(\.rawValue).sorted(), "tag_filter": tag,
         ]
-        let results = try await pages(readSet: readSet, inputs: inputs) { cursor in
+        let results = try await pages(prepared) { cursor in
             ["kind": "list_mode", "mode": mode, "options": wireOptions, "page": Self.page(cursor)]
         }
         var sections: [TaskSection] = []
         for result in results {
             for section in try result.objects("sections") {
-                let id = try section.string("id")
+                // A project section's id names the project: in the state's own terms.
+                let wireID = try section.string("id")
+                let id =
+                    wireID.hasPrefix("project:")
+                    ? "project:" + prepared.ids.swift(String(wireID.dropFirst("project:".count))) : wireID
                 var tasks: [TaskRecord] = []
                 for item in try section.objects("items") {
-                    if let task = state.tasks[TaskID(try item.string("id"))] { tasks.append(task) }
+                    if let task = try Self.task(item, state, prepared.ids) { tasks.append(task) }
                 }
                 // A section a page starts inside repeats its id.
                 if let last = sections.last, last.id == id {
                     sections[sections.count - 1].tasks += tasks
                 } else {
-                    sections.append(
-                        TaskSection(
-                            id: id, title: section.optionalString("title"), kind: try Self.sectionKind(section.object("kind")),
-                            tasks: tasks))
+                    let kind = try Self.sectionKind(section.object("kind"), prepared.ids)
+                    sections.append(TaskSection(id: id, title: section.optionalString("title"), kind: kind, tasks: tasks))
                 }
             }
         }
@@ -402,10 +454,10 @@ public struct RustDomainFacade: Sendable {
         return TaskListResult(sections: sections, openCount: openCount)
     }
 
-    private static func sectionKind(_ kind: WireObject) throws -> TaskSection.Kind {
+    private static func sectionKind(_ kind: WireObject, _ ids: RustIDTable) throws -> TaskSection.Kind {
         switch try kind.string("type") {
         case "open": return .open
-        case "project": return .project(kind.optionalString("project_id").map { ProjectID($0) })
+        case "project": return .project(kind.optionalString("project_id").map { ProjectID(ids.swift($0)) })
         case "date_view":
             guard let view = DateView(rawValue: try kind.string("view")) else { throw RustDomainError.malformedResult }
             return .dateView(view)
@@ -417,9 +469,8 @@ public struct RustDomainFacade: Sendable {
 
     /// Badge counts over open tasks.
     public func counts(in state: GTDState, now: Date, zone: String) async throws -> ListCounts {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
-        let value = try await ask(["kind": "list_counts"], readSet: readSet, inputs: inputs).object("value")
+        let prepared = try prepare(state, now: now, zone: zone)
+        let value = try await ask(["kind": "list_counts"], prepared).object("value")
         return ListCounts(
             inbox: try value.int("inbox"), next: try value.int("next"), waiting: try value.int("waiting"),
             someday: try value.int("someday"), overdue: try value.int("overdue"), today: try value.int("today"))
@@ -429,13 +480,12 @@ public struct RustDomainFacade: Sendable {
     public func projects(in state: GTDState, archived: Bool = false, now: Date, zone: String) async throws
         -> [ProjectSummary]
     {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
-        let result = try await ask(
-            ["kind": "projects", "filter": archived ? "archived" : "active"], readSet: readSet, inputs: inputs)
+        let prepared = try prepare(state, now: now, zone: zone)
+        let result = try await ask(["kind": "projects", "filter": archived ? "archived" : "active"], prepared)
         var summaries: [ProjectSummary] = []
         for item in result["value"] as? [WireObject] ?? [] {
-            guard let project = state.projects[ProjectID(try item.object("project").string("id"))] else { continue }
+            let id = ProjectID(prepared.ids.swift(try item.object("project").string("id")))
+            guard let project = state.projects[id] else { continue }
             summaries.append(
                 ProjectSummary(
                     project: project, openTaskCount: try item.int("open_task_count"),
@@ -446,12 +496,12 @@ public struct RustDomainFacade: Sendable {
 
     /// Active tags by name, with the number of open tasks carrying each.
     public func tags(in state: GTDState, now: Date, zone: String) async throws -> [TagSummary] {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
-        let result = try await ask(["kind": "tags"], readSet: readSet, inputs: inputs)
+        let prepared = try prepare(state, now: now, zone: zone)
+        let result = try await ask(["kind": "tags"], prepared)
         var summaries: [TagSummary] = []
         for item in result["value"] as? [WireObject] ?? [] {
-            guard let tag = state.tags[TagID(try item.object("tag").string("id"))] else { continue }
+            let id = TagID(prepared.ids.swift(try item.object("tag").string("id")))
+            guard let tag = state.tags[id] else { continue }
             summaries.append(TagSummary(tag: tag, openTaskCount: try item.int("open_task_count")))
         }
         return summaries
@@ -462,10 +512,9 @@ public struct RustDomainFacade: Sendable {
         -> ProjectDisplay?
     {
         guard state.projects[id] != nil else { return nil }
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
-        let value = try await ask(["kind": "project_display", "project_id": id.rawValue], readSet: readSet, inputs: inputs)
-            .object("value")
+        var prepared = try prepare(state, now: now, zone: zone)
+        let project = prepared.ids.project(id)
+        let value = try await ask(["kind": "project_display", "project_id": project], prepared).object("value")
         return ProjectDisplay(
             isArchived: try value.bool("is_archived"), acceptsNewTasks: try value.bool("accepts_new_tasks"),
             showsPreLosslessLine: try value.bool("shows_pre_lossless_line"), label: try value.string("label"))
@@ -474,20 +523,19 @@ public struct RustDomainFacade: Sendable {
     /// One task with its children, as the state holds it; nil for a task it does not hold.
     public func taskDetail(_ id: TaskID, in state: GTDState, now: Date, zone: String) async throws -> TaskRecord? {
         guard let task = state.tasks[id] else { return nil }
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
-        _ = try await ask(["kind": "task_detail", "task_id": id.rawValue], readSet: readSet, inputs: inputs)
+        var prepared = try prepare(state, now: now, zone: zone)
+        let wire = prepared.ids.task(id)
+        _ = try await ask(["kind": "task_detail", "task_id": wire], prepared)
         return task
     }
 
     /// The review's derived facts (`GET /review/state`). A review the policy does not expose is
     /// `exposed: false`, as the server answers `404 weekly_review_disabled`.
     public func reviewState(in state: GTDState, now: Date, zone: String) async throws -> ReviewServerFacts {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
+        let prepared = try prepare(state, now: now, zone: zone)
         let value: WireObject
         do {
-            value = try await ask(["kind": "review_state"], readSet: readSet, inputs: inputs).object("value")
+            value = try await ask(["kind": "review_state"], prepared).object("value")
         } catch RustDomainError.refused(let reason, _) where reason == "review_unavailable" {
             return ReviewServerFacts(exposed: false)
         }
@@ -500,8 +548,8 @@ public struct RustDomainFacade: Sendable {
                 let origin = ReviewOrigin(rawValue: try counted.string("origin"))
             else { throw RustDomainError.malformedResult }
             last = LastCountedReview(
-                sessionID: ReviewSessionID(try counted.string("session_id")), status: status, origin: origin,
-                endedAt: try counted.optionalInstant("ended_at"), counts: summary,
+                sessionID: ReviewSessionID(prepared.ids.swift(try counted.string("session_id"))), status: status,
+                origin: origin, endedAt: try counted.optionalInstant("ended_at"), counts: summary,
                 clearStart: counted.optionalString("clear_start").flatMap { ClearStart(rawValue: $0) })
         }
         return ReviewServerFacts(
@@ -509,7 +557,7 @@ public struct RustDomainFacade: Sendable {
             lastCountedReview: last, nextReviewAt: try value.optionalInstant("next_review_at"),
             restartMode: try value.bool("restart_mode"),
             openSessionID: value.optionalObject("open_session").flatMap { $0.optionalString("id") }
-                .map { ReviewSessionID($0) },
+                .map { ReviewSessionID(prepared.ids.swift($0)) },
             pulledAt: now)
     }
 
@@ -517,34 +565,40 @@ public struct RustDomainFacade: Sendable {
     public func reviewQueue(
         step: ReviewStep, session: ReviewSessionID? = nil, in state: GTDState, now: Date, zone: String
     ) async throws -> [TaskRecord] {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let inputs = try RustJSON.data(queryInputs(state, now: now, zone: zone))
+        var prepared = try prepare(state, now: now, zone: zone)
+        let sessionWire = prepared.ids.optional(session?.rawValue, prefix: "review")
         let value = try await ask(
-            ["kind": "review_queue", "step": step.rawValue, "session_id": wireNull(session?.rawValue)], readSet: readSet,
-            inputs: inputs
+            ["kind": "review_queue", "step": step.rawValue, "session_id": sessionWire], prepared
         ).object("value")
         var tasks: [TaskRecord] = []
         for item in try value.objects("items") {
-            if let task = state.tasks[TaskID(try item.string("id"))] { tasks.append(task) }
+            if let task = try Self.task(item, state, prepared.ids) { tasks.append(task) }
         }
         return tasks
     }
 
     // MARK: - Smart Add
 
-    private func draftObject(_ draft: CaptureDraft) -> WireObject {
+    private func draftObject(_ draft: CaptureDraft, _ ids: inout RustIDTable) -> WireObject {
         [
             "text": draft.text, "list": draft.list.rawValue, "waiting_for": draft.waitingFor, "details": draft.details,
             "due_date": wireNull(draft.dueDate?.isoString), "priority": draft.priority.rawValue,
-            "context_project": wireNull(draft.contextProjectID?.rawValue), "context_tag": wireNull(draft.contextTagID?.rawValue),
+            "context_project": ids.optional(draft.contextProjectID?.rawValue, prefix: "project"),
+            "context_tag": ids.optional(draft.contextTagID?.rawValue, prefix: "tag"),
         ]
     }
 
     /// What capture would do right now: the clean title, the tokens to highlight, the project
     /// and tags it would use or create, and the first problem.
     public func preview(_ draft: CaptureDraft, in state: GTDState) async throws -> CapturePreview {
-        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID))
-        let resolved = try await runtime.smartAddResolve(readSet: readSet, draft: RustJSON.data(draftObject(draft)))
+        var ids = RustIDTable()
+        let readSet = try RustJSON.data(RustReadSet.make(state, actorID: context.actorID, ids: &ids))
+        let draftData = try RustJSON.data(draftObject(draft, &ids))
+        return try await resolve(readSet: readSet, draft: draftData, state, ids)
+    }
+
+    private func resolve(readSet: Data, draft: Data, _ state: GTDState, _ ids: RustIDTable) async throws -> CapturePreview {
+        let resolved = try await runtime.smartAddResolve(readSet: readSet, draft: draft)
         let value = try RustJSON.object(resolved)
         var tokens: [SmartAddToken] = []
         for token in try value.objects("tokens") {
@@ -558,7 +612,7 @@ public struct RustDomainFacade: Sendable {
         var problem: GTDValidationError?
         if let refusal = value.optionalObject("problem") {
             let wire = RustRefusal(reason: try refusal.string("reason"), field: refusal.optionalString("field"))
-            problem = Self.validationError(wire, payload: [:], in: state)
+            problem = Self.validationError(wire, payload: [:], in: state, ids: ids)
             if problem == nil { throw RustDomainError.refused(reason: wire.reason, field: wire.field) }
         }
         return CapturePreview(
@@ -580,30 +634,30 @@ public struct RustDomainFacade: Sendable {
         makeProjectID: () -> ProjectID = { .random() }, makeTagID: () -> TagID = { .random() }
     ) async throws -> TaskID {
         let before = state
-        let readSet = try RustJSON.data(RustReadSet.make(before, actorID: context.actorID))
-        let draftData = try RustJSON.data(draftObject(draft))
-        // The preview tells which records are new, so only those get an id.
-        let resolution = try await preview(draft, in: before)
-        if let problem = resolution.problem { throw problem }
         var ids = RustIDTable()
+        let readSet = try RustJSON.data(RustReadSet.make(before, actorID: context.actorID, ids: &ids))
+        let draftData = try RustJSON.data(draftObject(draft, &ids))
+        // The preview tells which records are new, so only those get an id.
+        let resolution = try await resolve(readSet: readSet, draft: draftData, before, ids)
+        if let problem = resolution.problem { throw problem }
         var minted: WireObject = [:]
-        if resolution.project?.isNew == true { minted["project"] = ids.new(makeProjectID().rawValue, prefix: "project") }
+        if resolution.project?.isNew == true { minted["project"] = ids.project(makeProjectID()) }
         var tagIDs: [String] = []
-        for tag in resolution.tags where tag.isNew { tagIDs.append(ids.new(makeTagID().rawValue, prefix: "tag")) }
+        for tag in resolution.tags where tag.isNew { tagIDs.append(ids.tag(makeTagID())) }
         minted["tags"] = tagIDs
         let proposal = try await runtime.smartAddPropose(
             readSet: readSet, draft: draftData, minted: RustJSON.data(minted))
         let payload: WireObject
         switch proposal {
         case .answered(let data): payload = try RustJSON.object(data)
-        case .refused(let refusal): throw Self.refusalError(refusal, payload: [:], in: before)
+        case .refused(let refusal): throw Self.refusalError(refusal, payload: [:], in: before, ids: ids)
         }
         let taskID = makeTaskID()
         let encoded = RustEncodedCommand(
-            type: "task.smart_add", entityID: ids.new(taskID.rawValue, prefix: "task"), payload: payload, target: nil,
+            type: "task.smart_add", entityID: ids.task(taskID), payload: payload, target: nil,
             allocatedIDs: [RustCommandEncoder.derivedFormulation(taskID, date)], issuedAt: date, navigatorProvider: nil,
             consentTextVersion: nil)
-        let changeSet = try await decide(encoded, in: before, ids: ids)
+        let changeSet = try await decide(encoded, in: before, ids: &ids)
         var next = before
         _ = try RustChangeApplier.apply(
             changeSet, to: &next, before: before, at: date, ids: ids, actorID: context.actorID)

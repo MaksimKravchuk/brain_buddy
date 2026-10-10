@@ -205,75 +205,108 @@ enum RustInstant {
 
 // MARK: - Identifiers
 
-/// The identifiers of the records one call creates. The core refuses a new record whose
-/// ID is not `<prefix>_<lowercased UUID>`, while the Swift state keys records by the bare
-/// UUID `EntityID.random()` mints. A new ID crosses as the prefixed form and is mapped
-/// back when the core's answer is applied; an ID of an existing record crosses verbatim.
+/// The canonical wire identifier of every record, in both directions of one call.
+///
+/// The core refuses a new record whose ID is not `<prefix>_<lowercased UUID>`, while the
+/// Swift state keys records by the bare UUID `EntityID.random()` mints. The mapping from the
+/// bare form to the prefixed one is deterministic and is applied everywhere an identifier is
+/// sent: in the read set (as the record's own ID and in every reference to it) and in the
+/// command (target, payload and minted IDs). A create of an ID the state already holds then
+/// meets the same wire ID in the read set and is refused as `id_already_exists`, instead of
+/// creating a second record the Swift state would overwrite. An ID that is already prefixed,
+/// or of no shape the core could accept, crosses unchanged.
 struct RustIDTable {
     /// Prefixed wire ID to the Swift ID it stands for.
-    private(set) var created: [String: String] = [:]
+    private(set) var known: [String: String] = [:]
 
     init() {}
 
-    mutating func new(_ raw: String, prefix: String) -> String {
+    mutating func wire(_ raw: String, prefix: String) -> String {
         if ClientID.isValid(raw, prefix: prefix) { return raw }
         let wire = "\(prefix)_\(raw)"
         guard ClientID.isValid(wire, prefix: prefix) else { return raw }
-        created[wire] = raw
+        known[wire] = raw
         return wire
     }
 
-    func swift(_ wire: String) -> String { created[wire] ?? wire }
+    /// `null` for no identifier.
+    mutating func optional(_ raw: String?, prefix: String) -> Any {
+        guard let raw else { return NSNull() }
+        return wire(raw, prefix: prefix)
+    }
+
+    /// The Swift identifier a wire identifier stands for; one that was never mapped is its own.
+    func swift(_ wire: String) -> String { known[wire] ?? wire }
+
+    mutating func task(_ id: TaskID) -> String { wire(id.rawValue, prefix: "task") }
+    mutating func project(_ id: ProjectID) -> String { wire(id.rawValue, prefix: "project") }
+    mutating func tag(_ id: TagID) -> String { wire(id.rawValue, prefix: "tag") }
+    mutating func subtask(_ id: SubtaskID) -> String { wire(id.rawValue, prefix: "subtask") }
+    mutating func comment(_ id: CommentID) -> String { wire(id.rawValue, prefix: "comment") }
+    mutating func formulation(_ id: FormulationID) -> String { wire(id.rawValue, prefix: "form") }
+    mutating func decision(_ id: DecisionID) -> String { wire(id.rawValue, prefix: "decision") }
+    mutating func bulk(_ id: BulkID) -> String { wire(id.rawValue, prefix: "bulk") }
+    mutating func session(_ id: ReviewSessionID) -> String { wire(id.rawValue, prefix: "review") }
+    mutating func progress(_ id: ProgressID) -> String { wire(id.rawValue, prefix: "progress") }
 }
 
 // MARK: - The read set
 
-/// The Swift state as the core's protected read set. The whole state is encoded: the
-/// device holds one owner's rows and the rules read what they need.
+/// The Swift state as the core's read set. The whole state is encoded: the device holds one
+/// owner's rows and the rules read what they need. Every identifier is the canonical wire ID
+/// (`RustIDTable`).
 enum RustReadSet {
-    static func make(_ state: GTDState, actorID: String) -> WireObject {
+    static func make(_ state: GTDState, actorID: String, ids: inout RustIDTable) -> WireObject {
         var tasks: WireObject = [:]
         var subtasks: WireObject = [:]
         var comments: WireObject = [:]
         var parkAcks: [WireObject] = []
         for task in state.tasks.values {
-            tasks[task.id.rawValue] = self.task(task)
-            for subtask in task.subtasks { subtasks[subtask.id.rawValue] = self.subtask(subtask, of: task.id) }
+            let taskWire = ids.task(task.id)
+            tasks[taskWire] = self.task(task, &ids)
+            for subtask in task.subtasks {
+                subtasks[ids.subtask(subtask.id)] = self.subtask(subtask, of: taskWire, &ids)
+            }
             for comment in task.comments {
-                comments[comment.id.rawValue] = self.comment(comment, of: task.id, actorID: actorID)
+                comments[ids.comment(comment.id)] = self.comment(comment, of: taskWire, actorID: actorID, &ids)
             }
             // A park the person has not seen is a row of its own in the core.
             if let park = task.parked, !state.review.hasSeen(task.id, park) {
-                parkAcks.append(parkAck(task: task.id, formulation: park.formulationID, parked: park.at, seen: nil))
+                parkAcks.append(
+                    parkAck(task: taskWire, formulation: ids.formulation(park.formulationID), parked: park.at, seen: nil))
             }
         }
         var projects: WireObject = [:]
-        for project in state.projects.values { projects[project.id.rawValue] = self.project(project) }
+        for project in state.projects.values { projects[ids.project(project.id)] = self.project(project, &ids) }
         var tags: WireObject = [:]
-        for tag in state.tags.values { tags[tag.id.rawValue] = self.tag(tag) }
+        for tag in state.tags.values { tags[ids.tag(tag.id)] = self.tag(tag, &ids) }
 
         let review = state.review
         for ack in review.parkAcks {
             let parked = ack.parkedAt ?? state.tasks[ack.taskID]?.parked?.at ?? Date(timeIntervalSince1970: 0)
-            parkAcks.append(parkAck(task: ack.taskID, formulation: ack.formulationID, parked: parked, seen: parked))
+            parkAcks.append(
+                parkAck(task: ids.task(ack.taskID), formulation: ids.formulation(ack.formulationID), parked: parked, seen: parked))
         }
         var sessions: WireObject = [:]
         var queues: WireObject = [:]
         for session in review.sessions.values {
-            sessions[session.id.rawValue] = self.session(session)
+            let sessionWire = ids.session(session.id)
+            sessions[sessionWire] = self.session(session, &ids)
             if session.decisionQueue != nil || !session.setAsideTaskIDs.isEmpty {
-                queues[session.id.rawValue] = queue(session, decisions: review.decisions.values)
+                queues[sessionWire] = queue(session, decisions: review.decisions.values, &ids)
             }
         }
         var decisions: WireObject = [:]
-        for decision in review.decisions.values { decisions[decision.id.rawValue] = self.decision(decision) }
+        for decision in review.decisions.values { decisions[ids.decision(decision.id)] = self.decision(decision, &ids) }
         var bulkReleases: WireObject = [:]
-        for bulk in review.bulkReleases.values { bulkReleases[bulk.id.rawValue] = self.bulkRelease(bulk) }
+        for bulk in review.bulkReleases.values { bulkReleases[ids.bulk(bulk.id)] = self.bulkRelease(bulk, &ids) }
+        var receipts: [WireObject] = []
+        for item in review.receipts { receipts.append(receipt(item, &ids)) }
 
         var readSet: WireObject = [
             "tasks": tasks, "projects": projects, "tags": tags, "subtasks": subtasks, "comments": comments,
-            "sessions": sessions, "decision_queues": queues, "decisions": decisions,
-            "receipts": review.receipts.map(receipt), "park_acks": parkAcks, "bulk_releases": bulkReleases,
+            "sessions": sessions, "decision_queues": queues, "decisions": decisions, "receipts": receipts,
+            "park_acks": parkAcks, "bulk_releases": bulkReleases,
             "consents": review.navigatorConsents.values.map(consent),
         ]
         // Settings nobody changed are "not stored" for the rules, which then use their defaults.
@@ -283,33 +316,35 @@ enum RustReadSet {
 
     // MARK: Tasks and organization
 
-    static func task(_ task: TaskRecord) -> WireObject {
+    static func task(_ task: TaskRecord, _ ids: inout RustIDTable) -> WireObject {
         [
-            "id": task.id.rawValue, "title": task.title, "details": wireNull(task.details),
-            "state": task.state.rawValue, "project_id": wireNull(task.projectID?.rawValue),
-            "tag_ids": task.tagIDs.map(\.rawValue), "due_date": wireNull(task.dueDate?.isoString),
+            "id": ids.task(task.id), "title": task.title, "details": wireNull(task.details),
+            "state": task.state.rawValue, "project_id": ids.optional(task.projectID?.rawValue, prefix: "project"),
+            "tag_ids": task.tagIDs.map { ids.tag($0) }, "due_date": wireNull(task.dueDate?.isoString),
             "priority": task.priority.rawValue, "waiting_for": wireNull(task.waitingFor),
             "waiting_since": wireInstant(task.waitingSince), "order_key": String(max(task.orderKey, 0)),
             "source_capture_ids": [String](), "created_at": RustInstant.format(task.createdAt),
             "updated_at": RustInstant.format(task.updatedAt), "completed_at": wireInstant(task.completedAt),
             "cancelled_at": wireInstant(task.cancelledAt), "revision": String(task.serverRevision ?? 0),
             "consecutive_stalled_formulations": max(task.consecutiveStalledFormulations, 0),
-            "formulation": wireNull(task.formulation.map(clock)),
-            "parked": wireNull(task.parked.map(park)),
+            "formulation": wireNull(task.formulation.map { clock($0, &ids) }),
+            "parked": wireNull(task.parked.map { park($0, &ids) }),
         ]
     }
 
-    static func clock(_ clock: FormulationClock) -> WireObject {
+    static func clock(_ clock: FormulationClock, _ ids: inout RustIDTable) -> WireObject {
         [
-            "id": clock.id.rawValue, "started_at": RustInstant.format(clock.startedAt),
+            "id": ids.formulation(clock.id), "started_at": RustInstant.format(clock.startedAt),
             "extended_at": wireInstant(clock.extendedAt), "extension_reason": wireNull(clock.extensionReason),
             "park_floor_at": wireInstant(clock.parkFloorAt),
         ]
     }
 
     /// The public park marker, plus the private clock before it when this device parked the task.
-    static func park(_ marker: ParkMarker) -> WireObject {
-        var wire: WireObject = ["at": RustInstant.format(marker.at), "formulation_id": marker.formulationID.rawValue]
+    static func park(_ marker: ParkMarker, _ ids: inout RustIDTable) -> WireObject {
+        var wire: WireObject = [
+            "at": RustInstant.format(marker.at), "formulation_id": ids.formulation(marker.formulationID),
+        ]
         if let revision = marker.fromRevision, let before = marker.clockBefore {
             wire["private"] = [
                 "from_revision": String(max(revision, 0)),
@@ -323,9 +358,9 @@ enum RustReadSet {
         return wire
     }
 
-    static func project(_ project: ProjectRecord) -> WireObject {
+    static func project(_ project: ProjectRecord, _ ids: inout RustIDTable) -> WireObject {
         [
-            "id": project.id.rawValue, "name": project.name, "color": wireNull(project.color),
+            "id": ids.project(project.id), "name": project.name, "color": wireNull(project.color),
             "state": project.state.rawValue, "revision": String(project.serverRevision ?? 0),
             "desired_outcome": wireNull(project.desiredOutcome), "archived_at": wireInstant(project.archivedAt),
             "archived_before_lossless": project.archivedBeforeLossless,
@@ -333,24 +368,26 @@ enum RustReadSet {
         ]
     }
 
-    static func tag(_ tag: TagRecord) -> WireObject {
+    static func tag(_ tag: TagRecord, _ ids: inout RustIDTable) -> WireObject {
         [
-            "id": tag.id.rawValue, "name": tag.name, "state": tag.state.rawValue,
+            "id": ids.tag(tag.id), "name": tag.name, "state": tag.state.rawValue,
             "revision": String(tag.serverRevision ?? 0), "created_at": RustInstant.format(tag.createdAt),
         ]
     }
 
-    static func subtask(_ subtask: SubtaskRecord, of task: TaskID) -> WireObject {
+    static func subtask(_ subtask: SubtaskRecord, of task: String, _ ids: inout RustIDTable) -> WireObject {
         [
-            "id": subtask.id.rawValue, "task_id": task.rawValue, "title": subtask.title,
+            "id": ids.subtask(subtask.id), "task_id": task, "title": subtask.title,
             "state": subtask.state.rawValue, "order_key": String(max(subtask.orderKey, 0)),
             "revision": String(subtask.serverRevision ?? 0),
         ]
     }
 
-    static func comment(_ comment: CommentRecord, of task: TaskID, actorID: String) -> WireObject {
+    static func comment(
+        _ comment: CommentRecord, of task: String, actorID: String, _ ids: inout RustIDTable
+    ) -> WireObject {
         [
-            "id": comment.id.rawValue, "task_id": task.rawValue, "body": comment.body,
+            "id": ids.comment(comment.id), "task_id": task, "body": comment.body,
             "actor_id": comment.authorID ?? actorID, "created_at": RustInstant.format(comment.createdAt),
             "edited_at": wireInstant(comment.editedAt), "revision": String(comment.serverRevision ?? 0),
         ]
@@ -368,7 +405,7 @@ enum RustReadSet {
         ]
     }
 
-    static func session(_ session: ReviewSession) -> WireObject {
+    static func session(_ session: ReviewSession, _ ids: inout RustIDTable) -> WireObject {
         var counts: WireObject = [:]
         for counter in SessionCounter.allCases { counts[counter.rawValue] = session.counts[counter] }
         var steps: WireObject = [:]
@@ -376,7 +413,7 @@ enum RustReadSet {
         var seconds: WireObject = [:]
         for (step, value) in session.activeSecondsByStep { seconds[step.rawValue] = max(value, 0) }
         return [
-            "id": session.id.rawValue, "mode": session.mode.rawValue, "entry": session.entry.rawValue,
+            "id": ids.session(session.id), "mode": session.mode.rawValue, "entry": session.entry.rawValue,
             "origin": session.origin.rawValue, "status": session.status.rawValue,
             "started_at": RustInstant.format(session.startedAt),
             "last_activity_at": RustInstant.format(session.lastActivityAt), "ended_at": wireInstant(session.endedAt),
@@ -388,67 +425,74 @@ enum RustReadSet {
     }
 
     /// The decided cards of a run are the decisions made in it.
-    static func queue(_ session: ReviewSession, decisions: Dictionary<DecisionID, ReviewDecision>.Values) -> WireObject {
+    static func queue(
+        _ session: ReviewSession, decisions: Dictionary<DecisionID, ReviewDecision>.Values, _ ids: inout RustIDTable
+    ) -> WireObject {
         let decided = decisions.filter { $0.sessionID == session.id }
             .sorted { ($0.decidedAt, $0.id) < ($1.decidedAt, $1.id) }
-            .map(\.taskID.rawValue)
+            .map { ids.task($0.taskID) }
         return [
-            "session_id": session.id.rawValue, "task_ids": wireNull(session.decisionQueue?.map(\.rawValue)),
-            "decided_task_ids": decided, "set_aside_task_ids": session.setAsideTaskIDs.map(\.rawValue),
+            "session_id": ids.session(session.id),
+            "task_ids": wireNull(session.decisionQueue.map { $0.map { ids.task($0) } }),
+            "decided_task_ids": decided, "set_aside_task_ids": session.setAsideTaskIDs.map { ids.task($0) },
         ]
     }
 
     /// The public face of a decision: the Undo snapshot is the authoritative side's.
-    static func decision(_ decision: ReviewDecision) -> WireObject {
+    static func decision(_ decision: ReviewDecision, _ ids: inout RustIDTable) -> WireObject {
         let after = decision.taskAfter.serverRevision ?? 0
         let before = decision.undo?.taskBefore.serverRevision ?? after
         return [
-            "id": decision.id.rawValue, "type": decision.type.rawValue, "task_id": decision.taskID.rawValue,
-            "session_id": wireNull(decision.sessionID?.rawValue), "decided_at": RustInstant.format(decision.decidedAt),
+            "id": ids.decision(decision.id), "type": decision.type.rawValue, "task_id": ids.task(decision.taskID),
+            "session_id": ids.optional(decision.sessionID?.rawValue, prefix: "review"),
+            "decided_at": RustInstant.format(decision.decidedAt),
             "substantive": wireNull(decision.substantive), "stall_reason": wireNull(decision.stallReason?.rawValue),
             "ai_use": decision.aiUse.rawValue, "yielded_auto_park": decision.yieldedAutoPark,
-            "formulation_id": wireNull(decision.formulationID?.rawValue), "task_revision_before": String(max(before, 0)),
-            "task_revision_after": String(max(after, 0)), "created_task_id": wireNull(decision.undo?.createdTaskID?.rawValue),
+            "formulation_id": ids.optional(decision.formulationID?.rawValue, prefix: "form"),
+            "task_revision_before": String(max(before, 0)), "task_revision_after": String(max(after, 0)),
+            "created_task_id": ids.optional(decision.undo?.createdTaskID?.rawValue, prefix: "task"),
             "navigator_request_id": NSNull(), "review_counts_as": decision.type.countsAs.rawValue,
             "client_decided_at": NSNull(), "reason_text": wireNull(decision.reasonText),
             "undo_available_until": NSNull(),
         ]
     }
 
-    static func receipt(_ receipt: ReviewReceipt) -> WireObject {
+    static func receipt(_ receipt: ReviewReceipt, _ ids: inout RustIDTable) -> WireObject {
         [
-            "task_id": receipt.taskID.rawValue, "kind": receipt.kind.rawValue,
+            "task_id": ids.task(receipt.taskID), "kind": receipt.kind.rawValue,
             "hidden_until": RustInstant.format(receipt.hiddenUntil), "task_revision": String(max(receipt.taskRevision ?? 0, 0)),
             "reviewed_at": RustInstant.format(receipt.reviewedAt), "source": receipt.source.rawValue,
-            "decision_id": wireNull(receipt.decisionID?.rawValue), "bulk_id": wireNull(receipt.bulkID?.rawValue),
+            "decision_id": ids.optional(receipt.decisionID?.rawValue, prefix: "decision"),
+            "bulk_id": ids.optional(receipt.bulkID?.rawValue, prefix: "bulk"),
         ]
     }
 
-    static func parkAck(task: TaskID, formulation: FormulationID, parked: Date, seen: Date?) -> WireObject {
+    static func parkAck(task: String, formulation: String, parked: Date, seen: Date?) -> WireObject {
         [
-            "task_id": task.rawValue, "formulation_id": formulation.rawValue,
+            "task_id": task, "formulation_id": formulation,
             "parked_at": RustInstant.format(parked), "seen_at": wireInstant(seen), "returned_at": NSNull(),
         ]
     }
 
-    static func bulkRelease(_ bulk: BulkReleaseRecord) -> WireObject {
+    static func bulkRelease(_ bulk: BulkReleaseRecord, _ ids: inout RustIDTable) -> WireObject {
         let undo: Any
         if let result = bulk.undoResult {
             undo =
                 [
-                    "restored": result.restored.map(\.rawValue),
-                    "skipped": result.skipped.map { ["task_id": $0.rawValue, "reason": "stale"] },
+                    "restored": result.restored.map { ids.task($0) },
+                    "skipped": result.skipped.map { ["task_id": ids.task($0), "reason": "stale"] },
                 ] as WireObject
         } else {
             undo = NSNull()
         }
         return [
-            "id": bulk.id.rawValue, "kind": bulk.kind.rawValue, "session_id": wireNull(bulk.sessionID?.rawValue),
+            "id": ids.bulk(bulk.id), "kind": bulk.kind.rawValue,
+            "session_id": ids.optional(bulk.sessionID?.rawValue, prefix: "review"),
             "created_at": RustInstant.format(bulk.createdAt), "undone_at": wireInstant(bulk.undoneAt),
             "released": bulk.released.map {
-                ["task_id": $0.taskID.rawValue, "revision_after": String(max($0.taskAfter.serverRevision ?? 0, 0))]
+                ["task_id": ids.task($0.taskID), "revision_after": String(max($0.taskAfter.serverRevision ?? 0, 0))]
             },
-            "skipped": bulk.skipped.map { ["task_id": $0.taskID.rawValue, "reason": $0.reason] },
+            "skipped": bulk.skipped.map { ["task_id": ids.task($0.taskID), "reason": $0.reason] },
             "undo": undo,
         ]
     }

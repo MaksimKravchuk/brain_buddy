@@ -119,15 +119,20 @@ struct RustDomainParityTests {
         }
     }
 
-    @Test("026-FR-002: a new record crosses with the prefixed identifier the core requires and maps back")
-    func identifiersOfNewRecords() {
+    @Test("026-FR-002: a record always crosses with the same canonical prefixed identifier and maps back")
+    func canonicalIdentifiers() {
         var ids = RustIDTable()
-        let wire = ids.new(uuid(1), prefix: "task")
+        let wire = ids.wire(uuid(1), prefix: "task")
         #expect(wire == "task_" + uuid(1))
         #expect(ids.swift(wire) == uuid(1))
+        // Deterministic: the read set and the command name a record the same way.
+        #expect(ids.task(taskID(1)) == wire)
+        #expect(RustIDTable().task(taskID(1)) == wire)
+        #expect(ids.project(projectID(1)) == "project_" + uuid(1))
+        #expect(ids.swift("project_" + uuid(1)) == uuid(1))
         // An identifier of the right shape, or of no shape the core could accept, is left alone.
-        #expect(ids.new("task_" + uuid(2), prefix: "task") == "task_" + uuid(2))
-        #expect(ids.new("not a uuid", prefix: "task") == "not a uuid")
+        #expect(ids.wire("task_" + uuid(2), prefix: "task") == "task_" + uuid(2))
+        #expect(ids.wire("not a uuid", prefix: "task") == "not a uuid")
         #expect(ids.swift("task_" + uuid(2)) == "task_" + uuid(2))
     }
 
@@ -146,17 +151,18 @@ struct RustDomainParityTests {
                     priority: .set(.high))))
         let encoded = try RustCommandEncoder.encode(edit, at: moment(1), in: state, scopeID: "local", ids: &ids)
         #expect(encoded.type == "task.update")
-        #expect(encoded.entityID == uuid(1))
+        #expect(encoded.entityID == "task_" + uuid(1))
         #expect(encoded.payload["title"] as? String == "Buy oat milk")
         #expect(encoded.payload["details"] is NSNull)
         #expect(encoded.payload["priority"] as? String == "high")
         #expect(encoded.payload["project_id"] == nil)
         #expect(encoded.payload["due_date"] == nil)
         let tagChanges = try #require(encoded.payload["tag_changes"] as? [String: [String]])
-        #expect(tagChanges["add_tag_ids"] == [uuid(3)])
-        #expect(tagChanges["remove_tag_ids"] == [uuid(1)])
+        #expect(tagChanges["add_tag_ids"] == ["tag_" + uuid(3)])
+        #expect(tagChanges["remove_tag_ids"] == ["tag_" + uuid(1)])
         // The edit is checked against the revision the state holds for the target.
         #expect(encoded.target?.entityType == "task")
+        #expect(encoded.target?.id == "task_" + uuid(1))
         #expect(encoded.target?.revision == 0)
     }
 
@@ -180,10 +186,19 @@ struct RustDomainParityTests {
     func readSetShape() throws {
         var state = try seededState()
         state.tasks[taskID(1)]?.serverRevision = 9_007_199_254_740_993
-        let readSet = RustReadSet.make(state, actorID: "device")
+        var ids = RustIDTable()
+        let readSet = RustReadSet.make(state, actorID: "device", ids: &ids)
         let tasks = try #require(readSet["tasks"] as? WireObject)
         #expect(tasks.count == 7)
-        let milk = try #require(tasks[uuid(1)] as? WireObject)
+        // Every record and every reference to it carries the canonical wire ID.
+        let milk = try #require(tasks["task_" + uuid(1)] as? WireObject)
+        #expect(milk["id"] as? String == "task_" + uuid(1))
+        let rent = try #require(tasks["task_" + uuid(2)] as? WireObject)
+        #expect(rent["project_id"] as? String == "project_" + uuid(1))
+        let projects = try #require(readSet["projects"] as? WireObject)
+        #expect(projects["project_" + uuid(1)] != nil)
+        let call = try #require(tasks["task_" + uuid(3)] as? WireObject)
+        #expect(call["tag_ids"] as? [String] == ["tag_" + uuid(1)])
         #expect(milk["revision"] as? String == "9007199254740993")
         #expect(milk["due_date"] as? String == "2026-09-20")
         #expect(milk["created_at"] as? String == "2026-09-21T14:15:20Z")
@@ -341,6 +356,107 @@ struct RustDomainParityTests {
                 .transitionTask(.init(taskID: taskID(99), action: .complete)), at: moment(21), to: &state)
         }
         #expect(state == before)
+    }
+
+    @Test("026-FR-002: creating an ID the state already holds is refused in both images and never overwrites it")
+    func repeatedCreateIsRefused() async throws {
+        let facade = try makeFacade()
+        var legacy = try seededState()
+        var migrated = legacy
+        // Children exist in both images before they are created a second time.
+        let children: [GTDCommand] = [
+            .createSubtask(.init(taskID: taskID(1), subtaskID: SubtaskID(uuid(1)), title: "Oat milk")),
+            .createComment(.init(taskID: taskID(1), commentID: CommentID(uuid(1)), body: "Ask for the big bottle")),
+        ]
+        for (index, command) in children.enumerated() {
+            try GTDReducer.apply(command, at: moment(30 + index), to: &legacy)
+            try await facade.apply(command, at: moment(30 + index), to: &migrated)
+        }
+        let repeats: [GTDCommand] = [
+            .createTask(.init(taskID: taskID(1), title: "Another", list: .inbox)),
+            .createProject(.init(projectID: projectID(1), name: "Elsewhere")),
+            .createTag(.init(tagID: tagID(1), name: "elsewhere")),
+            .createSubtask(.init(taskID: taskID(1), subtaskID: SubtaskID(uuid(1)), title: "Again")),
+            .createComment(.init(taskID: taskID(1), commentID: CommentID(uuid(1)), body: "Again")),
+        ]
+        for command in repeats {
+            let kept = migrated
+            var legacyError: GTDValidationError?
+            do {
+                try GTDReducer.apply(command, at: moment(40), to: &legacy)
+            } catch {
+                legacyError = error
+            }
+            var rustError: GTDValidationError?
+            do {
+                try await GTDReducer.apply(command, at: moment(40), to: &migrated, rules: .rust(facade))
+            } catch let error as GTDValidationError {
+                rustError = error
+            }
+            #expect(legacyError == .idAlreadyExists, "\(command)")
+            #expect(rustError == .idAlreadyExists, "\(command)")
+            #expect(migrated == kept, "\(command)")
+        }
+        #expect(shape(migrated) == shape(legacy))
+        #expect(migrated.tasks[taskID(1)]?.title == "Buy milk")
+        #expect(migrated.projects[projectID(1)]?.name == "Home")
+    }
+
+    @Test("026-FR-016: a park the device observed online changes nothing until the server answers")
+    func nonOptimisticAutoPark() async throws {
+        let facade = try makeFacade()
+        var seed = GTDState.empty
+        seed.review.accountlessReleaseSwitch = true
+        seed.review.settings.activatedAt = start.addingTimeInterval(-200 * 86_400)
+        let old = start.addingTimeInterval(-100 * 86_400)
+        let formulation = FormulationID("form_" + uuid(1))
+        seed.tasks[taskID(1)] = TaskRecord(
+            id: taskID(1), title: "Call Sam", state: .next, orderKey: 0, createdAt: old, updatedAt: old,
+            formulation: FormulationClock(id: formulation, startedAt: old))
+        let observed = GTDCommand.autoParkTask(
+            .init(taskID: taskID(1), formulationID: formulation, optimistic: false))
+
+        var legacy = seed
+        try GTDReducer.apply(observed, at: start, to: &legacy)
+        #expect(legacy == seed, "the Swift reducer leaves the task alone")
+
+        var migrated = seed
+        try await GTDReducer.apply(observed, at: start, to: &migrated, rules: .rust(facade))
+        #expect(migrated == seed)
+        #expect(migrated.tasks[taskID(1)]?.state == .next)
+        #expect(migrated.tasks[taskID(1)]?.parked == nil)
+    }
+
+    @Test("026-FR-002: a blank title or name is told apart from an overlong note or outcome, in the order the app checks")
+    func invalidPayloadsAreClassifiedByTheirField() async throws {
+        let facade = try makeFacade()
+        let longNotes = String(repeating: "n", count: GTDLimits.details + 1)
+        let longOutcome = String(repeating: "o", count: GTDLimits.outcome + 1)
+        let cases: [(GTDCommand, GTDValidationError)] = [
+            (.createTask(.init(taskID: taskID(1), title: "   ", details: longNotes, list: .inbox)), .emptyTitle),
+            (.createTask(.init(taskID: taskID(1), title: "Buy milk", details: longNotes, list: .inbox)), .detailsTooLong),
+            (.createProject(.init(projectID: projectID(1), name: "", desiredOutcome: longOutcome)), .emptyName),
+            (.createProject(.init(projectID: projectID(1), name: "Home", desiredOutcome: longOutcome)), .outcomeTooLong),
+        ]
+        for (command, expected) in cases {
+            var legacy = GTDState.empty
+            var legacyError: GTDValidationError?
+            do {
+                try GTDReducer.apply(command, at: start, to: &legacy)
+            } catch {
+                legacyError = error
+            }
+            var migrated = GTDState.empty
+            var rustError: GTDValidationError?
+            do {
+                try await facade.apply(command, at: start, to: &migrated)
+            } catch let error as GTDValidationError {
+                rustError = error
+            }
+            #expect(legacyError == expected, "legacy: \(command)")
+            #expect(rustError == expected, "core: \(command)")
+            #expect(migrated == .empty)
+        }
     }
 
     @Test("026-FR-002: one facade serves many concurrent tasks")
