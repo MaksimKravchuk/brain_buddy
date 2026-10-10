@@ -50,6 +50,7 @@ from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import RustCore
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
+from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
 from app.repositories import (
     CrtCommandRepository,
     FeatureFlagOverrideRepository,
@@ -147,6 +148,9 @@ class Container:
     # Spec 026 PR-21: what a job-bound writer is checked against, under the task
     # writer lock, before an old-compatible write (fence, then scope authority).
     job_execution: JobExecutionGate
+    # Spec 026 PR-25: the one SQLite transaction Tasks, Review and job intents
+    # share. Opt-in; existing call sites keep their own commits.
+    task_unit_of_work: TaskUnitOfWork
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -761,6 +765,7 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
         review_flow_service=review_flow_service,
         navigator_service=navigator_service,
         job_repository=job_repository,
+        task_unit_of_work=TaskUnitOfWork(task_repo, job_repository),
         job_execution=JobExecutionGate(
             job_repository,
             # Identity is the scope authority: an owner that no longer resolves
