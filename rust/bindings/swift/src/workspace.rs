@@ -83,6 +83,43 @@ pub struct BridgeIdentityBinding {
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeSourceIdentityRequest {
+    pub entity_type: String,
+    pub canonical_id: String,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeSourceIdentityBinding {
+    pub entity_type: String,
+    pub canonical_id: String,
+    pub source_id: Option<String>,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeReviewForm {
+    pub text: String,
+    pub saved_at: String,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeReviewFormCount {
+    pub live_count: String,
+    pub projection_generation: String,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeReviewFormLoaded {
+    pub source_key: String,
+    pub draft: Option<BridgeReviewForm>,
+    pub live_count: String,
+    pub projection_generation: String,
+}
+impl From<bb_client::ReviewFormCount> for BridgeReviewFormCount {
+    fn from(value: bb_client::ReviewFormCount) -> Self {
+        Self {
+            live_count: value.live_count.to_string(),
+            projection_generation: value.projection_generation.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
 pub struct BridgeLegacyUnsent {
     pub entry_id: String,
     pub idempotency_key: String,
@@ -252,6 +289,26 @@ fn execute_failure(error: ExecuteError) -> Failure {
         code: error.code(),
         retryable: error.is_retryable(),
         field: None,
+    }
+}
+fn form_failure(error: ExecuteError) -> Failure {
+    if let ExecuteError::Refused(error) = &error {
+        match error.field.as_deref() {
+            Some("form_identity_unproven" | "formulation_identity_unproven") => {
+                return Failure::new("FORM_IDENTITY_UNPROVEN", Some("key"));
+            }
+            Some("identity_ambiguity") => {
+                return Failure::new("FORM_IDENTITY_AMBIGUOUS", Some("key"));
+            }
+            _ => {}
+        }
+    }
+    execute_failure(error)
+}
+fn form_query_failure(error: QueryError) -> Failure {
+    match error {
+        QueryError::Refused(error) => form_failure(ExecuteError::Refused(error)),
+        error => query_failure(error),
     }
 }
 
@@ -457,6 +514,46 @@ impl BridgeWorkspace {
                 **lock = OperationState::Committed;
             }
             Ok(())
+        })
+    }
+
+    fn mutate_review_forms(
+        &self,
+        operation: Arc<BridgeOperation>,
+        work: impl FnOnce(
+            &mut Store,
+            &mut dyn FnMut() -> Result<(), ExecuteError>,
+        ) -> Result<bb_client::ReviewFormCount, ExecuteError>,
+    ) -> Result<BridgeReviewFormCount, Failure> {
+        if operation.used.swap(true, Ordering::AcqRel) {
+            return Err(Failure::new("OPERATION_ALREADY_USED", None));
+        }
+        if self.state.load(Ordering::Acquire) != OPEN {
+            return Err(Failure::new("WORKSPACE_CLOSED", None));
+        }
+        let mut held = self
+            .store
+            .lock()
+            .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+        let store = held
+            .as_mut()
+            .ok_or_else(|| Failure::new("WORKSPACE_CLOSED", None))?;
+        let mut arbitration = None;
+        guarded(&AtomicU8::new(OPEN), || {
+            let mut before_commit = || {
+                let lock = operation.state.lock().map_err(|_| StoreError::Corrupt)?;
+                if *lock == OperationState::Cancelled || self.state.load(Ordering::Acquire) != OPEN
+                {
+                    return Err(ExecuteError::Cancelled);
+                }
+                arbitration = Some(lock);
+                Ok(())
+            };
+            let result = work(store, &mut before_commit).map_err(form_failure)?;
+            if let Some(lock) = &mut arbitration {
+                **lock = OperationState::Committed;
+            }
+            Ok(result.into())
         })
     }
 
@@ -675,6 +772,119 @@ impl BridgeWorkspace {
                     })
                 })
                 .transpose()
+        })?)
+    }
+
+    pub fn reverse_identities(
+        &self,
+        items: Vec<BridgeSourceIdentityRequest>,
+    ) -> Result<Vec<BridgeSourceIdentityBinding>, BridgeError> {
+        let typed = items
+            .iter()
+            .map(|item| {
+                Ok((
+                    bb_protocol::catalog::EntityType::from_wire(&item.entity_type)
+                        .ok_or_else(|| Failure::new("INVALID_REQUEST", Some("entity_type")))?,
+                    item.canonical_id.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>, Failure>>()?;
+        Ok(self.with_store(|store| {
+            let sources = bb_client::reverse_workspace_identities(store, &typed)
+                .map_err(form_query_failure)?;
+            Ok(items
+                .into_iter()
+                .zip(sources)
+                .map(|(item, source_id)| BridgeSourceIdentityBinding {
+                    entity_type: item.entity_type,
+                    canonical_id: item.canonical_id,
+                    source_id,
+                })
+                .collect())
+        })?)
+    }
+
+    pub fn load_review_form(
+        &self,
+        key: String,
+        now: String,
+    ) -> Result<BridgeReviewFormLoaded, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.with_store(|store| {
+            let loaded =
+                bb_client::load_review_form(store, &key, &now).map_err(form_query_failure)?;
+            Ok(BridgeReviewFormLoaded {
+                source_key: loaded.source_key,
+                draft: loaded.draft.map(|draft| BridgeReviewForm {
+                    text: draft.text,
+                    saved_at: draft.saved_at.as_str().to_owned(),
+                }),
+                live_count: loaded.live_count.to_string(),
+                projection_generation: loaded.projection_generation.to_string(),
+            })
+        })?)
+    }
+    pub fn review_form_count(&self, now: String) -> Result<BridgeReviewFormCount, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.with_store(|store| {
+            bb_client::review_form_count(store, &now)
+                .map(Into::into)
+                .map_err(form_query_failure)
+        })?)
+    }
+    pub fn prune_review_forms(
+        &self,
+        now: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeReviewFormCount, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.mutate_review_forms(operation, |store, before_commit| {
+            bb_client::prune_review_forms_with(store, &now, before_commit)
+        })?)
+    }
+    pub fn save_review_form(
+        &self,
+        key: String,
+        source_key: Option<String>,
+        draft: Option<BridgeReviewForm>,
+        now: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeReviewFormCount, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        let draft = draft
+            .map(|draft| {
+                Ok::<_, Failure>(bb_client::ReviewFormDraft {
+                    text: draft.text,
+                    saved_at: Instant::parse(draft.saved_at)
+                        .map_err(|_| Failure::new("INVALID_REQUEST", Some("saved_at")))?,
+                })
+            })
+            .transpose()?;
+        Ok(self.mutate_review_forms(operation, |store, before_commit| {
+            bb_client::save_review_form_with(
+                store,
+                &key,
+                source_key.as_deref(),
+                draft.as_ref(),
+                &now,
+                before_commit,
+            )
+        })?)
+    }
+    pub fn clear_review_forms_for_task(
+        &self,
+        canonical_task_id: String,
+        now: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeReviewFormCount, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.mutate_review_forms(operation, |store, before_commit| {
+            bb_client::clear_review_forms_for_task_with(
+                store,
+                &canonical_task_id,
+                &now,
+                before_commit,
+            )
         })?)
     }
 

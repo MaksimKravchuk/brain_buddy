@@ -34,6 +34,7 @@ mod localfacts;
 mod locking;
 mod receipts;
 mod replay;
+mod review_forms;
 mod snapshot;
 mod storage;
 mod sync_session;
@@ -95,4 +96,10 @@ pub use legacy_review::{
     LegacyReviewActivated, LegacyReviewAlias, LegacyReviewCapture, LegacyReviewDerivedCounts,
     LegacyReviewError, LegacyReviewToken, PreparedLegacyReview, activate_legacy_review,
     activate_legacy_review_with, capture_legacy_review,
+};
+
+pub use review_forms::{
+    ReviewFormCount, ReviewFormDraft, ReviewFormLoaded, clear_review_forms_for_task_with,
+    load_review_form, prune_review_forms_with, reverse_workspace_identities, review_form_count,
+    save_review_form_with,
 };

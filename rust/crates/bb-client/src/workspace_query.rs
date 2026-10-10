@@ -693,7 +693,10 @@ pub struct WorkspaceDraft {
 }
 
 fn draft_id_valid(id: &str) -> bool {
-    id.starts_with("runtime:") && id.len() > "runtime:".len() && id.len() <= 512
+    id.starts_with("runtime:")
+        && !id.starts_with("runtime:review-form:")
+        && id.len() > "runtime:".len()
+        && id.len() <= 512
 }
 
 fn legacy_form_key_valid(key: &str) -> bool {
@@ -764,7 +767,10 @@ pub fn save_workspace_draft_with(
             field,
         ))
     };
-    if !draft_id_valid(&draft.draft_id) || !draft.editor_kind.starts_with("runtime_") {
+    if !draft_id_valid(&draft.draft_id)
+        || !draft.editor_kind.starts_with("runtime_")
+        || draft.editor_kind == "runtime_form_overlay"
+    {
         return Err(invalid("draft_id"));
     }
     bb_protocol::wire::Instant::parse(&draft.updated_at).map_err(|_| invalid("updated_at"))?;
@@ -791,7 +797,7 @@ pub fn delete_workspace_draft_with(
         )));
     }
     store.try_write(|tx| {
-        tx.execute("DELETE FROM drafts WHERE workspace_id=(SELECT workspace_id FROM sync_meta) AND draft_id=?1 AND editor_kind LIKE 'runtime_%'",[id])?;
+        tx.execute("DELETE FROM drafts WHERE workspace_id=(SELECT workspace_id FROM sync_meta) AND draft_id=?1 AND editor_kind LIKE 'runtime_%' AND editor_kind<>'runtime_form_overlay'",[id])?;
         before_commit()
     })
 }

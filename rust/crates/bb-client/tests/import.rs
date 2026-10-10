@@ -667,26 +667,34 @@ fn import_026_fr_013_every_field_id_relation_and_flag_of_a_populated_base_is_imp
             key("project_ffffffffffff")
         ]
     );
-    assert_eq!(
-        aliases(&mut store),
-        [
-            ("comment", "comment-2", "comment_bbbbbbbbbbbb"),
-            ("project", "project-1", "project_1a2b3c4d5e6f"),
-            ("project", "project-3", "project_ffffffffffff"),
-            ("subtask", "subtask-2", "subtask_aaaaaaaaaaaa"),
-            ("tag", "tag-2", "tag_0123456789ab"),
-            ("task", "task-1", "task_1a2b3c4d5e6f"),
-            ("task", "task-3", "task_bbbbbbbbbbbb"),
-            ("task", "task-4", "task_cccccccccccc"),
-            ("task", "task-5", "task_dddddddddddd"),
-        ]
-        .map(|(kind, old, new)| (
+    let mut expected_aliases = [
+        ("comment", "comment-2", "comment_bbbbbbbbbbbb"),
+        ("project", "project-1", "project_1a2b3c4d5e6f"),
+        ("project", "project-3", "project_ffffffffffff"),
+        ("subtask", "subtask-2", "subtask_aaaaaaaaaaaa"),
+        ("tag", "tag-2", "tag_0123456789ab"),
+        ("task", "task-1", "task_1a2b3c4d5e6f"),
+        ("task", "task-3", "task_bbbbbbbbbbbb"),
+        ("task", "task-4", "task_cccccccccccc"),
+        ("task", "task-5", "task_dddddddddddd"),
+    ]
+    .map(|(kind, old, new)| {
+        (
             kind.to_owned(),
             old.to_owned(),
             new.to_owned(),
-            "legacy-import:server-id".to_owned()
-        ))
-    );
+            "legacy-import:server-id".to_owned(),
+        )
+    })
+    .to_vec();
+    expected_aliases.push((
+        "project".into(),
+        OLD_FLAT.into(),
+        old_flat.clone(),
+        "legacy-import:normalized-local-id".into(),
+    ));
+    expected_aliases.sort();
+    assert_eq!(aliases(&mut store), expected_aliases);
 
     // Fields and relations, through the rules' own record types.
     let plumber: Task = serde_json::from_value(tasks[&key("task_1a2b3c4d5e6f")].clone()).unwrap();
@@ -952,6 +960,37 @@ fn import_026_fr_013_unproven_ids_get_a_deterministic_key_and_proven_ids_stay_ve
     // An uppercase UUID is not the lowercase shape the rules mint: it crosses unchanged.
     let upper = uuid.to_uppercase();
     assert_eq!(legacy_record_key(EntityType::Task, &upper, None), upper);
+}
+
+#[test]
+fn import_026_fr_013_unsynced_normalization_persists_exact_reverse_alias_proof() {
+    let lane = lane("normalized-reverse-proof");
+    let uuid = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    let source = json!({"version":2,"generation":1,"base":{"tasks":{uuid:{"id":uuid,"title":"Unsynced task","state":"next","tagIDs":[],"priority":"none","orderKey":0,"createdAt":NOW,"updatedAt":NOW,"subtasks":[],"comments":[]}},"projects":{},"tags":{}},"outbox":[],"issues":[],"local":{"formDrafts":{format!("form:reformulate:{uuid}:-"):{"text":"Exact source-key draft","savedAt":NOW}}}});
+    lane.write_source(&source);
+    let report = import_legacy_store(&lane.request()).unwrap();
+    assert_eq!(report.marker.aliases, 1);
+    let mut store = open(&lane.database);
+    assert_eq!(
+        bb_client::reverse_workspace_identities(
+            &mut store,
+            &[(EntityType::Task, format!("task_{uuid}"))]
+        )
+        .unwrap(),
+        vec![Some(uuid.to_owned())]
+    );
+    assert_eq!(
+        aliases(&mut store)[0].3,
+        "legacy-import:normalized-local-id"
+    );
+    let form = bb_client::load_review_form(
+        &mut store,
+        &format!("form:reformulate:task_{uuid}:-"),
+        &Instant::parse(NOW).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(form.source_key, format!("form:reformulate:{uuid}:-"));
+    assert_eq!(form.draft.unwrap().text, "Exact source-key draft");
 }
 
 #[test]
@@ -1268,7 +1307,7 @@ fn import_026_fr_010_a_crash_before_the_commit_switches_nothing_and_the_rerun_im
     assert!(!report.already_active);
     let mut store = open(&lane.database);
     assert_eq!(count(&mut store, "confirmed_records"), 15);
-    assert_eq!(count(&mut store, "identity_aliases"), 9);
+    assert_eq!(count(&mut store, "identity_aliases"), 10);
     let integrity: String = store
         .read(|tx| tx.query_row("PRAGMA integrity_check", [], |row| row.get(0)))
         .unwrap();
@@ -1884,7 +1923,7 @@ fn review_activation_026_fr_013_admits_exact_historical_alias_atomically() {
     let result =
         bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).unwrap();
     assert_eq!(result.aliases, prepared.aliases);
-    assert_eq!(count(&mut store, "identity_aliases"), aliases_before + 1);
+    assert_eq!(count(&mut store, "identity_aliases"), aliases_before + 4);
     assert!(
         bb_client::capture_legacy_review(&mut store)
             .unwrap()

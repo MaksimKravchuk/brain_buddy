@@ -298,6 +298,19 @@ pub fn activate_legacy_review_with(
             tx.execute("INSERT OR IGNORE INTO identity_aliases (workspace_id,entity_type,old_local_id,server_id,provenance) VALUES (?1,?2,?3,?4,'legacy-review:source-server-id')",
                 params![workspace, alias.entity_type.as_str(), alias.local_id, alias.server_id])?;
         }
+        // These source primary identities were just admitted against the
+        // trusted codec's exact canonical record keys. Preserve that proof for
+        // bounded reverse lookups; form readers never infer UUID prefixes.
+        let mut admitted_aliases=capture.aliases.clone();
+        admitted_aliases.extend(prepared.aliases.iter().cloned());
+        for (kind,section) in [(EntityType::ReviewSession,"sessions"),(EntityType::ReviewDecision,"decisions"),(EntityType::ReviewBulkRelease,"bulkReleases")] {
+            for local in capture.review.get(section).and_then(Value::as_object).into_iter().flat_map(|items|items.keys()) {
+                let canonical=canonical(kind.as_str(),local,&admitted_aliases);
+                if canonical!=*local {
+                    tx.execute("INSERT OR IGNORE INTO identity_aliases(workspace_id,entity_type,old_local_id,server_id,provenance) VALUES (?1,?2,?3,?4,'legacy-import:normalized-local-id')",params![workspace,kind.as_str(),local,canonical])?;
+                }
+            }
+        }
         for record in &records {
             let value = json!(record)["value"].as_object().ok_or(StoreError::Corrupt)?.clone();
             let change = Change { entity_type: record.entity_type(), record_key: record.record_key(), record_version: Counter::from(crate::import::IMPORTED_VERSION), edit_revision: crate::execute::edit_revision(record), operation: Operation::Upsert, value: Some(value) };
@@ -350,10 +363,9 @@ fn canonical(kind: &str, local: &str, aliases: &[LegacyReviewAlias]) -> String {
         return alias.server_id.clone();
     }
     if kind == "form" {
-        return bb_domain::types::FormulationId::parse(local)
-            .or_else(|_| bb_domain::types::FormulationId::parse(format!("form_{local}")))
-            .map(|id| id.as_str().to_owned())
-            .unwrap_or_else(|_| local.to_owned());
+        // Existing formulation identities have no independently admitted alias
+        // family. Preserve the exact source reference, including UUID case.
+        return local.to_owned();
     }
     EntityType::from_wire(kind)
         .map(|kind| legacy_record_key(kind, local, None))

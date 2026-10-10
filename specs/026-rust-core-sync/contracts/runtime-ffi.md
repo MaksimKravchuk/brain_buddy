@@ -116,6 +116,51 @@ without inventing a result version or normalizing onto the skipped bulk item.
 
 Expected local errors include `VALIDATION_FAILED`, `STORE_BUSY`, `STORE_FULL`, `STORE_CORRUPT`, `STORE_UPGRADE_REQUIRED`, `WORKSPACE_CLOSED`, `AUTH_REQUIRED`, `CANCELLED`, `QUERY_RESTART_REQUIRED` and typed sync issues. A bounded lock timeout is retryable and never reports local save success. Panic handling rolls back a live transaction and marks the runtime unusable if safety cannot be established; reopening follows normal recovery. Platform suspension may prevent a callback but cannot invalidate a committed gesture receipt.
 
+Local Review form ports return one selected typed `{text, savedAt}` form, its
+exact source key, and the effective live count under one projection generation.
+`load_review_form(key, now)`, `review_form_count(now)`,
+`save_review_form(key, source_key?, draft?, now, operation)` (null clears) and
+`clear_review_forms_for_task(canonical_task_id, now, operation)` use existing
+draft rows. The immutable `legacy-form:<source_key>` carrier remains unchanged;
+one deterministic `runtime:review-form:<sha256(source_key)>` overlay stores a
+typed form or a content-free cleared tombstone. Expired overlays still shadow
+their carriers. Generic draft CRUD cannot modify or delete these overlays.
+Mutation, cancellation arbitration, derived count and one generation increment
+share a transaction; draft-only commits invalidate the existing cross-process
+subscription. No form index, whole-form body export or persisted count exists.
+
+Effective counts stream forms and match the existing native liveness contract:
+`now - savedAt < 7 days`; decision forms require an existing task and, when named,
+an exact current or parked formulation ID. Project and step forms use age only.
+Reverse identity requests are bounded to 200 typed canonical IDs and return only
+an exact unique source alias; canonical IDs and opaque step items remain verbatim
+without such proof. Canonical-key and source-key forms both present are refused
+as ambiguous, never merged. Imported normalized identities acquire aliases only
+at the source-validated import/Review activation transaction. Cleared overlays
+carry no authored draft for ambiguity checks, so explicit task-wide clearing can
+be followed by a fresh editor save while both fallback shadows remain.
+Earlier imports
+without that proof are not backfilled heuristically. An unexpired decision form
+whose source task is a bare UUID, lacks an exact alias, and has no same-ID task
+refuses as identity unproven, including an uncertain historical deletion until
+expiry. Formulation IDs are never matched by stripping or adding a prefix.
+Project discovery similarly refuses an unexpired bare source-project key
+without an exact alias or same-ID canonical project. Step discovery refuses an
+unexpired bare source-session key with the same exact step and opaque item when
+its identity has no such proof. These conservative refusals preserve text until
+proof recovery or expiry; project/step aggregate eligibility still uses age only.
+
+`prune_review_forms(now, operation)` is the existing native upkeep's narrow
+runtime port, including when Review is off or the workspace is accountless.
+Load, foreground, completed pull/snapshot and background upkeep schedule it.
+Within one transaction it examines validated mutable overlays only, tombstones
+expired/orphaned/formulation-stale text without revealing a legacy fallback,
+and returns count/generation. Generation advances once only when text changes;
+repeated no-op pruning does not invalidate. Malformed relevant data or unproven
+identity aborts safely. Immutable imported carriers retain the import backup
+policy. Cleanup failures retry separately and cannot relabel a committed command
+or form save as failed.
+
 ## Migration and packaging boundary
 
 Import reads `StoreDocument`/`FileDocumentStore` through the existing canonicalizers into a staging DB, preserving aliases, ever-sent/idempotency bodies, Review local state, issues and drafts. It validates schema/counts/relationships and replay before an atomic activation marker. The source file/report remains under its accepted backup policy. A failure leaves the original active and returns a typed recovery result; unknown old outcomes become issues, not new commands.

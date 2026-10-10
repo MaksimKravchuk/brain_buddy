@@ -78,6 +78,7 @@ const STAGING_SCHEMA: &str = "brainbuddy-legacy-import-staging/v1";
 /// A staged page: small enough that one page never holds the write lock long.
 const PAGE_BYTES: usize = 256 * 1024;
 const ALIAS_PROVENANCE: &str = "legacy-import:server-id";
+const NORMALIZED_ALIAS_PROVENANCE: &str = "legacy-import:normalized-local-id";
 /// The author of a comment the legacy file left unattributed and no account owns.
 const LOCAL_ACTOR: &str = "local";
 /// Imported records start below every real record version, so the first feed or
@@ -623,6 +624,11 @@ struct Alias {
     entity_type: String,
     old_local_id: String,
     server_id: String,
+    #[serde(default = "server_alias_provenance")]
+    provenance: String,
+}
+fn server_alias_provenance() -> String {
+    ALIAS_PROVENANCE.to_owned()
 }
 
 /// A row of `drafts` that carries a datum the schema has no table for.
@@ -1121,15 +1127,21 @@ impl Builder {
         }
     }
 
-    /// Records a proven server ID for a local one.
+    /// Records every source-proven identity difference, including normalization
+    /// of an unsynced bare UUID by the accepted import identity helper.
     fn alias(&mut self, entity: EntityType, local: &str, server: Option<&str>) {
-        if let Some(server) = server
-            && server != local
-        {
+        let canonical = legacy_record_key(entity, local, server);
+        if canonical != local {
             self.aliases.push(Alias {
                 entity_type: entity.as_str().to_owned(),
                 old_local_id: local.to_owned(),
-                server_id: server.to_owned(),
+                server_id: canonical,
+                provenance: if server.is_some() {
+                    ALIAS_PROVENANCE
+                } else {
+                    NORMALIZED_ALIAS_PROVENANCE
+                }
+                .to_owned(),
             });
         }
     }
@@ -1683,7 +1695,7 @@ fn activate(
                 alias.entity_type,
                 alias.old_local_id,
                 alias.server_id,
-                ALIAS_PROVENANCE
+                alias.provenance
             ],
         )?;
     }
@@ -1924,16 +1936,20 @@ fn verify(
     let mut stored: Vec<Alias> = Vec::new();
     {
         let mut statement = tx.prepare(
-            "SELECT entity_type, old_local_id, server_id FROM identity_aliases
-             WHERE workspace_id = ?1 AND provenance = ?2",
+            "SELECT entity_type, old_local_id, server_id, provenance FROM identity_aliases
+             WHERE workspace_id = ?1 AND provenance IN (?2,?3)",
         )?;
-        let found = statement.query_map(params![workspace, ALIAS_PROVENANCE], |row| {
-            Ok(Alias {
-                entity_type: row.get(0)?,
-                old_local_id: row.get(1)?,
-                server_id: row.get(2)?,
-            })
-        })?;
+        let found = statement.query_map(
+            params![workspace, ALIAS_PROVENANCE, NORMALIZED_ALIAS_PROVENANCE],
+            |row| {
+                Ok(Alias {
+                    entity_type: row.get(0)?,
+                    old_local_id: row.get(1)?,
+                    server_id: row.get(2)?,
+                    provenance: row.get(3)?,
+                })
+            },
+        )?;
         for alias in found {
             stored.push(alias?);
         }

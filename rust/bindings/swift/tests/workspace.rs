@@ -807,6 +807,93 @@ fn imported_presentation_carriers_are_individually_readable_and_immutable() {
 }
 
 #[test]
+fn workspace_026_fr_052_review_form_owned_ports_cancel_and_cross_connection_invalidation() {
+    use bb_swift::{BridgeReviewForm, BridgeSourceIdentityRequest};
+    let (first, options) = open("review-form-owned");
+    let second = workspace(&options);
+    let watch = second.subscribe().unwrap();
+    let before = watch.next(None, 0).unwrap().unwrap();
+    let draft = BridgeReviewForm {
+        text: "Private editor text stays local".into(),
+        saved_at: "2026-10-10T09:00:00.123456Z".into(),
+    };
+    let cancelled = operation();
+    assert!(cancelled.cancel());
+    assert_eq!(
+        code(
+            first
+                .save_review_form(
+                    "project:project-owned".into(),
+                    None,
+                    Some(draft.clone()),
+                    NOW.into(),
+                    cancelled
+                )
+                .unwrap_err()
+        ),
+        "CANCELLED"
+    );
+    assert_eq!(
+        second.review_form_count(NOW.into()).unwrap().live_count,
+        "0"
+    );
+    assert!(watch.next(Some(before.token.clone()), 0).unwrap().is_none());
+    let committed = operation();
+    let saved = first
+        .save_review_form(
+            "project:project-owned".into(),
+            None,
+            Some(draft.clone()),
+            NOW.into(),
+            committed.clone(),
+        )
+        .unwrap();
+    assert!(committed.is_committed());
+    assert!(!committed.cancel());
+    let changed = watch.next(Some(before.token), 0).unwrap().unwrap();
+    assert!(!changed.changed_kinds.is_empty());
+    assert_eq!(changed.projection_generation, saved.projection_generation);
+    let loaded = second
+        .load_review_form("project:project-owned".into(), NOW.into())
+        .unwrap();
+    assert_eq!(loaded.source_key, "project:project-owned");
+    assert_eq!(loaded.live_count, "1");
+    let owned = loaded.draft.unwrap();
+    assert_eq!(owned.text, draft.text);
+    assert_eq!(owned.saved_at, draft.saved_at);
+    assert_eq!(
+        second
+            .reverse_identities(vec![BridgeSourceIdentityRequest {
+                entity_type: "project".into(),
+                canonical_id: "project-owned".into()
+            }])
+            .unwrap()[0]
+            .source_id,
+        None
+    );
+    first
+        .save_review_form(
+            "project:project-owned".into(),
+            Some(loaded.source_key),
+            None,
+            NOW.into(),
+            operation(),
+        )
+        .unwrap();
+    assert_eq!(
+        second.review_form_count(NOW.into()).unwrap().live_count,
+        "0"
+    );
+    assert!(
+        second
+            .load_review_form("project:project-owned".into(), NOW.into())
+            .unwrap()
+            .draft
+            .is_none()
+    );
+}
+
+#[test]
 fn original_query_frame_token_is_owned_content_free_and_retry_survives_frame_change() {
     let (workspace, _) = open("original-query-frame");
     let created = match workspace
