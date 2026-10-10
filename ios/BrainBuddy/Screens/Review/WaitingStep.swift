@@ -109,6 +109,7 @@ struct ReviewItemStep: View {
             onBack: { asking = nil },
             onNext: context.advance
         )
+        .disabled(isSaving)
         .id(task?.id)
         .onAppear { if snapshot == nil { snapshot = queue() } }
         .task { try? await workspace.prepareReviewRead(read); snapshot = queue() }
@@ -121,6 +122,7 @@ struct ReviewItemStep: View {
             WorkspaceQueryPageControls(page: page,
                 previous: { try? await workspace.previousReviewPage(read); snapshot = queue() },
                 next: { try? await workspace.nextReviewPage(read); snapshot = queue() })
+                .disabled(isSaving)
         }
         .onChange(of: task?.id, initial: true) { _, _ in
             asking = nil
