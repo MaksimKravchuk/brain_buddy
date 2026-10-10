@@ -45,6 +45,18 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   dispatch on it; no mutation runs both. Comparing the two images belongs in tests
   (`RustDomainParityTests`). Change the Rust payloads and `RustDomain{Commands,Changes,Wire}.swift`
   together; `rust/bindings/swift/tests/apple_wire.rs` runs the same wire shapes from the Rust side.
+- `BrainBuddyPersistence/RustStoreImporter` is the one caller of
+  `RustBridgeRuntime.importLegacyStore`: it lets `StoreDocumentCoding` judge the legacy
+  `store.json` first (damaged, or saved by a newer app: nothing is attempted), passes the core its
+  own counts of the file to be cross-checked, and maps the core's `IMPORT_*`/`STORE_*` codes to
+  `RustStoreImportError`. The core (`bb-client` `import.rs`) takes the document's writer lock
+  (the exclusive `flock` on `.store.json.lock`, which `FileDocumentStore` writers take) from its
+  read of the file to the commit, so no app, widget or App Intent write can interleave, backs the
+  file up with a schema manifest, stages and validates under the migration lock, and switches the
+  store in one transaction or changes nothing; the legacy file is never modified. Its outbox entries and issues
+  are carried whole but not converted (`legacy_outbox`), so nothing may run on the Rust store
+  before that import has consumed them. Change the import's counts or errors in Rust, the facade
+  and the importer together.
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.

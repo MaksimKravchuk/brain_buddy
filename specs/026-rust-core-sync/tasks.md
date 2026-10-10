@@ -134,7 +134,7 @@ Independent test: update/import a populated store and uncertain queue, interrupt
 
 - [ ] T039 [US3] Implement sync_session.rs and epochs.rs: capture workspace/session/local-sync/server generations, invalidate/cancel on reset and ignore stale completions. Preserve immutable old envelopes and a pending-registration epoch for independent new work; register that same ID only under current authority and activate recovery base before sends. Unsupported versions retain store/queue. (PR-39).
 
-- [ ] T041 [US3] Implement import.rs and BrainBuddyPersistence/RustStoreImporter.swift to back up the source file/schema manifest, import every field/ID/relation/Review/local-only datum into staging and validate before atomically switching the marker under migration lock. Reuse legacy-import-golden and Mac awkward/corrupt/newer fixtures; preserve drafts and identity aliases without heuristic merging. (PR-41).
+- [x] T041 [US3] Implement import.rs and BrainBuddyPersistence/RustStoreImporter.swift to back up the source file/schema manifest, import every field/ID/relation/Review/local-only datum into staging and validate before atomically switching the marker under migration lock. Reuse legacy-import-golden and Mac awkward/corrupt/newer fixtures; preserve drafts and identity aliases without heuristic merging. (PR-41).
 
 - [ ] T042 [US3] Implement legacy_outbox.rs and RustOutboxImporter.swift to retain everSent, issuedAt, attempts, idempotency key/body, aliases and old Review marks. Lookup available legacy receipts; resolve only provable matches. Beyond the prior 24-hour window, keep uncertain submissions as issues rather than reissuing or using title/time similarity; exports include preserved unresolved intent. (PR-42).
 
