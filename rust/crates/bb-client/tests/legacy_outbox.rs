@@ -1292,7 +1292,7 @@ fn bounded_conversion_201_preserves_prefix_restart_order_known_retries_and_conte
         .is_err()
     );
     // A stale immutable source pin is not an offset or a new queue to convert.
-    store.write(|tx| {tx.execute("UPDATE drafts SET fields=replace(CAST(fields AS TEXT),'Original','Changed') WHERE editor_kind='legacy_outbox_entry' AND draft_id='legacy-outbox:00000000'",[])?;Ok(())}).unwrap();
+    store.write(|tx| {tx.execute("UPDATE drafts SET fields=CAST(replace(CAST(fields AS TEXT),'Original','Changed') AS BLOB) WHERE editor_kind='legacy_outbox_entry' AND draft_id='legacy-outbox:00000000'",[])?;Ok(())}).unwrap();
     assert!(legacy_conversion_page(&mut store, &plan.token, None).is_err());
 }
 
@@ -1660,7 +1660,7 @@ fn bounded_conversion_refuses_sent_uncertain_and_over_byte_budget_without_effect
         ],
         vec![],
     ));
-    resolve(&mut store, LATER, nothing);
+    resolve(&mut store, LATER, |_| LegacyAnswer::Unproven);
     let plan =
         begin_legacy_conversion_with(&mut store, &conversion_context(), false, |_| Ok(())).unwrap();
     assert_eq!(plan.source_count, 1);
