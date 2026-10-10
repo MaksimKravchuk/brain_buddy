@@ -1310,6 +1310,14 @@ extension Workspace {
                     let requests = try Self.rustRecordRequests(from: key)
                     return try await runtime.records(requests)
                 }
+                if root?["kind"] as? String == "review_content_stamps" {
+                    guard let encoded = root?["key"] as? String, let stampKey = Data(base64Encoded: encoded),
+                          let taskIDs = root?["task_ids"] as? [String],
+                          let projectIDs = root?["project_ids"] as? [String] else {
+                        throw RustBridgeError(code: "INVALID_REQUEST", field: "review_content_stamps")
+                    }
+                    return try await runtime.reviewContentStamps(key: stampKey, taskIDs: taskIDs, projectIDs: projectIDs)
+                }
                 var request = root ?? [:]
                 let limit = request.removeValue(forKey: "_collection_limit") as? Int ?? 200
                 guard (1...200).contains(limit) else { throw RustBridgeError(code: "INVALID_QUERY_LIMIT") }

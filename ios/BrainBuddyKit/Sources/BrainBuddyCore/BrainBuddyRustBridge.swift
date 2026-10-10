@@ -1127,6 +1127,18 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
+    /// Private content marks stay in the owned query cache and never become
+    /// domain query inputs or durable runtime state.
+    public func reviewContentStamps(key: Data, taskIDs: [String], projectIDs: [String])
+        async throws -> RustWorkspaceAnswer {
+        guard key.count <= 8 * 1024 * 1024 else { throw RustBridgeError(code: "TOO_MANY_BYTES", field: "key") }
+        guard taskIDs.count <= 200, projectIDs.count <= 200,
+              taskIDs.count + projectIDs.count <= 200 else { throw RustBridgeError(code: "TOO_MANY_ITEMS") }
+        return try await offActor { workspace in
+            Self.answer(try workspace.reviewContentStamps(key: key, taskIds: taskIDs, projectIds: projectIDs))
+        }
+    }
+
     public func smartAddPropose(draft: Data, minted: Data, expectedGeneration: String)
         async throws -> RustWorkspaceAnswer {
         try await offActor { workspace in
