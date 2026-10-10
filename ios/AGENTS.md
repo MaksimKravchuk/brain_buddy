@@ -36,8 +36,10 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   its `RustBridgeRuntime` takes and returns owned values, throws `RustBridgeError`
   (`code`, `retryable`, `field`, never payload text), runs off the caller's actor and
   honours task cancellation. Change the Rust interface and the facade together.
-- The Apple XCFramework is arm64 only (device, simulator, macOS); an Intel slice is a
-  `BB_APPLE_TARGETS` addition, not a code change.
+- The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
+  simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
+  with `lipo`, because Xcode links the simulator and Mac builds for both architectures.
+  `BB_APPLE_TARGETS` narrows the Rust targets (a Mac-only lane passes the two darwin ones).
 - The Rust crate stays under the workspace's `unsafe_code = "forbid"`; the UniFFI
   macros need no exception. Do not add `unsafe` to hand-written Rust.
 

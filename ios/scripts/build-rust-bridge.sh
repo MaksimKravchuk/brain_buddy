@@ -5,7 +5,9 @@
 #   linux   Artifacts/linux/libbb_swift.a
 #           Sources/BrainBuddyRustFFI/include/BrainBuddyRustFFI.h
 #           Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
-#   apple   Artifacts/BrainBuddyRustFFI.xcframework (static, one slice per Rust target)
+#   apple   Artifacts/BrainBuddyRustFFI.xcframework (static; one library per platform
+#           variant: iOS device arm64, iOS simulator arm64+x86_64, macOS arm64+x86_64, the
+#           two-architecture ones joined with lipo)
 #           Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
 #
 # Usage: sh ios/scripts/build-rust-bridge.sh [linux|apple]   (default: by `uname`)
@@ -14,8 +16,10 @@
 # --locked from rust/Cargo.lock, so the output follows from the committed sources; the
 # UniFFI generator is the `uniffi-bindgen` binary of the same crate and exact `uniffi`
 # version as the library. Environment:
-#   BB_APPLE_TARGETS  Rust targets of the XCFramework; defaults to the arm64 device, arm64
-#                     simulator and arm64 macOS. A Mac-only lane sets aarch64-apple-darwin.
+#   BB_APPLE_TARGETS  Rust targets of the XCFramework; defaults to all five below. A Mac-only
+#                     lane sets "aarch64-apple-darwin x86_64-apple-darwin". Simulator and macOS
+#                     builds link both architectures (Xcode builds the simulator for arm64 and
+#                     x86_64, and Mac apps are usually universal), so each needs both targets.
 #   CARGO_TARGET_DIR  where cargo builds (default rust/target).
 set -eu
 
@@ -56,7 +60,7 @@ if [ "$PLATFORM" = linux ]; then
 else
   export IPHONEOS_DEPLOYMENT_TARGET=26.0
   export MACOSX_DEPLOYMENT_TARGET=26.0
-  TARGETS="${BB_APPLE_TARGETS:-aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin}"
+  TARGETS="${BB_APPLE_TARGETS:-aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin}"
   LIBS=""
   for target in $TARGETS; do
     if command -v rustup >/dev/null 2>&1; then
@@ -64,6 +68,25 @@ else
     fi
     cargo_build --target "$target"
     LIBS="$LIBS $TARGET_DIR/$target/release/libbb_swift.a"
+  done
+  # One library per XCFramework platform variant: `-create-xcframework` accepts exactly
+  # one, so the variants that need two architectures are joined into a universal library.
+  VARIANT_LIBS=""
+  for variant in ios sim macos; do
+    parts=""
+    for target in $TARGETS; do
+      case "$variant:$target" in
+        ios:aarch64-apple-ios | sim:aarch64-apple-ios-sim | sim:x86_64-apple-ios | \
+          macos:aarch64-apple-darwin | macos:x86_64-apple-darwin)
+          parts="$parts $TARGET_DIR/$target/release/libbb_swift.a"
+          ;;
+      esac
+    done
+    [ -n "$parts" ] || continue
+    mkdir -p "$WORK/fat/$variant"
+    # shellcheck disable=SC2086 # $parts is a space-separated list of paths without spaces
+    lipo -create $parts -output "$WORK/fat/$variant/libbb_swift.a"
+    VARIANT_LIBS="$VARIANT_LIBS $WORK/fat/$variant/libbb_swift.a"
   done
 fi
 
@@ -95,7 +118,7 @@ module BrainBuddyRustFFI {
 }
 EOF
   set --
-  for lib in $LIBS; do
+  for lib in $VARIANT_LIBS; do
     set -- "$@" -library "$lib" -headers "$HEADERS"
   done
   mkdir -p "$KIT/Artifacts"

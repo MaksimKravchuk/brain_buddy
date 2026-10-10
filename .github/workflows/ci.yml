@@ -718,7 +718,7 @@ jobs:
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
         with:
           toolchain: 1.99.0
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Build the Rust bridge
         if: env.RUN == 'true'
@@ -831,12 +831,12 @@ jobs:
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
         with:
           toolchain: 1.99.0
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Build the Rust bridge
         if: env.RUN == 'true'
         env:
-          BB_APPLE_TARGETS: aarch64-apple-darwin
+          BB_APPLE_TARGETS: aarch64-apple-darwin x86_64-apple-darwin
         run: sh ios/scripts/build-rust-bridge.sh apple
 
       # --only-use-versions-from-resolved-file builds exactly what
