@@ -2023,3 +2023,664 @@ fn accountless_import_proof_cannot_grant_linked_source_or_reinterpret_existing_n
         bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).is_err()
     );
 }
+
+fn local_private_lane_custom(
+    name: &str,
+    modify: impl FnOnce(&mut Value),
+) -> (Lane, Store, bb_client::AccountlessImportProof) {
+    let lane = lane(name);
+    let mut source: Value = serde_json::from_slice(&golden_bytes()).unwrap();
+    let mut fixture = review_fixture();
+    let task = "00000000-0000-4000-8000-000000000011";
+    let decision = "00000000-0000-4000-8000-000000000014";
+    fixture["source_tasks"][task]["serverRevision"] = Value::Null;
+    fixture["source_review"]["decisions"][decision]["taskAfter"]["serverRevision"] = Value::Null;
+    fixture["source_review"]["decisions"][decision]["undo"]["taskBefore"]["serverRevision"] =
+        Value::Null;
+    fixture["source_review"]["decisions"][decision]["undo"]
+        .as_object_mut()
+        .unwrap()
+        .remove("createdTaskID");
+    fixture["source_review"]["decisions"][decision]["undo"]
+        .as_object_mut()
+        .unwrap()
+        .remove("createdTaskAfter");
+    let canonical = "decision_00000000-0000-4000-8000-000000000014";
+    fixture["expected_read_set"]["decisions"][canonical]["task_revision_before"] = json!("0");
+    fixture["expected_read_set"]["decisions"][canonical]["task_revision_after"] = json!("0");
+    fixture["expected_read_set"]["decisions"][canonical]["created_task_id"] = Value::Null;
+    modify(&mut fixture);
+    source["account"] = Value::Null;
+    source["outbox"] = json!([]);
+    source["base"]["tasks"] = fixture["source_tasks"].clone();
+    source["base"]["review"] = fixture["source_review"].clone();
+    lane.write_source(&source);
+    let report = import_legacy_store(&lane.request()).unwrap();
+    let mut store = open(&lane.database);
+    let proof = bb_client::verify_accountless_import(
+        &mut store,
+        &lane.directory.join(report.marker.backup_file),
+    )
+    .unwrap();
+    bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).unwrap();
+    let capture = bb_client::capture_legacy_review(&mut store).unwrap();
+    let prepared = bb_client::PreparedLegacyReview {
+        token: capture.token,
+        read_set: serde_json::from_value(fixture["expected_read_set"].clone()).unwrap(),
+        aliases: vec![],
+        derived_counts: serde_json::from_value(fixture["expected_derived_counts"].clone()).unwrap(),
+    };
+    bb_client::activate_legacy_review(&mut store, &review_context(), &prepared).unwrap();
+    (lane, store, proof)
+}
+
+#[test]
+fn accountless_private_import_original_nil_stamp_pins_native_zero_and_undo_survives_reopen() {
+    use bb_client::{ExecuteRequest, RandomIds, execute};
+    use bb_protocol::{
+        catalog::CommandType,
+        command::{Precondition, RevisionPrecondition},
+        wire::{CommandId, Counter, Id},
+    };
+    let (lane, mut store, proof) = local_private_lane_custom("local-private-nil-stamp", |_| {});
+    let page = capture_fragment(
+        &mut store,
+        &proof,
+        bb_client::LocalReviewSourceKind::Decision,
+        "00000000-0000-4000-8000-000000000014",
+        None,
+    );
+    let prepared = prepare_fragment(&page, &mut store);
+    let serialized = serde_json::to_vec(&prepared).unwrap();
+    let prepared: bb_client::PreparedLocalReviewFragment =
+        serde_json::from_slice(&serialized).unwrap();
+    let public = bb_client::visible_snapshot(&mut store).unwrap();
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Err(bb_client::LegacyReviewError::Cancelled)
+        ),
+        Err(bb_client::LegacyReviewError::Cancelled)
+    );
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        )
+        .unwrap(),
+        bb_client::LocalReviewFragmentAdmitted::Admitted
+    );
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        )
+        .unwrap(),
+        bb_client::LocalReviewFragmentAdmitted::AlreadyAdmitted
+    );
+    assert_eq!(bb_client::visible_snapshot(&mut store).unwrap(), public);
+    let private = carried(&mut store, "runtime_local_review_private");
+    assert_eq!(
+        private[0].2["private"]["fields"]["local_before"]["session_before"]["revision_after"],
+        json!("2")
+    );
+    drop(store);
+    let mut store = open(&lane.database);
+    let request = ExecuteRequest {
+        command_id: CommandId::parse("cmd_00000000-0000-4000-8000-000000000099").unwrap(),
+        command_type: CommandType::ReviewUndoDecision,
+        entity_id: Some(Id::parse("decision_00000000-0000-4000-8000-000000000014").unwrap()),
+        payload: json!({}).as_object().unwrap().clone(),
+        preconditions: vec![Precondition::Revision(RevisionPrecondition {
+            entity_type: EntityType::Task,
+            entity_id: Id::parse("task_history_proven").unwrap(),
+            edit_revision: Counter::from(0),
+        })],
+        depends_on: vec![],
+        admission_tokens: vec![],
+        context: review_context(),
+    };
+    execute(&mut store, &mut RandomIds, &request).unwrap();
+    assert_eq!(
+        bodies(&mut store, "task")["task_history_proven"]["revision"],
+        json!("1")
+    );
+    let before = bb_client::visible_snapshot(&mut store).unwrap();
+    bb_client::replay(&mut store, &review_context()).unwrap();
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        before.records
+    );
+    assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
+}
+
+#[test]
+fn accountless_private_import_source_mismatch_and_live_pin_changes_never_authorize_undo() {
+    let (_lane, mut store, proof) = local_private_lane_custom("local-private-pin", |_| {});
+    let page = capture_fragment(
+        &mut store,
+        &proof,
+        bb_client::LocalReviewSourceKind::Decision,
+        "00000000-0000-4000-8000-000000000014",
+        None,
+    );
+    let mut prepared = prepare_fragment(&page, &mut store);
+    prepared.evidence.task_matches = Some(false);
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        )
+        .unwrap(),
+        bb_client::LocalReviewFragmentAdmitted::Admitted
+    );
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    prepared.evidence.task_matches = Some(true);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE confirmed_records SET record_version='1' WHERE record_type='task'",
+                [],
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        ),
+        Err(bb_client::LegacyReviewError::SourceChanged)
+    );
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+}
+
+fn prepare_fragment(
+    page: &bb_client::LocalReviewFragmentPage,
+    store: &mut Store,
+) -> bb_client::PreparedLocalReviewFragment {
+    use bb_client::{LocalReviewComponent as C, PreparedLocalFragmentFields as F};
+    let mut evidence = bb_client::LocalReviewSourceEvidence {
+        task_matches: None,
+        created_task_matches: None,
+        session_matches: None,
+    };
+    let private = match page.component {
+        C::DecisionScalar => {
+            let task = bb_client::visible_snapshot(store)
+                .unwrap()
+                .records
+                .into_iter()
+                .find_map(|record| match record {
+                    bb_domain::types::Record::Task(task)
+                        if task.id.as_str() == "task_history_proven" =>
+                    {
+                        Some(task)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let mut task = serde_json::to_value(task).unwrap();
+            task.as_object_mut().unwrap().remove("tag_ids");
+            evidence.task_matches = Some(true);
+            evidence.session_matches = Some(true);
+            Some(F::Decision(serde_json::from_value(json!({"task_before":task,"created_task_revision":null,"receipt_kind":"waiting","local_before":{"receipt_replaced":null,"session_before":{"qualifying_activity":false,"last_activity_at":NOW,"last_activity_after":NOW,"revision_after":null}}})).unwrap()))
+        }
+        C::DecisionTags => Some(F::DecisionTags(
+            page.source
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| {
+                    bb_domain::types::TagId::parse(legacy_record_key(
+                        EntityType::Tag,
+                        id.as_str().unwrap(),
+                        None,
+                    ))
+                    .unwrap()
+                })
+                .collect(),
+        )),
+        C::BulkReleased => Some(F::Bulk(
+            page.source["released"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|_| {
+                    Some(bb_domain::types::ReleasedPrivate {
+                        previous_state: bb_domain::types::TaskState::Waiting,
+                        clock_before: None,
+                        local_receipt_replaced: None,
+                        local_source_task_unchanged: Some(true),
+                    })
+                })
+                .collect(),
+        )),
+        C::SessionScalar => Some(F::Session(bb_domain::types::SessionPrivate {
+            applied_progress: BTreeMap::new(),
+            finished_empty: vec![],
+            local_imported_progress: vec![],
+        })),
+        C::SessionProgress => Some(F::SessionProgress(
+            page.source
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| {
+                    bb_domain::types::ProgressId::parse(format!(
+                        "progress_{}",
+                        id.as_str().unwrap()
+                    ))
+                    .unwrap()
+                })
+                .collect(),
+        )),
+        C::Settings => Some(F::Settings(bb_domain::types::SettingsPrivate {
+            last_effective_sweep_at: None,
+            threshold_changed_at: serde_json::from_value(page.source["thresholdChangedAt"].clone())
+                .unwrap(),
+        })),
+        C::TaskPark => Some(F::TaskPark(serde_json::from_value(json!({"from_revision":null,"clock_before":{"formulation_id":page.source["parked"]["clockBefore"]["id"],"started_at":page.source["parked"]["clockBefore"]["startedAt"],"extended_at":null,"extension_reason":null,"park_floor_at":null,"stalled_before":2}})).unwrap())),
+    };
+    let prepared = bb_client::PreparedLocalReviewFragment {
+        header: page.header.clone(),
+        ordinal: page.ordinal,
+        component: page.component,
+        offset: page.offset,
+        count: page.count,
+        fragment_sha256: page.fragment_sha256.clone(),
+        task_public: page.task_public.clone(),
+        session_public: page.session_public.clone(),
+        private,
+        evidence,
+        task_before_park: None,
+    };
+    serde_json::from_slice(&serde_json::to_vec(&prepared).unwrap()).unwrap()
+}
+fn capture_fragment(
+    store: &mut Store,
+    proof: &bb_client::AccountlessImportProof,
+    kind: bb_client::LocalReviewSourceKind,
+    id: &str,
+    after: Option<&str>,
+) -> bb_client::LocalReviewFragmentPage {
+    bb_client::capture_local_review_private_fragment(
+        store,
+        proof,
+        &bb_client::LocalReviewSourceId {
+            source_kind: kind,
+            source_id: id.into(),
+        },
+        after,
+        &Instant::parse(NOW).unwrap(),
+    )
+    .unwrap()
+    .unwrap()
+}
+fn admit_fragment(
+    store: &mut Store,
+    proof: &bb_client::AccountlessImportProof,
+    prepared: &bb_client::PreparedLocalReviewFragment,
+) -> bb_client::LocalReviewFragmentAdmitted {
+    bb_client::admit_local_review_private_fragment_with(
+        store,
+        proof,
+        prepared,
+        &Instant::parse(NOW).unwrap(),
+        || Ok(()),
+    )
+    .unwrap()
+}
+#[test]
+fn accountless_private_fragments_require_complete_tags_and_all_original_pins_then_retry_after_prune()
+ {
+    use bb_client::{LocalReviewFragmentAdmitted as A, LocalReviewSourceKind as K};
+    let decision = "00000000-0000-4000-8000-000000000014";
+    let (lane, mut store, proof) = local_private_lane_custom("private-fragment-tags", |fixture| {
+        fixture["source_review"]["decisions"][decision]["undo"]["taskBefore"]["tagIDs"] = json!(
+            (1000..1201)
+                .map(|id| format!("00000000-0000-4000-8000-{id:012}"))
+                .collect::<Vec<_>>()
+        );
+    });
+    let first = capture_fragment(&mut store, &proof, K::Decision, decision, None);
+    assert!(first.source["undo"]["taskBefore"].get("tagIDs").is_none());
+    assert!(first.source["undo"]["taskBefore"].get("subtasks").is_none());
+    let prepared = prepare_fragment(&first, &mut store);
+    assert!(matches!(
+        admit_fragment(&mut store, &proof, &prepared),
+        A::Pending { next_ordinal: 1 }
+    ));
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    assert!(matches!(
+        admit_fragment(&mut store, &proof, &prepared),
+        A::Pending { next_ordinal: 1 }
+    ));
+    let mut different = prepared.clone();
+    different.evidence.task_matches = Some(false);
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &different,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        ),
+        Err(bb_client::LegacyReviewError::SourceChanged)
+    );
+    drop(store);
+    let mut store = open(&lane.database);
+    let mut cursor = first.next_cursor;
+    let mut last = None;
+    while let Some(after) = cursor {
+        let page = capture_fragment(&mut store, &proof, K::Decision, decision, Some(&after));
+        let prepared = prepare_fragment(&page, &mut store);
+        if page.next_cursor.is_none() {
+            assert_eq!(
+                bb_client::admit_local_review_private_fragment_with(
+                    &mut store,
+                    &proof,
+                    &prepared,
+                    &Instant::parse(NOW).unwrap(),
+                    || Err(bb_client::LegacyReviewError::Cancelled)
+                ),
+                Err(bb_client::LegacyReviewError::Cancelled)
+            );
+            assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+        }
+        let result = admit_fragment(&mut store, &proof, &prepared);
+        if page.next_cursor.is_none() {
+            assert_eq!(result, A::Admitted);
+            last = Some(prepared);
+        }
+        cursor = page.next_cursor;
+    }
+    let overlays = carried(&mut store, "runtime_local_review_private");
+    assert_eq!(
+        overlays[0].2["private"]["fields"]["task_before"]["tag_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        201
+    );
+    let expired = Instant::parse("2026-10-17T09:00:00Z").unwrap();
+    bb_client::prune_local_review_private_with(&mut store, &expired, 200, || Ok(())).unwrap();
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    assert_eq!(
+        bb_client::lookup_local_review_private_fragment(&mut store, &last.unwrap()).unwrap(),
+        Some(A::AlreadyAdmitted)
+    );
+    assert!(
+        bb_client::capture_local_review_private_fragment(
+            &mut store,
+            &proof,
+            &bb_client::LocalReviewSourceId {
+                source_kind: K::Decision,
+                source_id: decision.into()
+            },
+            None,
+            &expired
+        )
+        .unwrap()
+        .is_none()
+    );
+}
+#[test]
+fn accountless_private_fragments_do_not_complete_after_task_pin_interference_or_gaps() {
+    use bb_client::LocalReviewSourceKind as K;
+    let decision = "00000000-0000-4000-8000-000000000014";
+    let (_lane, mut store, proof) = local_private_lane_custom("private-fragment-pin", |fixture| {
+        fixture["source_review"]["decisions"][decision]["undo"]["taskBefore"]["tagIDs"] =
+            json!(["00000000-0000-4000-8000-000000000100"]);
+    });
+    let page = capture_fragment(&mut store, &proof, K::Decision, decision, None);
+    let prepared = prepare_fragment(&page, &mut store);
+    let mut gap = prepared.clone();
+    gap.ordinal = 1;
+    assert!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &gap,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        )
+        .is_err()
+    );
+    admit_fragment(&mut store, &proof, &prepared);
+    let final_page = capture_fragment(
+        &mut store,
+        &proof,
+        K::Decision,
+        decision,
+        page.next_cursor.as_deref(),
+    );
+    let prepared = prepare_fragment(&final_page, &mut store);
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE confirmed_records SET record_version='1' WHERE record_type='task'",
+                [],
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        bb_client::admit_local_review_private_fragment_with(
+            &mut store,
+            &proof,
+            &prepared,
+            &Instant::parse(NOW).unwrap(),
+            || Ok(())
+        ),
+        Err(bb_client::LegacyReviewError::SourceChanged)
+    );
+    assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+}
+#[test]
+fn accountless_private_import_pages_five_hundred_bulk_rows_without_partial_undo_or_revision_guess()
+{
+    use bb_client::{LocalReviewFragmentAdmitted as A, LocalReviewSourceKind as K};
+    let bulk = "00000000-0000-4000-8000-000000000015";
+    let canonical_bulk = format!("bulk_{bulk}");
+    let (_lane, mut store, proof) = local_private_lane_custom("private-fragment-bulk", |fixture| {
+        let original = fixture["source_tasks"]["00000000-0000-4000-8000-000000000011"].clone();
+        let mut released = vec![];
+        let mut public = vec![];
+        for seq in 2000..2500 {
+            let id = format!("00000000-0000-4000-8000-{seq:012}");
+            let canonical = format!("task_{id}");
+            let mut task = original.clone();
+            task["id"] = json!(id);
+            task["serverID"] = json!(canonical);
+            task["serverRevision"] = json!(6);
+            task["state"] = json!("someday");
+            fixture["source_tasks"][&id] = task;
+            released.push(json!({"taskID":id,"previousState":"waiting","taskAfter":{"serverRevision":6},"clockKnown":true}));
+            public.push(json!({"task_id":canonical,"revision_after":"6"}));
+        }
+        fixture["source_review"]["bulkReleases"][bulk]["released"] = json!(released);
+        fixture["source_review"]["bulkReleases"][bulk]["skipped"] = json!([]);
+        fixture["source_review"]["bulkReleases"][bulk]["undoneAt"] = Value::Null;
+        fixture["source_review"]["bulkReleases"][bulk]["undoResult"] = Value::Null;
+        fixture["expected_read_set"]["bulk_releases"][&canonical_bulk]["released"] = json!(public);
+        fixture["expected_read_set"]["bulk_releases"][&canonical_bulk]["skipped"] = json!([]);
+        fixture["expected_read_set"]["bulk_releases"][&canonical_bulk]["undone_at"] = Value::Null;
+        fixture["expected_read_set"]["bulk_releases"][&canonical_bulk]["undo"] = Value::Null;
+    });
+    let mut cursor = None;
+    let mut total = 0;
+    let mut pages = 0;
+    loop {
+        let page = capture_fragment(&mut store, &proof, K::BulkRelease, bulk, cursor.as_deref());
+        assert!(page.count <= 200);
+        assert!(page.header.binding.task_public.is_empty());
+        assert_eq!(
+            page.public["released"].as_array().unwrap().len(),
+            page.count as usize
+        );
+        total += page.count;
+        pages += 1;
+        let prepared = prepare_fragment(&page, &mut store);
+        let result = admit_fragment(&mut store, &proof, &prepared);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            assert_eq!(result, A::Admitted);
+            break;
+        }
+        assert!(carried(&mut store, "runtime_local_review_private").is_empty());
+    }
+    assert_eq!(total, 500);
+    assert!(pages > 2);
+    let private = carried(&mut store, "runtime_local_review_private");
+    assert_eq!(
+        private[0].2["private"]["fields"].as_array().unwrap().len(),
+        500
+    );
+    assert!(
+        private[0].2["private"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["local_source_task_unchanged"] == true)
+    );
+    assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
+    let public = bb_client::visible_snapshot(&mut store).unwrap();
+    assert!(
+        !serde_json::to_string(&public)
+            .unwrap()
+            .contains("local_source_task_unchanged")
+    );
+}
+#[test]
+fn accountless_private_settings_preserve_null_and_session_progress_uses_bounded_source_ids() {
+    use bb_client::{LocalReviewFragmentAdmitted as A, LocalReviewSourceKind as K};
+    let session = "00000000-0000-4000-8000-000000000013";
+    let (_lane, mut store, proof) =
+        local_private_lane_custom("private-fragment-progress", |fixture| {
+            fixture["source_review"]["settings"]["thresholdChangedAt"] = Value::Null;
+            fixture["source_review"]["sessions"][session]["appliedProgress"] = json!(
+                (3000..3201)
+                    .map(|id| format!("00000000-0000-4000-8000-{id:012}"))
+                    .collect::<Vec<_>>()
+            );
+        });
+    let page = capture_fragment(&mut store, &proof, K::Settings, "settings", None);
+    assert!(page.header.source_at.is_none());
+    let prepared = prepare_fragment(&page, &mut store);
+    assert_eq!(admit_fragment(&mut store, &proof, &prepared), A::Admitted);
+    let mut cursor = None;
+    let mut total = 0;
+    loop {
+        let page = capture_fragment(&mut store, &proof, K::Session, session, cursor.as_deref());
+        if page.component == bb_client::LocalReviewComponent::SessionProgress {
+            total += page.count;
+        }
+        let prepared = prepare_fragment(&page, &mut store);
+        admit_fragment(&mut store, &proof, &prepared);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(total, 201);
+    let rows = carried(&mut store, "runtime_local_review_private");
+    let session = rows
+        .iter()
+        .find(|row| row.2["entity_type"] == "review_session")
+        .unwrap();
+    assert_eq!(
+        session.2["private"]["fields"]["local_imported_progress"]
+            .as_array()
+            .unwrap()
+            .len(),
+        201
+    );
+}
+
+#[test]
+fn native_task_view_page_uses_same_local_park_evidence_and_returns_only_public_facts() {
+    use bb_domain::types::{Query, QueryResult, TaskId};
+    let original = "00000000-0000-4000-8000-000000000011";
+    let (_lane, mut store, proof) = local_private_lane_custom(
+        "private-native-task-view",
+        |fixture| {
+            fixture["source_tasks"][original]["state"] = json!("someday");
+            fixture["source_tasks"][original]["parked"] = json!({"at":NOW,"formulationID":"00000000-0000-4000-8000-000000000016","fromRevision":null,"clockBefore":{"id":"00000000-0000-4000-8000-000000000016","startedAt":"2026-10-01T09:00:00Z"},"stalledBefore":2});
+        },
+    );
+    let task = TaskId::parse("task_history_proven").unwrap();
+    let context = review_context();
+    let inputs = bb_domain::types::QueryInputs {
+        now: context.now,
+        device_zone: context.time_zone,
+        policy: context.policy,
+    };
+    let query = Query::NativeTaskViews {
+        task_ids: vec![task.clone()],
+    };
+    let before = bb_client::query_page(&mut store, &query, &inputs).unwrap();
+    let QueryResult::TaskList(before) = before.result else {
+        panic!("task list")
+    };
+    assert!(
+        before.items[0]
+            .formulation_state
+            .as_ref()
+            .unwrap()
+            .parked_after_days
+            .is_none()
+    );
+    let captured = capture_fragment(
+        &mut store,
+        &proof,
+        bb_client::LocalReviewSourceKind::TaskPark,
+        original,
+        None,
+    );
+    let prepared = prepare_fragment(&captured, &mut store);
+    admit_fragment(&mut store, &proof, &prepared);
+    let page = bb_client::query_page(&mut store, &query, &inputs).unwrap();
+    assert_eq!(page.task_frames.len(), 1);
+    assert!(!page.task_frames[0].token.children_known);
+    let wire = serde_json::to_string(&page.result).unwrap();
+    assert!(!wire.contains("clock_before"));
+    assert!(!wire.contains("from_revision"));
+    assert!(!wire.contains("private"));
+    let QueryResult::TaskList(list) = page.result else {
+        panic!("task list")
+    };
+    assert_eq!(
+        list.items[0]
+            .formulation_state
+            .as_ref()
+            .unwrap()
+            .parked_after_days,
+        Some(9)
+    );
+    let QueryResult::TaskFormulation(explicit) = bb_client::query_page(
+        &mut store,
+        &Query::TaskFormulation { task_id: task },
+        &inputs,
+    )
+    .unwrap()
+    .result
+    else {
+        panic!("formulation")
+    };
+    assert_eq!(list.items[0].formulation_state, Some(explicit));
+}

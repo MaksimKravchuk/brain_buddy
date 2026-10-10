@@ -250,3 +250,53 @@ qualification/activity only when its exact saved postdecision time and revision
 still match. Subsequent receipts and session progress stay intact. These optional
 private fields are absent on the ordinary server path and do not change public
 record formats.
+
+Private migration uses `capture_local_review_private_fragment(retained_source_path,
+selected_source, after, now)` and `admit_local_review_private_fragment(retained_source_path,
+prepared_page, now, operation)`. The source selector names one decision, bulk,
+parked task, session, or the settings singleton (`source_id="settings"`). Capture
+returns one optional page; expired decision/bulk sources return null. Each page
+has at most 200 total array entries, typed aliases, task witness/pin rows and
+present session witness/pin rows, and at most 8 MiB. Task witnesses carry only
+identity, original optional server revision and update time. Scalar TaskBefore
+omits child collections and tags; separate tag components retain all original
+tags. Session scalar excludes queues, set-aside IDs and progress IDs. Bulk source
+and public rows contain matching released slices, never a repeated whole bulk.
+These narrow witnesses make no full-task or child-completeness claim.
+
+The capture-owned header binds the codec version, exact importer/Review source
+token, whole original source digest, owner public digest/record version, component
+lengths and original deadline. `source_at` is nullable for timeless settings;
+absence of `thresholdChangedAt` remains absence. Decision/bulk dates and seven-day
+deadlines are required and immutable. Each prepared page echoes the header,
+ordinal, component, offset/count, fragment digest and bounded task/session pins.
+The existing native business codec supplies typed private fields independently
+for each page; Swift does not concatenate a large final payload.
+
+Contiguous validated components accumulate in a reserved pending draft distinct
+from an active private overlay. A gap, overlap or changed same-ordinal submission
+refuses; an exact retry is a no-op. Incomplete components never enter a private
+ReadSet. The final transaction recomputes every original slice, checks complete
+coverage, all public/task/session pins and current original expiry, constructs the
+whole shared private type in Rust, installs it and removes the pending draft
+atomically. Admission returns `pending { next_ordinal }`, `admitted`, or
+`already_admitted`. A small completion manifest retains only header/request
+digests; known completion lookup precedes backup reopening and expiry checks.
+Upkeep prunes expired pending and active private content without changing public
+records or recreating private content from the immutable backup.
+
+Imported Undo task/created-task eligibility requires the exact original source
+stamp (optional update-time wildcard, exact optional server revision equality),
+unchanged imported record version, public fingerprint and pinned native edit
+revision. Native zero is a representation, never proof. Source-stale bulk rows
+retain a LOCAL-only false match witness and skip before missing clock restoration;
+server behavior stays unchanged. Imported session progress retains exact source
+progress IDs in `SessionPrivate.local_imported_progress`. Only LOCAL recognizes
+those IDs as already applied, after checking the run's allowed steps. Native
+progress keeps its existing body digest map; Done, replacement and idle-close
+clear both sets. No digest or finished-empty classification is fabricated.
+
+Native task pages also attach optional `TaskView.formulation_state` from the
+owning formulation helper using the same read transaction and matching LOCAL
+private evidence. This is a closed public DTO and avoids per-row bridge reads.
+Pure/server task views omit the field; ordinary record reads remain public.

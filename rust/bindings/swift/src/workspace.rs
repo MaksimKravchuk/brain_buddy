@@ -567,14 +567,12 @@ impl BridgeWorkspace {
         })
     }
 
-    fn mutate_local_review(
+    fn mutate_local_review<T, E>(
         &self,
         operation: Arc<BridgeOperation>,
-        work: impl FnOnce(
-            &mut Store,
-            &mut dyn FnMut() -> Result<(), ExecuteError>,
-        ) -> Result<u32, ExecuteError>,
-    ) -> Result<u32, Failure> {
+        work: impl FnOnce(&mut Store, &mut dyn FnMut() -> Result<(), ExecuteError>) -> Result<T, E>,
+        failure: impl FnOnce(E) -> Failure,
+    ) -> Result<T, Failure> {
         if operation.used.swap(true, Ordering::AcqRel) {
             return Err(Failure::new("OPERATION_ALREADY_USED", None));
         }
@@ -599,7 +597,7 @@ impl BridgeWorkspace {
                 arbitration = Some(lock);
                 Ok(())
             };
-            let result = work(store, &mut before_commit).map_err(execute_failure)?;
+            let result = work(store, &mut before_commit).map_err(failure)?;
             if let Some(lock) = &mut arbitration {
                 **lock = OperationState::Committed;
             }
@@ -644,10 +642,14 @@ impl BridgeWorkspace {
         &self,
         operation: Arc<BridgeOperation>,
     ) -> Result<(), BridgeError> {
-        self.mutate_local_review(operation, |store, before_commit| {
-            bb_client::establish_account_less_with(store, before_commit)?;
-            Ok(0)
-        })?;
+        self.mutate_local_review(
+            operation,
+            |store, before_commit| {
+                bb_client::establish_account_less_with(store, before_commit)?;
+                Ok(0)
+            },
+            execute_failure,
+        )?;
         Ok(())
     }
 
@@ -661,20 +663,25 @@ impl BridgeWorkspace {
         if retained_source_path.is_empty() || retained_source_path.len() > 4096 {
             return Err(Failure::new("INVALID_REQUEST", Some("retained_source_path")).into());
         }
-        self.mutate_local_review(operation, |store, before_commit| {
-            let proof = bb_client::verify_accountless_import(
-                store,
-                std::path::Path::new(&retained_source_path),
-            )
-            .map_err(|error| {
-                ExecuteError::Refused(bb_domain::types::DomainError::field(
-                    bb_domain::types::Reason::InvalidValue,
-                    error.field().unwrap_or("account_less_import"),
-                ))
-            })?;
-            bb_client::establish_account_less_from_import_with(store, &proof, before_commit)?;
-            Ok(0)
-        })?;
+        self.mutate_local_review(
+            operation,
+            |store, before_commit| {
+                let proof = bb_client::verify_accountless_import(
+                    store,
+                    std::path::Path::new(&retained_source_path),
+                )
+                .map_err(|error| match error {
+                    bb_client::ImportError::Store(error) => ExecuteError::Store(error),
+                    error => ExecuteError::Refused(bb_domain::types::DomainError::field(
+                        bb_domain::types::Reason::InvalidValue,
+                        error.field().unwrap_or("account_less_import"),
+                    )),
+                })?;
+                bb_client::establish_account_less_from_import_with(store, &proof, before_commit)?;
+                Ok(0)
+            },
+            execute_failure,
+        )?;
         Ok(())
     }
 
@@ -686,9 +693,109 @@ impl BridgeWorkspace {
         operation: Arc<BridgeOperation>,
     ) -> Result<u32, BridgeError> {
         let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
-        Ok(self.mutate_local_review(operation, |store, before_commit| {
-            bb_client::prune_local_review_private_with(store, &now, limit, before_commit)
+        Ok(self.mutate_local_review(
+            operation,
+            |store, before_commit| {
+                bb_client::prune_local_review_private_with(store, &now, limit, before_commit)
+            },
+            execute_failure,
+        )?)
+    }
+
+    /// Trusted selected private capture. It reads the exact digest-verified
+    /// retained import backup, never a current native task reconstruction.
+    /// One bounded original-source private component. A null result is an
+    /// expired or absent source, and cannot be combined into displayed tasks.
+    pub fn capture_local_review_private_fragment(
+        &self,
+        retained_source_path: String,
+        selected: Vec<u8>,
+        after: Option<String>,
+        now: String,
+    ) -> Result<Vec<u8>, BridgeError> {
+        if retained_source_path.is_empty()
+            || retained_source_path.len() > 4096
+            || selected.len() > 4096
+            || after.as_ref().is_some_and(|v| v.len() > 4096)
+        {
+            return Err(Failure::new("INVALID_REQUEST", Some("local_review_private")).into());
+        }
+        let selected: bb_client::LocalReviewSourceId = parse_json(&selected, "selected")?;
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.with_store(|store| {
+            let proof = bb_client::verify_accountless_import(
+                store,
+                std::path::Path::new(&retained_source_path),
+            )
+            .map_err(|error| Failure {
+                code: error.code(),
+                retryable: error.is_retryable(),
+                field: error.field(),
+            })?;
+            to_json(
+                &bb_client::capture_local_review_private_fragment(
+                    store,
+                    &proof,
+                    &selected,
+                    after.as_deref(),
+                    &now,
+                )
+                .map_err(review_failure)?,
+            )
         })?)
+    }
+    /// Incomplete typed components remain reserved drafts. Complete native
+    /// coverage and all original pins install private evidence atomically.
+    pub fn admit_local_review_private_fragment(
+        &self,
+        retained_source_path: String,
+        prepared: Vec<u8>,
+        now: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<Vec<u8>, BridgeError> {
+        if retained_source_path.is_empty()
+            || retained_source_path.len() > 4096
+            || prepared.len() > 8 * 1024 * 1024
+        {
+            return Err(Failure::new("INVALID_REQUEST", Some("local_review_private")).into());
+        }
+        let prepared: bb_client::PreparedLocalReviewFragment = parse_json(&prepared, "prepared")?;
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        let outcome = self.mutate_local_review(
+            operation,
+            |store, before_commit| {
+                let arbitrate = |error| match error {
+                    ExecuteError::Cancelled => bb_client::LegacyReviewError::Cancelled,
+                    ExecuteError::Store(error) => bb_client::LegacyReviewError::Store(error),
+                    _ => bb_client::LegacyReviewError::Invalid("local_review_private"),
+                };
+                if let Some(known) =
+                    bb_client::lookup_local_review_private_fragment(store, &prepared)?
+                {
+                    before_commit().map_err(arbitrate)?;
+                    return Ok(known);
+                }
+                let proof = bb_client::verify_accountless_import(
+                    store,
+                    std::path::Path::new(&retained_source_path),
+                )
+                .map_err(|error| match error {
+                    bb_client::ImportError::Store(error) => {
+                        bb_client::LegacyReviewError::Store(error)
+                    }
+                    _ => bb_client::LegacyReviewError::Invalid("account_less_import"),
+                })?;
+                bb_client::admit_local_review_private_fragment_with(
+                    store,
+                    &proof,
+                    &prepared,
+                    &now,
+                    || before_commit().map_err(arbitrate),
+                )
+            },
+            review_failure,
+        )?;
+        Ok(to_json(&outcome)?)
     }
 
     /// Every command is saved in one transaction. Once commit wins, neither

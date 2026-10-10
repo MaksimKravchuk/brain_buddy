@@ -139,7 +139,7 @@ pub(crate) fn is_active_in(conn: &Connection, workspace: &str) -> Result<bool, S
         Err(_) => Err(StoreError::Corrupt),
     }
 }
-fn capture_in(tx: &Transaction<'_>) -> Result<LegacyReviewCapture, LegacyReviewError> {
+pub(crate) fn capture_in(tx: &Transaction<'_>) -> Result<LegacyReviewCapture, LegacyReviewError> {
     let found: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if found != crate::SCHEMA_VERSION {
         return Err(StoreError::UpgradeRequired { found }.into());
@@ -355,7 +355,7 @@ fn validate(
     validate_identities(capture, prepared, records, live)
 }
 
-fn canonical(kind: &str, local: &str, aliases: &[LegacyReviewAlias]) -> String {
+pub(crate) fn canonical(kind: &str, local: &str, aliases: &[LegacyReviewAlias]) -> String {
     if let Some(alias) = aliases
         .iter()
         .find(|alias| alias.entity_type.as_str() == kind && alias.local_id == local)
@@ -376,6 +376,8 @@ fn source_kind(field: &str) -> Option<&'static str> {
     match field {
         "taskID" | "createdTaskID" | "decisionQueue" | "setAsideTaskIDs" | "restored"
         | "skipped" => Some("task"),
+        "projectID" => Some("project"),
+        "tagIDs" => Some("tag"),
         "sessionID" => Some("review_session"),
         "decisionID" => Some("review_decision"),
         "bulkID" => Some("review_bulk_release"),
@@ -399,7 +401,7 @@ fn target_kind(field: &str) -> Option<&'static str> {
 
 // Only named identity fields count as evidence. Text, time and position never
 // admit an alias. Historical references remain valid without a live row.
-fn source_references(
+pub(crate) fn source_references(
     value: &Value,
     field: Option<&str>,
     aliases: &[LegacyReviewAlias],

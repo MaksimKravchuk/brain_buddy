@@ -228,6 +228,28 @@ pub fn query_collection_page(
             }) {
                 return Err(QueryError::RestartRequired);
             }
+            if let Query::NativeTaskViews { task_ids } = &query {
+                if collection_after.is_some() {
+                    return Err(QueryError::RestartRequired);
+                }
+                let mut result = QueryResult::TaskList(
+                    bb_domain::queries::native_task_views(&state, task_ids).map_err(|error| {
+                        QueryError::RefusedAt {
+                            error,
+                            projection_generation: generation,
+                        }
+                    })?,
+                );
+                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+                let task_frames =
+                    crate::admission::query_frames(tx, &workspace, &state, &result, false)?;
+                return Ok(QueryPage {
+                    projection_generation: generation,
+                    result,
+                    collection_next_cursor: None,
+                    task_frames,
+                });
+            }
             if let Query::TaskDetail { task_id } = &query {
                 if cursor
                     .as_ref()
@@ -262,7 +284,8 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
-                let result = QueryResult::TaskDetail(view);
+                let mut result = QueryResult::TaskDetail(view);
+                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
@@ -293,7 +316,7 @@ pub fn query_collection_page(
                     return Err(QueryError::RestartRequired);
                 }
                 let after = cursor.as_ref().and_then(|cursor| cursor.key.as_deref());
-                let (result, next) = if matches!(
+                let (mut result, next) = if matches!(
                     query,
                     Query::Projects { .. }
                         | Query::Tags {}
@@ -333,6 +356,7 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
+                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
@@ -354,7 +378,7 @@ pub fn query_collection_page(
                     return Err(QueryError::RestartRequired);
                 }
                 let after = cursor.as_ref().and_then(|cursor| cursor.key.as_deref());
-                let (result, next) = if matches!(query, Query::ReviewState {}) {
+                let (mut result, next) = if matches!(query, Query::ReviewState {}) {
                     bb_domain::review_sessions::native_state_page(
                         &state,
                         inputs,
@@ -385,6 +409,7 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
+                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
@@ -422,6 +447,14 @@ pub fn query_collection_page(
                     return Err(QueryError::Store(error));
                 }
                 result
+            } else if matches!(query, Query::TaskFormulation { .. })
+                && crate::local_review::account_less(tx)?
+            {
+                // Private clocks feed only the owning derived formulation
+                // calculation. Its closed DTO contains no private records.
+                let private =
+                    crate::local_review::private_read_set(tx, &workspace, &state, &inputs.now)?;
+                dispatch::query(&private, &query, inputs)
             } else {
                 dispatch::query(&state, &query, inputs)
             };
@@ -429,6 +462,7 @@ pub fn query_collection_page(
                 error,
                 projection_generation: generation,
             })?;
+            decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
             if collection_after.is_some() {
                 return Err(QueryError::RestartRequired);
             }
@@ -779,7 +813,9 @@ pub fn save_workspace_draft_with(
     if !draft_id_valid(&draft.draft_id)
         || !draft.editor_kind.starts_with("runtime_")
         || draft.editor_kind == "runtime_form_overlay"
-        || draft.editor_kind == "runtime_local_review_private"
+        || draft
+            .editor_kind
+            .starts_with("runtime_local_review_private")
     {
         return Err(invalid("draft_id"));
     }
@@ -896,4 +932,59 @@ pub fn workspace_records(
         }
         Ok((unsigned(generation)?,records,task_frames))
     })()))?
+}
+
+/// Attach the owner's closed formulation facts to already selected native rows,
+/// using this read transaction's public records and matching LOCAL evidence.
+fn decorate_task_views(
+    tx: &rusqlite::Transaction<'_>,
+    workspace: &str,
+    state: &ReadSet,
+    result: &mut QueryResult,
+    inputs: &QueryInputs,
+    generation: u64,
+) -> Result<(), QueryError> {
+    let views: Vec<&mut TaskView> = match result {
+        QueryResult::TaskDetail(view) => vec![view],
+        QueryResult::TaskList(page) => page.items.iter_mut().collect(),
+        QueryResult::ListMode(page) => page
+            .sections
+            .iter_mut()
+            .flat_map(|section| &mut section.items)
+            .collect(),
+        QueryResult::ReviewQueue(page) => page.items.iter_mut().collect(),
+        QueryResult::RestartCandidates(items) | QueryResult::AutoParkDue(items) => {
+            items.iter_mut().collect()
+        }
+        _ => Vec::new(),
+    };
+    if views.is_empty() {
+        return Ok(());
+    }
+    let private;
+    if crate::local_review::account_less(tx)? {
+        private = crate::local_review::private_read_set(tx, workspace, state, &inputs.now)?;
+    } else {
+        for view in views {
+            view.formulation_state = Some(
+                bb_domain::review_sessions::task_formulation_view(state, &view.id, inputs)
+                    .map_err(|error| QueryError::RefusedAt {
+                        error,
+                        projection_generation: generation,
+                    })?,
+            );
+        }
+        return Ok(());
+    }
+    for view in views {
+        view.formulation_state = Some(
+            bb_domain::review_sessions::task_formulation_view(&private, &view.id, inputs).map_err(
+                |error| QueryError::RefusedAt {
+                    error,
+                    projection_generation: generation,
+                },
+            )?,
+        );
+    }
+    Ok(())
 }

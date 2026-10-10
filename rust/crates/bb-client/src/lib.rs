@@ -31,6 +31,8 @@ mod issues;
 mod legacy_outbox;
 mod legacy_review;
 mod local_review;
+mod local_review_fragments;
+mod local_review_import;
 mod localfacts;
 mod locking;
 mod receipts;
@@ -98,6 +100,18 @@ pub use legacy_review::{
     LegacyReviewActivated, LegacyReviewAlias, LegacyReviewCapture, LegacyReviewDerivedCounts,
     LegacyReviewError, LegacyReviewToken, PreparedLegacyReview, activate_legacy_review,
     activate_legacy_review_with, capture_legacy_review,
+};
+
+pub use local_review_fragments::{
+    LocalReviewComponent, LocalReviewFragmentAdmitted, LocalReviewFragmentHeader,
+    LocalReviewFragmentPage, LocalReviewSessionWitness, LocalReviewTaskWitness,
+    PreparedLocalDecisionScalar, PreparedLocalFragmentFields, PreparedLocalReviewFragment,
+    admit_local_review_private_fragment_with, capture_local_review_private_fragment,
+    lookup_local_review_private_fragment,
+};
+pub use local_review_import::{
+    LocalReviewPrivateBinding, LocalReviewPublicPin, LocalReviewSourceEvidence,
+    LocalReviewSourceId, LocalReviewSourceKind, PreparedLocalParkPrivate,
 };
 
 pub use review_forms::{

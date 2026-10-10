@@ -66,19 +66,41 @@ pub fn establish_account_less_from_import_with(
     before_commit: impl FnOnce() -> Result<(), ExecuteError>,
 ) -> Result<(), ExecuteError> {
     store.try_write(|tx| {
-        let workspace:String=tx.query_row("SELECT workspace_id FROM sync_meta",[],|r|r.get(0))?;
-        if workspace!=proof.workspace {return Err(invalid("account_less_import"));}
-        let row:Option<(Vec<u8>,Vec<u8>)>=tx.query_row("SELECT manifest,manifest_digest FROM staging_bases WHERE workspace_id=?1 AND activation_id=?2 AND state='activated'",params![workspace,proof.activation],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        let(manifest,digest)=row.ok_or_else(||invalid("account_less_import"))?;
-        if crate::sha256_hex(&manifest)!=proof.marker_sha256 || crate::execute::sha256(&manifest).as_slice()!=digest.as_slice() {return Err(invalid("account_less_import"));}
-        let marker:crate::ImportMarker=serde_json::from_slice(&manifest).map_err(|_|StoreError::Corrupt)?;
-        if marker.source_sha256!=proof.source_sha256 || marker.source_bytes!=proof.source_bytes || marker.source_version!=proof.source_version || marker.source_generation!=proof.source_generation {return Err(invalid("account_less_import"));}
+        recheck_import_proof(tx, proof)?;
         if account_less(tx)? {return before_commit();}
         let denied:bool=tx.query_row("SELECT account_link_state<>'unchosen' OR account_id IS NOT NULL OR scope_id IS NOT NULL OR device_id IS NOT NULL OR server_generation IS NOT NULL OR cursor IS NOT NULL OR base_watermark IS NOT NULL OR device_epoch_state<>'none' OR next_local_seq<>1 OR link_checkpoint IS NOT NULL OR EXISTS(SELECT 1 FROM outbox) OR EXISTS(SELECT 1 FROM command_receipts) FROM sync_meta",[],|r|r.get(0))?;
         if denied || crate::legacy_outbox::has_remote_history_in(tx).map_err(|_|invalid("account_less_import"))? {return Err(invalid("account_less_import"));}
         tx.execute("UPDATE sync_meta SET account_link_state='account_less'",[])?;
         before_commit()
     })
+}
+
+/// Exact activated marker binding checked under the caller's transaction.
+pub(crate) fn recheck_import_proof(
+    tx: &Transaction<'_>,
+    proof: &crate::import::AccountlessImportProof,
+) -> Result<(), ExecuteError> {
+    let workspace: String = tx.query_row("SELECT workspace_id FROM sync_meta", [], |r| r.get(0))?;
+    if workspace != proof.workspace {
+        return Err(invalid("account_less_import"));
+    }
+    let row:Option<(Vec<u8>,Vec<u8>)>=tx.query_row("SELECT manifest,manifest_digest FROM staging_bases WHERE workspace_id=?1 AND activation_id=?2 AND state='activated'",params![workspace,proof.activation],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    let (manifest, digest) = row.ok_or_else(|| invalid("account_less_import"))?;
+    if crate::sha256_hex(&manifest) != proof.marker_sha256
+        || crate::execute::sha256(&manifest).as_slice() != digest.as_slice()
+    {
+        return Err(invalid("account_less_import"));
+    }
+    let marker: crate::ImportMarker =
+        serde_json::from_slice(&manifest).map_err(|_| StoreError::Corrupt)?;
+    if marker.source_sha256 != proof.source_sha256
+        || marker.source_bytes != proof.source_bytes
+        || marker.source_version != proof.source_version
+        || marker.source_generation != proof.source_generation
+    {
+        return Err(invalid("account_less_import"));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -100,7 +122,17 @@ enum PrivateFields {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Provenance {
-    LocalCommand { command_id: CommandId },
+    LocalCommand {
+        command_id: CommandId,
+    },
+    VerifiedImport {
+        activation_id: String,
+        marker_sha256: String,
+        source_sha256: String,
+        review_sha256: String,
+        source_fragment_sha256: String,
+        source_id: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -112,7 +144,7 @@ struct Overlay {
     record_key: RecordKey,
     provenance: Provenance,
     public_sha256: String,
-    source_at: Instant,
+    source_at: Option<Instant>,
     deadline: Option<Instant>,
     private: PrivateFields,
 }
@@ -253,15 +285,28 @@ pub(crate) fn private_read_set(
             _ => None,
         };
         if let Some(source) = source {
-            if overlay.source_at != *source || overlay.deadline.as_ref() != Some(&deadline(source)?)
+            if overlay.source_at.as_ref() != Some(source)
+                || overlay.deadline.as_ref() != Some(&deadline(source)?)
             {
                 return Err(StoreError::Corrupt.into());
             }
         } else if overlay.deadline.is_some() {
             return Err(StoreError::Corrupt.into());
         }
-        let Provenance::LocalCommand { command_id } = overlay.provenance;
-        let proven:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM outbox WHERE workspace_id=?1 AND command_id=?2 AND state='completed' AND ever_sent=0 AND json_extract(CAST(envelope AS TEXT),'$.scope_id') IS NULL AND json_extract(CAST(envelope AS TEXT),'$.device_id') IS NULL)",params![workspace,command_id.as_str()],|r|r.get(0))?;
+        let proven = match &overlay.provenance {
+            Provenance::LocalCommand { command_id } => conn.query_row("SELECT EXISTS(SELECT 1 FROM outbox WHERE workspace_id=?1 AND command_id=?2 AND state='completed' AND ever_sent=0 AND json_extract(CAST(envelope AS TEXT),'$.scope_id') IS NULL AND json_extract(CAST(envelope AS TEXT),'$.device_id') IS NULL)",params![workspace,command_id.as_str()],|r|r.get::<_,bool>(0))?,
+            Provenance::VerifiedImport { activation_id,marker_sha256,source_sha256,review_sha256,.. } => {
+                let manifest:Option<Vec<u8>>=conn.query_row("SELECT manifest FROM staging_bases WHERE workspace_id=?1 AND activation_id=?2 AND state='activated'",params![workspace,activation_id],|r|r.get(0)).optional()?;
+                let review:Option<Vec<u8>>=conn.query_row("SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id='legacy-review-base' AND editor_kind='legacy_review_base'",[workspace],|r|r.get(0)).optional()?;
+                match (manifest,review) {
+                    (Some(manifest),Some(review)) if crate::sha256_hex(&manifest)==*marker_sha256 && crate::sha256_hex(&review)==*review_sha256 => {
+                        let marker:crate::ImportMarker=serde_json::from_slice(&manifest).map_err(|_|StoreError::Corrupt)?;
+                        marker.source_sha256==*source_sha256 && crate::legacy_review::is_active_in(conn,workspace)?
+                    }
+                    _=>false,
+                }
+            }
+        };
         if !proven {
             return Err(StoreError::Corrupt.into());
         }
@@ -269,6 +314,75 @@ pub(crate) fn private_read_set(
         crate::execute::file(&mut result, record);
     }
     Ok(result)
+}
+
+/// Private importer admission changes neither public records nor sync metadata.
+/// All authority comes from the opaque source proof and the caller's pinned
+/// matching public record; generic JSON draft ports cannot reach this helper.
+pub(crate) fn admit_import_private(
+    tx: &Transaction<'_>,
+    proof: &crate::import::AccountlessImportProof,
+    token: &crate::LegacyReviewToken,
+    binding: &crate::LocalReviewPrivateBinding,
+    record: &Record,
+    now: &Instant,
+) -> Result<bool, ExecuteError> {
+    let Some((private, source_at, expiry)) = extract(record, now)? else {
+        return Ok(false);
+    };
+    let parsed_now = instant(now)?;
+    if expiry
+        .as_ref()
+        .map(instant)
+        .transpose()?
+        .is_some_and(|at| parsed_now >= at)
+    {
+        return Ok(false);
+    }
+    let overlay = Overlay {
+        version: 1,
+        workspace: proof.workspace.clone(),
+        entity_type: record.entity_type(),
+        record_key: record.record_key(),
+        provenance: Provenance::VerifiedImport {
+            activation_id: proof.activation.clone(),
+            marker_sha256: proof.marker_sha256.clone(),
+            source_sha256: proof.source_sha256.clone(),
+            review_sha256: token.review_sha256.clone(),
+            source_fragment_sha256: binding.source_fragment_sha256.clone(),
+            source_id: binding.source_id.clone(),
+        },
+        public_sha256: fingerprint(record)?,
+        source_at: if matches!(record, Record::ReviewSettings(_)) {
+            proof
+                .source
+                .pointer("/base/review/settings/thresholdChangedAt")
+                .filter(|v| !v.is_null())
+                .map(|v| serde_json::from_value(v.clone()).map_err(|_| StoreError::Corrupt))
+                .transpose()?
+        } else {
+            Some(source_at)
+        },
+        deadline: expiry,
+        private,
+    };
+    let id = draft_id(overlay.entity_type, &overlay.record_key);
+    let existing: Option<Vec<u8>> = tx
+        .query_row(
+            "SELECT fields FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",
+            params![proof.workspace, id, KIND],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let bytes = serde_json::to_vec(&overlay).map_err(|_| StoreError::Corrupt)?;
+    if let Some(existing) = existing {
+        if existing != bytes {
+            return Err(invalid("local_review_private"));
+        }
+        return Ok(false);
+    }
+    tx.execute("INSERT INTO drafts(workspace_id,draft_id,editor_kind,record_type,record_key,fields,updated_at,base_revision) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![proof.workspace,id,KIND,overlay.entity_type.as_str(),json!(overlay.record_key).to_string(),bytes,now.as_str(),overlay.deadline.as_ref().map(instant).transpose()?.map(|at|at.unix_micros().to_string())])?;
+    Ok(true)
 }
 
 /// Settles final public after-images in the existing local base with per-record
@@ -306,6 +420,9 @@ pub(crate) fn settle_change(
             String::from_utf8(digits).map_err(|_| StoreError::Corrupt)?
         }
     };
+    // A changed or deleted owner can no longer receive an incomplete imported
+    // before-image. Completion manifests contain hashes only and remain retries.
+    tx.execute("DELETE FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind='runtime_local_review_private_pending'",params![workspace,format!("{PREFIX}pending:{}",crate::sha256_hex(json!([kind,key]).to_string().as_bytes()))])?;
     let (body, revision) = match change {
         DomainChange::Upsert(record) => {
             if let Some((private, source_at, deadline)) = extract(record, now)? {
@@ -318,7 +435,7 @@ pub(crate) fn settle_change(
                         command_id: command.clone(),
                     },
                     public_sha256: fingerprint(record)?,
-                    source_at,
+                    source_at: Some(source_at),
                     deadline,
                     private,
                 };
@@ -365,10 +482,13 @@ pub fn prune_local_review_private_with(
     let now = instant(now)?;
     store.try_write(|tx|{
         let workspace:String=tx.query_row("SELECT workspace_id FROM sync_meta",[],|r|r.get(0))?;
-        let mut statement=tx.prepare("SELECT draft_id,fields FROM drafts WHERE workspace_id=?1 AND editor_kind=?2 AND base_revision IS NOT NULL AND CAST(base_revision AS INTEGER)<=?3 ORDER BY base_revision,draft_id LIMIT ?4")?;
-        let rows=statement.query_map(params![workspace,KIND,now.unix_micros(),limit],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
+        let mut statement=tx.prepare("SELECT draft_id,editor_kind,fields FROM drafts WHERE workspace_id=?1 AND editor_kind IN (?2,'runtime_local_review_private_pending') AND base_revision IS NOT NULL AND CAST(base_revision AS INTEGER)<=?3 ORDER BY base_revision,draft_id LIMIT ?4")?;
+        let rows=statement.query_map(params![workspace,KIND,now.unix_micros(),limit],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Vec<u8>>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
         let mut removed=0;
-        for(id,body)in rows{let overlay:Overlay=serde_json::from_slice(&body).map_err(|_|StoreError::Corrupt)?;if overlay.deadline.as_ref().map(instant).transpose()?.is_some_and(|at|now>=at){removed+=tx.execute("DELETE FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",params![workspace,id,KIND])?;}}
+        for(id,kind,body)in rows{
+            let due=if kind==KIND{let overlay:Overlay=serde_json::from_slice(&body).map_err(|_|StoreError::Corrupt)?;overlay.deadline.as_ref().map(instant).transpose()?.is_some_and(|at|now>=at)}else{true};
+            if due{removed+=tx.execute("DELETE FROM drafts WHERE workspace_id=?1 AND draft_id=?2 AND editor_kind=?3",params![workspace,id,kind])?;}
+        }
         before_commit()?;
         u32::try_from(removed).map_err(|_|StoreError::Corrupt.into())
     })

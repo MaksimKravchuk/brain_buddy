@@ -3168,3 +3168,57 @@ fn native_review_state_pages_bound_combined_arrays_and_keep_global_unseen_count(
     assert_eq!(parks, expected.unseen_parks);
     assert_eq!(receipts, expected.receipts);
 }
+
+#[test]
+fn local_imported_progress_is_source_id_only_after_mode_validation_and_clears_at_done() {
+    let mut read = Store::default().read_set();
+    run(
+        &mut read,
+        &start_command(SESSION_A, "quick", &[], true),
+        NOW,
+    );
+    let progress = progress_command(SESSION_A, 37, json!({"inbox_processed_delta":2}));
+    let types::Command::ReviewSessionProgress(payload) = &progress.command else {
+        panic!("progress")
+    };
+    let id = types::SessionId::parse(SESSION_A).unwrap();
+    read.sessions
+        .get_mut(&id)
+        .unwrap()
+        .private
+        .as_mut()
+        .unwrap()
+        .local_imported_progress = vec![payload.progress_id.clone()];
+    assert_eq!(
+        bb_domain::dispatch::decide_local_review(&read, &progress, &exec(NOW))
+            .unwrap()
+            .outcome,
+        ChangeOutcome::NoOp
+    );
+    assert_eq!(
+        review_sessions::decide(&read, &progress, &exec(NOW))
+            .unwrap()
+            .outcome,
+        ChangeOutcome::Applied
+    );
+    let invalid = progress_command(
+        SESSION_A,
+        37,
+        json!({"step":{"code":"mind_sweep","status":"finished"}}),
+    );
+    assert_eq!(
+        bb_domain::dispatch::decide_local_review(&read, &invalid, &exec(NOW))
+            .unwrap_err()
+            .reason,
+        Reason::StepNotInReview
+    );
+    run(&mut read, &finish_command(SESSION_A, None), NOW);
+    assert!(
+        session_of(&read, SESSION_A)
+            .private
+            .as_ref()
+            .unwrap()
+            .local_imported_progress
+            .is_empty()
+    );
+}

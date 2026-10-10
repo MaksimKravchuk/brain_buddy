@@ -3617,3 +3617,40 @@ fn local_review_bulk_undo_restores_owned_receipt_and_drops_entire_released_priva
         }
     }
 }
+
+#[test]
+fn local_imported_source_stale_bulk_item_skips_missing_clock_without_zero_revision_aliasing() {
+    let mut store = restart_store(&[old_next(1, 0), old_next(2, 0)]);
+    local_run(
+        &mut store,
+        &bulk_command(&bid(1), "restart", &[(&tid(1), 0), (&tid(2), 0)], None),
+    );
+    for task in store.read_set.tasks.values_mut() {
+        task.revision = 0.into();
+    }
+    let release = store.read_set.bulk_releases.values_mut().next().unwrap();
+    for item in &mut release.released {
+        item.revision_after = 0.into();
+    }
+    let private = release.released[0].private.as_mut().unwrap();
+    private.clock_before = None;
+    private.local_source_task_unchanged = Some(false);
+    release.released[1]
+        .private
+        .as_mut()
+        .unwrap()
+        .local_source_task_unchanged = Some(true);
+    let undo = command("review.bulk_undo", &bid(1), json!({}), vec![]);
+    assert_eq!(
+        store.decide(&undo).unwrap_err().reason,
+        Reason::UndoUnavailable,
+        "ordinary server does not adopt LOCAL source evidence"
+    );
+    let set = local_run(&mut store, &undo);
+    let result = the_release(&set).undo.as_ref().unwrap();
+    assert_eq!(result.restored, [types::TaskId::parse(tid(2)).unwrap()]);
+    assert_eq!(result.skipped.len(), 1);
+    assert_eq!(result.skipped[0].task_id.as_str(), tid(1));
+    assert_eq!(store.task(&tid(1)).state, types::TaskState::Someday);
+    assert_eq!(store.task(&tid(2)).state, types::TaskState::Next);
+}

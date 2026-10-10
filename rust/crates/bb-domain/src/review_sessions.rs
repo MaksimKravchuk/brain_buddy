@@ -678,6 +678,7 @@ fn ended(
     run.ended_at = Some(wire(ended_at, "ended_at")?);
     if let Some(private) = run.private.as_mut() {
         private.applied_progress.clear();
+        private.local_imported_progress.clear();
     }
     run.revision = next_counter(&session.revision, "revision")?;
     Ok(run)
@@ -770,6 +771,7 @@ fn session_start(
         private: inputs.private_review().then(|| SessionPrivate {
             applied_progress: BTreeMap::new(),
             finished_empty: Vec::new(),
+            local_imported_progress: Vec::new(),
         }),
     };
     changes.push(upsert(Record::ReviewSession(session)));
@@ -852,6 +854,15 @@ fn session_progress(
 ) -> Result<ChangeSet, DomainError> {
     let session = existing_session(read_set, command)?;
     require_run_steps(session, progress)?;
+    if inputs.local_review()
+        && session.private.as_ref().is_some_and(|private| {
+            private
+                .local_imported_progress
+                .contains(&progress.progress_id)
+        })
+    {
+        return Ok(ChangeSet::no_op());
+    }
     let digest = progress_digest(progress);
     let known = session
         .private
@@ -972,6 +983,11 @@ fn merged(
         next.private = Some(SessionPrivate {
             applied_progress,
             finished_empty: finished_empty.into_iter().collect(),
+            local_imported_progress: session
+                .private
+                .as_ref()
+                .map(|private| private.local_imported_progress.clone())
+                .unwrap_or_default(),
         });
     }
     let mut changes = vec![upsert(Record::ReviewSession(next))];

@@ -1282,6 +1282,7 @@ fn bulk_release(
         });
         let private = if inputs.private_review() {
             Some(ReleasedPrivate {
+                local_source_task_unchanged: None,
                 previous_state: releasable(payload.kind),
                 clock_before: snapshot.as_ref().map(stored_clock).transpose()?,
                 local_receipt_replaced: inputs
@@ -1397,6 +1398,14 @@ fn bulk_undo(
     // while any required private fact is absent, including an all-skipped bulk.
     let mut missing = None;
     for item in &release.released {
+        if inputs.local_review()
+            && item
+                .private
+                .as_ref()
+                .is_some_and(|private| private.local_source_task_unchanged == Some(false))
+        {
+            continue;
+        }
         let task = read_set
             .tasks
             .get(&item.task_id)
@@ -1454,6 +1463,18 @@ fn bulk_undo(
     let mut skipped = Vec::new();
     let mut changes = Vec::new();
     for item in &release.released {
+        if inputs.local_review()
+            && item
+                .private
+                .as_ref()
+                .is_some_and(|private| private.local_source_task_unchanged == Some(false))
+        {
+            skipped.push(BulkUndoSkipped {
+                task_id: item.task_id.clone(),
+                reason: UndoSkipReason::Stale,
+            });
+            continue;
+        }
         let current = read_set
             .tasks
             .get(&item.task_id)

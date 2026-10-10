@@ -170,6 +170,9 @@ pub struct AccountlessImportProof {
     pub(crate) source_bytes: u64,
     pub(crate) source_version: i64,
     pub(crate) source_generation: i64,
+    /// Verified original bytes decoded only after the existing strict parser.
+    /// Memory-only: never another persisted source copy or host authority flag.
+    pub(crate) source: Value,
 }
 
 /// Verifies the exact retained source through the same duplicate-key, source
@@ -213,6 +216,7 @@ pub fn verify_accountless_import(
         source_bytes: marker.source_bytes,
         source_version: marker.source_version,
         source_generation: marker.source_generation,
+        source: serde_json::from_slice(&bytes).map_err(|_| ImportError::StagingInvalid)?,
     })
 }
 
