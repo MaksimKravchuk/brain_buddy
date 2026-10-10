@@ -20,10 +20,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// `MIGRATIONS[n]` moves the schema from version `n` to `n + 1`.
-const MIGRATIONS: [&str; 1] = [SCHEMA_V1];
+const MIGRATIONS: [&str; 2] = [SCHEMA_V1, SCHEMA_V2];
 
 /// Why the store could not do what was asked. Every variant means nothing
 /// of the failed operation was saved; only `Busy` is worth retrying as is.
@@ -187,18 +187,28 @@ impl Store {
         &mut self,
         body: impl FnOnce(&Transaction<'_>) -> rusqlite::Result<T>,
     ) -> Result<T, StoreError> {
+        self.try_write(|transaction| body(transaction).map_err(StoreError::from))
+    }
+
+    /// [`Store::write`] for a body with its own error type: an `Err` rolls the
+    /// transaction back, so a refusal decided mid-way leaves nothing behind.
+    pub fn try_write<T, E: From<StoreError>>(
+        &mut self,
+        body: impl FnOnce(&Transaction<'_>) -> Result<T, E>,
+    ) -> Result<T, E> {
         if let StoreStatus::ReadOnlyRecovery { found } = self.status {
-            return Err(StoreError::UpgradeRequired { found });
+            return Err(StoreError::UpgradeRequired { found }.into());
         }
         let transaction = self
             .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
         let found = user_version(&transaction)?;
         if found != SCHEMA_VERSION {
-            return Err(StoreError::UpgradeRequired { found });
+            return Err(StoreError::UpgradeRequired { found }.into());
         }
         let value = body(&transaction)?;
-        transaction.commit()?;
+        transaction.commit().map_err(StoreError::from)?;
         Ok(value)
     }
 
@@ -448,4 +458,30 @@ CREATE TABLE staging_pages (
     FOREIGN KEY (workspace_id, activation_id)
         REFERENCES staging_bases (workspace_id, activation_id) ON DELETE CASCADE
 ) STRICT, WITHOUT ROWID;
+";
+
+/// Version 2: the visible projection and the local result of a command.
+///
+/// `visible_records` is `confirmed + replay(pending)` made durable, so one
+/// transaction can save a command and what it changed; it is rebuildable from
+/// `confirmed_records` and the outbox. `source_command_id` names the queued
+/// command that last wrote a row, which is how a later gesture finds the
+/// immutable identity it depends on. `outbox.projection_generation` and
+/// `local_result` keep what `execute` answered, so a retry after an unknown
+/// local completion returns the same answer. `outbox.envelope_digest` holds the
+/// SHA-256 of the caller's request, which that retry is compared with.
+const SCHEMA_V2: &str = "
+ALTER TABLE outbox ADD COLUMN projection_generation INTEGER;
+ALTER TABLE outbox ADD COLUMN local_result BLOB;
+
+CREATE TABLE visible_records (
+    workspace_id TEXT NOT NULL REFERENCES sync_meta (workspace_id),
+    record_type TEXT NOT NULL,
+    record_key TEXT NOT NULL,
+    edit_revision TEXT,
+    source_command_id TEXT,
+    body BLOB NOT NULL,
+    PRIMARY KEY (workspace_id, record_type, record_key)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX visible_by_key ON visible_records (workspace_id, record_key);
 ";

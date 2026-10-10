@@ -310,6 +310,7 @@ fn storage_026_fr_003_store_is_bound_to_one_protected_workspace() {
         "staging_pages",
         "sync_issues",
         "sync_meta",
+        "visible_records",
     ];
     assert_eq!(tables, expected);
     assert!(
