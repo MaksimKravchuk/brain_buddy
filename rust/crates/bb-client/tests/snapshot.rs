@@ -375,6 +375,23 @@ impl Fixture {
         self
     }
 
+    /// The server's own clock read `now` when it sent the manifest and pages.
+    fn serving_at(mut self, now: &str) -> Self {
+        self.manifest["server_now"] = json!(now);
+        for page in &mut self.pages {
+            page["server_now"] = json!(now);
+        }
+        self
+    }
+
+    /// Only the pages carry the server's clock reading `now`: a later response.
+    fn paging_at(mut self, now: &str) -> Self {
+        for page in &mut self.pages {
+            page["server_now"] = json!(now);
+        }
+        self
+    }
+
     fn envelope(&self) -> String {
         json!({ "manifest": self.manifest, "pages": self.pages }).to_string()
     }
@@ -1298,12 +1315,14 @@ mod snapshot {
         let mut store = open(&path).unwrap();
         assert_eq!(reading(&mut store), old);
         let fence = capture_fence(&mut store).unwrap();
+        let stale = fx.clone().serving_at(AFTER_EXPIRY);
         assert_eq!(
-            begin_at(&mut store, &fence, AFTER_EXPIRY, &fx).unwrap_err(),
+            begin_at(&mut store, &fence, AFTER_EXPIRY, &stale).unwrap_err(),
             ApplyError::Transfer(TransferFault::Expired)
         );
-        let again =
-            snapshot("snap-2", GENERATION, 6, &six_tasks()).expiring("2026-10-10T10:00:00Z");
+        let again = snapshot("snap-2", GENERATION, 6, &six_tasks())
+            .expiring("2026-10-10T10:00:00Z")
+            .serving_at(AFTER_EXPIRY);
         begin_at(&mut store, &fence, AFTER_EXPIRY, &again).unwrap();
         for index in 0..again.pages.len() {
             put_at(&mut store, &fence, AFTER_EXPIRY, &again, index).unwrap();
@@ -1333,6 +1352,96 @@ mod snapshot {
 
         assert_eq!(error, ApplyError::Transfer(TransferFault::Expired));
         assert_eq!(reading(&mut store), old);
+        assert_eq!(staging(&mut store), [("abandoned".into(), 0)]);
+    }
+
+    // The TTL is the server's: the device clock is never compared with a server
+    // instant. Here the server reads 09:00 and the snapshot expires at 09:30.
+
+    #[test]
+    fn snapshot_026_fr_005_a_device_clock_far_ahead_still_activates_a_fresh_snapshot() {
+        let path = scratch("clock-ahead");
+        let mut store = linked(&path);
+        let fx = snapshot("snap-1", GENERATION, 5, &six_tasks());
+        let fence = capture_fence(&mut store).unwrap();
+        let ahead = "2026-10-10T14:00:00Z"; // five hours past the server
+
+        begin_at(&mut store, &fence, ahead, &fx).unwrap();
+        for index in 0..fx.pages.len() {
+            put_at(&mut store, &fence, ahead, &fx, index).unwrap();
+        }
+        let done = activate_at(&mut store, &fence, ahead, &fx).unwrap();
+
+        assert_eq!(done.records, 6);
+        assert_eq!(position(&mut store), ("cursor-5".into(), "5".into()));
+    }
+
+    #[test]
+    fn snapshot_026_fr_005_a_device_clock_behind_still_expires_a_stale_snapshot() {
+        let behind = "2026-10-10T06:00:00Z"; // three hours before the server
+        let later = "2026-10-10T06:31:00Z"; // 31 minutes of real time on
+        let fx = snapshot("snap-1", GENERATION, 5, &six_tasks());
+
+        // Elapsed local time spends the TTL, though 06:31 is before 09:30.
+        let path = scratch("clock-behind-pages");
+        let mut store = linked(&path);
+        let old = reading(&mut store);
+        let fence = capture_fence(&mut store).unwrap();
+        begin_at(&mut store, &fence, behind, &fx).unwrap();
+        put_at(&mut store, &fence, behind, &fx, 0).unwrap();
+        assert_eq!(
+            put_at(&mut store, &fence, later, &fx, 1).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+        assert_eq!(staging(&mut store), [("abandoned".into(), 0)]);
+        assert_eq!(reading(&mut store), old);
+
+        // ... the same at activation.
+        let path = scratch("clock-behind-activation");
+        let mut store = linked(&path);
+        let fence = capture_fence(&mut store).unwrap();
+        begin_at(&mut store, &fence, behind, &fx).unwrap();
+        for index in 0..fx.pages.len() {
+            put_at(&mut store, &fence, behind, &fx, index).unwrap();
+        }
+        assert_eq!(
+            activate_at(&mut store, &fence, later, &fx).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+        assert_eq!(staging(&mut store), [("abandoned".into(), 0)]);
+
+        // The server's own reading on a later page spends it even when the device
+        // clock has not moved at all.
+        let path = scratch("clock-behind-server");
+        let mut store = linked(&path);
+        let fence = capture_fence(&mut store).unwrap();
+        let late_pages = fx.clone().paging_at(AFTER_EXPIRY);
+        begin_at(&mut store, &fence, behind, &fx).unwrap();
+        assert_eq!(
+            put_at(&mut store, &fence, behind, &late_pages, 0).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
+    }
+
+    #[test]
+    fn snapshot_026_fr_005_a_backwards_clock_does_not_extend_the_lifetime() {
+        let path = scratch("clock-back");
+        let mut store = linked(&path);
+        let fx = snapshot("snap-1", GENERATION, 5, &six_tasks());
+        let fence = capture_fence(&mut store).unwrap();
+        begin_at(&mut store, &fence, NOW, &fx).unwrap();
+        put_at(&mut store, &fence, "2026-10-10T09:20:00Z", &fx, 0).unwrap();
+
+        // The app restarts and the clock has been set back an hour: 20 minutes of
+        // the lifetime are still spent.
+        store.close().unwrap();
+        let mut store = open(&path).unwrap();
+        put_at(&mut store, &fence, "2026-10-10T08:00:00Z", &fx, 1).unwrap();
+        // Eleven more minutes by that clock make 31 in all, not 11.
+        assert_eq!(
+            put_at(&mut store, &fence, "2026-10-10T08:11:00Z", &fx, 2).unwrap_err(),
+            ApplyError::Transfer(TransferFault::Expired)
+        );
         assert_eq!(staging(&mut store), [("abandoned".into(), 0)]);
     }
 
