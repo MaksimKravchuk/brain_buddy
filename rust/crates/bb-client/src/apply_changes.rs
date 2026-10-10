@@ -44,6 +44,7 @@ use bb_protocol::feed::{
 };
 use bb_protocol::wire::{CommandId, CommonResponse, Id, Instant, Wire};
 use rusqlite::{OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 
 /// The largest decoded chunk of an oversized transaction (sync-v1 section 11).
 const MAX_CHUNK_BYTES: usize = 1 << 20;
@@ -472,7 +473,11 @@ fn page_in(
             return Err(ApplyError::Malformed("high_watermark behind the manifest"));
         }
         return Ok(FeedStep::Transfer(stage_manifest(
-            tx, context, &base, manifest,
+            tx,
+            context,
+            &base,
+            manifest,
+            &page.common.server_now,
         )?));
     }
 
@@ -685,11 +690,81 @@ impl TransferProgress {
     }
 }
 
-pub(crate) fn expired(expires_at: &Instant, now: &Instant) -> Result<bool, ApplyError> {
-    let parse = |instant: &Instant| {
-        UtcInstant::parse_rfc3339(instant.as_str()).map_err(|_| ApplyError::Malformed("instant"))
-    };
-    Ok(parse(now)? >= parse(expires_at)?)
+fn micros(instant: &Instant) -> Result<i64, ApplyError> {
+    UtcInstant::parse_rfc3339(instant.as_str())
+        .map(UtcInstant::unix_micros)
+        .map_err(|_| ApplyError::Malformed("instant"))
+}
+
+/// How much of a staged object's lifetime has been used.
+///
+/// `expires_at` is a **server** instant, so it is never compared with the device
+/// wall clock: a clock that runs ahead would refuse every fresh object and one
+/// that runs behind would keep an expired one alive. The lifetime that remained
+/// when staging began (`expires_at` minus the server time the same response
+/// carried) is spent by elapsed time instead. Elapsed time is the local clock's
+/// forward movement since the last look (a clock that jumps back adds nothing, so
+/// it never extends the lifetime and is never trusted to shorten it), raised to
+/// the server time of any later response when one is at hand. It is kept in the
+/// staging row so it survives a restart.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct Lifetime {
+    server_begin: i64,
+    elapsed: i64,
+    last_local: i64,
+}
+
+impl Lifetime {
+    pub(crate) fn begin(server_now: &Instant, local_now: &Instant) -> Result<Self, ApplyError> {
+        Ok(Self {
+            server_begin: micros(server_now)?,
+            elapsed: 0,
+            last_local: micros(local_now)?,
+        })
+    }
+
+    /// Accounts for the time since the last look and says whether `expires_at` is
+    /// reached. `server_now` is the server time of the response being handled,
+    /// when there is one. The caller saves the staging again when this is false.
+    pub(crate) fn used_up(
+        &mut self,
+        expires_at: &Instant,
+        local_now: &Instant,
+        server_now: Option<&Instant>,
+    ) -> Result<bool, ApplyError> {
+        let local = micros(local_now)?;
+        self.elapsed = self
+            .elapsed
+            .saturating_add((local - self.last_local).max(0));
+        self.last_local = local;
+        if let Some(server_now) = server_now {
+            self.elapsed = self.elapsed.max(micros(server_now)? - self.server_begin);
+        }
+        Ok(self.elapsed >= micros(expires_at)? - self.server_begin)
+    }
+}
+
+/// What is kept of an oversized transaction being staged.
+#[derive(Serialize, Deserialize)]
+struct StagedTransfer {
+    lifetime: Lifetime,
+    manifest: TransferManifest,
+}
+
+/// Saves a staging's side record (manifest, fence, lifetime) after it changed.
+pub(crate) fn persist_staged(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    activation_id: &str,
+    staged: &impl Serialize,
+) -> Result<(), ApplyError> {
+    let bytes = serde_json::to_vec(staged).map_err(|_| ApplyError::Malformed("staging"))?;
+    tx.execute(
+        "UPDATE staging_bases SET manifest = ?3
+         WHERE workspace_id = ?1 AND activation_id = ?2",
+        params![workspace_id, activation_id, bytes],
+    )?;
+    Ok(())
 }
 
 /// Records the manifest of the next transaction, once. Any other transfer still
@@ -699,29 +774,48 @@ fn stage_manifest(
     context: &ExecuteContext,
     base: &Base,
     manifest: &TransferManifest,
+    server_now: &Instant,
 ) -> Result<Id, ApplyError> {
-    if expired(&manifest.expires_at, &context.now)? {
-        return Err(ApplyError::Transfer(TransferFault::Expired));
-    }
     let bytes = serde_json::to_vec(manifest).map_err(|_| ApplyError::Malformed("manifest"))?;
     let digest = sha256(&bytes);
     let workspace_id = base.workspace_id.as_str();
     let id = manifest.transfer_id.as_str();
-    let existing: Option<(Vec<u8>, String)> = tx
+    let existing: Option<(Vec<u8>, String, Vec<u8>)> = tx
         .query_row(
-            "SELECT manifest_digest, state FROM staging_bases
+            "SELECT manifest_digest, state, manifest FROM staging_bases
              WHERE workspace_id = ?1 AND activation_id = ?2",
             params![workspace_id, id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     match existing {
-        Some((stored, _)) if stored != digest => {
+        Some((stored, _, _)) if stored != digest => {
             return Err(ApplyError::Transfer(TransferFault::Conflict));
         }
-        Some((_, state)) if state != "abandoned" => return Ok(manifest.transfer_id.clone()),
+        Some((_, state, _)) if state == "activated" => return Ok(manifest.transfer_id.clone()),
+        Some((_, state, kept)) if state != "abandoned" => {
+            let mut staged: StagedTransfer =
+                serde_json::from_slice(&kept).map_err(|_| StoreError::Corrupt)?;
+            if staged
+                .lifetime
+                .used_up(&manifest.expires_at, &context.now, Some(server_now))?
+            {
+                return Err(ApplyError::Transfer(TransferFault::Expired));
+            }
+            persist_staged(tx, workspace_id, id, &staged)?;
+            return Ok(manifest.transfer_id.clone());
+        }
         _ => {}
     }
+    let mut lifetime = Lifetime::begin(server_now, &context.now)?;
+    if lifetime.used_up(&manifest.expires_at, &context.now, None)? {
+        return Err(ApplyError::Transfer(TransferFault::Expired));
+    }
+    let staged = serde_json::to_vec(&StagedTransfer {
+        lifetime,
+        manifest: manifest.clone(),
+    })
+    .map_err(|_| ApplyError::Malformed("manifest"))?;
     let others: Vec<String> = {
         let mut statement = tx.prepare(
             "SELECT activation_id FROM staging_bases
@@ -746,7 +840,7 @@ fn stage_manifest(
             id,
             base.server_generation.as_deref().unwrap_or_default(),
             manifest.commit_seq.as_str(),
-            bytes,
+            staged,
             digest.as_slice(),
             total,
             context.now.as_str(),
@@ -803,7 +897,7 @@ fn discarding<T>(
 }
 
 struct Staged {
-    manifest: TransferManifest,
+    transfer: StagedTransfer,
     state: String,
 }
 
@@ -825,8 +919,8 @@ fn load_staged(tx: &Transaction<'_>, base: &Base, transfer_id: &Id) -> Result<St
     if base.server_generation.as_deref() != Some(generation.as_str()) {
         return Err(ApplyError::GenerationChanged);
     }
-    let manifest = serde_json::from_slice(&manifest).map_err(|_| StoreError::Corrupt)?;
-    Ok(Staged { manifest, state })
+    let transfer = serde_json::from_slice(&manifest).map_err(|_| StoreError::Corrupt)?;
+    Ok(Staged { transfer, state })
 }
 
 /// Verifies one byte page of a staged transfer and keeps it. A page that fails
@@ -846,24 +940,36 @@ pub fn stage_transfer_page(
         check_common(&base, &page.page.common)?;
         page.validate()
             .map_err(|_| ApplyError::Malformed("transfer page"))?;
-        let staged = load_staged(tx, &base, &page.transfer_id)?;
+        let mut staged = load_staged(tx, &base, &page.transfer_id)?;
         if staged.state == "activated" {
             return Err(ApplyError::Transfer(TransferFault::Unknown));
         }
-        if expired(&staged.manifest.expires_at, &context.now)? {
+        let manifest = &staged.transfer.manifest;
+        if staged.transfer.lifetime.used_up(
+            &manifest.expires_at,
+            &context.now,
+            Some(&page.page.common.server_now),
+        )? {
             return Err(ApplyError::Transfer(TransferFault::Expired));
         }
+        let total = manifest.page_count;
         let received = stage_page(
             tx,
             &base.workspace_id,
             page.transfer_id.as_str(),
-            staged.manifest.page_count,
+            total,
             &page.page,
+        )?;
+        persist_staged(
+            tx,
+            &base.workspace_id,
+            page.transfer_id.as_str(),
+            &staged.transfer,
         )?;
         Ok(TransferProgress {
             transfer_id: page.transfer_id.clone(),
             received,
-            total: staged.manifest.page_count,
+            total,
         })
     })
 }
@@ -974,9 +1080,9 @@ fn transfer_in(
     hook: &mut impl FnMut(ApplyStage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Applied, ApplyError> {
     let base = read_base(tx, fence)?;
-    let staged = load_staged(tx, &base, transfer_id)?;
+    let mut staged = load_staged(tx, &base, transfer_id)?;
     let (cursor, watermark) = base.feed()?;
-    let manifest = &staged.manifest;
+    let manifest = &staged.transfer.manifest;
     let seq = counter(&manifest.commit_seq, "commit_seq")?;
     if staged.state == "activated" || seq <= watermark {
         return Ok(Applied {
@@ -993,7 +1099,11 @@ fn transfer_in(
     if seq != watermark + 1 {
         return Err(gap(watermark + 1, seq, true));
     }
-    if expired(&manifest.expires_at, &context.now)? {
+    if staged
+        .transfer
+        .lifetime
+        .used_up(&manifest.expires_at, &context.now, None)?
+    {
         return Err(ApplyError::Transfer(TransferFault::Expired));
     }
 

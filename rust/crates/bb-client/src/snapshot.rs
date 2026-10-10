@@ -14,7 +14,9 @@
 //! 1. the staged stream is verified against the manifest (every page index,
 //!    the byte count, the SHA-256 and the record count) and the manifest must
 //!    still be unexpired and, in the same server generation, not older than the
-//!    base the device already holds;
+//!    base the device already holds. Expiry is the server's TTL spent by elapsed
+//!    time ([`crate::apply_changes::Lifetime`]), never the device wall clock
+//!    compared with a server instant;
 //! 2. the confirmed records are replaced by the snapshot's, tombstones
 //!    included, and the generation, cursor and watermark become the manifest's;
 //! 3. commands the server accepted (`accepted_awaiting_feed`) leave the queue
@@ -37,9 +39,9 @@
 //! look each one up (`GET commands/{id}`), never guess.
 
 use crate::apply_changes::{
-    ApplyError, ApplyStage, Base, Fence, Promised, Recovery, TransferFault, abandon_in,
-    abandon_transfer, expired, finish_in, install_change, read_base, stage_page, stream_pages,
-    unsigned,
+    ApplyError, ApplyStage, Base, Fence, Lifetime, Promised, Recovery, TransferFault, abandon_in,
+    abandon_transfer, finish_in, install_change, persist_staged, read_base, stage_page,
+    stream_pages, unsigned,
 };
 use crate::execute::{ExecuteContext, sha256};
 use crate::replay::Replayed;
@@ -50,12 +52,15 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// What is kept of a snapshot being staged: the manifest, and the request
-/// generations it was started under. A reset changes those, and then the
-/// download belongs to a request the runtime cancelled.
+/// What is kept of a snapshot being staged: the manifest, how much of its
+/// server-set lifetime is used up ([`Lifetime`]: never judged against the device
+/// wall clock), and the request generations it was started under. A reset
+/// changes those, and then the download belongs to a request the runtime
+/// cancelled.
 #[derive(Serialize, Deserialize)]
 struct StagedSnapshot {
     fence: [u64; 3],
+    lifetime: Lifetime,
     manifest: SnapshotManifest,
 }
 
@@ -232,16 +237,26 @@ fn begin_in(
             return Ok(progress(manifest.page_count));
         }
     }
-    if expired(&manifest.expires_at, &context.now)? {
-        return Err(ApplyError::Transfer(TransferFault::Expired));
-    }
     check_not_older(&base, target, watermark)?;
     if let Some((_, _, state, staged)) = &existing
         && state != "abandoned"
-        && let Ok(staged) = serde_json::from_slice::<StagedSnapshot>(staged)
+        && let Ok(mut staged) = serde_json::from_slice::<StagedSnapshot>(staged)
         && staged.fence == fence_of(fence)
     {
+        // Announced again: the lifetime keeps running from the first time.
+        if staged.lifetime.used_up(
+            &manifest.expires_at,
+            &context.now,
+            Some(&manifest.common.server_now),
+        )? {
+            return Err(ApplyError::Transfer(TransferFault::Expired));
+        }
+        persist_staged(tx, workspace_id, id, &staged)?;
         return Ok(progress(pages_staged(tx, workspace_id, id)?));
+    }
+    let mut lifetime = Lifetime::begin(&manifest.common.server_now, &context.now)?;
+    if lifetime.used_up(&manifest.expires_at, &context.now, None)? {
+        return Err(ApplyError::Transfer(TransferFault::Expired));
     }
 
     // A new download supersedes every other one in progress.
@@ -249,6 +264,7 @@ fn begin_in(
     abandon_in(tx, workspace_id, id)?;
     let staged = serde_json::to_vec(&StagedSnapshot {
         fence: fence_of(fence),
+        lifetime,
         manifest: manifest.clone(),
     })
     .map_err(|_| ApplyError::Malformed("snapshot manifest"))?;
@@ -349,7 +365,7 @@ pub fn stage_snapshot_page(
         page.validate()
             .map_err(|_| ApplyError::Malformed("snapshot page"))?;
         check_scope(&base, &page.page.common)?;
-        let staged = load_staged(tx, &base.workspace_id, &page.snapshot_id, fence)?;
+        let mut staged = load_staged(tx, &base.workspace_id, &page.snapshot_id, fence)?;
         let manifest = &staged.snapshot.manifest;
         if staged.state == "activated" {
             return Err(ApplyError::Transfer(TransferFault::Unknown));
@@ -361,20 +377,31 @@ pub fn stage_snapshot_page(
         if page.watermark != manifest.watermark {
             return Err(ApplyError::Transfer(TransferFault::Conflict));
         }
-        if expired(&manifest.expires_at, &context.now)? {
+        if staged.snapshot.lifetime.used_up(
+            &manifest.expires_at,
+            &context.now,
+            Some(&page.page.common.server_now),
+        )? {
             return Err(ApplyError::Transfer(TransferFault::Expired));
         }
+        let total = manifest.page_count;
         let received = stage_page(
             tx,
             &base.workspace_id,
             page.snapshot_id.as_str(),
-            manifest.page_count,
+            total,
             &page.page,
+        )?;
+        persist_staged(
+            tx,
+            &base.workspace_id,
+            page.snapshot_id.as_str(),
+            &staged.snapshot,
         )?;
         Ok(SnapshotProgress {
             snapshot_id: page.snapshot_id.clone(),
             received,
-            total: manifest.page_count,
+            total,
         })
     })
 }
@@ -439,7 +466,7 @@ fn activate_in(
 ) -> Result<Activated, ApplyError> {
     let base = read_base(tx, fence)?;
     let workspace_id = base.workspace_id.as_str();
-    let staged = load_staged(tx, workspace_id, snapshot_id, fence)?;
+    let mut staged = load_staged(tx, workspace_id, snapshot_id, fence)?;
     let manifest = &staged.snapshot.manifest;
     check_scope(&base, &manifest.common)?;
     let target = manifest.common.server_generation.as_str();
@@ -459,7 +486,11 @@ fn activate_in(
             already_active: true,
         });
     }
-    if expired(&manifest.expires_at, &context.now)? {
+    if staged
+        .snapshot
+        .lifetime
+        .used_up(&manifest.expires_at, &context.now, None)?
+    {
         return Err(ApplyError::Transfer(TransferFault::Expired));
     }
     check_not_older(&base, target, watermark)?;
