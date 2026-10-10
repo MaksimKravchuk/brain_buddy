@@ -214,6 +214,20 @@ jobs:
         if: steps.config.outputs.configured == 'true'
         run: bash ios/scripts/select-xcode.sh
 
+      # Spec 026: the app and widget extension link the shared Rust core as a static
+      # XCFramework built from rust/bindings/swift (not committed). Keep the version
+      # equal to rust/rust-toolchain.toml and ci.yml.
+      - name: Install pinned Rust
+        if: steps.config.outputs.configured == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+
+      - name: Build the Rust bridge
+        if: steps.config.outputs.configured == 'true'
+        run: sh ios/scripts/build-rust-bridge.sh apple
+
       - name: Install XcodeGen (pinned, checksum-verified)
         if: steps.config.outputs.configured == 'true'
         run: |

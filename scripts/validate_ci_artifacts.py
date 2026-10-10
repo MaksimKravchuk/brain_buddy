@@ -671,12 +671,13 @@ CANDIDATE_VERIFY_COMMAND = 'test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDA
 # comment; the output must actually be computed and written by the step the job
 # output reads. The Mac filter names the shared kit because the Mac links it
 # (021-mac-sync): a kit change must rebuild the Mac, and ios-app no longer
-# builds it on the kit's behalf.
+# builds it on the kit's behalf. It also names rust/bindings/swift, the Rust
+# bridge the kit links (026-rust-core-sync).
 CHANGED_STACK_DECISION_LINES = {
     "macos": (
         ("macos=true",),
         (
-            r"""printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' """
+            r"""printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust/bindings/swift)/' """
             "|| macos=false",
         ),
         # Inside the step's `{ ... } >> "$GITHUB_OUTPUT"` group, or on its own.

@@ -8,7 +8,8 @@ offline QA) is `README.md`.
 ## Commands
 
 ```bash
-sh ios/scripts/swift-linux.sh test         # package on Linux via Docker; no Xcode needed
+sh ios/scripts/build-rust-bridge.sh        # once, and after any change under rust/: see "Rust bridge"
+sh ios/scripts/swift-linux.sh test         # package on Linux via Docker (builds the bridge first); no Xcode needed
 sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests
 (cd ios/BrainBuddyKit && swift test)       # package on macOS
 (cd ios && xcodegen generate)              # after adding, moving or deleting any file
@@ -19,6 +20,26 @@ xcodebuild -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy \
 The SwiftUI targets compile only on macOS. On Linux, verify with the package
 tests and leave the app build to CI (the `ios-app` lane of
 `.github/workflows/ci.yml`).
+
+## Rust bridge
+
+`BrainBuddyCore` links the shared Rust core (spec 026, ADR-0031) through the UniFFI
+crate `rust/bindings/swift` (`bb-swift`). Nothing generated is committed: the build
+script writes the static library (an XCFramework on Apple, `Artifacts/linux/` on Linux),
+the generated C header and the generated Swift (`Sources/BrainBuddyRust{FFI,Bindings}`)
+into ignored paths, from `rust/Cargo.lock` and the toolchain pinned in
+`rust/rust-toolchain.toml`. `Package.swift` stops with that instruction when they are
+missing. CI runs the script before every Swift lane; `swift-linux.sh` does it in the
+official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
+
+- Only `Sources/BrainBuddyCore/BrainBuddyRustBridge.swift` imports the generated module;
+  its `RustBridgeRuntime` takes and returns owned values, throws `RustBridgeError`
+  (`code`, `retryable`, `field`, never payload text), runs off the caller's actor and
+  honours task cancellation. Change the Rust interface and the facade together.
+- The Apple XCFramework is arm64 only (device, simulator, macOS); an Intel slice is a
+  `BB_APPLE_TARGETS` addition, not a code change.
+- The Rust crate stays under the workspace's `unsafe_code = "forbid"`; the UniFFI
+  macros need no exception. Do not add `unsafe` to hand-written Rust.
 
 ## Where code goes
 
@@ -45,8 +66,9 @@ tests and leave the app build to CI (the `ios-app` lane of
   `#if canImport(...)` or in the app target. Run
   `sh ios/scripts/swift-linux.sh test` before calling package work done.
 - **No third-party dependencies**, in the package or the app. `Package.swift`
-  has none; keep it that way. The one exception (ADR-0031, spec 026): the shared
-  Rust domain/runtime and its audited, pinned generated Swift bindings. Their build
+  has no Swift dependency; keep it that way. The one exception (ADR-0031, spec 026): the shared
+  Rust domain/runtime and its audited, pinned generated Swift bindings (UniFFI 0.32.2,
+  MPL-2.0, built from `rust/Cargo.lock`). Their build
   inputs, licenses, lockfile, reproducible packaging, supported targets and the
   Foundation-only Linux test boundary must be reviewed before they land. This does
   not permit arbitrary Swift packages, bundled model weights or any other native

@@ -966,7 +966,7 @@ jobs:
       - id: decide
         run: |
           macos=true
-          printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false
+          printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust/bindings/swift)/' || macos=false
           echo "macos=${macos}" >> "$GITHUB_OUTPUT"
   backend:
     env:
@@ -2151,7 +2151,7 @@ class MacosAppLaneTests(unittest.TestCase):
         # so a kit change that left this lane idle would land unbuilt.
         narrowed = self.edit_job(
             "changes",
-            r"""grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false""",
+            r"""grep -Eq '^(macos|ios/BrainBuddyKit|rust/bindings/swift)/' || macos=false""",
             r"""grep -Eq '^macos/' || macos=false""",
         )
 

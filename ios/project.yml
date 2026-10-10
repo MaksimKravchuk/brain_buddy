@@ -18,6 +18,10 @@ options:
   developmentLanguage: en
 
 packages:
+  # BrainBuddyCore links the shared Rust core (spec 026) as a static XCFramework that is
+  # built, not committed: run `sh scripts/build-rust-bridge.sh apple` before resolving this
+  # package. The app and the widget extension both get it through BrainBuddyCore (the
+  # products below), so neither target lists it; ios/AGENTS.md, "Rust bridge".
   BrainBuddyKit:
     path: BrainBuddyKit
 

@@ -194,13 +194,15 @@ jobs:
                 # (apart from the shared surfaces above) is compiled into it
                 # or read by its tests. Its sync tests run against the Swift
                 # fake server in ios/, so a backend change is not an input.
-                printf '%s\n' "${changed}" | grep -q '^ios/' || ios=false
+                # The one outside input is the Rust bridge it links (spec 026):
+                # rust/bindings/swift is built into the kit by ios-kit/ios-app.
+                printf '%s\n' "${changed}" | grep -Eq '^(ios|rust/bindings/swift)/' || ios=false
                 # The Mac app builds from macos/ and, from 021-mac-sync on,
                 # links the shared kit in ios/BrainBuddyKit/, so a kit change
                 # rebuilds and retests the Mac too. The rest of ios/ (the
                 # iPhone app, its widgets, the XcodeGen project) is not an
                 # input to the Mac and leaves this lane idle.
-                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit)/' || macos=false
+                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust/bindings/swift)/' || macos=false
                 # The shared Rust core builds from rust/ alone, plus the frozen
                 # sync contract its codec tests read: that schema is an input.
                 printf '%s\n' "${changed}" | grep -Eq '^(rust|specs/026-rust-core-sync/contracts)/' || rust=false
@@ -590,6 +592,28 @@ jobs:
         if: env.RUN == 'true'
         run: swift --version
 
+      # Spec 026: BrainBuddyCore links the shared Rust core through the UniFFI
+      # bridge (rust/bindings/swift), built here rather than committed. rustup needs
+      # curl and cargo needs a C linker driver, which the Swift image does not promise.
+      - name: Install build tools for Rust
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends ca-certificates curl gcc libc6-dev
+
+      # Keep the version equal to rust/rust-toolchain.toml and the Rust core lane.
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+
+      - name: Build the Rust bridge
+        if: env.RUN == 'true'
+        working-directory: .
+        run: sh ios/scripts/build-rust-bridge.sh linux
+
       - name: Build the package
         if: env.RUN == 'true'
         run: swift build
@@ -683,6 +707,20 @@ jobs:
       - name: Select the newest Xcode 26
         if: env.RUN == 'true'
         run: bash ios/scripts/select-xcode.sh
+
+      # Spec 026: the app, the widget extension and the package link the shared Rust
+      # core as a static XCFramework built from rust/bindings/swift (device, simulator
+      # and macOS slices), not committed. Keep the version equal to rust/rust-toolchain.toml.
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+
+      - name: Build the Rust bridge
+        if: env.RUN == 'true'
+        run: sh ios/scripts/build-rust-bridge.sh apple
 
       - name: Install XcodeGen (pinned, checksum-verified)
         if: env.RUN == 'true'
@@ -782,6 +820,22 @@ jobs:
       - name: Show the toolchain
         if: env.RUN == 'true'
         run: swift --version
+
+      # Spec 026: the shared kit links the Rust core as a static XCFramework built
+      # from rust/bindings/swift, not committed. The Mac needs only its own slice.
+      # Keep the version equal to rust/rust-toolchain.toml.
+      - name: Install pinned Rust
+        if: env.RUN == 'true'
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
+        with:
+          toolchain: 1.99.0
+          targets: aarch64-apple-darwin
+
+      - name: Build the Rust bridge
+        if: env.RUN == 'true'
+        env:
+          BB_APPLE_TARGETS: aarch64-apple-darwin
+        run: sh ios/scripts/build-rust-bridge.sh apple
 
       # --only-use-versions-from-resolved-file builds exactly what
       # macos/Package.resolved pins and fails on a stale pin file, instead of

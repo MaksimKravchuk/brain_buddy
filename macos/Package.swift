@@ -3,6 +3,10 @@ import PackageDescription
 
 // Swift 6 language mode (the 6.2 default), no `unsafeFlags` (021 mac-app-host §2, research R2).
 // The GTD rules, the store file and sync come from the shared kit in `../ios/BrainBuddyKit`.
+// BrainBuddyCore links the shared Rust core as a static XCFramework (spec 026) that is built,
+// not committed: `BB_APPLE_TARGETS=aarch64-apple-darwin sh ../ios/scripts/build-rust-bridge.sh apple`
+// (macos/build_app.sh does it). Linking arrives through the Core product below, so this
+// manifest needs no flag of its own and still has no `unsafeFlags`.
 let kit: [Target.Dependency] = [
     .product(name: "BrainBuddyCore", package: "BrainBuddyKit"),
     .product(name: "BrainBuddyPersistence", package: "BrainBuddyKit"),
