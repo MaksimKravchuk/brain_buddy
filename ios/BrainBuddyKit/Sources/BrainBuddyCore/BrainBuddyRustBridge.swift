@@ -604,7 +604,7 @@ public struct RustWorkspaceSaved: Equatable, Sendable {
 
 public enum RustWorkspaceExecution: Equatable, Sendable {
     case saved([RustWorkspaceSaved])
-    case refused(RustRefusal)
+    case refused(RustRefusal, failedCommandID: String? = nil)
 }
 
 public struct RustWorkspacePage: Equatable, Sendable {
@@ -1004,7 +1004,7 @@ public final class RustWorkspaceRuntime: Sendable {
         try await committing { workspace, operation in
             switch try work(workspace, operation) {
             case .saved(let results): return .saved(results.map(RustWorkspaceSaved.init))
-            case .refused(let refusal): return .refused(RustRefusal(refusal))
+            case .refused(let refusal, let failedCommandID): return .refused(RustRefusal(refusal), failedCommandID: failedCommandID)
             }
         }
     }

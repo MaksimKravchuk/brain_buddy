@@ -206,3 +206,30 @@ extension RustWorkspaceBridgeTests {
         #expect(try guardRow.string("edit_revision") == row.string("task_revision_after"))
     }
 }
+
+extension RustWorkspaceBridgeTests {
+    @Test("A batch refusal crosses the bridge with the exact original failing command ID")
+    func exactBatchRefusal() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bridge = try RustBridgeRuntime()
+        let runtime = try await bridge.openStore(workspaceID: "local", databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let facade = RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC"))
+        let first = try facade.workspaceCommand(.createProject(.init(projectID: .random(), name: "First")),
+            commandID: UUID(), at: date, in: .empty)
+        let second = try facade.workspaceCommand(.createProject(.init(projectID: .random(), name: "")),
+            commandID: UUID(), at: date, in: .empty)
+        guard case .refused(let refusal, let failedID) = try await runtime.execute([first, second], context: context()) else {
+            Issue.record("The empty second name must reject the batch"); return
+        }
+        #expect(failedID == second.commandID)
+        #expect(refusal.reason == "invalid_payload")
+        let query = try facade.workspaceReadQuery("projects", filter: "active")
+        let inputs = try facade.workspaceQueryInputs(at: date, zone: "UTC", reviewExposed: false)
+        guard case .answered(let page) = try await runtime.query(query, inputs: inputs) else {
+            Issue.record("The canonical bounded project page must answer"); return
+        }
+        #expect(try facade.workspaceProjects(from: page.result, keeping: .empty, at: date).isEmpty)
+        try await runtime.close()
+    }
+}

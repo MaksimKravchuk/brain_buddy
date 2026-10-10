@@ -17,7 +17,7 @@ struct RustWorkspaceSavedGesture: Sendable {
 
 enum RustWorkspaceGestureCompletion: Sendable {
     case saved(RustWorkspaceSavedGesture)
-    case refused(RustRefusal, commands: [RustWorkspaceCommand])
+    case refused(RustRefusal, failedCommandID: String?, commands: [RustWorkspaceCommand])
 }
 
 @MainActor
@@ -56,10 +56,10 @@ final class RustWorkspaceGestureSaver {
                 if original.authoredIntent == authoredIntent {
                     return .saved(RustWorkspaceSavedGesture(commands: original.commands, receipts: receipts))
                 }
-            case .refused(let refusal):
+            case .refused(let refusal, let failedCommandID):
                 if original.authoredIntent == authoredIntent {
                     await clearKnownDraft(draftID)
-                    return .refused(refusal, commands: original.commands)
+                    return .refused(refusal, failedCommandID: failedCommandID, commands: original.commands)
                 }
             }
         }
@@ -75,7 +75,7 @@ final class RustWorkspaceGestureSaver {
         await clearKnownDraft(draftID)
         switch result {
         case .saved(let receipts): return .saved(RustWorkspaceSavedGesture(commands: prepared.commands, receipts: receipts))
-        case .refused(let refusal): return .refused(refusal, commands: prepared.commands)
+        case .refused(let refusal, let failedCommandID): return .refused(refusal, failedCommandID: failedCommandID, commands: prepared.commands)
         }
     }
 

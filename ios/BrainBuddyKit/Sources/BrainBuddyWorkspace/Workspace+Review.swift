@@ -789,11 +789,6 @@ extension Workspace {
 
     // MARK: Durable Review actions
 
-    private func finishLegacyReviewSave() async throws {
-        await flush()
-        if let storageError { throw WorkspaceError.storage(storageError) }
-    }
-
     private func reviewIntent(_ kind: String, _ fields: [String: Any] = [:]) throws -> Data {
         try JSONSerialization.data(withJSONObject: ["kind": kind, "fields": fields], options: [.sortedKeys])
     }
@@ -811,10 +806,19 @@ extension Workspace {
         editorID: String
     ) async throws -> DecisionID {
         guard isRustSelected else {
-            let id = try decide(type, on: taskID, title: title, waitingFor: waitingFor, reason: reason,
-                stallReason: stallReason, aiUse: aiUse, navigatorRequestID: navigatorRequestID,
-                sessionID: sessionID, formulationID: opened, expectedTask: expectedTask)
-            try await finishLegacyReviewSave()
+            guard let task = state.tasks[taskID] else { throw GTDValidationError.taskNotFound }
+            let id = DecisionID.make(makeID())
+            let starts: Set<DecisionType> = [.reformulate, .firstStep, .returnToNext, .followUp]
+            let command = GTDCommand.DecideTask(decisionID: id, taskID: taskID, type: type,
+                formulationID: type.decidesOnFormulation ? (opened ?? task.formulation?.id ?? task.parked?.formulationID) : nil,
+                newFormulationID: starts.contains(type) ? .make(makeID()) : nil,
+                stallReason: stallReason, title: title, waitingFor: waitingFor, reason: reason, sessionID: sessionID,
+                aiUse: aiUse, navigatorRequestID: navigatorRequestID,
+                followUpTaskID: type == .followUp ? TaskID(ClientID.make("task", makeID())) : nil,
+                expectedTask: expectedTask)
+            try await performLegacyDurably([.decideTask(command)], editorID: editorID, edits: [{ document in
+                document.local.formDrafts = document.local.formDrafts.filter { $0.key.taskID != taskID }
+            }])
             return id
         }
         let shown = state
@@ -849,8 +853,7 @@ extension Workspace {
 
     public func undoDecision(_ id: DecisionID, editorID: String) async throws {
         guard isRustSelected else {
-            try undoDecision(id)
-            try await finishLegacyReviewSave()
+            try await performLegacyDurably([.undoDecision(id)], editorID: editorID)
             return
         }
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
@@ -867,8 +870,12 @@ extension Workspace {
 
     public func acknowledgeExplainer(editorID: String) async throws {
         guard isRustSelected else {
-            try acknowledgeExplainer()
-            try await finishLegacyReviewSave()
+            let zone = deviceTimeZone().identifier, instant = Self.storedPrecision(now()), accountless = account == nil
+            try await performLegacyDurably([.review(.acknowledgeExplainer(timeZone: zone))], editorID: editorID, edits: [{ document in
+                if accountless, document.local.activatedAt == nil { document.local.activatedAt = instant }
+                document.local.explainerSeenLocally = true
+                document.local.lastObservedTimeZone = zone
+            }])
             return
         }
         let shown = state, zone = deviceTimeZone().identifier, instant = Self.storedPrecision(now())
@@ -886,8 +893,11 @@ extension Workspace {
         thresholdDays: Int? = nil, reviewWeekday: Int? = nil, reviewTime: String? = nil, editorID: String
     ) async throws {
         guard isRustSelected else {
-            try completeReviewOnboarding(thresholdDays: thresholdDays, reviewWeekday: reviewWeekday, reviewTime: reviewTime)
-            try await finishLegacyReviewSave()
+            let zone = deviceTimeZone().identifier
+            let command = ReviewSettingsChange(thresholdDays: thresholdDays, reviewWeekday: reviewWeekday,
+                reviewTime: reviewTime, timeZone: zone, onboarded: true)
+            try await performLegacyDurably([.review(.updateSettings(command))], editorID: editorID,
+                edits: [{ $0.local.lastObservedTimeZone = zone }])
             return
         }
         try await updateReviewSettings(ReviewSettingsChange(thresholdDays: thresholdDays,
@@ -896,8 +906,11 @@ extension Workspace {
 
     public func updateReviewSettings(_ change: ReviewSettingsChange, editorID: String) async throws {
         guard isRustSelected else {
-            try updateReviewSettings(change)
-            try await finishLegacyReviewSave()
+            guard !change.isEmpty else { return }
+            let edits: [@Sendable (inout StoreDocument) -> Void] = change.timeZone.map { zone in
+                [{ $0.local.lastObservedTimeZone = zone }]
+            } ?? []
+            try await performLegacyDurably([.review(.updateSettings(change))], editorID: editorID, edits: edits)
             return
         }
         guard !change.isEmpty else { return }
@@ -913,9 +926,16 @@ extension Workspace {
     @discardableResult
     public func sendDeviceTimeZoneIfChanged(editorID: String) async throws -> Bool {
         guard isRustSelected else {
-            let changed = sendDeviceTimeZoneIfChanged()
-            try await finishLegacyReviewSave()
-            return changed
+            let current = deviceTimeZone()
+            guard let observed = local.lastObservedTimeZone else {
+                try await performLegacyDurably([], editorID: editorID,
+                    edits: [{ $0.local.lastObservedTimeZone = current.identifier }])
+                return false
+            }
+            guard let changed = DeviceZoneTracker.change(lastObserved: observed, current: current) else { return false }
+            try await performLegacyDurably([.review(.updateSettings(ReviewSettingsChange(timeZone: changed.identifier)))],
+                editorID: editorID, edits: [{ $0.local.lastObservedTimeZone = changed.identifier }])
+            return true
         }
         let current = deviceTimeZone(), observed = local.lastObservedTimeZone
         guard let observed else {
@@ -929,8 +949,14 @@ extension Workspace {
 
     public func dismissWhileAway(shown: [ParkAck], editorID: String) async throws {
         guard isRustSelected else {
-            try dismissWhileAway(shown: shown)
-            try await finishLegacyReviewSave()
+            let acks = GTDQueries.whileAwayAcknowledgements(shown: shown, in: state), day = today
+            let commands = stride(from: 0, to: acks.count, by: ReviewLimits.parkAcknowledgements).map {
+                GTDCommand.review(.acknowledgeParks(Array(acks[$0..<min($0 + ReviewLimits.parkAcknowledgements, acks.count)])))
+            }
+            try await performLegacyDurably(commands, editorID: editorID, edits: [{ document in
+                document.local.linkedExtensionNotices = []; document.local.parkBatchWaiting = false
+                document.local.wywaLastShownDay = day
+            }])
             return
         }
         let current = state, day = today
@@ -950,8 +976,9 @@ extension Workspace {
 
     public func markWhileAwayShown(editorID: String) async throws {
         guard isRustSelected else {
-            markWhileAwayShown()
-            try await finishLegacyReviewSave()
+            guard reviewExposed else { return }
+            let day = today
+            try await performLegacyDurably([], editorID: editorID, edits: [{ $0.local.wywaLastShownDay = day }])
             return
         }
         guard reviewExposed else { return }
@@ -961,8 +988,11 @@ extension Workspace {
 
     public func closeWhileAway(editorID: String) async throws {
         guard isRustSelected else {
-            closeWhileAway()
-            try await finishLegacyReviewSave()
+            guard reviewExposed else { return }
+            let day = today
+            try await performLegacyDurably([], editorID: editorID, edits: [{ document in
+                document.local.linkedExtensionNotices = []; document.local.wywaLastShownDay = day
+            }])
             return
         }
         guard reviewExposed else { return }
@@ -973,8 +1003,9 @@ extension Workspace {
     @discardableResult
     public func startReview(mode: ReviewMode, entry: ReviewEntry, skipping skipSteps: [ReviewStep] = [], editorID: String) async throws -> ReviewSessionID {
         guard isRustSelected else {
-            let id = try startReview(mode: mode, entry: entry, skipping: skipSteps)
-            try await finishLegacyReviewSave()
+            let id = ReviewSessionID.make(makeID())
+            try await performLegacyDurably([.review(.startSession(StartSession(sessionID: id, mode: mode,
+                entry: entry, skipSteps: skipSteps)))], editorID: editorID)
             return id
         }
         let shown = state
@@ -992,10 +1023,10 @@ extension Workspace {
         setAsideTaskID: TaskID? = nil, inboxProcessedDelta: Int? = nil, snapshotDecisionQueue: Bool = false, editorID: String
     ) async throws {
         guard isRustSelected else {
-            try recordReviewProgress(sessionID, currentStep: currentStep, step: step, stepStatus: stepStatus,
-                activeStep: activeStep, activeSeconds: activeSeconds, setAsideTaskID: setAsideTaskID,
-                inboxProcessedDelta: inboxProcessedDelta, snapshotDecisionQueue: snapshotDecisionQueue)
-            try await finishLegacyReviewSave()
+            let command = SessionProgress(sessionID: sessionID, progressID: .make(makeID()), currentStep: currentStep,
+                step: step, stepStatus: stepStatus, activeStep: activeStep, activeSeconds: activeSeconds,
+                setAsideTaskID: setAsideTaskID, inboxProcessedDelta: inboxProcessedDelta, snapshotDecisionQueue: snapshotDecisionQueue)
+            try await performLegacyDurably([.review(.progressSession(command))], editorID: editorID)
             return
         }
         let shown = state
@@ -1013,8 +1044,7 @@ extension Workspace {
 
     public func finishReview(_ sessionID: ReviewSessionID, clearStart: ClearStart? = nil, editorID: String) async throws {
         guard isRustSelected else {
-            try finishReview(sessionID, clearStart: clearStart)
-            try await finishLegacyReviewSave()
+            try await performLegacyDurably([.review(.finishSession(FinishSession(sessionID: sessionID, clearStart: clearStart)))], editorID: editorID)
             return
         }
         let shown = state
@@ -1026,9 +1056,13 @@ extension Workspace {
     @discardableResult
     public func bulkRelease(_ kind: BulkReleaseKindCode, taskIDs: [TaskID], sessionID: ReviewSessionID? = nil, editorID: String) async throws -> [BulkID] {
         guard isRustSelected else {
-            let ids = try bulkRelease(kind, taskIDs: taskIDs, sessionID: sessionID)
-            try await finishLegacyReviewSave()
-            return ids
+            let commands = stride(from: 0, to: taskIDs.count, by: ReviewLimits.bulkReleaseItems).map {
+                GTDCommand.BulkRelease(bulkID: .make(makeID()), kind: kind, sessionID: sessionID,
+                    taskIDs: Array(taskIDs[$0..<min($0 + ReviewLimits.bulkReleaseItems, taskIDs.count)]))
+            }
+            guard !commands.isEmpty else { return [] }
+            try await performLegacyDurably(commands.map { .bulkRelease($0) }, editorID: editorID)
+            return commands.map(\.bulkID)
         }
         let shown = state
         guard let facade = rustFacade else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
@@ -1045,8 +1079,8 @@ extension Workspace {
 
     public func undoBulkRelease(_ ids: [BulkID], editorID: String) async throws {
         guard isRustSelected else {
-            try undoBulkRelease(ids)
-            try await finishLegacyReviewSave()
+            guard !ids.isEmpty else { return }
+            try await performLegacyDurably(ids.map { .undoBulkRelease($0) }, editorID: editorID)
             return
         }
         let shown = state
@@ -1057,8 +1091,8 @@ extension Workspace {
 
     public func grantNavigatorConsent(provider: String, consentTextVersion: Int, editorID: String) async throws {
         guard isRustSelected else {
-            try grantNavigatorConsent(provider: provider, consentTextVersion: consentTextVersion)
-            try await finishLegacyReviewSave()
+            try await performLegacyDurably([.review(.grantNavigatorConsent(provider: provider,
+                consentTextVersion: consentTextVersion))], editorID: editorID)
             return
         }
         let shown = state
@@ -1071,8 +1105,7 @@ extension Workspace {
 
     public func revokeNavigatorConsent(provider: String, editorID: String) async throws {
         guard isRustSelected else {
-            try revokeNavigatorConsent(provider: provider)
-            try await finishLegacyReviewSave()
+            try await performLegacyDurably([.review(.revokeNavigatorConsent(provider: provider))], editorID: editorID)
             return
         }
         let shown = state
@@ -1157,8 +1190,10 @@ extension Workspace {
 
     public func saveDraft(_ text: String, for key: DraftKey, editorID: String) async throws {
         guard isRustSelected else {
-            saveDraft(text, for: key)
-            try await finishLegacyReviewSave()
+            let instant = now()
+            try await performLegacyDurably([], editorID: editorID, edits: [{ document in
+                document.local.formDrafts[key] = text.isEmpty ? nil : FormDraft(text: text, savedAt: instant)
+            }])
             return
         }
         guard let runtime = rustRuntime, isRustBound else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
