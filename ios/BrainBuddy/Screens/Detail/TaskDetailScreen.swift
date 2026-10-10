@@ -105,13 +105,8 @@ struct TaskDetailScreen: View {
     }
 }
 
-private enum DetailField: Hashable {
-    case title, notes, waitingFor, organize, tags
-}
-
-private struct DetailProblem: Equatable {
-    var field: DetailField
-    var message: String
+private enum DetailField: String, Hashable {
+    case title, notes, waitingFor, priority, project, dueDate, tags
 }
 
 private struct TaskDetailForm: View {
@@ -126,9 +121,12 @@ private struct TaskDetailForm: View {
     /// Picker selections mirror the stored values and save on change.
     @State private var priority: TaskPriority
     @State private var projectID: ProjectID?
-    @State private var problem: DetailProblem?
+    @State private var problems: [DetailField: String] = [:]
     @State private var editorID = UUID().uuidString
     @State private var isSaving = false
+    @State private var saveTail: Task<Bool, Never>?
+    @State private var saveToken = UUID()
+    @State private var pendingSaves: [TaskChanges: Task<Bool, Never>] = [:]
     @State private var isTransitioning = false
     @State private var isMoving = false
     @State private var moveInitialList: OpenList?
@@ -174,11 +172,11 @@ private struct TaskDetailForm: View {
             }
             .onChange(of: priority) { _, newValue in
                 guard newValue != task.priority else { return }
-                Task { await save(.organize, TaskChanges(priority: .set(newValue))) }
+                Task { await save(.priority, TaskChanges(priority: .set(newValue))) }
             }
             .onChange(of: projectID) { _, newValue in
                 guard newValue != task.projectID else { return }
-                Task { await save(.organize, TaskChanges(projectID: setOrClear(newValue))) }
+                Task { await save(.project, TaskChanges(projectID: setOrClear(newValue))) }
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { Task { await commitAll() } }
@@ -186,27 +184,26 @@ private struct TaskDetailForm: View {
             .onDisappear { Task { await commitAll() } }
     }
 
-    /// Keeps the drafts in step with changes made elsewhere (sync, widgets),
-    /// except for the field being edited.
+    /// Follows changes elsewhere only when they do not replace an authored draft.
     private var syncedForm: some View {
         form
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
-            .onChange(of: task.title) { _, newValue in
-                if focus != .title { title = newValue }
+            .onChange(of: task.title) { oldValue, newValue in
+                if focus != .title && title == oldValue && problems[.title] == nil { title = newValue }
             }
-            .onChange(of: task.details) { _, newValue in
-                if focus != .notes { notes = newValue ?? "" }
+            .onChange(of: task.details) { oldValue, newValue in
+                if focus != .notes && notes == (oldValue ?? "") && problems[.notes] == nil { notes = newValue ?? "" }
             }
-            .onChange(of: task.waitingFor) { _, newValue in
-                if focus != .waitingFor { waitingFor = newValue ?? "" }
+            .onChange(of: task.waitingFor) { oldValue, newValue in
+                if focus != .waitingFor && waitingFor == (oldValue ?? "") && problems[.waitingFor] == nil { waitingFor = newValue ?? "" }
             }
-            .onChange(of: task.priority) { _, newValue in
-                priority = newValue
+            .onChange(of: task.priority) { oldValue, newValue in
+                if priority == oldValue && problems[.priority] == nil { priority = newValue }
             }
-            .onChange(of: task.projectID) { _, newValue in
-                projectID = newValue
+            .onChange(of: task.projectID) { oldValue, newValue in
+                if projectID == oldValue && problems[.project] == nil { projectID = newValue }
             }
     }
 
@@ -214,6 +211,7 @@ private struct TaskDetailForm: View {
         let projectPage = workspace.projectsPageState()
         return Form {
             titleSection
+                .disabled(isSaving || isTransitioning)
             // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
             FormulationSection(task: task) {
                 // Leave the field first: a title still focused under the card
@@ -225,7 +223,9 @@ private struct TaskDetailForm: View {
                     if await commitAll() { isDeciding = true }
                 }
             }
+            .disabled(isSaving || isTransitioning)
             propertiesSection
+                .disabled(isSaving || isTransitioning)
             SubtasksSection(task: task, isReadOnly: isReadOnly)
             CommentsSection(task: task, isReadOnly: isReadOnly)
             metadataSection
@@ -249,6 +249,7 @@ private struct TaskDetailForm: View {
                 Button(action: complete) {
                     Label("Complete", systemImage: "checkmark.circle")
                 }
+                .disabled(isSaving || isTransitioning)
             } else {
                 Button {
                     isReopening = true
@@ -264,6 +265,7 @@ private struct TaskDetailForm: View {
                 Label("More", systemImage: "ellipsis.circle")
             }
             .accessibilityLabel("More actions")
+            .disabled(isSaving || isTransitioning)
         }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
@@ -340,7 +342,7 @@ private struct TaskDetailForm: View {
             projectRow
             DueDateQuickPicker(day: task.dueDate, today: workspace.today, isDisabled: isReadOnly) { day in
                 guard day != task.dueDate else { return }
-                Task { await save(.organize, TaskChanges(dueDate: setOrClear(day))) }
+                Task { await save(.dueDate, TaskChanges(dueDate: setOrClear(day))) }
             }
             .labelStyle(.bbRow)
             priorityRow
@@ -491,13 +493,16 @@ private struct TaskDetailForm: View {
     /// The waiting-since line and any rejected property change, under the section.
     @ViewBuilder private var propertiesFooter: some View {
         let isWaiting = task.state == .waiting
-        let fields: [DetailField] = isWaiting ? [.waitingFor, .organize, .tags] : [.organize, .tags]
+        let propertyFields: [DetailField] = [.project, .dueDate, .priority, .tags]
+        let fields: [DetailField] = isWaiting ? [.waitingFor] + propertyFields : propertyFields
         let messages = fields.compactMap { message(for: $0) }
         let since = isWaiting && message(for: .waitingFor) == nil ? task.waitingSince : nil
         if !messages.isEmpty || since != nil {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(messages, id: \.self) { message in
-                    InlineProblemText(message: message)
+                ForEach(fields, id: \.self) { field in
+                    if let message = message(for: field) {
+                        InlineProblemText(message: message)
+                    }
                 }
                 if let since {
                     Text("Waiting since \(since.formatted(date: .abbreviated, time: .omitted))")
@@ -606,15 +611,17 @@ private struct TaskDetailForm: View {
         let messages = fields.compactMap { message(for: $0) }
         if !messages.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(messages, id: \.self) { text in
-                    InlineProblemText(message: text)
+                ForEach(fields, id: \.self) { field in
+                    if let text = message(for: field) {
+                        InlineProblemText(message: text)
+                    }
                 }
             }
         }
     }
 
     private func message(for field: DetailField) -> String? {
-        problem?.field == field ? problem?.message : nil
+        problems[field]
     }
 
     // MARK: Saving
@@ -624,18 +631,21 @@ private struct TaskDetailForm: View {
         case .title: _ = await commitTitle()
         case .notes: _ = await commitNotes()
         case .waitingFor: _ = await commitWaitingFor()
-        case .organize, .tags: break
+        case .priority, .project, .dueDate, .tags: break
         }
     }
 
     @MainActor private func commitAll() async -> Bool {
+        if let saveTail, !(await saveTail.value) { return false }
         let titleSaved = await commitTitle()
         let notesSaved = await commitNotes()
         let waitingSaved = await commitWaitingFor()
-        return titleSaved && notesSaved && waitingSaved
+        let propertiesSaved = await commitProperties()
+        return titleSaved && notesSaved && waitingSaved && propertiesSaved
     }
 
     @MainActor private func commitTitle() async -> Bool {
+        let task = workspace.taskDetail(self.task.id) ?? self.task
         guard task.isOpen else { return true }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == task.title {
@@ -644,13 +654,14 @@ private struct TaskDetailForm: View {
         }
         if trimmed.isEmpty {
             title = task.title
-            problem = DetailProblem(field: .title, message: "A task needs a title, so the previous one was kept.")
+            problems[.title] = "A task needs a title, so the previous one was kept."
             return false
         }
         return await save(.title, TaskChanges(title: .set(trimmed)))
     }
 
     @MainActor private func commitNotes() async -> Bool {
+        let task = workspace.taskDetail(self.task.id) ?? self.task
         guard task.isOpen, notes != (task.details ?? "") else { return true }
         if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if task.details == nil {
@@ -665,6 +676,7 @@ private struct TaskDetailForm: View {
     }
 
     @MainActor private func commitWaitingFor() async -> Bool {
+        let task = workspace.taskDetail(self.task.id) ?? self.task
         guard task.state == .waiting else { return true }
         let stored = task.waitingFor ?? ""
         let trimmed = waitingFor.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -674,25 +686,56 @@ private struct TaskDetailForm: View {
         }
         if trimmed.isEmpty {
             waitingFor = stored
-            problem = DetailProblem(field: .waitingFor, message: GTDValidationError.waitingForRequired.message)
+            problems[.waitingFor] = GTDValidationError.waitingForRequired.message
             return false
         }
         return await save(.waitingFor, TaskChanges(waitingFor: .set(trimmed)))
     }
 
+    @MainActor private func commitProperties() async -> Bool {
+        guard task.isOpen else { return true }
+        var prioritySaved = true
+        if priority != (workspace.taskDetail(task.id) ?? task).priority {
+            prioritySaved = await save(.priority, TaskChanges(priority: .set(priority)))
+        }
+        var projectSaved = true
+        if projectID != (workspace.taskDetail(task.id) ?? task).projectID {
+            projectSaved = await save(.project, TaskChanges(projectID: setOrClear(projectID)))
+        }
+        return prioritySaved && projectSaved
+    }
+
     @discardableResult
     @MainActor private func save(_ field: DetailField, _ changes: TaskChanges) async -> Bool {
-        guard !isSaving else { return false }
+        if let pending = pendingSaves[changes] { return await pending.value }
+        // Focus loss and a picker selection can both arrive before busy UI renders.
+        // Retain those accepted edits and write them in order, sharing exact retries.
+        let previous = saveTail
+        let submittedTaskID = task.id
+        let submittedEditorID = editorID + ":" + field.rawValue
+        let token = UUID()
+        saveToken = token
         isSaving = true
-        defer { isSaving = false }
-        do {
-            try await workspace.updateTask(task.id, changes, editorID: editorID)
-            if problem?.field == field { problem = nil }
-            return true
-        } catch {
-            problem = DetailProblem(field: field, message: TaskCommandRunner.message(for: error))
-            return false
+        let saving = Task { @MainActor in
+            if let previous { _ = await previous.value }
+            do {
+                try await workspace.updateTask(submittedTaskID, changes, editorID: submittedEditorID)
+                problems[field] = nil
+                return true
+            } catch {
+                problems[field] = TaskCommandRunner.message(for: error)
+                return false
+            }
         }
+        pendingSaves[changes] = saving
+        saveTail = saving
+        let saved = await saving.value
+        pendingSaves[changes] = nil
+        if saveToken == token {
+            saveTail = nil
+            isSaving = false
+        }
+        return saved
     }
 
     // MARK: Transitions
@@ -850,6 +893,7 @@ struct TaskTagsSheet: View {
                 Section {
                     HStack {
                         TextField("New tag", text: $newTagName)
+                            .disabled(isSaving)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .submitLabel(.done)
@@ -915,6 +959,7 @@ struct TaskTagsSheet: View {
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
+        .disabled(isSaving)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

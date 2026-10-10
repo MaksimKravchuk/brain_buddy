@@ -135,6 +135,7 @@ private struct QuickCaptureView: View {
                 .font(.title2.bold())
             TextField("What's on your mind?", text: $title)
                 .textFieldStyle(.roundedBorder)
+                .disabled(isSaving)
                 .focused($titleFocused)
                 .onSubmit(save)
             Text("You can clarify and organize it later.")
@@ -170,12 +171,13 @@ private struct QuickCaptureView: View {
     }
 
     private func save() {
-        guard !cleanTitle.isEmpty, EditorLimits.fits(cleanTitle, EditorLimits.title) else { return }
+        guard !isSaving, !cleanTitle.isEmpty, EditorLimits.fits(cleanTitle, EditorLimits.title) else { return }
         let authored = cleanTitle
+        let submittedEditorID = editorID
         isSaving = true
         Task {
             do {
-                try await model.quickCaptureInbox(authored, editorID: editorID)
+                try await model.quickCaptureInbox(authored, editorID: submittedEditorID)
                 onClose()
             } catch {
                 self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."

@@ -128,7 +128,7 @@ private struct DetailSubtaskRow: View {
             }
             .padding(.horizontal, -(BBMetrics.rowMinHeight - iconColumn) / 2)
             .buttonStyle(.borderless)
-            .disabled(isReadOnly)
+            .disabled(isReadOnly || isSaving)
             .accessibilityLabel(subtask.title)
             .accessibilityValue(stateName)
             .accessibilityHint(isOpen ? "Completes the subtask." : "Reopens the subtask.")
@@ -178,6 +178,7 @@ private struct DetailSubtaskRow: View {
                 }
                 .menuStyle(.button)
                 .buttonStyle(.borderless)
+                .disabled(isSaving)
                 .accessibilityLabel("More for \(subtask.title)")
             }
         }
@@ -185,7 +186,7 @@ private struct DetailSubtaskRow: View {
             if !editing { Task { await commitRename() } }
         }
         .onChange(of: subtask.title) { _, newValue in
-            if !isEditing { title = newValue }
+            if !isEditing && !isSaving { title = newValue }
         }
         .onDisappear { Task { await commitRename() } }
     }
@@ -236,7 +237,7 @@ private struct DetailSubtaskRow: View {
         guard !isSaving else { return }
         isSaving = true
         defer { isSaving = false }
-        guard await commitRename() else { return }
+        guard await renameWhileSaving() else { return }
         do {
             try await workspace.transitionSubtask(subtask.id, in: taskID, action, editorID: transitionEditorID)
             transitionEditorID = UUID().uuidString
@@ -247,6 +248,14 @@ private struct DetailSubtaskRow: View {
     }
 
     @MainActor private func commitRename() async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        defer { isSaving = false }
+        return await renameWhileSaving()
+    }
+
+    /// Both a direct rename and rename-before-transition own the busy flag.
+    @MainActor private func renameWhileSaving() async -> Bool {
         guard isOpen, !isReadOnly else { return true }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != subtask.title else { return true }
