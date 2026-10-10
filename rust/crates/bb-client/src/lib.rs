@@ -56,6 +56,6 @@ pub use snapshot::{
 };
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
 pub use sync_session::{
-    Authentication, EndCause, ErrorAction, Request, RequestKind, SessionBinding, SessionError,
-    SyncSession,
+    Authentication, CapabilitiesCheck, EndCause, ErrorAction, Request, RequestKind, SessionBinding,
+    SessionError, SyncSession,
 };

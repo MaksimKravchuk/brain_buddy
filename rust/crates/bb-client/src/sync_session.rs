@@ -77,9 +77,12 @@ pub enum EndCause {
 /// What a request is for, which decides what it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RequestKind {
-    /// Feed, snapshot, transfer and capabilities reads.
+    /// Feed, snapshot and transfer reads.
     Pull,
-    /// `GET commands/{id}`. The only kind allowed while an update is required:
+    /// `GET capabilities`. Applies nothing, so like `Lookup` it stays allowed
+    /// while an update is required.
+    Capabilities,
+    /// `GET commands/{id}`. Allowed (with `Capabilities`) while an update is required:
     /// known receipts stay reachable.
     Lookup,
     /// `POST devices` for the pending epoch.
@@ -209,6 +212,16 @@ impl From<rusqlite::Error> for SessionError {
     }
 }
 
+/// What [`SyncSession::check_capabilities`] made of an answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilitiesCheck {
+    /// The server speaks this build's protocol.
+    Supported,
+    /// The answer is not about the present (stale, cancelled, foreign scope or
+    /// generation): nothing changed.
+    Ignored,
+}
+
 /// What [`SyncSession::handle_error`] did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ErrorAction {
@@ -335,7 +348,9 @@ impl SyncSession {
     ) -> Result<Request, SessionError> {
         match self.standing {
             Standing::Ended => return Err(SessionError::NotAuthorized),
-            Standing::UpdateRequired if kind != RequestKind::Lookup => {
+            Standing::UpdateRequired
+                if !matches!(kind, RequestKind::Lookup | RequestKind::Capabilities) =>
+            {
                 return Err(SessionError::UpgradeRequired { found: None });
             }
             _ => {}
@@ -506,7 +521,10 @@ impl SyncSession {
         request: &Request,
         error: &ErrorBody,
     ) -> Result<ErrorAction, SessionError> {
-        if request.is_cancelled() {
+        // An error says nothing about the present unless its request still does:
+        // cancelled, or fenced out by a reset, a restore or another session
+        // (possibly another process's), whatever the code.
+        if request.is_cancelled() || !self.is_current(store, request)? {
             return Ok(ErrorAction::Ignored);
         }
         let details = &error.error.details;
@@ -548,19 +566,47 @@ impl SyncSession {
         }
     }
 
-    /// Stops sync when the server does not speak this build's protocol.
+    /// Stops sync when the server does not speak this build's protocol, judged
+    /// only on the answer to `request` (a [`RequestKind::Capabilities`], which
+    /// stays allowed in update-required mode so it can be re-checked). An answer
+    /// that is cancelled, fenced out, for another scope or from another server
+    /// generation than the request was issued under is [`CapabilitiesCheck::Ignored`]
+    /// and changes nothing.
     ///
     /// # Errors
     ///
     /// [`SessionError::UpgradeRequired`]; nothing is written.
-    pub fn check_capabilities(&mut self, capabilities: &Capabilities) -> Result<(), SessionError> {
+    pub fn check_capabilities(
+        &mut self,
+        store: &mut Store,
+        request: &Request,
+        capabilities: &Capabilities,
+    ) -> Result<CapabilitiesCheck, SessionError> {
+        let common = &capabilities.common;
+        let generation = request.fence.server_generation.as_deref();
+        if request.kind != RequestKind::Capabilities
+            || request.is_cancelled()
+            || common.scope_id != request.scope_id
+            || generation.is_some_and(|held| held != common.server_generation.as_str())
+            || !self.is_current(store, request)?
+        {
+            return Ok(CapabilitiesCheck::Ignored);
+        }
         if capabilities.protocol_versions.contains(&PROTOCOL_VERSION) {
-            return Ok(());
+            return Ok(CapabilitiesCheck::Supported);
         }
         if self.standing == Standing::Live {
             self.standing = Standing::UpdateRequired;
         }
         Err(SessionError::UpgradeRequired { found: None })
+    }
+
+    /// The request's fence is still the store's, and this session is still the
+    /// one the store was last bound or authenticated for.
+    fn is_current(&self, store: &mut Store, request: &Request) -> Result<bool, SessionError> {
+        let fence = store.read(fence_in)?;
+        Ok(fence == request.fence
+            && (fence.workspace_generation, fence.session_generation) == self.bound)
     }
 
     fn ensure_standing(&self) -> Result<(), SessionError> {

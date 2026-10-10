@@ -11,11 +11,11 @@
 //! codecs.
 
 use bb_client::{
-    ApplyError, Authentication, EndCause, EpochState, ErrorAction, ExecuteContext, ExecuteRequest,
-    Fence, IdSource, OpenOptions, RequestKind, SessionBinding, SessionError, Store, StoreError,
-    StoreStatus, SyncSession, activate_snapshot, apply_receipt, apply_registration, begin_snapshot,
-    capture_fence, close_epoch, epoch_view, execute, send_candidates, sha256_hex,
-    stage_snapshot_page,
+    ApplyError, Authentication, CapabilitiesCheck, EndCause, EpochState, ErrorAction,
+    ExecuteContext, ExecuteRequest, Fence, IdSource, OpenOptions, RequestKind, SessionBinding,
+    SessionError, Store, StoreError, StoreStatus, SyncSession, activate_snapshot, apply_receipt,
+    apply_registration, begin_snapshot, capture_fence, close_epoch, epoch_view, execute,
+    send_candidates, sha256_hex, stage_snapshot_page,
 };
 use bb_domain::types::{ActorId, Policy, ZoneName};
 use bb_protocol::capabilities::{Capabilities, DeviceRegistration};
@@ -296,7 +296,8 @@ fn recover_base(
     generation: &str,
     watermark: u64,
 ) -> Result<bb_client::Activated, ApplyError> {
-    let (manifest, page) = snapshot("snap-1", generation, watermark);
+    let id = format!("snap-{generation}-{watermark}");
+    let (manifest, page) = snapshot(&id, generation, watermark);
     begin_snapshot(store, &context(), fence, &manifest)?;
     stage_snapshot_page(store, &context(), fence, &page)?;
     activate_snapshot(store, &context(), fence, &manifest.snapshot_id)
@@ -1226,6 +1227,23 @@ mod sync_session {
         assert_eq!(dump(&mut store), before);
     }
 
+    fn capabilities_in(versions: Value, scope: &str, generation: &str) -> Capabilities {
+        decode(
+            &with_common_in(
+                json!({
+                    "protocol_versions": versions, "command_versions": [],
+                    "rule_version": "rules-1", "projection_schema_version": 1,
+                    "storage_epoch": "epoch-1", "feed_generation": "feed-1",
+                    "scope_enabled": true, "limits": {}, "recovery": {},
+                }),
+                scope,
+                generation,
+            )
+            .to_string(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn sync_session_026_fr_012_a_server_without_this_protocol_requires_an_update_and_writes_nothing()
      {
@@ -1233,31 +1251,94 @@ mod sync_session {
         let (mut store, mut session) = ready(&path);
         create_task(&mut store, &mut SeqIds(0), 1, "Kept");
         let before = dump(&mut store);
-        let capabilities = |versions: Value| -> Capabilities {
-            decode(
-                &with_common_in(
-                    json!({
-                        "protocol_versions": versions, "command_versions": [],
-                        "rule_version": "rules-1", "projection_schema_version": 1,
-                        "storage_epoch": "epoch-1", "feed_generation": "feed-1",
-                        "scope_enabled": true, "limits": {}, "recovery": {},
-                    }),
-                    SCOPE,
-                    GENERATION,
-                )
-                .to_string(),
-            )
-            .unwrap()
+        let check = |session: &mut SyncSession, store: &mut Store, versions: Value| {
+            let request = session
+                .begin_request(store, RequestKind::Capabilities)
+                .unwrap();
+            let capabilities = capabilities_in(versions, SCOPE, GENERATION);
+            session.check_capabilities(store, &request, &capabilities)
         };
+        assert_eq!(
+            check(&mut session, &mut store, json!([1, 2])).unwrap(),
+            CapabilitiesCheck::Supported
+        );
         session
-            .check_capabilities(&capabilities(json!([1, 2])))
+            .begin_request(&mut store, RequestKind::Pull)
             .unwrap();
+        assert_eq!(
+            check(&mut session, &mut store, json!([2])).unwrap_err(),
+            SessionError::UpgradeRequired { found: None }
+        );
+        assert_eq!(
+            session
+                .begin_request(&mut store, RequestKind::Pull)
+                .unwrap_err(),
+            SessionError::UpgradeRequired { found: None }
+        );
+        // Capabilities can be re-checked while an update is required.
+        assert_eq!(
+            check(&mut session, &mut store, json!([1])).unwrap(),
+            CapabilitiesCheck::Supported
+        );
+        assert_eq!(dump(&mut store), before);
+    }
+
+    #[test]
+    fn sync_session_026_fr_012_a_stale_or_foreign_capabilities_answer_never_blocks_current_sync() {
+        let path = scratch("capabilities-stale");
+        let (mut store, mut session) = ready(&path);
+        let unsupported =
+            |scope: &str, generation: &str| capabilities_in(json!([2]), scope, generation);
+        let issue = |session: &mut SyncSession, store: &mut Store| {
+            session
+                .begin_request(store, RequestKind::Capabilities)
+                .unwrap()
+        };
+
+        // Issued before a reset: cancelled and fenced out.
+        let before_reset = issue(&mut session, &mut store);
+        let fence = session.reset(&mut store).unwrap();
+        recover_base(&mut store, &fence, GENERATION, 3).unwrap();
+        // Issued before a restore (only the server generation moves).
+        let before_restore = issue(&mut session, &mut store);
+        let other = capture_fence(&mut store).unwrap();
+        recover_base(&mut store, &other, RESTORED, 6).unwrap();
+        // Issued before a newer session started in another process.
+        let before_session = issue(&mut session, &mut store);
+        let mut other_process = open(&path).unwrap();
+        SyncSession::start(&mut other_process, &binding(Authentication::Fresh)).unwrap();
+        for (request, generation) in [
+            (&before_reset, GENERATION),
+            (&before_restore, GENERATION),
+            (&before_session, RESTORED),
+        ] {
+            assert_eq!(
+                session
+                    .check_capabilities(&mut store, request, &unsupported(SCOPE, generation))
+                    .unwrap(),
+                CapabilitiesCheck::Ignored
+            );
+        }
+
+        // A new session: a foreign scope or another generation is ignored too and
+        // sync stays enabled; a current answer does set update-required.
+        let mut session =
+            SyncSession::start(&mut store, &binding(Authentication::Resumed)).unwrap();
+        let request = issue(&mut session, &mut store);
+        for (scope, generation) in [("scope-2", RESTORED), (SCOPE, GENERATION)] {
+            assert_eq!(
+                session
+                    .check_capabilities(&mut store, &request, &unsupported(scope, generation))
+                    .unwrap(),
+                CapabilitiesCheck::Ignored
+            );
+        }
         session
             .begin_request(&mut store, RequestKind::Pull)
             .unwrap();
         assert_eq!(
             session
-                .check_capabilities(&capabilities(json!([2])))
+                .check_capabilities(&mut store, &request, &unsupported(SCOPE, RESTORED))
                 .unwrap_err(),
             SessionError::UpgradeRequired { found: None }
         );
@@ -1267,7 +1348,70 @@ mod sync_session {
                 .unwrap_err(),
             SessionError::UpgradeRequired { found: None }
         );
-        assert_eq!(dump(&mut store), before);
+    }
+
+    /// A request issued before `how` happened, and the session after it.
+    fn late_error_after(how: &str, name: &str) -> (Store, SyncSession, bb_client::Request) {
+        let path = scratch(name);
+        let (mut store, mut session) = ready(&path);
+        let request = session
+            .begin_request(&mut store, RequestKind::Pull)
+            .unwrap();
+        match how {
+            // A same-session restore: only the server generation moved, and the
+            // request's cancel flag stays false.
+            "restore" => {
+                let other = capture_fence(&mut store).unwrap();
+                recover_base(&mut store, &other, RESTORED, 5).unwrap();
+            }
+            // A newer session started by another process.
+            _ => {
+                let mut other = open(&path).unwrap();
+                SyncSession::start(&mut other, &binding(Authentication::Fresh)).unwrap();
+            }
+        }
+        assert!(!request.is_cancelled());
+        (store, session, request)
+    }
+
+    #[test]
+    fn sync_session_026_fr_011_a_late_auth_failure_leaves_the_current_session_authorised() {
+        for how in ["restore", "newer-session"] {
+            let (mut store, mut session, request) =
+                late_error_after(how, &format!("late-auth-{how}"));
+            let error = error_body("AUTH_REQUIRED", json!({}));
+            assert_eq!(
+                session.handle_error(&mut store, &request, &error).unwrap(),
+                ErrorAction::Ignored,
+                "{how}"
+            );
+            if how == "restore" {
+                // Still authorised, and the current request was not cancelled.
+                let current = session
+                    .begin_request(&mut store, RequestKind::Pull)
+                    .unwrap();
+                assert!(!current.is_cancelled());
+            }
+        }
+    }
+
+    #[test]
+    fn sync_session_026_fr_012_a_late_upgrade_failure_leaves_current_sync_enabled() {
+        for how in ["restore", "newer-session"] {
+            let (mut store, mut session, request) =
+                late_error_after(how, &format!("late-upgrade-{how}"));
+            let error = error_body("UPGRADE_REQUIRED", json!({ "reason": "command_version" }));
+            assert_eq!(
+                session.handle_error(&mut store, &request, &error).unwrap(),
+                ErrorAction::Ignored,
+                "{how}"
+            );
+            if how == "restore" {
+                session
+                    .begin_request(&mut store, RequestKind::Pull)
+                    .unwrap();
+            }
+        }
     }
 
     #[test]
