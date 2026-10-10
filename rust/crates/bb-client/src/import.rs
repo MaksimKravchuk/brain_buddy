@@ -159,6 +159,63 @@ pub struct ImportMarker {
     pub local_task_facts: u64,
 }
 
+/// Importer-verified accountless source ownership. Not serializable and not
+/// constructible by host JSON: it binds exact retained backup bytes to an
+/// already admitted immutable import marker.
+pub struct AccountlessImportProof {
+    pub(crate) workspace: String,
+    pub(crate) activation: String,
+    pub(crate) marker_sha256: String,
+    pub(crate) source_sha256: String,
+    pub(crate) source_bytes: u64,
+    pub(crate) source_version: i64,
+    pub(crate) source_generation: i64,
+}
+
+/// Verifies the exact retained source through the same duplicate-key, source
+/// version and account parser as import. Missing/mismatched backups refuse.
+pub fn verify_accountless_import(
+    store: &mut Store,
+    retained_source: &Path,
+) -> Result<AccountlessImportProof, ImportError> {
+    let (workspace, activation, manifest, digest): (String,String,Vec<u8>,Vec<u8>) = store.read(|tx| {
+        tx.query_row("SELECT m.workspace_id,s.activation_id,s.manifest,s.manifest_digest FROM sync_meta m JOIN staging_bases s ON s.workspace_id=m.workspace_id WHERE s.activation_id LIKE 'legacy-import-%' AND s.state='activated'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))
+    })?;
+    if sha256(&manifest).as_slice() != digest.as_slice() {
+        return Err(ImportError::StagingInvalid);
+    }
+    let marker: ImportMarker =
+        serde_json::from_slice(&manifest).map_err(|_| ImportError::StagingInvalid)?;
+    if marker.schema != MARKER_SCHEMA {
+        return Err(ImportError::StagingInvalid);
+    }
+    let bytes = read_source(retained_source)?;
+    if hex(&sha256(&bytes)) != marker.source_sha256
+        || u64::try_from(bytes.len()).map_err(|_| ImportError::StagingInvalid)?
+            != marker.source_bytes
+    {
+        return Err(failed("account_less_source"));
+    }
+    let now = Instant::parse(&marker.imported_at).map_err(|_| ImportError::StagingInvalid)?;
+    let plan = parse(&bytes, &now)?;
+    if plan.account_id.is_some()
+        || plan.version != marker.source_version
+        || plan.generation != marker.source_generation
+        || plan.counts != marker.counts
+    {
+        return Err(failed("account_less_source"));
+    }
+    Ok(AccountlessImportProof {
+        workspace,
+        activation,
+        marker_sha256: hex(&sha256(&manifest)),
+        source_sha256: marker.source_sha256,
+        source_bytes: marker.source_bytes,
+        source_version: marker.source_version,
+        source_generation: marker.source_generation,
+    })
+}
+
 /// The outcome of [`import_legacy_store`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportReport {

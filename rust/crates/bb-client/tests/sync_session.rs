@@ -1516,7 +1516,9 @@ mod sync_session {
     #[test]
     fn sync_session_026_sc_002_a_registration_committed_before_a_kill_is_idempotent_on_restart() {
         let path = scratch("kill-register");
-        let mut store = linked(&path);
+        // This crash test exercises owner-bound work; unbound local history
+        // must never become a send candidate merely through registration.
+        let (mut store, _) = ready(&path);
         create_task(&mut store, &mut SeqIds(0), 1, "Captured");
         let pending = epoch_id(&mut store);
         store.close().unwrap();

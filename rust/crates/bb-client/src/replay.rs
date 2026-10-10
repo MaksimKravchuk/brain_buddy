@@ -137,6 +137,7 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
+    let local_authority = crate::local_review::account_less(tx)?;
     let mut base = Projection::confirmed(tx, &workspace_id)?;
     let mut local_facts = crate::localfacts::load(tx, &workspace_id)?;
     crate::localfacts::reset_visible(&mut local_facts);
@@ -158,7 +159,8 @@ pub fn replay_in(tx: &Transaction<'_>, context: &ExecuteContext) -> Result<Repla
         .filter(|command| match command.state.as_str() {
             "accepted_awaiting_feed" => true,
             "completed" => {
-                !proven.contains(command.id.as_str())
+                !local_authority
+                    && !proven.contains(command.id.as_str())
                     && command.local_result.as_deref().is_some_and(has_bindings)
             }
             _ => false,
@@ -527,10 +529,13 @@ impl Projection {
                     Row {
                         revision: edit_revision(record).map(|c| c.as_str().to_owned()),
                         source: Some(command.as_str().to_owned()),
-                        body: json!(record)["value"].take().to_string().into_bytes(),
+                        body: json!(record.public())["value"]
+                            .take()
+                            .to_string()
+                            .into_bytes(),
                     },
                 );
-                file(&mut self.read_set, record.clone());
+                file(&mut self.read_set, record.public());
             }
             DomainChange::Tombstone {
                 entity_type,

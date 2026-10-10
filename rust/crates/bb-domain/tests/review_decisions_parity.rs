@@ -3457,3 +3457,163 @@ fn native_undo_missing_private_never_masks_present_malformed_snapshots() {
     assert_eq!(noop.outcome, ChangeOutcome::NoOp);
     assert!(noop.changes.is_empty());
 }
+
+fn local_run(store: &mut Store, command: &DomainCommand) -> ChangeSet {
+    let set = bb_domain::dispatch::decide_local_review(
+        &store.read_set,
+        command,
+        &inputs_with(NOW, &[], false),
+    )
+    .unwrap();
+    store.land(&set);
+    set
+}
+fn local_prior_receipt(task: &str, kind: &str, revision: u64) -> ReviewReceipt {
+    serde_json::from_value(json!({"task_id":task,"kind":kind,"hidden_until":"2026-10-20T09:00:00Z","task_revision":revision.to_string(),"reviewed_at":"2026-10-08T09:00:00Z","source":"keep","decision_id":did(40),"bulk_id":null})).unwrap()
+}
+
+#[test]
+fn local_review_undo_restores_only_owned_original_receipt_and_preserves_its_eligibility() {
+    for (prior_revision, later) in [(3, false), (2, false), (3, true)] {
+        let mut store = Store::new(&[task_json(&tid(1), "someday", 3)]);
+        let prior = local_prior_receipt(&tid(1), "someday", prior_revision);
+        store.read_set.receipts.push(prior.clone());
+        let set = local_run(
+            &mut store,
+            &decide_command(&tid(1), &did(1), "keep_someday", json!({}), 3),
+        );
+        assert_eq!(
+            the_decision(&set)
+                .private
+                .as_ref()
+                .unwrap()
+                .local_before
+                .as_ref()
+                .unwrap()
+                .receipt_replaced
+                .as_ref()
+                .unwrap()
+                .task_was_unchanged,
+            prior_revision == 3
+        );
+        let mut subsequent = prior.clone();
+        subsequent.decision_id = Some(DecisionId::parse(did(99)).unwrap());
+        if later {
+            store.read_set.receipts = vec![subsequent.clone()];
+        }
+        local_run(&mut store, &undo_command(&did(1), &tid(1), 3));
+        let receipt = store.receipt(&tid(1), "someday").unwrap();
+        if later {
+            assert_eq!(*receipt, subsequent);
+        } else {
+            assert_eq!(receipt.decision_id, prior.decision_id);
+            assert_eq!(receipt.hidden_until, prior.hidden_until);
+            assert_eq!(
+                receipt.task_revision,
+                if prior_revision == 3 {
+                    store.task(&tid(1)).revision.clone()
+                } else {
+                    prior.task_revision
+                }
+            );
+        }
+    }
+    let store = Store::new(&[task_json(&tid(1), "someday", 3)]);
+    let server = store
+        .decide(&decide_command(
+            &tid(1),
+            &did(1),
+            "keep_someday",
+            json!({}),
+            3,
+        ))
+        .unwrap();
+    assert!(
+        the_decision(&server)
+            .private
+            .as_ref()
+            .unwrap()
+            .local_before
+            .is_none()
+    );
+    assert!(
+        serde_json::to_value(the_decision(&server)).unwrap()["private"]
+            .get("local_before")
+            .is_none()
+    );
+}
+
+#[test]
+fn local_review_undo_session_before_requires_exact_postdecision_revision_and_time() {
+    for intervening in [false, true] {
+        let mut prior = session_json(1, "open");
+        prior["last_activity_at"] = json!("2026-10-10T09:00:00Z");
+        let mut store = Store::new(&[next_json(1, 1, "2026-10-01T09:00:00Z")])
+            .with_sessions(vec![prior.clone()]);
+        local_run(
+            &mut store,
+            &decide_command(
+                &tid(1),
+                &did(1),
+                "complete",
+                json!({"session_id":sid(1)}),
+                1,
+            ),
+        );
+        let session = store
+            .read_set
+            .sessions
+            .get_mut(&types::SessionId::parse(sid(1)).unwrap())
+            .unwrap();
+        assert!(session.qualifying_activity);
+        assert_eq!(session.last_activity_at.as_str(), "2026-10-10T09:00:00Z");
+        if intervening {
+            session.revision = types::Counter::from(6);
+        }
+        local_run(&mut store, &undo_command(&did(1), &tid(1), 2));
+        let session = &store.read_set.sessions[&types::SessionId::parse(sid(1)).unwrap()];
+        assert_eq!(session.counts.done, 0);
+        assert_eq!(session.qualifying_activity, intervening);
+        assert_eq!(session.last_activity_at.as_str(), "2026-10-10T09:00:00Z");
+        assert_eq!(
+            session.revision.to_u64(),
+            Some(if intervening { 7 } else { 6 })
+        );
+    }
+}
+
+#[test]
+fn local_review_bulk_undo_restores_owned_receipt_and_drops_entire_released_private() {
+    for later in [false, true] {
+        let mut store = Store::new(&[task_json(&tid(1), "inbox", 3)]);
+        let prior = local_prior_receipt(&tid(1), "someday", 3);
+        store.read_set.receipts.push(prior.clone());
+        let release = command(
+            "review.bulk_release",
+            &bid(1),
+            json!({"kind":"inbox_remainder","items":[{"task_id":tid(1),"expected_revision":"3"}]}),
+            vec![],
+        );
+        local_run(&mut store, &release);
+        let mut subsequent = prior.clone();
+        subsequent.bulk_id = Some(types::BulkId::parse(bid(99)).unwrap());
+        if later {
+            store.read_set.receipts = vec![subsequent.clone()];
+        }
+        let undo = command("review.bulk_undo", &bid(1), json!({}), vec![]);
+        let set = local_run(&mut store, &undo);
+        assert!(
+            the_release(&set)
+                .released
+                .iter()
+                .all(|item| item.private.is_none())
+        );
+        let receipt = store.receipt(&tid(1), "someday").unwrap();
+        if later {
+            assert_eq!(*receipt, subsequent);
+        } else {
+            assert_eq!(receipt.decision_id, prior.decision_id);
+            assert_eq!(receipt.task_revision, store.task(&tid(1)).revision);
+        }
+    }
+}

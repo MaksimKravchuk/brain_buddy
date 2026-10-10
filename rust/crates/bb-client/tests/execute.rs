@@ -322,6 +322,20 @@ fn execute_child_entry() {
                 },
             );
         }
+        "local_intake" => {
+            let mut store = open(&path, 30_000).unwrap();
+            bb_client::establish_account_less_with(&mut store, || Ok(())).unwrap();
+            let me = u64::from(std::process::id());
+            for index in 0..argument.parse::<u64>().unwrap() {
+                let id = CommandId::parse(format!("{me:08x}-0000-4000-8000-{index:012}")).unwrap();
+                execute(
+                    &mut store,
+                    &mut RandomIds,
+                    &create_task(id, "Settled by a process"),
+                )
+                .unwrap();
+            }
+        }
         "intake" => {
             let mut store = open(&path, 30_000).unwrap();
             let me = u64::from(std::process::id());
@@ -1925,4 +1939,23 @@ fn new_tag_delete_task_guard_cannot_launder_historical_tag_delete_result() {
         task(&mut store, target.as_str())["tag_ids"],
         json!([second_tag.as_str()])
     );
+}
+
+#[test]
+fn accountless_local_two_process_writers_settle_one_sequence_and_never_send() {
+    let path = scratch("accountless-two-writers");
+    let store = open(&path, 30_000).unwrap();
+    drop(store);
+    let mut first = spawn("local_intake", &path, "12");
+    let mut second = spawn("local_intake", &path, "12");
+    assert!(first.wait().unwrap().success());
+    assert!(second.wait().unwrap().success());
+    let mut store = open(&path, 30_000).unwrap();
+    let(commands,records,next):(i64,i64,i64)=store.read(|tx|tx.query_row("SELECT (SELECT COUNT(*) FROM outbox WHERE state='completed' AND ever_sent=0),(SELECT COUNT(*) FROM confirmed_records WHERE tombstone=0),next_local_seq FROM sync_meta",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))).unwrap();
+    assert_eq!((commands, records, next), (24, 24, 25));
+    let envelopes = queue(&mut store);
+    assert!(envelopes.iter().all(
+        |row| row.envelope.get("scope_id").is_none() && row.envelope.get("device_id").is_none()
+    ));
+    assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
 }

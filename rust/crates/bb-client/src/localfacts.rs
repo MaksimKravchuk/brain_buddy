@@ -247,6 +247,15 @@ pub(crate) fn included(facts: &mut Facts, command: &CommandId) {
     }
 }
 
+/// Accountless settlement confirms this exact local effect atomically, without
+/// fabricating receipt/feed proof or revisiting its public before-image.
+pub(crate) fn settled(facts: &mut Facts, command: &CommandId) {
+    for fact in facts.values_mut() {
+        fact.confirmed = fact.visible;
+        fact.candidates.remove(command.as_str());
+    }
+}
+
 fn confirmed_state(
     conn: &Connection,
     workspace: &str,

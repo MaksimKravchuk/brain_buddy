@@ -390,6 +390,17 @@ pub fn resolve_legacy_outbox(
     })
 }
 
+/// The same immutable source classification used by accountless setup. Even a
+/// settled historical send remains remote history and must not be reinterpreted.
+pub(crate) fn has_remote_history_in(tx: &Transaction<'_>) -> Result<bool, LegacyOutboxError> {
+    let loaded = load(tx)?;
+    Ok(loaded.entries.iter().any(|entry| entry.sent)
+        || loaded
+            .standings
+            .values()
+            .any(|standing| standing != "unsent"))
+}
+
 /// The sends still to ask the server about: the carried entries a request may have reached
 /// the server for, with no final verdict. Read from the Rust store alone (the carried rows
 /// are immutable), so the legacy file is not read again and needs no lock.

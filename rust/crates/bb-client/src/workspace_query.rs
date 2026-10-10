@@ -703,6 +703,7 @@ pub struct WorkspaceDraft {
 fn draft_id_valid(id: &str) -> bool {
     id.starts_with("runtime:")
         && !id.starts_with("runtime:review-form:")
+        && !id.starts_with("runtime:local-review-private:")
         && id.len() > "runtime:".len()
         && id.len() <= 512
 }
@@ -778,6 +779,7 @@ pub fn save_workspace_draft_with(
     if !draft_id_valid(&draft.draft_id)
         || !draft.editor_kind.starts_with("runtime_")
         || draft.editor_kind == "runtime_form_overlay"
+        || draft.editor_kind == "runtime_local_review_private"
     {
         return Err(invalid("draft_id"));
     }

@@ -25,7 +25,7 @@
 //! Server-private bookkeeping (`applied_progress`, the finished-empty steps,
 //! the threshold-change instant, the sweep clock) rides in each record's
 //! `private` member: it is read when the read set holds it and written when
-//! `inputs.authoritative` or the record already carries it.
+//! `inputs.private_review()` or the record already carries it.
 //!
 //! Refusal mapping where the frozen [`Reason`] set has no member of the same
 //! name: `open_session_exists` and `id_conflict` (the server's 409s) are
@@ -624,6 +624,18 @@ pub fn decide(
     command: &DomainCommand,
     inputs: &ExecutionInputs,
 ) -> Result<ChangeSet, DomainError> {
+    decide_review(
+        read_set,
+        command,
+        &crate::types::ReviewInputs::server(inputs),
+    )
+}
+
+pub(crate) fn decide_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &crate::types::ReviewInputs<'_>,
+) -> Result<ChangeSet, DomainError> {
     let now = instant(&inputs.now, "now")?;
     match &command.command {
         Command::ReviewSessionStart(payload) => session_start(read_set, command, payload, inputs),
@@ -694,7 +706,7 @@ fn session_start(
     read_set: &ReadSet,
     command: &DomainCommand,
     start: &SessionStart,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
 ) -> Result<ChangeSet, DomainError> {
     let now = instant(&inputs.now, "now")?;
     let id = SessionId::parse(command.entity_id.as_str())?;
@@ -755,7 +767,7 @@ fn session_start(
         qualifying_activity: false,
         clear_start: None,
         revision: Counter::from(1),
-        private: inputs.authoritative.then(|| SessionPrivate {
+        private: inputs.private_review().then(|| SessionPrivate {
             applied_progress: BTreeMap::new(),
             finished_empty: Vec::new(),
         }),
@@ -835,7 +847,7 @@ fn session_progress(
     read_set: &ReadSet,
     command: &DomainCommand,
     progress: &SessionProgress,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let session = existing_session(read_set, command)?;
@@ -866,7 +878,7 @@ fn merged(
     session: &ReviewSession,
     progress: &SessionProgress,
     digest: &str,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let snapshot = Snapshot::new(read_set, now)?;
@@ -950,7 +962,7 @@ fn merged(
         next.last_activity_at = wire(now, "now")?;
     }
     next.revision = next_counter(&session.revision, "revision")?;
-    if inputs.authoritative || session.private.is_some() {
+    if inputs.private_review() || session.private.is_some() {
         let mut applied_progress = session
             .private
             .as_ref()
@@ -1061,7 +1073,7 @@ fn settings_update(
     read_set: &ReadSet,
     command: &DomainCommand,
     update: &SettingsUpdate,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let current = settings_or_default(read_set)?;
@@ -1080,7 +1092,7 @@ fn settings_update(
         updated.owner_park_floor_at =
             optional_wire(changed.owner_park_floor_at(), "owner_park_floor_at")?;
         let changed_at = wire(now, "now")?;
-        if let Some(private) = settings_private(&mut updated, inputs.authoritative) {
+        if let Some(private) = settings_private(&mut updated, inputs.private_review()) {
             private.threshold_changed_at = Some(changed_at);
         }
     }
@@ -1139,7 +1151,7 @@ fn clock_changes(
 fn explainer_ack(
     read_set: &ReadSet,
     ack: &ExplainerAck,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     if let Some(zone) = &ack.time_zone {
@@ -1157,7 +1169,7 @@ fn explainer_ack(
         activated.time_zone = zone.clone();
     }
     activated.revision = next_counter(&current.revision, "revision")?;
-    if let Some(private) = settings_private(&mut activated, inputs.authoritative) {
+    if let Some(private) = settings_private(&mut activated, inputs.private_review()) {
         private.last_effective_sweep_at = Some(at);
     }
     let mut changes = vec![upsert(Record::ReviewSettings(activated))];
@@ -1183,7 +1195,7 @@ fn explainer_ack(
 fn consent_grant(
     read_set: &ReadSet,
     grant: &ConsentGrantRequest,
-    inputs: &ExecutionInputs,
+    inputs: &crate::types::ReviewInputs<'_>,
     now: UtcInstant,
 ) -> Result<ChangeSet, DomainError> {
     let provider = inputs

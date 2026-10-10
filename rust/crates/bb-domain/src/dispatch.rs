@@ -35,6 +35,35 @@ use crate::{
 };
 use bb_protocol::command::CommandEnvelope;
 
+/// Rust-only local Review private capability. Other command owners use the
+/// ordinary inputs unchanged; this grants no remote/provider authority.
+pub fn decide_local_review_envelope(
+    read_set: &ReadSet,
+    envelope: &CommandEnvelope,
+    dependencies: &(impl Dependencies + ?Sized),
+    inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    let command = DomainCommand::from_envelope(envelope, dependencies)?;
+    decide_local_review(read_set, &command, inputs)
+}
+
+/// Typed counterpart of the Rust-only private Review entry point.
+pub fn decide_local_review(
+    read_set: &ReadSet,
+    command: &DomainCommand,
+    inputs: &ExecutionInputs,
+) -> Result<ChangeSet, DomainError> {
+    let review = crate::types::ReviewInputs::local(inputs);
+    match command_owner(&command.command)? {
+        CommandFamily::Park => park::decide_review(read_set, command, &review),
+        CommandFamily::ReviewDecisions => {
+            review_decisions::decide_review(read_set, command, &review)
+        }
+        CommandFamily::ReviewSessions => review_sessions::decide_review(read_set, command, &review),
+        _ => decide(read_set, command, inputs),
+    }
+}
+
 /// A rule family that decides commands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CommandFamily {

@@ -1557,3 +1557,364 @@ fn bound_bulk_undo_missing_private_never_marks_release_undone_or_restores_tasks(
     );
     assert_eq!(visible(&mut store, "review_bulk_release"), releases);
 }
+
+fn local_decision(store: &mut Store, ids: &mut SeqIds) -> (String, String, ExecuteRequest) {
+    bb_client::establish_account_less_with(store, || Ok(())).unwrap();
+    let target = create_task(store, ids, 1, "Local original task");
+    execute(
+        store,
+        ids,
+        &request(
+            cmd(2),
+            CommandType::TaskTransition,
+            Some(&target),
+            json!({"action":"move","to_state":"next"}),
+            vec![shown(EntityType::Task, &target, "1")],
+        ),
+    )
+    .unwrap();
+    let decision = format!("decision_{}", id(3));
+    let mut decide = request(
+        cmd(3),
+        CommandType::ReviewDecide,
+        Some(&target),
+        json!({"decision_id":decision,"type":"complete"}),
+        vec![shown(EntityType::Task, &target, "2")],
+    );
+    decide.context.policy.weekly_review = true;
+    execute(store, ids, &decide).unwrap();
+    (target, decision, decide)
+}
+
+#[test]
+fn accountless_local_decision_private_undo_reopen_and_expired_replay_keep_saved_effect() {
+    let path = scratch("accountless-private-undo");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision, decide) = local_decision(&mut store, &mut ids);
+    let private_count: i64 = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT count(*) FROM drafts WHERE editor_kind='runtime_local_review_private'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(private_count, 1);
+    let public = bb_client::visible_snapshot(&mut store).unwrap();
+    for record in &public.records {
+        assert_eq!(*record, record.public());
+    }
+    let public_decision = visible(&mut store, "review_decision");
+    assert!(public_decision[0].get("private").is_none());
+    assert_eq!(
+        public_decision[0]["undo_available_until"],
+        "2026-10-17T09:00:00Z"
+    );
+    assert!(
+        states(&mut store)
+            .values()
+            .all(|state| state == "completed")
+    );
+    assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
+    store.close().unwrap();
+    let mut store = open(&path).unwrap();
+    let undo = undo_public_decision(&target, &decision, 4);
+    execute(&mut store, &mut ids, &undo).unwrap();
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "next");
+    assert!(visible(&mut store, "review_decision").is_empty());
+    let after = bb_client::visible_snapshot(&mut store).unwrap().records;
+    let expired = Instant::parse("2026-11-10T09:00:00Z").unwrap();
+    bb_client::prune_local_review_private_with(&mut store, &expired, 200, || Ok(())).unwrap();
+    let mut later = context();
+    later.now = expired;
+    assert!(replay(&mut store, &later).unwrap().applied.is_empty());
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        after
+    );
+    let mut retry = undo.clone();
+    retry.context = later.clone();
+    assert!(execute(&mut store, &mut ids, &retry).unwrap().replayed);
+    let mut retry_decide = decide;
+    retry_decide.context = later;
+    assert!(
+        execute(&mut store, &mut ids, &retry_decide)
+            .unwrap()
+            .replayed
+    );
+    let bound: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT account_id,scope_id,device_id,server_generation,cursor FROM sync_meta",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+        })
+        .unwrap();
+    assert_eq!(bound, (None, None, None, None, None));
+}
+
+#[test]
+fn accountless_prune_removes_original_beforeimage_without_reconstruction_and_known_retry_wins() {
+    let path = scratch("accountless-expiry");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision, decide) = local_decision(&mut store, &mut ids);
+    let at = Instant::parse("2026-10-17T09:00:00Z").unwrap();
+    assert_eq!(
+        bb_client::prune_local_review_private_with(&mut store, &at, 1, || Ok(())).unwrap(),
+        1
+    );
+    let before = bb_client::visible_snapshot(&mut store).unwrap().records;
+    replay(&mut store, &context()).unwrap();
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        before
+    );
+    // Even a clock moved back cannot recreate private proof once pruned.
+    let undo = undo_public_decision(&target, &decision, 4);
+    assert!(
+        matches!(execute(&mut store,&mut ids,&undo),Err(ExecuteError::Refused(ref e)) if e.reason==bb_domain::types::Reason::UndoUnavailable)
+    );
+    assert!(execute(&mut store, &mut ids, &decide).unwrap().replayed);
+    assert_eq!(
+        bb_client::prune_local_review_private_with(&mut store, &at, 200, || Ok(())).unwrap(),
+        0
+    );
+}
+
+#[test]
+fn accountless_explicit_setup_refuses_owner_history_and_private_draft_ports() {
+    for sql in [
+        "UPDATE sync_meta SET account_link_state='linked',account_id='account-test'",
+        "UPDATE sync_meta SET account_link_state='linking'",
+        "UPDATE sync_meta SET scope_id='scope-test'",
+        "UPDATE sync_meta SET server_generation='server-test'",
+    ] {
+        let path = scratch(&format!("accountless-refuse-{}", sql.len()));
+        let mut store = open(&path).unwrap();
+        store.write(|tx| tx.execute(sql, [])).unwrap();
+        assert!(bb_client::establish_account_less_with(&mut store, || Ok(())).is_err());
+    }
+    let path = scratch("accountless-namespace");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    local_decision(&mut store, &mut ids);
+    bb_client::establish_account_less_with(&mut store, || Ok(())).unwrap();
+    let private_id: String = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT draft_id FROM drafts WHERE editor_kind='runtime_local_review_private'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert!(bb_client::load_workspace_draft(&mut store, &private_id).is_err());
+    assert!(bb_client::delete_workspace_draft_with(&mut store, &private_id, || Ok(())).is_err());
+    let draft = bb_client::WorkspaceDraft {
+        draft_id: "runtime:anything".into(),
+        editor_kind: "runtime_local_review_private".into(),
+        record_type: None,
+        record_key: None,
+        base_revision: None,
+        fields: json!({}),
+        updated_at: NOW.into(),
+    };
+    assert!(bb_client::save_workspace_draft_with(&mut store, &draft, || Ok(())).is_err());
+}
+
+#[test]
+fn accountless_local_atomic_rollback_and_stale_undo_leave_base_and_private_intact() {
+    let path = scratch("accountless-rollback");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision, _) = local_decision(&mut store, &mut ids);
+    let before = bb_client::visible_snapshot(&mut store).unwrap().records;
+    let undo = undo_public_decision(&target, &decision, 4);
+    let invalid = request(
+        cmd(5),
+        CommandType::TaskUpdate,
+        Some(&target),
+        json!({"title":""}),
+        vec![after(&cmd(4), EntityType::Task, &target)],
+    );
+    assert!(bb_client::execute_batch(&mut store, &mut ids, &[undo.clone(), invalid]).is_err());
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        before
+    );
+    assert_eq!(states(&mut store).len(), 3);
+    let edit = request(
+        cmd(6),
+        CommandType::TaskUpdate,
+        Some(&target),
+        json!({"title":"Intervening local edit"}),
+        vec![shown(EntityType::Task, &target, "3")],
+    );
+    execute(&mut store, &mut ids, &edit).unwrap();
+    assert!(
+        matches!(execute(&mut store,&mut ids,&undo),Err(ExecuteError::Refused(ref e)) if e.reason==bb_domain::types::Reason::UndoUnavailable)
+    );
+}
+
+#[test]
+fn accountless_bulk_undo_is_final_local_base_and_original_deadline_never_extends() {
+    let path = scratch("accountless-bulk");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    bb_client::establish_account_less_with(&mut store, || Ok(())).unwrap();
+    let target = create_task(&mut store, &mut ids, 1, "Inbox local release");
+    let bulk = format!("bulk_{}", id(2));
+    let mut release = request(
+        cmd(2),
+        CommandType::ReviewBulkRelease,
+        Some(&bulk),
+        json!({"kind":"inbox_remainder","items":[{"task_id":target,"expected_revision":"1"}]}),
+        vec![],
+    );
+    release.context.policy.weekly_review = true;
+    execute(&mut store, &mut ids, &release).unwrap();
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "someday");
+    let original:Vec<u8>=store.read(|tx|tx.query_row("SELECT fields FROM drafts WHERE editor_kind='runtime_local_review_private' AND record_type='review_bulk_release'",[],|r|r.get(0))).unwrap();
+    let mut retry = release.clone();
+    retry.context.now = Instant::parse("2026-10-16T09:00:00Z").unwrap();
+    assert!(execute(&mut store, &mut ids, &retry).unwrap().replayed);
+    let retained:Vec<u8>=store.read(|tx|tx.query_row("SELECT fields FROM drafts WHERE editor_kind='runtime_local_review_private' AND record_type='review_bulk_release'",[],|r|r.get(0))).unwrap();
+    assert_eq!(retained, original);
+    store.close().unwrap();
+    let mut store = open(&path).unwrap();
+    let mut undo = request(
+        cmd(3),
+        CommandType::ReviewBulkUndo,
+        Some(&bulk),
+        json!({}),
+        vec![],
+    );
+    undo.context.policy.weekly_review = true;
+    execute(&mut store, &mut ids, &undo).unwrap();
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "inbox");
+    let mut later = context();
+    later.now = Instant::parse("2026-11-10T09:00:00Z").unwrap();
+    bb_client::prune_local_review_private_with(&mut store, &later.now, 200, || Ok(())).unwrap();
+    replay(&mut store, &later).unwrap();
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "inbox");
+    // Existing completed bulk's public already-undone proof gives genuine NoOp.
+    let mut second = undo.clone();
+    second.command_id = cmd(4);
+    second.context = later;
+    execute(&mut store, &mut ids, &second).unwrap();
+    assert_eq!(
+        visible(&mut store, "review_bulk_release")[0]["undo"]["restored"],
+        json!([target])
+    );
+}
+
+#[test]
+fn accountless_cancel_rolls_back_settlement_beforeimages_and_sequence_together() {
+    let path = scratch("accountless-cancel");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    bb_client::establish_account_less_with(&mut store, || Ok(())).unwrap();
+    let target = create_task(&mut store, &mut ids, 1, "Local draft");
+    let before = bb_client::visible_snapshot(&mut store).unwrap().records;
+    let edit = request(
+        cmd(2),
+        CommandType::TaskUpdate,
+        Some(&target),
+        json!({"title":"Must roll back"}),
+        vec![shown(EntityType::Task, &target, "1")],
+    );
+    assert_eq!(
+        bb_client::execute_batch_with(&mut store, &mut ids, &[edit], |_| Err(
+            ExecuteError::Cancelled
+        )),
+        Err(ExecuteError::Cancelled)
+    );
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        before
+    );
+    assert_eq!(states(&mut store).len(), 1);
+    let version: String = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT record_version FROM confirmed_records WHERE record_type='task'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(version, "1");
+}
+
+#[test]
+fn accountless_link_boundary_preserves_immutable_local_history_and_completed_base() {
+    let path = scratch("accountless-link-boundary");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, _, _) = local_decision(&mut store, &mut ids);
+    let original = envelope(&mut store, 3);
+    let public = bb_client::visible_snapshot(&mut store).unwrap().records;
+    // T044's real link workflow is separate. A bound fixture proves that changing
+    // owner metadata cannot rewrite, replay, or send these completed local intents.
+    bind_account_for_undo(&mut store);
+    replay(&mut store, &context()).unwrap();
+    assert_eq!(envelope(&mut store, 3), original);
+    assert!(original.get("scope_id").is_none());
+    assert_eq!(
+        bb_client::visible_snapshot(&mut store).unwrap().records,
+        public
+    );
+    assert_eq!(task(&mut store, &target).unwrap()["state"], "completed");
+    assert!(bb_client::send_candidates(&mut store).unwrap().is_empty());
+}
+
+#[test]
+fn accountless_public_read_ports_drop_private_evidence_and_reserved_overlays() {
+    let path = scratch("accountless-public-ports");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let (target, decision, _) = local_decision(&mut store, &mut ids);
+    let (_, records, _) = bb_client::workspace_records(
+        &mut store,
+        &[
+            (EntityType::Task, vec![target.clone()]),
+            (EntityType::ReviewDecision, vec![decision]),
+        ],
+    )
+    .unwrap();
+    for record in records.into_iter().flatten() {
+        assert_eq!(record, record.public());
+    }
+    let query = bb_domain::types::Query::TaskDetail {
+        task_id: bb_domain::types::TaskId::parse(target).unwrap(),
+    };
+    let inputs = bb_domain::types::QueryInputs {
+        now: Instant::parse(NOW).unwrap(),
+        device_zone: ZoneName::new("UTC").unwrap(),
+        policy: context().policy,
+    };
+    let page = bb_client::query_page(&mut store, &query, &inputs).unwrap();
+    let serialized = serde_json::to_string(&page.result).unwrap();
+    assert!(!serialized.contains("task_before"));
+    assert!(!serialized.contains("private"));
+    let bodies:Vec<Vec<u8>>=store.read(|tx|{let mut s=tx.prepare("SELECT body FROM confirmed_records WHERE tombstone=0 UNION ALL SELECT body FROM visible_records")?;s.query_map([],|r|r.get(0))?.collect()}).unwrap();
+    for body in bodies {
+        let record: Value = serde_json::from_slice(&body).unwrap();
+        assert!(record.get("private").is_none());
+        assert!(
+            !body
+                .windows(b"task_before".len())
+                .any(|s| s == b"task_before")
+        );
+    }
+}

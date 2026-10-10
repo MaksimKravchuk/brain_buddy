@@ -803,7 +803,8 @@ fn run(
         })?;
         meta = read_meta(tx)?;
     }
-    let visible = load_visible(tx, &meta.workspace_id)?;
+    let mut visible = load_visible(tx, &meta.workspace_id)?;
+    let local_authority = crate::local_review::account_less(tx)?;
     evidence.start(&visible.read_set);
     if !evidence.batch {
         crate::admission::validate(
@@ -823,6 +824,25 @@ fn run(
     let normalized = normalize_fresh_tasks(tx, &meta.workspace_id, request, normalized, evidence)?;
     let (preconditions, depends_on) = wire(&normalized, &entity_id, &visible.pending);
     let results = load_dependencies(tx, &meta.workspace_id, &depends_on)?;
+    if local_authority {
+        for dependency in &depends_on {
+            let state: String = tx.query_row(
+                "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
+                params![meta.workspace_id, dependency.as_str()],
+                |r| r.get(0),
+            )?;
+            if state != "completed" {
+                return Err(refuse(
+                    if matches!(state.as_str(), "rejected" | "blocked_dependency") {
+                        Reason::DependencyRejected
+                    } else {
+                        Reason::DependencyPending
+                    },
+                    "depends_on",
+                ));
+            }
+        }
+    }
 
     let (epoch, new_epoch) = match &meta.device_epoch {
         Some(epoch) if matches!(meta.epoch_state.as_str(), "pending_registration" | "active") => {
@@ -879,27 +899,39 @@ fn run(
         )?,
         policy: request.context.policy.clone(),
     };
-    let (changes, deferred) =
-        match dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs) {
-            Ok(changes) => (changes, false),
-            Err(error) if private_undo_missing(request.command_type, &entity_id, &error) => {
-                for dependency in &depends_on {
-                    let state: String = tx.query_row(
-                        "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
-                        params![meta.workspace_id, dependency.as_str()],
-                        |row| row.get(0),
-                    )?;
-                    if matches!(state.as_str(), "rejected" | "blocked_dependency") {
-                        return Err(refuse(Reason::DependencyRejected, "depends_on"));
-                    }
+    if local_authority {
+        visible.read_set = crate::local_review::private_read_set(
+            tx,
+            &meta.workspace_id,
+            &visible.read_set,
+            &inputs.now,
+        )?;
+    }
+    let decided = if local_authority {
+        dispatch::decide_local_review_envelope(&visible.read_set, &envelope, &results, &inputs)
+    } else {
+        dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)
+    };
+    let (changes, deferred) = match decided {
+        Ok(changes) => (changes, false),
+        Err(error) if private_undo_missing(request.command_type, &entity_id, &error) => {
+            for dependency in &depends_on {
+                let state: String = tx.query_row(
+                    "SELECT state FROM outbox WHERE workspace_id=?1 AND command_id=?2",
+                    params![meta.workspace_id, dependency.as_str()],
+                    |row| row.get(0),
+                )?;
+                if matches!(state.as_str(), "rejected" | "blocked_dependency") {
+                    return Err(refuse(Reason::DependencyRejected, "depends_on"));
                 }
-                if !bound_account(tx)? {
-                    return Err(error.into());
-                }
-                (ChangeSet::no_op(), true)
             }
-            Err(error) => return Err(error.into()),
-        };
+            if !bound_account(tx)? {
+                return Err(error.into());
+            }
+            (ChangeSet::no_op(), true)
+        }
+        Err(error) => return Err(error.into()),
+    };
     evidence.produced(request, &changes);
 
     // What the rules resolved (a Smart Add name matched onto a queued project,
@@ -964,6 +996,12 @@ fn run(
             ],
         )?;
     }
+    if local_authority {
+        tx.execute(
+            "UPDATE outbox SET state='completed' WHERE workspace_id=?1 AND command_id=?2",
+            params![meta.workspace_id, request.command_id.as_str()],
+        )?;
+    }
     hook(Stage::IntentStored, tx)?;
     let mut local_read_set = visible.read_set.clone();
     for change in &changes.changes {
@@ -973,6 +1011,15 @@ fn run(
             change,
             &request.command_id,
         );
+        if local_authority {
+            crate::local_review::settle_change(
+                tx,
+                &meta.workspace_id,
+                &request.command_id,
+                change,
+                &request.context.now,
+            )?;
+        }
         apply(tx, &meta.workspace_id, &request.command_id, change)?;
         match change {
             DomainChange::Upsert(record) => file(&mut local_read_set, record.clone()),
@@ -981,6 +1028,37 @@ fn run(
                 record_key,
             } => crate::replay::remove(&mut local_read_set, *entity_type, record_key),
         }
+    }
+    if local_authority {
+        crate::localfacts::settled(&mut local_facts, &request.command_id);
+        let mut settled: LocalResult = serde_json::from_slice(&local_result).map_err(corrupt)?;
+        let mut versions = std::collections::BTreeMap::new();
+        for change in &changes.changes {
+            let kind = change.entity_type();
+            let key = change.record_key();
+            let version:String=tx.query_row("SELECT record_version FROM confirmed_records WHERE workspace_id=?1 AND record_type=?2 AND record_key=?3",params![meta.workspace_id,kind.as_str(),json!(key).to_string()],|row|row.get(0))?;
+            versions.insert(
+                (kind.as_str(), json!(key).to_string()),
+                LocalVersion {
+                    entity_type: kind,
+                    record_key: key,
+                    edit_revision: match change {
+                        DomainChange::Upsert(record) => edit_revision(record),
+                        DomainChange::Tombstone { .. } => None,
+                    },
+                    record_version: Some(Counter::parse(version).map_err(corrupt)?),
+                },
+            );
+        }
+        settled.versions = versions.into_values().collect();
+        tx.execute(
+            "UPDATE outbox SET local_result=?3 WHERE workspace_id=?1 AND command_id=?2",
+            params![
+                meta.workspace_id,
+                request.command_id.as_str(),
+                serde_json::to_vec(&settled).map_err(corrupt)?
+            ],
+        )?;
     }
     let fact_writes = if deferred {
         0
@@ -1308,7 +1386,10 @@ fn apply(
 ) -> Result<(), ExecuteError> {
     match change {
         DomainChange::Upsert(record) => {
-            let body = json!(record)["value"].take().to_string().into_bytes();
+            let body = json!(record.public())["value"]
+                .take()
+                .to_string()
+                .into_bytes();
             tx.execute(
                 "INSERT OR REPLACE INTO visible_records (workspace_id, record_type, record_key,
                     edit_revision, source_command_id, body)
@@ -1400,7 +1481,7 @@ pub fn visible_snapshot(store: &mut Store) -> Result<VisibleSnapshot, ExecuteErr
         projection_generation: unsigned(generation)?,
         records: rows
             .iter()
-            .map(|(kind, body)| record_from(kind, body))
+            .map(|(kind, body)| record_from(kind, body).map(|record| record.public()))
             .collect::<Result<_, _>>()?,
         pending: unsigned(pending)?,
         open_issues: unsigned(open_issues)?,
@@ -1582,6 +1663,8 @@ struct LocalVersion {
     entity_type: EntityType,
     record_key: RecordKey,
     edit_revision: Option<Counter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    record_version: Option<Counter>,
 }
 
 /// What a decided command leaves for the commands that build on it, as stored.
@@ -1595,6 +1678,7 @@ pub(crate) fn local_result(changes: &ChangeSet) -> Vec<u8> {
                     entity_type: record.entity_type(),
                     record_key: record.record_key(),
                     edit_revision: edit_revision(record),
+                    record_version: None,
                 }),
                 DomainChange::Tombstone { .. } => None,
             })
@@ -1616,6 +1700,7 @@ pub(crate) fn receipt_result(receipt: &Receipt) -> Vec<u8> {
                 entity_type: version.entity_type,
                 record_key: version.record_key.clone(),
                 edit_revision: version.edit_revision.clone(),
+                record_version: None,
             })
             .collect(),
         id_bindings: receipt.id_bindings.clone(),

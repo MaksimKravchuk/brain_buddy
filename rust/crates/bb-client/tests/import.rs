@@ -1932,3 +1932,94 @@ fn review_activation_026_fr_013_admits_exact_historical_alias_atomically() {
     );
     assert!(!bodies(&mut store, "task").contains_key("task_undoremoved_proven"));
 }
+
+#[test]
+fn accountless_import_authority_requires_exact_admitted_source_none_and_rechecks_marker() {
+    let lane = lane("accountless-proof");
+    let mut source: Value = serde_json::from_slice(&golden_bytes()).unwrap();
+    source["account"] = Value::Null;
+    source["outbox"] = json!([]);
+    lane.write_source(&source);
+    let report = import_legacy_store(&lane.request()).unwrap();
+    let backup = lane.directory.join(report.marker.backup_file);
+    let mut store = open(&lane.database);
+    assert!(bb_client::establish_account_less_with(&mut store, || Ok(())).is_err());
+    let proof = bb_client::verify_accountless_import(&mut store, &backup).unwrap();
+    assert_eq!(
+        bb_client::establish_account_less_from_import_with(&mut store, &proof, || Err(
+            bb_client::ExecuteError::Cancelled
+        )),
+        Err(bb_client::ExecuteError::Cancelled)
+    );
+    let mode: String = store
+        .read(|tx| tx.query_row("SELECT account_link_state FROM sync_meta", [], |r| r.get(0)))
+        .unwrap();
+    assert_eq!(mode, "unchosen");
+    let bytes = fs::read(&backup).unwrap();
+    let mut mismatched = bytes.clone();
+    mismatched.push(b' ');
+    fs::write(&backup, &mismatched).unwrap();
+    assert!(bb_client::verify_accountless_import(&mut store, &backup).is_err());
+    fs::write(&backup, &bytes).unwrap();
+    let before = bodies(&mut store, "task");
+    bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).unwrap();
+    bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).unwrap();
+    assert_eq!(bodies(&mut store, "task"), before);
+    assert_eq!(count(&mut store, "outbox"), 0);
+    let marker: Vec<u8> = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT manifest FROM staging_bases WHERE state='activated'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    store.write(|tx|tx.execute("UPDATE staging_bases SET manifest=CAST('tampered' AS BLOB) WHERE state='activated'",[])).unwrap();
+    assert!(
+        bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).is_err()
+    );
+    store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE staging_bases SET manifest=?1 WHERE state='activated'",
+                [marker],
+            )
+        })
+        .unwrap();
+}
+
+#[test]
+fn accountless_import_proof_cannot_grant_linked_source_or_reinterpret_existing_native_history() {
+    let linked = lane("accountless-linked-proof");
+    let mut source: Value = serde_json::from_slice(&golden_bytes()).unwrap();
+    source["account"] =
+        json!({"id":"owner-test","email":"sample@example.test","displayName":"Sample"});
+    source["outbox"] = json!([]);
+    linked.write_source(&source);
+    let report = import_legacy_store(&linked.request()).unwrap();
+    let mut store = open(&linked.database);
+    assert!(
+        bb_client::verify_accountless_import(
+            &mut store,
+            &linked.directory.join(report.marker.backup_file)
+        )
+        .is_err()
+    );
+    let fresh = lane("accountless-before-conversion");
+    source["account"] = Value::Null;
+    fresh.write_source(&source);
+    let report = import_legacy_store(&fresh.request()).unwrap();
+    let mut store = open(&fresh.database);
+    let proof = bb_client::verify_accountless_import(
+        &mut store,
+        &fresh.directory.join(report.marker.backup_file),
+    )
+    .unwrap();
+    store
+        .write(|tx| tx.execute("UPDATE sync_meta SET next_local_seq=2", []))
+        .unwrap();
+    assert!(
+        bb_client::establish_account_less_from_import_with(&mut store, &proof, || Ok(())).is_err()
+    );
+}

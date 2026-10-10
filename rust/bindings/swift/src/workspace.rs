@@ -567,6 +567,46 @@ impl BridgeWorkspace {
         })
     }
 
+    fn mutate_local_review(
+        &self,
+        operation: Arc<BridgeOperation>,
+        work: impl FnOnce(
+            &mut Store,
+            &mut dyn FnMut() -> Result<(), ExecuteError>,
+        ) -> Result<u32, ExecuteError>,
+    ) -> Result<u32, Failure> {
+        if operation.used.swap(true, Ordering::AcqRel) {
+            return Err(Failure::new("OPERATION_ALREADY_USED", None));
+        }
+        if self.state.load(Ordering::Acquire) != OPEN {
+            return Err(Failure::new("WORKSPACE_CLOSED", None));
+        }
+        let mut held = self
+            .store
+            .lock()
+            .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+        let store = held
+            .as_mut()
+            .ok_or_else(|| Failure::new("WORKSPACE_CLOSED", None))?;
+        let mut arbitration = None;
+        guarded(&AtomicU8::new(OPEN), || {
+            let mut before_commit = || {
+                let lock = operation.state.lock().map_err(|_| StoreError::Corrupt)?;
+                if *lock == OperationState::Cancelled || self.state.load(Ordering::Acquire) != OPEN
+                {
+                    return Err(ExecuteError::Cancelled);
+                }
+                arbitration = Some(lock);
+                Ok(())
+            };
+            let result = work(store, &mut before_commit).map_err(execute_failure)?;
+            if let Some(lock) = &mut arbitration {
+                **lock = OperationState::Committed;
+            }
+            Ok(result)
+        })
+    }
+
     fn with_store<T>(
         &self,
         work: impl FnOnce(&mut Store) -> Result<T, Failure>,
@@ -594,6 +634,60 @@ impl BridgeWorkspace {
                     BridgeStoreStatus::ReadOnlyRecovery { found }
                 }
             })
+        })?)
+    }
+
+    /// Trusted workspace lifecycle selection; callers must make the explicit
+    /// accountless choice before new local gestures. Missing credentials do not
+    /// activate it, and owner-bound history is never reinterpreted.
+    pub fn establish_account_less(
+        &self,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<(), BridgeError> {
+        self.mutate_local_review(operation, |store, before_commit| {
+            bb_client::establish_account_less_with(store, before_commit)?;
+            Ok(0)
+        })?;
+        Ok(())
+    }
+
+    /// Exact retained backup/source proof is verified by the importer; no JSON
+    /// authority flag or source-account guess crosses this port.
+    pub fn establish_account_less_from_import(
+        &self,
+        retained_source_path: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<(), BridgeError> {
+        if retained_source_path.is_empty() || retained_source_path.len() > 4096 {
+            return Err(Failure::new("INVALID_REQUEST", Some("retained_source_path")).into());
+        }
+        self.mutate_local_review(operation, |store, before_commit| {
+            let proof = bb_client::verify_accountless_import(
+                store,
+                std::path::Path::new(&retained_source_path),
+            )
+            .map_err(|error| {
+                ExecuteError::Refused(bb_domain::types::DomainError::field(
+                    bb_domain::types::Reason::InvalidValue,
+                    error.field().unwrap_or("account_less_import"),
+                ))
+            })?;
+            bb_client::establish_account_less_from_import_with(store, &proof, before_commit)?;
+            Ok(0)
+        })?;
+        Ok(())
+    }
+
+    /// Bounded, coalescable private-beforeimage upkeep, even when Review is OFF.
+    pub fn prune_local_review_private(
+        &self,
+        now: String,
+        limit: u32,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<u32, BridgeError> {
+        let now = Instant::parse(now).map_err(|_| Failure::new("INVALID_REQUEST", Some("now")))?;
+        Ok(self.mutate_local_review(operation, |store, before_commit| {
+            bb_client::prune_local_review_private_with(store, &now, limit, before_commit)
         })?)
     }
 

@@ -30,6 +30,7 @@ mod import;
 mod issues;
 mod legacy_outbox;
 mod legacy_review;
+mod local_review;
 mod localfacts;
 mod locking;
 mod receipts;
@@ -57,9 +58,9 @@ pub use execute::{
     projection_generation, visible_snapshot,
 };
 pub use import::{
-    ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage, SUPPORTED_SOURCE_VERSION,
-    SourceCounts, import_legacy_store, import_legacy_store_with, legacy_import_marker,
-    legacy_record_key,
+    AccountlessImportProof, ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage,
+    SUPPORTED_SOURCE_VERSION, SourceCounts, import_legacy_store, import_legacy_store_with,
+    legacy_import_marker, legacy_record_key, verify_accountless_import,
 };
 pub use issues::{
     Choice, CurrentRecord, DecisionDraft, DependentChoice, DependentDraft, DraftAction, Issue,
@@ -103,4 +104,9 @@ pub use review_forms::{
     ReviewFormCount, ReviewFormDraft, ReviewFormLoaded, clear_review_forms_for_task_with,
     load_review_form, prune_review_forms_with, reverse_workspace_identities, review_form_count,
     save_review_form_with,
+};
+
+pub use local_review::{
+    establish_account_less_from_import_with, establish_account_less_with,
+    prune_local_review_private_with,
 };

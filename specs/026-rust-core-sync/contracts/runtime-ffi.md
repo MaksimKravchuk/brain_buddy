@@ -199,3 +199,54 @@ A capability request includes feature/language/required response schema, explici
 Suggestion lifecycle follows design M-04/D-04.13–15: persist explicit local cancellation before releasing the request, fence late responses by request/owner/consent generation, and discard cancelled transient results without losing authored drafts. UI closure alone does not cancel; reconnect to a still-live request or the existing ADR-0002 operation. A lost synchronous navigator request becomes interrupted/unknown without automatic resubmission. New transmission requires another explicit request and current consent; no adapter promises to recall already sent data.
 
 The existing task navigator returns exactly one of proposals or a clarifying question. The adapter preserves that typed union and implements M-04/D-04.16–20: the explicit answer action saves one ordinary notes command, adopts the saved projection/revision, then requests suggestions with updated input and current consent. Persist notes-command identity and save/inference phase; an unknown save is reconciled, and an inference retry cannot append the answer twice. Draft and separate save/inference errors survive interruption.
+
+
+### Explicit accountless local Review capability (T043; activation remains T044)
+
+The trusted workspace lifecycle port `establish_account_less` selects durable
+`account_link_state=account_less` only for a wholly unbound workspace without
+remote-sent history, receipts or an active server base. Missing credentials or
+scope do not select it. The imported-base variant
+`establish_account_less_from_import(retained_source_path)` uses an importer-only,
+non-serializable proof: exact retained source length and SHA-256 match the admitted
+activation marker, the existing importer parses the source and proves its account
+is absent, and the setup transaction rechecks the marker and unbound pre-conversion
+sequence/history. Neither operation relabels an existing command or server record.
+
+The Rust-only local Review dispatcher grants private Review bookkeeping to the
+same Review rule bodies. The ordinary serialized `ExecutionInputs.authoritative`
+contract stays unchanged. Versioned private-field overlays live in the reserved
+`runtime:local-review-private:` draft namespace, inaccessible to generic host draft
+CRUD, and bind a typed record identity and its exact public fingerprint to a local
+command provenance and the original source instant/deadline. Matching evidence is
+injected only into the private local decision read set. All public records use
+`Record::public()` before persistence or bridge reads.
+
+Accepted local commands settle atomically: immutable original intent/fingerprint,
+sequence, dependencies and local result references; final public confirmed and
+visible records; private overlays; local confirmed origins; and completed outbox
+state. Each retained local record version advances from its own previous version,
+including tombstones. No receipt, feed cursor, watermark or server generation is
+invented. Completed commands are skipped by replay and cannot be send candidates. Send selection additionally requires the durable linked
+mode, validated bound owner identities and an original envelope carrying that
+exact scope/device. Registration alone cannot make an unbound historical intent
+sendable.
+A known retry returns its original saved result before expiry or upkeep checks.
+
+`prune_local_review_private(now, limit)` is bounded to 1–200 expired overlay rows
+and may be coalesced independently of Review exposure. Decision and bulk beforeimages
+expire at their original seven-day deadlines; saving/retrying does not extend them.
+Upkeep never changes completed public effects, and replay cannot recreate expired
+private evidence. Importing public Review rows alone grants no Undo beforeimage:
+missing or unproved source snapshots remain a refusal until an exact typed private
+activation is admitted. Production selection, account linking and pilot evidence
+remain T044 work; these ports do not activate the capability automatically.
+
+LOCAL Undo evidence additionally preserves a replaced receipt and session activity
+before-state. A receipt is restored only while the current receipt still belongs
+to the decision/bulk being undone; its task revision is rebound only when the
+original task-match evidence proved it valid. A session restores its previous
+qualification/activity only when its exact saved postdecision time and revision
+still match. Subsequent receipts and session progress stay intact. These optional
+private fields are absent on the ordinary server path and do not change public
+record formats.

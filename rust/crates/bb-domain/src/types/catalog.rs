@@ -768,3 +768,40 @@ pub struct ReviewPresentation {
     pub activated_at: Option<Instant>,
     pub ended_elsewhere_session: Option<SessionId>,
 }
+
+/// Borrowed private Review bookkeeping capability. It cannot be serialized.
+/// Ordinary rules derive it from their existing server authority; only the
+/// Rust dispatcher constructs the distinct local capability.
+pub struct ReviewInputs<'a> {
+    execution: &'a ExecutionInputs,
+    private_review: bool,
+    local_review: bool,
+}
+impl<'a> ReviewInputs<'a> {
+    pub fn server(execution: &'a ExecutionInputs) -> Self {
+        Self {
+            execution,
+            private_review: execution.authoritative,
+            local_review: false,
+        }
+    }
+    pub(crate) fn local(execution: &'a ExecutionInputs) -> Self {
+        Self {
+            execution,
+            private_review: true,
+            local_review: true,
+        }
+    }
+    pub fn private_review(&self) -> bool {
+        self.private_review
+    }
+    pub fn local_review(&self) -> bool {
+        self.local_review
+    }
+}
+impl std::ops::Deref for ReviewInputs<'_> {
+    type Target = ExecutionInputs;
+    fn deref(&self) -> &ExecutionInputs {
+        self.execution
+    }
+}
