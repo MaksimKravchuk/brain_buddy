@@ -356,6 +356,67 @@ fn rejected(command: &CommandId, code: &str, retryable: bool) -> Receipt {
     .unwrap()
 }
 
+/// An acceptance carrying what the server resolved: the versions it wrote and
+/// the entity it bound each proposed alias to.
+fn accepted_with(command: &CommandId, seq: u64, versions: Value, bindings: Value) -> Receipt {
+    decode(
+        &with_common(json!({
+            "command_id": command.as_str(),
+            "outcome": "accepted",
+            "has_changes": true,
+            "commit_seq": seq.to_string(),
+            "result_versions": versions,
+            "id_bindings": bindings,
+            "result_redacted": false,
+            "result": null,
+            "error": null,
+        }))
+        .to_string(),
+    )
+    .unwrap()
+}
+
+fn project_template() -> &'static Value {
+    static TEMPLATE: OnceLock<Value> = OnceLock::new();
+    TEMPLATE.get_or_init(|| {
+        let path = scratch("project-template");
+        let mut store = open(&path).unwrap();
+        let created = request(
+            cmd(1),
+            CommandType::ProjectCreate,
+            None,
+            json!({ "name": "Template" }),
+            Vec::new(),
+        );
+        execute(&mut store, &mut SeqIds(0), &created).unwrap();
+        let body: Vec<u8> = store
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT body FROM visible_records WHERE record_type = 'project'",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    })
+}
+
+fn project_change(project_id: &str, name: &str, version: u64) -> Value {
+    let mut value = project_template().clone();
+    value["id"] = json!(project_id);
+    value["name"] = json!(name);
+    value["revision"] = json!("1");
+    json!({
+        "entity_type": "project",
+        "record_key": [project_id],
+        "record_version": version.to_string(),
+        "edit_revision": "1",
+        "operation": "upsert",
+        "value": value,
+    })
+}
+
 fn settle(store: &mut Store, receipt: &Receipt) -> Result<bb_client::Settled, ApplyError> {
     let fence = capture_fence(store).unwrap();
     apply_receipt(store, &context(), &fence, receipt)
@@ -1644,10 +1705,17 @@ mod apply_changes {
 
         let settled = settle(&mut store, &accepted(&cmd(1), 1)).unwrap();
 
-        assert_eq!(settled.settlement, Settlement::Unchanged);
+        // The command stays done; the receipt's result replaces the prediction.
+        assert_eq!(settled.settlement, Settlement::Completed);
         assert_eq!(state(&mut store, 1), "completed");
         assert_eq!(count(&mut store, "command_receipts"), 1);
         assert_eq!(position(&mut store), ("cursor-1".into(), "1".into()));
+        assert_eq!(
+            settle(&mut store, &accepted(&cmd(1), 1))
+                .unwrap()
+                .settlement,
+            Settlement::Unchanged
+        );
     }
 
     #[test]
@@ -1797,6 +1865,281 @@ mod apply_changes {
         assert!(matches!(error, ApplyError::Contradiction(_)), "{error:?}");
         assert_eq!(open_issues(&mut store).unwrap().len(), 0);
         assert_eq!(count(&mut store, "command_receipts"), 1);
+    }
+
+    const P_ALIAS: &str = "project_00000000-0000-4000-8000-0000000000bb";
+    const P_REAL: &str = "project_00000000-0000-4000-8000-0000000000cc";
+
+    /// A queued Smart Add that proposes a new project `P_ALIAS`, and a task made
+    /// after it that refers to that project by the alias. Returns the first
+    /// command's task.
+    fn smart_add_with_dependent(store: &mut Store, ids: &mut SeqIds) -> String {
+        let creating = request(
+            cmd(1),
+            CommandType::TaskSmartAdd,
+            None,
+            json!({ "title": "Buy stamps", "project": { "name": "Errands", "proposed_id": P_ALIAS }}),
+            Vec::new(),
+        );
+        let added = execute(store, ids, &creating)
+            .unwrap()
+            .entity_id
+            .as_str()
+            .to_string();
+        let following = request(
+            cmd(2),
+            CommandType::TaskCreate,
+            None,
+            json!({ "title": "Post parcel", "project_id": {
+                "after_command": cmd(1).as_str(),
+                "alias_id": P_ALIAS,
+                "entity_type": "project",
+            }}),
+            Vec::new(),
+        );
+        execute(store, ids, &following).unwrap();
+        set_state(store, 1, "sending", true);
+        added
+    }
+
+    /// What the server committed for command 1: it found the project "Errands"
+    /// another device had made (`P_REAL`) and put the task on it.
+    fn server_smart_add(added: &str) -> Vec<Value> {
+        let mut task = task_change(added, "Buy stamps", 1, 1);
+        task["value"]["project_id"] = json!(P_REAL);
+        vec![project_change(P_REAL, "Errands", 1), task]
+    }
+
+    fn server_binding(added: &str, seq: u64) -> Receipt {
+        accepted_with(
+            &cmd(1),
+            seq,
+            json!([{ "entity_type": "task", "record_key": [added],
+                     "record_version": "1", "edit_revision": "1" }]),
+            json!([{ "entity_type": "project", "alias_id": P_ALIAS, "entity_id": P_REAL }]),
+        )
+    }
+
+    fn parcel(store: &mut Store) -> Option<Value> {
+        visible(store, "task")
+            .into_iter()
+            .find(|task| task["title"] == "Post parcel")
+    }
+
+    fn proven_alias(store: &mut Store) -> Vec<(String, String)> {
+        store
+            .read(|tx| {
+                let mut statement = tx.prepare(
+                    "SELECT old_local_id, server_id FROM identity_aliases ORDER BY old_local_id",
+                )?;
+                let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                rows.collect()
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn receipt_026_fr_005_ack_then_feed_the_dependent_resolves_the_server_binding() {
+        let path = scratch("binding");
+        let mut store = linked(&path);
+        let mut ids = SeqIds(0);
+        let added = smart_add_with_dependent(&mut store, &mut ids);
+        // Before anything is known the dependent follows the local prediction.
+        assert_eq!(parcel(&mut store).unwrap()["project_id"], P_ALIAS);
+
+        // The ACK says the alias is `P_REAL`, an entity this device has not
+        // received yet. The dependent can neither follow the prediction nor be
+        // judged against a base that lacks the entity: it waits, it is not
+        // rejected or held.
+        let settled = settle(&mut store, &server_binding(&added, 1)).unwrap();
+        assert_eq!(settled.settlement, Settlement::AwaitingFeed);
+        assert_eq!(state(&mut store, 1), "accepted_awaiting_feed");
+        assert_eq!(state(&mut store, 2), "queued");
+        assert!(open_issues(&mut store).unwrap().is_empty());
+        assert_eq!(
+            proven_alias(&mut store),
+            [(P_ALIAS.to_string(), P_REAL.to_string())]
+        );
+        assert!(confirmed(&mut store).is_empty(), "an ACK writes no base");
+
+        // The feed lands the source transaction.
+        let done = applied(
+            apply(
+                &mut store,
+                &page(
+                    "cursor-0",
+                    vec![transaction(1, &cmd(1), server_smart_add(&added))],
+                    "cursor-1",
+                    1,
+                ),
+            )
+            .unwrap(),
+        );
+        assert_eq!(done.completed, [cmd(1)]);
+        assert_eq!(state(&mut store, 1), "completed");
+        assert_eq!(state(&mut store, 2), "queued", "not rejected, not held");
+        assert!(open_issues(&mut store).unwrap().is_empty());
+        // Replayed against the server's entity, never the proposed ID.
+        assert_eq!(parcel(&mut store).unwrap()["project_id"], P_REAL);
+        assert!(
+            visible(&mut store, "project")
+                .iter()
+                .all(|project| project["id"] != P_ALIAS),
+            "the proposed project does not survive beside the real one"
+        );
+
+        // The binding is permanent: another ACK for it changes nothing, and a
+        // different one is refused.
+        assert_eq!(
+            settle(&mut store, &server_binding(&added, 1))
+                .unwrap()
+                .settlement,
+            Settlement::Unchanged
+        );
+        let mut elsewhere = server_binding(&added, 1);
+        elsewhere.id_bindings[0].entity_id = Id::parse("project_other").unwrap();
+        assert!(matches!(
+            settle(&mut store, &elsewhere).unwrap_err(),
+            ApplyError::Contradiction(_)
+        ));
+        assert_eq!(parcel(&mut store).unwrap()["project_id"], P_REAL);
+    }
+
+    #[test]
+    fn receipt_026_fr_005_feed_first_the_late_receipt_supplies_the_binding_without_a_rejection() {
+        let path = scratch("binding-late");
+        let mut store = linked(&path);
+        let mut ids = SeqIds(0);
+        let added = smart_add_with_dependent(&mut store, &mut ids);
+
+        // The feed proves the Smart Add before any receipt arrived.
+        applied(
+            apply(
+                &mut store,
+                &page(
+                    "cursor-0",
+                    vec![transaction(1, &cmd(1), server_smart_add(&added))],
+                    "cursor-1",
+                    1,
+                ),
+            )
+            .unwrap(),
+        );
+        assert_eq!(state(&mut store, 1), "completed");
+        // Which entity the alias became is unknown, so the dependent is not
+        // judged against the local guess: it waits, and is not rejected.
+        assert_eq!(state(&mut store, 2), "queued");
+        assert!(open_issues(&mut store).unwrap().is_empty());
+
+        // The lookup (or the original ACK) supplies the server's binding.
+        settle(&mut store, &server_binding(&added, 1)).unwrap();
+
+        assert_eq!(state(&mut store, 2), "queued");
+        assert!(open_issues(&mut store).unwrap().is_empty());
+        assert_eq!(parcel(&mut store).unwrap()["project_id"], P_REAL);
+    }
+
+    #[test]
+    fn receipt_026_fr_010_a_lookup_observation_from_an_obsolete_response_is_refused() {
+        let path = scratch("lookup-fence");
+        let mut store = linked(&path);
+        let mut ids = SeqIds(0);
+        create_task(&mut store, &mut ids, 1, "Mine");
+        set_state(&mut store, 1, "unknown", true);
+        let observation = |status: &str, patch: fn(&mut Value)| -> CommandLookup {
+            let mut body = with_common(json!({ "status": status, "command_id": id(1) }));
+            patch(&mut body);
+            decode(&body.to_string()).unwrap()
+        };
+        let fence = capture_fence(&mut store).unwrap();
+
+        for status in ["pending", "not_found"] {
+            let other_generation = observation(status, |body| {
+                body["server_generation"] = json!("generation-2");
+            });
+            assert_eq!(
+                apply_lookup(&mut store, &context(), &fence, &other_generation).unwrap_err(),
+                ApplyError::GenerationChanged
+            );
+            let other_scope = observation(status, |body| body["scope_id"] = json!("scope-2"));
+            assert_eq!(
+                apply_lookup(&mut store, &context(), &fence, &other_scope).unwrap_err(),
+                ApplyError::WrongScope
+            );
+        }
+
+        // Issued before a reset: ignored, whatever it says.
+        store
+            .write(|tx| {
+                tx.execute("UPDATE sync_meta SET local_sync_generation = 4", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let current = observation("pending", |_| {});
+        assert_eq!(
+            apply_lookup(&mut store, &context(), &fence, &current).unwrap_err(),
+            ApplyError::Stale
+        );
+        // The same observation under the current fences is fine.
+        let fence = capture_fence(&mut store).unwrap();
+        assert!(matches!(
+            apply_lookup(&mut store, &context(), &fence, &current).unwrap(),
+            Looked::Pending(_)
+        ));
+        assert_eq!(state(&mut store, 1), "unknown");
+    }
+
+    #[test]
+    fn receipt_026_fr_010_a_lookup_synthesised_for_a_foreign_scope_cannot_settle_a_command() {
+        let path = scratch("lookup-foreign");
+        let mut store = linked(&path);
+        let mut ids = SeqIds(0);
+        create_task(&mut store, &mut ids, 1, "Mine");
+        set_state(&mut store, 1, "unknown", true);
+        let fence = capture_fence(&mut store).unwrap();
+        // The lookup envelope is for another scope, the inner receipt is not.
+        let body = with_common(json!({
+            "status": "terminal",
+            "receipt": serde_json::to_value(accepted(&cmd(1), 1)).unwrap(),
+        }));
+        let mut foreign = body.clone();
+        foreign["scope_id"] = json!("scope-2");
+        let foreign: CommandLookup = decode(&foreign.to_string()).unwrap();
+
+        assert_eq!(
+            apply_lookup(&mut store, &context(), &fence, &foreign).unwrap_err(),
+            ApplyError::WrongScope
+        );
+        assert_eq!(state(&mut store, 1), "unknown");
+        assert_eq!(count(&mut store, "command_receipts"), 0);
+    }
+
+    #[test]
+    fn feed_026_fr_004_a_record_that_fails_late_in_an_oversized_stream_leaves_nothing_visible() {
+        let path = scratch("transfer-late-failure");
+        let mut store = linked(&path);
+        let mut changes = big_changes();
+        // The last record is well formed JSON but its key does not match its image.
+        let mut last = changes.pop().unwrap();
+        last["record_key"] = json!(["task_somebody-else"]);
+        changes.push(last);
+        let big = oversized(1, &external(1), "cursor-1", &changes);
+        announced(&mut store, &big);
+        for page in &big.pages {
+            stage(&mut store, page).unwrap();
+        }
+
+        let error = finish_transfer(&mut store).unwrap_err();
+
+        assert!(matches!(error, ApplyError::Malformed(_)), "{error:?}");
+        assert!(
+            confirmed(&mut store).is_empty(),
+            "five good records are not kept"
+        );
+        assert!(visible(&mut store, "task").is_empty());
+        assert_eq!(position(&mut store), ("cursor-0".into(), "0".into()));
+        // The staged bytes are intact; nothing was lost by the refusal.
+        assert_eq!(staging(&mut store).len(), 1);
     }
 
     #[test]

@@ -26,7 +26,7 @@
 //! guessed at (026-FR-010).
 
 use crate::apply_changes::{ApplyError, Fence, check_common, read_base};
-use crate::execute::ExecuteContext;
+use crate::execute::{ExecuteContext, receipt_result};
 use crate::issues::{IssueReason, record_rejection_in};
 use crate::replay::{ReplayError, Replayed, replay_in};
 use crate::storage::Store;
@@ -94,6 +94,11 @@ pub fn apply_lookup(
     fence: &Fence,
     lookup: &CommandLookup,
 ) -> Result<Looked, ApplyError> {
+    // An observation is as obsolete as any other response when it was issued
+    // before a reset, for another scope, or under another server generation.
+    store.read(|tx| {
+        Ok(read_base(tx, fence).and_then(|base| check_common(&base, &lookup.common)))
+    })??;
     match &lookup.status {
         LookupStatus::Terminal { receipt } => {
             apply_receipt(store, context, fence, receipt).map(Looked::Settled)
@@ -156,8 +161,18 @@ fn receipt_in(
         )
     };
     match (kind, state.as_str()) {
-        ("rejected", "rejected") | ("accepted" | "no_op", "completed") => {
-            Ok(settled(Settlement::Unchanged, None))
+        ("rejected", "rejected") => Ok(settled(Settlement::Unchanged, None)),
+        // The feed may have completed it first. The receipt is still what
+        // tells the dependants which entity an alias was bound to.
+        ("accepted" | "no_op", "completed") => {
+            if adopt_result(tx, workspace_id, receipt)? {
+                Ok(settled(
+                    Settlement::Completed,
+                    Some(replay_in(tx, context)?),
+                ))
+            } else {
+                Ok(settled(Settlement::Unchanged, None))
+            }
         }
         ("rejected", _) => {
             let reason = receipt
@@ -186,6 +201,7 @@ fn receipt_in(
                 None => true, // a no-op has no feed transaction to wait for
             };
             let done = kind == "no_op" || covered;
+            adopt_result(tx, workspace_id, receipt)?;
             set_state(if done {
                 "completed"
             } else {
@@ -204,8 +220,66 @@ fn receipt_in(
     }
 }
 
+/// Makes the receipt's result what the command's dependants see: the entity
+/// versions to build revisions on and, above all, the alias bindings (Smart Add
+/// may resolve a locally proposed ID onto an entity that already exists, which
+/// the optimistic decision cannot know). The bindings are also recorded as
+/// proven aliases, once and for good. Returns whether the stored result changed.
+fn adopt_result(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+    receipt: &Receipt,
+) -> Result<bool, ApplyError> {
+    for binding in &receipt.id_bindings {
+        if binding.alias_id == binding.entity_id {
+            continue; // the proposed ID stood: nothing was rebound
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO identity_aliases
+                (workspace_id, entity_type, old_local_id, server_id, provenance)
+             VALUES (?1, ?2, ?3, ?4, 'receipt')",
+            params![
+                workspace_id,
+                binding.entity_type.as_str(),
+                binding.alias_id.as_str(),
+                binding.entity_id.as_str()
+            ],
+        )?;
+        let proven: String = tx.query_row(
+            "SELECT server_id FROM identity_aliases
+             WHERE workspace_id = ?1 AND entity_type = ?2 AND old_local_id = ?3",
+            params![
+                workspace_id,
+                binding.entity_type.as_str(),
+                binding.alias_id.as_str()
+            ],
+            |row| row.get(0),
+        )?;
+        if proven != binding.entity_id.as_str() {
+            return Err(ApplyError::Contradiction(
+                "an alias is bound to two different entities",
+            ));
+        }
+    }
+    let stored = receipt_result(receipt);
+    let current: Option<Vec<u8>> = tx.query_row(
+        "SELECT local_result FROM outbox WHERE workspace_id = ?1 AND command_id = ?2",
+        params![workspace_id, receipt.command_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if current.as_deref() == Some(stored.as_slice()) {
+        return Ok(false);
+    }
+    tx.execute(
+        "UPDATE outbox SET local_result = ?3 WHERE workspace_id = ?1 AND command_id = ?2",
+        params![workspace_id, receipt.command_id.as_str(), stored],
+    )?;
+    Ok(true)
+}
+
 /// Keeps the verified receipt under its server generation. A stored one with
-/// another outcome or sequence is a contradiction; the same one is kept as is.
+/// another outcome, sequence, result or binding is a contradiction; the same
+/// one is kept as is.
 fn store_receipt(
     tx: &Transaction<'_>,
     workspace_id: &str,
@@ -215,16 +289,20 @@ fn store_receipt(
 ) -> Result<(), ApplyError> {
     let generation = receipt.common.server_generation.as_str();
     let commit_seq = receipt.commit_seq.as_ref().map(|seq| seq.as_str());
-    let stored: Option<(String, Option<String>)> = tx
+    let stored: Option<(String, Option<String>, Vec<u8>)> = tx
         .query_row(
-            "SELECT outcome, commit_seq FROM command_receipts
+            "SELECT outcome, commit_seq, receipt FROM command_receipts
              WHERE workspace_id = ?1 AND command_id = ?2 AND server_generation = ?3",
             params![workspace_id, receipt.command_id.as_str(), generation],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    if let Some((outcome, seq)) = stored {
-        return if outcome == kind && seq.as_deref() == commit_seq {
+    if let Some((outcome, seq, blob)) = stored {
+        let same_result = serde_json::from_slice::<Receipt>(&blob).is_ok_and(|kept| {
+            kept.result_versions == receipt.result_versions
+                && kept.id_bindings == receipt.id_bindings
+        });
+        return if outcome == kind && seq.as_deref() == commit_seq && same_result {
             Ok(())
         } else {
             Err(ApplyError::Contradiction(

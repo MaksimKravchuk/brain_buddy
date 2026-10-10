@@ -25,19 +25,22 @@
 //! A transaction too large for a page arrives as a manifest and byte pages
 //! (sync-v1 section 11). The pages are verified one by one into staging
 //! (`staging_bases`/`staging_pages`), which is never the active base; only the
-//! completed, digest-checked stream is decoded and applied, by the same code and
-//! in the same single transaction as an inline one.
+//! completed, digest-checked stream is applied, by the same install, match,
+//! replay and cursor code and in the same single transaction as an inline one.
+//! The stream is decoded incrementally inside that transaction, one page and one
+//! record in flight at a time, so a transaction of any size needs no more memory
+//! than its largest record, and a failed check rolls everything back.
 //!
 //! A command receipt never writes after-images and never moves the cursor: see
 //! [`crate::receipts`].
 
-use crate::execute::{ExecuteContext, edit_revision, record_from, sha256};
+use crate::execute::{ExecuteContext, Sha256, edit_revision, record_from, sha256};
 use crate::replay::{ReplayError, Replayed, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::calendar::UtcInstant;
 use bb_protocol::feed::{
-    Change, ChangesPage, Operation, Transaction as FeedTransaction, TransferManifest, TransferPage,
-    decode_change_stream,
+    Change, ChangeStreamDecoder, ChangesPage, Operation, Transaction as FeedTransaction,
+    TransferManifest, TransferPage,
 };
 use bb_protocol::wire::{CommandId, CommonResponse, Id, Instant, Wire};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -954,19 +957,7 @@ fn transfer_in(
         return Err(ApplyError::Transfer(TransferFault::Expired));
     }
 
-    let stream = assemble(tx, &base, transfer_id, manifest)?;
-    let changes =
-        decode_change_stream(&stream).map_err(|_| ApplyError::Transfer(TransferFault::Corrupt))?;
-    if u64::try_from(changes.len()).ok() != Some(manifest.record_count) {
-        return Err(ApplyError::Transfer(TransferFault::Corrupt));
-    }
-    let transaction = FeedTransaction {
-        transaction_id: manifest.transaction_id.clone(),
-        commit_seq: manifest.commit_seq.clone(),
-        source_command_id: manifest.source_command_id.clone(),
-        changes,
-    };
-    let completed = install_in(tx, &base.workspace_id, &transaction)?;
+    let completed = install_stream(tx, &base, transfer_id, manifest)?;
     hook(ApplyStage::Installed, tx)?;
     let replayed = finish_in(tx, context, &manifest.after_cursor, seq)?;
     tx.execute(
@@ -991,49 +982,76 @@ fn transfer_in(
     })
 }
 
-/// The staged pages as one byte stream, after every page, count and digest the
-/// manifest promises has been checked.
-fn assemble(
+/// Installs the staged transaction page by page, inside the caller's write
+/// transaction. Memory is one page plus the record being assembled across a
+/// page boundary: each record is decoded, validated and written as soon as it
+/// is complete, while the page indices, page digests, byte count, whole-stream
+/// digest and record count the manifest promises are checked as the bytes go
+/// by. Any disagreement is `Corrupt` and rolls the whole transaction back, so
+/// nothing of a transaction that fails its checks is ever visible. Returns the
+/// commands the transaction completed.
+fn install_stream(
     tx: &Transaction<'_>,
     base: &Base,
     transfer_id: &Id,
     manifest: &TransferManifest,
-) -> Result<Vec<u8>, ApplyError> {
+) -> Result<Vec<CommandId>, ApplyError> {
     let corrupt = || ApplyError::Transfer(TransferFault::Corrupt);
-    let mut statement = tx.prepare(
-        "SELECT page_index, page_digest, body FROM staging_pages
-         WHERE workspace_id = ?1 AND activation_id = ?2 ORDER BY page_index",
-    )?;
-    let rows = statement.query_map(params![base.workspace_id, transfer_id.as_str()], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, Vec<u8>>(1)?,
-            row.get::<_, Vec<u8>>(2)?,
-        ))
-    })?;
-    let mut stream = Vec::new();
-    let mut have = std::collections::BTreeSet::new();
-    for row in rows {
-        let (index, digest, body) = row?;
-        if sha256(&body).as_slice() != digest.as_slice() || index < 0 {
-            return Err(corrupt());
+    let present: std::collections::BTreeSet<u64> = {
+        let mut statement = tx.prepare(
+            "SELECT page_index FROM staging_pages WHERE workspace_id = ?1 AND activation_id = ?2",
+        )?;
+        let rows = statement
+            .query_map(params![base.workspace_id, transfer_id.as_str()], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        let mut present = std::collections::BTreeSet::new();
+        for row in rows {
+            present.insert(u64::try_from(row?).map_err(|_| corrupt())?);
         }
-        have.insert(unsigned(index));
-        stream.extend_from_slice(&body);
-    }
+        present
+    };
     let missing: Vec<u64> = (0..manifest.page_count)
-        .filter(|index| !have.contains(index))
+        .filter(|index| !present.contains(index))
         .collect();
     if !missing.is_empty() {
         return Err(ApplyError::Transfer(TransferFault::Incomplete { missing }));
     }
-    if u64::try_from(have.len()).ok() != Some(manifest.page_count)
-        || u64::try_from(stream.len()).ok() != Some(manifest.total_bytes)
-        || !manifest.sha256.eq_ignore_ascii_case(&hex(&sha256(&stream)))
+    if u64::try_from(present.len()).ok() != Some(manifest.page_count) {
+        return Err(corrupt());
+    }
+
+    let mut decoder = ChangeStreamDecoder::new();
+    let mut digest = Sha256::new();
+    let mut bytes = 0_u64;
+    for index in 0..manifest.page_count {
+        let (page_digest, body): (Vec<u8>, Vec<u8>) = tx.query_row(
+            "SELECT page_digest, body FROM staging_pages
+             WHERE workspace_id = ?1 AND activation_id = ?2 AND page_index = ?3",
+            params![
+                base.workspace_id,
+                transfer_id.as_str(),
+                i64::try_from(index).map_err(|_| corrupt())?
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        bytes += u64::try_from(body.len()).map_err(|_| corrupt())?;
+        if sha256(&body).as_slice() != page_digest.as_slice() || bytes > manifest.total_bytes {
+            return Err(corrupt());
+        }
+        digest.update(&body);
+        for change in decoder.push(&body).map_err(|_| corrupt())? {
+            install_change(tx, &base.workspace_id, &change)?;
+        }
+    }
+    let records = decoder.finish().map_err(|_| corrupt())?;
+    if records != manifest.record_count
+        || bytes != manifest.total_bytes
+        || !manifest.sha256.eq_ignore_ascii_case(&hex(&digest.finish()))
     {
         return Err(corrupt());
     }
-    Ok(stream)
+    complete_source(tx, &base.workspace_id, &manifest.source_command_id)
 }
 
 // ----------------------------------------------------------------------- encoding
