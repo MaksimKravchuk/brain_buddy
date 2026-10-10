@@ -312,7 +312,9 @@ public struct RustStoreImporter: Sendable {
     }
 
     private static func privateReviewSources(in state: GTDState) -> [RustWorkspaceLocalReviewSource] {
-        [.init(.settings, sourceID: "settings")]
+        // Only the original threshold clock is private settings evidence.
+        // Untouched defaults have no activated public settings row to enrich.
+        (state.review.settings.thresholdChangedAt == nil ? [] : [.init(.settings, sourceID: "settings")])
         + state.review.sessions.keys.sorted().map { .init(.session, sourceID: $0.rawValue) }
         + state.review.decisions.keys.sorted().map { .init(.decision, sourceID: $0.rawValue) }
         + state.review.bulkReleases.keys.sorted().map { .init(.bulkRelease, sourceID: $0.rawValue) }
