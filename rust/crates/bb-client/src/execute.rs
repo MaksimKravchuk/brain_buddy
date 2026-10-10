@@ -680,10 +680,25 @@ pub(crate) fn file(read_set: &mut ReadSet, record: Record) {
             drop(read_set.decision_queues.insert(r.session_id.clone(), r));
         }
         Record::ReviewDecision(r) => drop(read_set.decisions.insert(r.id.clone(), r)),
-        Record::ReviewReceipt(r) => read_set.receipts.push(r),
-        Record::ReviewParkAck(r) => read_set.park_acks.push(r),
+        // The list collections hold one entry per record key, so filing a
+        // record replaces the entry it supersedes instead of sitting beside it.
+        Record::ReviewReceipt(r) => {
+            read_set.receipts.retain(|held| {
+                (&held.task_id, held.kind.as_str()) != (&r.task_id, r.kind.as_str())
+            });
+            read_set.receipts.push(r);
+        }
+        Record::ReviewParkAck(r) => {
+            read_set.park_acks.retain(|held| {
+                (&held.task_id, &held.formulation_id) != (&r.task_id, &r.formulation_id)
+            });
+            read_set.park_acks.push(r);
+        }
         Record::ReviewBulkRelease(r) => drop(read_set.bulk_releases.insert(r.id.clone(), r)),
-        Record::ReviewNavigatorConsent(r) => read_set.consents.push(r),
+        Record::ReviewNavigatorConsent(r) => {
+            read_set.consents.retain(|held| held.provider != r.provider);
+            read_set.consents.push(r);
+        }
     }
 }
 
@@ -1088,7 +1103,33 @@ fn sha256(data: &[u8]) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use super::sha256;
+    use super::{file, record_from, sha256};
+    use bb_domain::types::ReadSet;
+
+    #[test]
+    fn execute_026_fr_001_filing_a_list_record_replaces_the_entry_with_its_key() {
+        let ack = |formulation: &str, seen: &str| {
+            format!(
+                r#"{{"task_id":"task_00000000-0000-4000-8000-000000000001","formulation_id":"form_{formulation}","parked_at":"2026-10-10T09:00:00Z","seen_at":{seen},"returned_at":null}}"#
+            )
+        };
+        let mut read_set = ReadSet::default();
+        for body in [
+            ack("00000000-0000-4000-8000-00000000000a", "null"),
+            ack(
+                "00000000-0000-4000-8000-00000000000a",
+                r#""2026-10-10T10:00:00Z""#,
+            ),
+            ack("00000000-0000-4000-8000-00000000000b", "null"),
+        ] {
+            file(
+                &mut read_set,
+                record_from("review_park_ack", body.as_bytes()).unwrap(),
+            );
+        }
+        assert_eq!(read_set.park_acks.len(), 2);
+        assert!(read_set.park_acks.iter().any(|ack| ack.seen_at.is_some()));
+    }
 
     fn hex(digest: [u8; 32]) -> String {
         digest.iter().map(|byte| format!("{byte:02x}")).collect()

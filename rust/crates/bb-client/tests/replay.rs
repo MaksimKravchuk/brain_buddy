@@ -12,7 +12,7 @@ use bb_client::{
     Replacement, ReplayError, ResolveRequest, Store, StoreError, execute, issue, load_draft,
     open_issues, record_rejection, replay, resolve_issue, save_draft,
 };
-use bb_domain::types::{ActorId, Policy, ZoneName};
+use bb_domain::types::{ActorId, Policy, ProviderName, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{
     AfterCommandPrecondition, CommandRef, Precondition, RevisionPrecondition,
@@ -1053,4 +1053,66 @@ fn replay_026_sc_002_rejection_committed_before_a_crash_is_found_after_it() {
     assert_eq!(issues.len(), 2);
     assert_eq!(issues[0].issue.local_text, Some(json!({ "title": "Mine" })));
     assert_eq!(task(&mut store, &task_id).unwrap()["title"], "Base");
+}
+
+#[test]
+fn replay_026_fr_007_a_queued_revoke_then_regrant_replaces_the_confirmed_consent() {
+    let path = scratch("consent");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let mut review = context();
+    review.policy.weekly_review = true;
+    review.policy.navigator_provider = Some(ProviderName::new("navigator").unwrap());
+    review.policy.navigator_available = true;
+
+    // The account holds a live grant for the provider.
+    store
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO confirmed_records (workspace_id, record_type, record_key,
+                    record_version, edit_revision, tombstone, body)
+                 VALUES ((SELECT workspace_id FROM sync_meta), 'review_navigator_consent',
+                    '[\"navigator\"]', '1', NULL, 0, ?1)",
+                [json!({
+                    "provider": "navigator",
+                    "consent": {
+                        "granted_at": "2026-10-01T10:00:00Z",
+                        "revoked_at": null,
+                        "consent_text_version": 1
+                    }
+                })
+                .to_string()
+                .into_bytes()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    replay(&mut store, &review).unwrap();
+
+    let consent_command = |n, command_type, payload| {
+        let mut command = request(cmd(n), command_type, Some("navigator"), payload, Vec::new());
+        command.context = review.clone();
+        command
+    };
+    let revoke = consent_command(
+        1,
+        CommandType::ReviewConsentRevoke,
+        json!({ "provider": "navigator" }),
+    );
+    execute(&mut store, &mut ids, &revoke).unwrap();
+    let grant = consent_command(
+        2,
+        CommandType::ReviewConsentGrant,
+        json!({ "provider": "navigator", "consent_text_version": 1 }),
+    );
+    execute(&mut store, &mut ids, &grant).unwrap();
+
+    // Replaying over the base must see the revoke, not the stale grant, so the
+    // re-grant is applied and the consent ends granted, once.
+    let replayed = replay(&mut store, &review).unwrap();
+    assert_eq!(replayed.applied, [cmd(1), cmd(2)]);
+    let consents = visible(&mut store, "review_navigator_consent");
+    assert_eq!(consents.len(), 1);
+    assert_eq!(consents[0]["consent"]["revoked_at"], Value::Null);
+    assert_eq!(consents[0]["consent"]["granted_at"], NOW);
 }
