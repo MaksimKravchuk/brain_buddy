@@ -199,6 +199,13 @@ fn feed_026_fr_010_assembled_change_stream_is_one_validated_array() {
     assert!(decode_change_stream(b"{}").is_err());
 }
 
+#[test]
+fn feed_026_fr_006_assembled_change_stream_rejects_repeated_record_keys() {
+    let repeated = json!([upsert("a"), tombstone("a")]).to_string();
+    assert!(decode_change_stream(repeated.as_bytes()).is_err());
+    assert!(incremental(&[repeated.as_bytes()]).is_err());
+}
+
 /// Feeds `chunks` to the incremental decoder and finishes it.
 fn incremental(chunks: &[&[u8]]) -> Result<Vec<Change>, bb_protocol::CodecError> {
     let mut decoder = ChangeStreamDecoder::new();

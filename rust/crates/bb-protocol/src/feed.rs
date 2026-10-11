@@ -48,7 +48,15 @@ impl Wire for Change {
 /// changes. Chunks may split a record, so only the assembled stream is parsed.
 impl Wire for Vec<Change> {
     fn validate(&self) -> Result<(), CodecError> {
-        self.iter().try_for_each(Wire::validate)
+        self.iter().try_for_each(Wire::validate)?;
+        let mut keys = HashSet::new();
+        if !self
+            .iter()
+            .all(|change| keys.insert((change.entity_type, &change.record_key)))
+        {
+            return Err(CodecError::Invalid("change stream repeats a record key"));
+        }
+        Ok(())
     }
 }
 
