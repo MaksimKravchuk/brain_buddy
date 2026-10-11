@@ -730,6 +730,17 @@ fn ai_policy_026_fr_020_a_proposal_off_the_allow_list_is_refused_before_anything
 }
 
 #[test]
+fn ai_policy_026_fr_020_a_proposal_for_an_unfenced_review_target_produces_no_command() {
+    let mut candidate = reformulate();
+    candidate.target = id("task_aaaaaaaaaaaa");
+
+    let refused = CommandProposal::new(&candidate, basis(3), NAVIGATOR_COMMANDS)
+        .expect_err("review action must target the revision-fenced task");
+    assert_eq!(refused.reason, Reason::InvalidValue);
+    assert_eq!(refused.field.as_deref(), Some("target"));
+}
+
+#[test]
 fn ai_policy_026_fr_020_a_proposal_must_be_a_well_formed_catalog_payload() {
     // Unknown field, wrong type, empty title: structural refusals, no command.
     for bad in [

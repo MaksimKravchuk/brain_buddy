@@ -538,6 +538,11 @@ impl CommandProposal {
         if !allowed.contains(&candidate.command_type) {
             return Err(DomainError::field(Reason::InvalidValue, "type"));
         }
+        if candidate.command_type == CommandType::ReviewDecide
+            && candidate.target != basis.check.entity_id
+        {
+            return Err(DomainError::field(Reason::InvalidValue, "target"));
+        }
         let command = Command::from_payload(candidate.command_type, &candidate.payload)?;
         if let Command::ReviewDecide(decide) = &command
             && !matches!(
