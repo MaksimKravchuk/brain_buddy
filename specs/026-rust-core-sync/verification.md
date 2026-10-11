@@ -245,3 +245,39 @@ The reset/read-model review identified two further gaps. Ordinary snapshot reset
 ## Reading copy
 
 The main reading copy is the [specification in ChatGPT Pages](https://chatgpt.com/space/page_1c47ad1be37c819187af9b4e5707d966). The Page is private, without a Space/parent; broad sharing was not enabled. Saved content was read back and its native headings, requirements, and diagrams checked. A preview of the Page on an iPhone is unavailable; the separate HTML mock also has no successful runtime verification.
+
+## T026 canonical acceptance — 2026-10-11
+
+T026 (PR-26) is accepted for its canonical scope on released commit [`cd9ba74b38f3489040c542a02883acfeb0e61ec4`](https://github.com/MaksimKravchuk/brain_buddy/commit/cd9ba74b38f3489040c542a02883acfeb0e61ec4). The exact-source review and evidence cover owner-scoped immutable receipt identity and envelope conflicts; lost-response retry without a second effect; process termination before and after commit; known retry recovery across closed epochs and retired execution versions; current authority checks; atomic receipt/feed/sequence finalization and rollback; and retained identity/outcome with content redaction.
+
+The exact-SHA backend workflow [run 38125807943](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943) completed the unfiltered command `pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results`: 5,659 tests collected and 5,659 passed, including 24 receipt-module and 29 unit-of-work cases. Required CI was terminal-successful at 23/23; coverage measured 98.73% lines and 96.14% branches against 98.7% and 95.9% floors. The [Allure artifact](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943/artifacts/11697876388) is retained with that run.
+
+Release workflow [run 38125797870](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125797870) tested that same SHA, verified the fresh non-force landing and `origin/main` equality, then passed authenticated production smoke at 2026-10-11 08:46:48 UTC. The supporting release receipt is `t026-existing-receipt-redaction-e7d6916f/exact-ci-landing-release-evidence-cd9-v1.json`.
+
+This records acceptance of T026 only. It does not mark T027 writers, T031 routed ingress, or T050's full retention/snapshot policy complete, and does not claim activation or completion of Spec 026. Closed-epoch and retired-version ordering was exercised through the T026 caller-ingress harness; routed ingress remains T030/T031 scope. No new test run is claimed by this documentation update.
+
+## Canonical acceptance — Phase 2 internal and port scope — 2026-10-11
+
+The full canonical acceptance criteria for these 17 tasks are accepted on released source [`cd9ba74b38f3489040c542a02883acfeb0e61ec4`](https://github.com/MaksimKravchuk/brain_buddy/commit/cd9ba74b38f3489040c542a02883acfeb0e61ec4). Their named cases passed in exact-SHA CI run [38125807943](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943): backend job [114429844761](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943/job/114429844761) passed all 5,659 collected tests, Rust job [114429844747](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943/job/114429844747) passed, and Swift job [114429844732](https://github.com/MaksimKravchuk/brain_buddy/actions/runs/38125807943/job/114429844732) passed.
+
+| Task | Named passing evidence in the exact-SHA run |
+| --- | --- |
+| T017 | `RustDomainParityTests.epochsAreExclusive`, `.commandsAgree` and `.queriesAgree`; `RustWorkspaceJourneyTests`, `RustWorkspaceTests` and `RustWorkspaceBridgeTests` cover selected native Workspace behavior; Rust list-mode parity and real binding lifecycle were executed in Rust job 114429844747 and Swift job 114429844732. |
+| T007 | `task_rules_026_fr_007_a_stale_completion_does_not_undo_a_later_reopen` (`rust/crates/bb-domain/tests/task_rules_parity.rs`) |
+| T008 | `organize_026_fr_008_deleting_a_tag_keeps_the_record_and_unlinks_every_task` (`rust/crates/bb-domain/tests/organize_parity.rs`) |
+| T009 | `archive_026_fr_009_the_reference_archive_keeps_every_member_in_every_state` (`rust/crates/bb-domain/tests/archive_parity.rs`) |
+| T010 | `children_026_fr_009_backend_detail_order_and_missing_parent` (`rust/crates/bb-domain/tests/children_parity.rs`) |
+| T011 | `smart_add_026_fr_002_web_parse_vectors_match_the_shared_resolution` (`rust/crates/bb-domain/tests/smart_add_parity.rs`) |
+| T012 | `queries_026_fr_009_a_ten_thousand_task_store_pages_in_full_order_for_every_sort` (`rust/crates/bb-domain/tests/queries_parity.rs`) |
+| T013 | `formulation_026_fr_002_the_stalled_count_survives_leaving_next` (`rust/crates/bb-domain/tests/formulation_parity.rs`) |
+| T014 | `park_026_fr_013_an_offline_decision_before_the_park_wins_the_yield` (`rust/crates/bb-domain/tests/park_parity.rs`) |
+| T015 | `review_decisions_026_fr_016_undo_decision_vectors_match_the_server` (`rust/crates/bb-domain/tests/review_decisions_parity.rs`) |
+| T016 | `review_sessions_026_fr_016_progress_merges_monotonically_without_conflict` (`rust/crates/bb-domain/tests/review_sessions_parity.rs`) |
+| T020 | `test_026_FR_015_expired_lease_is_reclaimed_with_a_new_fence` (`backend/tests/test_task_jobs.py`) |
+| T021 | `test_026_FR_015_fence_and_scope_are_rechecked_under_the_writer_lock` (`backend/tests/test_task_job_authority.py`) |
+| T022 | `test_026_FR_015_no_second_scheduler_is_active_before_the_handoff` (`backend/tests/test_review_job_handoff.py`) |
+| T023 | `test_026_FR_014_inventory_names_every_step_as_an_existing_port` (`backend/tests/test_maintenance_job_handoff.py`) |
+| T024 | `test_026_SC_007_lost_lease_stops_the_pass_and_leaves_the_rest_due` (`backend/tests/test_agent_job_handoff.py`) |
+| T025 | `test_026_SC_002_every_aggregate_write_and_job_intent_shares_one_commit` (`backend/tests/test_sync_unit_of_work.py`) |
+
+This records full acceptance only for T007–T017 and T020–T025. T018 remains pending integration of its six Smart Add and child/comment service-dispatch families. T019’s own Review criteria are covered, but its canonical acceptance remains dependent on T018. T017 is accepted as a dark internal foundation; this does not claim production activation. The whole phase, Spec 026, rollout, and downstream lifecycle are not complete. No author attribution is inferred. No new tests or builds were run for this documentation update.

@@ -261,10 +261,19 @@ class TaskService:
     ) -> object:
         """Dispatch only the opted-in legacy command family before old repair."""
         handler = self._legacy_tag_handler
-        if command != "create_tag" or handler is None:
+        if command not in {"create_tag", "update_tag"} or handler is None:
             return _NOT_SYNC_DISPATCHED
         if self._rust(cast(str, kwargs["owner_id"])) is None:
             return _NOT_SYNC_DISPATCHED
+        if command == "update_tag":
+            return handler.update_tag(
+                self,
+                cast(str, args[0]),
+                cast(TagUpdateRequest, args[1]),
+                owner_id=cast(str, kwargs["owner_id"]),
+                idempotency_key=cast(str, kwargs["idempotency_key"]),
+                now=self.clock(),
+            )
         return handler.create_tag(
             self,
             cast(TagCreateRequest, args[0]),
