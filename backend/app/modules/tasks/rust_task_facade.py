@@ -613,18 +613,39 @@ class RustTaskFacade:
     def create_tag(
         self, payload: TagCreateRequest, *, owner_id: str, now: datetime
     ) -> TagDocument:
-        change = self._decide(
+        decision, tag = self.decide_create_tag(
+            payload, owner_id=owner_id, now=now, entity_id=_native_id("tag")
+        )
+        if decision.refusal is not None:
+            raise _refused(
+                decision.refusal, attempted_name=display_tag_name(payload.name)
+            )
+        assert tag is not None
+        return tag
+
+    def decide_create_tag(
+        self,
+        payload: TagCreateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+        entity_id: str,
+    ) -> tuple[Decision, TagDocument | None]:
+        """Return the Rust decision and decoded result for receipt finalization."""
+        decision = self._call(
             "tag.create",
-            _native_id("tag"),
+            entity_id,
             payload.model_dump(mode="json"),
             owner_id=owner_id,
             now=now,
             read_set=self._organization_read_set(
                 tags=self._repo.list_tags_for_owner(owner_id=owner_id)
             ),
-            attempted_name=display_tag_name(payload.name),
         )
-        return change.tags[0]
+        if decision.refusal is not None:
+            return decision, None
+        change = self._decode(decision, owner_id, now, {})
+        return decision, change.tags[0]
 
     def update_tag(
         self,
