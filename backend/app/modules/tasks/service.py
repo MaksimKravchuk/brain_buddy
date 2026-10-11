@@ -10,6 +10,7 @@ import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from sqlite3 import Connection
 from typing import Any, Concatenate, Protocol, cast
 
 from pydantic import BaseModel
@@ -69,12 +70,16 @@ from .review_domain import (
     with_clock,
 )
 from .rust_task_facade import RustTaskFacade
+from .sync.command_handler import LegacyTagCommandHandler
+from .sync.receipts import Authority, CommandReceipts
+from .sync.unit_of_work import TaskUnitOfWork
 
 # Spec 020: content-free clock events (ids only, FR-044).
 review_logger = logging.getLogger("app.modules.tasks.review")
 
 _OPEN_STATES = ("inbox", "next", "waiting", "someday")
 _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "none": 3}
+_NOT_SYNC_DISPATCHED = object()
 
 
 def _smart_add_namesake[Namesake: (ProjectDocument, TagDocument)](
@@ -152,6 +157,11 @@ def serialized_write[Writer: SerializedWriter, **P, Result](
 
     def wrapped(service: Writer, /, *args: P.args, **kwargs: P.kwargs) -> Result:
         reject_caller_origin(kwargs)
+        dispatch = getattr(service, "_sync_dispatch", None)
+        if dispatch is not None:
+            result = dispatch(command.__name__, args, kwargs)
+            if result is not _NOT_SYNC_DISPATCHED:
+                return cast(Result, result)
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with owner_write_lock(service.task_repo, owner_id):
@@ -205,6 +215,9 @@ class TaskService:
         clock: Callable[[], datetime] = utcnow,
         rust_facade: RustTaskFacade | None = None,
         rust_core_enabled: Callable[[str], bool] | None = None,
+        command_receipts: CommandReceipts[Connection] | None = None,
+        task_unit_of_work: TaskUnitOfWork | None = None,
+        task_sync_authority: Authority[Connection] | None = None,
     ) -> None:
         self.task_repo = task_repo
         # Spec 026 T018: with ``rust_core_sync`` effective for the owner, task and
@@ -213,6 +226,23 @@ class TaskService:
         # its Python rules, byte for byte.
         self._rust_facade = rust_facade
         self._rust_core_enabled = rust_core_enabled
+        self._legacy_tag_handler = (
+            LegacyTagCommandHandler(
+                command_receipts,
+                task_unit_of_work,
+                task_sync_authority,
+                rust_facade,
+                task_repo,
+            )
+            if (
+                command_receipts is not None
+                and task_unit_of_work is not None
+                and task_sync_authority is not None
+                and rust_facade is not None
+                and rust_core_enabled is not None
+            )
+            else None
+        )
         # The one time seam of the task module (spec 020, research R21): every
         # timestamp and the idempotency purge read this injected clock, so tests
         # drive time through ``frozen_clock`` instead of patching ``utcnow``.
@@ -225,6 +255,23 @@ class TaskService:
         if facade is None or self._rust_core_enabled is None:
             return None
         return facade if self._rust_core_enabled(owner_id) else None
+
+    def _sync_dispatch(
+        self, command: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> object:
+        """Dispatch only the opted-in legacy command family before old repair."""
+        handler = self._legacy_tag_handler
+        if command != "create_tag" or handler is None:
+            return _NOT_SYNC_DISPATCHED
+        if self._rust(cast(str, kwargs["owner_id"])) is None:
+            return _NOT_SYNC_DISPATCHED
+        return handler.create_tag(
+            self,
+            cast(TagCreateRequest, args[0]),
+            owner_id=cast(str, kwargs["owner_id"]),
+            idempotency_key=cast(str, kwargs["idempotency_key"]),
+            now=self.clock(),
+        )
 
     @_serialized_write
     def create_project(

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import partial
+from sqlite3 import Connection
 from typing import Never
 
 from app.ai.providers import MockValidationProvider, OpenAIValidationProvider
@@ -50,6 +51,7 @@ from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import RustCore
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
+from app.modules.tasks.sync.receipts import Authority, ReceiptStore
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
 from app.repositories import (
     CrtCommandRepository,
@@ -362,7 +364,12 @@ def _allowed_external_provider_categories(config: AppConfig) -> frozenset[str]:
     return frozenset(allowed)
 
 
-def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Container:
+def build_container(
+    config: AppConfig,
+    *,
+    serve_navigator: bool = False,
+    task_sync_authority: Authority[Connection] | None = None,
+) -> Container:
     """Wire every service for one process.
 
     Only the web app (``app.main.create_app``) passes ``serve_navigator=True``:
@@ -482,11 +489,15 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
     # One bridge runtime serves the task and the Review facades.
     rust_core = RustCore()
     job_repository = JobRepository(task_repo.db_path)
+    task_unit_of_work = TaskUnitOfWork(task_repo, job_repository)
     task_service = TaskService(
         task_repo,
         clock=utcnow,
         rust_facade=RustTaskFacade(rust_core, task_repo),
         rust_core_enabled=_rust_core_sync_for_owner,
+        command_receipts=ReceiptStore(rust_core),
+        task_unit_of_work=task_unit_of_work,
+        task_sync_authority=task_sync_authority,
     )
     task_title_autocomplete_service = TaskTitleAutocompleteService(
         repository=task_repo,
@@ -765,7 +776,7 @@ def build_container(config: AppConfig, *, serve_navigator: bool = False) -> Cont
         review_flow_service=review_flow_service,
         navigator_service=navigator_service,
         job_repository=job_repository,
-        task_unit_of_work=TaskUnitOfWork(task_repo, job_repository),
+        task_unit_of_work=task_unit_of_work,
         job_execution=JobExecutionGate(
             job_repository,
             # Identity is the scope authority: an owner that no longer resolves
