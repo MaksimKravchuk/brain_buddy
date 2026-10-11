@@ -670,6 +670,34 @@ class RustTaskFacade:
         )
         return change.tags[0]
 
+    def decide_update_tag(
+        self,
+        tag_id: str,
+        payload: TagUpdateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+        before: TagDocument | None = None,
+    ) -> tuple[Decision, TagDocument | None]:
+        """Return the pure update decision for the legacy receipt boundary."""
+        decision = self._call(
+            "tag.update",
+            tag_id,
+            {} if payload.name is None else {"name": payload.name},
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(
+                tags=self._repo.list_tags_for_owner(owner_id=owner_id)
+            ),
+            expected=("tag", tag_id, payload.expected_revision),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        change = self._decode(
+            decision, owner_id, now, {} if before is None else {tag_id: before}
+        )
+        return decision, change.tags[0]
+
     def delete_tag(
         self,
         tag: TagDocument,

@@ -25,13 +25,13 @@ from app.modules.tasks.sync.receipts import (
     SyncCommandError,
 )
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
-from app.schemas.tasks import ProjectCreateRequest, TagCreateRequest
+from app.schemas.tasks import ProjectCreateRequest, TagCreateRequest, TagUpdateRequest
 from app.utils.idempotency import idempotency_key_digest
 
 pytestmark = [
     allure.epic("Task Management"),
     allure.feature("Durable task synchronization"),
-    allure.story("Legacy create-tag receipts"),
+    allure.story("Legacy tag receipts"),
 ]
 
 OWNER = "user_legacy_sync"
@@ -688,3 +688,425 @@ def test_026_FR_005_redacted_fresh_receipt_never_falls_back_to_legacy_snapshot(
         assert _count(repo, "sync_command_receipts") == 1
         assert _count(repo, "sync_change_transactions") == 1
         assert repo.get_tag_for_owner(original.id, owner_id=OWNER).name == "Current"
+
+
+def test_026_FR_005_legacy_tag_update_receipt_replay_and_key_conflicts(
+    legacy_service,
+):
+    service, repo, _enabled, _clock = legacy_service
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Renamed", expected_revision=tag.revision)
+
+    with allure.step("Update once and replay the original tag DTO"):
+        updated = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="update"
+        )
+        replay = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="update"
+        )
+        assert replay == updated
+        assert updated.name == "Renamed"
+        assert updated.revision == tag.revision + 1
+        assert _count(repo, "sync_command_receipts") == 2
+        assert _count(repo, "sync_change_transactions") == 2
+        assert _count(repo, "sync_change_records") == 2
+
+    with allure.step("Keep the legacy expected-revision precondition"):
+        with pytest.raises(ConflictError) as stale:
+            service.update_tag(
+                tag.id,
+                TagUpdateRequest(name="@Stale", expected_revision=tag.revision),
+                owner_id=OWNER,
+                idempotency_key="stale-update",
+            )
+        assert stale.value.resource == "Tag"
+        assert stale.value.identifier == tag.id
+        assert _count(repo, "sync_change_transactions") == 2
+
+    with allure.step("Reject changed bodies and operations for the same key"):
+        with pytest.raises(ConflictError):
+            service.update_tag(
+                tag.id,
+                TagUpdateRequest(name="Other", expected_revision=tag.revision),
+                owner_id=OWNER,
+                idempotency_key="update",
+            )
+        with pytest.raises(ConflictError):
+            service.create_tag(
+                TagCreateRequest(name="Other"), owner_id=OWNER, idempotency_key="update"
+            )
+        assert repo.get_tag_for_owner(tag.id, owner_id=OWNER) == updated
+
+
+def test_026_FR_005_tag_update_adoption_keeps_original_retention_and_current_guard(
+    legacy_service,
+):
+    service, repo, enabled, clock = legacy_service
+    clock[0] = NOW - timedelta(hours=23)
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Adopted", expected_revision=tag.revision)
+    enabled[0] = False
+    original = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="old-update"
+    )
+    enabled[0] = True
+    clock[0] = NOW
+
+    with allure.step("Adopt the legacy result without publishing a second effect"):
+        adopted = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="old-update"
+        )
+        assert adopted == original
+        assert _count(repo, "sync_command_receipts") == 2
+        assert _count(repo, "sync_change_transactions") == 1
+
+    newer = original.model_copy(
+        update={
+            "name": "Newest",
+            "normalized_name": "newest",
+            "revision": 3,
+            "updated_at": NOW + timedelta(hours=2),
+        }
+    )
+    repo.save_tag(newer)
+    clock[0] = NOW + timedelta(hours=2)
+    with allure.step("After the original deadline, use only the current same-ID row"):
+        replay = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="old-update"
+        )
+        assert replay == newer
+        assert _count(repo, "sync_change_transactions") == 1
+
+
+@pytest.mark.parametrize("missing_current", [False, True])
+def test_026_FR_005_adopted_tag_update_uses_current_at_original_deadline(
+    legacy_service, missing_current
+):
+    service, repo, enabled, clock = legacy_service
+    clock[0] = NOW - timedelta(hours=23)
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Adopted", expected_revision=tag.revision)
+    enabled[0] = False
+    original = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="exact-update"
+    )
+
+    enabled[0] = True
+    clock[0] = NOW
+    adopted = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="exact-update"
+    )
+    assert adopted == original
+    assert _count(repo, "sync_change_transactions") == 1
+
+    clock[0] = NOW + timedelta(hours=1)
+    if missing_current:
+        with sqlite3.connect(repo.db_path) as conn:
+            conn.execute(
+                "DELETE FROM tags WHERE owner_id = ? AND id = ?",
+                (OWNER, tag.id),
+            )
+    else:
+        repo.save_tag(
+            original.model_copy(
+                update={
+                    "name": "Current",
+                    "normalized_name": "current",
+                    "revision": original.revision + 1,
+                }
+            )
+        )
+
+    with allure.step("At the original 24-hour deadline, use current state only"):
+        if missing_current:
+            with pytest.raises(IdempotencyReceiptUnavailableError):
+                service.update_tag(
+                    tag.id, payload, owner_id=OWNER, idempotency_key="exact-update"
+                )
+            assert repo.list_tags_for_owner(owner_id=OWNER) == []
+        else:
+            replay = service.update_tag(
+                tag.id, payload, owner_id=OWNER, idempotency_key="exact-update"
+            )
+            assert replay.id == tag.id
+            assert replay.name == "Current"
+
+    assert _count(repo, "sync_command_receipts") == 2
+    assert _count(repo, "sync_change_transactions") == 1
+    assert _count(repo, "sync_change_records") == 1
+
+
+@pytest.mark.parametrize("missing_current", [False, True])
+def test_026_FR_005_early_redacted_tag_update_uses_current_or_unavailable(
+    legacy_service, missing_current
+):
+    service, repo, _enabled, _clock = legacy_service
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Renamed", expected_revision=tag.revision)
+    updated = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="early-redacted"
+    )
+    with sqlite3.connect(repo.db_path) as conn:
+        receipt = conn.execute(
+            "SELECT command_id FROM sync_legacy_keys WHERE owner_id = ? "
+            "AND key_digest = ?",
+            (OWNER, idempotency_key_digest("early-redacted")),
+        ).fetchone()
+    assert receipt is not None
+    command_id = receipt[0]
+    if missing_current:
+        with sqlite3.connect(repo.db_path) as conn:
+            conn.execute(
+                "DELETE FROM tags WHERE owner_id = ? AND id = ?",
+                (OWNER, tag.id),
+            )
+    else:
+        repo.save_tag(
+            updated.model_copy(
+                update={
+                    "name": "Current",
+                    "normalized_name": "current",
+                    "revision": updated.revision + 1,
+                }
+            )
+        )
+
+    with (
+        allure.step("Redact the accepted update result before its old cache expires"),
+        sqlite3.connect(repo.db_path) as conn,
+    ):
+        conn.execute(
+            "UPDATE sync_command_receipts SET result = NULL "
+            "WHERE owner_id = ? AND command_id = ?",
+            (OWNER, command_id),
+        )
+
+    with allure.step("Replay from current state or report unavailable after row loss"):
+        if missing_current:
+            with pytest.raises(IdempotencyReceiptUnavailableError):
+                service.update_tag(
+                    tag.id, payload, owner_id=OWNER, idempotency_key="early-redacted"
+                )
+            assert repo.list_tags_for_owner(owner_id=OWNER) == []
+        else:
+            replay = service.update_tag(
+                tag.id, payload, owner_id=OWNER, idempotency_key="early-redacted"
+            )
+            assert replay.id == tag.id
+            assert replay.name == "Current"
+            assert repo.get_tag_for_owner(tag.id, owner_id=OWNER).name == "Current"
+
+    assert _count(repo, "sync_command_receipts") == 2
+    assert _count(repo, "sync_change_transactions") == 2
+    assert _count(repo, "sync_change_records") == 2
+
+
+def test_026_FR_005_tag_update_refusal_is_immutable_after_the_conflict_changes(
+    legacy_service,
+):
+    service, repo, _enabled, _clock = legacy_service
+    first = service.create_tag(
+        TagCreateRequest(name="@First"), owner_id=OWNER, idempotency_key="first"
+    )
+    second = service.create_tag(
+        TagCreateRequest(name="@Second"), owner_id=OWNER, idempotency_key="second"
+    )
+    attempted = TagUpdateRequest(name="@Second", expected_revision=first.revision)
+
+    with allure.step("Record the existing duplicate-name refusal"):
+        with pytest.raises(ConflictError) as initial:
+            service.update_tag(
+                first.id, attempted, owner_id=OWNER, idempotency_key="rename-first"
+            )
+        assert initial.value.resource == "Tag"
+        assert initial.value.identifier == "Second"
+
+    service.update_tag(
+        second.id,
+        TagUpdateRequest(name="@Moved", expected_revision=second.revision),
+        owner_id=OWNER,
+        idempotency_key="rename-second",
+    )
+    with allure.step("Replay the original refusal without a new decision or feed row"):
+        with pytest.raises(ConflictError) as replay:
+            service.update_tag(
+                first.id, attempted, owner_id=OWNER, idempotency_key="rename-first"
+            )
+        assert str(replay.value) == str(initial.value)
+        assert repo.get_tag_for_owner(first.id, owner_id=OWNER).name == "First"
+        assert _count(repo, "sync_change_transactions") == 3
+
+
+def test_026_FR_005_new_tag_update_receipt_does_not_repair_a_lost_resource(
+    legacy_service,
+):
+    service, repo, _enabled, clock = legacy_service
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Renamed", expected_revision=tag.revision)
+    updated = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="update"
+    )
+
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute("DELETE FROM tags WHERE owner_id = ? AND id = ?", (OWNER, tag.id))
+
+    with allure.step("Replay the immutable DTO without repairing or re-deciding"):
+        replay = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="update"
+        )
+        assert replay == updated
+        assert repo.list_tags_for_owner(owner_id=OWNER) == []
+        assert _count(repo, "sync_change_transactions") == 2
+    clock[0] = NOW + timedelta(hours=25)
+    with allure.step("Keep the redacted terminal receipt unavailable after row loss"):
+        with pytest.raises(IdempotencyReceiptUnavailableError):
+            service.update_tag(
+                tag.id, payload, owner_id=OWNER, idempotency_key="update"
+            )
+        assert repo.list_tags_for_owner(owner_id=OWNER) == []
+        assert _count(repo, "sync_change_transactions") == 2
+
+
+def test_026_FR_005_redacted_fresh_tag_update_uses_current_same_id_row(
+    legacy_service,
+):
+    service, repo, _enabled, clock = legacy_service
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Renamed", expected_revision=tag.revision)
+    updated = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="update"
+    )
+    current = updated.model_copy(
+        update={
+            "name": "Current",
+            "normalized_name": "current",
+            "revision": updated.revision + 1,
+            "updated_at": NOW + timedelta(hours=1),
+        }
+    )
+    repo.save_tag(current)
+    clock[0] = NOW + timedelta(hours=25)
+
+    with allure.step("After receipt and legacy-result redaction, return current state"):
+        replay = service.update_tag(
+            tag.id, payload, owner_id=OWNER, idempotency_key="update"
+        )
+        assert replay == current
+        assert repo.get_tag_for_owner(tag.id, owner_id=OWNER) == current
+        assert _count(repo, "sync_change_transactions") == 2
+
+
+@pytest.mark.parametrize("failure_point", ["feed", "receipt"])
+def test_026_FR_005_tag_update_receipt_failure_rolls_back_all_writes(
+    legacy_service, monkeypatch, failure_point
+):
+    service, repo, _enabled, _clock = legacy_service
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    handler = service._legacy_tag_handler
+    assert handler is not None
+
+    def fail_insert(*_args, **_kwargs):
+        raise RuntimeError(f"injected update {failure_point} failure")
+
+    if failure_point == "feed":
+        monkeypatch.setattr(handler._receipts.change_log, "append", fail_insert)
+    else:
+        monkeypatch.setattr(handler._receipts, "_insert", fail_insert)
+    with allure.step(f"Fail {failure_point} finalization and roll back the update"):
+        with pytest.raises(
+            RuntimeError, match=f"injected update {failure_point} failure"
+        ):
+            service.update_tag(
+                tag.id,
+                TagUpdateRequest(name="@Renamed", expected_revision=tag.revision),
+                owner_id=OWNER,
+                idempotency_key="update",
+            )
+        assert repo.get_tag_for_owner(tag.id, owner_id=OWNER) == tag
+        assert repo.get_idempotency(owner_id=OWNER, key="update") is None
+        assert _count(repo, "sync_command_receipts") == 1
+        assert _count(repo, "sync_change_transactions") == 1
+
+
+@pytest.mark.parametrize("missing_current", [False, True])
+def test_026_FR_005_redacted_adopted_tag_update_uses_current_or_unavailable(
+    legacy_service, missing_current
+):
+    service, repo, enabled, clock = legacy_service
+    clock[0] = NOW - timedelta(hours=23)
+    tag = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    payload = TagUpdateRequest(name="@Adopted", expected_revision=tag.revision)
+    enabled[0] = False
+    original = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="adopted-redaction"
+    )
+
+    enabled[0] = True
+    clock[0] = NOW
+    adopted = service.update_tag(
+        tag.id, payload, owner_id=OWNER, idempotency_key="adopted-redaction"
+    )
+    assert adopted == original
+    assert _count(repo, "sync_change_transactions") == 1
+    if missing_current:
+        with sqlite3.connect(repo.db_path) as conn:
+            conn.execute(
+                "DELETE FROM tags WHERE owner_id = ? AND id = ?", (OWNER, tag.id)
+            )
+    else:
+        current = original.model_copy(
+            update={
+                "name": "Current",
+                "normalized_name": "current",
+                "revision": original.revision + 1,
+            }
+        )
+        repo.save_tag(current)
+
+    handler = service._legacy_tag_handler
+    assert handler is not None
+    with handler._units.begin(OWNER) as unit:
+        handler._receipts.change_log.redact_record(unit, "tag", [tag.id])
+
+    with allure.step(
+        "Replay after actual early redaction without reviving legacy text"
+    ):
+        if missing_current:
+            with pytest.raises(IdempotencyReceiptUnavailableError):
+                service.update_tag(
+                    tag.id,
+                    payload,
+                    owner_id=OWNER,
+                    idempotency_key="adopted-redaction",
+                )
+            assert repo.list_tags_for_owner(owner_id=OWNER) == []
+        else:
+            replay = service.update_tag(
+                tag.id,
+                payload,
+                owner_id=OWNER,
+                idempotency_key="adopted-redaction",
+            )
+            assert replay == current
+            assert replay.name == "Current"
+
+    assert repo.get_idempotency(owner_id=OWNER, key="adopted-redaction") is not None
+    assert _count(repo, "sync_command_receipts") == 2
+    assert _count(repo, "sync_change_transactions") == 1
+    assert _count(repo, "sync_change_records") == 1

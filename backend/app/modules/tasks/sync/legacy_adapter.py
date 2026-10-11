@@ -1,11 +1,11 @@
-"""The create-tag portion of the legacy HTTP-to-receipt adapter."""
+"""Legacy tag requests mapped to stable receipt identities."""
 
 from __future__ import annotations
 
 from uuid import UUID, uuid5
 
 from app.modules.tasks.sync.receipts import CommandRequest
-from app.schemas.tasks import TagCreateRequest
+from app.schemas.tasks import TagCreateRequest, TagUpdateRequest
 from app.utils.idempotency import idempotency_key_digest
 
 TAG_ALIAS = "tag_pending"
@@ -29,3 +29,17 @@ def tag_create_request(
 def tag_entity_id(owner_id: str, key: str) -> str:
     """Allocate the Rust-native tag ID deterministically from owner/key."""
     return f"tag_{uuid5(_TAG_NAMESPACE, f'{owner_id}:{idempotency_key_digest(key)}')}"
+
+
+def tag_update_request(
+    owner_id: str, key: str, tag_id: str, payload: TagUpdateRequest
+) -> CommandRequest:
+    """Use owner/key as identity; target and normalized body are conflict checks."""
+    return CommandRequest.legacy(
+        owner_id,
+        key,
+        "tag.update",
+        {"command_type": "tag.update", "body": payload.model_dump(mode="json")},
+        entity_id=tag_id,
+        route="update_tag",
+    )
