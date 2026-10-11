@@ -9,6 +9,58 @@ import Testing
 struct RustWorkspaceTests {
     private let query = Data("{\"kind\":\"list_counts\"}".utf8)
 
+    @Test("026-FR-026: a MainActor heartbeat cancels a pending real Rust observer without closing its workspace")
+    @MainActor
+    func actorHeartbeatDuringObservation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let runtime = try await RustBridgeRuntime().openStore(workspaceID: "local",
+            databaseURL: directory.appendingPathComponent("store.sqlite3"))
+        let subscription = try await runtime.subscribe()
+        let initial = try #require(try await subscription.next(after: nil, timeoutMilliseconds: 0))
+        var finished = false
+        var observer: Task<String, Never>?
+        await withCheckedContinuation { (started: CheckedContinuation<Void, Never>) in
+            observer = Task { @MainActor in
+                defer { finished = true }
+                started.resume()
+                do {
+                    // An unchanged real token cannot answer immediately. This is a
+                    // bounded Rust wait, not a sleep or a controlled query fixture.
+                    _ = try await subscription.next(after: initial.token, timeoutMilliseconds: 10_000)
+                    return "unexpected completion"
+                } catch let error as RustBridgeError {
+                    return error.code
+                } catch {
+                    return "unexpected error"
+                }
+            }
+        }
+        // This actor turn is the heartbeat. A synchronous Rust wait on MainActor
+        // would finish first, making this assertion fail before cancellation.
+        #expect(!finished)
+        let pendingObserver = try #require(observer)
+        pendingObserver.cancel()
+        #expect(await pendingObserver.value == "CANCELLED")
+        #expect(finished)
+
+        // Swift cancellation must reach the actual Rust handle, not merely
+        // discard one Swift result. The independently live workspace stays usable.
+        do {
+            _ = try await subscription.next(after: nil, timeoutMilliseconds: 0)
+            Issue.record("the cancelled subscription must remain cancelled")
+        } catch let error as RustBridgeError {
+            #expect(error.code == "CANCELLED")
+        }
+        let replacement = try await runtime.subscribe()
+        let current = try #require(try await replacement.next(after: nil, timeoutMilliseconds: 0))
+        #expect(current.token == initial.token)
+        #expect(try await runtime.snapshot().pending == "0")
+        replacement.cancel()
+        try await runtime.close()
+        try await runtime.close()
+    }
+
     @Test("026-FR-025: malformed canonical answers report a query error instead of publishing or retrying forever")
     @MainActor
     func malformedAnswer() async {
