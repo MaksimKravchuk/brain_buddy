@@ -13,14 +13,21 @@ from pathlib import Path
 import allure
 import pytest
 
-from app.exceptions import ValidationFailure
+from app.exceptions import ConflictError, ValidationFailure
 from app.modules.tasks import TaskRepository
 from app.modules.tasks import review_domain as rd
-from app.modules.tasks.domain import TaskDocument
+from app.modules.tasks.domain import TagDocument, TaskDocument
 from app.modules.tasks.jobs import JobRepository
 from app.modules.tasks.jobs.execution import JobExecutionGate, StaleExecutorError
+from app.modules.tasks.repository import display_tag_name
 from app.modules.tasks.rust_adapter import DomainRefusal, RustCore
 from app.modules.tasks.rust_review_facade import encode_settings_private, encode_task
+from app.modules.tasks.rust_task_facade import (
+    _envelope,
+    _inputs,
+    _refused,
+    encode_tag,
+)
 from app.modules.tasks.sync.receipts import (
     CommandRequest,
     ReceiptStore,
@@ -161,6 +168,222 @@ def test_026_FR_006_noop_and_rejection_have_no_sequence_or_feed(store):
         rejected = cmd.reject(DomainRefusal("entity_deleted", None, None, None))
     assert noop["commit_seq"] is rejected["commit_seq"] is None
     assert count(repo, "sync_change_transactions") == 0
+
+
+def test_026_FR_005_legacy_refusal_replay_keeps_original_tag_conflict(
+    store, monkeypatch
+):
+    repo, uow, receipts = store
+    tag_request = CommandRequest.legacy(
+        OWNER,
+        "legacy-tag-create",
+        "create_tag",
+        {"command_type": "tag.create", "body": {"name": "@Work"}},
+        entity_id="tag_pending",
+        route="create_tag",
+    )
+    existing = TagDocument(
+        id="tag_existing",
+        owner_id=OWNER,
+        name="Work",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    repo.create_tag(existing)
+    decision = receipts._core.decide(
+        {"projects": {}, "tags": {existing.id: encode_tag(existing)}},
+        _envelope(
+            "tag.create",
+            "tag_5b0f6f0e-8f1b-4f6e-9a57-2a0f0c1f4d12",
+            {"name": "@Work"},
+            NOW,
+            None,
+        ),
+        _inputs(NOW, OWNER),
+    )
+    assert decision.refusal is not None
+    original = decision.refusal
+    assert original.reason == "duplicate_tag_name"
+    with receipts.command(uow, tag_request, authority, now=NOW) as cmd:
+        rejected = cmd.reject(original)
+    assert rejected["error"]["message"] == "Command rejected."
+    assert "_legacy_refusal_v1" not in json.dumps(rejected)
+    assert count(repo, "sync_command_receipts") == 1
+
+    # The matching retry returns the original conflict after the live tag has
+    # changed. It does not decide against the newer owner state.
+    repo.save_tag(existing.model_copy(update={"name": "Renamed"}))
+    with receipts.command(uow, tag_request, authority, now=NOW) as retry:
+        assert retry.replay is not None
+        assert retry.replay["outcome"] == "rejected"
+        assert retry.replay_refusal == original
+        with pytest.raises(SyncCommandError, match="COMMAND_ALREADY_TERMINAL"):
+            retry.accept([])
+
+    assert retry.replay_refusal is not None
+    mapped = _refused(retry.replay_refusal, attempted_name=display_tag_name("@Work"))
+    assert isinstance(mapped, ConflictError)
+    assert (mapped.resource, mapped.identifier) == ("Tag", "Work")
+    assert str(mapped) == "Tag 'Work' already exists."
+    with uow.begin(OWNER) as unit:
+        public_lookup = receipts.lookup(unit, retry.command_id, authority, now=NOW)
+    assert public_lookup is not None
+    assert "_legacy_refusal_v1" not in json.dumps(public_lookup)
+
+    # Expiring the public result must not discard the minimal typed witness.
+    with receipts.command(
+        uow, tag_request, authority, now=NOW + timedelta(hours=25)
+    ) as expired_retry:
+        assert expired_retry.replay is not None
+        assert expired_retry.replay["result_redacted"] is True
+        assert expired_retry.replay_refusal == original
+
+    with (
+        pytest.raises(SyncCommandError, match="IDEMPOTENCY_KEY_REUSED"),
+        receipts.command(
+            uow,
+            CommandRequest.legacy(
+                OWNER,
+                "legacy-tag-create",
+                "create_tag",
+                {"command_type": "tag.create", "body": {"name": "@Other"}},
+                entity_id="tag_pending",
+                route="create_tag",
+            ),
+            authority,
+            now=NOW,
+        ),
+    ):
+        pytest.fail("the changed tag body replayed a stored refusal")
+
+    with sqlite3.connect(repo.db_path) as connection:
+        row = connection.execute(
+            "SELECT command_id, metadata FROM sync_command_receipts WHERE owner_id=?",
+            (OWNER,),
+        ).fetchone()
+        assert row is not None
+        metadata = json.loads(row[1])
+        valid = metadata["_legacy_refusal_v1"]
+        corrupt_witnesses = []
+        for field, value in (
+            ("reason", 7),
+            ("field", 7),
+            ("entity", {"type": "tag"}),
+            ("entity", ["tag", ["Work", 7]]),
+            ("current_revision", "not-a-revision"),
+            ("current_revision", str(2**64)),
+        ):
+            corrupt = {**valid, field: value}
+            corrupt_witnesses.append(corrupt)
+        corrupt_witnesses.append([])
+        corrupt_witnesses.append({})
+        for witness in corrupt_witnesses:
+            metadata["_legacy_refusal_v1"] = witness
+            connection.execute(
+                "UPDATE sync_command_receipts SET metadata=? "
+                "WHERE owner_id=? AND command_id=?",
+                (json.dumps(metadata), OWNER, row[0]),
+            )
+            connection.commit()
+            with (
+                pytest.raises(SyncCommandError, match="COMMAND_INTEGRITY"),
+                receipts.command(uow, tag_request, authority, now=NOW),
+            ):
+                pytest.fail("a malformed private refusal witness was trusted")
+        metadata.pop("_legacy_refusal_v1")
+        connection.execute(
+            "UPDATE sync_command_receipts SET metadata=? "
+            "WHERE owner_id=? AND command_id=?",
+            (json.dumps(metadata), OWNER, row[0]),
+        )
+        connection.commit()
+
+    with receipts.command(uow, tag_request, authority, now=NOW) as no_witness_retry:
+        assert no_witness_retry.replay is not None
+        assert no_witness_retry.replay_refusal is None
+
+    original_receipt_reader = receipts._receipt_row
+    reads = 0
+
+    def lose_private_row_after_lookup(unit, command_id):
+        nonlocal reads
+        reads += 1
+        return original_receipt_reader(unit, command_id) if reads == 1 else None
+
+    monkeypatch.setattr(receipts, "_receipt_row", lose_private_row_after_lookup)
+    with (
+        pytest.raises(SyncCommandError, match="COMMAND_INTEGRITY"),
+        receipts.command(uow, tag_request, authority, now=NOW),
+    ):
+        pytest.fail("a receipt removed between lookup and witness read was trusted")
+    monkeypatch.setattr(receipts, "_receipt_row", original_receipt_reader)
+
+    no_key_request = device_request()
+    with receipts.command(uow, no_key_request, authority, now=NOW) as cmd:
+        cmd.reject(DomainRefusal("entity_deleted", None, None, None))
+    with receipts.command(uow, no_key_request, authority, now=NOW) as no_key_retry:
+        assert no_key_retry.replay is not None
+        assert no_key_retry.replay_refusal is None
+
+
+def test_026_FR_005_rust_revision_refusal_replay_keeps_original_revision(store):
+    repo, uow, receipts = store
+    task = TaskDocument(
+        id="task_revision",
+        owner_id=OWNER,
+        title="Original title",
+        state="inbox",
+        order_key=0,
+        created_at=NOW,
+        updated_at=NOW,
+        revision=4,
+    )
+    repo.create(task)
+    decision = receipts._core.decide(
+        {"tasks": {task.id: encode_task(task)}},
+        _envelope(
+            "task.update",
+            task.id,
+            {"details": "attempted update"},
+            NOW,
+            ("task", task.id, 3),
+        ),
+        _inputs(NOW, OWNER),
+    )
+    assert decision.refusal is not None
+    original = decision.refusal
+    assert original.reason == "revision_conflict"
+    assert original.entity == ("task", [task.id])
+    assert original.current_revision == 4
+
+    stale_request = CommandRequest.legacy(
+        OWNER,
+        "stale-task-update",
+        "update_task:task_revision",
+        {
+            "command_type": "task.update",
+            "body": {"details": "attempted update", "expected_revision": 3},
+        },
+        entity_id=task.id,
+        route="update_task",
+    )
+    with receipts.command(uow, stale_request, authority, now=NOW) as cmd:
+        cmd.reject(original)
+
+    repo.save(task.model_copy(update={"revision": 5, "title": "Newer title"}))
+    with receipts.command(
+        uow, stale_request, authority, now=NOW + timedelta(hours=25)
+    ) as retry:
+        assert retry.replay is not None
+        assert retry.replay["result_redacted"] is True
+        assert retry.replay_refusal == original
+        assert retry.replay_refusal.current_revision == 4
+        assert retry.replay_refusal.entity == ("task", [task.id])
+
+    with uow.begin(OWNER) as unit:
+        public_lookup = receipts.lookup(unit, retry.command_id, authority, now=NOW)
+    assert public_lookup is not None
+    assert "_legacy_refusal_v1" not in json.dumps(public_lookup)
 
 
 def test_026_FR_006_an_unfinished_command_cannot_commit_domain_writes(store):

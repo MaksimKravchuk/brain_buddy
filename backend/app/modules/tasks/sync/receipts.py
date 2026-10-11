@@ -326,6 +326,9 @@ class CommandReceipts[ConnectionT](ABC):
             raise SyncCommandError("IDEMPOTENCY_KEY_REUSED")
         body = json.loads(row["metadata"])
         had_result = body.pop("_had_result")
+        # A matching legacy retry needs the original typed refusal for the
+        # existing HTTP adapter. Keep that witness private to ReceiptCommand.
+        body.pop("_legacy_refusal_v1", None)
         expired = datetime.fromisoformat(row["expires_at"]) <= now
         body["result_redacted"] = (
             body["result_redacted"] or expired or (had_result and row["result"] is None)
@@ -370,6 +373,8 @@ class CommandReceipts[ConnectionT](ABC):
             )
         }
         metadata["_had_result"] = wire["result"] is not None
+        if command._legacy_witness is not None:
+            metadata["_legacy_refusal_v1"] = command._legacy_witness
         self._write_receipt(
             command,
             metadata,
@@ -413,6 +418,58 @@ class ReceiptCommand[ConnectionT = Connection]:
         self._terminal = replay is not None
         self._failed = False
         self._activity = unit.activity
+        self.replay_refusal: DomainRefusal | None = None
+        if replay is not None and replay["outcome"] == "rejected":
+            self.replay_refusal = self._stored_legacy_refusal()
+        self._legacy_witness: dict[str, Any] | None = None
+
+    def _stored_legacy_refusal(self) -> DomainRefusal | None:
+        """Restore the private typed witness after the public replay is redacted."""
+        if self.request.key_digest is None:
+            return None
+        row = self.store._receipt_row(self.unit, self.command_id)
+        if row is None:
+            raise SyncCommandError("COMMAND_INTEGRITY")
+        try:
+            metadata = json.loads(row["metadata"])
+            if not isinstance(metadata, dict):
+                raise ValueError
+            witness = metadata.get("_legacy_refusal_v1")
+        except TypeError, ValueError:
+            raise SyncCommandError("COMMAND_INTEGRITY") from None
+        if witness is None:
+            return None
+        try:
+            reason = witness["reason"]
+            field = witness["field"]
+            entity = witness["entity"]
+            revision = witness["current_revision"]
+            if not isinstance(reason, str) or (
+                field is not None and not isinstance(field, str)
+            ):
+                raise ValueError
+            if entity is not None and (
+                not isinstance(entity, list)
+                or len(entity) != 2
+                or not isinstance(entity[0], str)
+                or not isinstance(entity[1], list)
+                or any(not isinstance(item, str) for item in entity[1])
+            ):
+                raise ValueError
+            if revision is not None:
+                if not isinstance(revision, str) or not revision.isdecimal():
+                    raise ValueError
+                revision = int(revision)
+                if revision > 2**64 - 1:
+                    raise ValueError
+            return DomainRefusal(
+                reason,
+                field,
+                None if entity is None else (entity[0], entity[1]),
+                revision,
+            )
+        except KeyError, TypeError, ValueError:
+            raise SyncCommandError("COMMAND_INTEGRITY") from None
 
     def _unseen(self) -> None:
         self.unit._require_open()
@@ -468,6 +525,8 @@ class ReceiptCommand[ConnectionT = Connection]:
         The caller loads any latest available record/edit versions under this
         unit, as it does the protected read set. They pass the existing typed
         receipt codec; no arbitrary exception message or detail map is accepted.
+        A legacy-key retry also retains only these normalized refusal fields in
+        private metadata so the existing adapter can reconstruct its error.
         """
         self._unseen()
         self._failed = True
@@ -490,6 +549,17 @@ class ReceiptCommand[ConnectionT = Connection]:
                 ).encode(),
             )
         )
+        if self.request.key_digest is not None:
+            self._legacy_witness = {
+                "reason": refusal.reason,
+                "field": refusal.field,
+                "entity": refusal.entity,
+                "current_revision": (
+                    str(refusal.current_revision)
+                    if refusal.current_revision is not None
+                    else None
+                ),
+            }
         if current_versions:
             error["details"]["current_versions"] = list(current_versions)
         return self._finish(
