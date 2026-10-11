@@ -801,6 +801,115 @@ def test_026_FR_022_deletion_redacts_receipt_and_requires_feed_reset(store):
         receipts.transactions(unit, authority, feed_generation="feed-1")
 
 
+def test_026_FR_022_redaction_marks_binding_only_receipts_without_changing_identity(
+    store,
+):
+    repo, uow, receipts = store
+    tag_binding = {
+        "entity_type": "tag",
+        "alias_id": "tag_redacted",
+        "entity_id": "tag_redacted",
+    }
+    second_binding = {
+        "entity_type": "tag",
+        "alias_id": "tag_redacted_2",
+        "entity_id": "tag_redacted_2",
+    }
+    with receipts.command(uow, request(), authority, now=NOW) as cmd:
+        accepted = cmd.accept(write(repo, cmd), id_bindings=[tag_binding])
+    owner_bindings = {accepted["command_id"]: tag_binding}
+    for index in range(1, 100):
+        binding = {
+            "entity_type": "tag",
+            "alias_id": f"tag_redacted_{index}",
+            "entity_id": f"tag_redacted_{index}",
+        }
+        with receipts.command(
+            uow, request(f"redaction-batch-{index}"), authority, now=NOW
+        ) as cmd:
+            accepted_batch_item = cmd.accept([], id_bindings=[binding])
+        owner_bindings[accepted_batch_item["command_id"]] = binding
+    other_request = CommandRequest.legacy(
+        "user_receipts_other", "other", "tag.create", {"name": "Other"}
+    )
+    with receipts.command(uow, other_request, authority, now=NOW) as cmd:
+        other = cmd.accept([], id_bindings=[second_binding])
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        before = {
+            row["command_id"]: json.loads(row["metadata"])
+            for row in conn.execute(
+                "SELECT command_id, metadata FROM sync_command_receipts "
+                "WHERE owner_id = ?",
+                (OWNER,),
+            )
+        }
+        other_before = conn.execute(
+            "SELECT metadata, result FROM sync_command_receipts "
+            "WHERE owner_id = ? AND command_id = ?",
+            ("user_receipts_other", other["command_id"]),
+        ).fetchone()
+        assert set(before) == set(owner_bindings)
+        assert len(before) == 100
+        assert all(row["_had_result"] is False for row in before.values())
+        assert all(row["result_redacted"] is False for row in before.values())
+
+    with uow.begin(OWNER) as unit:
+        receipts.change_log.redact_record(unit, "tag", ["tag_redacted"])
+
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        after = {
+            row["command_id"]: json.loads(row["metadata"])
+            for row in conn.execute(
+                "SELECT command_id, metadata FROM sync_command_receipts "
+                "WHERE owner_id = ?",
+                (OWNER,),
+            )
+        }
+        owner_results = [
+            row["result"]
+            for row in conn.execute(
+                "SELECT result FROM sync_command_receipts WHERE owner_id = ?",
+                (OWNER,),
+            )
+        ]
+        other_after = conn.execute(
+            "SELECT metadata, result FROM sync_command_receipts "
+            "WHERE owner_id = ? AND command_id = ?",
+            ("user_receipts_other", other["command_id"]),
+        ).fetchone()
+    assert after == {
+        command_id: {**metadata, "result_redacted": True}
+        for command_id, metadata in before.items()
+    }
+    assert len(owner_results) == 100 and set(owner_results) == {None}
+    assert other_after["metadata"] == other_before["metadata"]
+    assert other_after["result"] == other_before["result"]
+
+    with uow.begin(OWNER) as unit:
+        public = receipts.lookup(
+            unit,
+            accepted["command_id"],
+            authority,
+            now=NOW + timedelta(hours=1),
+        )
+    assert public is not None
+    assert public["result"] is None and public["result_redacted"] is True
+    assert public["id_bindings"] == [tag_binding]
+    assert "_had_result" not in public and "_legacy_refusal_v1" not in public
+    with uow.begin("user_receipts_other") as unit:
+        other_public = receipts.lookup(
+            unit,
+            other["command_id"],
+            authority,
+            now=NOW + timedelta(hours=1),
+        )
+    assert other_public is not None
+    assert other_public["result_redacted"] is False
+    assert other_public["id_bindings"] == [second_binding]
+
+
 def test_026_FR_022_refusal_keeps_only_server_owned_diagnostics(store):
     repo, uow, receipts = store
     with receipts.command(uow, request("seed"), authority, now=NOW) as cmd:

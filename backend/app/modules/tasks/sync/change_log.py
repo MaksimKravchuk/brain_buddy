@@ -282,10 +282,25 @@ class ChangeLog(AtomicChangeLog[Connection]):
         outcomes and aliases remain. A delta consumer must reset after redaction.
         """
         conn, owner = unit.connection, unit.owner_id
-        conn.execute(
-            "UPDATE sync_command_receipts SET result = NULL WHERE owner_id = ?",
-            (owner,),
-        )
+        last_command_id = ""
+        while True:
+            receipts = conn.execute(
+                "SELECT command_id, metadata FROM sync_command_receipts "
+                "WHERE owner_id = ? AND command_id > ? "
+                "ORDER BY command_id LIMIT 64",
+                (owner, last_command_id),
+            ).fetchall()
+            if not receipts:
+                break
+            for receipt in receipts:
+                metadata = json.loads(receipt["metadata"])
+                metadata["result_redacted"] = True
+                conn.execute(
+                    "UPDATE sync_command_receipts SET metadata = ?, result = NULL "
+                    "WHERE owner_id = ? AND command_id = ?",
+                    (encode(metadata), owner, receipt["command_id"]),
+                )
+            last_command_id = receipts[-1]["command_id"]
         # Removing an old upsert would make that transaction incomplete. Invalidate
         # the feed generation instead; later transports must require a new base.
         conn.execute(
