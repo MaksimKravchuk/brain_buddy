@@ -92,7 +92,11 @@ def task_update_request(
         owner_id,
         key,
         "task.update",
-        {"command_type": "task.update", "body": payload.model_dump(mode="json")},
+        {
+            "command_type": "task.update",
+            "body": payload.model_dump(mode="json"),
+            "fields_set": sorted(payload.model_fields_set),
+        },
         entity_id=task_id,
         route="update_task",
     )
@@ -105,7 +109,11 @@ def task_transition_request(
         owner_id,
         key,
         "task.transition",
-        {"command_type": "task.transition", "body": payload.model_dump(mode="json")},
+        {
+            "command_type": "task.transition",
+            "body": payload.model_dump(mode="json"),
+            "fields_set": sorted(payload.model_fields_set),
+        },
         entity_id=task_id,
         route="transition_task",
     )
@@ -118,7 +126,11 @@ def project_update_request(
         owner_id,
         key,
         "project.update",
-        {"command_type": "project.update", "body": payload.model_dump(mode="json")},
+        {
+            "command_type": "project.update",
+            "body": payload.model_dump(mode="json"),
+            "fields_set": sorted(payload.model_fields_set),
+        },
         entity_id=project_id,
         route="update_project",
     )
@@ -157,7 +169,11 @@ def tag_update_request(
         owner_id,
         key,
         "tag.update",
-        {"command_type": "tag.update", "body": payload.model_dump(mode="json")},
+        {
+            "command_type": "tag.update",
+            "body": payload.model_dump(mode="json"),
+            "fields_set": sorted(payload.model_fields_set),
+        },
         entity_id=tag_id,
         route="update_tag",
     )

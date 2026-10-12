@@ -627,6 +627,8 @@ class LegacyTagCommandHandler:
             "task_id": task_id,
             "body": payload.model_dump(mode="json"),
         }
+        if kind == "subtask" and action == "update":
+            body["fields_set"] = sorted(payload.model_fields_set)
         if kind == "comment" and action == "create":
             body["actor_id"] = kwargs["actor_id"]
         request = CommandRequest.legacy(

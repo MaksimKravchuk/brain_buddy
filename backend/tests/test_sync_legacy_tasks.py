@@ -946,6 +946,124 @@ def test_026_FR_005_renaming_project_preserves_duplicate_name_error(legacy_servi
         assert _count(repo, "sync_command_receipts") == 3
 
 
+def test_026_FR_005_project_update_receipt_distinguishes_omitted_nullable_fields(
+    legacy_service,
+):
+    service, repo, _enabled, _clock = legacy_service
+    project = service.create_project(
+        ProjectCreateRequest(
+            name="Project", color="blue", desired_outcome="Ship safely"
+        ),
+        owner_id=OWNER,
+        idempotency_key="project-create",
+    )
+    original_payload = ProjectUpdateRequest(
+        name="Renamed", expected_revision=project.revision
+    )
+    with allure.step("Replay the same project patch and reject changed field presence"):
+        original = service.update_project(
+            project.id,
+            original_payload,
+            owner_id=OWNER,
+            idempotency_key="project-update",
+        )
+        with sqlite3.connect(repo.db_path) as conn:
+            conn.execute(
+                "UPDATE sync_command_receipts SET result = NULL "
+                "WHERE owner_id = ? AND command_id = ?",
+                (OWNER, _receipt_command_id(repo, "project-update")),
+            )
+        assert (
+            service.update_project(
+                project.id,
+                original_payload,
+                owner_id=OWNER,
+                idempotency_key="project-update",
+            )
+            == original
+        )
+        receipts = _count(repo, "sync_command_receipts")
+        changes = _count(repo, "sync_change_transactions")
+        with pytest.raises(ConflictError):
+            service.update_project(
+                project.id,
+                ProjectUpdateRequest(
+                    name="Renamed",
+                    color=None,
+                    desired_outcome=None,
+                    expected_revision=project.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="project-update",
+            )
+        current = repo.get_project_for_owner(project.id, owner_id=OWNER)
+        assert current == original
+        assert current.color == "blue"
+        assert current.desired_outcome == "Ship safely"
+        assert _count(repo, "sync_command_receipts") == receipts
+        assert _count(repo, "sync_change_transactions") == changes
+
+
+def test_026_FR_005_task_update_receipt_distinguishes_omitted_nullable_fields(
+    legacy_service,
+):
+    service, repo, _enabled, _clock = legacy_service
+    task = service.create_task(
+        TaskCreateRequest(title="Task", details="Keep this detail"),
+        owner_id=OWNER,
+        idempotency_key="task-create",
+    )
+    original_payload = TaskUpdateRequest(
+        title="Renamed", expected_revision=task.revision
+    )
+    with allure.step("Replay the same task patch and reject changed field presence"):
+        original = service.update_task(
+            task.id,
+            original_payload,
+            owner_id=OWNER,
+            idempotency_key="task-update",
+        )
+        with sqlite3.connect(repo.db_path) as conn:
+            conn.execute(
+                "UPDATE sync_command_receipts SET result = NULL "
+                "WHERE owner_id = ? AND command_id = ?",
+                (OWNER, _receipt_command_id(repo, "task-update")),
+            )
+        assert (
+            service.update_task(
+                task.id,
+                original_payload,
+                owner_id=OWNER,
+                idempotency_key="task-update",
+            )
+            == original
+        )
+        receipts = _count(repo, "sync_command_receipts")
+        changes = _count(repo, "sync_change_transactions")
+        with pytest.raises(ConflictError):
+            service.update_task(
+                task.id,
+                TaskUpdateRequest(
+                    title="Renamed",
+                    details=None,
+                    project_id=None,
+                    tag_ids=None,
+                    due_date=None,
+                    priority=None,
+                    waiting_for=None,
+                    new_formulation_id=None,
+                    expected_revision=task.revision,
+                ),
+                owner_id=OWNER,
+                idempotency_key="task-update",
+            )
+        current = service.get_task(task.id, owner_id=OWNER)
+        assert current == original
+        assert current.details == "Keep this detail"
+        assert _count(repo, "sync_command_receipts") == receipts
+        assert _count(repo, "sync_change_transactions") == changes
+
+
 def _seed_expired_legacy_key(service, repo, tag, key: str) -> None:
     repo.save_idempotency(
         owner_id=OWNER,
@@ -1568,6 +1686,46 @@ def test_026_FR_005_legacy_tag_update_uses_owner_receipt_and_feed(legacy_service
                 idempotency_key="update",
             )
         assert _count(repo, "sync_change_transactions") == 2
+
+
+def test_026_FR_005_tag_update_receipt_distinguishes_omitted_nullable_name(
+    legacy_service,
+):
+    service, repo, _enabled, _clock = legacy_service
+    original = service.create_tag(
+        TagCreateRequest(name="@Work"), owner_id=OWNER, idempotency_key="create"
+    )
+    omitted_name = TagUpdateRequest(expected_revision=original.revision)
+
+    with allure.step("Replay omitted name and reject explicit null under the same key"):
+        updated = service.update_tag(
+            original.id, omitted_name, owner_id=OWNER, idempotency_key="tag-update"
+        )
+        assert (
+            service.update_tag(
+                original.id,
+                omitted_name,
+                owner_id=OWNER,
+                idempotency_key="tag-update",
+            )
+            == updated
+        )
+        receipts = _count(repo, "sync_command_receipts")
+        transactions = _count(repo, "sync_change_transactions")
+        records = _count(repo, "sync_change_records")
+
+        with pytest.raises(ConflictError):
+            service.update_tag(
+                original.id,
+                TagUpdateRequest(name=None, expected_revision=original.revision),
+                owner_id=OWNER,
+                idempotency_key="tag-update",
+            )
+
+        assert repo.get_tag_for_owner(original.id, owner_id=OWNER) == updated
+        assert _count(repo, "sync_command_receipts") == receipts
+        assert _count(repo, "sync_change_transactions") == transactions
+        assert _count(repo, "sync_change_records") == records
 
 
 def test_026_FR_005_legacy_tag_update_failure_rolls_back_resource_receipt_and_feed(
