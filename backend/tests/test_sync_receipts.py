@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
-import select
+import os
+import selectors
 import sqlite3
 import subprocess
 import sys
@@ -462,10 +464,15 @@ if sys.argv[2] == "after":
         text=True,
     )
     try:
-        assert select.select([child.stdout], [], [], 20)[
-            0
-        ], "child never reached the crash boundary"
-        assert child.stdout.readline().strip() == "ready"
+        assert child.stdout is not None
+        # Exercise the descriptor range reached by the full backend suite.
+        with (
+            os.fdopen(fcntl.fcntl(child.stdout, fcntl.F_DUPFD, 1024)) as ready_stdout,
+            selectors.DefaultSelector() as selector,
+        ):
+            selector.register(ready_stdout, selectors.EVENT_READ)
+            assert selector.select(timeout=20), "child never reached the crash boundary"
+            assert ready_stdout.readline().strip() == "ready"
         child.kill()
         child.communicate(timeout=10)
     finally:
