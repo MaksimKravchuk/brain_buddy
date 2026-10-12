@@ -86,6 +86,7 @@ jobs:
           python3 -m unittest scripts/test_capture_fly_release_image.py -v
           python3 -m unittest scripts/test_classify_path_risk.py -v
           python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
+          python3 -m unittest scripts/test_select_backend_tests.py -v
           python3 scripts/validate_trunk_delivery.py trunk-ci \
             --ci .github/workflows/ci.yml
           python3 scripts/validate_trunk_delivery.py deploy \
@@ -399,13 +400,96 @@ jobs:
         if: env.RUN == 'true'
         run: lint-imports
 
+      # Test-impact selection (pull requests only). Every push to main records
+      # which test files execute which app/ files (`--cov-context=test`) and
+      # caches that map; a pull request restores the newest one and runs only
+      # the tests on record for the files it changed. The selector narrows the
+      # run for one kind of change alone -- edits inside function bodies of
+      # measured app/*.py files -- and answers ALL for everything else (see
+      # scripts/select_backend_tests.py), so it fails toward running MORE.
+      # Landing pushes never select: main and trunk-candidate/** run the whole
+      # suite and the coverage floor exactly as before.
+      - name: Restore the backend test-impact map
+        if: env.RUN == 'true' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/backend-test-map.json
+          key: backend-test-map-${{ github.event.pull_request.base.sha }}
+          restore-keys: backend-test-map-
+
+      - name: Select the backend tests this change can affect
+        id: select
+        if: env.RUN == 'true'
+        working-directory: .
+        env:
+          MAP: ${{ runner.temp }}/backend-test-map.json
+          # A branch that edits the coverage floor needs the whole suite to
+          # measure against it.
+          FLOOR_TOUCHED: ${{ needs.changes.outputs.floor-backend }}
+        run: |
+          selection="${RUNNER_TEMP}/backend-selected-tests.txt"
+          echo ALL > "${selection}"
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "landing path; running the whole suite"
+          elif [ "${FLOOR_TOUCHED}" = "true" ]; then
+            echo "this branch edits the coverage floor; running the whole suite"
+          elif [ ! -s "${MAP}" ]; then
+            echo "no test-impact map restored; running the whole suite"
+          else
+            map_sha=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_sha"])' "${MAP}")
+            git fetch --no-tags --depth=1 origin "${map_sha}" 2>/dev/null || true
+            python3 scripts/select_backend_tests.py select --map "${MAP}" --repo . > "${selection}"
+          fi
+          if [ "$(head -n 1 "${selection}")" = "ALL" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=selected" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Backend test selection"
+              echo "Ran $(wc -l < "${selection}") test files chosen from the test-impact map:"
+              echo '```'
+              cat "${selection}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "selection=${selection}" >> "$GITHUB_OUTPUT"
+
       - name: Run pytest with coverage and Allure
         if: env.RUN == 'true'
+        env:
+          MODE: ${{ steps.select.outputs.mode }}
+          SELECTION: ${{ steps.select.outputs.selection }}
         run: |
-          pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+          if [ "${MODE}" = "selected" ]; then
+            # A partial run cannot meet the whole-suite 95% bar; the floor is
+            # enforced on the landing path, which always runs everything.
+            mapfile -t tests < "${SELECTION}"
+            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
+              --cov-fail-under=0 "${tests[@]}"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
+              --cov-context=test
+          else
+            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+          fi
+
+      - name: Build the backend test-impact map
+        if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: .
+        run: |
+          python3 scripts/select_backend_tests.py build-map --coverage backend/.coverage \
+            --backend-root backend --source-sha "${BRAIN_BUDDY_CANDIDATE_SHA}" \
+            --output "${RUNNER_TEMP}/backend-test-map.json"
+
+      - name: Save the backend test-impact map
+        if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/backend-test-map.json
+          key: backend-test-map-${{ github.sha }}
 
       - name: Enforce backend coverage floor
-        if: env.RUN == 'true'
+        if: env.RUN == 'true' && steps.select.outputs.mode == 'full'
         working-directory: .
         run: |
           # The floor may only ratchet upward, so a branch that EDITS the floor
