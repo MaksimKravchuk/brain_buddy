@@ -208,6 +208,63 @@ def _changed_lines(diff: str) -> set[int]:
     return lines
 
 
+def _imported_test_modules(source: str) -> set[str] | None:
+    """Test files (``tests/test_x.py``) a test module imports; None if unparsable.
+
+    Tests share helpers by importing other test modules as ``tests.test_x``,
+    ``.test_x`` or ``test_x``; each spelling names a file in ``tests/``.
+    """
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level and not module:
+                # ``from . import test_x``
+                names.extend(alias.name for alias in node.names)
+            else:
+                names.append(module)
+    found = set()
+    for name in names:
+        parts = name.split(".")
+        if parts[0] == "tests":
+            parts = parts[1:]
+        if len(parts) == 1 and parts[0].startswith("test_"):
+            found.add(f"tests/{parts[0]}.py")
+    return found
+
+
+def _consumers_of(
+    changed_tests: set[str],
+    head_tests: set[str],
+    head_source_for: Callable[[str], str],
+) -> set[str]:
+    """Test files that import a changed test file, directly or transitively."""
+
+    imports = {
+        path: _imported_test_modules(head_source_for(f"backend/{path}"))
+        for path in head_tests
+    }
+    reached = set(changed_tests)
+    grew = True
+    while grew:
+        grew = False
+        for path, imported in imports.items():
+            if path in reached:
+                continue
+            # An unparsable test file cannot show it is unaffected.
+            if imported is None or imported & reached:
+                reached.add(path)
+                grew = True
+    return reached - changed_tests
+
+
 def select(
     test_map: dict,
     changes: list[tuple[str, str]],
@@ -225,6 +282,7 @@ def select(
         path: set(functions) for path, functions in test_map["import_executed"].items()
     }
     bridge_users: set[str] = set()
+    changed_tests: set[str] = set()
 
     for status, path in changes:
         if not path.startswith(("backend/", "rust/")):
@@ -240,7 +298,7 @@ def select(
         if path.startswith(TESTS_PREFIX):
             name = Path(path).name
             if name.startswith("test_") and name.endswith(".py"):
-                selected.add(path.removeprefix("backend/"))
+                changed_tests.add(path.removeprefix("backend/"))
                 reasons.append(f"{path}: changed test file")
                 continue
             return None, [f"{path}: shared test support can change every test"]
@@ -299,6 +357,17 @@ def select(
         reasons.append(
             f"{len(bridge_users)} Rust file(s): tests on record for {', '.join(importers)}"
         )
+
+    if changed_tests:
+        selected.update(changed_tests)
+        # Test modules share helpers by importing each other, so a changed
+        # test file can break the tests that import it.
+        consumers = _consumers_of(
+            changed_tests & head_tests, head_tests, head_source_for
+        )
+        if consumers:
+            selected.update(consumers)
+            reasons.append(f"{len(consumers)} test file(s) import a changed test file")
 
     unknown = sorted(head_tests - set(test_map["tests"]))
     if unknown:

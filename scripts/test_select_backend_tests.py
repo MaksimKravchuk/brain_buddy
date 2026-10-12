@@ -229,6 +229,25 @@ class SelectionTests(unittest.TestCase):
         tests, _ = _select([("M", "backend/tests/test_registry.py")])
         self.assertEqual(tests, ["tests/test_registry.py"])
 
+    def test_changed_test_file_brings_the_tests_that_import_it(self) -> None:
+        sources = {
+            "backend/tests/test_sync.py": "from tests.test_registry import Fake\n",
+            "backend/tests/test_api_trees.py": "from .test_sync import helper\n",
+            "backend/tests/test_tree_service.py": "import test_registry\n",
+            "backend/tests/test_rust_bridge.py": "def broken(:\n",
+        }
+        tests, reasons = select(
+            TEST_MAP,
+            [("M", "backend/tests/test_registry.py")],
+            diff_for=lambda _path: "",
+            head_source_for=lambda path: sources.get(path, ""),
+            head_tests=set(HEAD_TESTS),
+            bridge_importers=set(BRIDGE),
+        )
+        # Direct, transitive, every import spelling, and the unparsable file.
+        self.assertEqual(tests, sorted(HEAD_TESTS))
+        self.assertIn("4 test file(s) import a changed test file", reasons)
+
     def test_test_files_the_map_has_not_seen_are_always_selected(self) -> None:
         head = HEAD_TESTS | {"tests/test_brand_new.py"}
         tests, _ = _select([("M", "backend/tests/test_registry.py")], head_tests=head)
