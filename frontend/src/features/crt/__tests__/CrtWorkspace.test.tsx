@@ -1160,6 +1160,8 @@ describe("CrtWorkspace tree lifecycle", () => {
     vi.spyOn(crtApi, "getCrtTree").mockResolvedValue(loaded);
     render(<CrtWorkspace createDraftCoordinator={() => coordinator} />);
     expect(await screen.findByRole("heading", { name: "Recover local draft" })).toBeInTheDocument();
+    // Initial focus marks completion of the modal's keyboard effects.
+    await waitFor(() => expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(await screen.findByText(/Local draft retained/)).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Current Reality Tree canvas" })).toBeInTheDocument();
