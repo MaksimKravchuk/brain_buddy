@@ -158,7 +158,7 @@ package final class MacSyncController {
         let account = workspace.account
         let mode: SignInFlow.Mode = account.map { .signInAgain(email: $0.email, serverURL: $0.serverURL) } ?? .signIn
         signIn = SignInFlow(
-            mode: mode, hasLocalTasks: account == nil && workspace.pendingChangeCount > 0, defaultServer: defaultServer(),
+            mode: mode, hasLocalTasks: account == nil && workspace.hasLocalWorkToMerge, defaultServer: defaultServer(),
             isOnline: { workspace.syncSnapshot.isOnline },
             signIn: { url, email, password, cancellation in
                 try await workspace.signIn(serverURL: url, email: email, password: password, cancellation: cancellation)
