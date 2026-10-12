@@ -430,7 +430,7 @@ jobs:
       # suite and the coverage floor exactly as before.
       - name: Restore the backend test-impact map
         if: env.RUN == 'true' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/backend-test-map.json
           key: backend-test-map-${{ github.event.pull_request.base.sha }}
@@ -502,7 +502,7 @@ jobs:
 
       - name: Save the backend test-impact map
         if: env.RUN == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/backend-test-map.json
           key: backend-test-map-${{ github.sha }}
@@ -1285,14 +1285,14 @@ jobs:
 
       - name: Download the head measurement
         if: env.RUN == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: mutation-gate-artifacts
           path: head-stats
 
       - name: Download the base measurement
         if: env.RUN == 'true' && github.event_name == 'pull_request'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: mutation-base-stats
           path: base-stats
@@ -1720,7 +1720,7 @@ jobs:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Download five native outputs
         if: env.RUN == 'true'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: bb-native-*
           path: cli/target/native-input
@@ -1839,7 +1839,7 @@ jobs:
 
       - name: Download Allure results
         if: steps.aggregate.outputs.run == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: '*-allure-results'
           path: allure-results
