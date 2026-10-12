@@ -688,6 +688,8 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             ).fetchone()
         if row is None:
             return None
+        if row["response_body"].startswith('{"_expired_revision":'):
+            return None
         return IdempotencyRecord(
             key=row["key"],
             command=row["command"],
@@ -745,17 +747,38 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 SELECT key FROM idempotency_records
                 WHERE owner_id = ? AND created_at < ?
                     AND command != 'create_native_inbox_task'
+                    AND json_type(response_body, '$._expired_revision') IS NULL
                 """,
                 (owner_id, cutoff),
             ).fetchall()
             if not rows:
                 return 0
             self._note_write(owner_id, "Idempotency-Key", owner_id)
+            # Child/Smart Add keys still identify one immutable command after
+            # the response expires. Retain only the identity and edit revision;
+            # never retain response text or classification names for replay.
+            conn.execute(
+                """
+                UPDATE idempotency_records
+                SET response_body = json_object('_expired_revision',
+                    CASE WHEN command = 'smart_add_task'
+                        THEN json_extract(response_body, '$.task.revision')
+                        ELSE json_extract(response_body, '$.revision') END)
+                WHERE owner_id = ? AND created_at < ?
+                  AND (command = 'smart_add_task' OR command GLOB '*_subtask:*'
+                       OR command GLOB '*_comment:*')
+                  AND json_type(response_body, '$._expired_revision') IS NULL
+                """,
+                (owner_id, cutoff),
+            )
             conn.execute(
                 """
                 DELETE FROM idempotency_records
                 WHERE owner_id = ? AND created_at < ?
                     AND command != 'create_native_inbox_task'
+                    AND command != 'smart_add_task'
+                    AND command NOT GLOB '*_subtask:*'
+                    AND command NOT GLOB '*_comment:*'
                 """,
                 (owner_id, cutoff),
             )
@@ -769,6 +792,7 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
                 """
                 SELECT key, command, request_hash, resource_id, response_body, created_at
                 FROM idempotency_records WHERE owner_id = ?
+                  AND json_type(response_body, '$._expired_revision') IS NULL
                 """,
                 (owner_id,),
             ).fetchall()

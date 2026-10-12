@@ -391,21 +391,42 @@ class RustTaskFacade:
         )
         return change.tasks[0]
 
-    def update_task(
+    def decide_create_task(
         self,
-        task: TaskDocument,
-        payload: TaskUpdateRequest,
+        payload: TaskCreateRequest,
         *,
         owner_id: str,
         now: datetime,
-    ) -> TaskDocument:
-        """``PATCH /tasks/{id}``; the caller has loaded ``task`` (owner-scoped)."""
+        entity_id: str,
+    ) -> tuple[Decision, TaskDocument | None]:
+        same_list = [
+            task
+            for task in self._repo.list_for_owner(owner_id=owner_id)
+            if task.state == payload.state
+        ]
+        decision = self._call(
+            "task.create",
+            entity_id,
+            payload.model_dump(mode="json"),
+            owner_id=owner_id,
+            now=now,
+            read_set=self._task_read_set(
+                owner_id,
+                tasks=same_list,
+                project_ids=[payload.project_id],
+                tag_ids=payload.tag_ids,
+            ),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        return decision, self._decode(decision, owner_id, now, {}).tasks[0]
 
+    @staticmethod
+    def _update_task_parts(
+        task: TaskDocument, payload: TaskUpdateRequest
+    ) -> tuple[dict[str, Any], ValidationFailure | None, bool]:
         fields = payload.model_fields_set
         body: dict[str, Any] = {}
-        # A null title or priority is a request error that Python reports after
-        # the revision check, so it is withheld from the core and raised once
-        # the core has settled the revision.
         request_error: ValidationFailure | None = None
         if "title" in fields:
             if payload.title is None:
@@ -426,7 +447,6 @@ class RustTaskFacade:
             )
         if payload.new_formulation_id is not None:
             body["new_formulation_id"] = payload.new_formulation_id
-        requested_tags: list[str] | None = None
         duplicate_tags = False
         if "tag_ids" in fields:
             requested = list(payload.tag_ids or [])
@@ -436,6 +456,41 @@ class RustTaskFacade:
                 "add_tag_ids": [t for t in requested_tags if t not in task.tag_ids],
                 "remove_tag_ids": [t for t in task.tag_ids if t not in requested_tags],
             }
+        return body, request_error, duplicate_tags
+
+    def update_task(
+        self,
+        task: TaskDocument,
+        payload: TaskUpdateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> TaskDocument:
+        """``PATCH /tasks/{id}``; the caller has loaded ``task`` (owner-scoped)."""
+
+        _, request_error, duplicate_tags = self._update_task_parts(task, payload)
+        decision, updated = self.decide_update_task(
+            task, payload, owner_id=owner_id, now=now
+        )
+        if decision.refusal is not None:
+            raise _ordered_refusal(decision.refusal, request_error, duplicate_tags)
+        assert updated is not None
+        return updated
+
+    def decide_update_task(
+        self,
+        task: TaskDocument,
+        payload: TaskUpdateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, TaskDocument | None]:
+        """Return the Rust decision and decoded task without persisting it."""
+        body, request_error, duplicate_tags = self._update_task_parts(task, payload)
+        fields = payload.model_fields_set
+        requested_tags = (
+            list(dict.fromkeys(payload.tag_ids or [])) if "tag_ids" in fields else None
+        )
         decision = self._call(
             "task.update",
             task.id,
@@ -454,7 +509,7 @@ class RustTaskFacade:
             expected=("task", task.id, payload.expected_revision),
         )
         if decision.refusal is not None:
-            raise _ordered_refusal(decision.refusal, request_error, duplicate_tags)
+            return decision, None
         if request_error is not None:
             raise request_error
         if duplicate_tags:
@@ -464,7 +519,7 @@ class RustTaskFacade:
             # The legacy request names the stored order; the core settles the
             # membership and the adapter keeps the request's order.
             updated = updated.model_copy(update={"tag_ids": requested_tags})
-        return updated
+        return decision, updated
 
     def transition_task(
         self,
@@ -474,6 +529,23 @@ class RustTaskFacade:
         owner_id: str,
         now: datetime,
     ) -> TransitionResult:
+        decision, result = self.decide_transition_task(
+            task, payload, owner_id=owner_id, now=now
+        )
+        if decision.refusal is not None:
+            raise _refused(decision.refusal, payload.action)
+        assert result is not None
+        return result
+
+    def decide_transition_task(
+        self,
+        task: TaskDocument,
+        payload: TaskTransitionRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, TransitionResult | None]:
+        """Return the Rust transition decision and decoded outcome only."""
         body: dict[str, Any] = {"action": payload.action}
         for name in ("to_state", "waiting_for", "new_formulation_id"):
             value = getattr(payload, name)
@@ -485,7 +557,7 @@ class RustTaskFacade:
         stored_ack = self._park_ack_of(task, owner_id)
         if stored_ack is not None:
             read_set["park_acks"] = [_encode_park_ack(stored_ack)]
-        change = self._decide(
+        decision = self._call(
             "task.transition",
             task.id,
             body,
@@ -493,10 +565,10 @@ class RustTaskFacade:
             now=now,
             read_set=read_set,
             expected=("task", task.id, payload.expected_revision),
-            action=payload.action,
-            before={task.id: task},
-            park_ack=stored_ack,
         )
+        if decision.refusal is not None:
+            return decision, None
+        change = self._decode(decision, owner_id, now, {task.id: task}, stored_ack)
         updated = change.tasks[0]
         if (
             not change.park_acks
@@ -511,7 +583,7 @@ class RustTaskFacade:
                 task.id,
                 task.parked.formulation_id,
             )
-        return TransitionResult(
+        return decision, TransitionResult(
             updated, change.park_acks[0] if change.park_acks else None
         )
 
@@ -532,6 +604,28 @@ class RustTaskFacade:
             attempted_name=display_project_name(payload.name),
         )
         return change.projects[0]
+
+    def decide_create_project(
+        self,
+        payload: ProjectCreateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+        entity_id: str,
+    ) -> tuple[Decision, ProjectDocument | None]:
+        decision = self._call(
+            "project.create",
+            entity_id,
+            payload.model_dump(mode="json"),
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(
+                projects=self._repo.list_projects_for_owner(owner_id=owner_id)
+            ),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        return decision, self._decode(decision, owner_id, now, {}).projects[0]
 
     def update_project(
         self,
@@ -563,6 +657,39 @@ class RustTaskFacade:
         )
         return change.projects[0]
 
+    def decide_update_project(
+        self,
+        project: ProjectDocument,
+        payload: ProjectUpdateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, ProjectDocument | None]:
+        fields = payload.model_fields_set
+        body: dict[str, Any] = {}
+        if payload.name is not None:
+            body["name"] = payload.name
+        for name in ("color", "desired_outcome"):
+            if name in fields:
+                body[name] = getattr(payload, name)
+        decision = self._call(
+            "project.update",
+            project.id,
+            body,
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(
+                projects=self._repo.list_projects_for_owner(owner_id=owner_id)
+            ),
+            expected=("project", project.id, payload.expected_revision),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        return (
+            decision,
+            self._decode(decision, owner_id, now, {project.id: project}).projects[0],
+        )
+
     def archive_project(
         self,
         project: ProjectDocument,
@@ -582,6 +709,30 @@ class RustTaskFacade:
             before={project.id: project},
         )
         return change.projects[0]
+
+    def decide_archive_project(
+        self,
+        project: ProjectDocument,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, ProjectDocument | None]:
+        decision = self._call(
+            "project.archive",
+            project.id,
+            {},
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(projects=[project]),
+            expected=("project", project.id, payload.expected_revision),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        return (
+            decision,
+            self._decode(decision, owner_id, now, {project.id: project}).projects[0],
+        )
 
     def unarchive_project(
         self,
@@ -607,6 +758,30 @@ class RustTaskFacade:
             before={project.id: project},
         )
         return None if change.no_op else change.projects[0]
+
+    def decide_unarchive_project(
+        self,
+        project: ProjectDocument,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, ProjectDocument | None]:
+        decision = self._call(
+            "project.unarchive",
+            project.id,
+            {},
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(
+                projects=self._repo.list_projects_for_owner(owner_id=owner_id)
+            ),
+            expected=("project", project.id, payload.expected_revision),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        change = self._decode(decision, owner_id, now, {project.id: project})
+        return decision, project if change.no_op else change.projects[0]
 
     # ------------------------------------------------------------------- tags
 
@@ -670,6 +845,29 @@ class RustTaskFacade:
         )
         return change.tags[0]
 
+    def decide_update_tag(
+        self,
+        tag: TagDocument,
+        payload: TagUpdateRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, TagDocument | None]:
+        decision = self._call(
+            "tag.update",
+            tag.id,
+            {} if payload.name is None else {"name": payload.name},
+            owner_id=owner_id,
+            now=now,
+            read_set=self._organization_read_set(
+                tags=self._repo.list_tags_for_owner(owner_id=owner_id)
+            ),
+            expected=("tag", tag.id, payload.expected_revision),
+        )
+        if decision.refusal is not None:
+            return decision, None
+        return decision, self._decode(decision, owner_id, now, {tag.id: tag}).tags[0]
+
     def delete_tag(
         self,
         tag: TagDocument,
@@ -678,6 +876,22 @@ class RustTaskFacade:
         owner_id: str,
         now: datetime,
     ) -> TagDeleteResult:
+        decision, deleted = self.decide_delete_tag(
+            tag, payload, owner_id=owner_id, now=now
+        )
+        if decision.refusal is not None:
+            raise _refused(decision.refusal)
+        assert deleted is not None
+        return deleted
+
+    def decide_delete_tag(
+        self,
+        tag: TagDocument,
+        payload: ExpectedRevisionRequest,
+        *,
+        owner_id: str,
+        now: datetime,
+    ) -> tuple[Decision, TagDeleteResult | None]:
         holders = [
             task
             for task in self._repo.list_for_owner(owner_id=owner_id)
@@ -685,7 +899,7 @@ class RustTaskFacade:
         ]
         read_set = self._organization_read_set(tags=[tag])
         read_set["tasks"] = {task.id: encode_task(task) for task in holders}
-        change = self._decide(
+        decision = self._call(
             "tag.delete",
             tag.id,
             {},
@@ -693,9 +907,16 @@ class RustTaskFacade:
             now=now,
             read_set=read_set,
             expected=("tag", tag.id, payload.expected_revision),
-            before={tag.id: tag, **{task.id: task for task in holders}},
         )
-        return TagDeleteResult(change.tags[0], change.tasks)
+        if decision.refusal is not None:
+            return decision, None
+        change = self._decode(
+            decision,
+            owner_id,
+            now,
+            {tag.id: tag, **{task.id: task for task in holders}},
+        )
+        return decision, TagDeleteResult(change.tags[0], change.tasks)
 
     # --------------------------------------------------------------- internals
 

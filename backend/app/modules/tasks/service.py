@@ -159,9 +159,25 @@ def serialized_write[Writer: SerializedWriter, **P, Result](
         reject_caller_origin(kwargs)
         dispatch = getattr(service, "_sync_dispatch", None)
         if dispatch is not None:
-            result = dispatch(command.__name__, args, kwargs)
-            if result is not _NOT_SYNC_DISPATCHED:
-                return cast(Result, result)
+            # The flag decision and fallback must not race a receipt commit.
+            with service.task_repo.writer_guard():
+                try:
+                    result = dispatch(command.__name__, args, kwargs, command)
+                finally:
+                    # Raw legacy child/Smart Add writers also save response
+                    # bodies; receipt-only traffic must not keep them forever.
+                    service.task_repo.purge_expired_idempotency(
+                        owner_id=cast(str, kwargs["owner_id"]), now=service.clock()
+                    )
+                if result is not _NOT_SYNC_DISPATCHED:
+                    return cast(Result, result)
+                owner_id = cast(str, kwargs["owner_id"])
+                idempotency_key = cast(str, kwargs["idempotency_key"])
+                with owner_write_lock(service.task_repo, owner_id):
+                    service._reconcile_idempotent_result(
+                        owner_id=owner_id, key=idempotency_key
+                    )
+                    return command(service, *args, **kwargs)
         owner_id = cast(str, kwargs["owner_id"])
         idempotency_key = cast(str, kwargs["idempotency_key"])
         with owner_write_lock(service.task_repo, owner_id):
@@ -257,21 +273,177 @@ class TaskService:
         return facade if self._rust_core_enabled(owner_id) else None
 
     def _sync_dispatch(
-        self, command: str, args: tuple[object, ...], kwargs: dict[str, object]
+        self,
+        command: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        raw_command: Callable[..., object],
     ) -> object:
         """Dispatch only the opted-in legacy command family before old repair."""
         handler = self._legacy_tag_handler
-        if command != "create_tag" or handler is None:
+        if (
+            command
+            not in {
+                "create_tag",
+                "update_tag",
+                "delete_tag",
+                "create_project",
+                "update_project",
+                "archive_project",
+                "unarchive_project",
+                "create_task_result",
+                "update_task_result",
+                "transition_task_result",
+                "create_subtask",
+                "update_subtask",
+                "transition_subtask",
+                "create_comment",
+                "update_comment",
+                "smart_add_task",
+            }
+            or handler is None
+            or (
+                self._rust(cast(str, kwargs["owner_id"])) is None
+                and not handler.has_legacy_key(
+                    cast(str, kwargs["owner_id"]),
+                    cast(str, kwargs["idempotency_key"]),
+                    self.clock(),
+                )
+            )
+        ):
             return _NOT_SYNC_DISPATCHED
-        if self._rust(cast(str, kwargs["owner_id"])) is None:
-            return _NOT_SYNC_DISPATCHED
-        return handler.create_tag(
+        handler.reject_redacted_legacy_conflict(
+            cast(str, kwargs["owner_id"]),
+            cast(str, kwargs["idempotency_key"]),
+            command,
+        )
+        if command in {
+            "create_task_result",
+            "update_task_result",
+            "transition_task_result",
+        }:
+            return self._sync_task_dispatch(command, args, kwargs)
+        if command in {
+            "create_project",
+            "update_project",
+            "archive_project",
+            "unarchive_project",
+        }:
+            return self._sync_project_dispatch(command, args, kwargs)
+        if command in {
+            "create_subtask",
+            "update_subtask",
+            "transition_subtask",
+            "create_comment",
+            "update_comment",
+        }:
+            return handler.run_legacy_child(
+                self, command, args, kwargs, raw_command, now=self.clock()
+            )
+        if command == "smart_add_task":
+            return handler.run_legacy_smart_add(
+                self,
+                cast(SmartAddTaskCreateRequest, args[0]),
+                kwargs,
+                raw_command,
+                now=self.clock(),
+            )
+        if command == "create_tag":
+            return handler.create_tag(
+                self,
+                cast(TagCreateRequest, args[0]),
+                owner_id=cast(str, kwargs["owner_id"]),
+                idempotency_key=cast(str, kwargs["idempotency_key"]),
+                now=self.clock(),
+            )
+        if command == "update_tag":
+            return handler.update_tag(
+                self,
+                cast(str, args[0]),
+                cast(TagUpdateRequest, args[1]),
+                owner_id=cast(str, kwargs["owner_id"]),
+                idempotency_key=cast(str, kwargs["idempotency_key"]),
+                now=self.clock(),
+            )
+        return handler.delete_tag(
             self,
-            cast(TagCreateRequest, args[0]),
+            cast(str, args[0]),
+            cast(ExpectedRevisionRequest, args[1]),
             owner_id=cast(str, kwargs["owner_id"]),
             idempotency_key=cast(str, kwargs["idempotency_key"]),
             now=self.clock(),
         )
+
+    def _sync_project_dispatch(
+        self, command: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> ProjectDocument:
+        handler = self._legacy_tag_handler
+        assert handler is not None
+        owner_id = cast(str, kwargs["owner_id"])
+        key = cast(str, kwargs["idempotency_key"])
+        if command == "create_project":
+            return handler.create_project(
+                self,
+                cast(ProjectCreateRequest, args[0]),
+                owner_id=owner_id,
+                idempotency_key=key,
+                now=self.clock(),
+            )
+        project_id = cast(str, args[0])
+        if command == "update_project":
+            return handler.update_project(
+                self,
+                project_id,
+                cast(ProjectUpdateRequest, args[1]),
+                owner_id=owner_id,
+                idempotency_key=key,
+                now=self.clock(),
+            )
+        payload = cast(ExpectedRevisionRequest, args[1])
+        if command == "archive_project":
+            return handler.archive_project(
+                self,
+                project_id,
+                payload,
+                owner_id=owner_id,
+                idempotency_key=key,
+                now=self.clock(),
+            )
+        return handler.unarchive_project(
+            self,
+            project_id,
+            payload,
+            owner_id=owner_id,
+            idempotency_key=key,
+            now=self.clock(),
+        )
+
+    def _sync_task_dispatch(
+        self, command: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> TaskCommandResult:
+        handler = self._legacy_tag_handler
+        assert handler is not None
+        owner_id = cast(str, kwargs["owner_id"])
+        key = cast(str, kwargs["idempotency_key"])
+        if command == "create_task_result":
+            task, settings = handler.create_task(
+                self,
+                cast(TaskCreateRequest, args[0]),
+                owner_id=owner_id,
+                idempotency_key=key,
+                now=self.clock(),
+            )
+        else:
+            task, settings = handler.mutate_task(
+                self,
+                "update" if command == "update_task_result" else "transition",
+                cast(str, args[0]),
+                cast(TaskUpdateRequest | TaskTransitionRequest, args[1]),
+                owner_id=owner_id,
+                idempotency_key=key,
+                now=self.clock(),
+            )
+        return TaskCommandResult(task, settings)
 
     @_serialized_write
     def create_project(
@@ -878,11 +1050,7 @@ class TaskService:
             updated = rust.update_task(
                 task, payload, owner_id=owner_id, now=self.clock()
             )
-            if task.state == "next" and updated.due_date != task.due_date:
-                # The Python rule logs this where it moves the floor (FR-046).
-                review_logger.info(
-                    "review_due_date_moved owner_id=%s task_id=%s", owner_id, task.id
-                )
+            self._log_due_date_move(task, updated, owner_id=owner_id)
         else:
             updated = self._python_updated_task(task, payload, owner_id=owner_id)
         snapshot = self.formulation_settings(owner_id)
@@ -897,6 +1065,15 @@ class TaskService:
         )
         self.task_repo.save(updated)
         return TaskCommandResult(updated, snapshot)
+
+    @staticmethod
+    def _log_due_date_move(
+        before: TaskDocument, after: TaskDocument, *, owner_id: str
+    ) -> None:
+        if before.state == "next" and after.due_date != before.due_date:
+            review_logger.info(
+                "review_due_date_moved owner_id=%s task_id=%s", owner_id, before.id
+            )
 
     def _python_updated_task(
         self, task: TaskDocument, payload: TaskUpdateRequest, *, owner_id: str

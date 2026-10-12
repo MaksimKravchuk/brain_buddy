@@ -324,6 +324,13 @@ class CommandReceipts[ConnectionT](ABC):
             return None
         if fingerprint is not None and fingerprint != row["fingerprint"]:
             raise SyncCommandError("IDEMPOTENCY_KEY_REUSED")
+        if (
+            datetime.fromisoformat(row["expires_at"]) <= now
+            and row["result"] is not None
+        ):
+            self._redact_result(unit, command_id)
+            row = self._receipt_row(unit, command_id)
+            assert row is not None
         body = json.loads(row["metadata"])
         had_result = body.pop("_had_result")
         # A matching legacy retry needs the original typed refusal for the
@@ -344,6 +351,12 @@ class CommandReceipts[ConnectionT](ABC):
     def _receipt_row(
         self, unit: OwnerUnitOfWork[ConnectionT], command_id: str
     ) -> StorageRow | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _redact_result(
+        self, unit: OwnerUnitOfWork[ConnectionT], command_id: str
+    ) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -379,7 +392,10 @@ class CommandReceipts[ConnectionT](ABC):
             command,
             metadata,
             wire["result"],
-            expires_at=command.now + timedelta(hours=24),
+            expires_at=min(
+                command.now + timedelta(hours=24),
+                command.source_expires_at or command.now + timedelta(hours=24),
+            ),
         )
         return wire
 
@@ -415,6 +431,8 @@ class ReceiptCommand[ConnectionT = Connection]:
             now,
         )
         self.replay = replay
+        # Adoption may copy a still-live legacy result, but not renew its TTL.
+        self.source_expires_at: datetime | None = None
         self._terminal = replay is not None
         self._failed = False
         self._activity = unit.activity
@@ -485,6 +503,7 @@ class ReceiptCommand[ConnectionT = Connection]:
         result: dict[str, Any] | None = None,
         id_bindings: Sequence[dict[str, Any]] = (),
         result_versions: Sequence[dict[str, Any]] = (),
+        source_expires_at: datetime | None = None,
     ) -> dict[str, Any]:
         """Commit Rust-decided facts plus an already-public application result.
 
@@ -492,6 +511,7 @@ class ReceiptCommand[ConnectionT = Connection]:
         or exception. Feed changes separately use the core's Record.public().
         """
         self._unseen()
+        self.source_expires_at = source_expires_at
         # Poison before the first persistence operation. A caller catching a
         # codec/SQL failure cannot retry finalization and commit partial rows.
         self._failed = True
@@ -583,6 +603,17 @@ class ReceiptCommand[ConnectionT = Connection]:
         self._activity = self.unit.activity
         return result
 
+    def accept_legacy_projection_repair(self) -> None:
+        """Allow the old child read-repair without reapplying the command effect."""
+        if (
+            self.request.origin != "legacy"
+            or self.replay is None
+            or self.replay["outcome"] != "accepted"
+            or self.unit.activity != self._activity + 1
+        ):
+            raise SyncCommandError("COMMAND_INTEGRITY")
+        self._activity = self.unit.activity
+
     def _complete(self) -> None:
         if self._failed:
             raise SyncCommandError("COMMAND_FINALIZATION_FAILED")
@@ -638,6 +669,15 @@ class ReceiptStore(CommandReceipts[Connection]):
             (unit.owner_id, command_id),
         ).fetchone()
         return row
+
+    def _redact_result(
+        self, unit: OwnerUnitOfWork[Connection], command_id: str
+    ) -> None:
+        unit.connection.execute(
+            "UPDATE sync_command_receipts SET result = NULL "
+            "WHERE owner_id = ? AND command_id = ?",
+            (unit.owner_id, command_id),
+        )
 
     def _write_receipt(
         self,
