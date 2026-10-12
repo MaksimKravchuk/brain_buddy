@@ -259,7 +259,7 @@ jobs:
       # Same discovery failure as the aggregate in `ci.yml`, in the workflow
       # whose entire output is the report.
       - name: Download report-only Allure evidence
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           pattern: "*-allure-results"
           path: mutation-allure-results
