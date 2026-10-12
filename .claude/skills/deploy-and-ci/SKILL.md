@@ -22,9 +22,14 @@ Runbooks: `docs/fly-deployment.md`, `docs/fly-review-apps.md`.
 
 `.github/workflows/ci.yml` runs as parallel lanes joined only by `full-ci`: one
 per service (`backend`, `frontend` — each its own
-lint/type/unit/integration — and the native app's `ios-kit` and `ios-app`, all
-path filtered by the `changes` job), plus `workflow-lint`, `spec-kit`, the
-mutation gate, `docker` and `e2e`. `ios.yml` only uploads to TestFlight, after
+lint/type/unit/integration — the native apps' `ios-kit`, `ios-app` and
+`macos-app`, the `rust` core and the five `cli-native` targets, all path
+filtered by the `changes` job), plus `workflow-lint`, `spec-kit`, the
+mutation gate, `docker` and `e2e`. A filtered lane still runs and skips its
+steps, so `full-ci` never sees "skipped"; a macOS or Windows lane with nothing
+to do takes the Linux no-op runner. Only `.github/`, `scripts/` and the
+`Makefile` widen a pull request to every lane; `compose.yaml` is exercised by
+`e2e` alone. Landing pushes always run everything. `ios.yml` only uploads to TestFlight, after
 CI has passed on `main`.
 
 An edge earns its place for one of three reasons only:

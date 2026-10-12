@@ -672,12 +672,14 @@ CANDIDATE_VERIFY_COMMAND = 'test "$(git rev-parse HEAD)" = "$BRAIN_BUDDY_CANDIDA
 # output reads. The Mac filter names the shared kit because the Mac links it
 # (021-mac-sync): a kit change must rebuild the Mac, and ios-app no longer
 # builds it on the kit's behalf. It also names rust/, because the Rust bridge
-# the kit links is built from the whole workspace (026-rust-core-sync).
+# the kit links is built from the whole workspace (026-rust-core-sync), and
+# ios/scripts/, because the Mac lane runs the bridge and Xcode-selection scripts
+# kept there.
 CHANGED_STACK_DECISION_LINES = {
     "macos": (
         ("macos=true",),
         (
-            r"""printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust)/' """
+            r"""printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|ios/scripts|rust)/' """
             "|| macos=false",
         ),
         # Inside the step's `{ ... } >> "$GITHUB_OUTPUT"` group, or on its own.
@@ -935,6 +937,12 @@ LANE_DEPENDENCY_LIMITS = {
     # The shared Rust core (feature 026) builds from rust/ alone: it reads only
     # the changed-stack decision and feeds no other lane yet.
     "rust": {"changes"},
+    # The CLI's native targets read only the changed-stack decision (cli/, and
+    # the backend for the Linux journey target). The release aggregation also
+    # reads it, because it consumes all five native outputs and they only exist
+    # when the CLI itself changed.
+    "cli-native": {"changes"},
+    "cli-artifacts": {"changes", "cli-native"},
     # The whole-stack lane. It consumes nothing the service lanes produce, but
     # it may wait for them so a failing linter or unit test stops the run before
     # anything pays to boot the stack. It may wait for NOTHING ELSE: not the
