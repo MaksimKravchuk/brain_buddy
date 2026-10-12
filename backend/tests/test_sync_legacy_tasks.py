@@ -4081,3 +4081,261 @@ def test_026_FR_005_old_child_update_key_adopts_without_second_mutation(legacy_s
         )
         assert _count(repo, "sync_command_receipts") == 3
         assert _count(repo, "sync_change_transactions") == 2
+
+
+_LEGACY_WRITERS = (
+    "create_tag",
+    "update_tag",
+    "delete_tag",
+    "create_project",
+    "update_project",
+    "archive_project",
+    "unarchive_project",
+    "create_task",
+    "update_task",
+    "transition_task",
+    "create_subtask",
+    "update_subtask",
+    "transition_subtask",
+    "create_comment",
+    "update_comment",
+    "smart_add_task",
+)
+
+
+class _WriterMatrix:
+    """One valid call per legacy TaskService writer, each on its own target."""
+
+    def __init__(self, service: TaskService, repo: TaskRepository) -> None:
+        self.service = service
+        self.repo = repo
+        self._variant = 0
+        self._frozen: dict[tuple[str, int], int] = {}
+        create = service.create_task
+        self.parent = create(
+            TaskCreateRequest(title="Parent"), owner_id=OWNER, idempotency_key="s-p"
+        )
+        self.tag_update = self._tag("Update", "s-tu")
+        self.tag_delete = self._tag("Delete", "s-td")
+        self.project_update = self._project("Update", "s-pu")
+        self.project_archive = self._project("Archive", "s-pa")
+        unarchive = self._project("Unarchive", "s-pn")
+        service.archive_project(
+            unarchive.id,
+            ExpectedRevisionRequest(expected_revision=unarchive.revision),
+            owner_id=OWNER,
+            idempotency_key="s-pn-archive",
+        )
+        self.project_unarchive = unarchive
+        self.task_update = create(
+            TaskCreateRequest(title="Edit"), owner_id=OWNER, idempotency_key="s-tku"
+        )
+        self.task_transition = create(
+            TaskCreateRequest(title="Move"), owner_id=OWNER, idempotency_key="s-tkt"
+        )
+        self.subtask_update = self._subtask("s-su")
+        self.subtask_transition = self._subtask("s-st")
+        self.comment_update = service.create_comment(
+            self.parent.id,
+            TaskCommentCreateRequest(body="Comment"),
+            owner_id=OWNER,
+            actor_id=OWNER,
+            idempotency_key="s-cu",
+        )
+
+    def _tag(self, name: str, key: str):
+        return self.service.create_tag(
+            TagCreateRequest(name=f"@{name}"), owner_id=OWNER, idempotency_key=key
+        )
+
+    def _project(self, name: str, key: str):
+        return self.service.create_project(
+            ProjectCreateRequest(name=name), owner_id=OWNER, idempotency_key=key
+        )
+
+    def _subtask(self, key: str):
+        return self.service.create_subtask(
+            self.parent.id,
+            TaskSubtaskCreateRequest(title=key),
+            owner_id=OWNER,
+            idempotency_key=key,
+        )
+
+    def _revision(self, getter, entity_id: str) -> int:
+        """The expected revision, frozen per body variant so retries are identical."""
+        cache_key = (entity_id, self._variant)
+        if cache_key not in self._frozen:
+            try:
+                self._frozen[cache_key] = getter(entity_id).revision
+            except NotFoundError:
+                self._frozen[cache_key] = 1
+        return self._frozen[cache_key]
+
+    def snapshot(self) -> dict[str, int]:
+        return {
+            "receipts": _count(self.repo, "sync_command_receipts"),
+            "transactions": _count(self.repo, "sync_change_transactions"),
+            "records": _count(self.repo, "sync_change_records"),
+            "tags": len(self.repo.list_tags_for_owner(owner_id=OWNER)),
+            "tasks": len(self.repo.list_for_owner(owner_id=OWNER)),
+        }
+
+    def call(self, name: str, key: str, variant: int):  # noqa: C901, PLR0911, PLR0912
+        """Run writer ``name``; a different ``variant`` is a different body."""
+        s = self.service
+        self._variant = variant
+        kw = {"owner_id": OWNER, "idempotency_key": key}
+        label = f"V{variant}"
+        repo, parent = self.repo, self.parent
+        if name == "create_tag":
+            return s.create_tag(TagCreateRequest(name=f"@New{label}"), **kw)
+        if name == "update_tag":
+            rev = self._revision(
+                lambda i: repo.get_tag_for_owner(i, owner_id=OWNER),
+                self.tag_update.id,
+            )
+            return s.update_tag(
+                self.tag_update.id,
+                TagUpdateRequest(name=f"@Renamed{label}", expected_revision=rev),
+                **kw,
+            )
+        if name == "delete_tag":
+            rev = self._revision(
+                lambda i: repo.get_tag_for_owner(i, owner_id=OWNER),
+                self.tag_delete.id,
+            )
+            return s.delete_tag(
+                self.tag_delete.id, ExpectedRevisionRequest(expected_revision=rev), **kw
+            )
+        if name == "create_project":
+            return s.create_project(ProjectCreateRequest(name=f"New {label}"), **kw)
+        project_ids = {
+            "update_project": self.project_update,
+            "archive_project": self.project_archive,
+            "unarchive_project": self.project_unarchive,
+        }
+        if name in project_ids:
+            pid = project_ids[name].id
+            rev = self._revision(
+                lambda i: repo.get_project_for_owner(i, owner_id=OWNER), pid
+            )
+            if name == "update_project":
+                return s.update_project(
+                    pid,
+                    ProjectUpdateRequest(
+                        name=f"Renamed {label}", expected_revision=rev
+                    ),
+                    **kw,
+                )
+            payload = ExpectedRevisionRequest(expected_revision=rev)
+            return getattr(s, name)(pid, payload, **kw)
+        if name == "create_task":
+            return s.create_task(TaskCreateRequest(title=f"New {label}"), **kw)
+        if name in {"update_task", "transition_task"}:
+            task = self.task_update if name == "update_task" else self.task_transition
+            rev = self._revision(
+                lambda i: repo.get_for_owner(i, owner_id=OWNER), task.id
+            )
+            if name == "update_task":
+                return s.update_task(
+                    task.id,
+                    TaskUpdateRequest(title=f"Edited {label}", expected_revision=rev),
+                    **kw,
+                )
+            return s.transition_task(
+                task.id,
+                TaskTransitionRequest(
+                    action="complete" if variant == 0 else "cancel",
+                    expected_revision=rev,
+                ),
+                **kw,
+            )
+        if name == "create_subtask":
+            return s.create_subtask(
+                parent.id, TaskSubtaskCreateRequest(title=f"Child {label}"), **kw
+            )
+        if name in {"update_subtask", "transition_subtask"}:
+            sub = (
+                self.subtask_update
+                if name == "update_subtask"
+                else self.subtask_transition
+            )
+            rev = self._revision(
+                lambda i: repo.get_subtask_for_owner(
+                    i, owner_id=OWNER, task_id=parent.id
+                ),
+                sub.id,
+            )
+            if name == "update_subtask":
+                return s.update_subtask(
+                    parent.id,
+                    sub.id,
+                    TaskSubtaskUpdateRequest(
+                        title=f"Edited {label}", expected_revision=rev
+                    ),
+                    **kw,
+                )
+            return s.transition_subtask(
+                parent.id,
+                sub.id,
+                TaskSubtaskTransitionRequest(
+                    action="complete" if variant == 0 else "cancel",
+                    expected_revision=rev,
+                ),
+                **kw,
+            )
+        if name == "create_comment":
+            return s.create_comment(
+                parent.id,
+                TaskCommentCreateRequest(body=f"Body {label}"),
+                actor_id=OWNER,
+                **kw,
+            )
+        if name == "update_comment":
+            rev = self._revision(
+                lambda i: repo.get_comment_for_owner(
+                    i, owner_id=OWNER, task_id=parent.id
+                ),
+                self.comment_update.id,
+            )
+            return s.update_comment(
+                parent.id,
+                self.comment_update.id,
+                TaskCommentUpdateRequest(body=f"Edited {label}", expected_revision=rev),
+                **kw,
+            )
+        assert name == "smart_add_task"
+        return s.smart_add_task(SmartAddTaskCreateRequest(title=f"Smart {label}"), **kw)
+
+
+@pytest.mark.parametrize("first", _LEGACY_WRITERS)
+def test_026_FR_014_every_legacy_writer_owns_its_key_across_operations(
+    legacy_service, first
+):
+    service, repo, _enabled, _clock = legacy_service
+    matrix = _WriterMatrix(service, repo)
+    key = "shared-legacy-key"
+
+    with allure.step(f"{first} publishes exactly one receipt and feed transaction"):
+        before = matrix.snapshot()
+        original = matrix.call(first, key, 0)
+        after = matrix.snapshot()
+        assert after["receipts"] == before["receipts"] + 1
+        assert after["transactions"] == before["transactions"] + 1
+
+    with allure.step("An identical retry replays the original result"):
+        assert matrix.call(first, key, 0) == original
+        assert matrix.snapshot() == after
+
+    with allure.step("Changing the body under the same owner key is a conflict"):
+        with pytest.raises(ConflictError):
+            matrix.call(first, key, 1)
+        assert matrix.snapshot() == after
+
+    for other in _LEGACY_WRITERS:
+        if other == first:
+            continue
+        with allure.step(f"{other} cannot reuse the {first} key"):
+            with pytest.raises(ConflictError):
+                matrix.call(other, key, 1)
+            assert matrix.snapshot() == after
