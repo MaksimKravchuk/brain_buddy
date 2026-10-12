@@ -131,8 +131,10 @@ jobs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
       ios: ${{ steps.decide.outputs.ios }}
+      ios_kit: ${{ steps.decide.outputs.ios_kit }}
       macos: ${{ steps.decide.outputs.macos }}
       rust: ${{ steps.decide.outputs.rust }}
+      cli: ${{ steps.decide.outputs.cli }}
       floor-backend: ${{ steps.decide.outputs.floor-backend }}
       floor-frontend: ${{ steps.decide.outputs.floor-frontend }}
       mutation: ${{ steps.mutation_scope.outputs.mutation }}
@@ -165,8 +167,10 @@ jobs:
           backend=true
           frontend=true
           ios=true
+          ios_kit=true
           macos=true
           rust=true
+          cli=true
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
@@ -175,16 +179,17 @@ jobs:
               printf '%s\n' "${changed}" | sed 's/^/  /'
 
               # Shared surfaces exercise everything: a change to CI, the
-              # delivery scripts, the Makefile or the Compose stack can alter
-              # any stack's result.
+              # delivery scripts or the Makefile can alter any stack's result.
               #
-              # `compose.yaml` is this repository's Compose file. The pattern
-              # used to name only `docker-compose`, which has never matched
-              # anything here, so edits to the real file silently exercised no
-              # stack at all. Both spellings are listed now: the legacy one
-              # costs nothing and survives a rename back.
+              # `compose.yaml` is deliberately NOT a shared surface. Its only
+              # consumer is the Compose stack that `e2e` boots, and `e2e` is
+              # never path filtered, so a Compose edit is always exercised there.
+              # No stack lane reads the file (the backend and frontend suites,
+              # the native apps, the Rust core and the CLI all run without
+              # Compose), so listing it here only queued macOS and Windows
+              # runners for a change none of them could observe.
               if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$|compose\.yaml$|docker-compose)'; then
+                   '^(\.github/|scripts/|Makefile$)'; then
                 echo "shared surface touched; exercising every stack"
               else
                 # Spec 026: the backend wheel compiles the PyO3 bridge from rust/.
@@ -199,15 +204,27 @@ jobs:
                 # from the whole workspace (lockfile, toolchain pin and the
                 # crates it depends on), so any rust/ change is an input.
                 printf '%s\n' "${changed}" | grep -Eq '^(ios|rust)/' || ios=false
+                # The kit lane builds and tests ios/BrainBuddyKit/ alone, plus
+                # the Rust bridge it links (built by ios/scripts/). The iPhone
+                # app, its widgets, ios/Shared and the XcodeGen project are not
+                # compiled into the package, so a change confined to them is
+                # proved by ios-app and leaves the Linux kit lane idle.
+                printf '%s\n' "${changed}" | grep -Eq '^(ios/BrainBuddyKit|ios/scripts|rust)/' || ios_kit=false
                 # The Mac app builds from macos/ and, from 021-mac-sync on,
                 # links the shared kit in ios/BrainBuddyKit/, so a kit change
-                # rebuilds and retests the Mac too. The rest of ios/ (the
+                # rebuilds and retests the Mac too. It also runs the bridge and
+                # Xcode-selection scripts in ios/scripts/. The rest of ios/ (the
                 # iPhone app, its widgets, the XcodeGen project) is not an
                 # input to the Mac and leaves this lane idle.
-                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust)/' || macos=false
+                printf '%s\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|ios/scripts|rust)/' || macos=false
                 # The shared Rust core builds from rust/ alone, plus the frozen
                 # sync contract its codec tests read: that schema is an input.
                 printf '%s\n' "${changed}" | grep -Eq '^(rust|specs/026-rust-core-sync/contracts)/' || rust=false
+                # The CLI is its own Cargo workspace with no path dependency on
+                # rust/, so cli/ is its only source input. Its Linux journey
+                # test drives the real backend, which the cli-native job handles
+                # by also reading the backend output for that one target.
+                printf '%s\n' "${changed}" | grep -q '^cli/' || cli=false
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"
@@ -236,10 +253,12 @@ jobs:
             echo "backend=${backend}"
             echo "frontend=${frontend}"
             echo "ios=${ios}"
+            echo "ios_kit=${ios_kit}"
             echo "macos=${macos}"
             echo "rust=${rust}"
+            echo "cli=${cli}"
           } >> "$GITHUB_OUTPUT"
-          echo "backend=${backend} frontend=${frontend} ios=${ios} macos=${macos} rust=${rust}"
+          echo "backend=${backend} frontend=${frontend} ios=${ios} ios_kit=${ios_kit} macos=${macos} rust=${rust} cli=${cli}"
 
       # The mutation gate's scope is computed separately and far more narrowly
       # than the stack filter above: ADR-0004 requirement 1 runs it only over
@@ -576,7 +595,7 @@ jobs:
     timeout-minutes: 20
     needs: changes
     env:
-      RUN: ${{ needs.changes.outputs.ios }}
+      RUN: ${{ needs.changes.outputs.ios_kit }}
     defaults:
       run:
         shell: bash
@@ -1491,9 +1510,16 @@ jobs:
   # publish its link while `mutation-gate` was still deciding. The rule is
   # checked by `scripts/validate_ci_artifacts.py workflow`, so a new job cannot
   # quietly start finishing after the report that claims to summarise it.
+  # The CLI ships as its own Cargo workspace (cli/), so like the stack lanes it
+  # always runs and gates its steps on RUN, reporting success rather than
+  # "skipped" when nothing it builds changed (ADR-0008). A target with nothing
+  # to do takes the Linux no-op path instead of queueing a macOS or Windows
+  # runner. The x86_64 Linux target is the exception: its task journey drives
+  # the real backend, so a backend change runs that one target as well.
   cli-native:
     name: CLI native (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
+    needs: changes
+    runs-on: ${{ (needs.changes.outputs.cli == 'true' || (matrix.target == 'x86_64-unknown-linux-gnu' && needs.changes.outputs.backend == 'true')) && matrix.runner || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1509,6 +1535,7 @@ jobs:
           - target: x86_64-pc-windows-msvc
             runner: windows-2025
     env:
+      RUN: ${{ (needs.changes.outputs.cli == 'true' || (matrix.target == 'x86_64-unknown-linux-gnu' && needs.changes.outputs.backend == 'true')) && 'true' || 'false' }}
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       MACOSX_DEPLOYMENT_TARGET: "15.0"
     steps:
@@ -1517,21 +1544,24 @@ jobs:
         with:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Set up native Python
+        if: env.RUN == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.14"
       - name: Install pinned Rust
+        if: env.RUN == 'true'
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action, fixed toolchain
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
       - name: Configure Linux native store
-        if: runner.os == 'Linux'
+        if: env.RUN == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends gnome-keyring dbus-x11 pkg-config
           mkdir -m 700 "${RUNNER_TEMP}/bb-keyring" "${RUNNER_TEMP}/bb-runtime"
       - name: Format, lint, behavioral tests and release binary
+        if: env.RUN == 'true'
         shell: bash
         run: |
           cd cli
@@ -1540,13 +1570,13 @@ jobs:
           cargo test --locked --tests
           cargo build --locked --release
       - name: Exercise real backend task journey
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        if: env.RUN == 'true' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           python -m venv backend/.venv
           backend/.venv/bin/python -m pip install -e './backend[dev]'
           BB_TEST_CLI_BINARY="${PWD}/cli/target/release/bb" BB_TEST_BACKEND_PYTHON="${PWD}/backend/.venv/bin/python" cargo test --locked --manifest-path cli/Cargo.toml --test task_journey -- --ignored
       - name: Execute Linux native credential and installer checks
-        if: runner.os == 'Linux'
+        if: env.RUN == 'true' && runner.os == 'Linux'
         env:
           XDG_DATA_HOME: ${{ runner.temp }}/bb-keyring
           XDG_RUNTIME_DIR: ${{ runner.temp }}/bb-runtime
@@ -1556,7 +1586,7 @@ jobs:
             python3 scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --binary cli/target/release/bb --output cli/target/native-evidence.json
           BB_NATIVE
       - name: Execute macOS15 native credential and installer checks
-        if: runner.os == 'macOS'
+        if: env.RUN == 'true' && runner.os == 'macOS'
         run: |
           original_keychain=$(security default-keychain -d user | tr -d '"' | xargs)
           fixture_keychain="${RUNNER_TEMP}/bb-cli.keychain-db"
@@ -1567,18 +1597,20 @@ jobs:
           security default-keychain -d user -s "$fixture_keychain"
           python3 scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --binary cli/target/release/bb --output cli/target/native-evidence.json
       - name: Execute Windows native credential and installer checks
-        if: runner.os == 'Windows'
+        if: env.RUN == 'true' && runner.os == 'Windows'
         shell: pwsh
         run: |
           python scripts/check_cli_native.py --target "${{ matrix.target }}" --source-sha "$env:CANDIDATE_SHA" --binary cli/target/release/bb.exe --output cli/target/native-evidence.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package exact native output
+        if: env.RUN == 'true'
         shell: bash
         run: |
           binary=cli/target/release/bb
           if [ "${{ runner.os }}" = Windows ]; then binary=cli/target/release/bb.exe; fi
           python scripts/build_cli_release.py package --target "${{ matrix.target }}" --source-sha "${CANDIDATE_SHA}" --version 0.1.0 --binary "$binary" --evidence cli/target/native-evidence.json --output cli/target/native-package
       - name: Upload native archives and checks
+        if: env.RUN == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bb-native-${{ matrix.target }}
@@ -1589,8 +1621,13 @@ jobs:
   cli-artifacts:
     name: CLI release artifacts
     runs-on: ubuntu-22.04
-    needs: cli-native
+    needs:
+      - changes
+      - cli-native
     env:
+      # Aggregates all five native outputs, which only exist when the CLI
+      # itself changed; a backend-only run builds just the Linux journey target.
+      RUN: ${{ needs.changes.outputs.cli }}
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact source
@@ -1598,15 +1635,18 @@ jobs:
         with:
           ref: ${{ env.CANDIDATE_SHA }}
       - name: Download five native outputs
+        if: env.RUN == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: bb-native-*
           path: cli/target/native-input
       - name: Validate and assemble versioned release
+        if: env.RUN == 'true'
         run: |
           python3 -m unittest scripts/test_build_cli_release.py -v
           python3 scripts/build_cli_release.py aggregate --source-sha "${CANDIDATE_SHA}" --version 0.1.0 --input cli/target/native-input --output cli/target/release-package
       - name: Upload reviewed release candidate
+        if: env.RUN == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: bb-release-0.1.0
