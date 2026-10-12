@@ -966,7 +966,7 @@ jobs:
       - id: decide
         run: |
           macos=true
-          printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|rust)/' || macos=false
+          printf '%s\\n' "${changed}" | grep -Eq '^(macos|ios/BrainBuddyKit|ios/scripts|rust)/' || macos=false
           echo "macos=${macos}" >> "$GITHUB_OUTPUT"
   backend:
     env:
@@ -1015,6 +1015,24 @@ jobs:
         if: env.RUN == 'true'
         working-directory: macos
         run: swift test --parallel
+  cli-native:
+    needs: changes
+    env:
+      RUN: ${{ needs.changes.outputs.cli }}
+    steps:
+      - name: Format, lint, behavioral tests and release binary
+        if: env.RUN == 'true'
+        run: cargo test --locked --tests
+  cli-artifacts:
+    needs:
+      - changes
+      - cli-native
+    env:
+      RUN: ${{ needs.changes.outputs.cli }}
+    steps:
+      - name: Validate and assemble versioned release
+        if: env.RUN == 'true'
+        run: python3 scripts/build_cli_release.py aggregate
   mutation-base:
     name: Backend mutation base measurement
     env:
@@ -1064,6 +1082,8 @@ jobs:
   full-ci:
     needs:
       - changes
+      - cli-native
+      - cli-artifacts
       - backend
       - ios-kit
       - ios-app
@@ -1127,6 +1147,8 @@ jobs:
     name: Allure Report
     needs:
       - changes
+      - cli-native
+      - cli-artifacts
       - backend
       - ios-kit
       - ios-app
@@ -2151,7 +2173,7 @@ class MacosAppLaneTests(unittest.TestCase):
         # so a kit change that left this lane idle would land unbuilt.
         narrowed = self.edit_job(
             "changes",
-            r"""grep -Eq '^(macos|ios/BrainBuddyKit|rust)/' || macos=false""",
+            r"""grep -Eq '^(macos|ios/BrainBuddyKit|ios/scripts|rust)/' || macos=false""",
             r"""grep -Eq '^macos/' || macos=false""",
         )
 
