@@ -50,6 +50,15 @@ transitive one restated — and rejects a job missing from `full-ci`'s `needs`
 layers are reused via the shared `stack-*` buildx cache, so an untouched service
 starts from main's image.
 
+Inside the `backend` lane a pull request runs only the tests a test-impact
+map has on record for the files it changed. Every push to `main` records the
+map (`--cov-context=test`) into the Actions cache;
+`scripts/select_backend_tests.py select` narrows the run for edits inside
+function bodies, imports and signatures of measured `app/*.py` files, and for
+`rust/` changes through the `bb_core` bridge, and answers `ALL` for anything
+else. A narrowed run skips the coverage floor, which the landing path still
+enforces on the whole suite.
+
 `allure-report` closes the run — it is the last job before `full-ci`, so the
 aggregate report and the link posted to the pull request always describe a
 finished run.
