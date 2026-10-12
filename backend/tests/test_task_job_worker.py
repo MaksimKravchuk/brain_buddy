@@ -492,12 +492,27 @@ def test_026_FR_015_loop_survives_a_failing_job_and_a_failing_pass(
         return real(**kwargs)
 
     monkeypatch.setattr(ledger, "claim_due", flaky)
+    # ``start`` schedules once itself; a second call is the loop's own periodic
+    # reconcile. Waiting for it keeps that branch from depending on how fast
+    # the two jobs happen to finish.
+    reconciled = threading.Event()
+    schedules = {"n": 0}
+    real_ensure = worker.ensure_schedules
+
+    def counting_ensure(**kwargs):  # type: ignore[no-untyped-def]
+        schedules["n"] += 1
+        if schedules["n"] > 1:
+            reconciled.set()
+        return real_ensure(**kwargs)
+
+    monkeypatch.setattr(worker, "ensure_schedules", counting_ensure)
     worker.start()
     try:
         worker.wake(bad.job_type)
         worker.wake(good.job_type)
         assert good.entered.wait(WAIT)
         assert bad.entered.wait(WAIT)
+        assert reconciled.wait(WAIT)
     finally:
         assert worker.shutdown(timeout=WAIT) is True
     assert calls["n"] > 1
