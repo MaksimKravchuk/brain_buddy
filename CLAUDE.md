@@ -31,12 +31,6 @@ Only the things those files don't tell you:
   `python3 scripts/check_gate_integrity.py --update`. That puts the new hash in
   the diff on purpose; the invariants in the same script are not waivable by it.
 
-Coverage floors live in `frontend/coverage-floor.json` and may only ratchet
-upward. There is no per-file escape hatch: `scripts/validate_ci_artifacts.py
-coverage-suppressions` rejects `istanbul ignore file` and every range form in
-`frontend/src`, because an excluded file is reported as neither covered nor
-uncovered — it silently leaves the measurement.
-
 ## Tool use
 
 Read, search and edit files with the dedicated `Read`, `Grep`, `Glob` and `Edit`
@@ -146,7 +140,6 @@ never instantiate services directly in route handlers.**
 - **GDPR account management** — `AccountService` (profile/email/password, ZIP data export, 14-day-grace deletion + purge) is **always on and must never be feature-flagged**. See `docs/data-retention.md`.
 - **Task module commands** — `app/modules/tasks/` commands are idempotent and owner-serialized; preserve both properties when adding operations.
 - **Correlation IDs** — every response carries `X-Correlation-ID`. Error toasts surface it for retry/report flows, and backend logs key off the same ID.
-- **Autosave** — the canvas debounces a 5s local autosave to `localStorage` and warns on page exit when unsaved changes exist.
 
 ## Deployment & CI
 
@@ -164,6 +157,4 @@ failure is never to raise that number. See `docs/allure-quality-gate.md`.
 
 - **Commits:** conventional prefix style — `feat:`, `fix:`, `docs:`, `refactor:`, etc.
 - **Style:** enforced mechanically by `.pre-commit-config.yaml` and CI (black, ruff, mypy, import-linter, eslint, tsc). Read `backend/pyproject.toml` for the active ruff rule set and complexity ceilings rather than assuming a subset.
-- **Backend tests:** mirror module name (`test_tree_service.py`); use the `api_client` / service fixtures from `conftest.py`; clear `TreeService`'s 16-entry LRU cache between tests.
-- **Frontend tests:** Vitest + Testing Library in `src/**/__tests__/`; Playwright e2e in `frontend/tests/`.
 - **Allure taxonomy:** every pytest, Vitest and Playwright product test must emit non-empty `epic`, `feature`, `story`, a human-readable title, and at least one named step. Central defaults live in `backend/tests/allure_taxonomy.py`, `frontend/src/test/allureTaxonomy.ts`, and `frontend/tests/allure.fixtures.ts`; use explicit Allure decorators/helpers only for narrower overrides. See `docs/test-allure-taxonomy.md`.
