@@ -694,3 +694,27 @@ def test_026_FR_024_operator_seed_and_sweep_publish_through_the_same_boundary(
     with allure.step("no public write left an owner unit"):
         assert bypassed(writes) == []
         rig.consistent()
+
+
+def test_026_SC_007_a_client_key_cannot_pre_claim_an_internal_effect_identity(
+    rig: Rig,
+) -> None:
+    """Scheduler effects share no key namespace with client Idempotency-Keys."""
+
+    s = rig.s
+    session = s.api.start()
+    s.clock.advance(days=8)
+    candidates = [session["id"]]
+    import hashlib
+
+    digest = hashlib.sha256("\0".join(sorted(candidates)).encode()).hexdigest()[:32]
+    computed = f"idle-close:{s.owner}:{digest}"
+    with allure.step("a client claims the computed effect key first"):
+        claimed = s.post("/api/review/explainer/acknowledge", {}, computed)
+        assert claimed.status_code == 200, claimed.text
+    with allure.step("maintenance still closes the run and publishes it"):
+        result = app_main._run_review_maintenance_sweep(s.container)
+        assert result is not None and result.closed == 1
+        ended = next(v for k, v in s.folded().items() if k[0] == "review_session")
+        assert ended["status"] != "open"
+        rig.consistent()

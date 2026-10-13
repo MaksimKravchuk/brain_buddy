@@ -476,7 +476,7 @@ class ReviewCommandBoundary:
         request = (
             CommandRequest.job(owner_id, kind, body, effect_id=effect_key)
             if current_execution() is not None
-            else CommandRequest.legacy(
+            else CommandRequest.internal(
                 owner_id, effect_key, kind, body, entity_id=owner_id, route=kind
             )
         )

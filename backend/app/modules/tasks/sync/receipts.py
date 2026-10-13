@@ -110,9 +110,42 @@ class CommandRequest:
         entity_id: str | None = None,
         route: str | None = None,
     ) -> CommandRequest:
+        return cls._legacy(
+            owner, idempotency_key_digest(key), command, body, entity_id, route
+        )
+
+    @classmethod
+    def internal(
+        cls,
+        owner: str,
+        effect_key: str,
+        command: str,
+        body: dict[str, Any],
+        *,
+        entity_id: str | None = None,
+        route: str | None = None,
+    ) -> CommandRequest:
+        """A server-side effect outside a job (scheduler, operator CLI).
+
+        Its key digest has a shape no client Idempotency-Key digest can have,
+        so no client request can pre-claim an effect identity.
+        """
+        # A client digest is always 64 hex characters; this one never is.
+        digest = "internal-v1:" + hashlib.sha256(effect_key.encode()).hexdigest()
+        return cls._legacy(owner, digest, command, body, entity_id, route)
+
+    @classmethod
+    def _legacy(  # noqa: PLR0913 - the one legacy envelope
+        cls,
+        owner: str,
+        digest: str,
+        command: str,
+        body: dict[str, Any],
+        entity_id: str | None,
+        route: str | None,
+    ) -> CommandRequest:
         if current_execution() is not None:
             raise SyncCommandError("TRUSTED_ORIGIN_REQUIRED")
-        digest = idempotency_key_digest(key)
         command_id = str(uuid5(_NAMESPACE, encode(["legacy-v1", owner, digest])))
         wire = encode(
             {
