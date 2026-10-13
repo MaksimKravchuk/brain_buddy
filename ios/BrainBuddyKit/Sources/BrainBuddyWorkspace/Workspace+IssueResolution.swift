@@ -88,6 +88,7 @@ extension Workspace {
             accountLinkState: rustSyncState?.accountLinkState ?? "unchosen")
         recovery.storeNeedsUpdate = rustLoadFailureCode == "STORE_UPGRADE_REQUIRED"
         recovery.storeUnavailable = rustLoadFailureCode != nil
+        recovery.syncNeedsUpdate = runtimeSyncNeedsUpdate
         recovery.rebuild = rustRebuild
         return recovery
     }

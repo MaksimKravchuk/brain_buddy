@@ -172,16 +172,20 @@ public struct RuntimeSyncRecovery: Equatable, Sendable {
     public var storeNeedsUpdate: Bool
     /// The shared runtime is not running this workspace (it failed to open, or is read-only).
     public var storeUnavailable: Bool
+    /// The sync server or its protocol is newer than this build (`UPGRADE_REQUIRED`): the store is
+    /// fine and local saves work, but nothing syncs until the app updates.
+    public var syncNeedsUpdate: Bool
     public var rebuild: Rebuild
 
     public init(
         epoch: Epoch = .none, accountLink: AccountLink = .unchosen, storeNeedsUpdate: Bool = false,
-        storeUnavailable: Bool = false, rebuild: Rebuild = .idle
+        storeUnavailable: Bool = false, syncNeedsUpdate: Bool = false, rebuild: Rebuild = .idle
     ) {
         self.epoch = epoch
         self.accountLink = accountLink
         self.storeNeedsUpdate = storeNeedsUpdate
         self.storeUnavailable = storeUnavailable
+        self.syncNeedsUpdate = syncNeedsUpdate
         self.rebuild = rebuild
     }
 
@@ -196,7 +200,7 @@ public struct RuntimeSyncRecovery: Equatable, Sendable {
 
     /// Whether any recovery state needs showing.
     public var needsAttention: Bool {
-        storeNeedsUpdate || storeUnavailable || rebuild != .idle || epochClosed
+        storeNeedsUpdate || storeUnavailable || syncNeedsUpdate || rebuild != .idle || epochClosed
     }
 }
 

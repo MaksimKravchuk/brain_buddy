@@ -184,6 +184,8 @@ public final class Workspace {
     var rustReviewState: RustWorkspaceReviewState?
     var rustIdentityBindings: [RustWorkspaceIdentityBinding] = []
     public private(set) var runtimeTransportUnavailable = false
+    /// The sync server is newer than this build; set by the transport, cleared by its next status.
+    public private(set) var runtimeSyncNeedsUpdate = false
     public private(set) var runtimeIssues: [RustWorkspaceIssue] = []
     public private(set) var queryError: String?
     var presentationDraftError: String?
@@ -1713,7 +1715,8 @@ extension Workspace {
         let result = await selection.transport.request(trigger)
         guard binding == runtimeBindingID else { return }
         switch result {
-        case .status(let status): runtimeTransportUnavailable = false; syncStatus = status
+        case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
+        case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
         }
     }
@@ -2630,6 +2633,7 @@ extension Workspace {
         rustLoadFailureCode = nil
         runtimeIssues = []
         runtimeTransportUnavailable = false
+        runtimeSyncNeedsUpdate = false
     }
 
     private func resetRustAccountState() {

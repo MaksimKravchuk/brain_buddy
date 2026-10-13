@@ -44,6 +44,9 @@ public enum SyncRuntimeRebuildResult: Hashable, Sendable {
 
 public enum SyncRuntimeWakeResult: Hashable, Sendable {
     case status(SyncStatus)
+    /// The server or its protocol is newer than this build (`UPGRADE_REQUIRED`): sync is stopped
+    /// until the app updates. Waiting changes and saved issues stay on the device.
+    case updateNeeded
     /// The accepted transport slice has not been installed. Pending local
     /// commands remain durable; this is never represented as synced.
     case transportUnavailable
