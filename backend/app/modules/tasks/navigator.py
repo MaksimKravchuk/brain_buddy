@@ -536,12 +536,16 @@ def confirm_command_proposal(
 _BRAIN_DUMP_SOURCE = {"kind": "remote", "provider": "brain_dump_agent_run"}
 
 
-def check_task_create_proposal(title: str, *, task_ref: str) -> ConfirmedProposal:
+def check_task_create_proposal(
+    title: str, *, task_ref: str, core: RustCore | None = None
+) -> ConfirmedProposal:
     """The shared structural check of one confirmed Brain Dump create action.
 
     The person's confirmation in the ADR-0002 operation workspace is the explicit
     apply; nothing existed when the AgentRun proposed, so the basis revision is
     ``"0"``. The ordinary execute boundary still validates against current state.
+    ``core`` is the composition root's runtime (the shared holder); without it the
+    process-wide policy runtime is used.
     """
 
     return confirm_command_proposal(
@@ -552,6 +556,7 @@ def check_task_create_proposal(title: str, *, task_ref: str) -> ConfirmedProposa
         basis_revision="0",
         current_revision="0",
         source=_BRAIN_DUMP_SOURCE,
+        core=core,
     )
 
 

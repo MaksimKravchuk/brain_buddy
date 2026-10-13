@@ -612,7 +612,7 @@ def build_container(
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(
             task_service.create_native_inbox_task,
-            proposal_check=check_task_create_proposal,
+            proposal_check=partial(check_task_create_proposal, core=rust_core),
         ),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
