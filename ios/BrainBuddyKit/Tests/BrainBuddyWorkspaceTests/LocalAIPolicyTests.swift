@@ -291,4 +291,30 @@ import Testing
         #expect(Workspace.suggestionPortError(RustBridgeError(code: "CANCELLED")) == .unknown(code: "CANCELLED"))
         #expect(Workspace.suggestionPortError(CancellationError()) == .unknown(code: "SAVE_FAILED"))
     }
+
+    /// The iPhone consent screen (`ReviewSuggestionSheet.sentFields`) names these six things, one for each
+    /// path below. If the request grows or loses a field, this fails until the screen's list is changed too.
+    @Test("026-FR-019 the consent screen's field list is exactly what the cloud request carries")
+    func consentFieldListMatchesRequestBody() async throws {
+        let port = FakePort()
+        port.projectName = "Home"
+        port.openTitles = ["Paint the hall"]
+        let remote = FakeRemote()
+        let sut = ReviewSuggestionModel(
+            taskID: TaskID("task-1"), kind: .firstStep, stallReason: .tooBig, port: port, remote: remote,
+            adapter: adapter([]), journal: InMemoryReviewSuggestionJournal(), privacy: .remoteAllowed)
+        sut.request()
+        await sut.settled()
+        await sut.allowCloud()
+        await sut.settled()
+        let body = try #require(remote.bodies.first)
+        let object = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any])
+        func paths(_ value: Any, _ prefix: String) -> [String] {
+            guard let dictionary = value as? [String: Any] else { return [prefix] }
+            return dictionary.flatMap { paths($0.value, prefix.isEmpty ? $0.key : prefix + "." + $0.key) }
+        }
+        let sent = paths(object, "").filter { !$0.hasPrefix("consent.") }.sorted()
+        #expect(sent == ["kind", "project.name", "project.open_task_titles", "task.notes", "task.stall_reason", "task.title"])
+        withExtendedLifetime(port) {}
+    }
 }

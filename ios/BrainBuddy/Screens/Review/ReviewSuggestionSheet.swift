@@ -141,6 +141,9 @@ struct ReviewSuggestionSheet: View {
     // MARK: States
 
     @ViewBuilder private func content(_ m: ReviewSuggestionModel) -> some View {
+        if m.revokeFailed {
+            InlineProblemText(message: "Cloud suggestions couldn't be turned off, so they are still on.")
+        }
         switch m.phase {
         case .idle:
             outcome("Suggestions", workspace.account == nil
@@ -236,6 +239,7 @@ struct ReviewSuggestionSheet: View {
         }
     }
 
+    /// Must equal the fields of the cloud request body (`consentFieldListMatchesRequestBody`).
     private static let sentFields = [
         "The task title", "The task notes", "The stall reason, if you chose one", "The project name",
         "Titles of up to 20 other open tasks in that project", "Whether you asked for a first step or new wording",
@@ -276,6 +280,8 @@ struct ReviewSuggestionSheet: View {
         case .invalidProposal: "The answer didn't pass Brain Buddy's checks, so nothing is shown."
         case .inputTooLarge: "This task has too much text to suggest from."
         case .taskGone: "This task is no longer here."
+        case .journalFailed: "Brain Buddy couldn't save its place on this device, so nothing was sent."
+        case .consentChangeFailed: "Cloud suggestions couldn't be turned off, so they are still on."
         }
     }
 
