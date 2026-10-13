@@ -1265,7 +1265,7 @@ def test_026_FR_014_the_flag_applies_per_command_and_each_side_reads_the_others_
 
 
 def test_026_FR_014_every_review_command_fails_closed_when_the_core_is_down(
-    apps: Apps,
+    apps: Apps, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A closed core is a retryable 503 for every command and read, with no write."""
 
@@ -1284,7 +1284,11 @@ def test_026_FR_014_every_review_command_fails_closed_when_the_core_is_down(
     before = s.snapshot()
     facade = api.container.review_service._rust_facade
     assert facade is not None
-    facade._core.close()
+    # The holder would replace a closed runtime; pin it to a dead one to prove
+    # a bridge failure itself fails closed (replacement: test_rust_core_holder).
+    dead = RustCore()
+    dead.close()
+    monkeypatch.setattr(facade._core, "get", lambda: dead)
     fresh_run = s.nid("review")
     calls: dict[str, Callable[[], Any]] = {
         "decide": lambda: s.decide(cards[1], "complete"),
