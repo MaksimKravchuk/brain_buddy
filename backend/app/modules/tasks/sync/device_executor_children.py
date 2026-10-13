@@ -267,6 +267,9 @@ class ChildrenDeviceExecutor(TaskDeviceExecutor):
         if self._exists(self._repo.get_for_owner, task_id, owner):
             return command.reject(_refusal("id_already_exists"))
         state = body.get("state", "inbox")
+        if state == "next" and not body.get("new_formulation_id"):
+            # A server-allocated formulation id would differ from the device's.
+            raise _invalid()
         decision = self._rust.decide_command(
             "task.smart_add",
             task_id,

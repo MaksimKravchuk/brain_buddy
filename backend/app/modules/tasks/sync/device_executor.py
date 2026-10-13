@@ -137,7 +137,8 @@ class TaskDeviceExecutor:
             if blocked is not None:
                 return blocked
             handler = getattr(self, "_" + kind.replace(".", "_"))
-            return handler(command, envelope, dict(payload))  # type: ignore[no-any-return]
+            body = self._resolve_aliases(command, envelope, dict(payload))
+            return handler(command, envelope, body)  # type: ignore[no-any-return]
         except ValidationError:
             raise _invalid() from None
 
@@ -166,6 +167,59 @@ class TaskDeviceExecutor:
                 "DEPENDENCY_PENDING", details={"dependency_ids": pending}
             )
         return None
+
+    def _resolve_aliases(
+        self,
+        command: ReceiptCommand[Connection],
+        envelope: Mapping[str, Any],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Replace Smart Add ``{after_command, alias_id, entity_type}`` references.
+
+        The envelope is never rewritten: each alias is read from the declared
+        predecessor's retained ``id_bindings`` into the in-memory body only.
+        """
+        if not str(envelope["type"]).startswith("task."):
+            return body
+        kinds = {"project_id": "project", "tag_ids": "tag"}
+        kinds |= {"add_tag_ids": "tag", "remove_tag_ids": "tag"}
+
+        def one(value: Any, kind: str) -> Any:
+            if not isinstance(value, dict):
+                return value
+            if (
+                set(value) != {"after_command", "alias_id", "entity_type"}
+                or value["entity_type"] != kind
+                or value["after_command"] not in envelope["depends_on"]
+            ):
+                raise _invalid()
+            receipt = self._receipt(command, value["after_command"])
+            for binding in (receipt or {}).get("id_bindings", []):
+                if (binding["entity_type"], binding["alias_id"]) == (
+                    kind,
+                    value["alias_id"],
+                ):
+                    return binding["entity_id"]
+            raise _invalid()
+
+        def resolve(fields: dict[str, Any]) -> dict[str, Any]:
+            return {
+                key: (
+                    (
+                        [one(item, kinds[key]) for item in value]
+                        if isinstance(value, list)
+                        else one(value, kinds[key])
+                    )
+                    if key in kinds
+                    else value
+                )
+                for key, value in fields.items()
+            }
+
+        resolved = resolve(body)
+        if isinstance(resolved.get("tag_changes"), dict):
+            resolved["tag_changes"] = resolve(resolved["tag_changes"])
+        return resolved
 
     @staticmethod
     def _receipt(command: ReceiptCommand[Connection], command_id: str) -> Any:

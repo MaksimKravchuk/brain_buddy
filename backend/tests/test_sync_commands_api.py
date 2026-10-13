@@ -1456,3 +1456,111 @@ def test_026_FR_005_child_ids_are_unique_across_parents(live, owner):
         check_equal("rows", rows(live), (before[0] + 2, before[1]))
         assert repo.list_subtasks(owner_id=owner, task_id=second) == []
         assert repo.list_comments(owner_id=owner, task_id=second) == []
+
+
+def test_026_FR_005_dependents_resolve_smart_add_aliases_from_the_receipt(live, owner):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    home, errand = uid("project", 1), uid("tag", 2)
+    run(live, owner, 1, "project.create", home, {"name": "Home"})
+    run(live, owner, 2, "tag.create", errand, {"name": "errand"})
+    task, other = uid("task", 3), uid("task", 7)
+    alias_project, alias_tag = uid("project", 4), uid("tag", 5)
+    added = run(
+        live,
+        owner,
+        3,
+        "task.smart_add",
+        task,
+        {
+            "title": "A",
+            "project": {"name": "home", "proposed_id": alias_project},
+            "tags": [{"name": "errand", "proposed_id": alias_tag}],
+        },
+    ).json()
+    assert added["outcome"] == "accepted", added
+
+    def ref(kind, alias):
+        return {"after_command": cid(3), "alias_id": alias, "entity_type": kind}
+
+    with allure.step("task.update resolves a project alias to the resolved record"):
+        moved = run(
+            live,
+            owner,
+            4,
+            "task.update",
+            task,
+            {
+                "project_id": None,
+                "tag_changes": {"remove_tag_ids": [ref("tag", alias_tag)]},
+            },
+            rev=1,
+            depends_on=[cid(3)],
+        ).json()
+        attach_json("update", moved)
+        assert moved["outcome"] == "accepted", moved
+        assert repo.get_for_owner(task, owner_id=owner).tag_ids == []
+        back = run(
+            live,
+            owner,
+            5,
+            "task.update",
+            task,
+            {"project_id": ref("project", alias_project)},
+            rev=2,
+            depends_on=[cid(3)],
+        ).json()
+        assert back["outcome"] == "accepted", back
+        assert repo.get_for_owner(task, owner_id=owner).project_id == home
+    with allure.step("task.create resolves aliases and the alias must be declared"):
+        created = run(
+            live,
+            owner,
+            6,
+            "task.create",
+            other,
+            {"title": "B", "tag_ids": [ref("tag", alias_tag)]},
+            depends_on=[cid(3)],
+        ).json()
+        assert created["outcome"] == "accepted", created
+        assert repo.get_for_owner(other, owner_id=owner).tag_ids == [errand]
+        undeclared = run(
+            live,
+            owner,
+            8,
+            "task.create",
+            uid("task", 9),
+            {"title": "C", "tag_ids": [ref("tag", alias_tag)]},
+        )
+        assert undeclared.status_code == 422
+
+
+def test_026_FR_005_smart_add_next_requires_the_device_formulation_id(live, owner):
+    before = rows(live)
+    missing = run(
+        live,
+        owner,
+        1,
+        "task.smart_add",
+        uid("task", 1),
+        {"title": "n", "state": "next"},
+    )
+    assert missing.status_code == 422 and error_code(missing) == "INVALID_REQUEST"
+    check_equal("rows", rows(live), before)
+    given = run(
+        live,
+        owner,
+        2,
+        "task.smart_add",
+        uid("task", 2),
+        {
+            "title": "n",
+            "state": "next",
+            "new_formulation_id": "form_" + "0" * 8 + "-0000-4000-8000-" + "0" * 12,
+        },
+    ).json()
+    attach_json("given", given)
+    assert given["outcome"] == "accepted", given
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    assert repo.get_for_owner(uid("task", 2), owner_id=owner).formulation_id.startswith(
+        "form_0"
+    )
