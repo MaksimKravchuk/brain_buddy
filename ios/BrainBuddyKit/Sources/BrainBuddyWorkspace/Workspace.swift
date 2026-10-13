@@ -170,6 +170,8 @@ public final class Workspace {
     @ObservationIgnored private var rustGestureSaver: RustWorkspaceGestureSaver?
     @ObservationIgnored private var rustSubscription: RustWorkspaceSubscription?
     @ObservationIgnored private var rustWatcher: Task<Void, Never>?
+@ObservationIgnored private var logoutDrain: Task<Void, Never>?
+    @ObservationIgnored private var rustStatusPump: Task<Void, Never>?
     @ObservationIgnored private(set) var runtimeBindingID = UUID()
     @ObservationIgnored private var rustTaskFrames: [TaskID: RustWorkspaceTaskFrame] = [:]
     @ObservationIgnored private var rustTaskInterests: [Data: Set<TaskID>] = [:]
@@ -184,6 +186,8 @@ public final class Workspace {
     var rustReviewState: RustWorkspaceReviewState?
     var rustIdentityBindings: [RustWorkspaceIdentityBinding] = []
     public private(set) var runtimeTransportUnavailable = false
+    /// The sync server is newer than this build; set by the transport, cleared by its next status.
+    public private(set) var runtimeSyncNeedsUpdate = false
     public private(set) var runtimeIssues: [RustWorkspaceIssue] = []
     public private(set) var queryError: String?
     var presentationDraftError: String?
@@ -209,6 +213,14 @@ public final class Workspace {
     var rustLoadFailureCode: String?
 
     public var isRustSelected: Bool { rustSelection != nil }
+
+    /// The install's runtime cannot be opened: the recovery state shows `code`, and nothing opens
+    /// the retired document instead (spec 026, T044).
+    func markUnavailable(code: String) {
+        rustLoadFailureCode = code
+        loadError = "Brain Buddy couldn't open your lists. Your work is kept."
+        isLoaded = true
+    }
     public var isRustBound: Bool { rustRuntime != nil && rustQueries != nil }
 
     // MARK: Construction
@@ -823,6 +835,13 @@ public final class Workspace {
     }
 
     /// Requests one immediate pull for each foreground trigger.
+    /// The scene left the foreground: a selected runtime's sync stops polling and closes its hint
+    /// stream until the next foreground request. Waiting changes stay saved.
+    public func enterBackground() async {
+        guard isRustSelected, let selection = rustSelection else { return }
+        await selection.transport.enterBackground()
+    }
+
     public func requestForegroundPull() async {
         if isRustSelected {
             await wakeRustTransport(.foreground)
@@ -860,7 +879,7 @@ public final class Workspace {
 
     /// Pushes pending changes and pulls the latest server state now.
     public func syncNow() async {
-        if isRustSelected { await maintainRuntimeDrafts(); await wakeRustTransport(.manual); await refreshRustStatus(); return }
+        if isRustSelected { drainRustLogouts(); await maintainRuntimeDrafts(); await wakeRustTransport(.manual); await refreshRustStatus(); return }
         guard let sync, account != nil else { return }
         await flush()
         let status = await sync.syncNow()
@@ -898,7 +917,7 @@ public final class Workspace {
                 await previous?.value
                 guard binding == self.runtimeBindingID else { return }
                 await selection.transport.setNetworkAvailable(isAvailable)
-                if isAvailable { await self.wakeRustTransport(.networkRestored) }
+                if isAvailable { self.drainRustLogouts(); await self.wakeRustTransport(.networkRestored) }
             }
             return
         }
@@ -1407,6 +1426,9 @@ extension Workspace {
             let subscription = try await runtime.subscribe()
             guard binding == runtimeBindingID else { subscription.cancel(); return }
             rustSubscription = subscription
+            await listenToTransport(selection.transport, binding: binding)
+            guard binding == runtimeBindingID else { return }
+            drainRustLogouts()
             rustWatcher = Task { [weak self] in
                 var token: String?
                 do {
@@ -1452,6 +1474,8 @@ extension Workspace {
         runtimeBindingID = UUID()
         rustWatcher?.cancel()
         rustWatcher = nil
+        rustStatusPump?.cancel()
+        rustStatusPump = nil
         rustQueries?.close()
         rustQueries = nil
         rustSubscription = nil
@@ -1707,15 +1731,50 @@ extension Workspace {
         }
     }
 
+    /// Sends the server logouts that waited for the network (an offline sign-out, an abandoned
+    /// login), whether or not a sync session exists: the account-less binding after a sign-out
+    /// has none. One drain at a time; a retryable failure leaves the logout for the next call.
+    func drainRustLogouts() {
+        guard networkIsAvailable, logoutDrain == nil, let lifecycle = rustLifecycle else { return }
+        logoutDrain = Task { [weak self] in
+            await lifecycle.drainPendingLogouts()
+            self?.logoutDrain = nil
+        }
+    }
+
+    /// Waits for a drain in progress (tests).
+    func waitForLogoutDrain() async { await logoutDrain?.value }
+
     private func wakeRustTransport(_ trigger: SyncTrigger) async {
         guard let selection = rustSelection, isRustBound else { return }
         let binding = runtimeBindingID
         let result = await selection.transport.request(trigger)
         guard binding == runtimeBindingID else { return }
+        adoptTransportResult(result)
+    }
+
+    private func adoptTransportResult(_ result: SyncRuntimeWakeResult) {
         switch result {
-        case .status(let status): runtimeTransportUnavailable = false; syncStatus = status
+        case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
+        case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
         }
+    }
+
+    /// Statuses the transport reaches between requests (hint pulls, polls, retries) land here, on
+    /// the main actor only to set state: the worker hands the latest one over a stream and does no
+    /// work on the main thread.
+    private func listenToTransport(_ transport: any SyncRuntimePort, binding: UUID) async {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: SyncRuntimeWakeResult.self, bufferingPolicy: .bufferingNewest(1))
+        rustStatusPump?.cancel()
+        rustStatusPump = Task { [weak self] in
+            for await result in stream {
+                guard let self, self.runtimeBindingID == binding else { return }
+                self.adoptTransportResult(result)
+            }
+        }
+        await transport.setStatusHandler { continuation.yield($0) }
     }
 
     func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown: GTDState)
@@ -2596,6 +2655,9 @@ extension Workspace {
             signOutRemovalEnded()
         }
         detachRustBinding()
+        // Nothing may write or hold the account's store while its copy is removed. A failed
+        // sign-out leaves the port usable: its next request starts the host again.
+        await selection.transport.quiesce()
         let named = RustSignOutConfirmation(unsent: confirmed.reduce(0) { $0 + $1.runtimeUnsentCount },
                                             issueIDs: Set(confirmed.compactMap(\.runtimeIssueID)),
                                             projectionGeneration: confirmed.compactMap(\.runtimeUnsentGeneration).max() ?? 0)
@@ -2630,6 +2692,7 @@ extension Workspace {
         rustLoadFailureCode = nil
         runtimeIssues = []
         runtimeTransportUnavailable = false
+        runtimeSyncNeedsUpdate = false
     }
 
     private func resetRustAccountState() {

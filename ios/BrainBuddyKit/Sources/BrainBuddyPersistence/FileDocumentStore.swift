@@ -52,6 +52,9 @@ public actor FileDocumentStore: DocumentStore {
         try file.createDirectoryIfNeeded()
         let lock = try file.lock()
         defer { lock.release() }
+        // Re-checked under the lock (spec 026, pilot handoff): a writer that waited behind the
+        // import must not commit to the retired document once the runtime selection exists.
+        if isRetired { throw DocumentStoreError.io(Self.retiredReason) }
         var current: StoreDocument?
         if let data = try file.readContents() {
             current = try StoreDocumentCoding.decode(data)
@@ -59,6 +62,37 @@ public actor FileDocumentStore: DocumentStore {
         let (data, written) = try StoreDocumentCoding.prepareWrite(from: current, transform)
         try file.replaceContents(with: data)
         return written
+    }
+
+    /// `runtime/selection.json` beside the document's folder (both hosts keep the Rust runtime's
+    /// files there): once it exists the document is the retired runtime's and no writer may commit
+    /// to it. `RustRuntimeSelectionStore` writes it; this store only looks for the file.
+    public nonisolated var selectionMarkerURL: URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent("runtime", isDirectory: true)
+            .appendingPathComponent("selection.json")
+    }
+
+    public static let retiredReason = "This install has moved to the new store; try again"
+
+    nonisolated var isRetired: Bool { FileManager.default.fileExists(atPath: selectionMarkerURL.path) }
+
+    /// Runs `body` while holding the writer lock, provided the document is still at `generation`
+    /// (nil: there is none) and not yet retired. The pilot handoff publishes the runtime selection
+    /// inside `body`, so a writer queued behind the import finds either the old document and
+    /// commits before the selection, or the selection and is refused. Returns false, running
+    /// nothing, when a writer got in between the import's read and this lock.
+    public func performHandoff(
+        whenGeneration generation: Int?, _ body: @Sendable () throws -> Void
+    ) async throws -> Bool {
+        let activity = ExpiringActivity(reason: "Switching your data")
+        defer { activity.end() }
+        try file.createDirectoryIfNeeded()
+        let lock = try file.lock()
+        defer { lock.release() }
+        let current = try file.readContents().map { try StoreDocumentCoding.generation(of: $0) }
+        guard current == generation else { return false }
+        try body()
+        return true
     }
 
     public func generation() async throws(DocumentStoreError) -> Int? {

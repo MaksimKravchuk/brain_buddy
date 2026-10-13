@@ -525,6 +525,7 @@ fn activate_in(
             install_change(tx, workspace_id, change)
         },
     )?;
+    retain_merged_review(tx, workspace_id)?;
     crate::localfacts::snapshot_after(
         tx,
         workspace_id,
@@ -636,4 +637,19 @@ fn lookups_in(tx: &Transaction<'_>, workspace_id: &str) -> Result<Vec<CommandId>
         lookups.push(CommandId::parse(row?).map_err(|_| StoreError::Corrupt)?);
     }
     Ok(lookups)
+}
+
+/// Puts back the Review records a first-sign-in merge kept (`rebase.rs`): the snapshot replaces
+/// the confirmed base, and the server holds no Review state the merge could not express as
+/// commands. A key the snapshot carries wins; nothing the snapshot holds is overwritten.
+fn retain_merged_review(tx: &Transaction<'_>, workspace_id: &str) -> Result<(), ApplyError> {
+    tx.execute(
+        "INSERT OR IGNORE INTO confirmed_records (workspace_id, record_type, record_key,
+            record_version, edit_revision, tombstone, body)
+         SELECT workspace_id, record_type, record_key, '0',
+                json_extract(CAST(fields AS TEXT), '$.revision'), 0, fields
+         FROM drafts WHERE workspace_id = ?1 AND editor_kind = ?2",
+        params![workspace_id, crate::rebase::RETAINED_KIND],
+    )?;
+    Ok(())
 }

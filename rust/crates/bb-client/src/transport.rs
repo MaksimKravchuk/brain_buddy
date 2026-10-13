@@ -947,9 +947,10 @@ impl Syncer {
             return Ok(());
         }
         let mut touched: HashSet<CommandId> = HashSet::new();
+        let mut stuck: Option<Halt> = None;
         for _ in 0..self.schedule.max_sends_per_round {
             let Some(next) = self.next_command(store, &touched)? else {
-                return Ok(());
+                return stuck.map_or(Ok(()), Err);
             };
             touched.insert(next.id.clone());
             match self.attempt(store, &next, report) {
@@ -975,11 +976,19 @@ impl Syncer {
                 Err(Halt::NotReady) => {
                     self.held.insert(next.id);
                 }
+                // A refusal that is neither a verdict nor retryable leaves the
+                // command `unknown` (kept, never rekeyed). It must not hold up
+                // independent commands: only its dependants wait, because they
+                // need it completed. It is skipped until the next wake.
+                Err(Halt::Failed(code)) => {
+                    self.held.insert(next.id);
+                    stuck.get_or_insert(Halt::Failed(code));
+                }
                 Err(halt) => return Err(halt),
             }
         }
         report.more_sends = self.next_command(store, &touched)?.is_some();
-        Ok(())
+        stuck.map_or(Ok(()), Err)
     }
 
     /// The next command to work on: a possibly-sent one first (its outcome is
