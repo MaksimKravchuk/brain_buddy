@@ -162,7 +162,8 @@ public final class Workspace {
     /// How many times `state` was rebuilt by a full replay (for tests).
     @ObservationIgnored private(set) var fullReplayCount = 0
 
-    @ObservationIgnored private let rustSelection: RustWorkspaceSelection?
+    @ObservationIgnored private(set) var rustSelection: RustWorkspaceSelection?
+    @ObservationIgnored private let rustLifecycle: (any RustAccountLifecyclePort)?
     @ObservationIgnored private(set) var rustRuntime: RustWorkspaceRuntime?
     @ObservationIgnored private(set) var rustFacade: RustDomainFacade?
     @ObservationIgnored private(set) var rustQueries: RustWorkspaceAdapter?
@@ -185,6 +186,18 @@ public final class Workspace {
     public private(set) var queryError: String?
     var presentationDraftError: String?
     @ObservationIgnored private var rustStatusRequestID: UInt64 = 0
+    /// Whether the runtime holds any record at all (`hasLocalWorkToMerge`), as of the generation
+    /// last counted; read only while the workspace has no account.
+    @ObservationIgnored private(set) var rustHasLocalRecords = false
+    @ObservationIgnored private var rustLocalRecordsGeneration: UInt64?
+
+    private static func hasAnyRecord(_ records: Data) -> Bool {
+        switch try? JSONSerialization.jsonObject(with: records) {
+        case let rows as [Any]: !rows.isEmpty
+        case let rows as [String: Any]: !rows.isEmpty
+        default: true  // unreadable: assume there is work rather than hide the merge notice
+        }
+    }
     private var rustSyncState: RustWorkspaceSyncState?
 
     public var isRustSelected: Bool { rustSelection != nil }
@@ -199,6 +212,7 @@ public final class Workspace {
     /// that runs the foreground tick.
     public init(
         store: any DocumentStore, sync: (any SyncService)?, rust: RustWorkspaceSelection? = nil,
+        rustLifecycle: (any RustAccountLifecyclePort)? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() },
         tickScheduler: any SyncScheduler = TaskSyncScheduler()
@@ -206,6 +220,7 @@ public final class Workspace {
         self.store = store
         self.sync = rust == nil ? sync : nil
         rustSelection = rust
+        self.rustLifecycle = rust == nil ? nil : rustLifecycle
         self.now = now
         self.makeID = makeID
         foregroundTicker = (rust == nil ? sync : nil).map { sync in
@@ -268,7 +283,19 @@ public final class Workspace {
     /// Changes the other process queued are local changes of this device, and
     /// only the app syncs, so they get the same debounced sync as the app's own.
     public func reloadIfChangedExternally() async {
-        if isRustSelected { await refreshRustStatus(); return }
+        if isRustSelected {
+            // Another process (widget, App Intent) wrote through the same store: a moved
+            // generation means the pages shown are stale.
+            let before = rustSyncState?.generation
+            await refreshRustStatus()
+            if let generation = rustSyncState?.generation, generation != before, isRustBound {
+                rustQueries?.invalidate(generation: generation)
+                for key in Array(rustQueries?.entries.keys ?? Dictionary<Data, RustWorkspaceAdapter.Entry>().keys) {
+                    await prepareRustQuery(key)
+                }
+            }
+            return
+        }
         guard isLoaded, loadError == nil else { return await load() }
         let known = Set((document.outbox + unpersisted).map(\.id))
         guard let reloaded = await refreshFromStore() else { return }
@@ -569,7 +596,9 @@ public final class Workspace {
     public func signIn(
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
-        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
+        if isRustSelected {
+            return try await signInRust(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
+        }
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
         }
@@ -671,7 +700,11 @@ public final class Workspace {
 
     /// The local changes a sign-out would remove, each by its id and what it holds: unsent ones and
     /// open sync issues, for a sign-out confirmation to name (`signOut(removing:)`).
-    public var pendingChanges: Set<PendingChange> { isRustSelected ? [] : PendingChange.all(in: document, unpersisted: unpersisted) }
+    public var pendingChanges: Set<PendingChange> {
+        guard isRustSelected else { return PendingChange.all(in: document, unpersisted: unpersisted) }
+        let unsent = (0..<Int(clamping: rustSyncState?.pending ?? 0)).map { PendingChange(runtimeUnsent: $0, generation: rustSyncState?.generation ?? 0) }
+        return Set(unsent).union(runtimeIssues.map { PendingChange(runtimeIssue: $0.id) })
+    }
 
     /// Signs out and removes the account's data from this device. Fails with
     /// `WorkspaceError.unsyncedChanges` unless `discardUnsyncedChanges` is set
@@ -695,7 +728,7 @@ public final class Workspace {
     /// this workspace meanwhile is refused (`GTDValidationError.signingOut`, `isSigningOut`). While a sign-in runs (its link and first sync) it is refused with
     /// `WorkspaceError.signingIn` and nothing is removed.
     public func signOut(removing confirmed: Set<PendingChange>) async throws {
-        guard !isRustSelected else { throw WorkspaceError.storage("This account change isn't available yet. Your work is kept.") }
+        if isRustSelected { return try await signOutRust(removing: confirmed) }
         guard !isSigningIn else { throw WorkspaceError.signingIn }
         let pending = pendingChanges
         if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
@@ -1403,8 +1436,9 @@ extension Workspace {
         }
     }
 
-    public func closeRuntime() async {
-        guard let selection = rustSelection else { return }
+    /// Fences the current binding without closing its runtime: every response it still waits for
+    /// (queries, status, transport, subscription) is dropped from here on.
+    fileprivate func detachRustBinding() {
         runtimeBindingID = UUID()
         rustWatcher?.cancel()
         rustWatcher = nil
@@ -1419,6 +1453,11 @@ extension Workspace {
         rustTaskInterests = [:]
         rustProjectInterests = [:]
         rustTagInterests = [:]
+    }
+
+    public func closeRuntime() async {
+        guard let selection = rustSelection else { return }
+        detachRustBinding()
         state = .empty
         await selection.transport.close()
         do { try await selection.runtime.close() }
@@ -1635,6 +1674,14 @@ extension Workspace {
             let status = try facade.workspaceSyncState(from: await runtime.syncStatus())
             guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
             guard status.generation >= (rustQueries?.generationFloor ?? 0) else { return }
+            // Only an account-less workspace has a first sign-in to merge; any persisted record
+            // counts, terminal tasks, projects, tags and review data included.
+            if account == nil, rustLocalRecordsGeneration != status.generation {
+                let records = try await runtime.snapshot().records
+                guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
+                rustHasLocalRecords = Self.hasAnyRecord(records)
+                rustLocalRecordsGeneration = status.generation
+            }
             rustSyncState = status
             pendingChangeCount = Int(clamping: status.pending)
             let answer = try await runtime.issues()
@@ -1662,6 +1709,8 @@ extension Workspace {
 
     func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown: GTDState)
         async throws -> RustWorkspaceSavedGesture {
+        // Nothing is accepted while a sign-out commits: it would be removed unseen.
+        guard !isSigningOut else { throw GTDValidationError.signingOut }
         guard let runtime = rustRuntime, let facade = rustFacade, let saver = rustGestureSaver else {
             throw RustBridgeError(code: "WORKSPACE_NOT_READY")
         }
@@ -1758,6 +1807,7 @@ extension Workspace {
             try await performLegacyDurably(plan.commands, editorID: editorID)
             return plan.taskID
         }
+        guard !isSigningOut else { throw GTDValidationError.signingOut }
         guard let runtime = rustRuntime, let facade = rustFacade, let saver = rustGestureSaver else {
             throw RustBridgeError(code: "WORKSPACE_NOT_READY")
         }
@@ -2465,5 +2515,126 @@ extension Workspace {
     private func legacyTaskViews(_ ids: [TaskID]) -> [TaskRecord] {
         var seen: Set<TaskID> = []
         return ids.compactMap { seen.insert($0).inserted ? task($0) : nil }
+    }
+}
+
+
+// MARK: - Account lifecycle on a selected runtime (spec 026, T044)
+
+extension Workspace {
+    private static let rustAccountUnavailable = "This account change isn't available yet. Your work is kept."
+
+    fileprivate func signInRust(serverURL: URL, email: String, password: String,
+                                cancellation: SignInCancellation) async throws {
+        try refuseAnotherAccountChange()
+        guard let lifecycle = rustLifecycle, let selection = rustSelection, isRustBound else {
+            throw WorkspaceError.signInFailed(message: Self.rustAccountUnavailable, referenceID: nil)
+        }
+        guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else { throw WorkspaceError.invalidServerURL }
+        // Saves are durable when they return; this picks up what another process queued.
+        await refreshRustStatus()
+        try refuseAnotherAccountChange()
+        isSigningIn = true
+        defer { isSigningIn = false }
+        let outcome: RustSignInOutcome
+        do {
+            outcome = try await lifecycle.signIn(RustSignInRequest(serverURL: url, email: email, password: password,
+                cancellation: cancellation, current: selection, mergesLocalWork: account == nil))
+        } catch {
+            throw Self.signInFailure(error)
+        }
+        let next = outcome.selection
+        let sameRuntime = next.runtime === selection.runtime
+        // An owner that is not the linked one, or a Cancel that won, links nothing.
+        guard let linked = next.account, account == nil || account?.id == linked.id else {
+            await discardRust(next, keepingRuntime: sameRuntime)
+            throw WorkspaceError.signInFailed(
+                message: "This is a different account. Sign out first; your work is kept.", referenceID: nil)
+        }
+        // The port claims the commit right before it links; this claims it when it did not, so a
+        // Cancel arriving after the link can no longer report a failure over a linked store.
+        guard cancellation.isCommitted || cancellation.commit() else {
+            await discardRust(next, keepingRuntime: sameRuntime)
+            throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil)
+        }
+        detachRustBinding()
+        await selection.transport.close()
+        if !sameRuntime { try? await selection.runtime.close() }
+        replaceRustBinding(with: next.prepared())
+        if outcome.deletionCancelled { signInCancelledAccountDeletion = true }
+        await bindRustRuntime()
+        if account != linked { account = linked }
+        if let error = loadError { throw WorkspaceError.signInFailed(message: error, referenceID: nil) }
+    }
+
+    fileprivate func signOutRust(removing confirmed: Set<PendingChange>) async throws {
+        guard let lifecycle = rustLifecycle, let selection = rustSelection, isRustBound else {
+            throw WorkspaceError.storage(Self.rustAccountUnavailable)
+        }
+        guard !isSigningIn else { throw WorkspaceError.signingIn }
+        guard !isSigningOut else { throw WorkspaceError.storage("Brain Buddy is already signing out.") }
+        // What a widget or App Intent queued since the last look counts too.
+        await refreshRustStatus()
+        let pending = pendingChanges
+        if !pending.isSubset(of: confirmed) { throw WorkspaceError.unsyncedChanges(count: pending.count) }
+        // Set in the step that checked the count: nothing performed from here on is removed unseen.
+        isSigningOut = true
+        signOutRemovalPending = true
+        defer {
+            isSigningOut = false
+            signOutRemovalEnded()
+        }
+        detachRustBinding()
+        let named = RustSignOutConfirmation(unsent: confirmed.reduce(0) { $0 + $1.runtimeUnsentCount },
+                                            issueIDs: Set(confirmed.compactMap(\.runtimeIssueID)),
+                                            projectionGeneration: confirmed.compactMap(\.runtimeUnsentGeneration).max() ?? 0)
+        let next: RustWorkspaceSelection
+        do {
+            next = try await lifecycle.signOut(RustSignOutRequest(current: selection, confirmed: named))
+        } catch {
+            // Nothing was removed: still signed in, on the same runtime.
+            replaceRustBinding(with: selection.prepared())
+            await bindRustRuntime()
+            if let error = error as? WorkspaceError { throw error }
+            throw WorkspaceError.storage(Self.saveMessage(for: error))
+        }
+        await selection.transport.close()
+        if next.runtime !== selection.runtime { try? await selection.runtime.close() }
+        replaceRustBinding(with: next.prepared())
+        resetRustAccountState()
+        await bindRustRuntime()
+        didPersist?()
+    }
+
+    private func discardRust(_ selection: RustWorkspaceSelection, keepingRuntime: Bool) async {
+        await selection.transport.close()
+        if !keepingRuntime { try? await selection.runtime.close() }
+    }
+
+    private func replaceRustBinding(with selection: RustWorkspaceSelection) {
+        rustSelection = selection
+        rustSyncState = nil
+        runtimeIssues = []
+        runtimeTransportUnavailable = false
+    }
+
+    private func resetRustAccountState() {
+        state = .empty
+        account = nil
+        syncStatus = .localOnly
+        pendingChangeCount = 0
+        rustLocalReview = LocalReviewState()
+        rustReviewState = nil
+        rustReviewDraftCount = 0
+        rustIdentityBindings = []
+        queryError = nil
+    }
+
+    private static func signInFailure(_ error: any Error) -> any Error {
+        if let failure = error as? SignInFailure {
+            return WorkspaceError.signInFailed(message: failure.message, referenceID: failure.referenceID)
+        }
+        if error is WorkspaceError { return error }
+        return WorkspaceError.signInFailed(message: "Couldn't sign in. Your work is kept.", referenceID: nil)
     }
 }

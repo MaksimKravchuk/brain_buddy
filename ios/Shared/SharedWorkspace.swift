@@ -31,6 +31,11 @@ enum SharedWorkspace {
             await appWorkspace.reloadIfChangedExternally()
             return appWorkspace
         }
+        // Extension processes still open the legacy App Group file. Opening the Rust store here
+        // needs the selected workspace identity persisted in the App Group, which does not exist
+        // before the production cutover; a process-local setting from the app cannot reach
+        // another process. The package seam for that cutover is
+        // `Workspace.extensionWorkspace(over:)` with `Workspace.rustDatabaseURL(appGroupID:workspaceID:)`.
         let workspace = Workspace.live(appGroupID: SharedConstants.appGroupID, enableSync: false)
         await workspace.load()
         return workspace

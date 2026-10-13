@@ -932,3 +932,70 @@ def test_026_FR_022_refusal_keeps_only_server_owned_diagnostics(store):
     assert rejected["error"]["message"] == "Command rejected."
     assert "Secret title" not in json.dumps(rejected)
     assert rejected["error"]["details"]["current_versions"] == current
+
+
+def test_026_FR_005_device_command_id_with_a_different_envelope_conflicts(store):
+    repo, uow, receipts = store
+    with receipts.command(uow, device_request(), authority, now=NOW) as cmd:
+        cmd.accept(write(repo, cmd))
+    for changed in (
+        device_request(payload={"previous_schema_field": "other"}),
+        device_request(entity_id="task_other"),
+    ):
+        with (
+            pytest.raises(SyncCommandError, match="IDEMPOTENCY_KEY_REUSED"),
+            receipts.command(uow, changed, authority, now=NOW),
+        ):
+            pytest.fail("conflicting device command executed")
+    assert count(repo, "tasks") == count(repo, "sync_change_transactions") == 1
+
+
+def test_026_FR_006_each_scope_commit_takes_the_next_sequence_with_its_records(store):
+    repo, uow, receipts = store
+    sequences: dict[str, list[str]] = {OWNER: [], "user_other": []}
+    for owner, key in (
+        (OWNER, "a1"),
+        ("user_other", "b1"),
+        (OWNER, "a2"),
+        ("user_other", "b2"),
+        ("user_other", "b3"),
+    ):
+        envelope = CommandRequest.legacy(owner, key, "task.create", {"title": key})
+        with receipts.command(uow, envelope, authority, now=NOW) as cmd:
+            task = TaskDocument(
+                id=f"task_{key}",
+                owner_id=owner,
+                title="t",
+                state="inbox",
+                order_key=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+            repo.create(task)
+            change = {
+                "operation": "upsert",
+                "entity_type": "task",
+                "value": encode_task(task),
+            }
+            sequences[owner].append(cmd.accept([change])["commit_seq"])
+    assert sequences == {OWNER: ["1", "2"], "user_other": ["1", "2", "3"]}
+    with sqlite3.connect(repo.db_path) as conn:
+        joined = conn.execute(
+            "SELECT t.owner_id, t.commit_seq, r.record_key FROM "
+            "sync_change_transactions t JOIN sync_change_records r "
+            "ON r.owner_id = t.owner_id AND r.commit_seq = t.commit_seq "
+            "ORDER BY t.owner_id, length(t.commit_seq), t.commit_seq"
+        ).fetchall()
+        orphans = conn.execute(
+            "SELECT count(*) FROM sync_change_records r WHERE NOT EXISTS ("
+            "SELECT 1 FROM sync_change_transactions t "
+            "WHERE t.owner_id = r.owner_id AND t.commit_seq = r.commit_seq)"
+        ).fetchone()[0]
+    assert orphans == 0
+    assert [(o, c, json.loads(k)[0]) for o, c, k in joined] == [
+        ("user_other", "1", "task_b1"),
+        ("user_other", "2", "task_b2"),
+        ("user_other", "3", "task_b3"),
+        (OWNER, "1", "task_a1"),
+        (OWNER, "2", "task_a2"),
+    ]
