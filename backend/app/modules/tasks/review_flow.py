@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -70,6 +70,7 @@ from .review_service import (
 )
 from .rust_review_facade import ReviewRefused, RustReviewFacade
 from .service import serialized_write
+from .sync.review_projection import dict_codec, model_codec
 
 logger = logging.getLogger("app.modules.tasks.review")
 
@@ -196,6 +197,89 @@ class ReviewFlowService:
 
     def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
         self.review._reconcile_idempotent_result(owner_id=owner_id, key=key)
+
+    @property
+    def _sync_dispatch(self) -> Callable[..., object] | None:
+        """The receipt-boundary hook ``serialized_write`` looks for (PR-28).
+
+        ``None`` without a wired boundary, so the unwired path is unchanged.
+        """
+
+        return self._dispatch_sync if self.review._boundary is not None else None
+
+    def _dispatch_sync(
+        self,
+        command: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        raw_command: Callable[..., object],
+    ) -> object:
+        """Opt the run and bulk commands into the shared receipt boundary."""
+
+        owner_id = cast(str, kwargs["owner_id"])
+        command_type, payload, entity_id, path, codec = self._sync_plan(command, args)
+        return self.review.sync_dispatch(
+            self,
+            owner_id,
+            cast(str, kwargs["idempotency_key"]),
+            raw_command,
+            args,
+            kwargs,
+            command_type=command_type,
+            route=command,
+            payload=payload,
+            entity_id=entity_id,
+            path=path,
+            codec=codec,
+            # Each of these answers a stored matching record or its own state
+            # without writing, so a redacted receipt can still be recovered.
+            recoverable=True,
+        )
+
+    @staticmethod
+    def _sync_plan(
+        command: str, args: tuple[object, ...]
+    ) -> tuple[str, BaseModel | None, str, dict[str, str] | None, tuple[Any, Any]]:
+        """``(catalog command, payload, entity, path, codec)``."""
+
+        match command:
+            case "start_session":
+                start = cast(SessionStartRequest, args[0])
+                return (
+                    "review.session_start",
+                    start,
+                    start.id or "review_pending",
+                    None,
+                    model_codec(ReviewSessionDocument),
+                )
+            case "progress_session" | "finish_session":
+                kind = "progress" if command == "progress_session" else "finish"
+                session_id = cast(str, args[0])
+                return (
+                    f"review.session_{kind}",
+                    cast(BaseModel, args[1]),
+                    session_id,
+                    {"session_id": session_id},
+                    model_codec(ReviewSessionDocument),
+                )
+            case "bulk_release":
+                release = cast(BulkReleaseRequest, args[0])
+                return (
+                    "review.bulk_release",
+                    release,
+                    release.id or "bulk_pending",
+                    None,
+                    model_codec(ReviewBulkReleaseDocument),
+                )
+            case _:  # ``undo_bulk_release``, the last decorated writer
+                bulk_id = cast(str, args[0])
+                return (
+                    "review.bulk_undo",
+                    None,
+                    bulk_id,
+                    {"bulk_id": bulk_id},
+                    dict_codec(),
+                )
 
     # ------------------------------------------------------------------ runs
     @serialized_write
