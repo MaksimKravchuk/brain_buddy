@@ -932,3 +932,45 @@ def test_026_FR_022_refusal_keeps_only_server_owned_diagnostics(store):
     assert rejected["error"]["message"] == "Command rejected."
     assert "Secret title" not in json.dumps(rejected)
     assert rejected["error"]["details"]["current_versions"] == current
+
+
+def test_026_FR_005_device_command_id_with_a_different_envelope_conflicts(store):
+    repo, uow, receipts = store
+    with receipts.command(uow, device_request(), authority, now=NOW) as cmd:
+        cmd.accept(write(repo, cmd))
+    for changed in (
+        device_request(payload={"previous_schema_field": "other"}),
+        device_request(entity_id="task_other"),
+    ):
+        with (
+            pytest.raises(SyncCommandError, match="IDEMPOTENCY_KEY_REUSED"),
+            receipts.command(uow, changed, authority, now=NOW),
+        ):
+            pytest.fail("conflicting device command executed")
+    assert count(repo, "tasks") == count(repo, "sync_change_transactions") == 1
+
+
+def test_026_FR_006_each_scope_commit_takes_the_next_sequence_with_its_records(store):
+    repo, uow, receipts = store
+    sequences = []
+    for key in ("key-1", "key-2"):
+        with receipts.command(uow, request(key=key), authority, now=NOW) as cmd:
+            task = TaskDocument(
+                id=f"task_{key}",
+                owner_id=OWNER,
+                title="t",
+                state="inbox",
+                order_key=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+            repo.create(task)
+            change = {
+                "operation": "upsert",
+                "entity_type": "task",
+                "value": encode_task(task),
+            }
+            sequences.append(cmd.accept([change])["commit_seq"])
+    assert sequences == ["1", "2"]
+    assert count(repo, "sync_change_transactions") == 2
+    assert count(repo, "sync_change_records") == 2
