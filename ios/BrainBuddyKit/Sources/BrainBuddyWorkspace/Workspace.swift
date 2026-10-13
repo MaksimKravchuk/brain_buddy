@@ -209,6 +209,14 @@ public final class Workspace {
     var rustLoadFailureCode: String?
 
     public var isRustSelected: Bool { rustSelection != nil }
+
+    /// The install's runtime cannot be opened: the recovery state shows `code`, and nothing opens
+    /// the retired document instead (spec 026, T044).
+    func markUnavailable(code: String) {
+        rustLoadFailureCode = code
+        loadError = "Brain Buddy couldn't open your lists. Your work is kept."
+        isLoaded = true
+    }
     public var isRustBound: Bool { rustRuntime != nil && rustQueries != nil }
 
     // MARK: Construction

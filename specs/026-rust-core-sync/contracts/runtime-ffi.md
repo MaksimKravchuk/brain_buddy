@@ -244,6 +244,20 @@ missing or unproved source snapshots remain a refusal until an exact typed priva
 activation is admitted. Production selection, account linking and pilot evidence
 remain T044 work; these ports do not activate the capability automatically.
 
+Account link and removal (T044, `account_link.rs`): `link_account(account_id)` binds an
+account-less or unchosen workspace to the signed-in account in one transaction (state
+`linked`, `workspace_generation` bumped so answers to earlier requests are stale; scope and
+device are bound by the sync session at its first start). A workspace that holds local records
+or unsettled commands is not linked (`LocalWorkNotMerged`, nothing changes): the constructed
+owner-bound import commands of the explicit merge are not implemented yet, and relabelling or
+dropping local work is never an option. `remove_account_copy(max_unsent, generation, issue_ids)`
+re-reads the unsent count, the projection generation and the open issues under the write lock and
+removes every row and resets the identity row to a fresh `unchosen` workspace only when no more
+was queued or opened than the confirmation named (`Changed{unsent, open_issues}` otherwise,
+nothing written). Command ids are not exposed by the runtime, so the confirmation is the count
+plus the generation (every local write moves it); both operations take the bridge's cancellable
+commit arbitration like the other lifecycle operations.
+
 LOCAL Undo evidence additionally preserves a replaced receipt and session activity
 before-state. A receipt is restored only while the current receipt still belongs
 to the decision/bulk being undone; its task revision is rebound only when the

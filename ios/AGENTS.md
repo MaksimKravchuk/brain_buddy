@@ -69,6 +69,16 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   until the status says `mayRun` (every entry classified, no `unsent` intent left), and the UI must
   not say "synced" unless `fullySynced`. The `unsent` intents are the runtime's to turn into new
   commands (use the entry's idempotency key as the command ID so a retry is idempotent).
+- `BrainBuddyWorkspace/RustRuntimeLauncher` + `RustRuntimeSelectionStore` choose the runtime per install
+  (T044, pilot): `runtime/selection.json` beside the stores (App Group on iOS, the Mac's folder on
+  macOS) names the Rust workspace identity; no file means legacy. Only the app writes it, and only
+  after the PR-41/42 importers finished with `mayRun`; the default-OFF pilot switch
+  (`RustRuntimePilotSwitch`, a local `UserDefaults` key, never a server flag) gates that first move
+  alone. An existing selection that cannot be opened is `unavailable`, never a fallback to the
+  retired file. Widgets and App Intents (`SharedWorkspace.make()`) read only the file and open the
+  store through `Workspace.openForExtension`. The sync host plugs in at `RustTransportProvider`;
+  `HostRustAccountLifecycle` is the production `RustAccountLifecyclePort` over the core's
+  `link_account` / `remove_account_copy` (one transaction each, under the store's lock).
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.

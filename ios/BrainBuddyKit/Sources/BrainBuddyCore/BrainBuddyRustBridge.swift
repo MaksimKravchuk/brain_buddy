@@ -878,6 +878,23 @@ extension RustBridgeRuntime {
     }
 }
 
+/// What binding a workspace to the signed-in account did (T044).
+public enum RustAccountLinkOutcome: Equatable, Sendable {
+    case linked
+    case alreadyLinked
+    /// Another account owns the workspace; nothing changed.
+    case otherAccount
+    /// The workspace holds local work that no import carries into an account yet; nothing changed.
+    case localWorkNotMerged(records: UInt64, queued: UInt64)
+}
+
+/// What removing the account's local copy did (T044).
+public enum RustAccountCopyRemoval: Equatable, Sendable {
+    case removed
+    /// More was queued (or an issue opened) since the confirmation; nothing was removed.
+    case changed(unsent: UInt64, openIssues: UInt64)
+}
+
 /// All disk work runs off the caller's actor. The adapter chooses where to
 /// adopt results. The generated handle owns no borrowed buffers or pointers.
 public final class RustWorkspaceRuntime: Sendable {
@@ -908,6 +925,34 @@ public final class RustWorkspaceRuntime: Sendable {
     /// Explicit trusted lifecycle choice, independently verified by Rust.
     public func establishAccountless() async throws {
         try await committing { workspace, operation in try workspace.establishAccountLess(operation: operation) }
+    }
+
+    /// Binds the account-less (or unchosen) workspace to the account that signed in (T044). The
+    /// core decides under the store's lock: a workspace that holds local work is not linked
+    /// (`.localWorkNotMerged`, nothing changed), and another account's is never taken over.
+    public func linkAccount(accountID: String) async throws -> RustAccountLinkOutcome {
+        try await committing { workspace, operation in
+            switch try workspace.linkAccount(accountId: accountID, operation: operation) {
+            case .linked: return .linked
+            case .alreadyLinked: return .alreadyLinked
+            case .otherAccount: return .otherAccount
+            case .localWorkNotMerged(let records, let queued): return .localWorkNotMerged(records: records, queued: queued)
+            }
+        }
+    }
+
+    /// Removes the account's local copy when it still is what the confirmation named, checked
+    /// under the store's lock (T044). Afterwards the store is a fresh unchosen workspace; the
+    /// caller deletes its file.
+    public func removeAccountCopy(maxUnsent: UInt64, generation: UInt64, issueIDs: [String])
+        async throws -> RustAccountCopyRemoval {
+        try await committing { workspace, operation in
+            switch try workspace.removeAccountCopy(maxUnsent: maxUnsent, generation: generation, issueIds: issueIDs,
+                                                  operation: operation) {
+            case .removed: return .removed
+            case .changed(let unsent, let openIssues): return .changed(unsent: unsent, openIssues: openIssues)
+            }
+        }
     }
 
     public func establishAccountlessFromImport(retainedSourceURL: URL) async throws {

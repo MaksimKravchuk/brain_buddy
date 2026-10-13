@@ -81,16 +81,7 @@ extension Workspace {
     /// none, Application Support): app, widgets and intents derive the same path, so they share
     /// the store's lock. The identity is encoded, so it cannot name another folder.
     public nonisolated static func rustDatabaseURL(appGroupID: String, workspaceID: String) -> URL {
-        #if canImport(Darwin)
-            let document =
-                FileDocumentStore.appGroupDocumentURL(appGroupID: appGroupID)
-                ?? FileDocumentStore.applicationSupportDocumentURL()
-        #else
-            let document = FileDocumentStore.applicationSupportDocumentURL()
-        #endif
-        let encoded = workspaceID.utf8.map { String(format: "%02x", $0) }.joined()
-        return document.deletingLastPathComponent().appendingPathComponent("runtime", isDirectory: true)
-            .appendingPathComponent(encoded, isDirectory: true).appendingPathComponent("store.sqlite3")
+        RustRuntimeLocation.appGroup(appGroupID).databaseURL(workspaceID)
     }
 
     /// A widget or App Intent over the selected runtime: it saves through the store's lock and
