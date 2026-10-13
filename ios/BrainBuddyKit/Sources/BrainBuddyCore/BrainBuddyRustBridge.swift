@@ -460,6 +460,17 @@ public final class RustBridgeRuntime: Sendable {
         }
     }
 
+    /// Chooses the executor for one AI request with the shared policy (JSON in and out). The call
+    /// runs no model and sends nothing; a denial is a value of the answer, not a throw.
+    public func aiRoute(_ request: Data) async throws -> Data {
+        try await offActor { (runtime: BridgeRuntime) throws -> Data in try runtime.aiRoute(request: request) }
+    }
+
+    /// Validates one model answer with the shared navigator rules (JSON in and out).
+    public func aiValidateAnswer(_ answer: Data) async throws -> Data {
+        try await offActor { (runtime: BridgeRuntime) throws -> Data in try runtime.aiValidateAnswer(answer: answer) }
+    }
+
     /// The `task.smart_add` payload a draft would send, given the IDs minted for the records
     /// it creates; a blocked draft is a refusal.
     public func smartAddPropose(readSet: Data, draft: Data, minted: Data) async throws -> RustAnswer {

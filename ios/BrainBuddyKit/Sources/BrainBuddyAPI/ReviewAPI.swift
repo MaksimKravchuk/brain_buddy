@@ -295,6 +295,79 @@ public struct NavigatorConsentGrantBody: Codable, Hashable, Sendable {
     }
 }
 
+/// `POST /review/navigator/suggestions`: exactly the FR-019 input and nothing else (no language,
+/// no identifiers). `task` is absent for a project next action, `project` for the other kinds.
+public struct NavigatorSuggestionBody: Codable, Hashable, Sendable {
+    public struct Consent: Codable, Hashable, Sendable {
+        public var externalProcessingAllowed: Bool
+        public var provider: String
+        public init(externalProcessingAllowed: Bool, provider: String) {
+            self.externalProcessingAllowed = externalProcessingAllowed
+            self.provider = provider
+        }
+        enum CodingKeys: String, CodingKey {
+            case provider
+            case externalProcessingAllowed = "external_processing_allowed"
+        }
+    }
+
+    public struct TaskInput: Codable, Hashable, Sendable {
+        public var title: String
+        public var notes: String?
+        public var stallReason: String?
+        public init(title: String, notes: String? = nil, stallReason: String? = nil) {
+            self.title = title
+            self.notes = notes
+            self.stallReason = stallReason
+        }
+        enum CodingKeys: String, CodingKey {
+            case title, notes
+            case stallReason = "stall_reason"
+        }
+        public func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(title, forKey: .title)
+            try values.encodeIfPresent(notes, forKey: .notes)
+            try values.encodeIfPresent(stallReason, forKey: .stallReason)
+        }
+    }
+
+    public struct ProjectInput: Codable, Hashable, Sendable {
+        public var name: String
+        public var openTaskTitles: [String]
+        public init(name: String, openTaskTitles: [String]) {
+            self.name = name
+            self.openTaskTitles = openTaskTitles
+        }
+        enum CodingKeys: String, CodingKey {
+            case name
+            case openTaskTitles = "open_task_titles"
+        }
+    }
+
+    public var kind: String
+    public var consent: Consent
+    public var task: TaskInput?
+    public var project: ProjectInput?
+
+    public init(kind: String, consent: Consent, task: TaskInput? = nil, project: ProjectInput? = nil) {
+        self.kind = kind
+        self.consent = consent
+        self.task = task
+        self.project = project
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(kind, forKey: .kind)
+        try values.encode(consent, forKey: .consent)
+        try values.encodeIfPresent(task, forKey: .task)
+        try values.encodeIfPresent(project, forKey: .project)
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, consent, task, project }
+}
+
 // MARK: - Responses
 
 public struct DecisionRecordDTO: Codable, Hashable, Sendable {
@@ -856,6 +929,15 @@ public struct NavigatorSuggestionResponseDTO: Codable, Hashable, Sendable {
         case clarifyingQuestion = "clarifying_question"
     }
 
+    public init(requestID: String, provider: String, notesTruncated: Bool = false, proposals: [String]? = nil,
+                clarifyingQuestion: String? = nil) {
+        self.requestID = requestID
+        self.provider = provider
+        self.notesTruncated = notesTruncated
+        self.proposals = proposals
+        self.clarifyingQuestion = clarifyingQuestion
+    }
+
     /// Exactly one of `proposals` and `clarifying_question` (http §7).
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -963,6 +1045,13 @@ extension BrainBuddyAPIClient {
     /// `GET /review/navigator`.
     public func navigatorStatus() async throws(APIError) -> NavigatorStatusDTO {
         try await get(["review", "navigator"])
+    }
+
+    /// `POST /review/navigator/suggestions`: read-like, no idempotency key, nothing stored. A lost
+    /// response is never resent by the client; the caller decides (`APIError.requestMayHaveBeenSent`).
+    public func navigatorSuggestions(_ body: NavigatorSuggestionBody) async throws(APIError) -> NavigatorSuggestionResponseDTO {
+        let exchange = try await exchange(Endpoint(.post, ["review", "navigator", "suggestions"], body: try encode(body)))
+        return try decode(exchange)
     }
 
     /// `POST /review/navigator/consent`.

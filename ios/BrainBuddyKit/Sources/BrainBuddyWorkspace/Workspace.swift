@@ -176,6 +176,8 @@ public final class Workspace {
     @ObservationIgnored private var rustProjectInterests: [Data: Set<ProjectID>] = [:]
     @ObservationIgnored private var rustTagInterests: [Data: Set<TagID>] = [:]
     @ObservationIgnored private var rustPruningDrafts = false
+    /// One suggestion model per task and kind, so a closed sheet keeps its live request (T049).
+    @ObservationIgnored let reviewSuggestions = ReviewSuggestionCenter()
     @ObservationIgnored var rustReviewPresentationSaving = false
     var rustLocalReview = LocalReviewState()
     var rustReviewDraftCount = 0

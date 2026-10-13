@@ -62,6 +62,7 @@ use serde::{Deserialize, Serialize};
 
 uniffi::setup_scaffolding!();
 
+mod ai;
 mod workspace;
 pub use workspace::*;
 
@@ -918,6 +919,17 @@ impl BridgeRuntime {
         Ok(guarded(&self.state, || {
             propose_smart_add(&read_set, &draft, &minted)
         })?)
+    }
+
+    /// Chooses the executor for one AI request (`bb_domain::ai_policy::route`); the
+    /// request and answer are JSON. Nothing runs and nothing is sent by this call.
+    pub fn ai_route(&self, request: Vec<u8>) -> Result<Vec<u8>, BridgeError> {
+        Ok(guarded(&self.state, || ai::route_json(&request))?)
+    }
+
+    /// Validates one model answer (navigator contract rules 1-5); JSON in and out.
+    pub fn ai_validate_answer(&self, answer: Vec<u8>) -> Result<Vec<u8>, BridgeError> {
+        Ok(guarded(&self.state, || ai::validate_json(&answer))?)
     }
 }
 
