@@ -186,6 +186,18 @@ public final class Workspace {
     public private(set) var queryError: String?
     var presentationDraftError: String?
     @ObservationIgnored private var rustStatusRequestID: UInt64 = 0
+    /// Whether the runtime holds any record at all (`hasLocalWorkToMerge`), as of the generation
+    /// last counted; read only while the workspace has no account.
+    @ObservationIgnored private(set) var rustHasLocalRecords = false
+    @ObservationIgnored private var rustLocalRecordsGeneration: UInt64?
+
+    private static func hasAnyRecord(_ records: Data) -> Bool {
+        switch try? JSONSerialization.jsonObject(with: records) {
+        case let rows as [Any]: !rows.isEmpty
+        case let rows as [String: Any]: !rows.isEmpty
+        default: true  // unreadable: assume there is work rather than hide the merge notice
+        }
+    }
     private var rustSyncState: RustWorkspaceSyncState?
 
     public var isRustSelected: Bool { rustSelection != nil }
@@ -690,7 +702,7 @@ public final class Workspace {
     /// open sync issues, for a sign-out confirmation to name (`signOut(removing:)`).
     public var pendingChanges: Set<PendingChange> {
         guard isRustSelected else { return PendingChange.all(in: document, unpersisted: unpersisted) }
-        let unsent = (0..<Int(clamping: rustSyncState?.pending ?? 0)).map(PendingChange.init(runtimeUnsent:))
+        let unsent = (0..<Int(clamping: rustSyncState?.pending ?? 0)).map { PendingChange(runtimeUnsent: $0, generation: rustSyncState?.generation ?? 0) }
         return Set(unsent).union(runtimeIssues.map { PendingChange(runtimeIssue: $0.id) })
     }
 
@@ -1662,6 +1674,14 @@ extension Workspace {
             let status = try facade.workspaceSyncState(from: await runtime.syncStatus())
             guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
             guard status.generation >= (rustQueries?.generationFloor ?? 0) else { return }
+            // Only an account-less workspace has a first sign-in to merge; any persisted record
+            // counts, terminal tasks, projects, tags and review data included.
+            if account == nil, rustLocalRecordsGeneration != status.generation {
+                let records = try await runtime.snapshot().records
+                guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
+                rustHasLocalRecords = Self.hasAnyRecord(records)
+                rustLocalRecordsGeneration = status.generation
+            }
             rustSyncState = status
             pendingChangeCount = Int(clamping: status.pending)
             let answer = try await runtime.issues()
@@ -2525,15 +2545,17 @@ extension Workspace {
         }
         let next = outcome.selection
         let sameRuntime = next.runtime === selection.runtime
-        // A Cancel that won, or an owner that is not the linked one, links nothing.
-        if cancellation.isCancelled {
-            await discardRust(next, keepingRuntime: sameRuntime)
-            throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil)
-        }
+        // An owner that is not the linked one, or a Cancel that won, links nothing.
         guard let linked = next.account, account == nil || account?.id == linked.id else {
             await discardRust(next, keepingRuntime: sameRuntime)
             throw WorkspaceError.signInFailed(
                 message: "This is a different account. Sign out first; your work is kept.", referenceID: nil)
+        }
+        // The port claims the commit right before it links; this claims it when it did not, so a
+        // Cancel arriving after the link can no longer report a failure over a linked store.
+        guard cancellation.isCommitted || cancellation.commit() else {
+            await discardRust(next, keepingRuntime: sameRuntime)
+            throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil)
         }
         detachRustBinding()
         await selection.transport.close()
@@ -2564,7 +2586,8 @@ extension Workspace {
         }
         detachRustBinding()
         let named = RustSignOutConfirmation(unsent: confirmed.reduce(0) { $0 + $1.runtimeUnsentCount },
-                                            issueIDs: Set(confirmed.compactMap(\.runtimeIssueID)))
+                                            issueIDs: Set(confirmed.compactMap(\.runtimeIssueID)),
+                                            projectionGeneration: confirmed.compactMap(\.runtimeUnsentGeneration).max() ?? 0)
         let next: RustWorkspaceSelection
         do {
             next = try await lifecycle.signOut(RustSignOutRequest(current: selection, confirmed: named))

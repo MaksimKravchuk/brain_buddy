@@ -23,13 +23,6 @@ enum SharedWorkspace {
         appWorkspace = workspace
     }
 
-    /// The selected runtime's binding for the current workspace identity, set by the app's
-    /// composition once the install runs on the Rust runtime (its path comes from
-    /// `Workspace.rustDatabaseURL(appGroupID:workspaceID:)`). It is asked every time, so an
-    /// extension created after a sign-in, sign-out or account switch opens the new identity's
-    /// store and never the previous one. Absent: the legacy App Group file.
-    static var rustSelection: (@MainActor () async -> RustWorkspaceSelection?)?
-
     /// A loaded workspace over the App Group store with sync disabled. Make
     /// one per intent or widget timeline and let it go afterwards: widget
     /// extensions have a tight memory budget.
@@ -38,12 +31,11 @@ enum SharedWorkspace {
             await appWorkspace.reloadIfChangedExternally()
             return appWorkspace
         }
-        if let selection = await rustSelection?() {
-            // Same database lock as the app; its transport is replaced, so it never syncs.
-            let workspace = Workspace.extensionWorkspace(over: selection)
-            await workspace.load()
-            return workspace
-        }
+        // Extension processes still open the legacy App Group file. Opening the Rust store here
+        // needs the selected workspace identity persisted in the App Group, which does not exist
+        // before the production cutover; a process-local setting from the app cannot reach
+        // another process. The package seam for that cutover is
+        // `Workspace.extensionWorkspace(over:)` with `Workspace.rustDatabaseURL(appGroupID:workspaceID:)`.
         let workspace = Workspace.live(appGroupID: SharedConstants.appGroupID, enableSync: false)
         await workspace.load()
         return workspace

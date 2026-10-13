@@ -11,7 +11,7 @@ public struct PendingChange: Hashable, Sendable {
         case issue(SyncIssue)
         /// The `index`-th unsent command of a selected runtime, which reports a count: a sign-out
         /// names how many it removes, and the runtime checks the count again under its lock.
-        case runtimeUnsent(Int)
+        case runtimeUnsent(Int, generation: UInt64)
         case runtimeIssue(String)
     }
 
@@ -28,9 +28,9 @@ public struct PendingChange: Hashable, Sendable {
         content = .issue(issue)
     }
 
-    init(runtimeUnsent index: Int) {
+    init(runtimeUnsent index: Int, generation: UInt64) {
         id = Self.deterministicID(UInt64(index), salt: 1)
-        content = .runtimeUnsent(index)
+        content = .runtimeUnsent(index, generation: generation)
     }
 
     init(runtimeIssue issueID: String) {
@@ -43,6 +43,12 @@ public struct PendingChange: Hashable, Sendable {
     /// How many unsent changes a runtime sign-out confirmation names.
     var runtimeUnsentCount: Int {
         if case .runtimeUnsent = content { 1 } else { 0 }
+    }
+
+    /// The projection generation the unsent change was named at: a change queued or replaced
+    /// since moves it, so a count that merely stays equal is not the same work.
+    var runtimeUnsentGeneration: UInt64? {
+        if case .runtimeUnsent(_, let generation) = content { generation } else { nil }
     }
 
     var runtimeIssueID: String? {

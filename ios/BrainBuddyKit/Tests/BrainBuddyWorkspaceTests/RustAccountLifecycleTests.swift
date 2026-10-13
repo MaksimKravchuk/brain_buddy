@@ -100,6 +100,62 @@ struct RustAccountLifecycleTests {
         await workspace.closeRuntime()
     }
 
+    @Test("026-FR-011: a Cancel arriving after the port claimed the link cannot report failure over a linked store")
+    @MainActor
+    func lateCancelAfterLink() async throws {
+        let h = Harness()
+        defer { h.cleanup() }
+        let lifecycle = try await h.lifecycle(lateCancel: true)
+        let workspace = try await h.workspace(scope: "local", account: nil, lifecycle: lifecycle)
+        let cancellation = SignInCancellation()
+        try await workspace.signIn(serverURL: h.serverURL, email: "a@example.com", password: "secret",
+                                   cancellation: cancellation)
+        #expect(cancellation.isCommitted)
+        #expect(workspace.account == h.accountA)
+        #expect(workspace.isRustBound)
+        await workspace.closeRuntime()
+    }
+
+    @Test("026-FR-011: a confirmation names the generation, so replaced work with the same count is refused")
+    @MainActor
+    func replacedWorkIsNotTheConfirmedWork() async throws {
+        let confirmation = RustSignOutConfirmation(unsent: 1, issueIDs: [], projectionGeneration: 7)
+        // A was acknowledged and a widget queued B: one unsent change, another generation.
+        #expect(!confirmation.admits(pending: 1, generation: 8))
+        #expect(confirmation.admits(pending: 1, generation: 7))
+        #expect(confirmation.admits(pending: 0, generation: 9))
+        #expect(!confirmation.admits(pending: 2, generation: 7))
+
+        let h = Harness()
+        defer { h.cleanup() }
+        let recorder = Recorder()
+        let workspace = try await h.workspace(scope: "a", account: h.accountA, lifecycle: try await h.lifecycle(recorder: recorder))
+        _ = try await workspace.capture(CaptureDraft(text: "B, queued after the confirmation"), editorID: "scene:life:b")
+        let stale: Set<PendingChange> = [PendingChange(runtimeUnsent: 0, generation: 99)]
+        await #expect(throws: WorkspaceError.unsyncedChanges(count: 1)) { try await workspace.signOut(removing: stale) }
+        #expect(await recorder.signOuts.isEmpty)
+        #expect(workspace.account == h.accountA)
+        await workspace.closeRuntime()
+    }
+
+    @Test("026-FR-011: terminal records alone count as local work to merge on the first sign-in")
+    @MainActor
+    func terminalRecordsAreLocalWork() async throws {
+        let h = Harness()
+        defer { h.cleanup() }
+        let workspace = try await h.workspace(scope: "local", account: nil, startup: .freshAccountless, lifecycle: nil)
+        #expect(!workspace.hasLocalWorkToMerge)
+        let id = try await workspace.capture(CaptureDraft(text: "Done already"), editorID: "scene:life:done")
+        await workspace.prepareList(.list(.inbox))
+        await workspace.refreshTaskDetails(id)
+        try await workspace.completeTask(id, editorID: "scene:life:complete")
+        await workspace.syncNow()
+        #expect(workspace.counts() == ListCounts())
+        #expect(workspace.pendingChangeCount == 0)
+        #expect(workspace.hasLocalWorkToMerge)
+        await workspace.closeRuntime()
+    }
+
     @Test("026-FR-011: the sign-out warning names the unsent work and removes no more than it named")
     @MainActor
     func signOutWarning() async throws {
@@ -286,8 +342,9 @@ struct Harness: Sendable {
 
     @MainActor
     func workspace(scope: String, account: LinkedAccount?, transport: any SyncRuntimePort = PendingRustSyncRuntimePort(),
+                   startup: RustWorkspaceSelection.Startup = .prepared,
                    lifecycle: (any RustAccountLifecyclePort)?) async throws -> Workspace {
-        let selection = try await selection(scope: scope, account: account, transport: transport)
+        let selection = try await selection(scope: scope, account: account, transport: transport, startup: startup)
         let instant = instant
         let workspace = Workspace(store: ControlledStore(), sync: nil, rust: selection, rustLifecycle: lifecycle,
             now: { instant })
@@ -299,10 +356,10 @@ struct Harness: Sendable {
     /// A host's lifecycle over real stores: sign-in links the same workspace in place (the merge),
     /// sign-out checks the confirmation against the store's own count after `signOutGate`, then
     /// returns an empty account-less identity.
-    func lifecycle(recorder: Recorder = Recorder(), signInAccount: LinkedAccount? = nil, cancelling: Bool = false,
+    func lifecycle(recorder: Recorder = Recorder(), signInAccount: LinkedAccount? = nil, cancelling: Bool = false, lateCancel: Bool = false,
                    signOutGate: Gate? = nil) async throws -> any RustAccountLifecyclePort {
         ScriptedLifecycle(harness: self, recorder: recorder, signInAccount: signInAccount ?? accountA,
-                          cancelling: cancelling, signOutGate: signOutGate)
+                          cancelling: cancelling, lateCancel: lateCancel, signOutGate: signOutGate)
     }
 }
 
@@ -311,11 +368,13 @@ struct ScriptedLifecycle: RustAccountLifecyclePort {
     let recorder: Recorder
     let signInAccount: LinkedAccount
     let cancelling: Bool
+    var lateCancel = false
     let signOutGate: Gate?
 
     func signIn(_ request: RustSignInRequest) async throws -> RustSignInOutcome {
         await recorder.recordSignIn(merging: request.mergesLocalWork)
-        if cancelling { request.cancellation.cancel() }
+        if cancelling { request.cancellation.cancel() } else { _ = request.cancellation.commit() }
+        if lateCancel { _ = request.cancellation.cancel() }
         let current = request.current
         if signInAccount.id != current.account?.id, current.account != nil {
             // A different owner gets its own workspace; the old one's work is never moved into it.
@@ -330,7 +389,8 @@ struct ScriptedLifecycle: RustAccountLifecyclePort {
         await signOutGate?.reach()
         // Under the store's own lock in a real host: whatever a widget queued meanwhile counts.
         let pending = Int(try await request.current.runtime.snapshot().pending) ?? 0
-        guard pending <= request.confirmed.unsent else { throw WorkspaceError.unsyncedChanges(count: pending) }
+        let generation = UInt64(try await request.current.runtime.snapshot().projectionGeneration) ?? 0
+        guard request.confirmed.admits(pending: pending, generation: generation) else { throw WorkspaceError.unsyncedChanges(count: pending) }
         await recorder.recordSignOut(removing: pending)
         return try await harness.selection(scope: "local-\(UUID().uuidString)", account: nil)
     }
