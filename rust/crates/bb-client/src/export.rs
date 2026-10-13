@@ -13,7 +13,7 @@
 //! field cannot leak by default.
 //!
 //! Failures carry a stage and a store code only, never a row or its text.
-use crate::{Store, StoreError};
+use crate::{ExecuteContext, Store, StoreError, replay};
 use rusqlite::{Transaction, params};
 use serde::Serialize;
 use serde_json::Value;
@@ -180,17 +180,39 @@ fn strip_protected(value: &mut Value) {
 }
 
 /// Reads the whole export in one transaction.
+///
+/// A store that was just upgraded has confirmed rows but no visible
+/// projection yet. The projection is rebuilt first (a write, under the store
+/// lock) so the export is never a stale or empty visible set; if it is still
+/// stale inside the read, the export fails rather than guess.
 pub fn export_workspace(
     store: &mut Store,
     workspace: &str,
+    context: &ExecuteContext,
 ) -> Result<(WorkspaceExport, ExportReport), ExportError> {
     let started = Instant::now();
+    let fail = |store| ExportError {
+        stage: ExportStage::Records,
+        store,
+    };
+    if projection_stale(store).map_err(fail)? {
+        replay(store, context).map_err(|error| match error {
+            crate::ReplayError::Store(store) => fail(store),
+            _ => fail(StoreError::Corrupt),
+        })?;
+    }
     let export = store
-        .read(|tx| Ok(collect(tx, workspace)))
-        .map_err(|store| ExportError {
-            stage: ExportStage::Records,
-            store,
-        })??;
+        .read(|tx| {
+            let stale: i64 = tx.query_row("SELECT projection_stale FROM sync_meta", [], |row| {
+                row.get(0)
+            })?;
+            Ok(if stale == 0 {
+                collect(tx, workspace)
+            } else {
+                Err(corrupt(ExportStage::Records))
+            })
+        })
+        .map_err(fail)??;
     let report = ExportReport {
         visible_records: export.visible_records.len(),
         pending_intents: export.pending_intents.len(),
@@ -200,6 +222,15 @@ pub fn export_workspace(
         elapsed_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
     Ok((export, report))
+}
+
+fn projection_stale(store: &mut Store) -> Result<bool, StoreError> {
+    store.read(|tx| {
+        let stale: i64 = tx.query_row("SELECT projection_stale FROM sync_meta", [], |row| {
+            row.get(0)
+        })?;
+        Ok(stale != 0)
+    })
 }
 
 fn collect(tx: &Transaction<'_>, workspace: &str) -> Result<WorkspaceExport, ExportError> {

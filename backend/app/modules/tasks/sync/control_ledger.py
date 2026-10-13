@@ -111,10 +111,15 @@ class ControlLedger:
         now: datetime,
         detail: str | None = None,
     ) -> None:
-        conn.execute(
+        added = conn.execute(
             "INSERT INTO control_entries(kind, owner_id, auth_version, recorded_at, "
             "detail) VALUES (?,?,?,?,?)",
             (kind, owner_id, auth_version, _stamp(now), detail),
+        )
+        # The durable high-water mark: losing the newest row stays detectable.
+        conn.execute(
+            "INSERT OR REPLACE INTO control_meta VALUES ('high_water', ?)",
+            (str(added.lastrowid),),
         )
 
     def record_epoch(
@@ -154,11 +159,18 @@ class ControlLedger:
         cutoff = _stamp(now - HORIZON)
         with self._open() as conn:
             for row in conn.execute(
-                "SELECT DISTINCT owner_id FROM control_entries "
-                "WHERE kind = ? AND recorded_at <= ?",
+                "SELECT owner_id, max(recorded_at) AS purged_at FROM control_entries "
+                "WHERE kind = ? AND recorded_at <= ? GROUP BY owner_id",
                 (PURGE, cutoff),
             ).fetchall():
                 if not keep_owner(row["owner_id"]):
+                    # A backup older than the purge still holds the account, so
+                    # coverage must not stay behind the marker we erase.
+                    conn.execute(
+                        "UPDATE control_meta SET value = max(value, ?) "
+                        "WHERE key = 'covered_from'",
+                        (row["purged_at"],),
+                    )
                     conn.execute(
                         "UPDATE control_entries SET kind = ?, owner_id = NULL, "
                         "auth_version = NULL, detail = NULL "
@@ -204,7 +216,7 @@ class ControlLedger:
 
         The proof uses only this file and the backup's timestamp, never the
         restored image: the ledger must have existed and not yet retired anything
-        newer than the backup, and its sequence must have no hole.
+        newer than the backup, and its sequence must be exactly 1..high-water mark.
         """
         with self._open() as conn:
             covered = conn.execute(
@@ -215,10 +227,14 @@ class ControlLedger:
             covered["value"]
         ):
             raise LedgerIncomplete("backup predates ledger coverage")
-        if entries and [entry.seq for entry in entries] != list(
-            range(entries[0].seq, entries[0].seq + len(entries))
-        ):
-            raise LedgerIncomplete("control sequence has a gap")
+        with self._open() as conn:
+            mark = conn.execute(
+                "SELECT value FROM control_meta WHERE key = 'high_water'"
+            ).fetchone()
+        high_water = int(mark["value"]) if mark is not None else 0
+        # Rows are only ever tombstoned, never deleted: exactly 1..high_water.
+        if [entry.seq for entry in entries] != list(range(1, high_water + 1)):
+            raise LedgerIncomplete("control sequence has a gap or lost an edge")
         return [e for e in entries if e.owner_id is not None]
 
     def state(self) -> str | None:

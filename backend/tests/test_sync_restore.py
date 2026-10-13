@@ -506,3 +506,37 @@ def test_026_FR_015_production_container_records_into_its_own_ledger(api_client)
         kinds = [(e.kind, e.owner_id) for e in container.control_ledger.entries()]
         attach_json("entries", kinds)
         assert ("revoke_sessions", user_id) in kinds
+
+
+def test_026_FR_015_pruned_purge_marker_still_makes_an_earlier_backup_unprovable(
+    world,
+):
+    world.ledger.record_revocation(GONE, 2, now=T0 + timedelta(hours=1))
+    world.ledger.record_purge(GONE, now=T0 + timedelta(hours=3))
+    backup = T0 + timedelta(hours=2)  # after the revocation, before the purge
+    world.ledger.prune(T0 + HORIZON + timedelta(days=1), keep_owner=lambda _: False)
+    with allure.step("a backup that still holds the account is not provable"):
+        with pytest.raises(LedgerIncomplete) as early:
+            world.ledger.prove_complete(backup)
+        attach_json("reason", str(early.value))
+    with allure.step("a backup taken after the purge is"):
+        assert world.ledger.prove_complete(T0 + timedelta(hours=4)) == []
+
+
+@pytest.mark.parametrize("edge", ["first", "last", "only"])
+def test_026_FR_015_losing_an_edge_entry_makes_completeness_unprovable(world, edge):
+    world.ledger.record_purge(GONE, now=T0 + timedelta(hours=1))
+    if edge != "only":
+        world.ledger.record_revocation(KEPT, 2, now=T0 + timedelta(hours=2))
+        world.ledger.record_purge(KEPT, now=T0 + timedelta(hours=3))
+    keep_seq = {"first": "MIN", "last": "MAX", "only": "MAX"}[edge]
+    with closing(sqlite3.connect(world.data_dir / "control.sqlite3")) as conn:
+        conn.execute(
+            f"DELETE FROM control_entries WHERE seq = "  # noqa: S608
+            f"(SELECT {keep_seq}(seq) FROM control_entries)"
+        )
+        conn.commit()
+    with allure.step("the missing edge is detected"):
+        with pytest.raises(LedgerIncomplete) as lost:
+            world.ledger.prove_complete(T0 + timedelta(minutes=1))
+        attach_json("reason", str(lost.value))

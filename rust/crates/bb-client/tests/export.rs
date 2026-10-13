@@ -2,13 +2,40 @@
 //! with relationships intact, and nothing protected.
 
 use bb_client::{
-    EXPORT_FORMAT, ExportStage, OpenOptions, Store, StoreError, WorkspaceExport, export_workspace,
+    EXPORT_FORMAT, ExecuteContext, ExecuteRequest, ExportStage, IdSource, OpenOptions, Store,
+    StoreError, WorkspaceExport, execute, export_workspace,
 };
+use bb_domain::types::{ActorId, Policy, ZoneName};
+use bb_protocol::catalog::CommandType;
+use bb_protocol::wire::{CommandId, Instant};
 use rusqlite::params;
 use std::path::PathBuf;
 use std::time::Duration;
 
 const WORKSPACE: &str = "workspace-local";
+
+fn context() -> ExecuteContext {
+    ExecuteContext {
+        now: Instant::parse("2026-10-10T09:00:00Z").unwrap(),
+        time_zone: ZoneName::new("UTC").unwrap(),
+        actor_id: ActorId::parse("actor-local").unwrap(),
+        policy: Policy {
+            weekly_review: false,
+            navigator_provider: None,
+            navigator_available: false,
+            consent_text_version: 1,
+        },
+    }
+}
+
+struct SeqIds(u64);
+
+impl IdSource for SeqIds {
+    fn uuid(&mut self) -> std::io::Result<String> {
+        self.0 += 1;
+        Ok(format!("00000000-0000-4000-8000-{:012x}", self.0))
+    }
+}
 
 fn open(name: &str) -> Store {
     let directory = std::env::temp_dir().join(format!("bb-export-{name}-{}", std::process::id()));
@@ -90,7 +117,7 @@ fn seed(store: &mut Store) {
 fn exported(name: &str) -> (WorkspaceExport, String) {
     let mut store = open(name);
     seed(&mut store);
-    let (export, _) = export_workspace(&mut store, WORKSPACE).expect("export");
+    let (export, _) = export_workspace(&mut store, WORKSPACE, &context()).expect("export");
     let json = serde_json::to_string(&export).expect("serialise");
     (export, json)
 }
@@ -173,7 +200,7 @@ fn feature_026_fr_023_export_excludes_fingerprints_tokens_and_digests() {
 fn feature_026_fr_023_report_and_errors_carry_counts_stage_and_timing_only() {
     let mut store = open("report");
     seed(&mut store);
-    let (_, report) = export_workspace(&mut store, WORKSPACE).expect("export");
+    let (_, report) = export_workspace(&mut store, WORKSPACE, &context()).expect("export");
     let rendered = serde_json::to_string(&report).expect("report");
     assert!(rendered.contains("\"pending_intents\":3"));
     assert!(!rendered.contains("milk") && !rendered.contains("typed words"));
@@ -184,7 +211,7 @@ fn feature_026_fr_023_report_and_errors_carry_counts_stage_and_timing_only() {
             Ok(())
         })
         .expect("corrupt");
-    let error = export_workspace(&mut store, WORKSPACE).expect_err("corrupt body");
+    let error = export_workspace(&mut store, WORKSPACE, &context()).expect_err("corrupt body");
     assert_eq!(error.stage, ExportStage::Records);
     assert_eq!(error.store, StoreError::Corrupt);
     assert_eq!(error.to_string(), "EXPORT_RECORDS: STORE_CORRUPT");
@@ -194,7 +221,52 @@ fn feature_026_fr_023_report_and_errors_carry_counts_stage_and_timing_only() {
 fn feature_026_fr_003_export_of_another_workspace_is_empty() {
     let mut store = open("scoped");
     seed(&mut store);
-    let (export, report) = export_workspace(&mut store, "someone-else").expect("export");
+    let (export, report) =
+        export_workspace(&mut store, "someone-else", &context()).expect("export");
     assert!(export.visible_records.is_empty() && export.pending_intents.is_empty());
     assert_eq!(report.issues + report.identity_aliases + report.drafts, 0);
+}
+
+#[test]
+fn feature_026_fr_003_export_after_upgrade_rebuilds_a_stale_projection_first() {
+    let mut store = open("stale");
+    let created = ExecuteRequest {
+        command_id: CommandId::parse("01900000-0000-4000-8000-000000000001").unwrap(),
+        command_type: CommandType::TaskCreate,
+        entity_id: None,
+        payload: serde_json::json!({ "title": "Stale base task" })
+            .as_object()
+            .unwrap()
+            .clone(),
+        preconditions: Vec::new(),
+        depends_on: Vec::new(),
+        admission_tokens: Vec::new(),
+        context: context(),
+    };
+    execute(&mut store, &mut SeqIds(0), &created).expect("create");
+    // The server confirmed it; then the store looks like a fresh upgrade:
+    // confirmed rows, no visible projection, projection marked stale.
+    store
+        .write(|tx| {
+            tx.execute(
+                "INSERT OR REPLACE INTO confirmed_records (workspace_id, record_type,
+                    record_key, record_version, edit_revision, tombstone, body)
+                 SELECT workspace_id, record_type, record_key, '1', edit_revision, 0, body
+                 FROM visible_records",
+                [],
+            )?;
+            tx.execute("UPDATE outbox SET state = 'completed'", [])?;
+            tx.execute("DELETE FROM visible_records", [])?;
+            tx.execute("UPDATE sync_meta SET projection_stale = 1", [])?;
+            Ok(())
+        })
+        .expect("simulate upgrade");
+
+    let (export, _) = export_workspace(&mut store, WORKSPACE, &context()).expect("export");
+    assert_eq!(export.visible_records.len(), 1, "confirmed record exported");
+    assert_eq!(export.visible_records[0].body["title"], "Stale base task");
+    let stale: i64 = store
+        .read(|tx| tx.query_row("SELECT projection_stale FROM sync_meta", [], |r| r.get(0)))
+        .expect("flag");
+    assert_eq!(stale, 0, "projection rebuilt");
 }
