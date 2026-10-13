@@ -15,6 +15,7 @@ a log or a response.
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import TracebackType
@@ -186,6 +187,75 @@ class RustCore:
     ) -> dict[str, Any]:
         body: dict[str, Any] = json.loads(self._call(call, _encode(request)))
         return body
+
+
+class RustCoreHolder(RustCore):
+    """The process's replaceable bridge runtime, as a drop-in :class:`RustCore`.
+
+    Facades, device executors and receipt stores hold this instead of a raw
+    runtime, so one contained Rust panic (which leaves the runtime closed) costs
+    the calls that were in flight and nothing after them. Every call resolves
+    :meth:`get` once: a healthy runtime is returned unchanged; a closed one is
+    replaced under a lock, so concurrent callers share one new runtime. A call
+    already running on the poisoned runtime is never retried or moved: it fails
+    with ``RustBridgeError`` before any caller writes its result.
+    """
+
+    def __init__(self, factory: Callable[[], RustCore] = RustCore) -> None:
+        # Deliberately not ``RustCore.__init__``: the runtime lives in ``_current``.
+        self._factory = factory
+        self._lock = threading.Lock()
+        self._current = factory()
+
+    def get(self) -> RustCore:
+        """The open runtime, recreating it first when the current one is closed."""
+        current = self._current
+        if current.is_open:
+            return current
+        with self._lock:
+            if not self._current.is_open:
+                self._current = self._factory()
+            return self._current
+
+    @property
+    def is_open(self) -> bool:
+        return self.get().is_open
+
+    def close(self) -> None:
+        """Close the current runtime; the next call opens a fresh one."""
+        self._current.close()
+
+    def decode_command(self, wire: bytes) -> DecodedCommand:
+        return self.get().decode_command(wire)
+
+    def persistence(self, kind: str, wire: bytes) -> bytes:
+        return self.get().persistence(kind, wire)
+
+    def decide(
+        self,
+        read_set: Mapping[str, Any],
+        envelope: Mapping[str, Any],
+        inputs: Mapping[str, Any],
+        receipts: list[Mapping[str, Any]] | None = None,
+    ) -> Decision:
+        return self.get().decide(read_set, envelope, inputs, receipts)
+
+    def query(
+        self,
+        read_set: Mapping[str, Any],
+        query: Mapping[str, Any],
+        inputs: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return self.get().query(read_set, query, inputs)
+
+    def ai_route(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self.get().ai_route(request)
+
+    def ai_validate_navigator(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self.get().ai_validate_navigator(request)
+
+    def ai_confirm_proposal(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return self.get().ai_confirm_proposal(request)
 
 
 def _encode(value: object) -> bytes:

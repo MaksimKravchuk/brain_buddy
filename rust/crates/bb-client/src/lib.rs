@@ -42,7 +42,9 @@ mod review_content_stamps;
 mod review_forms;
 mod snapshot;
 mod storage;
+mod subscriptions;
 mod sync_session;
+mod transport;
 mod workspace_query;
 
 pub use admission::{ShownFrameToken, ShownTaskFrame};
@@ -92,9 +94,19 @@ pub use snapshot::{
     begin_snapshot, stage_snapshot_page,
 };
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
+pub use subscriptions::{
+    Action, ChangeKind, HintReader, HintStream, HintWatcher, Invalidation, InvalidationHub,
+    SSE_MAX_EVENT_BYTES, Scheduler, SseItem, SseOverflow, SseParser, Step, StreamEnd,
+    StreamFailure, Subscription, SubscriptionError, SyncLoop, Wake, WakeSet, Waker,
+};
 pub use sync_session::{
     Authentication, CapabilitiesCheck, EndCause, ErrorAction, Request, RequestKind, SessionBinding,
     SessionError, SyncSession,
+};
+pub use transport::{
+    API, Backoff, CATCH_UP_WINDOW, Cancellation, Changes, Clock, Halt, HttpRequest, HttpResponse,
+    Jitter, Method, MonotonicClock, PullReport, RoundReport, Schedule, SplitMix, Syncer, Transport,
+    TransportFailure, encode,
 };
 pub use workspace_query::{
     IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceRecordPage, WorkspaceSyncStatus,

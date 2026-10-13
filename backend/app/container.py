@@ -49,7 +49,7 @@ from app.modules.tasks.navigator import (
 )
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
-from app.modules.tasks.rust_adapter import RustCore
+from app.modules.tasks.rust_adapter import RustCoreHolder
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.modules.tasks.sync.authority import IdentityScopeAuthority
@@ -164,6 +164,8 @@ class Container:
     sync_retention: SyncRetention
     # Spec 026 PR-52: deletion/revocation decisions a task-backup restore replays.
     control_ledger: ControlLedger
+    # Spec 026: the one replaceable Rust runtime every sync surface shares.
+    rust_core: RustCoreHolder
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -504,8 +506,9 @@ def build_container(
             return False
         return feature_flag_service.is_effective("rust_core_sync", user)
 
-    # One bridge runtime serves the task and the Review facades.
-    rust_core = RustCore()
+    # One replaceable runtime holder serves the Task and Review facades, the
+    # sync gateway and the navigator; a poisoned runtime is swapped, not kept.
+    rust_core = RustCoreHolder()
     job_repository = JobRepository(task_repo.db_path)
     task_unit_of_work = TaskUnitOfWork(task_repo, job_repository)
     task_service = TaskService(
@@ -612,7 +615,7 @@ def build_container(
         audio_limits=config.voice.audio_limits,
         task_port=InProcessTaskPort(
             task_service.create_native_inbox_task,
-            proposal_check=check_task_create_proposal,
+            proposal_check=partial(check_task_create_proposal, core=rust_core),
         ),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
@@ -820,6 +823,7 @@ def build_container(
         job_repository=job_repository,
         task_unit_of_work=task_unit_of_work,
         control_ledger=control_ledger,
+        rust_core=rust_core,
         sync_retention=SyncRetention(
             task_unit_of_work,
             ChangeLog(rust_core),
