@@ -141,6 +141,9 @@ struct BrainBuddyApp: App {
             diagnostics?.sceneEnteredBackground()
             Task {
                 await workspace.flush()
+                // A selected runtime stops polling and closes its hint stream until the next
+                // foreground; the legacy engine ignores it.
+                await workspace.enterBackground()
                 WidgetCenter.shared.reloadAllTimelines()
                 BackgroundRefresh.schedule(for: workspace)
             }

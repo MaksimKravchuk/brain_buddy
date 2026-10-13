@@ -271,13 +271,17 @@ extension RustRuntimeEnvironment {
     /// A dry run (`BRAINBUDDY_MAC_DATA_DIR`) opens no Keychain item until a sign-in the person starts.
     package static func mac(
         _ configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil,
-        transports: any RustTransportProvider = PendingRustTransportProvider()
+        transports: (any RustTransportProvider)? = nil
     ) throws -> RustRuntimeEnvironment {
         let base: @Sendable () -> any SessionTokenStore = { tokenStore ?? WorkspaceHost.systemTokenStore() }
         let tokens: any SessionTokenStore = configuration.isDryRun ? DeferredSessionTokenStore(opening: base) : base()
         return RustRuntimeEnvironment(
             location: .directory(configuration.directory), legacyStoreURL: configuration.storeURL,
-            bridge: try RustBridgeRuntime(), transports: transports,
+            bridge: try RustBridgeRuntime(),
+            // The Mac syncs for the life of the process (no background signal): its foreground,
+            // window and network events reach the host through the workspace.
+            transports: transports ?? RustSyncTransportProvider(
+                tokenStore: tokens, identity: .macOS(version: BrainBuddyAPI.bundleVersion)),
             server: APIRustAccountServer(tokenStore: tokens, identity: .macOS(version: BrainBuddyAPI.bundleVersion)))
     }
 }

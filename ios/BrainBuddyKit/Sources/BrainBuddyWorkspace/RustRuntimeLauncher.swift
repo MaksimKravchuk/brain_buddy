@@ -20,6 +20,11 @@ public struct RustTransportContext: Sendable {
     public let account: LinkedAccount?
     /// The install's device identity for this workspace identity (random, allocated once).
     public let deviceID: String
+    /// True for the sign-in that just created this binding: every earlier request is fenced out.
+    /// False for a launch, which resumes the same still-valid session.
+    public var freshAuthentication = false
+    /// Whether the weekly review is exposed (the policy the feed is applied under).
+    public var reviewEnabled = false
 }
 
 /// THE SEAM for the Swift sync host (PR-54 host slice): given an open runtime and who it belongs
@@ -81,7 +86,8 @@ public struct RustRuntimeEnvironment: Sendable {
 
     func selection(_ runtime: RustWorkspaceRuntime, for record: RustRuntimeSelectionRecord) -> RustWorkspaceSelection {
         let context = RustTransportContext(runtime: runtime, workspaceID: record.workspaceID,
-            databaseURL: location.databaseURL(record.workspaceID), account: record.account, deviceID: record.deviceID)
+            databaseURL: location.databaseURL(record.workspaceID), account: record.account, deviceID: record.deviceID,
+            reviewEnabled: record.reviewEnabled)
         return RustWorkspaceSelection(runtime: runtime, facade: facade(), transport: transports.transport(for: context),
             account: record.account, reviewEnabled: record.reviewEnabled, startup: .prepared)
     }
@@ -216,10 +222,11 @@ extension RustRuntimeLocation {
 
 extension RustRuntimeEnvironment {
     /// The iOS app's environment: the App Group's folder, the app's own session token store and
-    /// REST client. `transports` is where the sync host plugs in.
+    /// REST client. `transports` defaults to the Rust sync host (`RustSyncTransportProvider`), which
+    /// only ever starts for a selected, signed-in workspace.
     public static func appGroup(
         _ appGroupID: String, tokenStore: (any SessionTokenStore)? = nil,
-        transports: any RustTransportProvider = PendingRustTransportProvider(), reviewEnabled: Bool = false,
+        transports: (any RustTransportProvider)? = nil, reviewEnabled: Bool = false,
         identity: ClientIdentity = .iOS
     ) throws -> RustRuntimeEnvironment {
         #if canImport(Security)
@@ -229,7 +236,8 @@ extension RustRuntimeEnvironment {
         #endif
         return RustRuntimeEnvironment(
             location: .appGroup(appGroupID), legacyStoreURL: RustRuntimeLocation.legacyStoreURL(appGroupID: appGroupID),
-            bridge: try RustBridgeRuntime(), transports: transports,
+            bridge: try RustBridgeRuntime(),
+            transports: transports ?? RustSyncTransportProvider(tokenStore: tokenStore, identity: identity),
             server: APIRustAccountServer(tokenStore: tokenStore, identity: identity), reviewEnabled: reviewEnabled)
     }
 }

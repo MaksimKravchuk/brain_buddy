@@ -800,11 +800,13 @@ package struct SyncRecoveryContent: Equatable, Sendable {
 }
 
 extension SyncRecoveryCondition {
-    /// The recovery state the workspace reports. `updateNeededSync` has no signal from the runtime
-    /// yet, so it is never produced here.
+    /// The recovery state the workspace reports. `updateNeededSync` is the sync transport's
+    /// `UPGRADE_REQUIRED`; the store being newer than this build outranks it.
     package init?(_ recovery: RuntimeSyncRecovery) {
         if recovery.storeNeedsUpdate {
             self = .updateNeededStore
+        } else if recovery.syncNeedsUpdate {
+            self = .updateNeededSync
         } else if recovery.rebuild == .rebuilding {
             self = .rebuilding
         } else if case .failed(let reference) = recovery.rebuild {

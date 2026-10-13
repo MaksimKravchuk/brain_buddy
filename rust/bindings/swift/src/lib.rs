@@ -63,7 +63,9 @@ use serde::{Deserialize, Serialize};
 uniffi::setup_scaffolding!();
 
 mod ai;
+mod sync;
 mod workspace;
+pub use sync::*;
 pub use workspace::*;
 
 const OPEN: u8 = 0;

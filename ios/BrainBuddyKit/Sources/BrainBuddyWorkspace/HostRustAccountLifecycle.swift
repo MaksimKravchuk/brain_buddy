@@ -121,7 +121,8 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
             throw WorkspaceError.signInFailed(message: Self.localWorkKeptMessage, referenceID: nil)
         }
         let context = RustTransportContext(runtime: current.runtime, workspaceID: linked.workspaceID,
-            databaseURL: environment.location.databaseURL(linked.workspaceID), account: login.account, deviceID: linked.deviceID)
+            databaseURL: environment.location.databaseURL(linked.workspaceID), account: login.account, deviceID: linked.deviceID,
+            freshAuthentication: true, reviewEnabled: current.reviewEnabled)
         let selection = RustWorkspaceSelection(
             runtime: current.runtime, facade: current.facade, transport: environment.transports.transport(for: context),
             account: login.account, reviewEnabled: current.reviewEnabled, startup: .prepared)
@@ -191,7 +192,8 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
         try? FileManager.default.removeItem(at: environment.location.identityDirectory(held.workspaceID))
         if let account = current.account { await environment.server.finishSignOut(ticket, of: account) }
         let context = RustTransportContext(runtime: fresh, workspaceID: identity,
-            databaseURL: environment.location.databaseURL(identity), account: nil, deviceID: next.deviceID)
+            databaseURL: environment.location.databaseURL(identity), account: nil, deviceID: next.deviceID,
+            reviewEnabled: current.reviewEnabled)
         return RustWorkspaceSelection(
             runtime: fresh, facade: current.facade, transport: environment.transports.transport(for: context),
             account: nil, reviewEnabled: current.reviewEnabled, startup: .prepared)

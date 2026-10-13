@@ -184,6 +184,8 @@ public final class Workspace {
     var rustReviewState: RustWorkspaceReviewState?
     var rustIdentityBindings: [RustWorkspaceIdentityBinding] = []
     public private(set) var runtimeTransportUnavailable = false
+    /// The sync server is newer than this build; set by the transport, cleared by its next status.
+    public private(set) var runtimeSyncNeedsUpdate = false
     public private(set) var runtimeIssues: [RustWorkspaceIssue] = []
     public private(set) var queryError: String?
     var presentationDraftError: String?
@@ -831,6 +833,13 @@ public final class Workspace {
     }
 
     /// Requests one immediate pull for each foreground trigger.
+    /// The scene left the foreground: a selected runtime's sync stops polling and closes its hint
+    /// stream until the next foreground request. Waiting changes stay saved.
+    public func enterBackground() async {
+        guard isRustSelected, let selection = rustSelection else { return }
+        await selection.transport.enterBackground()
+    }
+
     public func requestForegroundPull() async {
         if isRustSelected {
             await wakeRustTransport(.foreground)
@@ -1721,7 +1730,8 @@ extension Workspace {
         let result = await selection.transport.request(trigger)
         guard binding == runtimeBindingID else { return }
         switch result {
-        case .status(let status): runtimeTransportUnavailable = false; syncStatus = status
+        case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
+        case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
         }
     }
@@ -2604,6 +2614,9 @@ extension Workspace {
             signOutRemovalEnded()
         }
         detachRustBinding()
+        // Nothing may write or hold the account's store while its copy is removed. A failed
+        // sign-out leaves the port usable: its next request starts the host again.
+        await selection.transport.quiesce()
         let named = RustSignOutConfirmation(unsent: confirmed.reduce(0) { $0 + $1.runtimeUnsentCount },
                                             issueIDs: Set(confirmed.compactMap(\.runtimeIssueID)),
                                             projectionGeneration: confirmed.compactMap(\.runtimeUnsentGeneration).max() ?? 0)
@@ -2638,6 +2651,7 @@ extension Workspace {
         rustLoadFailureCode = nil
         runtimeIssues = []
         runtimeTransportUnavailable = false
+        runtimeSyncNeedsUpdate = false
     }
 
     private func resetRustAccountState() {
