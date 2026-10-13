@@ -134,7 +134,7 @@ public final class RustSyncHost: SyncRuntimePort {
 
     /// Hears every status the loop reaches, including those between requests (a hint pull, a poll,
     /// a retry). Called on the sync worker: hand off and return. Replaces an earlier handler.
-    public func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) {
+    public func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async {
         shared.setHandler(handler)
     }
 

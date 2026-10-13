@@ -170,6 +170,7 @@ public final class Workspace {
     @ObservationIgnored private var rustGestureSaver: RustWorkspaceGestureSaver?
     @ObservationIgnored private var rustSubscription: RustWorkspaceSubscription?
     @ObservationIgnored private var rustWatcher: Task<Void, Never>?
+    @ObservationIgnored private var rustStatusPump: Task<Void, Never>?
     @ObservationIgnored private(set) var runtimeBindingID = UUID()
     @ObservationIgnored private var rustTaskFrames: [TaskID: RustWorkspaceTaskFrame] = [:]
     @ObservationIgnored private var rustTaskInterests: [Data: Set<TaskID>] = [:]
@@ -1424,6 +1425,8 @@ extension Workspace {
             let subscription = try await runtime.subscribe()
             guard binding == runtimeBindingID else { subscription.cancel(); return }
             rustSubscription = subscription
+            await listenToTransport(selection.transport, binding: binding)
+            guard binding == runtimeBindingID else { return }
             rustWatcher = Task { [weak self] in
                 var token: String?
                 do {
@@ -1469,6 +1472,8 @@ extension Workspace {
         runtimeBindingID = UUID()
         rustWatcher?.cancel()
         rustWatcher = nil
+        rustStatusPump?.cancel()
+        rustStatusPump = nil
         rustQueries?.close()
         rustQueries = nil
         rustSubscription = nil
@@ -1729,11 +1734,31 @@ extension Workspace {
         let binding = runtimeBindingID
         let result = await selection.transport.request(trigger)
         guard binding == runtimeBindingID else { return }
+        adoptTransportResult(result)
+    }
+
+    private func adoptTransportResult(_ result: SyncRuntimeWakeResult) {
         switch result {
         case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
         case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
         }
+    }
+
+    /// Statuses the transport reaches between requests (hint pulls, polls, retries) land here, on
+    /// the main actor only to set state: the worker hands the latest one over a stream and does no
+    /// work on the main thread.
+    private func listenToTransport(_ transport: any SyncRuntimePort, binding: UUID) async {
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: SyncRuntimeWakeResult.self, bufferingPolicy: .bufferingNewest(1))
+        rustStatusPump?.cancel()
+        rustStatusPump = Task { [weak self] in
+            for await result in stream {
+                guard let self, self.runtimeBindingID == binding else { return }
+                self.adoptTransportResult(result)
+            }
+        }
+        await transport.setStatusHandler { continuation.yield($0) }
     }
 
     func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown: GTDState)

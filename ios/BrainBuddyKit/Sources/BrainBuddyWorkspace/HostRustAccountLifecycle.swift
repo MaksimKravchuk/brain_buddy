@@ -78,8 +78,9 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
         guard let held = try? selections.load(), held.account?.id == current.account?.id else {
             throw WorkspaceError.signInFailed(message: "Brain Buddy couldn't read this device's account. Your work is kept.", referenceID: nil)
         }
-        // Known before any session is opened: a workspace with local work is not linked.
-        if current.account == nil, try await holdsLocalWork(current.runtime) {
+        // Known before any session is opened: local work reaches an account only through the merge
+        // the sign-in sheet announced (`mergesLocalWork`), never silently.
+        if current.account == nil, !request.mergesLocalWork, try await holdsLocalWork(current.runtime) {
             throw WorkspaceError.signInFailed(message: Self.localWorkKeptMessage, referenceID: nil)
         }
         let login = try await environment.server.login(serverURL: request.serverURL, email: request.email, password: request.password)
@@ -100,25 +101,26 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
             await environment.server.abandon(login)
             throw WorkspaceError.signInFailed(message: "Brain Buddy couldn't save your sign-in on this device.", referenceID: nil)
         }
-        let outcome: RustAccountLinkOutcome
+        // The first sign-in of an account-less workspace carries its local work into the account:
+        // one transaction binds the account and queues a new command per record. A crash before
+        // it leaves the workspace as it was; a retry after it is `.alreadyLinked`, never a second
+        // import. The sync host then sends the queued commands.
+        let outcome: RustAccountMergeOutcome
         do {
-            outcome = try await current.runtime.linkAccount(accountID: login.account.id)
+            outcome = try await environment.linkAndMerge(
+                current.runtime, account: login.account, deviceID: linked.deviceID, facade: current.facade,
+                reviewEnabled: current.reviewEnabled)
         } catch {
             try? selections.save(held)
             await environment.server.abandon(login)
             throw WorkspaceError.signInFailed(message: "Couldn't sign in. Your work is kept.", referenceID: nil)
         }
         switch outcome {
-        case .linked, .alreadyLinked: break
+        case .merged, .alreadyLinked: break
         case .otherAccount:
             try? selections.save(held)
             await environment.server.abandon(login)
             throw WorkspaceError.signInFailed(message: Self.differentAccountMessage, referenceID: nil)
-        case .localWorkNotMerged:
-            // Work arrived (a widget) between the look above and the link.
-            try? selections.save(held)
-            await environment.server.abandon(login)
-            throw WorkspaceError.signInFailed(message: Self.localWorkKeptMessage, referenceID: nil)
         }
         let context = RustTransportContext(runtime: current.runtime, workspaceID: linked.workspaceID,
             databaseURL: environment.location.databaseURL(linked.workspaceID), account: login.account, deviceID: linked.deviceID,
@@ -197,5 +199,26 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
         return RustWorkspaceSelection(
             runtime: fresh, facade: current.facade, transport: environment.transports.transport(for: context),
             account: nil, reviewEnabled: current.reviewEnabled, startup: .prepared)
+    }
+}
+
+extension RustRuntimeEnvironment {
+    /// The first-sign-in merge for one runtime (scope = the account's id, device = the install's).
+    /// The instant is only the fallback: each record's command is decided at its own time.
+    func linkAndMerge(
+        _ runtime: RustWorkspaceRuntime, account: LinkedAccount, deviceID: String, facade: RustDomainFacade,
+        reviewEnabled: Bool
+    ) async throws -> RustAccountMergeOutcome {
+        let zone = TimeZone.current.identifier
+        let instant = now()
+        let inputs = try facade.workspaceQueryInputs(at: instant, zone: zone, reviewExposed: reviewEnabled)
+        guard let root = try JSONSerialization.jsonObject(with: inputs) as? [String: Any], let policy = root["policy"] else {
+            throw RustBridgeError(code: "INVALID_REQUEST", field: "policy")
+        }
+        let context = RustWorkspaceContext(
+            now: instant, timeZone: zone, actorID: facade.context.actorID,
+            policy: try JSONSerialization.data(withJSONObject: policy, options: [.sortedKeys]))
+        return try await runtime.linkAndMerge(
+            accountID: account.id, scopeID: account.id, deviceID: deviceID, context: context)
     }
 }

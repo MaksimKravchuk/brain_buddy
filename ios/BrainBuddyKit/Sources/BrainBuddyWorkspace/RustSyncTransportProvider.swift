@@ -59,6 +59,7 @@ actor RustSyncHostPort: SyncRuntimePort {
     private var updateRequired = false
     /// Bumped by `quiesce()`: a start that began before it is discarded when it ends.
     private var epoch = 0
+    private var statusHandler: (@Sendable (SyncRuntimeWakeResult) -> Void)?
 
     init(
         context: RustTransportContext, account: LinkedAccount, tokenStore: any SessionTokenStore,
@@ -93,6 +94,7 @@ actor RustSyncHostPort: SyncRuntimePort {
             return nil
         }
         host = started
+        await started.setStatusHandler(statusHandler)
         if !online { await started.setNetworkAvailable(false) }
         return started
     }
@@ -140,6 +142,11 @@ actor RustSyncHostPort: SyncRuntimePort {
     }
 
     func enterBackground() async { await host?.enterBackground() }
+
+    func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async {
+        statusHandler = handler
+        await host?.setStatusHandler(handler)
+    }
 
     func quiesce() async {
         epoch += 1

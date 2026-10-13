@@ -27,6 +27,8 @@ struct RustSyncProviderLifecycleTests {
         }
         #expect(provider.built == 0)
         #expect(rig.stub.requests.isEmpty)
+        #expect(await rig.server.logins == 0)
+        #expect(!FileManager.default.fileExists(atPath: rig.location.root.path), "no store was opened, so nothing could merge")
     }
 
     @Test("026-FR-003: an account-less selection gets a port that sends nothing")
@@ -108,6 +110,126 @@ struct RustSyncProviderLifecycleTests {
         await app.closeRuntime()
     }
 
+    @Test("026-FR-003 026-FR-005: work written before the account survives the first sign-in and is sent exactly once")
+    @MainActor
+    func localWorkIsMergedAndSentOnce() async throws {
+        let rig = try Rig()
+        defer { rig.cleanup() }
+        let app = try await rig.app(provider: rig.counting())
+        _ = try await app.capture(CaptureDraft(text: "Written before the account"), editorID: "scene:merge:a")
+        _ = try await app.capture(CaptureDraft(text: "Also before"), editorID: "scene:merge:b")
+        #expect(app.hasLocalWorkToMerge)
+        #expect(rig.stub.requests.isEmpty, "account-less: nothing is sent")
+
+        try await app.signIn(serverURL: rig.serverURL, email: "a@example.com", password: "secret")
+        #expect(app.account == rig.account)
+        #expect(rig.stub.wait(timeout: 30) { requests, _ in
+            requests.filter { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }.count >= 2
+        })
+        await app.syncNow()
+        await app.refreshRustStatus()
+        #expect(app.pendingChangeCount == 0)
+        let sent = rig.model.commandIDs
+        #expect(sent.count == 2 && Set(sent).count == 2, "one command per record, each sent once: \(sent)")
+        let shown = await eventually(app) { $0 == ["Written before the account", "Also before"] }
+        #expect(shown == ["Written before the account", "Also before"])
+
+        // More rounds (foreground, manual, a restart of the host) send nothing again.
+        await app.requestForegroundPull()
+        await app.syncNow()
+        let port = try #require(app.rustSelection?.transport as? RustSyncHostPort)
+        await port.quiesce()
+        await app.syncNow()
+        #expect(rig.model.commandIDs == sent)
+        await app.closeRuntime()
+    }
+
+    @Test("026-FR-003: a sign-in that crashed after saving the selection is finished at the next launch, once")
+    @MainActor
+    func crashBeforeTheMergeIsFinishedOnRelaunch() async throws {
+        let rig = try Rig()
+        defer { rig.cleanup() }
+        let first = try await rig.app(provider: rig.counting())
+        _ = try await first.capture(CaptureDraft(text: "Survives the crash"), editorID: "scene:crash:a")
+        await first.closeRuntime()
+        // The state a crash leaves: the selection names the account, the merge never committed.
+        var record = try #require(try rig.selections.load())
+        #expect(record.account == nil)
+        record.account = rig.account
+        try rig.selections.save(record)
+
+        for launch in 1...2 {
+            let relaunched = try await rig.app(provider: rig.counting())
+            #expect(relaunched.account == rig.account, "launch \(launch)")
+            await relaunched.syncNow()
+            #expect(rig.stub.wait(timeout: 30) { requests, _ in
+                requests.contains { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }
+            })
+            await relaunched.syncNow()
+            await relaunched.refreshRustStatus()
+            #expect(relaunched.pendingChangeCount == 0)
+            #expect(rig.model.commandIDs.count == 1, "launch \(launch): \(rig.model.commandIDs)")
+            await relaunched.closeRuntime()
+        }
+    }
+
+    @Test("026-FR-003: another account's workspace is never taken over by the merge")
+    @MainActor
+    func otherAccountKeepsItsWorkspace() async throws {
+        let rig = try Rig()
+        defer { rig.cleanup() }
+        let app = try await rig.app(provider: rig.counting())
+        try await app.signIn(serverURL: rig.serverURL, email: "a@example.com", password: "secret")
+        let selection = try #require(app.rustSelection)
+        let device = try #require(try rig.selections.load()).deviceID
+        let other = try await selection.runtime.linkAndMerge(
+            accountID: "owner-b", scopeID: "owner-b", deviceID: device,
+            context: RustWorkspaceContext(now: Date(), timeZone: "UTC", actorID: "device",
+                policy: Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8)))
+        #expect(other == .otherAccount)
+        await app.closeRuntime()
+    }
+
+    @Test("026-FR-005: a status reached between requests (a background round) reaches the Workspace")
+    @MainActor
+    func backgroundRoundsUpdateTheStatus() async throws {
+        let rig = try Rig()
+        defer { rig.cleanup() }
+        let stub = rig.stub
+        let provider = CountingProvider(RustSyncTransportProvider(
+            tokenStore: rig.tokens, urlSessionConfiguration: { stub.sessionConfiguration }, pollInterval: 0.2))
+        let app = try await rig.app(provider: provider)
+        try await app.signIn(serverURL: rig.serverURL, email: "a@example.com", password: "secret")
+        await app.syncNow()
+        guard case .idle = app.syncStatus else {
+            Issue.record("synced first: \(app.syncStatus)")
+            return
+        }
+        // The server goes away; the worker's own poll finds out, no request came from the Workspace.
+        rig.go(offline: true)
+        var seen = app.syncStatus
+        for _ in 0..<200 {
+            if case .offline = seen { break }
+            try? await Task.sleep(for: .milliseconds(50))
+            seen = app.syncStatus
+        }
+        guard case .offline = seen else {
+            Issue.record("expected offline, saw \(seen)")
+            return
+        }
+        rig.go(offline: false)
+        for _ in 0..<200 {
+            if case .idle = seen { break }
+            try? await Task.sleep(for: .milliseconds(50))
+            seen = app.syncStatus
+        }
+        guard case .idle = seen else {
+            Issue.record("expected idle again, saw \(seen)")
+            return
+        }
+        await app.closeRuntime()
+    }
+
     @Test("026-FR-017: a server newer than this build reads as update needed through the provider's port")
     @MainActor
     func newerServer() async throws {
@@ -142,6 +264,8 @@ private struct Rig: Sendable {
     let account: LinkedAccount
     let server: StubAccountServer
     let tokens: InMemorySessionTokenStore
+    let model: SyncModel
+    private let down = Flag()
     private let suite = "provider-\(UUID().uuidString)"
 
     var serverURL: URL { stub.secureServerURL }
@@ -156,8 +280,12 @@ private struct Rig: Sendable {
         server = StubAccountServer(account: account)
         tokens = InMemorySessionTokenStore(tokens: [stub.secureServerURL: "tok-1"])
         let model = SyncModel(protocolVersions: protocolVersions, scope: account.id)
-        stub.respond { model.answer($0) }
+        self.model = model
+        let down = down
+        stub.respond { request in down.value ? .fail(.notConnectedToInternet) : model.answer(request) }
     }
+
+    func go(offline: Bool) { down.set(offline) }
 
     func cleanup() {
         UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
@@ -190,4 +318,23 @@ private struct Rig: Sendable {
         await workspace.load()
         return workspace
     }
+}
+
+/// The Inbox titles once `done` holds (the last seen ones if it never does within 10 s).
+@MainActor
+private func eventually(_ workspace: Workspace, _ done: (Set<String>) -> Bool) async -> Set<String> {
+    var titles = Set<String>()
+    for _ in 0..<200 {
+        await workspace.prepareList(.list(.inbox))
+        titles = Set(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title))
+        if done(titles) { break }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    return titles
+}
+
+private final class Flag: Sendable {
+    private let state = Mutex(false)
+    var value: Bool { state.withLock { $0 } }
+    func set(_ value: Bool) { state.withLock { $0 = value } }
 }

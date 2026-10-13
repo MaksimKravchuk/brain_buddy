@@ -142,11 +142,15 @@ public struct RustRuntimeLauncher: Sendable {
     private func open(_ record: RustRuntimeSelectionRecord) async -> Resolution {
         do {
             let runtime = try await environment.openRuntime(record.workspaceID)
-            // A link saved in the selection that the store lost to a crash is repaired (idempotent).
+            // A sign-in that saved the selection and crashed before its merge committed is finished
+            // here (idempotent: a merge that did commit reports `.alreadyLinked`, queueing nothing).
             if let account = record.account {
-                switch try await runtime.linkAccount(accountID: account.id) {
-                case .linked, .alreadyLinked: break
-                case .otherAccount, .localWorkNotMerged:
+                switch try await environment.linkAndMerge(
+                    runtime, account: account, deviceID: record.deviceID, facade: environment.facade(),
+                    reviewEnabled: record.reviewEnabled)
+                {
+                case .merged, .alreadyLinked: break
+                case .otherAccount:
                     try? await runtime.close()
                     return .unavailable(code: "ACCOUNT_LINK_MISMATCH")
                 }

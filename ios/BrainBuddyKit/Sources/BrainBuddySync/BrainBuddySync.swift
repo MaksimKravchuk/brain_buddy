@@ -33,11 +33,16 @@ public protocol SyncRuntimePort: Sendable {
     /// Stops all work on the store and releases it, but stays usable: the next request starts
     /// again. Called before the account's copy is removed, so nothing writes or holds the file.
     func quiesce() async
+    /// Hears every status the transport reaches, including those between requests (a hint pull,
+    /// a poll, a retry). Called on the transport's own thread: hand off and return. Replaces an
+    /// earlier handler; nil removes it.
+    func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async
 }
 
 extension SyncRuntimePort {
     public func enterBackground() async {}
     public func quiesce() async {}
+    public func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async {}
     public func rebuildSyncedCopy() async -> SyncRuntimeRebuildResult { .transportUnavailable }
 }
 

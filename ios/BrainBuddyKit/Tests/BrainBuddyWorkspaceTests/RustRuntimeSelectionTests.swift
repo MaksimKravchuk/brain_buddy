@@ -189,9 +189,9 @@ struct RustRuntimeSelectionTests {
         await app.closeRuntime()
     }
 
-    @Test("026-FR-003: account-less work is the explicit merge's to carry; until it exists the install is not linked and the work is kept")
+    @Test("026-FR-003: the first sign-in carries account-less work into the account as queued commands, and a retry queues nothing more")
     @MainActor
-    func localWorkIsKeptNotLinked() async throws {
+    func localWorkIsMergedOnFirstSignIn() async throws {
         let lane = try SelectionLane()
         defer { lane.cleanup() }
         let app = try await lane.app()
@@ -199,13 +199,25 @@ struct RustRuntimeSelectionTests {
         await app.prepareList(.list(.inbox))
         #expect(app.hasLocalWorkToMerge)
 
-        await #expect(throws: WorkspaceError.signInFailed(message: HostRustAccountLifecycle.localWorkKeptMessage, referenceID: nil)) {
-            try await app.signIn(serverURL: lane.serverURL, email: "a@example.com", password: "secret")
-        }
-        #expect(await lane.server.logins == 0, "no session is opened for a link that cannot happen")
-        #expect(app.account == nil)
-        #expect(try lane.selections.load()?.account == nil)
-        #expect(app.task(id)?.title == "Written before the account")
+        try await app.signIn(serverURL: lane.serverURL, email: "a@example.com", password: "secret")
+        #expect(await lane.server.logins == 1)
+        #expect(app.account == lane.accountA)
+        #expect(try lane.selections.load()?.account == lane.accountA)
+        await app.refreshRustStatus()
+        #expect(app.pendingChangeCount == 1, "the record is now a command waiting to be sent")
+        await app.prepareList(.list(.inbox))
+        #expect(app.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title) == ["Written before the account"])
+        _ = id
+
+        // Retried (a crash after the commit, a second launch): the same account is a no-op.
+        let selection = try #require(app.rustSelection)
+        let again = try await selection.runtime.linkAndMerge(
+            accountID: lane.accountA.id, scopeID: lane.accountA.id, deviceID: try #require(try lane.selections.load()).deviceID,
+            context: RustWorkspaceContext(now: lane.instant, timeZone: "UTC", actorID: "device",
+                policy: Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8)))
+        #expect(again == .alreadyLinked)
+        await app.refreshRustStatus()
+        #expect(app.pendingChangeCount == 1)
         await app.closeRuntime()
     }
 

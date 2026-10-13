@@ -5,14 +5,14 @@ use super::{
     BridgeError, BridgeRefusal, CLOSED, Failure, OPEN, POISONED, guarded, parse_json, to_json,
 };
 use bb_client::{
-    Choice, DependentChoice, ExecuteContext, ExecuteError, ExecuteRequest, IssueError, LinkOutcome,
-    OpenOptions, QueryError, RandomIds, RemovalCheck, RemovalOutcome, Replacement,
-    ReportedExecuteError, ResolveRequest, Store, StoreError, StoreStatus, WorkspaceDraft,
-    WorkspaceWatch, convert_legacy_prepared_with, delete_workspace_draft_with,
-    execute_batch_reported_with, legacy_unsent, link_account_with, load_workspace_draft,
-    query_collection_page, remove_account_copy_with, resolve_workspace_identities,
-    save_workspace_draft_with, visible_snapshot, workspace_issues_page, workspace_read,
-    workspace_sync_status, workspace_watch,
+    AccountBinding, Choice, DependentChoice, ExecuteContext, ExecuteError, ExecuteRequest,
+    IssueError, LinkOutcome, MergeOutcome, OpenOptions, QueryError, RandomIds, RemovalCheck,
+    RemovalOutcome, Replacement, ReportedExecuteError, ResolveRequest, Store, StoreError,
+    StoreStatus, WorkspaceDraft, WorkspaceWatch, convert_legacy_prepared_with,
+    delete_workspace_draft_with, execute_batch_reported_with, legacy_unsent, link_account_with,
+    link_and_merge_with, load_workspace_draft, query_collection_page, remove_account_copy_with,
+    resolve_workspace_identities, save_workspace_draft_with, visible_snapshot,
+    workspace_issues_page, workspace_read, workspace_sync_status, workspace_watch,
 };
 use bb_domain::types::{ActorId, Policy, Query, QueryInputs, ZoneName};
 use bb_protocol::{
@@ -53,6 +53,19 @@ pub enum BridgeLinkOutcome {
         records: u64,
         queued: u64,
     },
+}
+
+/// What the first-sign-in merge did (PR-54b): the account-less records became commands, or it
+/// already had, or another account owns the workspace.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeMergeOutcome {
+    Merged {
+        records: u64,
+        commands: u64,
+        review_records_kept_local: u64,
+    },
+    AlreadyLinked,
+    OtherAccount,
 }
 
 /// What removing the account's local copy did (T044).
@@ -914,6 +927,44 @@ impl BridgeWorkspace {
             LinkOutcome::LocalWorkNotMerged { records, queued } => {
                 BridgeLinkOutcome::LocalWorkNotMerged { records, queued }
             }
+        })
+    }
+
+    /// The explicit first-sign-in merge: binds account, scope and device and queues the local
+    /// records as new commands in one transaction (a crash before the commit changes nothing; a
+    /// retry after it is `AlreadyLinked`). The caller has shown the person what this does.
+    pub fn link_and_merge(
+        &self,
+        account_id: String,
+        scope_id: String,
+        device_id: String,
+        context: BridgeExecuteContext,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeMergeOutcome, BridgeError> {
+        let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
+        let binding = AccountBinding {
+            account: Id::parse(account_id).map_err(|_| invalid("account_id"))?,
+            scope: Id::parse(scope_id).map_err(|_| invalid("scope_id"))?,
+            device: Id::parse(device_id).map_err(|_| invalid("device_id"))?,
+        };
+        let context = owned_context(&context)?;
+        let outcome = self.mutate_local_review(
+            operation,
+            |store, before_commit| link_and_merge_with(store, &binding, &context, before_commit),
+            execute_failure,
+        )?;
+        Ok(match outcome {
+            MergeOutcome::Merged {
+                records,
+                commands,
+                review_records_kept_local,
+            } => BridgeMergeOutcome::Merged {
+                records,
+                commands,
+                review_records_kept_local,
+            },
+            MergeOutcome::AlreadyLinked => BridgeMergeOutcome::AlreadyLinked,
+            MergeOutcome::OtherAccount => BridgeMergeOutcome::OtherAccount,
         })
     }
 

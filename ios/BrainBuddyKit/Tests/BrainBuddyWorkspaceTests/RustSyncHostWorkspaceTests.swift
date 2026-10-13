@@ -217,6 +217,7 @@ final class SyncModel: Sendable {
     private struct State {
         var transactions: [Transaction] = []
         var commands = 0
+        var commandIDs: [String] = []
         /// Snapshot ID to its watermark. Every snapshot has its own ID, as the server's do.
         var snapshots: [String: Int] = [:]
     }
@@ -236,6 +237,8 @@ final class SyncModel: Sendable {
     }
 
     var commandsSeen: Int { state.withLock { $0.commands } }
+    /// The ID of every command intake saw, in order (a duplicate send shows up twice).
+    var commandIDs: [String] { state.withLock { $0.commandIDs } }
 
     func commitExternal(taskID: String, title: String) {
         state.withLock { state in
@@ -313,6 +316,7 @@ final class SyncModel: Sendable {
         let title = payload["title"] as? String ?? "Created"
         let seq = state.withLock { state -> Int in
             state.commands += 1
+            state.commandIDs.append(command)
             let seq = state.transactions.count + 1
             state.transactions.append(
                 Transaction(seq: seq, source: command, changes: [Self.taskChange(id: entity, title: title, version: seq)]))

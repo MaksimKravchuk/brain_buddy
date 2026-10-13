@@ -451,3 +451,29 @@ fn host_026_fr_005_a_lost_connection_is_offline_and_a_401_needs_sign_in() {
     assert_eq!(report.state, BridgeSyncState::AuthRequired, "{report:?}");
     signed_out.host.stop();
 }
+
+#[test]
+fn host_026_fr_005_the_fallback_poll_runs_rounds_on_its_own() {
+    let server = Server::new(&[1]);
+    let path = linked("poll");
+    let mut settings = config(&path);
+    settings.poll_interval_ms = Some(200);
+    let (round_sender, rounds) = channel();
+    let (opened_sender, _opened) = channel();
+    let host = BridgeSyncHost::start(
+        settings,
+        server,
+        Arc::new(Hints {
+            opened: opened_sender,
+            cancelled: channel().0,
+        }),
+        Arc::new(Rounds(Mutex::new(round_sender))),
+    )
+    .unwrap();
+    host.signal(BridgeWake::Foreground);
+    // The foreground round, the stream-open catch-up and then polls with no wake from outside.
+    for _ in 0..5 {
+        rounds.recv_timeout(WAIT).expect("a round");
+    }
+    host.stop();
+}

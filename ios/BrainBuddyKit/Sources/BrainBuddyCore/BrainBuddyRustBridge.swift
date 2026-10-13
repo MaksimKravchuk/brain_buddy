@@ -888,6 +888,16 @@ public enum RustAccountLinkOutcome: Equatable, Sendable {
     case localWorkNotMerged(records: UInt64, queued: UInt64)
 }
 
+/// What the first-sign-in merge did (PR-54b).
+public enum RustAccountMergeOutcome: Equatable, Sendable {
+    /// The workspace is the account's now; `commands` were queued from `records` local records.
+    case merged(records: UInt64, commands: UInt64, reviewRecordsKeptLocal: UInt64)
+    /// It already was this account's (a retry): nothing was queued again.
+    case alreadyLinked
+    /// Another account owns the workspace; nothing changed.
+    case otherAccount
+}
+
 /// What removing the account's local copy did (T044).
 public enum RustAccountCopyRemoval: Equatable, Sendable {
     case removed
@@ -937,6 +947,23 @@ public final class RustWorkspaceRuntime: Sendable {
             case .alreadyLinked: return .alreadyLinked
             case .otherAccount: return .otherAccount
             case .localWorkNotMerged(let records, let queued): return .localWorkNotMerged(records: records, queued: queued)
+            }
+        }
+    }
+
+    /// The explicit first-sign-in merge (PR-54b): binds the account, its scope and this device and
+    /// queues the account-less records as new commands, in one transaction under the store's lock.
+    /// A crash before the commit changes nothing; a retry after it is `.alreadyLinked`.
+    public func linkAndMerge(accountID: String, scopeID: String, deviceID: String, context: RustWorkspaceContext)
+        async throws -> RustAccountMergeOutcome {
+        let context = context.bridged
+        return try await committing { workspace, operation in
+            switch try workspace.linkAndMerge(accountId: accountID, scopeId: scopeID, deviceId: deviceID,
+                                              context: context, operation: operation) {
+            case .merged(let records, let commands, let kept):
+                return .merged(records: records, commands: commands, reviewRecordsKeptLocal: kept)
+            case .alreadyLinked: return .alreadyLinked
+            case .otherAccount: return .otherAccount
             }
         }
     }
