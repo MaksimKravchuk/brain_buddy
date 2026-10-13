@@ -2,6 +2,7 @@ import BrainBuddyAPI
 import BrainBuddyCore
 import Foundation
 import Observation
+import Synchronization
 
 // The shared state machine of the first Weekly Review suggestion request (design M-04 / D-04,
 // states .01-.20; spec 026 T049). The iPhone and Mac sheets (PR-59/60) render `phase` and call
@@ -60,6 +61,8 @@ public struct ReviewSuggestionRecord: Codable, Equatable, Sendable {
     public var transmitted: Bool
     public var answerDraft: String
     public var pending: PendingAnswer?
+    /// The account the record belongs to; a record of another account is never recovered.
+    public var owner: String? = nil
 }
 
 public protocol ReviewSuggestionJournal: Sendable {
@@ -92,6 +95,10 @@ public final class ReviewSuggestionModel {
         case invalidProposal
         case inputTooLarge
         case taskGone
+        /// The local record could not be written, so nothing was sent or saved.
+        case journalFailed
+        /// Revoking the consent did not complete; the grant stays current.
+        case consentChangeFailed
     }
 
     public enum AnswerSaveFailure: Equatable, Sendable {
@@ -146,10 +153,16 @@ public final class ReviewSuggestionModel {
     // Weak: the workspace owns the center that owns this model. A gone workspace reads as a gone task.
     @ObservationIgnored private weak var weakPort: (any ReviewSuggestionPort)?
     private var port: PortHandle { PortHandle(base: weakPort) }
-    @ObservationIgnored private let remote: (any NavigatorRemote)?
-    @ObservationIgnored private let adapter: LocalAIAdapter
+    @ObservationIgnored private var remote: (any NavigatorRemote)?
+    @ObservationIgnored private var adapter: LocalAIAdapter
     @ObservationIgnored private let journal: any ReviewSuggestionJournal
-    @ObservationIgnored private let privacy: AIPrivacyMode
+    @ObservationIgnored private var privacy: AIPrivacyMode
+    /// The account this model was made for; the workspace replaces it when the account changes.
+    public let owner: String
+    /// A local record could not be written (cancel still took effect).
+    public private(set) var journalFailed = false
+    /// Revoking consent failed; nothing was cleared and the grant stays current.
+    public private(set) var revokeFailed = false
     @ObservationIgnored private let makeID: @MainActor () -> String
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -177,6 +190,22 @@ public final class ReviewSuggestionModel {
         self.journal = journal
         self.privacy = privacy
         self.makeID = makeID
+        self.owner = port.suggestionOwner
+    }
+
+    /// A cached model takes the current client and policy for its next request (sign-in, sign-out or a
+    /// privacy change after it was made). A request already running is not touched.
+    public func updateConfiguration(remote: (any NavigatorRemote)?, privacy: AIPrivacyMode, adapter: LocalAIAdapter) {
+        self.remote = remote
+        self.privacy = privacy
+        self.adapter = adapter
+    }
+
+    /// Ends any running request and ignores its late result (another account took over).
+    public func invalidate() {
+        generation += 1
+        task?.cancel()
+        task = nil
     }
 
     public var journalKey: String { taskID.rawValue + ":" + kind.rawValue }
@@ -209,6 +238,10 @@ public final class ReviewSuggestionModel {
     public func recover() async {
         guard phase == .idle, let record = try? await journal.load(journalKey) else { return }
         guard phase == .idle else { return }
+        if let recorded = record.owner, recorded != port.suggestionOwner {
+            clearJournal()
+            return
+        }
         restoring = true
         transmitted = record.transmitted
         pending = record.pending
@@ -259,9 +292,16 @@ public final class ReviewSuggestionModel {
     public func declineCloud() { phase = .manual }
 
     public func revokeCloud(provider: String) async {
+        // Consent is cleared only after the revoke is durably recorded; a failed revoke leaves the grant
+        // current and a running request alone.
+        do { try await port.revokeSuggestionConsent(provider: provider) } catch {
+            revokeFailed = true
+            if !isRequestLive { phase = .unavailable(.consentChangeFailed) }
+            return
+        }
+        revokeFailed = false
         generation += 1
         task?.cancel()
-        try? await port.revokeSuggestionConsent(provider: provider)
         proposals = []
         question = nil
         phase = .consentOff
@@ -274,7 +314,7 @@ public final class ReviewSuggestionModel {
         phase = .cancelling
         generation += 1
         let sent = transmitted
-        await persist(stage: .cancelled, transmitted: sent)
+        if !(await persist(stage: .cancelled, transmitted: sent)) { journalFailed = true }
         task?.cancel()
         task = nil
         phase = .cancelled(afterTransmission: sent)
@@ -314,9 +354,17 @@ public final class ReviewSuggestionModel {
     }
 
     private func run(_ current: Int) async {
-        guard let input = port.suggestionInput(for: taskID, kind: kind, stallReason: stallReason) else {
+        guard let raw = port.suggestionInput(for: taskID, kind: kind, stallReason: stallReason) else {
             return fail(.unavailable(.taskGone), current)
         }
+        // The accepted head/tail reduction runs before the size estimate, a local model or the cloud body.
+        let input: SuggestionInput
+        do {
+            let reduced = try await adapter.reducingNotes(raw)
+            input = reduced.input
+            notesTruncated = reduced.truncated
+        } catch { return fail(.unavailable(.providerError), current) }
+        guard live(current) else { return }
         if shown == nil || answerSaved { shown = port.suggestionShownTask(taskID) ?? shown }
         let owner = port.suggestionOwner
         let stamp = consentStamp(owner)
@@ -346,7 +394,7 @@ public final class ReviewSuggestionModel {
     }
 
     private func runLocal(_ source: LocalAISource, _ terms: AITerms, _ input: SuggestionInput, _ current: Int) async {
-        await persist(stage: .requestSent, transmitted: false)
+        guard await persist(stage: .requestSent, transmitted: false) else { return fail(.unavailable(.journalFailed), current) }
         guard live(current) else { return }
         let adapter = self.adapter
         do {
@@ -370,14 +418,19 @@ public final class ReviewSuggestionModel {
         guard let remote else { return fail(.unavailable(.remoteOff), current) }
         // The send is recorded first: from here a lost request may have reached the provider.
         transmitted = true
-        await persist(stage: .requestSent, transmitted: true)
+        guard await persist(stage: .requestSent, transmitted: true) else {
+            transmitted = false
+            return fail(.unavailable(.journalFailed), current)
+        }
         guard live(current) else { return }
         let body = NavigatorSuggestionBody(
             kind: input.kind.rawValue, consent: .init(externalProcessingAllowed: true, provider: provider),
             task: input.kind == .projectNextAction ? nil
                 : .init(title: input.taskTitle ?? "", notes: input.taskNotes, stallReason: input.stallReason),
+            // The project context (name and up to 20 sibling titles) goes with every kind that has a project.
             project: input.kind == .projectNextAction
-                ? .init(name: input.projectName ?? "", openTaskTitles: input.openTaskTitles) : nil)
+                ? .init(name: input.projectName ?? "", openTaskTitles: input.openTaskTitles)
+                : input.projectName.map { .init(name: $0, openTaskTitles: input.openTaskTitles) })
         do {
             let response = try await remote.suggest(body)
             // Late, cancelled, another account, or consent changed meanwhile: nothing is inserted.
@@ -389,7 +442,7 @@ public final class ReviewSuggestionModel {
                 return
             }
             navigatorRequestID = response.requestID
-            notesTruncated = response.notesTruncated
+            notesTruncated = notesTruncated || response.notesTruncated
             await deliver(ModelAnswer(proposals: response.proposals ?? [], clarifyingQuestion: response.clarifyingQuestion),
                           input, current)
         } catch let error as APIError {
@@ -508,7 +561,14 @@ public final class ReviewSuggestionModel {
         }
         pending = identity
         // The identity is durable before the first save attempt, so a lost acknowledgement reconciles.
-        await persist(stage: .answerSaving, transmitted: transmitted)
+        guard await persist(stage: .answerSaving, transmitted: transmitted) else {
+            guard current == generation else { return }
+            pending = nil
+            phase = .answerNotSaved(.rejected(code: "JOURNAL_FAILED"))
+            task = nil
+            return
+        }
+        guard current == generation else { return }
         do {
             try await port.saveSuggestionNotes(taskID, notes: identity.newNotes, editorID: identity.editorID)
         } catch {
@@ -604,15 +664,18 @@ public final class ReviewSuggestionModel {
 
     // MARK: Journal
 
-    private func persist(stage: ReviewSuggestionRecord.Stage, transmitted sent: Bool) async {
-        let record = ReviewSuggestionRecord(stage: stage, transmitted: sent, answerDraft: answerDraft, pending: pending)
-        try? await journal.save(record, for: journalKey)
+    /// True when the record is durably written. Side effects wait for it.
+    private func persist(stage: ReviewSuggestionRecord.Stage, transmitted sent: Bool) async -> Bool {
+        let record = ReviewSuggestionRecord(stage: stage, transmitted: sent, answerDraft: answerDraft, pending: pending,
+                                            owner: port.suggestionOwner)
+        do { try await journal.save(record, for: journalKey); return true } catch { return false }
     }
 
     private func persistDraft() {
         guard !restoring, question != nil, !answerSaved else { return }
         let stage: ReviewSuggestionRecord.Stage = pending == nil ? .requestSent : .answerSaving
-        let record = ReviewSuggestionRecord(stage: stage, transmitted: transmitted, answerDraft: answerDraft, pending: pending)
+        let record = ReviewSuggestionRecord(stage: stage, transmitted: transmitted, answerDraft: answerDraft, pending: pending,
+                                            owner: port.suggestionOwner)
         let journal = self.journal, key = journalKey, previous = persisting
         persisting = Task {
             await previous?.value
@@ -657,19 +720,70 @@ private struct PortHandle {
     }
 }
 
-/// Runs `work` and fails with `LocalAIError.executorFailed` if it outlives `milliseconds`.
+/// Runs `work` and fails with `LocalAIError.executorFailed` once `milliseconds` pass. The race does not
+/// wait for `work`: an executor that ignores cancellation is abandoned and its late result dropped.
 private func withTimeout<T: Sendable>(
     milliseconds: UInt32, _ work: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await work() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
-            throw LocalAIError.executorFailed
+    let race = Race<T>()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, any Error>) in
+            race.install(continuation)
+            let worker = Task {
+                do { race.finish(.success(try await work())) } catch { race.finish(.failure(error)) }
+            }
+            let timer = Task {
+                try? await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
+                if race.finish(.failure(LocalAIError.executorFailed)) { worker.cancel() }
+            }
+            race.onFinish { worker.cancel(); timer.cancel() }
         }
-        defer { group.cancelAll() }
-        guard let first = try await group.next() else { throw LocalAIError.executorFailed }
-        return first
+    } onCancel: {
+        race.finish(.failure(CancellationError()))
+    }
+}
+
+/// Resumes its continuation exactly once, with whichever result arrives first.
+private final class Race<T: Sendable>: Sendable {
+    private struct State {
+        var continuation: CheckedContinuation<T, any Error>?
+        var early: Result<T, any Error>?
+        var cleanup: (@Sendable () -> Void)?
+        var done = false
+    }
+    private let state = Mutex(State())
+
+    func install(_ continuation: CheckedContinuation<T, any Error>) {
+        let early = state.withLock { state -> Result<T, any Error>? in
+            if let early = state.early { state.done = true; return early }
+            state.continuation = continuation
+            return nil
+        }
+        if let early { continuation.resume(with: early) }
+    }
+
+    func onFinish(_ cleanup: @escaping @Sendable () -> Void) {
+        let run = state.withLock { state -> Bool in
+            if state.done { return true }
+            state.cleanup = cleanup
+            return false
+        }
+        if run { cleanup() }
+    }
+
+    /// True when this call decided the race.
+    @discardableResult
+    func finish(_ result: Result<T, any Error>) -> Bool {
+        let (continuation, cleanup, won) = state.withLock { state -> (CheckedContinuation<T, any Error>?, (@Sendable () -> Void)?, Bool) in
+            if state.done || state.early != nil { return (nil, nil, false) }
+            guard let continuation = state.continuation else { state.early = result; return (nil, nil, true) }
+            state.continuation = nil
+            state.done = true
+            return (continuation, state.cleanup, true)
+        }
+        continuation?.resume(with: result)
+        cleanup?()
+        return won
     }
 }
 
@@ -689,10 +803,51 @@ public final class ReviewSuggestionCenter {
         return created
     }
 
+    public func existing(_ taskID: TaskID, kind: SuggestionKind) -> ReviewSuggestionModel? {
+        models[taskID.rawValue + ":" + kind.rawValue]
+    }
+
     /// Releases a finished model (applied, continued manually or discarded).
     public func release(_ taskID: TaskID, kind: SuggestionKind) {
         models[taskID.rawValue + ":" + kind.rawValue] = nil
     }
 
     public func releaseAll() { models = [:] }
+}
+
+/// A journal in a directory of the app's container: one file per key, written atomically, so the
+/// cancellation marker, the typed answer and the notes-command identity survive a restart when the
+/// runtime's own draft store is not in use.
+public struct FileReviewSuggestionJournal: ReviewSuggestionJournal {
+    public let directory: URL
+
+    public init(directory: URL) { self.directory = directory }
+
+    /// `Application Support/BrainBuddy/ReviewSuggestions` of the current user.
+    public static var standard: FileReviewSuggestionJournal {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return FileReviewSuggestionJournal(directory: base.appendingPathComponent("BrainBuddy/ReviewSuggestions", isDirectory: true))
+    }
+
+    private func file(_ key: String) -> URL {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let name = key.addingPercentEncoding(withAllowedCharacters: allowed)?.replacingOccurrences(of: "%", with: "~") ?? "record"
+        return directory.appendingPathComponent(name + ".json")
+    }
+
+    public func load(_ key: String) async throws -> ReviewSuggestionRecord? {
+        guard let data = try? Data(contentsOf: file(key)) else { return nil }
+        // A damaged record reads as none: it must never invent a request, a cancellation or an answer.
+        return try? JSONDecoder().decode(ReviewSuggestionRecord.self, from: data)
+    }
+
+    public func save(_ record: ReviewSuggestionRecord, for key: String) async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(record).write(to: file(key), options: .atomic)
+    }
+
+    public func clear(_ key: String) async throws {
+        do { try FileManager.default.removeItem(at: file(key)) } catch CocoaError.fileNoSuchFile {} catch CocoaError.fileReadNoSuchFile {}
+    }
 }

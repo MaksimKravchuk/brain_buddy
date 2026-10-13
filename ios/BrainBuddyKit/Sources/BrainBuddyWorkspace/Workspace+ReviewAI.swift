@@ -11,14 +11,26 @@ extension Workspace: ReviewSuggestionPort {
     /// it, in place; `releaseReviewSuggestionModel` ends it after apply, manual continuation or discard.
     public func reviewSuggestionModel(
         for taskID: TaskID, kind: SuggestionKind, stallReason: StallReason? = nil, adapter: LocalAIAdapter,
-        remote: (any NavigatorRemote)?, privacy: AIPrivacyMode, shown: ShownTask? = nil
+        remote: (any NavigatorRemote)?, privacy: AIPrivacyMode, shown: ShownTask? = nil,
+        journal: (any ReviewSuggestionJournal)? = nil
     ) -> ReviewSuggestionModel {
-        let model = reviewSuggestions.model(for: taskID, kind: kind) {
-            ReviewSuggestionModel(
-                taskID: taskID, kind: kind, stallReason: stallReason, port: self, remote: remote, adapter: adapter,
-                journal: suggestionJournal(), privacy: privacy)
+        // Another account took over: the old model's request is ended and its result never shown.
+        if let old = reviewSuggestions.existing(taskID, kind: kind), old.owner != suggestionOwner {
+            old.invalidate()
+            reviewSuggestions.release(taskID, kind: kind)
         }
-        if let shown { model.adoptShownTask(shown) }
+        var created = false
+        let model = reviewSuggestions.model(for: taskID, kind: kind) {
+            created = true
+            let made = ReviewSuggestionModel(
+                taskID: taskID, kind: kind, stallReason: stallReason, port: self, remote: remote, adapter: adapter,
+                journal: journal ?? suggestionJournal(), privacy: privacy)
+            // The shown version is adopted only for a new model. A view that rebuilds must not replace the
+            // version a pending proposal was made against, or a stale proposal would no longer read as stale.
+            if let shown { made.adoptShownTask(shown) }
+            return made
+        }
+        if !created { model.updateConfiguration(remote: remote, privacy: privacy, adapter: adapter) }
         return model
     }
 
@@ -27,7 +39,8 @@ extension Workspace: ReviewSuggestionPort {
     }
 
     private func suggestionJournal() -> any ReviewSuggestionJournal {
-        guard let runtime = rustRuntime else { return InMemoryReviewSuggestionJournal() }
+        // Durable either way: the runtime's draft store when bound, otherwise a file in the app container.
+        guard let runtime = rustRuntime else { return FileReviewSuggestionJournal.standard }
         return RuntimeDraftSuggestionJournal(runtime: runtime)
     }
 

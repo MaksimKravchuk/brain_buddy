@@ -101,6 +101,9 @@ final class FakePort: ReviewSuggestionPort {
     var gone = false
     var saveOutcomes: [(any Error)?] = []
     var applyOutcome: (any Error)?
+    var revokeError: (any Error)?
+    var projectName: String?
+    var openTitles: [String] = []
     var grantCalls = 0
     var revokeCalls = 0
     private(set) var saves: [(notes: String, editorID: String)] = []
@@ -111,7 +114,7 @@ final class FakePort: ReviewSuggestionPort {
 
     func suggestionInput(for taskID: TaskID, kind: SuggestionKind, stallReason: StallReason?) -> SuggestionInput? {
         gone ? nil : SuggestionInput(kind: kind, taskTitle: title, taskNotes: notes, stallReason: stallReason?.rawValue,
-                                     projectName: nil, openTaskTitles: [])
+                                     projectName: projectName, openTaskTitles: openTitles)
     }
     func suggestionShownTask(_ taskID: TaskID) -> ShownTask? { shown }
     func suggestionNotes(_ taskID: TaskID) -> String? { gone ? nil : notes }
@@ -122,6 +125,7 @@ final class FakePort: ReviewSuggestionPort {
                                      consentTextVersion: textVersion)]
     }
     func revokeSuggestionConsent(provider: String) async throws {
+        if let revokeError { throw revokeError }
         revokeCalls += 1
         consents = consents.map {
             var consent = $0
@@ -154,6 +158,15 @@ final class FakePort: ReviewSuggestionPort {
     }
 }
 
+struct JournalDown: Error {}
+
+/// A journal that refuses every write.
+struct FailingJournal: ReviewSuggestionJournal {
+    func load(_ key: String) async throws -> ReviewSuggestionRecord? { nil }
+    func save(_ record: ReviewSuggestionRecord, for key: String) async throws { throw JournalDown() }
+    func clear(_ key: String) async throws {}
+}
+
 @MainActor
 final class PortKeeper {
     var ports: [FakePort] = []
@@ -168,19 +181,19 @@ final class PortKeeper {
 
     init() throws { runtime = try RustBridgeRuntime() }
 
-    private func adapter(_ executors: [FakeExecutor]) -> LocalAIAdapter {
-        LocalAIAdapter(policy: runtime, executors: executors, detectLanguage: { _ in "en" })
+    private func adapter(_ executors: [FakeExecutor], terms: AITerms = .navigator) -> LocalAIAdapter {
+        LocalAIAdapter(policy: runtime, executors: executors, terms: terms, detectLanguage: { _ in "en" })
     }
 
     private func model(
         _ port: FakePort, executor: FakeExecutor? = FakeExecutor(), remote: FakeRemote? = nil,
         privacy: AIPrivacyMode = .onDeviceOnly, kind: SuggestionKind = .reformulate,
-        journal: any ReviewSuggestionJournal = InMemoryReviewSuggestionJournal()
+        journal: any ReviewSuggestionJournal = InMemoryReviewSuggestionJournal(), terms: AITerms = .navigator
     ) -> ReviewSuggestionModel {
         var counter = 0
         keeper.ports.append(port)
         return ReviewSuggestionModel(
-            taskID: taskID, kind: kind, port: port, remote: remote, adapter: adapter(executor.map { [$0] } ?? []),
+            taskID: taskID, kind: kind, port: port, remote: remote, adapter: adapter(executor.map { [$0] } ?? [], terms: terms),
             journal: journal, privacy: privacy, makeID: { counter += 1; return "id\(counter)" })
     }
 
@@ -495,6 +508,170 @@ final class PortKeeper {
         let sut = await started(model(port, executor: nil, remote: FakeRemote(), privacy: .remoteAllowed))
         sut.keepCurrentWording()
         #expect(sut.aiUseForManualDecision == .notUsed && sut.navigatorRequestID == "nav_req_1")
+    }
+
+    // MARK: Review findings on #388
+
+    @Test("026-FR-019 a failed revoke keeps the grant current and does not enter consent-off")
+    func failedRevokeKeepsGrant() async {
+        let port = FakePort()
+        granted(port)
+        port.revokeError = SuggestionPortError.unknown(code: "SAVE_FAILED")
+        let sut = model(port, executor: nil, remote: FakeRemote(), privacy: .remoteAllowed)
+        await sut.revokeCloud(provider: "openai")
+        #expect(sut.phase != .consentOff && sut.revokeFailed)
+        #expect(sut.phase == .unavailable(.consentChangeFailed))
+        #expect(port.consents.first?.revokedAt == nil)
+    }
+
+    @Test("026-FR-019 a failed revoke leaves a running cloud request alone")
+    func failedRevokeKeepsRunningRequest() async {
+        let remote = FakeRemote()
+        let gate = SuggestionGate()
+        remote.setGate(gate)
+        let port = FakePort()
+        granted(port)
+        port.revokeError = SuggestionPortError.unknown(code: "SAVE_FAILED")
+        let sut = model(port, executor: nil, remote: remote, privacy: .remoteAllowed)
+        sut.request()
+        while remote.suggestCalls == 0 { await Task.yield() }
+        await sut.revokeCloud(provider: "openai")
+        #expect(sut.phase == .requesting && sut.revokeFailed)
+        await gate.open()
+        await sut.settled()
+        #expect(sut.phase == .proposals)
+    }
+
+    @Test("026-FR-020 no remote request, local run or notes save starts unless the journal write succeeded")
+    func journalFailureStopsSideEffects() async {
+        let remote = FakeRemote()
+        let port = FakePort()
+        granted(port)
+        let cloud = model(port, executor: nil, remote: remote, privacy: .remoteAllowed, journal: FailingJournal())
+        cloud.request()
+        await cloud.settled()
+        #expect(cloud.phase == .unavailable(.journalFailed) && remote.suggestCalls == 0)
+
+        let executor = FakeExecutor()
+        let local = model(FakePort(), executor: executor, journal: FailingJournal())
+        local.request()
+        await local.settled()
+        #expect(local.phase == .unavailable(.journalFailed) && executor.calls == 0)
+    }
+
+    @Test("026-FR-020 an answer is not saved to the notes unless its identity was durably recorded")
+    func answerNeedsDurableIdentity() async throws {
+        final class Flaky: ReviewSuggestionJournal, @unchecked Sendable {
+            private let lock = NSLock()
+            private var failing = false
+            private var store: [String: ReviewSuggestionRecord] = [:]
+            func setFailing(_ value: Bool) { lock.withLock { failing = value } }
+            func load(_ key: String) async throws -> ReviewSuggestionRecord? { lock.withLock { store[key] } }
+            func save(_ record: ReviewSuggestionRecord, for key: String) async throws {
+                try lock.withLock {
+                    if failing { throw JournalDown() }
+                    store[key] = record
+                }
+            }
+            func clear(_ key: String) async throws { lock.withLock { store[key] = nil } }
+        }
+        let journal = Flaky()
+        let port = FakePort()
+        let executor = FakeExecutor(result: .success(ModelAnswer(proposals: [], clarifyingQuestion: "Which tiles did you choose")))
+        let sut = model(port, executor: executor, journal: journal)
+        sut.request()
+        await sut.settled()
+        journal.setFailing(true)
+        sut.answerDraft = "Grey ones"
+        sut.submitAnswer()
+        await sut.settled()
+        #expect(port.saves.isEmpty && sut.phase == .answerNotSaved(.rejected(code: "JOURNAL_FAILED")))
+    }
+
+    @Test("026-FR-019 long notes are reduced to the head/tail rule before the estimate, a local model and the cloud body")
+    func notesReducedBeforeAnyModel() async throws {
+        let port = FakePort()
+        port.notes = (0..<3_000).map { "note line \($0)" }.joined(separator: "\n")
+        let executor = FakeExecutor()
+        let local = await started(model(port, executor: executor))
+        let localNotes = try #require(executor.inputs.first?.taskNotes)
+        #expect(localNotes.unicodeScalars.count <= 6_003 && localNotes.contains("\n\u{2026}\n") && local.notesTruncated)
+        let remote = FakeRemote()
+        granted(port)
+        _ = await started(model(port, executor: nil, remote: remote, privacy: .remoteAllowed))
+        let sent = try #require(remote.bodies.first?.task?.notes)
+        #expect(sent == localNotes)
+    }
+
+    @Test("026-FR-019 task suggestions send the project context too; the task object is absent only for a project next action")
+    func projectContextForTaskKinds() async throws {
+        let port = FakePort()
+        granted(port)
+        port.projectName = "Home"
+        port.openTitles = ["Paint the hall", "Fix the sink"]
+        for kind in [SuggestionKind.firstStep, .reformulate] {
+            let remote = FakeRemote()
+            _ = await started(model(port, executor: nil, remote: remote, privacy: .remoteAllowed, kind: kind))
+            let body = try #require(remote.bodies.first)
+            #expect(body.task?.title == "Renovate the bathroom")
+            #expect(body.project == .init(name: "Home", openTaskTitles: ["Paint the hall", "Fix the sink"]))
+        }
+        let remote = FakeRemote()
+        _ = await started(model(port, executor: nil, remote: remote, privacy: .remoteAllowed, kind: .projectNextAction))
+        let body = try #require(remote.bodies.first)
+        #expect(body.task == nil && body.project?.name == "Home")
+    }
+
+    @Test("026-FR-020 rule 5 compares against every open task of the project, not only the 20 sent")
+    func duplicateFilterSeesAllOpenTitles() async throws {
+        let titles = (1...25).map { "Task number \($0)" } + ["Order the grey tiles"]
+        let port = FakePort()
+        port.projectName = "Home"
+        port.openTitles = titles
+        // The model input is bounded; the validator still sees the 26th title.
+        let input = try #require(port.suggestionInput(for: taskID, kind: .reformulate, stallReason: nil))
+        #expect(input.openTaskTitles.count == 20 && input.allOpenTaskTitles.count == 26)
+        let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Order the grey tiles"])))
+        let sut = await started(model(port, executor: executor))
+        #expect(sut.phase == .noSuggestion)
+    }
+
+    @Test("026-FR-020 the timeout does not wait for an executor that ignores cancellation")
+    func timeoutIgnoresStuckExecutor() async {
+        let executor = FakeExecutor()
+        let gate = SuggestionGate()
+        executor.setGate(gate)
+        let sut = model(FakePort(), executor: executor, terms: AITerms(timeoutMS: 30, maxInputTokens: 4_000, maxOutputTokens: 400))
+        sut.request()
+        await sut.settled()
+        #expect(sut.phase == .unavailable(.localFailed) && sut.proposals.isEmpty)
+        await gate.open()  // the late result is dropped
+        await Task.yield()
+        #expect(sut.phase == .unavailable(.localFailed))
+    }
+
+    @Test("026-FR-020 the file journal keeps the record across instances and reads damage as none")
+    func fileJournalSurvivesRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("journal-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let record = ReviewSuggestionRecord(stage: .cancelled, transmitted: true, answerDraft: "Grey ones", pending: nil, owner: "owner-1")
+        try await FileReviewSuggestionJournal(directory: directory).save(record, for: "task-1:reformulate")
+        #expect(try await FileReviewSuggestionJournal(directory: directory).load("task-1:reformulate") == record)
+        let file = try #require(try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first)
+        try Data("not json".utf8).write(to: file)
+        #expect(try await FileReviewSuggestionJournal(directory: directory).load("task-1:reformulate") == nil)
+        try await FileReviewSuggestionJournal(directory: directory).clear("task-1:reformulate")
+        try await FileReviewSuggestionJournal(directory: directory).clear("task-1:reformulate")
+    }
+
+    @Test("026-FR-020 a record of another account is never recovered")
+    func otherAccountRecordIgnored() async {
+        let journal = InMemoryReviewSuggestionJournal()
+        try? await journal.save(ReviewSuggestionRecord(stage: .requestSent, transmitted: true, answerDraft: "", pending: nil, owner: "owner-2"),
+                                for: "task-1:reformulate")
+        let sut = model(FakePort(), journal: journal)
+        await sut.recover()
+        #expect(sut.phase == .idle)
     }
 
     static func record() -> TaskRecord {

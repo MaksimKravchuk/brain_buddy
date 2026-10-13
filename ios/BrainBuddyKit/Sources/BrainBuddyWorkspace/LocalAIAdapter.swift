@@ -89,17 +89,20 @@ public struct SuggestionInput: Sendable, Equatable {
     public var taskNotes: String?
     public var stallReason: String?
     public var projectName: String?
-    /// At most 20 other open task titles of the project.
+    /// At most 20 other open task titles of the project: the only titles a model receives.
     public var openTaskTitles: [String]
+    /// Every other open task title of the project the client holds; only rule 5 compares against it.
+    public var allOpenTaskTitles: [String]
 
     public init(kind: SuggestionKind, taskTitle: String?, taskNotes: String? = nil, stallReason: String? = nil,
-                projectName: String? = nil, openTaskTitles: [String] = []) {
+                projectName: String? = nil, openTaskTitles: [String] = [], allOpenTaskTitles: [String]? = nil) {
         self.kind = kind
         self.taskTitle = taskTitle
         self.taskNotes = taskNotes
         self.stallReason = stallReason
         self.projectName = projectName
         self.openTaskTitles = Array(openTaskTitles.prefix(20))
+        self.allOpenTaskTitles = allOpenTaskTitles ?? openTaskTitles
     }
 
     /// A rough size for the policy's input guard (about four characters a token).
@@ -145,6 +148,7 @@ extension BrainBuddyAPIClient: NavigatorRemote {
 public protocol AIPolicyEngine: Sendable {
     func aiRoute(_ request: Data) async throws -> Data
     func aiValidateAnswer(_ answer: Data) async throws -> Data
+    func aiReduceNotes(_ notes: Data) async throws -> Data
 }
 
 extension RustBridgeRuntime: AIPolicyEngine {}
@@ -295,8 +299,23 @@ public struct LocalAIAdapter: Sendable {
         return answer
     }
 
-    /// Rules 1-5 of the navigator contract; `projectOpenTitles` are the open titles the client holds.
-    public func validate(_ answer: ModelAnswer, for input: SuggestionInput, projectOpenTitles: [String] = [])
+    /// The input with its notes reduced by the shared rule (at most 6 003 scalars), and whether lines
+    /// were dropped. Applied before routing, so the estimate, a local model and the cloud body agree.
+    public func reducingNotes(_ input: SuggestionInput) async throws -> (input: SuggestionInput, truncated: Bool) {
+        guard let notes = input.taskNotes, !notes.isEmpty else { return (input, false) }
+        let data = try await policy.aiReduceNotes(JSONSerialization.data(withJSONObject: ["notes": notes]))
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let reduced = object["notes"] as? String, let truncated = object["truncated"] as? Bool else {
+            throw LocalAIError.malformedPolicyAnswer
+        }
+        var result = input
+        result.taskNotes = reduced
+        return (result, truncated)
+    }
+
+    /// Rules 1-5 of the navigator contract. Rule 5 compares against every open title the client holds
+    /// (`allOpenTaskTitles`), not only the bounded list the model saw; `projectOpenTitles` overrides it.
+    public func validate(_ answer: ModelAnswer, for input: SuggestionInput, projectOpenTitles: [String]? = nil)
         async throws -> ValidatedAnswer {
         let request: [String: Any] = [
             "kind": input.kind.rawValue,
@@ -305,7 +324,7 @@ public struct LocalAIAdapter: Sendable {
             "stall_reason": input.stallReason as Any? ?? NSNull(),
             "project_name": input.projectName as Any? ?? NSNull(),
             "open_task_titles": input.openTaskTitles,
-            "project_open_titles": projectOpenTitles,
+            "project_open_titles": projectOpenTitles ?? input.allOpenTaskTitles,
             "proposals": answer.proposals,
             "clarifying_question": answer.clarifyingQuestion as Any? ?? NSNull(),
         ]
