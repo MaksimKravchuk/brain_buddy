@@ -69,7 +69,7 @@ from .review_service import (
 )
 from .rust_review_facade import ReviewRefused, RustReviewFacade
 from .service import serialized_write
-from .sync.review_projection import dict_codec, model_codec
+from .sync.review_projection import dict_codec, model_codec, replaying
 
 logger = logging.getLogger("app.modules.tasks.review")
 
@@ -1463,6 +1463,8 @@ def _log_run(
 ) -> None:
     """``review_run`` (plan Observability): mode, status and counts only."""
 
+    if replaying():
+        return
     logger.info(
         "review_run owner_id=%s session_id=%s event=%s mode=%s status=%s "
         "counts=%s qualifying=%s outcome=%s duration_ms=%d",
@@ -1481,6 +1483,8 @@ def _log_run(
 def _log_bulk(
     release: ReviewBulkReleaseDocument, *, event: str, outcome: str, t0: float
 ) -> None:
+    if replaying():
+        return
     logger.info(
         "review_bulk_release owner_id=%s bulk_id=%s event=%s kind=%s released=%d "
         "skipped=%d outcome=%s duration_ms=%d",
@@ -1496,6 +1500,8 @@ def _log_bulk(
 
 
 def _log_refusal(owner_id: str, record_id: str, reason: str) -> None:
+    if replaying():
+        return
     logger.info(
         "review_flow_refused owner_id=%s id=%s outcome=%s", owner_id, record_id, reason
     )

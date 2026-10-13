@@ -229,6 +229,12 @@ class CommandReceipts[ConnectionT](ABC):
             raise SyncCommandError("RESET_REQUIRED")
         return current
 
+    def admit(
+        self, unit: OwnerUnitOfWork[ConnectionT], authorize: Authority[ConnectionT]
+    ) -> ScopeAuthority:
+        """Current authority under the unit's lock, for ingress outside a command."""
+        return self._scope(unit, authorize)
+
     @abstractmethod
     def _scope_row(self, unit: OwnerUnitOfWork[ConnectionT]) -> StorageRow | None:
         raise NotImplementedError

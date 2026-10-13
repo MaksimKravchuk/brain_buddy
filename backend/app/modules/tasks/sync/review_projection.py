@@ -88,6 +88,19 @@ PUBLIC_REVIEW_ENTITY_TYPES: Final = (
 _ACTIVE: ContextVar[bool] = ContextVar("review_command_boundary_active", default=False)
 
 
+_REPLAYING: ContextVar[bool] = ContextVar("review_command_replaying", default=False)
+
+
+def replaying() -> bool:
+    """Whether a Review command only re-derives a redacted retained answer.
+
+    A recovery replay has no side effects: the legacy idempotency replay logged
+    nothing, so neither does this one.
+    """
+
+    return _REPLAYING.get()
+
+
 class _NothingPublished(Exception):  # noqa: N818 - control flow, never surfaced
     """Rolls an internal unit back when it wrote no public Review state."""
 
@@ -516,6 +529,7 @@ class ReviewCommandBoundary:
             raise IdempotencyReceiptUnavailableError()
         unit: OwnerUnitOfWork[Connection] = receipt.unit
         before = unit.activity
+        token = _REPLAYING.set(True)
         try:
             with self._executing():
                 result = execute()
@@ -529,6 +543,8 @@ class ReviewCommandBoundary:
             # revision, deleted target) means no stored record answers it.
             # Integrity and storage errors are not domain errors: they surface.
             raise IdempotencyReceiptUnavailableError() from None
+        finally:
+            _REPLAYING.reset(token)
         if unit.activity != before:
             raise IdempotencyReceiptUnavailableError()
         return result

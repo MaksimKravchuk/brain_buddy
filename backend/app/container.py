@@ -52,6 +52,7 @@ from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import RustCore
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
+from app.modules.tasks.sync.authority import IdentityScopeAuthority
 from app.modules.tasks.sync.receipts import Authority, ReceiptStore
 from app.modules.tasks.sync.review_projection import ReviewCommandBoundary
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
@@ -447,6 +448,13 @@ def build_container(
         admin_service=admin_service,
         relay_capability_available=relay_capability_available,
     )
+
+    # Spec 026 PR-30: the live writers (web, MCP, CLI) get the Identity-backed
+    # authority unless a caller injects one. Every Task/Review dispatch is still
+    # gated per owner by ``rust_core_sync`` (default OFF), so with the flag off
+    # no writer enters the receipt boundary and behaviour is unchanged.
+    if task_sync_authority is None:
+        task_sync_authority = IdentityScopeAuthority(user_repo)
 
     tree_service = TreeService(tree_repo, index_repo)
 

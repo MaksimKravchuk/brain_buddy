@@ -382,7 +382,9 @@ class Apps:
 
 
 @pytest.fixture
-def apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Apps]:
+def apps(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Apps]:
     built = []
     for subdir in ("review-off", "review-on"):
         client, _ = _build_authenticated_client(
@@ -398,6 +400,17 @@ def apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Apps]:
         api.flag("on")
         built.append(api)
     off_api, on_api = built
+    # Journeys run with the receipt boundary that build_container wires. The
+    # undo journey alone stays engine-only: a decision Undo tombstones its
+    # records, so the boundary redacts the retained answer and a same-key retry
+    # is a 409 idempotency_receipt_unavailable by design (PR-28). The follow-up
+    # undo test in test_sync_review_projection pins that divergence.
+    spec = getattr(request.node, "callspec", None)
+    if spec is not None and spec.params.get("name") == "undo":
+        for api in built:
+            api.container.review_service._boundary = None
+            api.container.navigator_service._boundary = None
+            api.container.task_service._legacy_tag_handler = None
     on_api.container.feature_flag_service.set_mode(
         "rust_core_sync", "on", operator_id="parity"
     )
@@ -479,6 +492,10 @@ def _compare(
         _evidence("compared", f"{len(apps.on.exchanges)} requests")
     with allure.step("the stored rows are identical"):
         on_rows, off_rows = apps.on.snapshot(), apps.off.snapshot()
+        # Under the boundary the receipt is the idempotency record (PR-28), so
+        # that legacy table is empty ON; ``test_sync_review_projection`` pins it.
+        on_rows.pop("idempotency", None)
+        off_rows.pop("idempotency", None)
         differing = {
             kind: {
                 "only ON": [row for row in on_rows[kind] if row not in off_rows[kind]],

@@ -10,6 +10,7 @@ committed feed straight from the sync tables.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -26,10 +27,10 @@ from app.core.rate_limit import navigator_rate_limiter
 from app.modules.tasks.jobs import JobRepository
 from app.modules.tasks.review_domain import ReviewSettingsDocument
 from app.modules.tasks.review_service import SNAPSHOT_RETENTION
+from app.modules.tasks.sync.authority import IdentityScopeAuthority
 from app.modules.tasks.sync.legacy_adapter import revoke_collision_key
 from app.modules.tasks.sync.receipts import (
     ReceiptStore,
-    ScopeAuthority,
     SyncCommandError,
 )
 from app.modules.tasks.sync.review_projection import (
@@ -42,6 +43,7 @@ from app.modules.tasks.sync.review_projection import (
 )
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork, WriteRecord
 from app.utils.idempotency import idempotency_key_digest
+from tests.allure_evidence import attach_json, check_equal
 
 from .conftest import FrozenClock
 from .test_review_auto_park import keep_alive
@@ -123,13 +125,17 @@ class Synced:
         self.boundary = ReviewCommandBoundary(
             ReceiptStore(core),
             TaskUnitOfWork(self.repo, JobRepository(self.repo.db_path)),
-            lambda unit: ScopeAuthority(
-                unit.owner_id, "server-1", "feed-1", "access-1", "sqlite-1"
-            ),
+            # The production Identity authority, as ``build_container`` wires it:
+            # one scope row serves the Task and Review writers alike.
+            IdentityScopeAuthority(container.user_repo),
             self.repo,
             core,
         )
         container.review_service._boundary = self.boundary
+        # This suite counts Review receipts only; the Task writers that seed the
+        # journey stay outside the boundary, as they were before the production
+        # authority was wired.
+        container.task_service._legacy_tag_handler = None
         container.navigator_service._boundary = self.boundary
         self.rust("on")
         self.api.flag("on")
@@ -1093,6 +1099,46 @@ def test_026_FR_006_bulk_release_undo_and_run_commands_replay_their_first_answer
             "review_decision",
             "review_decision_queue",
         ]
+
+
+def test_026_FR_006_a_bulk_undo_recovery_replay_has_no_log_line_and_no_state(
+    synced: Synced, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The undo's receipt is redacted by its tombstones, so a same-key retry is
+    re-derived; that recovery must log nothing and write nothing."""
+
+    api, clock = synced.api, synced.clock
+    inbox = api.create("inbox card", state="inbox")
+    synced.post("/api/review/explainer/acknowledge", {}).raise_for_status()
+    clock.advance(days=40)
+    inbox = api.task(inbox["id"])
+    item = {"task_id": inbox["id"], "expected_revision": inbox["revision"]}
+    released = synced.post(
+        "/api/review/bulk-releases",
+        {"kind": "inbox_remainder", "items": [item]},
+        "bulk-1",
+    )
+    undo_path = f"/api/review/bulk-releases/{released.json()['id']}/undo"
+    undone = synced.post(undo_path, {}, "bulk-undo-1")
+    assert undone.status_code == 200, undone.text
+    before = (synced.receipts(), len(synced.transactions()))
+    caplog.set_level(logging.INFO, logger="app.modules.tasks.review")
+    caplog.clear()
+    with allure.step("the same-key retry answers again without a log line"):
+        retry = synced.post(undo_path, {}, "bulk-undo-1")
+        lines = [r.getMessage() for r in caplog.records]
+        attach_json("log lines", lines)
+        check_equal("retry body", retry.json(), undone.json())
+        check_equal(
+            "no review_bulk_release log",
+            [x for x in lines if x.startswith("review_bulk_release")],
+            [],
+        )
+    check_equal(
+        "no new receipt or transaction",
+        (synced.receipts(), len(synced.transactions())),
+        before,
+    )
 
 
 def test_026_FR_014_queue_projection_equals_the_queue_api_in_queue_order(

@@ -325,6 +325,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Review sync projection",
         "Review writers publish complete public projections",
     ),
+    "sync_authority": (
+        EPIC_TASKS,
+        "Sync authority and device epochs",
+        "Current authorization fences sync execution",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",

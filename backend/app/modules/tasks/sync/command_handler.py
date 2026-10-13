@@ -1480,6 +1480,14 @@ class LegacyTagCommandHandler:
             if isinstance(requested_name, str)
             else None
         )
+        if operation == "unarchive" and project_id is not None:
+            # The name clash names the project being restored, as the legacy path.
+            try:
+                attempted_name = self._repo.get_project_for_owner(
+                    project_id, owner_id=owner_id
+                ).name
+            except NotFoundError:
+                attempted_name = None
         try:
             with self._receipts.command(
                 self._units, request, self._authority, now=now
