@@ -9,7 +9,13 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
-  workers: 1,
+  // Spec files run concurrently against the one Compose stack; tests within a
+  // file stay in order. Every journey signs up its own account (uniqueEmail
+  // carries the worker index), so files share only the operator and flag
+  // state they set idempotently. Three leaves CPU for the stack on CI's
+  // four-core runner, and is about where crt.spec.ts, the longest file, starts
+  // to bound the run.
+  workers: isCI ? 3 : 1,
   reporter: [
     [isCI ? "github" : "list"],
     ["html", { outputFolder: "playwright-report", open: "never" }],
