@@ -170,6 +170,7 @@ public final class Workspace {
     @ObservationIgnored private var rustGestureSaver: RustWorkspaceGestureSaver?
     @ObservationIgnored private var rustSubscription: RustWorkspaceSubscription?
     @ObservationIgnored private var rustWatcher: Task<Void, Never>?
+@ObservationIgnored private var logoutDrain: Task<Void, Never>?
     @ObservationIgnored private var rustStatusPump: Task<Void, Never>?
     @ObservationIgnored private(set) var runtimeBindingID = UUID()
     @ObservationIgnored private var rustTaskFrames: [TaskID: RustWorkspaceTaskFrame] = [:]
@@ -878,7 +879,7 @@ public final class Workspace {
 
     /// Pushes pending changes and pulls the latest server state now.
     public func syncNow() async {
-        if isRustSelected { await maintainRuntimeDrafts(); await wakeRustTransport(.manual); await refreshRustStatus(); return }
+        if isRustSelected { drainRustLogouts(); await maintainRuntimeDrafts(); await wakeRustTransport(.manual); await refreshRustStatus(); return }
         guard let sync, account != nil else { return }
         await flush()
         let status = await sync.syncNow()
@@ -916,7 +917,7 @@ public final class Workspace {
                 await previous?.value
                 guard binding == self.runtimeBindingID else { return }
                 await selection.transport.setNetworkAvailable(isAvailable)
-                if isAvailable { await self.wakeRustTransport(.networkRestored) }
+                if isAvailable { self.drainRustLogouts(); await self.wakeRustTransport(.networkRestored) }
             }
             return
         }
@@ -1427,6 +1428,7 @@ extension Workspace {
             rustSubscription = subscription
             await listenToTransport(selection.transport, binding: binding)
             guard binding == runtimeBindingID else { return }
+            drainRustLogouts()
             rustWatcher = Task { [weak self] in
                 var token: String?
                 do {
@@ -1728,6 +1730,20 @@ extension Workspace {
             markRustQueryError(error)
         }
     }
+
+    /// Sends the server logouts that waited for the network (an offline sign-out, an abandoned
+    /// login), whether or not a sync session exists: the account-less binding after a sign-out
+    /// has none. One drain at a time; a retryable failure leaves the logout for the next call.
+    func drainRustLogouts() {
+        guard networkIsAvailable, logoutDrain == nil, let lifecycle = rustLifecycle else { return }
+        logoutDrain = Task { [weak self] in
+            await lifecycle.drainPendingLogouts()
+            self?.logoutDrain = nil
+        }
+    }
+
+    /// Waits for a drain in progress (tests).
+    func waitForLogoutDrain() async { await logoutDrain?.value }
 
     private func wakeRustTransport(_ trigger: SyncTrigger) async {
         guard let selection = rustSelection, isRustBound else { return }

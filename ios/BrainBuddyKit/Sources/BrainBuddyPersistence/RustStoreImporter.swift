@@ -170,10 +170,11 @@ public struct RustStoreImporter: Sendable {
     /// to its account (the core records it), so no account-less authority or local Review
     /// fragment is established and the sync host binds the scope and device at its first session.
     /// Nothing is exposed until every preparation step succeeded and the outbox status says
-    /// `mayRun`. `account` is the legacy document's, for the caller to record.
+    /// `mayRun`. `account` is the legacy document's, for the caller to record; `sourceGeneration` is the
+    /// generation of the file that was imported, for the handoff to confirm under the writer lock.
     public func prepareImportedRuntime(facade: RustDomainFacade, reviewEnabled: Bool = false,
                                        requireAccountless: Bool = false)
-        async throws -> (runtime: RustWorkspaceRuntime, account: LinkedAccount?) {
+        async throws -> (runtime: RustWorkspaceRuntime, account: LinkedAccount?, sourceGeneration: Int) {
         let report = try await run()
         let source = try await retainedSource(report)
         let document = source.document
@@ -222,7 +223,7 @@ public struct RustStoreImporter: Sendable {
             }
             let outbox = RustOutboxImporter(runtime: runtime, databaseURL: databaseURL, workspaceID: workspaceID,
                 busyTimeoutMilliseconds: busyTimeoutMilliseconds, now: now)
-            if try await outbox.run().mayRun { return (workspace, document.account) }
+            if try await outbox.run().mayRun { return (workspace, document.account, Int(report.sourceGeneration)) }
             // Prepare the verified ORIGINAL sequence once, including converted
             // prefixes. Re-encoding a suffix from base loses dependency lineage.
             let original = try await Task.detached(priority: .userInitiated) {
@@ -265,7 +266,7 @@ public struct RustStoreImporter: Sendable {
                 if plan.atomicGroup { _ = try await workspace.finalizeLegacyConversion(token: plan.token) }
             }
             guard try await outbox.run().mayRun else { throw RustBridgeError(code: "LEGACY_OUTBOX_NOT_READY") }
-            return (workspace, document.account)
+            return (workspace, document.account, Int(report.sourceGeneration))
         } catch {
             try? await workspace.close()
             throw error

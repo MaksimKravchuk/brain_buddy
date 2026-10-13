@@ -53,6 +53,38 @@ struct MacRustSelectionTests {
         await again.workspace.closeRuntime()
     }
 
+    @Test("026-FR-025: a selected install whose bridge cannot initialize is unavailable, never legacy")
+    func selectedInstallWithFailingBridgeIsUnavailable() async throws {
+        let folder = TemporaryFolder()
+        let first = try makeLaunch(folder, pilot: true)
+        await first.run { _ in }
+        let selected = try #require(first.host)
+        await selected.workspace.closeRuntime()
+
+        // The next launch cannot build a Rust environment (`live` leaves it nil when `.mac` throws).
+        let configuration = MacHostConfiguration(directory: folder.url, isDryRun: false)
+        let failing = MacLaunch(
+            environment: MacLaunchEnvironment(
+                configuration: configuration, tokenStore: SpyTokenStore(), transport: CountingTransport(),
+                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                makeID: SequentialIDs().provider, log: CapturingMacLog(), rustRuntime: nil))
+        await failing.run { _ in }
+        #expect(failing.importFailed && failing.host == nil)
+    }
+
+    @Test("026-FR-025: an unselected install with no bridge still launches legacy")
+    func unselectedInstallWithFailingBridgeStaysLegacy() async throws {
+        let folder = TemporaryFolder()
+        let configuration = MacHostConfiguration(directory: folder.url, isDryRun: false)
+        let launch = MacLaunch(
+            environment: MacLaunchEnvironment(
+                configuration: configuration, tokenStore: SpyTokenStore(), transport: CountingTransport(),
+                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                makeID: SequentialIDs().provider, log: CapturingMacLog(), rustRuntime: nil))
+        await launch.run { _ in }
+        #expect(try #require(launch.host).workspace.isRustSelected == false)
+    }
+
     @Test("026-FR-025: a selection that cannot be read stops the launch instead of opening the retired file")
     func unreadableSelectionStopsTheLaunch() async throws {
         let folder = TemporaryFolder()

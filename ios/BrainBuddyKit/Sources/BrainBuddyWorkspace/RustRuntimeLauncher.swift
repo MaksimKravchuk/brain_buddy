@@ -55,6 +55,9 @@ public struct RustRuntimeEnvironment: Sendable {
     public var busyTimeoutMilliseconds: UInt32
     public var now: @Sendable () -> Date
     public var makeID: @Sendable () -> UUID
+    /// Test seam: runs after the import finished and before the selection handoff, where a legacy
+    /// writer queued behind the import can commit.
+    var beforeHandoff: (@Sendable () async -> Void)?
 
     public init(
         location: RustRuntimeLocation, legacyStoreURL: URL, bridge: RustBridgeRuntime,
@@ -170,6 +173,7 @@ public struct RustRuntimeLauncher: Sendable {
         do {
             let record: RustRuntimeSelectionRecord
             let runtime: RustWorkspaceRuntime
+            var importedGeneration: Int?
             if hasLegacyFile {
                 let workspaceID = Self.importedWorkspaceID
                 let importer = RustStoreImporter(
@@ -179,6 +183,7 @@ public struct RustRuntimeLauncher: Sendable {
                 let prepared = try await importer.prepareImportedRuntime(
                     facade: environment.facade(), reviewEnabled: environment.reviewEnabled)
                 runtime = prepared.runtime
+                importedGeneration = prepared.sourceGeneration
                 record = RustRuntimeSelectionRecord(
                     workspaceID: workspaceID, account: prepared.account, deviceID: environment.makeID().uuidString.lowercased(),
                     selectedAt: environment.now(), reviewEnabled: environment.reviewEnabled)
@@ -193,7 +198,25 @@ public struct RustRuntimeLauncher: Sendable {
                     workspaceID: workspaceID, account: nil, deviceID: environment.makeID().uuidString.lowercased(),
                     selectedAt: environment.now(), reviewEnabled: environment.reviewEnabled)
             }
-            do { try environment.selections.save(record) } catch {
+            // The handoff is fenced against legacy writers: the selection is published while the
+            // legacy document's writer lock is held, and only if no writer committed since the
+            // import read the file. A writer queued behind the import then finds the selection when
+            // it gets the lock and is refused (`FileDocumentStore.update`); one that committed first
+            // makes the generation differ, so nothing is selected and the install stays legacy.
+            let selections = environment.selections
+            await environment.beforeHandoff?()
+            do {
+                if hasLegacyFile {
+                    let legacy = FileDocumentStore(fileURL: environment.legacyStoreURL)
+                    guard try await legacy.performHandoff(whenGeneration: importedGeneration, { try selections.save(record) })
+                    else {
+                        try? await runtime.close()
+                        return .legacy(.notReady(code: "LEGACY_CHANGED"))
+                    }
+                } else {
+                    try selections.save(record)
+                }
+            } catch {
                 try? await runtime.close()
                 return .legacy(.notReady(code: "SELECTION_NOT_SAVED"))
             }

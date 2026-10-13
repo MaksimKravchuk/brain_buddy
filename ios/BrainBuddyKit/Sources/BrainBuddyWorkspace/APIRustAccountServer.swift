@@ -76,16 +76,18 @@ public struct APIRustAccountServer: RustAccountServer {
         try? tokenStore.addPendingLogout(logout)
     }
 
-    /// `POST /auth/logout` carrying the logout's own token through a client of its own, so the
-    /// stored sessions are not touched. True when the server ended it, had none, or refused in a
-    /// way a retry will not change.
+    /// The shared rule (`PendingLogoutSender`): true when a retry would change nothing.
     private func send(_ logout: PendingLogout) async -> Bool {
-        let tokens = InMemorySessionTokenStore(tokens: [logout.serverURL: logout.token])
-        do throws(APIError) {
-            try await client(for: logout.serverURL, tokens: tokens).logout()
-            return true
-        } catch {
-            return !error.isRetryable
+        await PendingLogoutSender.send(logout, transport: transport, clientVersion: identity.version, identity: identity)
+    }
+
+    /// Sends the logouts that waited for the network and removes each one by the same rule the
+    /// legacy engine uses: only when the server ended it or refused for good.
+    public func drainPendingLogouts() async {
+        guard let pending = try? tokenStore.pendingLogouts() else { return }
+        for logout in pending {
+            if Task.isCancelled { return }
+            if await send(logout) { try? tokenStore.removePendingLogout(logout) }
         }
     }
 

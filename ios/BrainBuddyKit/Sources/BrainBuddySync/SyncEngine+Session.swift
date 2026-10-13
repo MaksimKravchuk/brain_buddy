@@ -148,20 +148,12 @@ extension SyncEngine {
         case retryLater
     }
 
-    /// `POST /auth/logout` carrying `logout.token`, through a client of its
-    /// own, so the stored sessions are not touched.
+    /// `POST /auth/logout` carrying `logout.token` (`PendingLogoutSender`, the rule the Rust
+    /// runtime shares), so the stored sessions are not touched.
     private func send(_ logout: PendingLogout) async -> LogoutOutcome {
-        let client = BrainBuddyAPIClient(
-            baseURL: logout.serverURL, transport: transport,
-            tokenStore: InMemorySessionTokenStore(tokens: [logout.serverURL: logout.token]),
-            clientVersion: configuration.clientVersion, identity: identity
-        )
-        do throws(APIError) {
-            try await client.logout()
-            return .done
-        } catch {
-            return error.isRetryable ? .retryLater : .done
-        }
+        let done = await PendingLogoutSender.send(
+            logout, transport: transport, clientVersion: configuration.clientVersion, identity: identity)
+        return done ? .done : .retryLater
     }
 }
 

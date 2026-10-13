@@ -188,6 +188,10 @@ struct RustSyncURLSessionTests {
         #expect(server.requests.count == 1)
     }
 
+    // swift-corelibs-foundation aborts the process on a redirect it was asked not to follow, so the
+    // end-to-end check runs on Apple platforms; `RustSyncRedirectRefusalTests` covers the delegate
+    // everywhere.
+    #if !canImport(FoundationNetworking)
     @Test("026-FR-005 a redirect is not followed and the cookie goes nowhere else")
     func redirectIsRefused() throws {
         let (server, _, transport) = rig()
@@ -196,6 +200,7 @@ struct RustSyncURLSessionTests {
         #expect(answer.status == 302)
         #expect(server.requests.count == 1)
     }
+    #endif
 
     @Test("026-FR-005 the server address maps to the origin the core's paths are relative to")
     func originDropsTheApiSuffix() {
@@ -338,6 +343,10 @@ struct RustSyncHintStreamTests {
         #expect(server.requests.isEmpty)
     }
 
+    // swift-corelibs-foundation aborts the process on a redirect it was asked not to follow, so the
+    // end-to-end check runs on Apple platforms; `RustSyncRedirectRefusalTests` covers the delegate
+    // everywhere.
+    #if !canImport(FoundationNetworking)
     @Test("026-FR-007 a redirect on the stream is not followed")
     func redirectRefused() {
         let (server, hints) = rig()
@@ -346,5 +355,50 @@ struct RustSyncHintStreamTests {
             try hints.open(path: path, idleTimeout: 5, cancel: RustSyncCancellation())
         }
         #expect(server.requests.count == 1)
+    }
+    #endif
+}
+
+/// Both delegates the Rust sync adapter installs refuse every redirect, so the hand-set `Cookie`
+/// header never reaches a `Location`. Called directly: nothing is sent.
+@Suite("Rust sync redirect refusal")
+struct RustSyncRedirectRefusalTests {
+    private final class Recorder: Sendable {
+        let answers = Mutex<[URLRequest?]>([])
+    }
+
+    private func refuse(with delegate: any URLSessionTaskDelegate, status: Int) throws -> [URLRequest?] {
+        let origin = URL(string: "https://brainbuddy.example.test/api/sync/v1/changes")!
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        // Created, never resumed.
+        let task = session.dataTask(with: origin)
+        let redirect = try #require(
+            HTTPURLResponse(
+                url: origin, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Location": "https://elsewhere.example.test/steal"]
+            )
+        )
+        var onward = URLRequest(url: URL(string: "https://elsewhere.example.test/steal")!)
+        onward.setValue("brainbuddy_session=tok-1", forHTTPHeaderField: "Cookie")
+        let recorder = Recorder()
+        delegate.urlSession?(session, task: task, willPerformHTTPRedirection: redirect, newRequest: onward) {
+            request in recorder.answers.withLock { $0.append(request) }
+        }
+        return recorder.answers.withLock { $0 }
+    }
+
+    @Test("026-FR-005 the request transport's delegate refuses every redirect", arguments: [301, 302, 303, 307, 308])
+    func requestDelegateRefuses(status: Int) throws {
+        let answers = try refuse(with: RefuseRedirects(), status: status)
+        #expect(answers.count == 1)
+        #expect(answers.allSatisfy { $0 == nil })
+    }
+
+    @Test("026-FR-007 the hint stream's delegate refuses every redirect", arguments: [301, 302, 303, 307, 308])
+    func streamDelegateRefuses(status: Int) throws {
+        let answers = try refuse(with: HintPump(), status: status)
+        #expect(answers.count == 1)
+        #expect(answers.allSatisfy { $0 == nil })
     }
 }

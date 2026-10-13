@@ -56,6 +56,14 @@ public protocol RustAccountServer: Sendable {
     func finishSignOut(_ ticket: RustSignOutTicket, of account: LinkedAccount) async
     /// Nothing was removed: the session stays valid.
     func cancelSignOut(_ ticket: RustSignOutTicket) async
+    /// Sends the logouts that could not go out when they were recorded (offline sign-out, an
+    /// abandoned login). Called whenever the network is, or comes back; a retryable failure
+    /// leaves the logout for the next call.
+    func drainPendingLogouts() async
+}
+
+extension RustAccountServer {
+    public func drainPendingLogouts() async {}
 }
 
 public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
@@ -142,6 +150,10 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
             default: false
             }
         return queued > 0 || !empty
+    }
+
+    public func drainPendingLogouts() async {
+        await environment.server.drainPendingLogouts()
     }
 
     // MARK: Sign out

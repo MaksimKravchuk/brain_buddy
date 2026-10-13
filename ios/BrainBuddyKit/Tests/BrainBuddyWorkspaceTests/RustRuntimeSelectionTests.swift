@@ -86,6 +86,51 @@ struct RustRuntimeSelectionTests {
         #expect(throws: RustRuntimeSelectionError.unreadable) { _ = try lane.selections.load() }
     }
 
+    // MARK: The handoff against legacy writers
+
+    @Test("026-FR-025: a legacy writer that gets the lock after the handoff is refused and the edit is not stranded")
+    @MainActor
+    func writerAfterHandoffIsRefused() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        guard case .rust(let selection, _) = await lane.launcher(pilot: true).resolve() else {
+            Issue.record("a clean legacy file must be imported")
+            return
+        }
+        let before = try Data(contentsOf: lane.legacyURL)
+        // An App Intent that was waiting for the legacy lock gets it now: the selection exists.
+        let legacy = FileDocumentStore(fileURL: lane.legacyURL)
+        await #expect(throws: DocumentStoreError.io(FileDocumentStore.retiredReason)) {
+            _ = try await legacy.update { $0 = $0 }
+        }
+        #expect(try Data(contentsOf: lane.legacyURL) == before, "nothing was committed to the retired file")
+        try await selection.runtime.close()
+    }
+
+    @Test("026-FR-025: a legacy write that lands between the import and the handoff keeps the install legacy")
+    @MainActor
+    func writerBeforeHandoffBlocksTheSelection() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        var environment = lane.environment()
+        let url = lane.legacyURL
+        environment.beforeHandoff = {
+            // The writer that was queued behind the import's lock commits first.
+            _ = try? await FileDocumentStore(fileURL: url).update { _ in }
+        }
+        let switchBox = RustRuntimePilotSwitch(suiteName: lane.suite)
+        switchBox.set(true)
+        let resolution = await RustRuntimeLauncher(environment: environment, pilot: switchBox).resolve()
+        guard case .legacy(.notReady(let code)) = resolution else {
+            Issue.record("the selection must not be published over a newer legacy file")
+            return
+        }
+        #expect(code == "LEGACY_CHANGED")
+        #expect(try lane.selections.load() == nil)
+    }
+
     // MARK: The import, gated
 
     @Test("026-FR-010: the pilot imports the legacy file once, binds the Rust store and leaves the file as it was")
@@ -372,7 +417,7 @@ struct SelectionLane: Sendable {
     let accountA: LinkedAccount
     let accountB: LinkedAccount
     let server: StubAccountServer
-    private let suite = "selection-\(UUID().uuidString)"
+    let suite = "selection-\(UUID().uuidString)"
 
     init() throws {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

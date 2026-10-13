@@ -66,6 +66,13 @@ public protocol RustAccountLifecyclePort: Sendable {
     func signIn(_ request: RustSignInRequest) async throws -> RustSignInOutcome
     /// Removes the account's local copy and returns the account-less binding.
     func signOut(_ request: RustSignOutRequest) async throws -> RustWorkspaceSelection
+    /// Sends the server logouts still waiting for the network. Independent of any sync session:
+    /// an account-less binding (after sign-out) has none.
+    func drainPendingLogouts() async
+}
+
+extension RustAccountLifecyclePort {
+    public func drainPendingLogouts() async {}
 }
 
 extension Workspace {

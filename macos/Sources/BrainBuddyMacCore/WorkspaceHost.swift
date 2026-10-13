@@ -397,6 +397,23 @@ package final class MacLaunch {
         // stops the launch like a failed import: the retired file is never opened instead.
         var rustSelection: RustWorkspaceSelection?
         var rustLifecycle: (any RustAccountLifecyclePort)?
+        if environment.rustRuntime == nil {
+            // The bridge could not initialize (`live` keeps no environment then). An install that
+            // already has a selection is the Rust runtime's: it must not fall back to the retired
+            // file, whose edits would fork from the selected store. A selection that cannot be read
+            // is the same. Only an unselected install may go on as legacy.
+            do {
+                if try RustRuntimeSelectionStore(location: .directory(directory)).load() != nil {
+                    environment.log.log(.import, "rust runtime unavailable code=RUNTIME_INIT_FAILED")
+                    phase = .importFailed
+                    return
+                }
+            } catch {
+                environment.log.log(.import, "rust runtime unavailable code=SELECTION_UNREADABLE")
+                phase = .importFailed
+                return
+            }
+        }
         if let rustEnvironment = environment.rustRuntime {
             switch await RustRuntimeLauncher(environment: rustEnvironment, pilot: environment.rustPilot).resolve() {
             case .legacy:
