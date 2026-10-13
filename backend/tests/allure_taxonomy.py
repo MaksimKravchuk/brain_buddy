@@ -324,6 +324,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync authority and device epochs",
         "Current authorization fences sync execution",
     ),
+    "sync_commands_api": (
+        EPIC_TASKS,
+        "Sync commands API",
+        "Command and capability routes expose the frozen contract",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",

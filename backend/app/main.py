@@ -18,6 +18,7 @@ from app.api.mcp import install_task_mcp
 from app.api.middleware import CorrelationIdMiddleware
 from app.api.modern_auth import router as modern_auth_router
 from app.api.review import register_review_exception_handlers
+from app.api.sync import router as sync_router
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
@@ -578,6 +579,7 @@ def create_app() -> FastAPI:
     app.include_router(account_router, prefix=f"{config.api_prefix}/account")
     app.include_router(admin_router, prefix=f"{config.api_prefix}/admin")
     app.include_router(api_router, prefix=config.api_prefix)
+    app.include_router(sync_router, prefix=config.api_prefix)
     if config.mcp_enabled:
         install_task_mcp(app, app.state.container, config)
 
