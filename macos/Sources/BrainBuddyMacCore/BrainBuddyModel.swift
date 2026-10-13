@@ -1305,6 +1305,23 @@ package final class BrainBuddyModel {
         return [.reformulate, .firstStep]
     }
 
+    /// What the task detail shows for the suggestion entry. While the editor has unsaved fields the
+    /// entry is blocked with a message: an applied wording is saved at once, and a later editor save
+    /// of an older title or notes must not overwrite it.
+    package enum ReviewSuggestionEntry: Equatable {
+        case hidden
+        case blocked(String)
+        case available([SuggestionKind])
+    }
+
+    package static let suggestionBlockedByEditor = "Save or discard your changes to this task to ask for suggestions."
+
+    package func reviewSuggestionEntry(for task: TaskRecord, editorDirty: Bool) -> ReviewSuggestionEntry {
+        let kinds = reviewSuggestionKinds(for: task)
+        if kinds.isEmpty { return .hidden }
+        return editorDirty ? .blocked(Self.suggestionBlockedByEditor) : .available(kinds)
+    }
+
     /// The adapter over the shared Rust policy, with the executors this Mac can run (none when it
     /// has no on-device model). Nil when the bridge cannot start; the entry then stays hidden.
     package func reviewSuggestionAdapter(executors: [any LocalAIExecutor]) -> LocalAIAdapter? {

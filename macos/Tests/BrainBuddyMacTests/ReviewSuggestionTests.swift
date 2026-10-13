@@ -228,6 +228,18 @@ struct ReviewSuggestionTests {
         #expect(app.model.reviewSuggestionModel(for: waitingTask, kind: .reformulate, adapter: try adapter([])) == nil)
     }
 
+    @Test("026-FR-020 an editor with unsaved fields blocks the entry with a message, so a later editor save cannot overwrite an applied wording")
+    func dirtyEditorBlocksTheEntry() async throws {
+        let app = await OfflineWorkspaceTests.App()
+        app.workspace.accountlessReviewEnabled = true
+        let id = try app.add("Sort out the bike", .next)
+        let task = try #require(app.workspace.task(id))
+        #expect(app.model.reviewSuggestionEntry(for: task, editorDirty: false) == .available([.reformulate, .firstStep]))
+        #expect(app.model.reviewSuggestionEntry(for: task, editorDirty: true) == .blocked(BrainBuddyModel.suggestionBlockedByEditor))
+        let waiting = try #require(app.workspace.task(try app.add("Wait", .waiting, waitingFor: "Sam")))
+        #expect(app.model.reviewSuggestionEntry(for: waiting, editorDirty: true) == .hidden)
+    }
+
     @Test("026-FR-018 026-FR-019 account-less, nothing leaves the Mac: no executor means manual continuation and no remote request")
     func accountLessNeverGoesRemote() async throws {
         let app = await OfflineWorkspaceTests.App()

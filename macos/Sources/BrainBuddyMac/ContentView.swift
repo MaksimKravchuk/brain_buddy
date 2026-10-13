@@ -1507,7 +1507,7 @@ struct WorkspaceView: View {
         } onCancelTask: {
             requestNavigation(.cancel(task.id))
         } extras: { onExtrasDirtyChange in
-            TaskDetailExtras(task: task, model: model, onDirtyChange: onExtrasDirtyChange)
+            TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
         }
     }
 
@@ -2436,6 +2436,7 @@ private struct SuggestionRequest: Identifiable {
 private struct TaskDetailExtras: View {
     let task: TaskRecord
     let model: BrainBuddyModel
+    let editorDirty: Bool
     let onDirtyChange: (Bool) -> Void
     @State private var newSubtask = ""
     @State private var newComment = ""
@@ -2522,8 +2523,12 @@ private struct TaskDetailExtras: View {
     /// review is exposed. A choice here opens the sheet; nothing is requested or changed by it.
     @ViewBuilder
     private var suggestionEntry: some View {
-        let kinds = model.reviewSuggestionKinds(for: task)
-        if !kinds.isEmpty {
+        switch model.reviewSuggestionEntry(for: task, editorDirty: editorDirty) {
+        case .hidden:
+            EmptyView()
+        case .blocked(let message):
+            Text(message).font(.caption).foregroundStyle(.secondary)
+        case .available(let kinds):
             Menu("Suggest with AI…") {
                 ForEach(kinds, id: \.rawValue) { kind in
                     Button(kind == .firstStep ? "Suggest a first step" : "Suggest clearer wording") {
