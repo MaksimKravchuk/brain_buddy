@@ -16,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from app.api import sync as sync_api
 from app.modules.tasks.sync import wire
+from app.modules.tasks.sync.device_executor import DeviceExecutorRegistry
+from app.modules.tasks.sync.device_executor_review import _SUPPORTED as REVIEW_TYPES
 from app.modules.tasks.sync.wire import VersionPolicy
 from tests.allure_evidence import attach_json, check_equal
 from tests.conftest import (
@@ -1000,10 +1002,12 @@ def test_026_FR_023_only_executable_families_are_advertised_and_others_stay_426(
                     "subtask.transition",
                     "comment.create",
                     "comment.update",
+                    *REVIEW_TYPES,
                 ]
             ),
         )
-    with allure.step("a command of another family is 426 and keeps recovery access"):
+    with allure.step("a command no family executes is 426 and keeps recovery access"):
+        live.app.state.sync_device_executor = DeviceExecutorRegistry()  # type: ignore[attr-defined]
         other = submit(live, envelope(owner, cid(1), type="review.settings"))
         assert other.status_code == 426 and error_code(other) == "UPGRADE_REQUIRED"
 
@@ -1080,9 +1084,9 @@ def test_026_FR_023_executor_registry_composes_families(live, owner):
         def execute(self, command, envelope):  # type: ignore[no-untyped-def]
             return command.accept([], result={"family": "extra"})
 
-    live.app.state.sync_device_executor = None  # force a rebuild
+    base = DeviceExecutorRegistry()
+    live.app.state.sync_device_executor = base  # type: ignore[attr-defined]
     caps = live.get(f"/api/sync/v1/capabilities?scope_id={owner}").json()
-    base = live.app.state.sync_device_executor
     with allure.step(
         "a registered family adds its commands to capabilities and routing"
     ):
