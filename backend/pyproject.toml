@@ -32,7 +32,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Spec 026 PR-55: driver for the dark PostgreSQL target
+# (app/modules/tasks/sync/postgres.py). Not installed by production images;
+# PR-57's cutover adds it to the runtime set when it activates the target.
+postgres = [
+  "psycopg[binary]>=3.2,<4",
+]
 dev = [
+  "psycopg[binary]>=3.2,<4",
   "pytest>=8.0,<10.0",
   "pytest-cov>=4.1,<8.0",
   "black>=24.3,<27.0",

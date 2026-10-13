@@ -314,6 +314,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Task sync unit of work",
         "Tasks, Review and job intents share one SQLite commit",
     ),
+    "sync_postgres": (
+        EPIC_TASKS,
+        "Task sync unit of work",
+        "PostgreSQL target keeps the unit, receipt, feed and fence guarantees",
+    ),
     "task_owner_isolation": (
         EPIC_AUTH,
         "Ownership",
