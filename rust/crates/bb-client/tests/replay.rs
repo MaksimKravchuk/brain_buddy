@@ -10,7 +10,7 @@ use bb_client::{
     Choice, DecisionDraft, DependentChoice, DependentDraft, DraftAction, ExecuteContext,
     ExecuteError, ExecuteRequest, IdSource, IssueError, IssueReason, IssueState, OpenOptions,
     Replacement, ReplayError, ResolveRequest, Store, StoreError, execute, issue, load_draft,
-    open_issues, record_rejection, replay, resolve_issue, save_draft,
+    open_issues, record_rejection, replay, resolve_issue, resolve_issue_with, save_draft,
 };
 use bb_domain::types::{ActorId, Policy, ProviderName, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -1911,4 +1911,42 @@ fn accountless_public_read_ports_drop_private_evidence_and_reserved_overlays() {
                 .any(|s| s == b"task_before")
         );
     }
+}
+
+#[test]
+fn replay_026_fr_007_a_cancellation_before_commit_saves_no_replacement_or_discard() {
+    let path = scratch("cancel-before-commit");
+    let mut store = open(&path).unwrap();
+    let mut ids = SeqIds(0);
+    let task_id = confirmed_task(&mut store, &mut ids);
+    offline_edit(&mut store, &mut ids, &task_id);
+    let r2 = revision(&mut store, &task_id);
+    edit(
+        &mut store,
+        &mut ids,
+        3,
+        &task_id,
+        json!({ "details": "Later" }),
+        shown(EntityType::Task, &task_id, &r2),
+    );
+    server_edit(&mut store, &task_id, |task| task["title"] = json!("Theirs"));
+    replay(&mut store, &context()).unwrap();
+    let before = states(&mut store);
+
+    let request = resolution(
+        2,
+        keep_mine(9, vec![shown(EntityType::Task, &task_id, "2")]),
+        vec![(3, DependentChoice::Discard { confirmed: true })],
+    );
+    let refused = resolve_issue_with(&mut store, &mut ids, &request, || {
+        Err(ExecuteError::Cancelled)
+    });
+    assert_eq!(
+        refused.unwrap_err(),
+        IssueError::Execute(ExecuteError::Cancelled)
+    );
+    // Nothing was replaced or discarded, and both issues are still open.
+    assert_eq!(states(&mut store), before);
+    assert_eq!(open_issues(&mut store).unwrap().len(), 2);
+    assert!(superseded_by(&mut store, 2).is_none());
 }
