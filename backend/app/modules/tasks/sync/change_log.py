@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from .unit_of_work import OwnerUnitOfWork
 
 SYNC_TABLES = (
+    "sync_device_epochs",
+    "sync_devices",
     "sync_change_records",
     "sync_change_transactions",
     "sync_legacy_keys",
@@ -55,6 +57,12 @@ _SCHEMA = (
     "PRIMARY KEY(owner_id,commit_seq,entity_type,record_key), "
     "FOREIGN KEY(owner_id,commit_seq) REFERENCES sync_change_transactions(owner_id,commit_seq) "
     "ON DELETE CASCADE)",
+    "CREATE TABLE IF NOT EXISTS sync_devices (device_id TEXT PRIMARY KEY, "
+    "owner_id TEXT NOT NULL, bound_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS sync_device_epochs (device_id TEXT NOT NULL, "
+    "device_epoch TEXT NOT NULL, owner_id TEXT NOT NULL, status TEXT NOT NULL, "
+    "server_generation TEXT NOT NULL, registered_at TEXT NOT NULL, "
+    "closed_at TEXT, close_reason TEXT, PRIMARY KEY(device_id,device_epoch))",
     "CREATE INDEX IF NOT EXISTS sync_receipt_expiry ON sync_command_receipts(owner_id,expires_at)",
     "CREATE INDEX IF NOT EXISTS sync_change_record_history ON sync_change_records(owner_id,entity_type,record_key)",
 )

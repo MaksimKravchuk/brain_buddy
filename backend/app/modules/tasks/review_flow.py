@@ -44,7 +44,6 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import ProjectDocument, TaskDocument
-from .jobs.execution import owner_write_lock
 from .repository import TaskRepository
 from .review_domain import (
     BulkReleasedItemDocument,
@@ -70,7 +69,7 @@ from .review_service import (
 )
 from .rust_review_facade import ReviewRefused, RustReviewFacade
 from .service import serialized_write
-from .sync.review_projection import dict_codec, model_codec
+from .sync.review_projection import dict_codec, model_codec, replaying
 
 logger = logging.getLogger("app.modules.tasks.review")
 
@@ -681,7 +680,9 @@ class ReviewFlowService:
         closed = 0
         if not candidates:
             return closed
-        with owner_write_lock(self.task_repo, owner_id):
+
+        def close() -> None:
+            nonlocal closed
             for session_id in candidates:
                 session = self.task_repo.get_review_session(owner_id, session_id)
                 if (
@@ -698,6 +699,16 @@ class ReviewFlowService:
                 self.task_repo.save_review_session(ended)
                 _log_run(ended, event="idle_close", outcome="applied", t0=None)
                 closed += 1
+
+        # One receipt and feed commit per owner (spec 026 PR-29); the candidate
+        # runs name the effect, so a retry of an unfinished close repeats it.
+        digest = hashlib.sha256("\0".join(sorted(candidates)).encode()).hexdigest()
+        self.review.internal_write(
+            owner_id,
+            "internal.review_idle_close",
+            f"idle-close:{owner_id}:{digest[:32]}",
+            close,
+        )
         return closed
 
     # ---------------------------------------------------------------- queues
@@ -1452,6 +1463,8 @@ def _log_run(
 ) -> None:
     """``review_run`` (plan Observability): mode, status and counts only."""
 
+    if replaying():
+        return
     logger.info(
         "review_run owner_id=%s session_id=%s event=%s mode=%s status=%s "
         "counts=%s qualifying=%s outcome=%s duration_ms=%d",
@@ -1470,6 +1483,8 @@ def _log_run(
 def _log_bulk(
     release: ReviewBulkReleaseDocument, *, event: str, outcome: str, t0: float
 ) -> None:
+    if replaying():
+        return
     logger.info(
         "review_bulk_release owner_id=%s bulk_id=%s event=%s kind=%s released=%d "
         "skipped=%d outcome=%s duration_ms=%d",
@@ -1485,6 +1500,8 @@ def _log_bulk(
 
 
 def _log_refusal(owner_id: str, record_id: str, reason: str) -> None:
+    if replaying():
+        return
     logger.info(
         "review_flow_refused owner_id=%s id=%s outcome=%s", owner_id, record_id, reason
     )

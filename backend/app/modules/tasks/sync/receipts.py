@@ -110,9 +110,42 @@ class CommandRequest:
         entity_id: str | None = None,
         route: str | None = None,
     ) -> CommandRequest:
+        return cls._legacy(
+            owner, idempotency_key_digest(key), command, body, entity_id, route
+        )
+
+    @classmethod
+    def internal(
+        cls,
+        owner: str,
+        effect_key: str,
+        command: str,
+        body: dict[str, Any],
+        *,
+        entity_id: str | None = None,
+        route: str | None = None,
+    ) -> CommandRequest:
+        """A server-side effect outside a job (scheduler, operator CLI).
+
+        Its key digest has a shape no client Idempotency-Key digest can have,
+        so no client request can pre-claim an effect identity.
+        """
+        # A client digest is always 64 hex characters; this one never is.
+        digest = "internal-v1:" + hashlib.sha256(effect_key.encode()).hexdigest()
+        return cls._legacy(owner, digest, command, body, entity_id, route)
+
+    @classmethod
+    def _legacy(  # noqa: PLR0913 - the one legacy envelope
+        cls,
+        owner: str,
+        digest: str,
+        command: str,
+        body: dict[str, Any],
+        entity_id: str | None,
+        route: str | None,
+    ) -> CommandRequest:
         if current_execution() is not None:
             raise SyncCommandError("TRUSTED_ORIGIN_REQUIRED")
-        digest = idempotency_key_digest(key)
         command_id = str(uuid5(_NAMESPACE, encode(["legacy-v1", owner, digest])))
         wire = encode(
             {
@@ -160,7 +193,7 @@ type Authority[ConnectionT] = Callable[[OwnerUnitOfWork[ConnectionT]], ScopeAuth
 
 class CommandUnits[ConnectionT](Protocol):
     def begin(
-        self, owner_id: str
+        self, owner_id: str, *, cleanup: bool = False
     ) -> AbstractContextManager[OwnerUnitOfWork[ConnectionT]]: ...
 
 
@@ -196,6 +229,12 @@ class CommandReceipts[ConnectionT](ABC):
             raise SyncCommandError("RESET_REQUIRED")
         return current
 
+    def admit(
+        self, unit: OwnerUnitOfWork[ConnectionT], authorize: Authority[ConnectionT]
+    ) -> ScopeAuthority:
+        """Current authority under the unit's lock, for ingress outside a command."""
+        return self._scope(unit, authorize)
+
     @abstractmethod
     def _scope_row(self, unit: OwnerUnitOfWork[ConnectionT]) -> StorageRow | None:
         raise NotImplementedError
@@ -214,8 +253,12 @@ class CommandReceipts[ConnectionT](ABC):
         authorize: Authority[ConnectionT],
         *,
         now: datetime,
+        cleanup: bool = False,
     ) -> Iterator[ReceiptCommand[ConnectionT]]:
         """Yield a replay or unseen command. The caller validates/decides a miss.
+
+        ``cleanup`` is the narrower job-owner check for destructive retention
+        only (spec 026 PR-29): the owner need only still exist.
 
         No current execution schema, size or epoch check is applied to replay.
         Device ingress must check active epoch *only* on a miss. A known command
@@ -224,7 +267,11 @@ class CommandReceipts[ConnectionT](ABC):
         if now.tzinfo is None:
             raise SyncCommandError("INVALID_REQUEST")
         now = now.astimezone(UTC)
-        with uow.begin(request.owner_id) as unit:
+        with (
+            uow.begin(request.owner_id, cleanup=True)
+            if cleanup
+            else uow.begin(request.owner_id)
+        ) as unit:
             execution = current_execution()
             if request.origin == "job":
                 if (
