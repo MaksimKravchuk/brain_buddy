@@ -339,6 +339,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync delta feed",
         "Pages carry whole commit-ordered transactions",
     ),
+    "sync_hints": (
+        EPIC_TASKS,
+        "Sync hints",
+        "Authenticated SSE wakes clients for committed changes",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",
