@@ -350,6 +350,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync hints",
         "Authenticated SSE wakes clients for committed changes",
     ),
+    "sync_routes": (
+        EPIC_TASKS,
+        "Sync routes",
+        "The production app serves every sync v1 route",
+    ),
     "sync_snapshots": (
         EPIC_TASKS,
         "Sync snapshots",
