@@ -520,7 +520,9 @@ def test_026_FR_015_pruned_purge_marker_still_makes_an_earlier_backup_unprovable
             world.ledger.prove_complete(backup)
         attach_json("reason", str(early.value))
     with allure.step("a backup taken after the purge is"):
-        assert world.ledger.prove_complete(T0 + timedelta(hours=4)) == []
+        decisions = world.ledger.prove_complete(T0 + timedelta(hours=4))
+        attach_json("decisions", decisions)
+        assert decisions == []
 
 
 @pytest.mark.parametrize("edge", ["first", "last", "only"])
