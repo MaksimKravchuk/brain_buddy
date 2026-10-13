@@ -36,9 +36,12 @@ public protocol ReviewSuggestionPort: AnyObject {
     /// One ordinary notes edit with a stable identity: the same `editorID` and `notes` after an
     /// unknown outcome return the original save and never append twice.
     func saveSuggestionNotes(_ taskID: TaskID, notes: String, editorID: String) async throws
-    /// The ordinary decision command for an accepted suggestion, checked against `expected`.
+    /// An accepted suggestion. Inside a review run (`sessionID`) it is the same session-bound decision the
+    /// manual card records, returning its ID for Undo; outside a run it is a plain wording update (nil).
+    /// Both are checked against `expected`.
     func applySuggestion(kind: SuggestionKind, taskID: TaskID, title: String, aiUse: AIUse,
-                         navigatorRequestID: String?, expected: ShownTask, editorID: String) async throws
+                         navigatorRequestID: String?, expected: ShownTask, sessionID: ReviewSessionID?,
+                         editorID: String) async throws -> DecisionID?
 }
 
 /// What survives a closed sheet or a lost process. Never proposals or model output; the answer
@@ -153,7 +156,9 @@ public final class ReviewSuggestionModel {
     @ObservationIgnored private var transmitted = false
     @ObservationIgnored private var failedLocal: [LocalAISource] = []
     @ObservationIgnored private var shown: ShownTask?
-    @ObservationIgnored private var remoteRequestID: String?
+    public private(set) var navigatorRequestID: String?
+    /// The review decision an in-run apply recorded, for Undo; nil outside a run.
+    public private(set) var appliedDecisionID: DecisionID?
     @ObservationIgnored private var pending: ReviewSuggestionRecord.PendingAnswer?
     @ObservationIgnored private var applyEditorID: String?
     @ObservationIgnored private var persisting: Task<Void, Never>?
@@ -183,7 +188,8 @@ public final class ReviewSuggestionModel {
 
     public var isRequestLive: Bool { phase == .requesting || phase == .savingAnswer || phase == .cancelling }
 
-    /// The AI-use code a manual decision records after the proposals were shown and not used.
+    /// The AI-use code a manual decision records after the proposals were shown and not used (FR-026);
+    /// the manual decision passes it with `navigatorRequestID`.
     public var aiUseForManualDecision: AIUse { proposalsWereShown ? .notUsed : .none }
 
     /// The task version the card showed; the apply step is checked against it. After an answer is
@@ -382,7 +388,7 @@ public final class ReviewSuggestionModel {
                 phase = .consentOff
                 return
             }
-            remoteRequestID = response.requestID
+            navigatorRequestID = response.requestID
             notesTruncated = response.notesTruncated
             await deliver(ModelAnswer(proposals: response.proposals ?? [], clarifyingQuestion: response.clarifyingQuestion),
                           input, current)
@@ -552,7 +558,7 @@ public final class ReviewSuggestionModel {
 
     /// "Apply suggestion": the ordinary decision command against the version the sheet showed.
     /// `text` may be an edited proposal. Nothing changes until this is called.
-    public func apply(_ text: String) async {
+    public func apply(_ text: String, sessionID: ReviewSessionID? = nil) async {
         guard phase == .proposals, kind != .projectNextAction else { return }
         let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
@@ -562,9 +568,9 @@ public final class ReviewSuggestionModel {
         phase = .applying
         applyFailure = nil
         do {
-            try await port.applySuggestion(kind: kind, taskID: taskID, title: title,
-                                           aiUse: proposals.contains(title) ? .asIs : .edited,
-                                           navigatorRequestID: remoteRequestID, expected: expected, editorID: editorID)
+            appliedDecisionID = try await port.applySuggestion(
+                kind: kind, taskID: taskID, title: title, aiUse: proposals.contains(title) ? .asIs : .edited,
+                navigatorRequestID: navigatorRequestID, expected: expected, sessionID: sessionID, editorID: editorID)
             phase = .applied
             proposals = []
             applyEditorID = nil
@@ -643,10 +649,11 @@ private struct PortHandle {
         try await base.saveSuggestionNotes(id, notes: notes, editorID: editorID)
     }
     func applySuggestion(kind: SuggestionKind, taskID: TaskID, title: String, aiUse: AIUse, navigatorRequestID: String?,
-                         expected: ShownTask, editorID: String) async throws {
+                         expected: ShownTask, sessionID: ReviewSessionID?, editorID: String) async throws -> DecisionID? {
         guard let base else { throw SuggestionPortError.rejected(code: "WORKSPACE_GONE") }
-        try await base.applySuggestion(kind: kind, taskID: taskID, title: title, aiUse: aiUse,
-                                       navigatorRequestID: navigatorRequestID, expected: expected, editorID: editorID)
+        return try await base.applySuggestion(kind: kind, taskID: taskID, title: title, aiUse: aiUse,
+                                              navigatorRequestID: navigatorRequestID, expected: expected,
+                                              sessionID: sessionID, editorID: editorID)
     }
 }
 

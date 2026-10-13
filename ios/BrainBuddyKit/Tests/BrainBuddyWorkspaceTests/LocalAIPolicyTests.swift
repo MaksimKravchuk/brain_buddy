@@ -174,12 +174,31 @@ import Testing
         await model.settled()
         #expect(model.phase == .proposals)
         #expect(workspace.task(task)?.title == "Renovate the bathroom", "a proposal is not a Task change")
-        await model.apply("Draft the outline")
+        let session = try workspace.startReview(mode: .full, entry: .list)
+        await model.apply("Draft the outline", sessionID: session)
         #expect(model.phase == .applied)
         #expect(workspace.task(task)?.title == "Draft the outline")
-        let decision = try #require(workspace.state.review.decisions.values.first)
-        #expect(decision.aiUse == .asIs && decision.type == .reformulate)
+        let id = try #require(model.appliedDecisionID)
+        let decision = try #require(workspace.state.review.decisions[id])
+        #expect(decision.aiUse == .asIs && decision.type == .reformulate && decision.sessionID == session)
+        try workspace.undoDecision(id)
+        #expect(workspace.task(task)?.title == "Renovate the bathroom", "Undo within the existing window")
         workspace.releaseReviewSuggestionModel(for: task, kind: .reformulate)
+    }
+
+    @Test("026-FR-020 outside a review run, apply is a plain wording update with no decision")
+    func workspaceApplyOutsideSession() async throws {
+        let workspace = try await activated()
+        let task = try workspace.capture(CaptureDraft(text: "Renovate the bathroom", list: .next))
+        let shown = workspace.shownTask(of: try #require(workspace.task(task)))
+        let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Draft the outline"])))
+        let model = workspace.reviewSuggestionModel(
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown)
+        model.request()
+        await model.settled()
+        await model.apply("Draft the outline")
+        #expect(model.phase == .applied && model.appliedDecisionID == nil)
+        #expect(workspace.task(task)?.title == "Draft the outline" && workspace.state.review.decisions.isEmpty)
     }
 
     @Test("026-FR-020 a task edited since it was shown is refused as stale and keeps its new wording")
