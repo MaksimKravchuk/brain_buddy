@@ -991,9 +991,15 @@ def test_026_FR_023_only_executable_families_are_advertised_and_others_stay_426(
                     "tag.update",
                     "tag.delete",
                     "task.create",
+                    "task.smart_add",
                     "task.update",
                     "task.tags",
                     "task.transition",
+                    "subtask.create",
+                    "subtask.update",
+                    "subtask.transition",
+                    "comment.create",
+                    "comment.update",
                 ]
             ),
         )
@@ -1080,3 +1086,373 @@ def test_026_FR_023_executor_registry_composes_families(live, owner):
         check_equal("review.settings", row["review.settings"], [1])
         receipt = run(live, owner, 1, "review.settings", owner, {}).json()
         check_equal("routed", receipt["result"], {"family": "extra"})
+
+
+# ---------------------------------------------------------------- PR-31c ----
+def test_026_FR_005_subtask_and_comment_commands_execute_end_to_end(live, owner):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    task, sub, note = uid("task", 1), uid("subtask", 2), uid("comment", 3)
+    assert (
+        run(live, owner, 1, "task.create", task, {"title": "Parent"}).status_code == 200
+    )
+    parent_revision = repo.get_for_owner(task, owner_id=owner).revision
+    number = 10
+
+    def step(kind, entity_id, payload, **more):
+        nonlocal number
+        number += 1
+        before = rows(live)
+        receipt = run(live, owner, number, kind, entity_id, payload, **more).json()
+        attach_json(kind, receipt)
+        assert receipt["outcome"] == "accepted", receipt
+        assert receipt["has_changes"] is True and receipt["commit_seq"] is not None
+        check_equal(kind + " rows", rows(live), (before[0] + 1, before[1] + 1))
+        return receipt
+
+    with allure.step("subtask.create appends a child under the existing parent"):
+        step("subtask.create", sub, {"task_id": task, "title": "Draft"})
+        stored = repo.get_subtask_for_owner(sub, owner_id=owner, task_id=task)
+        assert (stored.title, stored.order_key, stored.revision) == ("Draft", 0, 1)
+    with allure.step("subtask.update and subtask.transition check the child revision"):
+        step(
+            "subtask.update",
+            sub,
+            {"task_id": task, "title": "Final"},
+            rev=1,
+        )
+        pre = [{"entity_type": "subtask", "entity_id": sub, "edit_revision": "2"}]
+        number += 1
+        moved = submit(
+            live,
+            envelope(
+                owner,
+                cid(number),
+                type="subtask.transition",
+                entity_id=sub,
+                payload={"task_id": task, "action": "complete"},
+                preconditions=pre,
+            ),
+        ).json()
+        assert moved["outcome"] == "accepted", moved
+        stored = repo.get_subtask_for_owner(sub, owner_id=owner, task_id=task)
+        assert (stored.title, stored.state, stored.revision) == (
+            "Final",
+            "completed",
+            3,
+        )
+    with allure.step("comment.create derives the actor and comment.update keeps it"):
+        step("comment.create", note, {"task_id": task, "body": "First"})
+        comment = repo.get_comment_for_owner(note, owner_id=owner, task_id=task)
+        assert comment.actor_id == owner and comment.edited_at is None
+        step("comment.update", note, {"task_id": task, "body": "Edited"}, rev=1)
+        comment = repo.get_comment_for_owner(note, owner_id=owner, task_id=task)
+        assert (comment.body, comment.actor_id, comment.revision) == (
+            "Edited",
+            owner,
+            2,
+        )
+        assert comment.edited_at is not None
+    with allure.step("the parent task row is untouched and the web sees the child"):
+        assert repo.get_for_owner(task, owner_id=owner).revision == parent_revision
+        detail = live.get(f"/api/tasks/{task}/detail")
+        if detail.status_code == 200:
+            attach_json("detail", detail.json())
+
+
+def test_026_FR_012_child_replay_and_conflicting_envelope(live, owner):
+    task, sub = uid("task", 1), uid("subtask", 2)
+    run(live, owner, 1, "task.create", task, {"title": "Parent"})
+    first = run(
+        live, owner, 2, "subtask.create", sub, {"task_id": task, "title": "One"}
+    ).json()
+    counts = rows(live)
+    with allure.step("an exact replay returns the stored receipt and writes nothing"):
+        replay = run(
+            live, owner, 2, "subtask.create", sub, {"task_id": task, "title": "One"}
+        )
+        volatile = {"server_now", "correlation_id"}
+        check_equal(
+            "replay",
+            {k: v for k, v in replay.json().items() if k not in volatile},
+            {k: v for k, v in first.items() if k not in volatile},
+        )
+        check_equal("rows", rows(live), counts)
+    with allure.step("the same command ID with another payload conflicts"):
+        other = run(
+            live, owner, 2, "subtask.create", sub, {"task_id": task, "title": "Two"}
+        )
+        assert other.status_code == 409
+        assert error_code(other) == "IDEMPOTENCY_KEY_REUSED"
+        check_equal("rows", rows(live), counts)
+
+
+def test_026_FR_005_child_refusals_are_terminal_receipts_without_feed_entries(
+    live, owner
+):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    task, sub, note = uid("task", 1), uid("subtask", 2), uid("comment", 3)
+    run(live, owner, 1, "task.create", task, {"title": "Parent"})
+    run(live, owner, 2, "subtask.create", sub, {"task_id": task, "title": "One"})
+    run(live, owner, 3, "comment.create", note, {"task_id": task, "body": "Hi"})
+    before = rows(live)
+    cases = {
+        "stale subtask revision": (
+            run(
+                live,
+                owner,
+                4,
+                "subtask.update",
+                sub,
+                {"task_id": task, "title": "x"},
+                rev=9,
+            ),
+            "REVISION_CONFLICT",
+        ),
+        "stale comment revision": (
+            run(
+                live,
+                owner,
+                5,
+                "comment.update",
+                note,
+                {"task_id": task, "body": "x"},
+                rev=9,
+            ),
+            "REVISION_CONFLICT",
+        ),
+        "parent not found": (
+            run(
+                live,
+                owner,
+                6,
+                "subtask.create",
+                uid("subtask", 7),
+                {"task_id": uid("task", 99), "title": "x"},
+            ),
+            "not_found",
+        ),
+        "child not found": (
+            run(
+                live,
+                owner,
+                8,
+                "comment.update",
+                uid("comment", 98),
+                {"task_id": task, "body": "x"},
+                rev=1,
+            ),
+            "not_found",
+        ),
+        "transition to the current state": (
+            run(
+                live,
+                owner,
+                9,
+                "subtask.transition",
+                sub,
+                {"task_id": task, "action": "reopen"},
+                rev=1,
+            ),
+            None,
+        ),
+        "reused creation id": (
+            run(
+                live,
+                owner,
+                10,
+                "subtask.create",
+                sub,
+                {"task_id": task, "title": "dup"},
+            ),
+            None,
+        ),
+    }
+    with allure.step("each is a rejected receipt with no feed transaction"):
+        seen = {}
+        for name, (response, code) in cases.items():
+            body = response.json()
+            seen[name] = (body["outcome"], body["error"]["code"])
+            assert body["outcome"] == "rejected" and body["commit_seq"] is None, name
+            if code is not None:
+                error = body["error"]
+                assert code in (error["code"], error["details"].get("reason")), name
+        attach_json("outcomes", seen)
+        check_equal("rows", rows(live), (before[0] + len(cases), before[1]))
+    with allure.step("stored children are unchanged"):
+        assert (
+            repo.get_subtask_for_owner(sub, owner_id=owner, task_id=task).title == "One"
+        )
+        assert (
+            repo.get_comment_for_owner(note, owner_id=owner, task_id=task).body == "Hi"
+        )
+
+
+def test_026_FR_005_child_payloads_are_validated_before_execution(live, owner):
+    task, sub = uid("task", 1), uid("subtask", 2)
+    run(live, owner, 1, "task.create", task, {"title": "Parent"})
+    run(live, owner, 2, "subtask.create", sub, {"task_id": task, "title": "One"})
+    before = rows(live)
+    cases = {
+        "creation id shape": run(
+            live,
+            owner,
+            3,
+            "subtask.create",
+            "subtask_1",
+            {"task_id": task, "title": "x"},
+        ),
+        "foreign prefix": run(
+            live,
+            owner,
+            4,
+            "comment.create",
+            uid("subtask", 5),
+            {"task_id": task, "body": "x"},
+        ),
+        "payload revision": run(
+            live,
+            owner,
+            6,
+            "subtask.update",
+            sub,
+            {"task_id": task, "expected_revision": 1},
+            rev=1,
+        ),
+        "missing parent": run(
+            live, owner, 7, "subtask.create", uid("subtask", 8), {"title": "x"}
+        ),
+        "missing precondition": run(
+            live, owner, 9, "subtask.update", sub, {"task_id": task, "title": "x"}
+        ),
+        "actor in payload": run(
+            live,
+            owner,
+            10,
+            "comment.create",
+            uid("comment", 11),
+            {"task_id": task, "body": "x", "actor_id": "evil"},
+        ),
+    }
+    seen = {name: (r.status_code, error_code(r)) for name, r in cases.items()}
+    attach_json("responses", seen)
+    assert set(seen.values()) == {(422, "INVALID_REQUEST")}
+    check_equal("rows", rows(live), before)
+
+
+def test_026_FR_005_smart_add_resolves_creates_and_binds_like_the_web_path(live, owner):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    home_project, home_tag = uid("project", 1), uid("tag", 2)
+    run(live, owner, 1, "project.create", home_project, {"name": "Home"})
+    run(live, owner, 2, "tag.create", home_tag, {"name": "errand"})
+    task = uid("task", 3)
+    new_project, new_tag, namesake = uid("project", 4), uid("tag", 5), uid("tag", 6)
+    payload = {
+        "title": "Buy milk",
+        "project": {"name": "  home ", "proposed_id": new_project},
+        "tags": [
+            {"name": "@Errand", "proposed_id": namesake},
+            {"name": "fresh", "proposed_id": new_tag},
+            {"id": home_tag},
+        ],
+    }
+    before = rows(live)
+    with allure.step("one receipt and one feed transaction cover the whole add"):
+        receipt = run(live, owner, 3, "task.smart_add", task, payload).json()
+        attach_json("receipt", receipt)
+        assert receipt["outcome"] == "accepted", receipt
+        check_equal("rows", rows(live), (before[0] + 1, before[1] + 1))
+    with allure.step("by-name references bind proposed ids to the resolved ids"):
+        check_equal(
+            "bindings",
+            sorted(
+                (b["entity_type"], b["alias_id"], b["entity_id"])
+                for b in receipt["id_bindings"]
+            ),
+            sorted(
+                [
+                    ("project", new_project, home_project),
+                    ("tag", namesake, home_tag),
+                    ("tag", new_tag, new_tag),
+                ]
+            ),
+        )
+    with allure.step("stored state matches: namesakes reused, new tag created once"):
+        stored = repo.get_for_owner(task, owner_id=owner)
+        assert stored.project_id == home_project
+        assert stored.tag_ids == [home_tag, new_tag]
+        assert repo.get_tag_for_owner(new_tag, owner_id=owner).name == "fresh"
+        assert receipt["result"]["created"] == {
+            "project_id": None,
+            "tag_ids": [new_tag],
+        }
+    with allure.step("the web path resolves the same names to the same records"):
+        web = live.post(
+            "/api/tasks/smart-add",
+            headers={"Idempotency-Key": "web-parity"},
+            json={
+                "title": "Buy milk",
+                "project": {"name": "  home "},
+                "tags": [{"name": "@Errand"}, {"name": "fresh"}, {"id": home_tag}],
+            },
+        )
+        assert web.status_code == 201, web.text
+        body = web.json()
+        check_equal("web project", body["project"]["id"], stored.project_id)
+        check_equal("web tags", [t["id"] for t in body["tags"]], stored.tag_ids)
+        check_equal("web created", body["created"], {"project_id": None, "tag_ids": []})
+
+
+def test_026_FR_005_smart_add_refusals_and_replay(live, owner):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    project, task = uid("project", 1), uid("task", 2)
+    run(live, owner, 1, "project.create", project, {"name": "Work"})
+    run(live, owner, 2, "project.archive", project, {}, rev=1)
+    before = rows(live)
+    with allure.step("an inactive namesake is refused without a feed transaction"):
+        refused = run(
+            live,
+            owner,
+            3,
+            "task.smart_add",
+            task,
+            {
+                "title": "x",
+                "project": {"name": "work", "proposed_id": uid("project", 9)},
+            },
+        ).json()
+        attach_json("refused", refused)
+        assert refused["outcome"] == "rejected" and refused["commit_seq"] is None
+        check_equal("rows", rows(live), (before[0] + 1, before[1]))
+    with allure.step("a taken task id is refused"):
+        run(live, owner, 4, "task.smart_add", task, {"title": "ok"})
+        taken = run(live, owner, 5, "task.smart_add", task, {"title": "again"}).json()
+        assert taken["error"]["details"]["reason"] == "id_already_exists"
+        assert repo.get_for_owner(task, owner_id=owner).title == "ok"
+    with allure.step("an exact replay executes nothing"):
+        counts = rows(live)
+        again = run(live, owner, 4, "task.smart_add", task, {"title": "ok"})
+        assert again.status_code == 200 and again.json()["outcome"] == "accepted"
+        check_equal("rows", rows(live), counts)
+
+
+def test_026_FR_005_child_ids_are_unique_across_parents(live, owner):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    first, second = uid("task", 1), uid("task", 2)
+    sub, note = uid("subtask", 3), uid("comment", 4)
+    run(live, owner, 1, "task.create", first, {"title": "A"})
+    run(live, owner, 2, "task.create", second, {"title": "B"})
+    run(live, owner, 3, "subtask.create", sub, {"task_id": first, "title": "S"})
+    run(live, owner, 4, "comment.create", note, {"task_id": first, "body": "C"})
+    before = rows(live)
+    with allure.step("the same id under another parent is refused, nothing written"):
+        for number, kind, payload, entity in (
+            (5, "subtask.create", {"task_id": second, "title": "dup"}, sub),
+            (6, "comment.create", {"task_id": second, "body": "dup"}, note),
+        ):
+            body = run(live, owner, number, kind, entity, payload).json()
+            attach_json(kind, body)
+            assert body["outcome"] == "rejected" and body["commit_seq"] is None
+            assert body["error"]["details"]["reason"] == "id_already_exists"
+        check_equal("rows", rows(live), (before[0] + 2, before[1]))
+        assert repo.list_subtasks(owner_id=owner, task_id=second) == []
+        assert repo.list_comments(owner_id=owner, task_id=second) == []

@@ -920,6 +920,28 @@ class RustTaskFacade:
 
     # --------------------------------------------------------------- internals
 
+    def decide_command(
+        self,
+        command_type: str,
+        entity_id: str,
+        body: dict[str, Any],
+        *,
+        owner_id: str,
+        now: datetime,
+        read_set: dict[str, Any],
+        expected: tuple[str, str, int] | None = None,
+    ) -> Decision:
+        """One catalog command decided against a caller-built read set."""
+        return self._call(
+            command_type,
+            entity_id,
+            body,
+            owner_id=owner_id,
+            now=now,
+            read_set=read_set,
+            expected=expected,
+        )
+
     def _call(
         self,
         command_type: str,

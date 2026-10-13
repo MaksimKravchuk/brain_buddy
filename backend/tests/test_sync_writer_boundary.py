@@ -272,6 +272,19 @@ INVENTORY: dict[str, tuple[str, set[str]]] = {
             "save_tag",
         },
     ),
+    "modules/tasks/sync/device_executor_children.py": (
+        "the boundary: device-origin subtask, comment and Smart Add writes run "
+        "inside the route's receipt unit",
+        {
+            "create",
+            "create_comment",
+            "create_project",
+            "create_subtask",
+            "create_tag",
+            "save_comment",
+            "save_subtask",
+        },
+    ),
     "modules/tasks/review_service.py": (
         "routed: Review commands via serialized_write, maintenance via internal_write",
         {
