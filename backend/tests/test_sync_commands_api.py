@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -696,3 +698,385 @@ def test_026_SC_002_wire_scrubber_is_the_only_receipt_exit():
             "outcome": "accepted",
             "result": {"kept": 1},
         }
+
+
+# ---------------------------------------------------------------- PR-31b ----
+def uid(kind: str, number: int) -> str:
+    return f"{kind}_00000000-0000-4000-8000-{number:012d}"
+
+
+def rows(client: TestClient) -> tuple[int, int]:
+    path = client.app.state.container.task_repo.db_path  # type: ignore[attr-defined]
+    with sqlite3.connect(path) as conn:
+        return (
+            conn.execute("SELECT count(*) FROM sync_command_receipts").fetchone()[0],
+            conn.execute("SELECT count(*) FROM sync_change_transactions").fetchone()[0],
+        )
+
+
+def run(client, owner, number, kind, entity_id, payload=None, *, rev=None, **more):
+    """Submit one catalog command; ``rev`` is the target's edit revision."""
+    pre = (
+        []
+        if rev is None
+        else [
+            {
+                "entity_type": kind.split(".")[0],
+                "entity_id": entity_id,
+                "edit_revision": str(rev),
+            }
+        ]
+    )
+    return submit(
+        client,
+        envelope(
+            owner,
+            cid(number),
+            type=kind,
+            entity_id=entity_id,
+            payload=payload or {},
+            preconditions=pre,
+            **more,
+        ),
+    )
+
+
+@pytest.fixture()
+def live(client, owner):
+    ready(client, owner)
+    return client
+
+
+def test_026_FR_005_task_commands_execute_end_to_end_with_one_receipt_and_feed_entry(
+    live, owner
+):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    project, tag, task = uid("project", 1), uid("tag", 2), uid("task", 3)
+    plan = [
+        ("project.create", project, {"name": "Home"}, None),
+        ("tag.create", tag, {"name": "errand"}, None),
+        ("task.create", task, {"title": "Buy milk", "project_id": project}, None),
+    ]
+    number = 10
+    for kind, entity_id, payload, rev in plan:
+        before = rows(live)
+        with allure.step(f"{kind} mutates state with one receipt and one feed entry"):
+            receipt = run(live, owner, number, kind, entity_id, payload, rev=rev).json()
+            attach_json("receipt", receipt)
+            assert receipt["outcome"] == "accepted" and receipt["has_changes"] is True
+            assert receipt["commit_seq"] is not None and receipt["error"] is None
+            check_equal("rows", rows(live), (before[0] + 1, before[1] + 1))
+        number += 1
+    with allure.step("the created records are the stored state"):
+        attach_json("ids", [project, tag, task])
+        assert repo.get_project_for_owner(project, owner_id=owner).name == "Home"
+        assert repo.get_tag_for_owner(tag, owner_id=owner).name == "errand"
+        assert repo.get_for_owner(task, owner_id=owner).title == "Buy milk"
+
+    def step(kind, entity_id, payload, entity, **more):
+        nonlocal number
+        number += 1
+        current = {
+            "task": repo.get_for_owner,
+            "project": repo.get_project_for_owner,
+            "tag": repo.get_tag_for_owner,
+        }[entity](entity_id, owner_id=owner)
+        before = rows(live)
+        receipt = run(
+            live, owner, number, kind, entity_id, payload, rev=current.revision, **more
+        ).json()
+        attach_json(kind, receipt)
+        assert receipt["outcome"] == "accepted", receipt
+        assert rows(live) == (before[0] + 1, before[1] + 1), kind
+        return receipt
+
+    with allure.step("task.update changes fields and applies explicit tag changes"):
+        step(
+            "task.update",
+            task,
+            {"title": "Buy oat milk", "tag_changes": {"add_tag_ids": [tag]}},
+            "task",
+        )
+        stored = repo.get_for_owner(task, owner_id=owner)
+        assert (stored.title, stored.tag_ids, stored.revision) == (
+            "Buy oat milk",
+            [tag],
+            2,
+        )
+    with allure.step("task.tags removes a tag without touching the rest"):
+        step("task.tags", task, {"remove_tag_ids": [tag]}, "task")
+        assert repo.get_for_owner(task, owner_id=owner).tag_ids == []
+    with allure.step("task.transition completes the task"):
+        step("task.transition", task, {"action": "complete"}, "task")
+        assert repo.get_for_owner(task, owner_id=owner).state == "completed"
+    with allure.step("project and tag update, archive, unarchive and delete"):
+        step("project.update", project, {"name": "House"}, "project")
+        step("project.archive", project, {}, "project")
+        assert repo.get_project_for_owner(project, owner_id=owner).state == "archived"
+        step("project.unarchive", project, {}, "project")
+        step("tag.update", tag, {"name": "errands"}, "tag")
+        step("tag.delete", tag, {}, "tag")
+        assert repo.get_tag_for_owner(tag, owner_id=owner).state == "deleted"
+
+
+def test_026_FR_012_device_replay_and_lookup_by_command_id_are_exact(live, owner):
+    first = run(live, owner, 1, "task.create", uid("task", 1), {"title": "Once"}).json()
+    counts = rows(live)
+    replay = run(live, owner, 1, "task.create", uid("task", 1), {"title": "Once"})
+    looked = live.get(f"/api/sync/v1/commands/{cid(1)}?scope_id={owner}").json()
+    volatile = {"server_now", "correlation_id"}
+    with allure.step("replay and lookup return the stored receipt, executing nothing"):
+        attach_json("replay", replay.json())
+        assert replay.status_code == 200
+
+        def strip(body):  # type: ignore[no-untyped-def]
+            return {k: v for k, v in body.items() if k not in volatile}
+
+        check_equal("replay", strip(replay.json()), strip(first))
+        check_equal("lookup", strip(looked["receipt"]), strip(first))
+        check_equal("rows unchanged", rows(live), counts)
+    with allure.step(
+        "the same ID with another envelope conflicts and executes nothing"
+    ):
+        other = run(live, owner, 1, "task.create", uid("task", 1), {"title": "Twice"})
+        assert (
+            other.status_code == 409 and error_code(other) == "IDEMPOTENCY_KEY_REUSED"
+        )
+        check_equal("rows unchanged", rows(live), counts)
+
+
+def test_026_FR_005_domain_refusals_are_terminal_receipts_without_feed_entries(
+    live, owner
+):
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    task = uid("task", 1)
+    assert run(live, owner, 1, "task.create", task, {"title": "A"}).status_code == 200
+    before = rows(live)
+    with allure.step("a stale revision is a rejected receipt, state unchanged"):
+        stale = run(live, owner, 2, "task.update", task, {"title": "B"}, rev=9).json()
+        attach_json("stale", stale)
+        assert stale["outcome"] == "rejected" and stale["commit_seq"] is None
+        assert stale["error"]["code"] == "REVISION_CONFLICT"
+        check_equal("rows", rows(live), (before[0] + 1, before[1]))
+        assert repo.get_for_owner(task, owner_id=owner).title == "A"
+    with allure.step("a reused creation ID is refused, not overwritten"):
+        clash = run(live, owner, 3, "task.create", task, {"title": "C"}).json()
+        assert clash["outcome"] == "rejected"
+        assert clash["error"]["details"]["reason"] == "id_already_exists"
+        assert repo.get_for_owner(task, owner_id=owner).title == "A"
+    with allure.step("an unknown target is a rejected not_found receipt"):
+        missing = run(
+            live, owner, 4, "task.update", uid("task", 99), {"title": "x"}, rev=1
+        )
+        assert missing.json()["outcome"] == "rejected"
+        assert missing.json()["error"]["details"]["reason"] == "not_found"
+
+
+def test_026_FR_005_creation_ids_and_payloads_are_validated_before_execution(
+    live, owner
+):
+    task = uid("task", 1)
+    assert run(live, owner, 1, "task.create", task, {"title": "A"}).status_code == 200
+    before = rows(live)
+    cases = {
+        "creation id shape": run(
+            live, owner, 2, "task.create", "task_1", {"title": "x"}
+        ),
+        "wrong prefix": run(
+            live, owner, 3, "task.create", uid("tag", 3), {"title": "x"}
+        ),
+        "unknown field": run(
+            live, owner, 4, "task.create", uid("task", 4), {"nope": 1}
+        ),
+        "whole tag_ids edit": run(
+            live, owner, 5, "task.update", task, {"tag_ids": []}, rev=1
+        ),
+        "payload revision": run(
+            live, owner, 6, "task.update", task, {"expected_revision": 1}, rev=1
+        ),
+        "missing precondition": run(
+            live, owner, 7, "task.update", task, {"title": "x"}
+        ),
+    }
+    with allure.step("each is 422 INVALID_REQUEST and writes nothing"):
+        seen = {name: (r.status_code, error_code(r)) for name, r in cases.items()}
+        attach_json("responses", seen)
+        assert set(seen.values()) == {(422, "INVALID_REQUEST")}
+        check_equal("rows", rows(live), before)
+
+
+def test_026_FR_012_dependencies_pending_rejected_and_after_command(live, owner):
+    first, second = uid("task", 1), uid("task", 2)
+    with allure.step("an unknown predecessor is retryable DEPENDENCY_PENDING"):
+        blocked = run(
+            live, owner, 2, "task.create", second, {"title": "B"}, depends_on=[cid(1)]
+        )
+        assert (
+            blocked.status_code == 409 and error_code(blocked) == "DEPENDENCY_PENDING"
+        )
+        assert blocked.json()["error"]["details"]["dependency_ids"] == [cid(1)]
+    with allure.step("after_command substitutes the predecessor's receipt revision"):
+        assert (
+            run(live, owner, 1, "task.create", first, {"title": "A"}).status_code == 200
+        )
+        ref = {
+            "after_command": {
+                "command_id": cid(1),
+                "entity_type": "task",
+                "entity_id": first,
+            }
+        }
+        chained = submit(
+            live,
+            envelope(
+                owner,
+                cid(3),
+                type="task.update",
+                entity_id=first,
+                payload={"title": "A2"},
+                preconditions=[ref],
+                depends_on=[cid(1)],
+            ),
+        ).json()
+        attach_json("chained", chained)
+        assert chained["outcome"] == "accepted"
+        undeclared = submit(
+            live,
+            envelope(
+                owner,
+                cid(4),
+                type="task.update",
+                entity_id=first,
+                payload={"title": "A3"},
+                preconditions=[ref],
+                depends_on=[],
+            ),
+        )
+        assert undeclared.status_code == 422
+    with allure.step("a rejected predecessor rejects its dependant terminally"):
+        stale = run(live, owner, 5, "task.update", first, {"title": "x"}, rev=9).json()
+        assert stale["outcome"] == "rejected"
+        child = run(
+            live,
+            owner,
+            6,
+            "task.update",
+            first,
+            {"title": "y"},
+            rev=2,
+            depends_on=[cid(5)],
+        ).json()
+        assert child["outcome"] == "rejected"
+        assert child["error"]["code"] == "DEPENDENCY_REJECTED"
+
+
+def test_026_FR_023_only_executable_families_are_advertised_and_others_stay_426(
+    live, owner
+):
+    caps = live.get(f"/api/sync/v1/capabilities?scope_id={owner}").json()
+    listed = {r["type"]: r["supported_versions"] for r in caps["command_versions"]}
+    executable = sorted(t for t, v in listed.items() if v == [1])
+    with allure.step("capabilities advertise exactly the executed commands"):
+        attach_json("executable", executable)
+        check_equal(
+            "executable",
+            executable,
+            sorted(
+                [
+                    "project.create",
+                    "project.update",
+                    "project.archive",
+                    "project.unarchive",
+                    "tag.create",
+                    "tag.update",
+                    "tag.delete",
+                    "task.create",
+                    "task.update",
+                    "task.tags",
+                    "task.transition",
+                ]
+            ),
+        )
+    with allure.step("a command of another family is 426 and keeps recovery access"):
+        other = submit(live, envelope(owner, cid(1), type="review.settings"))
+        assert other.status_code == 426 and error_code(other) == "UPGRADE_REQUIRED"
+
+
+def test_026_FR_005_legacy_web_writes_are_unchanged_beside_device_commands(live, owner):
+    task = uid("task", 1)
+    assert (
+        run(live, owner, 1, "task.create", task, {"title": "Device"}).status_code == 200
+    )
+    created = live.post(
+        "/api/tasks", headers={"Idempotency-Key": "web-1"}, json={"title": "Web"}
+    )
+    with allure.step("a web write still answers its legacy status and joins the feed"):
+        attach_json("legacy", {"status": created.status_code})
+        assert created.status_code == 201
+        retry = live.post(
+            "/api/tasks", headers={"Idempotency-Key": "web-1"}, json={"title": "Web"}
+        )
+        assert retry.json()["id"] == created.json()["id"]
+        check_equal("rows", rows(live), (2, 2))
+    with allure.step("a device edit sees the web-visible revision"):
+        stored = live.get(f"/api/tasks/{task}")
+        assert stored.status_code == 200 and stored.json()["title"] == "Device"
+
+
+def test_026_FR_005_device_due_date_move_emits_the_review_event_like_a_web_update(
+    live, owner, caplog
+):
+    task = uid("task", 1)
+    live.app.state.container.task_service  # noqa: B018 - the container is wired
+    assert (
+        run(
+            live, owner, 1, "task.create", task, {"title": "A", "state": "next"}
+        ).status_code
+        == 200
+    )
+    with (
+        allure.step("a device due-date move on a Next task logs review_due_date_moved"),
+        caplog.at_level(logging.INFO, logger="app.modules.tasks.review"),
+    ):
+        moved = run(
+            live, owner, 2, "task.update", task, {"due_date": "2026-10-18"}, rev=1
+        )
+        attach_json("receipt", moved.json())
+        assert moved.json()["outcome"] == "accepted"
+        events = [
+            r for r in caplog.records if "review_due_date_moved" in r.getMessage()
+        ]
+        check_equal("events", len(events), 1)
+        assert task in events[0].getMessage() and owner in events[0].getMessage()
+    with allure.step("a title-only device update logs nothing"):
+        caplog.clear()
+        run(live, owner, 3, "task.update", task, {"title": "B"}, rev=2)
+        assert not [
+            r for r in caplog.records if "review_due_date_moved" in r.getMessage()
+        ]
+
+
+def test_026_FR_023_executor_registry_composes_families(live, owner):
+
+    class Extra:
+        def supports(self, command_type: str) -> bool:
+            return command_type == "review.settings"
+
+        def execute(self, command, envelope):  # type: ignore[no-untyped-def]
+            return command.accept([], result={"family": "extra"})
+
+    live.app.state.sync_device_executor = None  # force a rebuild
+    caps = live.get(f"/api/sync/v1/capabilities?scope_id={owner}").json()
+    base = live.app.state.sync_device_executor
+    with allure.step(
+        "a registered family adds its commands to capabilities and routing"
+    ):
+        base.register(Extra())
+        listed = {r["type"]: r["supported_versions"] for r in caps["command_versions"]}
+        attach_json("before", listed["review.settings"])
+        assert listed["review.settings"] == []
+        after = live.get(f"/api/sync/v1/capabilities?scope_id={owner}").json()
+        row = {r["type"]: r["supported_versions"] for r in after["command_versions"]}
+        check_equal("review.settings", row["review.settings"], [1])
+        receipt = run(live, owner, 1, "review.settings", owner, {}).json()
+        check_equal("routed", receipt["result"], {"family": "extra"})

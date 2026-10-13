@@ -260,6 +260,18 @@ INVENTORY: dict[str, tuple[str, set[str]]] = {
             "save_tag",
         },
     ),
+    "modules/tasks/sync/device_executor.py": (
+        "the boundary: device-origin writes run inside the route's receipt unit",
+        {
+            "create",
+            "create_project",
+            "create_tag",
+            "save",
+            "save_park_ack",
+            "save_project",
+            "save_tag",
+        },
+    ),
     "modules/tasks/review_service.py": (
         "routed: Review commands via serialized_write, maintenance via internal_write",
         {

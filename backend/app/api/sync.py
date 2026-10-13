@@ -30,6 +30,7 @@ from app.exceptions import ValidationFailure
 from app.modules.tasks.rust_adapter import RustBridgeError, RustCore
 from app.modules.tasks.sync import wire
 from app.modules.tasks.sync.authority import IdentityScopeAuthority, require_scope
+from app.modules.tasks.sync.device_executor import build_executor
 from app.modules.tasks.sync.devices import DeviceEpochs
 from app.modules.tasks.sync.receipts import (
     STABLE_REPLAY_BYTES,
@@ -133,9 +134,17 @@ def get_sync_gateway(
         return gateway
 
 
-def get_device_executor(request: Request) -> wire.DeviceCommandExecutor:
-    found = getattr(request.app.state, "sync_device_executor", None)
-    return found if found is not None else wire.NoDeviceExecutor()
+def get_device_executor(
+    request: Request,
+    gateway: SyncGateway = Depends(get_sync_gateway),
+    container: Container = Depends(get_container),
+) -> wire.DeviceCommandExecutor:
+    """The injected executor, else the registry of family executors (built once)."""
+    state = request.app.state
+    with _BUILD:
+        if getattr(state, "sync_device_executor", None) is None:
+            state.sync_device_executor = build_executor(container, gateway.core)
+        return state.sync_device_executor  # type: ignore[no-any-return]
 
 
 def get_version_policy(request: Request) -> wire.VersionPolicy:
