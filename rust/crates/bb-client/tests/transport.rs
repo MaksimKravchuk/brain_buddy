@@ -317,6 +317,7 @@ struct Model {
     commands: HashMap<String, u64>,
     faults: VecDeque<Fault>,
     log: Vec<(String, Option<Vec<u8>>)>,
+    paths: Vec<String>,
     snapshot: Option<Vec<Value>>,
 }
 
@@ -329,6 +330,7 @@ impl Model {
             commands: HashMap::new(),
             faults: VecDeque::new(),
             log: Vec::new(),
+            paths: Vec::new(),
             snapshot: None,
         }
     }
@@ -538,6 +540,8 @@ fn route_of(request: &HttpRequest) -> (String, Vec<(String, String)>) {
     };
     let generic = if name.starts_with("commands/") {
         "commands/*".to_string()
+    } else if name.starts_with("transactions/") {
+        "transactions/*".to_string()
     } else if name.starts_with("snapshots/") {
         "snapshots/*".to_string()
     } else {
@@ -573,6 +577,7 @@ impl Transport for Controlled {
         let effect = {
             let mut model = self.model.lock().unwrap();
             model.log.push((route.clone(), request.body.clone()));
+            model.paths.push(request.path.clone());
             let position = model.faults.iter().position(|fault| fault.route == route);
             position
                 .and_then(|at| model.faults.remove(at))
@@ -2063,5 +2068,279 @@ mod threading {
             confirmed_titles(&mut store),
             vec!["Applied in the background"]
         );
+    }
+}
+
+// ======================================================= paged transfers and snapshots
+
+mod paging {
+    use super::*;
+
+    fn byte_page(transfer: &str, index: u64, next: Option<&str>) -> Value {
+        let payload = format!("p{index}");
+        json!({
+            "transfer_id": transfer,
+            "page_index": index,
+            "payload_base64": base64_encode(payload.as_bytes()),
+            "page_sha256": bb_client::sha256_hex(payload.as_bytes()),
+            "has_more": next.is_some(),
+            "next_page_token": next,
+            "correlation_id": "corr-1", "scope_id": SCOPE,
+            "server_generation": GENERATION, "server_now": NOW,
+        })
+    }
+
+    /// A feed page announcing one oversized transaction of `pages` byte pages.
+    fn announce(world: &World, pages: u64) -> Value {
+        world.common_json(json!({
+            "from_cursor": "cursor-0", "transactions": [], "has_more": true,
+            "next_cursor": "cursor-0", "high_watermark": "1",
+            "transaction_manifest": {
+                "transfer_id": "transfer-1", "transaction_id": "tx-1", "commit_seq": "1",
+                "source_command_id": cmd(901).as_str(), "page_count": pages,
+                "record_count": 1, "total_bytes": pages * 2,
+                "sha256": bb_client::sha256_hex(b"whole"), "expires_at": EXPIRES,
+                "first_page_token": "t0", "after_cursor": "cursor-1",
+            },
+        }))
+    }
+
+    fn start(name: &str, pages: u64) -> (World, Store, Syncer) {
+        let world = World::new();
+        let mut store = linked(&scratch(name));
+        let syncer = world.syncer(&mut store, Schedule::default());
+        world.fault("GET changes", Effect::Serve(announce(&world, pages)));
+        (world, store, syncer)
+    }
+
+    /// An expired transfer (the server says reset) recovers through a snapshot,
+    /// like any other reset.
+    #[test]
+    fn transport_026_fr_010_a_reset_answer_to_a_transfer_page_recovers_through_a_snapshot() {
+        let (world, mut store, mut syncer) = start("transfer-reset", 3);
+        world.model().commit_external("task_ext_1", "Server one");
+        world.fault(
+            "GET transactions/*",
+            Effect::Error(409, "RESET_REQUIRED", false),
+        );
+        let report = syncer.pull(&mut store);
+        assert_eq!(report.halt, None, "{report:?}");
+        assert_eq!(report.snapshots, 1, "{report:?}");
+        assert_eq!(cursor_of(&mut store).as_deref(), Some("cursor-1"));
+    }
+
+    /// Auth, throttling and connectivity keep their meaning inside a transfer.
+    #[test]
+    fn transport_026_fr_011_transfer_page_failures_keep_their_instructions() {
+        for (effect, expected) in [
+            (Effect::Status(401, None), Halt::AuthRequired),
+            (
+                Effect::Status(429, Some(7)),
+                Halt::Retry {
+                    after: Some(Duration::from_secs(7)),
+                },
+            ),
+            (Effect::Status(503, None), Halt::Retry { after: None }),
+            (Effect::Timeout, Halt::Offline),
+            (Effect::Lose, Halt::Offline),
+            (
+                Effect::Error(426, "UPGRADE_REQUIRED", false),
+                Halt::UpdateRequired,
+            ),
+        ] {
+            let (world, mut store, mut syncer) = start("transfer-failures", 3);
+            world.fault("GET transactions/*", effect);
+            let report = syncer.pull(&mut store);
+            assert_eq!(report.halt, Some(expected));
+        }
+    }
+
+    /// A server that repeats a page token (or announces more pages than the
+    /// manifest) cannot keep the client fetching.
+    #[test]
+    fn transport_026_fr_010_a_repeated_or_excess_page_token_ends_the_transfer() {
+        let (world, mut store, mut syncer) = start("transfer-loop", 3);
+        world.fault(
+            "GET transactions/*",
+            Effect::Serve(byte_page("transfer-1", 0, Some("loop"))),
+        );
+        world.fault(
+            "GET transactions/*",
+            Effect::Serve(byte_page("transfer-1", 1, Some("loop"))),
+        );
+        world.fault(
+            "GET transactions/*",
+            Effect::Serve(byte_page("transfer-1", 2, Some("loop"))),
+        );
+        world.fault(
+            "GET transactions/*",
+            Effect::Serve(byte_page("transfer-1", 2, Some("loop"))),
+        );
+        let report = syncer.pull(&mut store);
+        assert!(matches!(report.halt, Some(Halt::Failed(_))), "{report:?}");
+        assert!(
+            world.count("GET transactions/*") <= 3,
+            "stopped at the repeat"
+        );
+    }
+
+    /// The pull budget holds inside a transfer: it pauses with `more`, and the next
+    /// pull continues from the page it stopped at, not from the first.
+    #[test]
+    fn transport_026_sc_004_a_transfer_pauses_on_the_budget_and_resumes_at_its_token() {
+        let (world, mut store, mut syncer) = start("transfer-budget", 12);
+        *world.latency.lock().unwrap() = Duration::from_secs(8);
+        for index in 0..12u64 {
+            let next = (index + 1 < 12).then(|| format!("t{}", index + 1));
+            world.fault(
+                "GET transactions/*",
+                Effect::Serve(byte_page("transfer-1", index, next.as_deref())),
+            );
+        }
+        let started = world.clock.at();
+        let first = syncer.pull(&mut store);
+        let spent = world.clock.at() - started;
+        assert!(first.more, "{first:?}");
+        assert_eq!(first.halt, None);
+        let schedule = Schedule::default();
+        assert!(
+            spent <= schedule.pull_budget + schedule.request_timeout,
+            "{spent:?}"
+        );
+        let fetched = world.count("GET transactions/*");
+        assert!((1..12).contains(&fetched), "{fetched}");
+
+        world.fault("GET changes", Effect::Serve(announce(&world, 12)));
+        let _ = syncer.pull(&mut store);
+        let paths = world.model().paths.clone();
+        let tokens: Vec<&String> = paths
+            .iter()
+            .filter(|path| path.contains("/transactions/"))
+            .collect();
+        let first_again = tokens
+            .iter()
+            .filter(|path| path.ends_with("page_token=t0"))
+            .count();
+        assert_eq!(
+            first_again, 1,
+            "the second pull resumed, it did not restart: {tokens:?}"
+        );
+    }
+
+    /// The snapshot download obeys the same budget and resumes without creating a
+    /// second snapshot.
+    #[test]
+    fn transport_026_sc_004_a_snapshot_pauses_on_the_budget_and_resumes() {
+        let world = World::new();
+        let mut store = linked(&scratch("snapshot-budget"));
+        {
+            let mut model = world.model();
+            for n in 1..=40 {
+                model.commit_external(&format!("task_ext_{n}"), &format!("Server {n}"));
+            }
+        }
+        let mut syncer = world.syncer(&mut store, Schedule::default());
+        world.fault("GET changes", Effect::Error(409, "RESET_REQUIRED", false));
+        *world.latency.lock().unwrap() = Duration::from_secs(8);
+        let first = syncer.pull(&mut store);
+        assert!(first.more, "{first:?}");
+        assert_eq!(first.snapshots, 0);
+        let mut rounds = 0;
+        let mut snapshots = 0;
+        while snapshots == 0 && rounds < 40 {
+            let report = syncer.pull(&mut store);
+            assert_eq!(report.halt, None, "{report:?}");
+            snapshots += report.snapshots;
+            rounds += 1;
+        }
+        assert_eq!(snapshots, 1, "activated after resuming");
+        assert_eq!(
+            world.count("POST snapshots"),
+            1,
+            "one snapshot, resumed not recreated"
+        );
+        assert_eq!(confirmed_titles(&mut store).len(), 40);
+    }
+}
+
+mod closing {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+
+    fn records() -> Changes {
+        Changes {
+            records: true,
+            ..Changes::default()
+        }
+    }
+
+    /// Once `close` returns, no callback is running or can start: close waits for
+    /// one already under way.
+    #[test]
+    fn transport_026_fr_011_close_waits_for_a_delivery_in_progress() {
+        let hub = InvalidationHub::new(2);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let finished = Arc::new(AtomicBool::new(false));
+        let done = Arc::clone(&finished);
+        let subscription = hub
+            .subscribe(
+                [ChangeKind::Records],
+                false,
+                Some(Arc::new(move || {
+                    entered_tx.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(300));
+                    done.store(true, Ordering::SeqCst);
+                })),
+            )
+            .unwrap();
+        let publisher = {
+            let hub = hub.clone();
+            std::thread::spawn(move || hub.publish(1, &records()))
+        };
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        subscription.close();
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "close returned while a callback was still running"
+        );
+        publisher.join().unwrap();
+        hub.publish(2, &records());
+        assert!(subscription.take().is_none());
+    }
+
+    /// A callback may close its own subscription (or the hub) without deadlock.
+    #[test]
+    fn transport_026_fr_011_a_callback_can_close_its_own_subscription() {
+        let hub = InvalidationHub::new(2);
+        let slot: Arc<Mutex<Option<bb_client::Subscription>>> = Arc::default();
+        let inside = Arc::clone(&slot);
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        let subscription = hub
+            .subscribe(
+                [ChangeKind::Records],
+                false,
+                Some(Arc::new(move || {
+                    if let Some(own) = inside.lock().unwrap().as_ref() {
+                        own.close();
+                    }
+                    flag.store(true, Ordering::SeqCst);
+                })),
+            )
+            .unwrap();
+        *slot.lock().unwrap() = Some(subscription);
+        let worker = {
+            let hub = hub.clone();
+            std::thread::spawn(move || hub.publish(1, &records()))
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !worker.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(worker.is_finished(), "deadlocked");
+        worker.join().unwrap();
+        assert!(ran.load(Ordering::SeqCst));
+        assert_eq!(hub.subscribers(), 0);
     }
 }

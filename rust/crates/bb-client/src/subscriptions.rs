@@ -773,12 +773,89 @@ pub enum SubscriptionError {
 
 type Notify = Arc<dyn Fn() + Send + Sync>;
 
+struct GateState {
+    live: bool,
+    /// The threads inside a delivery right now.
+    running: Vec<std::thread::ThreadId>,
+}
+
+/// Serializes a subscriber's deliveries with its close: once [`Gate::close`]
+/// returns, no delivery is running or can start. A delivery may close its own
+/// subscription (the closing thread is not waited for), so there is no deadlock.
+struct Gate {
+    state: Mutex<GateState>,
+    idle: Condvar,
+}
+
+/// Leaves the delivery even if the callback panics.
+struct Leave<'a>(&'a Gate);
+
+impl Drop for Leave<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.lock();
+        let me = std::thread::current().id();
+        if let Some(at) = state.running.iter().position(|id| *id == me) {
+            state.running.swap_remove(at);
+        }
+        drop(state);
+        self.0.idle.notify_all();
+    }
+}
+
+impl Gate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(GateState {
+                live: true,
+                running: Vec::new(),
+            }),
+            idle: Condvar::new(),
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, GateState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn is_live(&self) -> bool {
+        self.lock().live
+    }
+
+    /// Runs `call` unless the subscriber is closed; `close` waits for it.
+    fn deliver(&self, call: &(dyn Fn() + Send + Sync)) {
+        {
+            let mut state = self.lock();
+            if !state.live {
+                return;
+            }
+            state.running.push(std::thread::current().id());
+        }
+        let _leave = Leave(self);
+        call();
+    }
+
+    /// Stops all later deliveries and waits out the ones on other threads.
+    fn close(&self) {
+        let me = std::thread::current().id();
+        let mut state = self.lock();
+        state.live = false;
+        while state.running.iter().any(|id| *id != me) {
+            state = self
+                .idle
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+}
+
 struct Slot {
     kinds: BTreeSet<ChangeKind>,
     status: bool,
     pending: Option<Invalidation>,
     notify: Option<Notify>,
-    live: Arc<AtomicBool>,
+    live: Arc<Gate>,
 }
 
 struct HubState {
@@ -846,7 +923,7 @@ impl InvalidationHub {
         }
         let id = state.next_id;
         state.next_id += 1;
-        let live = Arc::new(AtomicBool::new(true));
+        let live = Arc::new(Gate::new());
         state.slots.insert(
             id,
             Slot {
@@ -883,7 +960,7 @@ impl InvalidationHub {
             return;
         }
         self.inner.published.fetch_add(1, Ordering::SeqCst);
-        let mut pokes: Vec<(Notify, Arc<AtomicBool>)> = Vec::new();
+        let mut pokes: Vec<(Notify, Arc<Gate>)> = Vec::new();
         {
             let mut state = self.lock();
             for slot in state.slots.values_mut() {
@@ -913,11 +990,10 @@ impl InvalidationHub {
                 }
             }
         }
-        for (notify, live) in pokes {
-            // A subscriber closed after the poke was queued is not called.
-            if live.load(Ordering::SeqCst) {
-                notify();
-            }
+        for (notify, gate) in pokes {
+            // A subscriber closed after the poke was queued is not called, and a
+            // close racing a call waits for it.
+            gate.deliver(&*notify);
         }
     }
 
@@ -928,10 +1004,13 @@ impl InvalidationHub {
 
     /// Releases every subscriber: nothing is delivered after this returns.
     pub fn close(&self) {
-        let mut state = self.lock();
-        state.closed = true;
-        for (_, slot) in state.slots.drain() {
-            slot.live.store(false, Ordering::SeqCst);
+        let gates: Vec<Arc<Gate>> = {
+            let mut state = self.lock();
+            state.closed = true;
+            state.slots.drain().map(|(_, slot)| slot.live).collect()
+        };
+        for gate in gates {
+            gate.close();
         }
     }
 }
@@ -940,25 +1019,27 @@ impl InvalidationHub {
 pub struct Subscription {
     id: u64,
     hub: InvalidationHub,
-    live: Arc<AtomicBool>,
+    live: Arc<Gate>,
 }
 
 impl Subscription {
     /// Takes the coalesced invalidation, if any. Never delivers after close.
     pub fn take(&self) -> Option<Invalidation> {
-        if !self.live.load(Ordering::SeqCst) {
+        if !self.live.is_live() {
             return None;
         }
         self.hub.lock().slots.get_mut(&self.id)?.pending.take()
     }
 
     pub fn is_live(&self) -> bool {
-        self.live.load(Ordering::SeqCst)
+        self.live.is_live()
     }
 
     /// Unsubscribes; idempotent.
     pub fn close(&self) {
-        self.live.store(false, Ordering::SeqCst);
+        // Stop deliveries and wait for one under way, outside the hub's lock (a
+        // callback may need it), then forget the slot.
+        self.live.close();
         self.hub.lock().slots.remove(&self.id);
     }
 }

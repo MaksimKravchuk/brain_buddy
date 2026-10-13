@@ -456,6 +456,35 @@ impl From<SessionError> for Broke {
     }
 }
 
+/// Where a paged download stands: the next token and every token seen, so a
+/// server that repeats a token, or runs past the manifest's page count, is cut off.
+struct Paging {
+    next: Option<String>,
+    seen: HashSet<String>,
+}
+
+impl Paging {
+    fn new(first: String) -> Self {
+        Self {
+            seen: HashSet::from([first.clone()]),
+            next: Some(first),
+        }
+    }
+
+    /// Moves to the page after the one just staged. At most `total` pages exist.
+    fn advance(&mut self, next: Option<String>, total: u64) -> Result<(), ApplyError> {
+        if let Some(token) = &next
+            && (!self.seen.insert(token.clone()) || self.seen.len() as u64 > total)
+        {
+            return Err(ApplyError::Malformed(
+                "page token repeats or exceeds the manifest",
+            ));
+        }
+        self.next = next;
+        Ok(())
+    }
+}
+
 enum Next {
     Refetch,
     Snapshot,
@@ -477,6 +506,9 @@ pub struct Syncer {
     parked: HashSet<CommandId>,
     held: HashSet<CommandId>,
     capabilities_checked: bool,
+    /// A paged transfer or snapshot stopped on the pull budget: where to go on.
+    transfer_resume: Option<(Id, Paging)>,
+    snapshot_resume: Option<(SnapshotManifest, Paging)>,
 }
 
 impl Syncer {
@@ -506,6 +538,8 @@ impl Syncer {
             parked: HashSet::new(),
             held: HashSet::new(),
             capabilities_checked: false,
+            transfer_resume: None,
+            snapshot_resume: None,
         }
     }
 
@@ -659,17 +693,17 @@ impl Syncer {
         let started = self.clock.now();
         let (mut refetches, mut resets) = (0u32, 0u32);
         loop {
-            let spent = self.clock.now().saturating_sub(started);
-            if spent >= self.schedule.pull_budget
-                || report.requests >= self.schedule.max_pages_per_pull
-            {
+            if self.out_of_budget(started, report) {
                 report.more = true;
                 return Ok(());
             }
             let request = self.session.begin_request(store, RequestKind::Pull)?;
             let Some(cursor) = read_cursor(store)? else {
                 bump(&mut resets, "SNAPSHOT_REQUIRED")?;
-                self.recover_snapshot(store, report)?;
+                if self.recover_snapshot(store, report, started)? {
+                    report.more = true;
+                    return Ok(());
+                }
                 continue;
             };
             let path = format!(
@@ -685,7 +719,10 @@ impl Syncer {
                 other => match self.halt_for(store, &request, other) {
                     Halt::ResetRequired => {
                         bump(&mut resets, "RESET_REQUIRED")?;
-                        self.recover_snapshot(store, report)?;
+                        if self.recover_snapshot(store, report, started)? {
+                            report.more = true;
+                            return Ok(());
+                        }
                         continue;
                     }
                     halt => return Err(halt),
@@ -696,63 +733,97 @@ impl Syncer {
             let fence = request.live_fence()?.clone();
             let step = apply_changes(store, &context, &fence, &page);
             let applied = match step {
-                Ok(FeedStep::Applied(applied)) => Ok(applied),
+                Ok(FeedStep::Applied(applied)) => Ok(Some(applied)),
                 Ok(FeedStep::Transfer(transfer_id)) => {
-                    self.apply_oversized(store, &request, &page, &transfer_id, report)
+                    self.apply_oversized(store, &request, &page, &transfer_id, started, report)
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(Broke::Apply(error)),
             };
-            match applied {
-                Ok(applied) => {
+            let error = match applied {
+                Ok(Some(applied)) => {
                     note(report, &applied);
                     if !applied.has_more {
                         return Ok(());
                     }
+                    continue;
                 }
-                Err(error) => match self.recover_feed(store, error, &mut refetches, &mut resets)? {
-                    Next::Refetch => {}
-                    Next::Snapshot => self.recover_snapshot(store, report)?,
-                },
+                // The budget ran out inside the transfer; it resumes next pull.
+                Ok(None) => {
+                    report.more = true;
+                    return Ok(());
+                }
+                // The server refused a transfer page: same meaning as anywhere else.
+                Err(Broke::Halt(Halt::ResetRequired)) => {
+                    bump(&mut resets, "RESET_REQUIRED")?;
+                    if self.recover_snapshot(store, report, started)? {
+                        report.more = true;
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Err(Broke::Halt(halt)) => return Err(halt),
+                Err(Broke::Apply(error)) => error,
+            };
+            match self.recover_feed(store, error, &mut refetches, &mut resets)? {
+                Next::Refetch => {}
+                Next::Snapshot => {
+                    if self.recover_snapshot(store, report, started)? {
+                        report.more = true;
+                        return Ok(());
+                    }
+                }
             }
         }
     }
 
+    /// The pull's time budget or its request bound is spent.
+    fn out_of_budget(&self, started: Duration, report: &PullReport) -> bool {
+        self.clock.now().saturating_sub(started) >= self.schedule.pull_budget
+            || report.requests >= self.schedule.max_pages_per_pull
+    }
+
+    /// Fetches and stages the byte pages of an oversized transaction, then applies
+    /// it. `Ok(None)`: the budget ran out; the next pull goes on from the saved token.
     fn apply_oversized(
         &mut self,
         store: &mut Store,
         request: &Request,
         page: &ChangesPage,
         transfer_id: &Id,
+        started: Duration,
         report: &mut PullReport,
-    ) -> Result<crate::apply_changes::Applied, ApplyError> {
+    ) -> Result<Option<crate::apply_changes::Applied>, Broke> {
         let Some(manifest) = page.transaction_manifest.as_ref() else {
-            return Err(ApplyError::Malformed("transfer without a manifest"));
+            return Err(ApplyError::Malformed("transfer without a manifest").into());
         };
-        let mut token = Some(manifest.first_page_token.clone());
-        while let Some(current) = token {
+        let mut paging = match self.transfer_resume.take() {
+            Some((id, paging)) if id == *transfer_id => paging,
+            _ => Paging::new(manifest.first_page_token.clone()),
+        };
+        while let Some(current) = paging.next.clone() {
+            if self.out_of_budget(started, report) {
+                self.transfer_resume = Some((transfer_id.clone(), paging));
+                return Ok(None);
+            }
             let path = format!(
                 "{API}/transactions/{}?page_token={}",
                 encode(transfer_id.as_str()),
                 encode(&current)
             );
-            let body = match self.exchange(request, Method::Get, path, None) {
-                Ok(Answer::Body(body)) => body,
-                _ => {
-                    return Err(ApplyError::Transfer(TransferFault::Incomplete {
-                        missing: Vec::new(),
-                    }));
-                }
+            let body = match self.exchange(request, Method::Get, path, None)? {
+                Answer::Body(body) => body,
+                other => return Err(self.halt_for(store, request, other).into()),
             };
             report.requests += 1;
             let transfer: TransferPage = decode_apply(&body)?;
             let context = (self.context)();
             let fence = request.live_fence().map_err(|_| ApplyError::Stale)?.clone();
             stage_transfer_page(store, &context, &fence, &transfer)?;
-            token = transfer.page.next_page_token.clone();
+            paging.advance(transfer.page.next_page_token.clone(), manifest.page_count)?;
         }
         let context = (self.context)();
         let fence = request.live_fence().map_err(|_| ApplyError::Stale)?.clone();
-        apply_transfer(store, &context, &fence, transfer_id)
+        Ok(Some(apply_transfer(store, &context, &fence, transfer_id)?))
     }
 
     fn recover_feed(
@@ -783,15 +854,22 @@ impl Syncer {
 
     // -------------------------------------------------------------------- snapshot
 
-    fn recover_snapshot(&mut self, store: &mut Store, report: &mut PullReport) -> Result<(), Halt> {
+    /// Rebuilds the base from a snapshot. `Ok(true)`: the budget ran out; the
+    /// download goes on at its saved token next pull.
+    fn recover_snapshot(
+        &mut self,
+        store: &mut Store,
+        report: &mut PullReport,
+        started: Duration,
+    ) -> Result<bool, Halt> {
         for attempt in 0..2 {
-            match self.snapshot_once(store, report) {
-                Ok(()) => return Ok(()),
+            match self.snapshot_once(store, report, started) {
+                Ok(paused) => return Ok(paused),
                 Err(Broke::Apply(ApplyError::Transfer(
                     TransferFault::Expired | TransferFault::Corrupt | TransferFault::Conflict,
                 ))) if attempt == 0 => {}
                 // The device already holds a newer base: just pull the feed.
-                Err(Broke::Apply(ApplyError::Gap { .. })) => return Ok(()),
+                Err(Broke::Apply(ApplyError::Gap { .. })) => return Ok(false),
                 Err(Broke::Apply(error)) => return Err(error.into()),
                 Err(Broke::Halt(halt)) => return Err(halt),
             }
@@ -799,27 +877,43 @@ impl Syncer {
         Err(Halt::Failed("SNAPSHOT_INVALID".to_owned()))
     }
 
-    fn snapshot_once(&mut self, store: &mut Store, report: &mut PullReport) -> Result<(), Broke> {
+    fn snapshot_once(
+        &mut self,
+        store: &mut Store,
+        report: &mut PullReport,
+        started: Duration,
+    ) -> Result<bool, Broke> {
         let request = self.session.begin_request(store, RequestKind::Pull)?;
-        let create = serde_json::to_vec(&json!({
-            "scope_id": request.scope_id().as_str(),
-            "projection_schema_version": 1,
-        }))
-        .map_err(|_| Halt::Failed("ENCODE".to_owned()))?;
-        let body = self.expect_body(
-            store,
-            &request,
-            Method::Post,
-            format!("{API}/snapshots"),
-            Some(create),
-        )?;
-        report.requests += 1;
-        let manifest: SnapshotManifest = parse(&body)?;
+        let (manifest, mut paging) = match self.snapshot_resume.take() {
+            Some(saved) => saved,
+            None => {
+                let create = serde_json::to_vec(&json!({
+                    "scope_id": request.scope_id().as_str(),
+                    "projection_schema_version": 1,
+                }))
+                .map_err(|_| Halt::Failed("ENCODE".to_owned()))?;
+                let body = self.expect_body(
+                    store,
+                    &request,
+                    Method::Post,
+                    format!("{API}/snapshots"),
+                    Some(create),
+                )?;
+                report.requests += 1;
+                let manifest: SnapshotManifest = parse(&body)?;
+                let paging = Paging::new(manifest.first_page_token.clone());
+                (manifest, paging)
+            }
+        };
         let context = (self.context)();
         let fence = request.live_fence()?.clone();
+        // Announcing again is idempotent: it reports how far the staging has come.
         begin_snapshot(store, &context, &fence, &manifest)?;
-        let mut token = Some(manifest.first_page_token.clone());
-        while let Some(current) = token {
+        while let Some(current) = paging.next.clone() {
+            if self.out_of_budget(started, report) {
+                self.snapshot_resume = Some((manifest, paging));
+                return Ok(true);
+            }
             let path = format!(
                 "{API}/snapshots/{}?scope_id={}&page_token={}",
                 encode(manifest.snapshot_id.as_str()),
@@ -832,7 +926,7 @@ impl Syncer {
             let context = (self.context)();
             let fence = request.live_fence()?.clone();
             stage_snapshot_page(store, &context, &fence, &page)?;
-            token = page.page.next_page_token.clone();
+            paging.advance(page.page.next_page_token.clone(), manifest.page_count)?;
         }
         let context = (self.context)();
         let fence = request.live_fence()?.clone();
@@ -841,7 +935,7 @@ impl Syncer {
         report.snapshots += 1;
         report.changes.records = true;
         report.changes.status = true;
-        Ok(())
+        Ok(false)
     }
 
     // ----------------------------------------------------------------------- sends
