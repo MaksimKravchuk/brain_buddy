@@ -44,7 +44,8 @@ Run record: build ____  device ____  iOS ____  Apple Intelligence on/off ____  d
 - [ ] Edited proposal applies the edited text
 - [ ] Task changed elsewhere after the sheet opened: "This task changed", edit kept; Review the task then Apply again works
 - [ ] Applied: sheet and card close, "Wording updated.", task shows the new wording; no completion, no AgentRun badge
-- [ ] Inside a review run: after Apply the card shows the existing stale view (known limit, see PR notes)
+- [ ] Inside a review run: Apply counts as the run's decision, the step shows its Undo line and the next card; Undo restores the wording
+- [ ] Continue without AI after proposals were shown, then Save new wording / first step: decision records AI use "not used" and the navigator request ID
 
 ## Clarifying question and answer (.16-.20)
 

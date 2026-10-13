@@ -76,6 +76,9 @@ struct DecisionCardSheet: View {
     @State private var editorID = UUID().uuidString
     /// The suggestion sheet (M-04, spec 026) opened from the card.
     @State private var suggestion: ReviewSuggestionTarget?
+    /// What a manual decision records after suggestions were shown and not used (spec 026, FR-020).
+    @State private var manualAIUse = AIUse.none
+    @State private var manualNavigatorRequestID: String?
 
     init(taskID: TaskID, review: ReviewDecisionContext? = nil) {
         self.taskID = taskID
@@ -113,7 +116,8 @@ struct DecisionCardSheet: View {
                             path = []
                         },
                         onCloseCard: closeCard,
-                        expectedTask: opened?.stamp, shownRecord: opened?.task
+                        expectedTask: opened?.stamp, shownRecord: opened?.task,
+                        aiUse: manualAIUse, navigatorRequestID: manualNavigatorRequestID
                     )
                 }
         }
@@ -123,7 +127,8 @@ struct DecisionCardSheet: View {
         .sheet(item: $suggestion) { target in
             ReviewSuggestionSheet(
                 taskID: taskID, kind: target.kind, stallReason: stallReason, shown: opened?.stamp,
-                onApplied: suggestionApplied)
+                sessionID: review?.sessionID, onApplied: suggestionApplied(_:title:),
+                onManual: { manualAIUse = $0; manualNavigatorRequestID = $1 })
         }
         .onAppear(perform: recordOpenedWording)
         .task {
@@ -273,11 +278,14 @@ struct DecisionCardSheet: View {
         }
     }
 
-    /// A suggestion was applied through the ordinary decision command. Outside a review the card is
-    /// done; inside one the wording changed under it, so the stale view takes over (FR-011).
-    private func suggestionApplied() {
-        guard review == nil else { return }
+    /// A suggestion was applied through the ordinary decision command. Inside a review it counts as
+    /// the run's decision (Undo as for a manual one); outside, it is a plain title update.
+    private func suggestionApplied(_ decisionID: DecisionID?, title: String) {
         hasDecided = true
+        if let review, let decisionID, let kind = suggestion?.kind {
+            review.onDecided(decisionID, kind == .firstStep ? .firstStep : .reformulate, title)
+            return
+        }
         dismiss()
         toasts.show("Wording updated.")
     }

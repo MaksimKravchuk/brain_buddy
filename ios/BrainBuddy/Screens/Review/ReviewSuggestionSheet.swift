@@ -25,7 +25,12 @@ struct ReviewSuggestionSheet: View {
     let stallReason: StallReason?
     /// The task as the card showed it; the apply step is checked against it.
     let shown: ShownTask?
-    let onApplied: () -> Void
+    /// The review run the card counts decisions in (M-16), if any; an applied suggestion counts there.
+    let sessionID: ReviewSessionID?
+    /// Applied: the decision (for Undo) and the wording that was applied.
+    let onApplied: (DecisionID?, String) -> Void
+    /// Continued without AI: what a manual decision records about suggestions that were shown.
+    let onManual: (AIUse, String?) -> Void
 
     @Environment(Workspace.self) private var workspace
     @Environment(\.dismiss) private var dismiss
@@ -100,8 +105,13 @@ struct ReviewSuggestionSheet: View {
 
     /// Applied, continued manually or discarded: the model is finished and released.
     private func leave(applied: Bool) {
+        if let model {
+            if applied { onApplied(model.appliedDecisionID, edited) } else {
+                let aiUse = model.aiUseForManualDecision
+                onManual(aiUse, aiUse == .none ? nil : model.navigatorRequestID)
+            }
+        }
         workspace.releaseReviewSuggestionModel(for: taskID, kind: kind)
-        if applied { onApplied() }
         dismiss()
     }
 
@@ -175,8 +185,18 @@ struct ReviewSuggestionSheet: View {
         case .answerNotSaved(let failure):
             question(m, saving: false, failure: failure)
         case .stale:
-            outcome("This task changed", "Review it before applying a suggestion. Your edited wording is kept.")
-            action("Review the task", prominent: true) { m.reviewAfterChange() }
+            outcome("This task changed", "Read how it is now before applying a suggestion. Your edited wording is kept.")
+            VStack(alignment: .leading, spacing: BBSpacing.s2) {
+                LabeledContent("Now", value: workspace.task(taskID)?.title ?? "This task is no longer here")
+                LabeledContent("Suggestion", value: edited)
+                if let notes = workspace.suggestionNotes(taskID), !notes.isEmpty {
+                    LabeledContent("Notes now", value: notes)
+                }
+            }
+            .font(BBFont.secondary)
+            .padding(BBSpacing.s4)
+            .bbCard()
+            action("Use this suggestion on the current task", prominent: true) { m.reviewAfterChange() }
             action("Keep current wording") { m.keepCurrentWording() }
         case .applying:
             outcome("Applying…", nil, busy: true)
@@ -297,7 +317,7 @@ struct ReviewSuggestionSheet: View {
             TextField("Suggestion", text: $edited, axis: .vertical).lineLimit(2...6).textFieldStyle(.roundedBorder)
             if m.applyFailure != nil { InlineProblemText(message: "Couldn't apply the suggestion. Nothing changed. Try again.") }
             action("Apply suggestion", prominent: true, disabled: edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                run { [edited] in await $0.apply(edited) }
+                run { [edited, sessionID] in await $0.apply(edited, sessionID: sessionID) }
             }
             action("Keep current wording") { m.keepCurrentWording() }
         }
