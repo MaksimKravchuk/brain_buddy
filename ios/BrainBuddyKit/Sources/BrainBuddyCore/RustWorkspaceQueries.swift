@@ -19,6 +19,20 @@ public struct RustWorkspaceIssue: Identifiable, Equatable, Sendable {
     public let shownBaseRevision: String?
     public let dependentIDs: [String]
     public let createdAt: Date
+
+    public init(
+        id: String, commandID: String, reason: String, localIntent: Data, localText: [String: String],
+        shownBaseRevision: String?, dependentIDs: [String], createdAt: Date
+    ) {
+        self.id = id
+        self.commandID = commandID
+        self.reason = reason
+        self.localIntent = localIntent
+        self.localText = localText
+        self.shownBaseRevision = shownBaseRevision
+        self.dependentIDs = dependentIDs
+        self.createdAt = createdAt
+    }
 }
 
 public struct RustWorkspaceSyncState: Sendable {

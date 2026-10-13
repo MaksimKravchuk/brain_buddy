@@ -266,6 +266,12 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Rust core bridge",
         "PyO3 command codec and lifecycle",
     ),
+    # Spec 026 (T048): the server AI adapters over the shared Rust AI policy.
+    "rust_ai_policy": (
+        EPIC_AI,
+        "Shared AI policy",
+        "Server adapters keep consent and confirmation authority",
+    ),
     # Spec 026 (T018): the Rust-backed task facade behind ``rust_core_sync``.
     "rust_task_parity": (
         EPIC_TASKS,

@@ -25,6 +25,21 @@ public protocol SyncRuntimePort: Sendable {
     func request(_ trigger: SyncTrigger) async -> SyncRuntimeWakeResult
     func setNetworkAvailable(_ available: Bool) async
     func close() async
+    /// Rebuilds the synced copy from the account while keeping every waiting change and saved
+    /// issue (design D-03). A port without a transport answers `.transportUnavailable`.
+    func rebuildSyncedCopy() async -> SyncRuntimeRebuildResult
+}
+
+extension SyncRuntimePort {
+    public func rebuildSyncedCopy() async -> SyncRuntimeRebuildResult { .transportUnavailable }
+}
+
+public enum SyncRuntimeRebuildResult: Hashable, Sendable {
+    case rebuilt
+    /// The rebuild stopped; the reference is safe to quote. Waiting changes are untouched.
+    case failed(referenceID: String?)
+    /// The accepted transport slice has not been installed; nothing was rebuilt.
+    case transportUnavailable
 }
 
 public enum SyncRuntimeWakeResult: Hashable, Sendable {

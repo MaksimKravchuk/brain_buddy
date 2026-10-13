@@ -16,19 +16,22 @@ struct SyncStatusPopover: View {
     @State private var copied: SyncPopoverControl?
     /// The conflict detail (D-02) shown in place of the list; Back returns with the draft kept.
     @State private var conflict: SyncConflictModel?
-    @State private var drafts: [String: SyncConflictDraft] = [:]
+    /// Opening a conflict reads the account's record first; "Review" waits for it.
+    @State private var openingConflict = false
+    /// What "Try again" on a failed rebuild last told the person (a rebuild that could not run says so).
+    @State private var rebuildNotice: String?
 
     private var runtimeIssues: [SyncRuntimeIssue] { controller.workspace.runtimeIssues.map(SyncRuntimeIssue.init) }
 
     var body: some View {
         let content = SyncPopoverModel.adding(
-            runtimeIssues: runtimeIssues, pendingCount: controller.workspace.syncSnapshot.pendingCount,
-            to: controller.popoverContent()
+            runtimeIssues: runtimeIssues, recovery: controller.recoveryCondition,
+            pendingCount: controller.workspace.syncSnapshot.pendingCount, to: controller.popoverContent()
         )
         Group {
             if let model = Binding($conflict) {
                 SyncConflictView(
-                    model: model, blockedPreview: { action in "Retry: \(action.summary)" }, submit: nil,
+                    model: model, blockedPreview: { action in "Retry: \(action.summary)" }, submit: submit,
                     back: closeConflict
                 )
             } else {
@@ -47,6 +50,26 @@ struct SyncStatusPopover: View {
         .onAppear {
             if let initial = content.initialFocus { controller.router.handle(.focusInside(.inPopover(initial))) }
         }
+        .task(id: conflict?.issueID) {
+            // The account's record moves when a sync brings a newer one; the draft is kept (D-02.08).
+            guard conflict != nil else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, var model = conflict, model.isEditable else { continue }
+                await controller.refreshConflict(&model)
+                if conflict?.issueID == model.issueID, conflict?.isEditable == true { conflict = model }
+            }
+        }
+        .onChange(of: conflict?.draft) { _, _ in
+            if let model = conflict, model.isEditable || model.phase == .confirmingDiscard { controller.keepDraft(model) }
+        }
+        .onChange(of: runtimeIssues.map(\.id)) { _, ids in
+            // Resolved elsewhere while open: nothing is left to decide here.
+            if let model = conflict, model.phase != .saving, !ids.contains(model.issueID) {
+                controller.discardDraft(issueID: model.issueID)
+                conflict = nil
+            }
+        }
         .task(id: controller.discards.nextExpiry) {
             guard let expiry = controller.discards.nextExpiry else { return }
             try? await Task.sleep(for: .seconds(max(0, expiry.timeIntervalSinceNow)))
@@ -60,24 +83,48 @@ struct SyncStatusPopover: View {
         }
     }
 
-    /// Open D-02 for `id`: the blocked later actions are the issues it lists; a kept draft returns.
+    /// Open D-02 for `id`: the account's record is read first, the blocked later actions are the
+    /// issues it lists, and a kept draft returns (restoring submits nothing).
     private func openConflict(_ id: String) {
-        let issues = runtimeIssues
-        guard let issue = issues.first(where: { $0.id == id }) else { return }
-        let blocked = issue.dependentIDs.map { dependent in
-            SyncBlockedAction(id: dependent, summary: issues.first { $0.id == dependent }?.summary ?? "Saved action")
+        guard !openingConflict else { return }
+        openingConflict = true
+        Task {
+            conflict = await controller.openConflict(id)
+            openingConflict = false
         }
-        var model = SyncConflictModel(issue: issue, accountVersion: nil, blocked: blocked)
-        if let draft = drafts[id] { model.restore(draft) }
-        conflict = model
     }
 
     /// Back, Cancel or closing keeps every original and the decision draft; nothing is submitted.
     private func closeConflict() {
-        if let model = conflict { drafts[model.issueID] = model.draft }
+        if let model = conflict, model.phase != .saving { controller.keepDraft(model) }
         conflict = nil
         if let initial = controller.popoverContent().initialFocus {
             controller.router.handle(.focusInside(.inPopover(initial)))
+        }
+    }
+
+    /// Apply: the decision goes to the workspace once. The detail closes only when it is stored
+    /// durably; a changed record or a failure keeps it open with the draft.
+    private func submit(_ resolution: SyncConflictResolution) {
+        Task {
+            let outcome = await controller.submit(resolution)
+            guard var model = conflict, model.issueID == resolution.issueID else {
+                if outcome == .resolved || outcome == .gone { controller.discardDraft(issueID: resolution.issueID) }
+                return
+            }
+            model.finish(outcome)
+            switch outcome {
+            case .resolved, .gone:
+                controller.discardDraft(issueID: model.issueID)
+                conflict = nil
+                AccessibilityNotification.Announcement("Choice saved").post()
+                if let initial = controller.popoverContent().initialFocus {
+                    controller.router.handle(.focusInside(.inPopover(initial)))
+                }
+            case .changedAgain, .failed:
+                conflict = model
+                controller.keepDraft(model)
+            }
         }
     }
 
@@ -92,7 +139,7 @@ struct SyncStatusPopover: View {
                     switch action {
                     case .copyReference(let reference): copyButton(reference, control: .recovery(action))
                     default:
-                        Button(Self.title(of: action)) { perform(action) }
+                        Button(Self.title(of: action)) { perform(action, recovery: recovery) }
                             .focused($focus, equals: .recovery(action))
                     }
                 }
@@ -113,15 +160,22 @@ struct SyncStatusPopover: View {
         }
     }
 
-    private func perform(_ action: SyncRecoveryAction) {
+    private func perform(_ action: SyncRecoveryAction, recovery: SyncRecoveryContent) {
         switch action {
-        case .tryAgain: Task { await controller.syncNow() }
+        case .tryAgain:
+            if case .rebuildFailed = recovery.condition {
+                Task { rebuildNotice = await controller.rebuildSyncedCopy() }
+            } else {
+                Task { await controller.syncNow() }
+            }
+        case .rebuildSyncedCopy:
+            Task { rebuildNotice = await controller.rebuildSyncedCopy() }
         case .updateApp:
-            if let url = URL(string: "macappstore://apps.apple.com/") { NSWorkspace.shared.open(url) }
+            rebuildNotice = RuntimeRecoveryCard.updateHelp  // no store page of its own to open
         case .openImportReport:
             if let file = controller.host.importer.upgradeFiles().report { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-        case .rebuildSyncedCopy, .exportSavedData, .copyReference:
-            break  // wired by the workspace's recovery API (not present yet); see PR-46 notes
+        case .exportSavedData, .copyReference:
+            break  // Export has no entry point yet; the reference Copy is its own button.
         }
     }
 
@@ -136,6 +190,7 @@ struct SyncStatusPopover: View {
             HStack(spacing: 10) {
                 if let reference = issue.referenceID { copyButton(reference, control: .runtimeCopy(issue.id)) }
                 Button("Review") { openConflict(issue.id) }
+                    .disabled(openingConflict)
                     .accessibilityLabel(issue.actionAccessibilityLabel)
                     .focused($focus, equals: .openConflict(issue.id))
             }
@@ -145,6 +200,10 @@ struct SyncStatusPopover: View {
     private func sections(_ content: SyncPopoverContent) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if let recovery = content.recovery { recoveryView(recovery) }
+            if let rebuildNotice {
+                Text(rebuildNotice).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
+            }
             if let notice = content.notice { noticeView(notice) }
             if content.lastSynced != nil || content.queue != nil {
                 VStack(alignment: .leading, spacing: 4) {

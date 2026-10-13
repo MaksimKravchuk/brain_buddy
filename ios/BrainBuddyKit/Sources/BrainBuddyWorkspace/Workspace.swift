@@ -198,7 +198,13 @@ public final class Workspace {
         default: true  // unreadable: assume there is work rather than hide the merge notice
         }
     }
-    private var rustSyncState: RustWorkspaceSyncState?
+    private(set) var rustSyncState: RustWorkspaceSyncState?
+    /// Where an explicit "Rebuild synced copy" stands (design D-03).
+    var rustRebuild = RuntimeSyncRecovery.Rebuild.idle
+    /// Requests submitted for issue decisions, reused by a repeated Apply.
+    @ObservationIgnored var rustResolutions = RuntimeIssueResolutionLedger()
+    /// The stable code the shared runtime failed to open with, for the recovery state.
+    var rustLoadFailureCode: String?
 
     public var isRustSelected: Bool { rustSelection != nil }
     public var isRustBound: Bool { rustRuntime != nil && rustQueries != nil }
@@ -1330,6 +1336,7 @@ extension Workspace {
         let binding = UUID()
         runtimeBindingID = binding
         do {
+            rustLoadFailureCode = nil
             guard case .ready = try await selection.runtime.status() else {
                 throw RustBridgeError(code: "READ_ONLY_RECOVERY")
             }
@@ -1396,7 +1403,7 @@ extension Workspace {
             }
             guard binding == runtimeBindingID else { return }
             let subscription = try await runtime.subscribe()
-            guard binding == runtimeBindingID else { return }
+            guard binding == runtimeBindingID else { subscription.cancel(); return }
             rustSubscription = subscription
             rustWatcher = Task { [weak self] in
                 var token: String?
@@ -1431,6 +1438,7 @@ extension Workspace {
             loadError = nil
         } catch {
             guard binding == runtimeBindingID else { return }
+            rustLoadFailureCode = (error as? RustBridgeError)?.code
             loadError = Self.saveMessage(for: error)
             isLoaded = true
         }
@@ -1449,6 +1457,7 @@ extension Workspace {
         rustFacade = nil
         rustGestureSaver = nil
         rustStatusRequestID &+= 1
+        rustResolutions.removeAll()
         rustTaskFrames = [:]
         rustTaskInterests = [:]
         rustProjectInterests = [:]
@@ -1665,7 +1674,7 @@ extension Workspace {
         }
     }
 
-    private func refreshRustStatus() async {
+    func refreshRustStatus() async {
         guard let runtime = rustRuntime, let facade = rustFacade else { return }
         let binding = runtimeBindingID
         rustStatusRequestID &+= 1
@@ -2614,6 +2623,9 @@ extension Workspace {
     private func replaceRustBinding(with selection: RustWorkspaceSelection) {
         rustSelection = selection
         rustSyncState = nil
+        rustRebuild = .idle
+        rustResolutions.removeAll()
+        rustLoadFailureCode = nil
         runtimeIssues = []
         runtimeTransportUnavailable = false
     }

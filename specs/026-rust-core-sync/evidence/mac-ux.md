@@ -23,5 +23,8 @@ Run on: ______ (macOS version) · build: ______ · tester: ______
 | 13 | D-03.01-.10 | Rebuild, failed rebuild with reference, import failed, migration uncertain, interrupted | pending |
 | 14 | Accessibility | Tab order, VoiceOver labels and announcements, Esc closes, bounded height (<= 480 pt) with scroll | pending |
 
-Known gaps to confirm or close before this can pass: applying a conflict resolution, recovery
-status feed and draft persistence need Workspace APIs that do not exist yet (see PR-46 report).
+Wired to the Workspace (part 2): Apply choice / Keep item deleted call `Workspace.submit` (`resolveIssue`),
+the account side comes from `accountVersion(ofIssue:)`, recovery comes from `syncRecovery`, and the
+draft is kept per issue in `<data dir>/ConflictDrafts`. Still unobserved on a real Mac (rows above).
+Still not reachable: `updateNeededSync` (no runtime signal until PR-40), "Export saved data" (no entry
+point), and a real rebuild (the transport answers `transportUnavailable`, which the popover says).
