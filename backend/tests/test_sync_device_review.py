@@ -194,6 +194,7 @@ def run_device_journey(
                 "decision_id": decision,
                 "type": "follow_up",
                 "title": "Call Ann",
+                "follow_up_task_id": new("task"),
                 "session_id": session,
             },
             checks=[("task", waiting["id"], waiting["revision"])],
@@ -316,7 +317,12 @@ def test_026_FR_005_decide_and_undo_change_the_stored_state(
         receipt = device.accepted(
             "review.decide",
             task["id"],
-            {"decision_id": decision, "type": "follow_up", "title": "Call Ann"},
+            {
+                "decision_id": decision,
+                "type": "follow_up",
+                "title": "Call Ann",
+                "follow_up_task_id": new("task"),
+            },
             checks=[("task", task["id"], task["revision"])],
         )
         result = receipt["result"]
@@ -950,3 +956,79 @@ def test_026_FR_005_task_family_refusals_stay_terminal_beside_review_commands(
         except ProtocolFailure as raised:
             failure = raised
         check_equal("upgrade required", failure is not None, True)
+
+
+def test_026_FR_005_client_created_decision_ids_are_required_by_the_catalog(
+    synced: Synced, device: Device
+) -> None:
+    """A device command never lets the server mint an id the offline client lacks."""
+    api, clock = synced.api, synced.clock
+    waiting = api.create("waiting card", state="waiting", waiting_for="Ann")
+    nxt = api.create("next card", state="next")
+    clock.advance(days=40)
+    waiting, nxt = api.task(waiting["id"]), api.task(nxt["id"])
+    form = nxt["formulation"]["id"]
+    before = device.counts()
+
+    def decide(task: dict[str, Any], **body: Any) -> Any:
+        return device.send(
+            "review.decide",
+            task["id"],
+            body,
+            checks=[("task", task["id"], task["revision"])],
+        )
+
+    with allure.step("a decision without decision_id is an invalid request"):
+        missing = decide(waiting, type="complete")
+        assert (missing.status_code, error_code(missing)) == (422, "INVALID_REQUEST")
+        check_equal("counts", device.counts(), before)
+    cases = {
+        "follow_up without follow_up_task_id": (
+            waiting,
+            {"type": "follow_up", "title": "Call Ann"},
+            "follow_up_task_id",
+        ),
+        "first_step without new_formulation_id": (
+            nxt,
+            {"type": "first_step", "title": "Open it", "formulation_id": form},
+            "new_formulation_id",
+        ),
+        "substantive reformulate without new_formulation_id": (
+            nxt,
+            {"type": "reformulate", "title": "Entirely new", "formulation_id": form},
+            "new_formulation_id",
+        ),
+        "return_to_next without new_formulation_id": (
+            waiting,
+            {"type": "return_to_next", "title": "Back"},
+            "new_formulation_id",
+        ),
+    }
+    for name, (task, body, _field) in cases.items():
+        with allure.step(f"{name} is refused and changes nothing"):
+            receipt = device.rejected(
+                "review.decide",
+                task["id"],
+                {"decision_id": new("decision"), **body},
+                checks=[("task", task["id"], task["revision"])],
+            )
+            check_equal(name, receipt["error"]["details"]["reason"], "invalid_value")
+            check_equal("task", api.task(task["id"])["revision"], task["revision"])
+    with allure.step("a cosmetic reformulate and a plain move need no new id"):
+        device.accepted(
+            "review.decide",
+            nxt["id"],
+            {
+                "decision_id": new("decision"),
+                "type": "reformulate",
+                "title": nxt["title"],
+                "formulation_id": form,
+            },
+            checks=[("task", nxt["id"], nxt["revision"])],
+        )
+        device.accepted(
+            "review.decide",
+            waiting["id"],
+            {"decision_id": new("decision"), "type": "complete"},
+            checks=[("task", waiting["id"], waiting["revision"])],
+        )

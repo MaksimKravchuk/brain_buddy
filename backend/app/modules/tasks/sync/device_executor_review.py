@@ -24,6 +24,7 @@ from app.exceptions import (
     NotFoundError,
     ValidationFailure,
 )
+from app.modules.tasks import formulation
 from app.modules.tasks.navigator import NavigatorService, NavigatorStatus
 from app.modules.tasks.repository import TaskRepository
 from app.modules.tasks.review_domain import (
@@ -333,11 +334,14 @@ class ReviewDeviceExecutor:
         body: Json,
     ) -> Receipt:
         owner, task_id = command.unit.owner_id, envelope["entity_id"]
-        if "expected_revision" in body:
+        if "expected_revision" in body or "decision_id" not in body:
             raise _invalid()
         request = DecisionRequest(
             **body, expected_revision=self._expected(command, envelope, "task", task_id)
         )
+        missing = self._missing_client_id(owner, task_id, request)
+        if missing is not None:
+            return command.reject(DomainRefusal("invalid_value", missing, None, None))
         return self._run(
             command,
             lambda: _DECIDE(
@@ -349,6 +353,29 @@ class ReviewDeviceExecutor:
             ),
             _decision_result,
         )
+
+    def _missing_client_id(
+        self, owner: str, task_id: str, request: DecisionRequest
+    ) -> str | None:
+        """The client-created id a decision needs and the device left out.
+
+        The server never mints an id on a device command, or its feed would
+        diverge from the offline client's own: a follow-up needs its task id, and
+        a decision that starts a formulation needs that id (``first_step``,
+        ``return_to_next`` and a substantive ``reformulate``).
+        """
+        if request.type == "follow_up" and request.follow_up_task_id is None:
+            return "follow_up_task_id"
+        if request.new_formulation_id is not None:
+            return None
+        starts = request.type in ("first_step", "return_to_next")
+        if request.type == "reformulate":
+            try:
+                task = self._repo.get_for_owner(task_id, owner_id=owner)
+            except NotFoundError:
+                return None
+            starts = formulation.is_substantive(task.title, request.title or "")
+        return "new_formulation_id" if starts else None
 
     def _review_undo_decision(
         self,
