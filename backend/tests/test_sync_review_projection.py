@@ -1093,3 +1093,62 @@ def test_026_FR_006_bulk_release_undo_and_run_commands_replay_their_first_answer
             "review_decision",
             "review_decision_queue",
         ]
+
+
+def test_026_FR_014_queue_projection_equals_the_queue_api_in_queue_order(
+    synced: Synced,
+) -> None:
+    """Decided and set-aside ids follow the captured queue order, not decision
+    time, and a set-aside card that is then decided is no longer set aside."""
+
+    api, clock = synced.api, synced.clock
+    for i in range(4):
+        api.create(f"card {i}", state="next")
+    synced.post("/api/review/explainer/acknowledge", {}).raise_for_status()
+    clock.advance(days=40)
+    session = api.start_raw().json()["id"]
+    api.progress_raw(session, snapshot_decision_queue=True).raise_for_status()
+    cards = api.queue("decisions", session)["items"]
+    assert len(cards) == 4
+    for card in (cards[1], cards[3]):
+        api.progress_raw(session, set_aside_task_id=card["id"]).raise_for_status()
+    with allure.step("decide out of queue order, one of them a set-aside card"):
+        for card in (cards[3], cards[0]):
+            api.decide(api.task(card["id"]), "complete", session_id=session)
+    meta = api.queue("decisions", session)["meta"]
+    queue = synced.folded()[("review_decision_queue", json.dumps([session]))]
+    assert meta["decided_task_ids"] == [cards[0]["id"], cards[3]["id"]]
+    assert meta["set_aside_task_ids"] == [cards[1]["id"]]
+    assert queue["decided_task_ids"] == meta["decided_task_ids"]
+    assert queue["set_aside_task_ids"] == meta["set_aside_task_ids"]
+    assert synced.review_base() == synced.snapshot()
+
+
+def test_026_FR_005_a_stale_recovery_after_undo_is_unavailable(
+    synced: Synced,
+) -> None:
+    """Undo's tombstone redacts the decide receipt; retrying the original key
+    would be stale, which recovery reports as unavailable, not as a conflict."""
+
+    api = synced.api
+    task = api.create("card", state="next")
+    synced.post("/api/review/explainer/acknowledge", {}).raise_for_status()
+    synced.clock.advance(days=40)
+    task = api.task(task["id"])
+    body = {
+        "type": "complete",
+        "expected_revision": task["revision"],
+        "formulation_id": task["formulation"]["id"],
+    }
+    path = f"/api/tasks/{task['id']}/decisions"
+    decided = synced.post(path, body, "decide-stale")
+    assert decided.status_code == 200
+    undone = api.undo_raw(
+        decided.json()["decision"]["id"], decided.json()["task"]["revision"]
+    )
+    assert undone.status_code == 200
+    before = (synced.receipts(), len(synced.transactions()))
+    retry = synced.post(path, body, "decide-stale")
+    assert retry.status_code == 409
+    assert retry.json()["detail"] == {"reason": "idempotency_receipt_unavailable"}
+    assert (synced.receipts(), len(synced.transactions())) == before

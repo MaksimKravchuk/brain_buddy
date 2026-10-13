@@ -17,7 +17,7 @@ public member and never leave this module.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -27,15 +27,18 @@ from typing import Any, Final, cast
 from pydantic import BaseModel
 
 from app.exceptions import (
+    ConflictError,
     IdempotencyConflictError,
     IdempotencyReceiptUnavailableError,
     NotFoundError,
+    ValidationFailure,
 )
 from app.modules.tasks.domain import TaskDocument
 from app.modules.tasks.repository import IDEMPOTENCY_RETENTION, TaskRepository
 from app.modules.tasks.review_domain import (
     NavigatorConsentDocument,
     ReviewDecisionDocument,
+    ReviewRequestError,
     ReviewSessionDocument,
 )
 from app.modules.tasks.rust_adapter import RustCore
@@ -147,24 +150,39 @@ def decision_value(decision: ReviewDecisionDocument) -> Json:
 
 
 def queue_value(
-    session: ReviewSessionDocument, decisions: Iterable[ReviewDecisionDocument]
+    session: ReviewSessionDocument,
+    decisions: Iterable[ReviewDecisionDocument],
+    existing: Collection[str] | None = None,
 ) -> Json:
     """The decision-step queue of a run.
 
     ``task_ids`` stays ``None`` until the run captured its queue, so a captured
-    empty queue and an uncaptured one differ. ``decided_task_ids`` is derived
-    from the run's decisions, oldest first, once per task.
+    empty queue and an uncaptured one differ. Decided and set-aside ids follow
+    the queue API (``ReviewFlowService._handled_decisions``): in captured queue
+    order, only for cards the queue still lists (``existing``), and a decided
+    card is never also set aside. An uncaptured queue is live, so its decided
+    ids fall back to decision order.
     """
 
-    ordered = sorted(decisions, key=lambda d: (d.decided_at, d.id))
-    decided = list(dict.fromkeys(d.task_id for d in ordered))
+    stored = list(decisions)
+    decided = {d.task_id for d in stored}
+    if session.decision_queue is None:
+        ordered = sorted(stored, key=lambda d: (d.decided_at, d.id))
+        return {
+            "session_id": session.id,
+            "task_ids": None,
+            "decided_task_ids": list(dict.fromkeys(d.task_id for d in ordered)),
+            "set_aside_task_ids": [
+                t for t in session.set_aside_task_ids if t not in decided
+            ],
+        }
+    listed = [t for t in session.decision_queue if existing is None or t in existing]
+    aside = set(session.set_aside_task_ids) - decided
     return {
         "session_id": session.id,
-        "task_ids": (
-            None if session.decision_queue is None else list(session.decision_queue)
-        ),
-        "decided_task_ids": decided,
-        "set_aside_task_ids": list(session.set_aside_task_ids),
+        "task_ids": list(session.decision_queue),
+        "decided_task_ids": [t for t in listed if t in decided],
+        "set_aside_task_ids": [t for t in listed if t in aside],
     }
 
 
@@ -179,11 +197,21 @@ class ReviewProjection:
     def session_changes(
         self, owner_id: str, session: ReviewSessionDocument
     ) -> list[Json]:
-        decisions = self._repo.list_review_decisions_for_session(owner_id, session.id)
         return [
             _upsert("review_session", encode_session(session)),
-            _upsert("review_decision_queue", queue_value(session, decisions)),
+            self._queue(owner_id, session),
         ]
+
+    def _queue(self, owner_id: str, session: ReviewSessionDocument) -> Json:
+        decisions = self._repo.list_review_decisions_for_session(owner_id, session.id)
+        existing = (
+            None
+            if session.decision_queue is None
+            else {t.id for t in self._repo.list_for_owner(owner_id=owner_id)}
+        )
+        return _upsert(
+            "review_decision_queue", queue_value(session, decisions, existing)
+        )
 
     # ------------------------------------------------------------ snapshots
     def snapshot(self, owner_id: str) -> list[Json]:
@@ -250,12 +278,7 @@ class ReviewProjection:
         for session_id in queues:
             session = self._repo.get_review_session(owner_id, session_id)
             if session is not None and ("Review session", session_id) not in seen:
-                decisions = self._repo.list_review_decisions_for_session(
-                    owner_id, session_id
-                )
-                changes.append(
-                    _upsert("review_decision_queue", queue_value(session, decisions))
-                )
+                changes.append(self._queue(owner_id, session))
         return changes
 
     def _project(
@@ -439,8 +462,19 @@ class ReviewCommandBoundary:
             raise IdempotencyReceiptUnavailableError()
         unit: OwnerUnitOfWork[Connection] = receipt.unit
         before = unit.activity
-        with self._executing():
-            result = execute()
+        try:
+            with self._executing():
+                result = execute()
+        except (
+            ConflictError,
+            NotFoundError,
+            ValidationFailure,
+            ReviewRequestError,
+        ):
+            # The command's own preconditions failing during recovery (stale
+            # revision, deleted target) means no stored record answers it.
+            # Integrity and storage errors are not domain errors: they surface.
+            raise IdempotencyReceiptUnavailableError() from None
         if unit.activity != before:
             raise IdempotencyReceiptUnavailableError()
         return result
