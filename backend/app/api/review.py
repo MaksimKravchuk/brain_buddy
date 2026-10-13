@@ -24,11 +24,13 @@ from app.api.task_mapping import task_response
 from app.exceptions import ValidationFailure
 from app.modules.tasks.domain import FormulationSettingsDocument, TaskDocument
 from app.modules.tasks.review_domain import (
+    AutoParkResultDocument,
     DecisionResultDocument,
     ReviewReceiptDocument,
     ReviewRequestError,
     ReviewSessionDocument,
     ReviewSettingsDocument,
+    UndoResultDocument,
 )
 from app.modules.tasks.review_service import ReviewService, ReviewStateView
 from app.schemas.api import ErrorResponse
@@ -233,6 +235,35 @@ def decision_response(
     )
 
 
+def undo_response(
+    result: UndoResultDocument, review_service: ReviewService, owner_id: str
+) -> UndoDecisionResponse:
+    (task,) = tasks_with_formulation(
+        review_service, owner_id, result.formulation_settings, result.task
+    )
+    assert task is not None
+    return UndoDecisionResponse(
+        task=task,
+        undone_decision_id=result.undone_decision_id,
+        deleted_task_id=result.deleted_task_id,
+        session_counts=(
+            None
+            if result.session_counts is None
+            else SessionCounts.model_validate(result.session_counts.model_dump())
+        ),
+    )
+
+
+def auto_park_response(
+    result: AutoParkResultDocument, review_service: ReviewService, owner_id: str
+) -> AutoParkResponse:
+    (task,) = tasks_with_formulation(
+        review_service, owner_id, result.formulation_settings, result.task
+    )
+    assert task is not None
+    return AutoParkResponse(applied=result.applied, task=task)
+
+
 # ----------------------------------------------------------------- routes
 @router.post(
     "/tasks/{task_id}/decisions",
@@ -277,20 +308,7 @@ def undo_decision(
         owner_id=current_user.id,
         idempotency_key=require_idempotency_key(idempotency_key),
     )
-    (task,) = tasks_with_formulation(
-        review_service, current_user.id, result.formulation_settings, result.task
-    )
-    assert task is not None
-    return UndoDecisionResponse(
-        task=task,
-        undone_decision_id=result.undone_decision_id,
-        deleted_task_id=result.deleted_task_id,
-        session_counts=(
-            None
-            if result.session_counts is None
-            else SessionCounts.model_validate(result.session_counts.model_dump())
-        ),
-    )
+    return undo_response(result, review_service, current_user.id)
 
 
 @router.post(
@@ -315,11 +333,7 @@ def auto_park_task(
         idempotency_key=require_idempotency_key(idempotency_key),
         exposed=weekly_review_enabled(current_user, feature_flags),
     )
-    (task,) = tasks_with_formulation(
-        review_service, current_user.id, result.formulation_settings, result.task
-    )
-    assert task is not None
-    return AutoParkResponse(applied=result.applied, task=task)
+    return auto_park_response(result, review_service, current_user.id)
 
 
 @router.post(

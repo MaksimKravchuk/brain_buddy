@@ -1032,3 +1032,70 @@ def test_026_FR_005_client_created_decision_ids_are_required_by_the_catalog(
             {"decision_id": new("decision"), "type": "complete"},
             checks=[("task", waiting["id"], waiting["revision"])],
         )
+
+
+def test_026_FR_024_review_receipts_equal_the_rest_response_shape(
+    synced: Synced, device: Device
+) -> None:
+    """Task-bearing Review results are the Review API's bodies, not stored documents."""
+    from app.schemas.review import DecisionResponse
+
+    api, clock = synced.api, synced.clock
+    card = api.create("waiting card", state="waiting", waiting_for="Ann")
+    clock.advance(days=40)
+    task = api.task(card["id"])
+    follow_up = new("task")
+    receipt = device.accepted(
+        "review.decide",
+        task["id"],
+        {
+            "decision_id": new("decision"),
+            "type": "follow_up",
+            "title": "Call Ann",
+            "follow_up_task_id": follow_up,
+        },
+        checks=[("task", task["id"], task["revision"])],
+    )
+    result = receipt["result"]
+    with allure.step("the result validates as the strict REST DecisionResponse"):
+        attach_json("result keys", sorted(result))
+        assert DecisionResponse.model_validate(result)
+        assert set(result) == {
+            "decision",
+            "task",
+            "created_task",
+            "receipt",
+            "session_counts",
+        }
+    with allure.step("its tasks equal the REST reads of those tasks"):
+        check_equal("task", result["task"], api.task(task["id"]))
+        check_equal("created", result["created_task"], api.task(follow_up))
+    with allure.step("no storage-only member is present"):
+        attach_json("keys", sorted(set(_walk(result))))
+        assert PRIVATE_KEYS & set(_walk(result)) == set()
+        assert "formulation_settings" not in result
+
+
+def test_026_FR_005_task_family_review_decision_keeps_the_clients_formulation_id(
+    synced: Synced, device: Device
+) -> None:
+    api, clock = synced.api, synced.clock
+    waiting = api.create("waiting card", state="waiting", waiting_for="Ann")
+    clock.advance(days=40)
+    task = api.task(waiting["id"])
+    form = "form_00000000-0000-4000-8000-0000000000dd"
+    receipt = device.accepted(
+        "review.decide",
+        task["id"],
+        {
+            "decision_id": new("decision"),
+            "type": "return_to_next",
+            "title": "Back",
+            "new_formulation_id": form,
+        },
+        checks=[("task", task["id"], task["revision"])],
+    )
+    with allure.step("the formulation the decision created is the device's id"):
+        attach_json("formulation", receipt["result"]["task"]["formulation"])
+        check_equal("receipt", receipt["result"]["task"]["formulation"]["id"], form)
+        check_equal("stored", api.task(task["id"])["formulation"]["id"], form)

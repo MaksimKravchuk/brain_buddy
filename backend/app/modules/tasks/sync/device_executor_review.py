@@ -43,7 +43,6 @@ from app.modules.tasks.review_flow import (
 from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import DomainRefusal, RustCore
 from app.modules.tasks.rust_review_facade import (
-    encode_receipt,
     encode_release,
     encode_session,
 )
@@ -67,7 +66,6 @@ from .receipts import ReceiptCommand
 from .review_projection import (
     ReviewProjection,
     consent_value,
-    decision_value,
     executing,
     public_value,
 )
@@ -150,6 +148,27 @@ _GRANT = _raw(NavigatorService.grant_consent)
 _REVOKE = _raw(NavigatorService.revoke_consent)
 
 
+class _RestResults:
+    """Decision, Undo and auto-park results as the Review API returns them."""
+
+    def __init__(self, review: ReviewService, owner: str) -> None:
+        from app.api import review as rest  # noqa: PLC0415 - api is above modules
+
+        self._rest, self._review, self._owner = rest, review, owner
+
+    def decision(self, result: DecisionResultDocument) -> Json:
+        response = self._rest.decision_response(result, self._review, self._owner)
+        return response.model_dump(mode="json")
+
+    def undo(self, result: UndoResultDocument) -> Json:
+        response = self._rest.undo_response(result, self._review, self._owner)
+        return response.model_dump(mode="json")
+
+    def auto_park(self, result: AutoParkResultDocument) -> Json:
+        response = self._rest.auto_park_response(result, self._review, self._owner)
+        return response.model_dump(mode="json")
+
+
 class ReviewDeviceExecutor:
     """``DeviceCommandExecutor`` for Review, Navigator consent and park commands."""
 
@@ -166,6 +185,10 @@ class ReviewDeviceExecutor:
 
     def supports(self, command_type: str) -> bool:
         return command_type in _SUPPORTED
+
+    def _public(self, owner: str) -> _RestResults:
+        """Task-bearing results in the REST response shape (one source of shape)."""
+        return _RestResults(self._review, owner)
 
     def execute(
         self, command: ReceiptCommand[Connection], envelope: Mapping[str, Any]
@@ -351,7 +374,7 @@ class ReviewDeviceExecutor:
                 owner_id=owner,
                 idempotency_key=command.command_id,
             ),
-            _decision_result,
+            lambda result: self._public(owner).decision(result),
         )
 
     def _missing_client_id(
@@ -406,7 +429,7 @@ class ReviewDeviceExecutor:
                 owner_id=owner,
                 idempotency_key=command.command_id,
             ),
-            _undo_result,
+            lambda result: self._public(owner).undo(result),
         )
 
     def _review_auto_park(
@@ -427,7 +450,7 @@ class ReviewDeviceExecutor:
                 idempotency_key=command.command_id,
                 exposed=self._review.is_exposed(owner),
             ),
-            _auto_park_result,
+            lambda result: self._public(owner).auto_park(result),
         )
 
     # ------------------------------------------------- settings and activation
@@ -639,56 +662,6 @@ class ReviewDeviceExecutor:
 
 
 # ------------------------------------------------------------------ results
-def _decision_result(result: DecisionResultDocument) -> Json:
-    return {
-        "decision": decision_value(result.decision),
-        "task": result.task.model_dump(mode="json"),
-        "created_task": (
-            None
-            if result.created_task is None
-            else result.created_task.model_dump(mode="json")
-        ),
-        "receipt": (
-            None
-            if result.receipt is None
-            else public_value(encode_receipt(result.receipt))
-        ),
-        "session_counts": (
-            None
-            if result.session_counts is None
-            else result.session_counts.model_dump(mode="json")
-        ),
-        "formulation_settings": _formulation(result),
-    }
-
-
-def _formulation(result: Any) -> Json | None:
-    settings = result.formulation_settings
-    return None if settings is None else settings.model_dump(mode="json")
-
-
-def _undo_result(result: UndoResultDocument) -> Json:
-    return {
-        "task": result.task.model_dump(mode="json"),
-        "undone_decision_id": result.undone_decision_id,
-        "deleted_task_id": result.deleted_task_id,
-        "session_counts": (
-            None
-            if result.session_counts is None
-            else result.session_counts.model_dump(mode="json")
-        ),
-        "formulation_settings": _formulation(result),
-    }
-
-
-def _auto_park_result(result: AutoParkResultDocument) -> Json:
-    return {
-        "applied": result.applied,
-        "task": result.task.model_dump(mode="json"),
-        "formulation_settings": _formulation(result),
-    }
-
-
 def _settings_result(settings: ReviewSettingsDocument) -> Json:
     return public_value(encode_settings(settings))  # type: ignore[no-any-return]
 

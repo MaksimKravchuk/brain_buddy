@@ -1680,6 +1680,7 @@ def test_026_FR_005_child_refusals_are_terminal_receipts_without_feed_entries(
         attach_json("outcomes", seen)
         check_equal("rows", rows(live), (before[0] + len(cases), before[1]))
     with allure.step("stored children are unchanged"):
+        attach_json("children", [sub, note])
         assert (
             repo.get_subtask_for_owner(sub, owner_id=owner, task_id=task).title == "One"
         )
@@ -1778,6 +1779,7 @@ def test_026_FR_005_smart_add_resolves_creates_and_binds_like_the_web_path(live,
             ),
         )
     with allure.step("stored state matches: namesakes reused, new tag created once"):
+        attach_json("receipt", receipt)
         stored = repo.get_for_owner(task, owner_id=owner)
         assert stored.project_id == home_project
         assert stored.tag_ids == [home_tag, new_tag]
