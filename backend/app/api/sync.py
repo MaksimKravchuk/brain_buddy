@@ -125,7 +125,7 @@ def get_sync_gateway(
                 container.task_unit_of_work,
                 receipts,
                 IdentityScopeAuthority(container.user_repo),
-                DeviceEpochs(receipts),
+                DeviceEpochs(receipts, container.control_ledger),
                 core,
                 lambda user: flags.is_effective("rust_core_sync", user),
                 container.task_service.clock,

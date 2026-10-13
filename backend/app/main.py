@@ -127,6 +127,18 @@ def _run_privacy_maintenance_sweep(
             "Sync retention sweep iteration failed",
         )
 
+    # Spec 026 PR-52: restore points older than the horizon are gone, so the
+    # control ledger retires what only they needed (never an account still present).
+    if retained:
+        _isolated_step(
+            lambda: container.control_ledger.prune(
+                utcnow(),
+                keep_owner=lambda owner: container.user_repo.get_by_id(owner)
+                is not None,
+            ),
+            "Control ledger prune iteration failed",
+        )
+
     # Spec 020: its own block, so a review failure stops neither purge nor
     # relay retention, and the 3-tuple above stays this function's contract.
     if not durable(Responsibility.REVIEW_SWEEP):
