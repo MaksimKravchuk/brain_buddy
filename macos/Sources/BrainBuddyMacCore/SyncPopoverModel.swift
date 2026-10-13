@@ -20,6 +20,11 @@ package enum SyncPopoverControl: Hashable, Sendable {
     case offlineCopy
     case signOut
     case backupShowInFinder, reportShowInFinder, laterFileShowInFinder
+    /// A runtime issue's "Review" (opens the conflict detail) and its reference "Copy" (spec 026, D-01/D-02).
+    case openConflict(String)
+    case runtimeCopy(String)
+    /// D-03's recovery actions.
+    case recovery(SyncRecoveryAction)
 }
 
 /// The pre-upgrade files X-02 has a line for (data-model E8, FR-021, FR-033).
@@ -90,11 +95,17 @@ package struct SyncPopoverContent: Equatable, Sendable {
     package var backupLine: String?
     package var reportLine: String?
     package var laterFileLine: String?
+    /// Typed Rust-runtime issues (D-01 "Open sync issues"), listed after the legacy ones.
+    package var runtimeIssues: [SyncPopoverRuntimeIssue] = []
+    /// D-03: update needed, rebuilding, interrupted or uncertain migration; nil when nothing to recover.
+    package var recovery: SyncRecoveryContent?
 
     /// The design's Tab order (planning review c2, G27), with only the controls that are shown and
     /// enabled.
     package var tabOrder: [SyncPopoverControl] {
         var order: [SyncPopoverControl] = []
+        // Update-needed outranks every other state (design D-01 priority); its actions come first.
+        if let recovery { order.append(contentsOf: recovery.actions.map { .recovery($0) }) }
         switch notice {
         case .sessionEnded?: order.append(.signInAgain)
         case .accountLess?: order.append(.signIn)
@@ -114,6 +125,10 @@ package struct SyncPopoverContent: Equatable, Sendable {
                 order.append(.dismiss(issue.id))
             }
         }
+        for issue in runtimeIssues {
+            if issue.referenceID != nil { order.append(.runtimeCopy(issue.id)) }
+            order.append(.openConflict(issue.id))
+        }
         if syncNowShown, syncNowEnabled { order.append(.syncNow) }
         if case .offline(_, let reference)? = notice, reference != nil { order.append(.offlineCopy) }
         if email != nil { order.append(.signOut) }
@@ -126,6 +141,7 @@ package struct SyncPopoverContent: Equatable, Sendable {
     /// Focus on open: the attention action; otherwise "Sync now" when enabled; otherwise "Sign in…"
     /// when account-less; otherwise the first enabled control.
     package var initialFocus: SyncPopoverControl? {
+        if let recovery, recovery.condition.isBlocking, let first = recovery.actions.first { return .recovery(first) }
         switch notice {
         case .sessionEnded?: return .signInAgain
         case .failing(_, let reference)? where reference != nil: return .failingCopy
@@ -165,7 +181,8 @@ package enum SyncPopoverModel {
 
     package static func content(
         snapshot: SyncSnapshot, issues: [SyncIssue], state: GTDState, files: MacUpgradeFiles,
-        discarded: Set<SyncIssue.ID> = [], now: Date, device: DeviceKind = .mac, calendar: Calendar = .current
+        discarded: Set<SyncIssue.ID> = [], runtimeIssues: [SyncRuntimeIssue] = [],
+        recovery: SyncRecoveryCondition? = nil, now: Date, device: DeviceKind = .mac, calendar: Calendar = .current
     ) -> SyncPopoverContent {
         let line = SyncStatusDescriber.describe(snapshot, now: now, device: device, calendar: calendar)
         var content = SyncPopoverContent(
@@ -196,9 +213,11 @@ package enum SyncPopoverModel {
                 content.notice = .failing(failing, referenceID: nonEmpty(snapshot.lastFailureReferenceID))
             }
             content.issues = issues.map { row($0, state: state, discarded: discarded.contains($0.id)) }
-            let open = content.issues.filter { !$0.discarded }.count
+            content.runtimeIssues = runtimeRows(runtimeIssues)
+            let open = content.issues.filter { !$0.discarded }.count + content.runtimeIssues.count
             if open > 0 { content.issuesHeading = "\(SyncCopy.changes(open)) couldn't sync" }
         }
+        content.recovery = recovery.map { SyncRecoveryContent($0, pendingCount: snapshot.pendingCount) }
         if files.backup != nil, let until = files.backupKeptUntil {
             content.backupLine = SyncCopy.popoverBackup(until: until, notCarried: files.notCarried, now: now, calendar: calendar)
         }
@@ -235,6 +254,33 @@ package enum SyncPopoverModel {
             referenceID: nonEmpty(description.referenceID), keptOutcome: description.keptOutcome,
             actionAccessibilityLabel: label, discarded: discarded
         )
+    }
+
+    /// The typed runtime issues as rows: actions blocked behind another issue are counted under it,
+    /// not rows of their own, so "2 later actions" never inflate the heading count.
+    /// Adds the typed runtime issues and a recovery condition to content built without them (the
+    /// controller's `popoverContent()`), keeping the heading count honest.
+    package static func adding(
+        runtimeIssues: [SyncRuntimeIssue], recovery: SyncRecoveryCondition? = nil, pendingCount: Int = 0,
+        to content: SyncPopoverContent
+    ) -> SyncPopoverContent {
+        var content = content
+        guard content.email != nil else { return content }
+        content.runtimeIssues = runtimeRows(runtimeIssues)
+        let open = content.issues.filter { !$0.discarded }.count + content.runtimeIssues.count
+        content.issuesHeading = open > 0 ? "\(SyncCopy.changes(open)) couldn't sync" : nil
+        content.recovery = recovery.map { SyncRecoveryContent($0, pendingCount: pendingCount) }
+        return content
+    }
+
+    static func runtimeRows(_ issues: [SyncRuntimeIssue]) -> [SyncPopoverRuntimeIssue] {
+        let blocked = Set(issues.flatMap(\.dependentIDs))
+        return issues.filter { !blocked.contains($0.id) }.map { issue in
+            SyncPopoverRuntimeIssue(
+                id: issue.id, attempted: shortened(issue.summary), why: issue.kind.why,
+                referenceID: issue.referenceID, kind: issue.kind, laterActions: issue.dependentIDs.count
+            )
+        }
     }
 
     /// One line: past `titleLimit` characters the text ends in "…".
@@ -299,4 +345,343 @@ package struct OutcomeDiscards: Equatable, Sendable {
 
     /// When the next discard goes for good.
     package var nextExpiry: Date? { discardedAt.values.min().map { $0.addingTimeInterval(Self.undoWindow) } }
+}
+
+// MARK: - Typed runtime issues (spec 026, D-01/D-02)
+
+/// What a runtime issue is, from the reason code the Rust core kept (contracts/sync-v1.md error table).
+package enum SyncRuntimeIssueKind: Equatable, Sendable {
+    /// Concurrent edit of one field: choose a version (D-02.01).
+    case versionConflict
+    /// Deleted elsewhere while edited here (D-02.09).
+    case deletedElsewhere
+    /// An earlier action was rejected, so this one waits (D-02.11).
+    case dependencyRejected
+    /// Any other rejection: kept and shown, never dropped.
+    case rejected
+
+    package init(reason: String) {
+        switch reason.lowercased().filter({ $0 != "_" && $0 != "-" }) {
+        case "revisionconflict": self = .versionConflict
+        case "entitydeleted": self = .deletedElsewhere
+        case "dependencyrejected": self = .dependencyRejected
+        default: self = .rejected
+        }
+    }
+
+    var why: String {
+        switch self {
+        case .versionConflict: return "This task changed on another device. Both versions are saved."
+        case .deletedElsewhere: return "This item was deleted on another device. Your edit is saved in this issue."
+        case .dependencyRejected: return "An earlier change wasn't accepted. This change is saved here."
+        case .rejected: return "This change isn't accepted. It is saved here."
+        }
+    }
+}
+
+/// One typed runtime issue as the Mac sees it. It keeps the core's string ids and the shown base
+/// revision; it is never coerced into a legacy `SyncIssue`.
+package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
+    package var id: String
+    package var commandID: String
+    package var kind: SyncRuntimeIssueKind
+    /// What the user attempted, on one line (from the issue's saved text; never a payload).
+    package var summary: String
+    /// The user's own saved edit, in full.
+    package var savedEdit: String?
+    package var shownBaseRevision: String?
+    package var dependentIDs: [String]
+    /// Safe, opaque id to copy: it carries no task, AI or auth content.
+    package var referenceID: String? { id.isEmpty ? nil : id }
+
+    package init(
+        id: String, commandID: String, reason: String, summary: String, savedEdit: String? = nil,
+        shownBaseRevision: String? = nil, dependentIDs: [String] = []
+    ) {
+        self.id = id
+        self.commandID = commandID
+        kind = SyncRuntimeIssueKind(reason: reason)
+        self.summary = summary
+        self.savedEdit = savedEdit
+        self.shownBaseRevision = shownBaseRevision
+        self.dependentIDs = dependentIDs
+    }
+
+    /// From the kit's issue: the saved text keys read are `summary`, `title`, `after`, `text`.
+    package init(_ issue: RustWorkspaceIssue) {
+        let text = issue.localText
+        self.init(
+            id: issue.id, commandID: issue.commandID, reason: issue.reason,
+            summary: text["summary"] ?? text["title"] ?? "Saved change",
+            savedEdit: text["after"] ?? text["title"] ?? text["text"],
+            shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs
+        )
+    }
+}
+
+package struct SyncPopoverRuntimeIssue: Equatable, Sendable, Identifiable {
+    package var id: String
+    package var attempted: String
+    package var why: String
+    package var referenceID: String?
+    package var kind: SyncRuntimeIssueKind
+    package var laterActions: Int
+
+    package var actionAccessibilityLabel: String { "Review: \(attempted)" }
+}
+
+// MARK: - D-02 conflict detail
+
+package enum SyncConflictVersion: String, Equatable, Sendable, Codable { case yours, account }
+
+package enum SyncDependentChoice: String, Equatable, Sendable, Codable { case keepForLater, reviewAndRetry, discard }
+
+/// A later action blocked behind the conflicted one (D-02.11).
+package struct SyncBlockedAction: Equatable, Sendable, Identifiable {
+    package var id: String
+    package var summary: String
+    /// "Keep for later" is the safe initial selection.
+    package var choice: SyncDependentChoice = .keepForLater
+    /// "Review and retry" needs an explicit approval of the shown preview; never a default.
+    package var retryApproved = false
+
+    package init(id: String, summary: String) {
+        self.id = id
+        self.summary = summary
+    }
+}
+
+/// What the user decided, to hand to the workspace when it can store it atomically.
+package struct SyncConflictResolution: Equatable, Sendable {
+    package enum Outcome: Equatable, Sendable {
+        case version(SyncConflictVersion)
+        case keepDeleted
+    }
+
+    package var issueID: String
+    package var outcome: Outcome
+    /// The revision the user was shown: the resolution applies against it, or not at all.
+    package var shownRevision: String?
+    package var keep: [String]
+    package var retry: [String]
+    package var discard: [String]
+}
+
+/// The draft that survives closing, Back, Cancel and relaunch: restoring it never submits.
+package struct SyncConflictDraft: Equatable, Sendable, Codable {
+    package var issueID: String
+    package var selected: SyncConflictVersion?
+    package var choices: [String: SyncDependentChoice]
+    package var approvedRetries: Set<String>
+}
+
+/// D-02's state machine as a value: a radio choice with no default, Apply gated on every needed
+/// decision, discard behind the named confirmation, a changed account side clearing approvals.
+package struct SyncConflictModel: Equatable, Sendable {
+    package enum Phase: Equatable, Sendable {
+        case choosing
+        case confirmingDiscard
+        /// "Saving your choice…": a second submit creates no second resolution.
+        case saving
+        case saveFailed
+        /// Stored durably and waiting to sync; both originals remain.
+        case waiting
+        case changedAgain
+    }
+
+    package let issueID: String
+    package let kind: SyncRuntimeIssueKind
+    package private(set) var shownRevision: String?
+    package private(set) var accountVersion: String?
+    package let yourEdit: String
+    package private(set) var selected: SyncConflictVersion?
+    package private(set) var actions: [SyncBlockedAction]
+    package private(set) var phase: Phase = .choosing
+
+    package init(issue: SyncRuntimeIssue, accountVersion: String?, blocked: [SyncBlockedAction] = []) {
+        issueID = issue.id
+        kind = issue.kind
+        shownRevision = issue.shownBaseRevision
+        self.accountVersion = accountVersion
+        yourEdit = issue.savedEdit ?? issue.summary
+        actions = blocked
+    }
+
+    package var title: String { kind == .deletedElsewhere ? "Deleted on another device" : "Choose a title" }
+    package var versionLabels: [(SyncConflictVersion, String)] {
+        [(.yours, "Your saved edit"), (.account, "Current account version")]
+    }
+    package var blockedHeading: String? {
+        actions.isEmpty ? nil : "\(actions.count) later action\(actions.count == 1 ? "" : "s") need your decision"
+    }
+    package var statusLine: String? {
+        switch phase {
+        case .saving: return "Saving your choice…"
+        case .saveFailed: return "Your choice wasn't saved. Try again."
+        case .waiting: return "Your choice is saved and waiting to sync."
+        case .changedAgain: return "This task changed again. Review both versions."
+        case .choosing, .confirmingDiscard: return nil
+        }
+    }
+
+    private var discardCount: Int { actions.filter { $0.choice == .discard }.count }
+    package var confirmDiscardTitle: String { "Discard these \(discardCount) saved action\(discardCount == 1 ? "" : "s")?" }
+    package var confirmDiscardButton: String { "Discard \(discardCount) action\(discardCount == 1 ? "" : "s")" }
+    package let confirmDiscardDetail = "They will not be sent. Other saved actions will be kept."
+    /// The exact summaries the confirmation names. Cancel is its initially focused control.
+    package var discardSummaries: [String] { actions.filter { $0.choice == .discard }.map(\.summary) }
+
+    package var isEditable: Bool { phase == .choosing || phase == .changedAgain || phase == .saveFailed }
+
+    /// Apply stays disabled until a version is picked (no default) and every retry is approved.
+    package var applyEnabled: Bool {
+        guard isEditable else { return false }
+        if kind != .deletedElsewhere, selected == nil { return false }
+        return actions.allSatisfy { $0.choice != .reviewAndRetry || $0.retryApproved }
+    }
+
+    package mutating func select(_ version: SyncConflictVersion) {
+        guard isEditable else { return }
+        selected = version
+        phase = .choosing
+    }
+
+    package mutating func setChoice(_ choice: SyncDependentChoice, for id: String) {
+        guard isEditable, let i = actions.firstIndex(where: { $0.id == id }) else { return }
+        actions[i].choice = choice
+        actions[i].retryApproved = false
+    }
+
+    package mutating func approveRetry(_ id: String) {
+        guard isEditable, let i = actions.firstIndex(where: { $0.id == id }), actions[i].choice == .reviewAndRetry
+        else { return }
+        actions[i].retryApproved = true
+    }
+
+    /// "Apply choice": asks for the named discard confirmation, or submits.
+    package mutating func apply() -> SyncConflictResolution? {
+        guard applyEnabled else { return nil }
+        if discardCount > 0 {
+            phase = .confirmingDiscard
+            return nil
+        }
+        return begin()
+    }
+
+    package mutating func confirmDiscard() -> SyncConflictResolution? {
+        guard phase == .confirmingDiscard else { return nil }
+        return begin()
+    }
+
+    /// Cancel returns to the sheet with every choice kept.
+    package mutating func cancelDiscard() { if phase == .confirmingDiscard { phase = .choosing } }
+
+    private mutating func begin() -> SyncConflictResolution {
+        phase = .saving
+        return SyncConflictResolution(
+            issueID: issueID, outcome: kind == .deletedElsewhere ? .keepDeleted : .version(selected ?? .yours),
+            shownRevision: shownRevision, keep: ids(.keepForLater), retry: ids(.reviewAndRetry),
+            discard: ids(.discard)
+        )
+    }
+
+    private func ids(_ choice: SyncDependentChoice) -> [String] { actions.filter { $0.choice == choice }.map(\.id) }
+
+    package mutating func saveFailed() { if phase == .saving { phase = .saveFailed } }
+    package mutating func savedWhileOffline() { if phase == .saving { phase = .waiting } }
+
+    /// The account side moved after the card opened: show it, keep the user's draft and original
+    /// edit, clear every approval and require an explicit apply again (D-02.08).
+    package mutating func accountChanged(revision: String?, accountVersion: String?) {
+        guard revision != shownRevision || accountVersion != self.accountVersion else { return }
+        shownRevision = revision
+        self.accountVersion = accountVersion
+        for i in actions.indices { actions[i].retryApproved = false }
+        phase = .changedAgain
+    }
+
+    package var draft: SyncConflictDraft {
+        SyncConflictDraft(
+            issueID: issueID, selected: selected,
+            choices: Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0.choice) }),
+            approvedRetries: Set(actions.filter(\.retryApproved).map(\.id))
+        )
+    }
+
+    /// Relaunch: the draft returns as it was; nothing is submitted and no discard is pre-confirmed.
+    package mutating func restore(_ draft: SyncConflictDraft) {
+        guard draft.issueID == issueID else { return }
+        selected = draft.selected
+        for i in actions.indices {
+            let choice = draft.choices[actions[i].id] ?? .keepForLater
+            actions[i].choice = choice
+            actions[i].retryApproved = choice == .reviewAndRetry && draft.approvedRetries.contains(actions[i].id)
+        }
+        phase = .choosing
+    }
+}
+
+// MARK: - D-03 recovery
+
+package enum SyncRecoveryAction: Hashable, Sendable {
+    case updateApp, tryAgain, rebuildSyncedCopy, exportSavedData, openImportReport
+    case copyReference(String)
+}
+
+package enum SyncRecoveryCondition: Equatable, Sendable {
+    case updateNeededSync
+    case updateNeededStore
+    case rebuilding
+    case rebuildFailed(referenceID: String?)
+    case importFailed
+    case migrationUncertain
+    case interrupted
+
+    /// States where sync is stopped.
+    package var isBlocking: Bool { self == .updateNeededSync || self == .updateNeededStore }
+}
+
+/// D-03's words and actions; waiting changes and saved conflicts are always named as kept.
+package struct SyncRecoveryContent: Equatable, Sendable {
+    package var condition: SyncRecoveryCondition
+    package var title: String
+    package var detail: String
+    package var actions: [SyncRecoveryAction]
+    package var referenceID: String?
+
+    package init(_ condition: SyncRecoveryCondition, pendingCount: Int) {
+        self.condition = condition
+        referenceID = nil
+        switch condition {
+        case .updateNeededSync:
+            title = "Update needed to sync"
+            detail = "Your saved tasks and waiting changes stay on this device."
+            actions = [.updateApp]
+        case .updateNeededStore:
+            title = "Update needed to open tasks"
+            detail = "Nothing is written and nothing syncs until you update."
+            actions = [.updateApp, .tryAgain, .exportSavedData]
+        case .rebuilding:
+            title = "Rebuilding synced copy…"
+            detail = "\(SyncCopy.changes(pendingCount)) waiting. Your waiting changes and saved conflicts will be kept."
+            actions = []
+        case .rebuildFailed(let reference):
+            title = "Couldn't rebuild the synced copy."
+            detail = "Your waiting changes are saved."
+            actions = [.tryAgain] + (reference.map { [.copyReference($0)] } ?? [])
+            referenceID = reference
+        case .importFailed:
+            title = "Couldn't import earlier data"
+            detail = "Your earlier data file is unchanged. The new store hasn't been activated."
+            actions = [.openImportReport, .tryAgain]
+        case .migrationUncertain:
+            title = "Earlier changes need verification"
+            detail = "Your earlier store and waiting changes are kept while sync checks what reached your account."
+            actions = [.tryAgain]
+        case .interrupted:
+            title = "Connect to finish recovery"
+            detail = "Your waiting changes are saved. Recovery resumes from where it stopped."
+            actions = []
+        }
+    }
 }
