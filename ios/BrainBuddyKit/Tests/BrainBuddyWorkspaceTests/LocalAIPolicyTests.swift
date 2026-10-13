@@ -169,7 +169,8 @@ import Testing
         let shown = workspace.shownTask(of: try #require(workspace.task(task)))
         let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Draft the outline"])))
         let model = workspace.reviewSuggestionModel(
-            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown)
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown,
+            journal: InMemoryReviewSuggestionJournal())
         model.request()
         await model.settled()
         #expect(model.phase == .proposals)
@@ -193,7 +194,8 @@ import Testing
         let shown = workspace.shownTask(of: try #require(workspace.task(task)))
         let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Draft the outline"])))
         let model = workspace.reviewSuggestionModel(
-            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown)
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown,
+            journal: InMemoryReviewSuggestionJournal())
         model.request()
         await model.settled()
         await model.apply("Draft the outline")
@@ -208,7 +210,8 @@ import Testing
         let shown = workspace.shownTask(of: try #require(workspace.task(task)))
         let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Draft the outline"])))
         let model = workspace.reviewSuggestionModel(
-            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown)
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly, shown: shown,
+            journal: InMemoryReviewSuggestionJournal())
         model.request()
         await model.settled()
         try workspace.updateTask(task, TaskChanges(title: .set("Renovate the guest bathroom")))
@@ -225,7 +228,8 @@ import Testing
         try workspace.updateTask(task, TaskChanges(details: .set("Tiles chosen")))
         let executor = FakeExecutor(result: .success(ModelAnswer(proposals: [], clarifyingQuestion: "Which tiles did you choose")))
         let model = workspace.reviewSuggestionModel(
-            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly)
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly,
+            journal: InMemoryReviewSuggestionJournal())
         model.request()
         await model.settled()
         #expect(model.phase == .question)
@@ -236,6 +240,46 @@ import Testing
         #expect(workspace.task(task)?.details == "Tiles chosen\n\nGrey ones")
         #expect(executor.inputs.last?.taskNotes == "Tiles chosen\n\nGrey ones")
         #expect(model.phase == .proposals)
+    }
+
+    @Test("026-FR-020 a rebuilt view must not replace the shown version of a pending proposal")
+    func rebuildKeepsShownVersion() async throws {
+        let workspace = try await activated()
+        let task = try workspace.capture(CaptureDraft(text: "Renovate the bathroom", list: .next))
+        let shown = workspace.shownTask(of: try #require(workspace.task(task)))
+        let executor = FakeExecutor(result: .success(ModelAnswer(proposals: ["Draft the outline"])))
+        let journal = InMemoryReviewSuggestionJournal()
+        let model = workspace.reviewSuggestionModel(
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly,
+            shown: shown, journal: journal)
+        model.request()
+        await model.settled()
+        try workspace.updateTask(task, TaskChanges(title: .set("Renovate the guest bathroom")))
+        let fresh = workspace.shownTask(of: try #require(workspace.task(task)))
+        let again = workspace.reviewSuggestionModel(
+            for: task, kind: .reformulate, adapter: adapter([executor]), remote: nil, privacy: .onDeviceOnly,
+            shown: fresh, journal: journal)
+        #expect(again === model)
+        await again.apply("Draft the outline")
+        #expect(again.phase == .stale, "the version the proposal was made against is kept")
+        #expect(workspace.task(task)?.title == "Renovate the guest bathroom")
+    }
+
+    @Test("026-FR-019 a cached model takes the current client and privacy policy")
+    func cachedModelRefreshesConfiguration() async throws {
+        let workspace = try await activated()
+        let task = try workspace.capture(CaptureDraft(text: "Renovate the bathroom", list: .next))
+        let remote = FakeRemote()
+        let journal = InMemoryReviewSuggestionJournal()
+        let first = workspace.reviewSuggestionModel(
+            for: task, kind: .reformulate, adapter: adapter([]), remote: nil, privacy: .onDeviceOnly, journal: journal)
+        let second = workspace.reviewSuggestionModel(
+            for: task, kind: .reformulate, adapter: adapter([]), remote: remote, privacy: .remoteAllowed, journal: journal)
+        #expect(first === second)
+        second.request()
+        await second.settled()
+        #expect(remote.statusCalls == 1, "the refreshed client and policy were used")
+        #expect(second.phase == .needsConsent(provider: "openai", textVersion: 1, state: .missing))
     }
 
     @Test("026-FR-023 workspace errors map to content-free conflict, rejection or unknown outcomes")
