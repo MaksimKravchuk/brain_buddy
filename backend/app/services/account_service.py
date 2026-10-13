@@ -11,6 +11,7 @@ import logging
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import IO, Any
@@ -24,6 +25,7 @@ from app.exceptions import (
 )
 from app.modules.agents.repository import AgentRepository
 from app.modules.tasks import TaskRepository
+from app.modules.tasks.sync.control_ledger import ControlLedger
 from app.repositories import (
     CrtCommandRepository,
     FeatureFlagOverrideRepository,
@@ -99,6 +101,28 @@ class AccountService:
         self.deletion_grace = deletion_grace
         self.auth_migration = auth_migration
         self.apple_lifecycle: AuthAppleLifecycle | None = None
+        self._control_ledger: ControlLedger | None = None
+        self._retire_restore_points: Callable[[str], None] | None = None
+
+    def attach_control_ledger(
+        self,
+        ledger: ControlLedger,
+        retire_restore_points: Callable[[str], None] | None = None,
+    ) -> None:
+        """Record deletion/revocation outside the task backups (spec 026 PR-52).
+
+        ``retire_restore_points(owner_id)`` must remove the backup/WAL/transfer
+        artifacts that could restore the account; if it raises, purge stays
+        incomplete and retries. Without it (platform snapshots that only expire)
+        the purge marker stays until ``ControlLedger.prune`` retires it after the
+        restore horizon.
+        """
+        self._control_ledger = ledger
+        self._retire_restore_points = retire_restore_points
+
+    def _note_revocation(self, user_id: str, auth_version: int | None) -> None:
+        if self._control_ledger is not None:
+            self._control_ledger.record_revocation(user_id, auth_version, now=utcnow())
 
     # ------------------------------------------------------------------
     # Helpers
@@ -191,6 +215,7 @@ class AccountService:
                 self._confirmed_owner(user)
                 updated = self.user_repo.update_email(user.id, new_email)
                 self._keep_current_session(updated, keep_token_hash)
+                self._note_revocation(user.id, updated.auth_version)
                 self.session_repo.delete_all_for_user(user.id, keep=keep_token_hash)
                 return updated
         except ConflictError as exc:
@@ -220,6 +245,7 @@ class AccountService:
                 lambda fresh: fresh.model_copy(update={"password_hash": new_hash}),
             )
             self._keep_current_session(updated, keep_token_hash)
+            self._note_revocation(user.id, updated.auth_version)
             revoked = self.session_repo.delete_all_for_user(
                 user.id, keep=keep_token_hash
             )
@@ -353,6 +379,13 @@ class AccountService:
             for name, records in self.task_repo.iter_review_export(user.id):
                 write_json(f"review/{name}", records)
 
+            # Spec 026 (FR-003): the owner's scope generations and registered
+            # device epochs. Receipts, fingerprints, jobs, lease fences and
+            # transfer/snapshot copies are protected and named in `excluded`.
+            sync_identity = self.task_repo.export_sync_identity(owner_id=user.id)
+            write_json("sync/scope.json", sync_identity["scope"])
+            write_json("sync/devices.json", sync_identity["devices"])
+
             relay = self.agent_repo.export_owner_data(owner_id=user.id, now=now)
             write_json("relay/relay.json", relay)
 
@@ -393,6 +426,7 @@ class AccountService:
                         "tasks": len(tasks),
                         "voice_operations": len(operations),
                         "voice_audio_chunks": audio_chunks,
+                        "sync_device_epochs": len(sync_identity["devices"]),
                         "relay_connections": len(relay["connections"]),
                         "relay_runs": len(relay["runs"]),
                         "relay_events": len(relay["events"]),
@@ -407,6 +441,10 @@ class AccountService:
                         "of data already exported)",
                         "navigator_usage (weekly-review AI suggestion cost and call "
                         "counters: operational, content-free, deleted after 35 days)",
+                        "sync command receipts, request fingerprints, legacy key "
+                        "digests, change-feed images, snapshot and transfer pages, "
+                        "jobs and lease fences (protected dedup/control state and "
+                        "copies of data already exported)",
                         "relay credentials, inbound signing secrets, and sealed secret boxes",
                         "relay idempotency keys and raw request/response receipts",
                         "relay content already expired or redacted under the retention policy",
@@ -458,6 +496,7 @@ class AccountService:
                 "DELETE FROM auth_challenges WHERE user_id=?", (user.id,)
             )
             connection.execute("DELETE FROM auth_attempts WHERE user_id=?", (user.id,))
+            self._note_revocation(user.id, user.auth_version)
             revoked = self.session_repo.delete_all_for_user(user.id)
         logger.info(
             "Account deletion requested for %s (purge at %s); revoked %s session(s)",
@@ -550,6 +589,9 @@ class AccountService:
                 ),
             )
 
+        if self._control_ledger is not None:
+            # Before any destructive step, so a restored backup replays the purge.
+            self._control_ledger.record_purge(user_id, now=utcnow())
         if self.auth_migration is not None:
             self.auth_migration.erase_backup()
         self.feature_flag_repo.scrub_user(user_id)
@@ -571,6 +613,11 @@ class AccountService:
                     # the owner, so it must not survive this retry.
                     self.tree_service.remove_stale_tree_state(entry.id)
             self.invite_repo.scrub_user(user_id)
+            if self._control_ledger is not None and self._retire_restore_points:
+                # Artifacts first, then the marker; a failure keeps purge open.
+                self._control_ledger.complete_purge(
+                    user_id, self._retire_restore_points
+                )
             self.user_repo.delete(user_id)
         logger.info("Purged account %s and all owned data", user_id)
 

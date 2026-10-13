@@ -26,6 +26,7 @@ mod admission;
 mod apply_changes;
 mod epochs;
 mod execute;
+mod export;
 mod import;
 mod issues;
 mod legacy_outbox;
@@ -59,6 +60,10 @@ pub use execute::{
     RandomIds, ReportedExecuteError, Stage, VisibleSnapshot, execute, execute_batch,
     execute_batch_reported_with, execute_batch_with, execute_with, lookup_known_batch,
     projection_generation, visible_snapshot,
+};
+pub use export::{
+    EXPORT_FORMAT, ExportError, ExportReport, ExportStage, ExportedAlias, ExportedDraft,
+    ExportedIntent, ExportedIssue, ExportedRecord, WorkspaceExport, export_workspace,
 };
 pub use import::{
     AccountlessImportProof, ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage,

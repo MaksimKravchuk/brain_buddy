@@ -16,6 +16,7 @@ from typing import Any
 from app.core.logging import get_correlation_id
 
 from .authority import require_owned
+from .control_ledger import ControlLedger
 from .receipts import (
     Authority,
     CommandReceipts,
@@ -27,6 +28,7 @@ from .unit_of_work import OwnerUnitOfWork
 
 ACTIVE = "active"
 CLOSED = "closed"
+GENERATION_CHANGED = "generation_changed"
 _MAX_ID = 128
 
 
@@ -39,8 +41,13 @@ def _identifier(value: object) -> str:
 class DeviceEpochs:
     """Registration, closure and the unseen-command epoch fence."""
 
-    def __init__(self, receipts: CommandReceipts[Connection]) -> None:
+    def __init__(
+        self,
+        receipts: CommandReceipts[Connection],
+        ledger: ControlLedger | None = None,
+    ) -> None:
         self._receipts = receipts
+        self._ledger = ledger
 
     def register(  # noqa: PLR0913 - the registration body's fields
         self,
@@ -57,6 +64,7 @@ class DeviceEpochs:
         device_id, device_epoch = _identifier(device_id), _identifier(device_epoch)
         _identifier(protocol_version)
         stamp = now.astimezone(UTC).isoformat()
+        stale = False
         with uow.begin(owner_id) as unit:
             current = self._receipts.admit(unit, authorize)
             conn = unit.connection
@@ -71,11 +79,17 @@ class DeviceEpochs:
             else:
                 require_owned(owner_id, bound["owner_id"])
             epoch = conn.execute(
-                "SELECT status FROM sync_device_epochs "
+                "SELECT status, server_generation FROM sync_device_epochs "
                 "WHERE device_id = ? AND device_epoch = ?",
                 (device_id, device_epoch),
             ).fetchone()
             if epoch is None:
+                if self._ledger is not None:
+                    # Outside the task DB, so a restore older than this
+                    # registration can still close the epoch.
+                    self._ledger.record_epoch(
+                        owner_id, device_id, device_epoch, now=now
+                    )
                 conn.execute(
                     "INSERT INTO sync_device_epochs VALUES (?,?,?,?,?,?,NULL,NULL)",
                     (
@@ -89,15 +103,28 @@ class DeviceEpochs:
                 )
             elif epoch["status"] != ACTIVE:
                 raise SyncCommandError("EPOCH_CLOSED")
-            return {
-                "device_id": device_id,
-                "device_epoch": device_epoch,
-                "epoch_status": ACTIVE,
-                "scope_id": owner_id,
-                "server_generation": current.server_generation,
-                "server_now": stamp,
-                "correlation_id": get_correlation_id(),
-            }
+            elif epoch["server_generation"] != current.server_generation:
+                # Registered before a restore/generation change: it keeps
+                # answering RESET_REQUIRED, so retire it and make the client
+                # move to a fresh epoch instead of looping on this one.
+                conn.execute(
+                    "UPDATE sync_device_epochs SET status = ?, closed_at = ?, "
+                    "close_reason = ? WHERE device_id = ? AND device_epoch = ?",
+                    (CLOSED, stamp, GENERATION_CHANGED, device_id, device_epoch),
+                )
+                stale = True
+            if not stale:
+                return {
+                    "device_id": device_id,
+                    "device_epoch": device_epoch,
+                    "epoch_status": ACTIVE,
+                    "scope_id": owner_id,
+                    "server_generation": current.server_generation,
+                    "server_now": stamp,
+                    "correlation_id": get_correlation_id(),
+                }
+        # Raised after the unit committed, so the closure above persists.
+        raise SyncCommandError("EPOCH_CLOSED")
 
     def close(  # noqa: PLR0913 - the closure's fields
         self,
