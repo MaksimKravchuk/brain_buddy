@@ -116,6 +116,14 @@ def _run_privacy_maintenance_sweep(
         else 0
     )
 
+    # Spec 026 PR-50: sync copies expire independently of owner activity and
+    # flags, so the legacy loop runs the cleanup whenever it owns privacy.
+    if retained:
+        _isolated_step(
+            lambda: container.sync_retention.run_retention_sweep(),
+            "Sync retention sweep iteration failed",
+        )
+
     # Spec 020: its own block, so a review failure stops neither purge nor
     # relay retention, and the 3-tuple above stays this function's contract.
     if not durable(Responsibility.REVIEW_SWEEP):
@@ -378,6 +386,8 @@ def _install_durable_scheduler(
             container.crt_command_repo,
             gate,
             cadence=privacy,
+            # Stub containers in the handoff tests predate this port.
+            sync_retention=getattr(container, "sync_retention", None),
         )
     )
     handoff.assign(Responsibility.PRIVACY_RETENTION, owned)

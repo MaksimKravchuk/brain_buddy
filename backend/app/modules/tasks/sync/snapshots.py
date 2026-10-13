@@ -44,6 +44,7 @@ from .authority import resource_not_found
 from .change_log import encode
 from .delta import encode_cursor
 from .receipts import ScopeAuthority
+from .retention import FIELD_EXPIRY_ENTITIES, expire_value
 from .review_projection import ReviewProjection
 from .transfers import (
     TRANSFER_PAGE_BYTES,
@@ -126,7 +127,7 @@ class SnapshotStore:
         conn, owner = unit.connection, unit.owner_id
         self._expire(conn, owner, now)
         watermark = self._watermark(conn, owner)
-        changes = self._changes(unit)
+        changes = self._changes(unit, now)
         if self._watermark(conn, owner) != watermark:
             # Unreachable under the owner lock; never serve a base we cannot prove.
             raise ProtocolFailure("TEMPORARILY_UNAVAILABLE")
@@ -182,7 +183,7 @@ class SnapshotStore:
         ).fetchone()
         return str(row["commit_seq"]) if row else "0"
 
-    def _changes(self, unit: OwnerUnitOfWork[Connection]) -> list[Json]:
+    def _changes(self, unit: OwnerUnitOfWork[Connection], now: datetime) -> list[Json]:
         """Current public upserts and final deletion versions, deterministically."""
         conn, owner = unit.connection, unit.owner_id
         versions = {
@@ -208,7 +209,10 @@ class SnapshotStore:
                 **row,
                 "record_version": "1" if version is None else version["record_version"],
             }
-            value = row["value"]
+            # Undo content past its seven-day deadline is not materialized, even
+            # if the Review sweep has not yet cleared the source row.
+            value = expire_value(row["entity_type"], row["value"], now) or row["value"]
+            change["value"] = value
             if "revision" in value:
                 change["edit_revision"] = value["revision"]
             changes[key] = change
@@ -324,7 +328,7 @@ class SnapshotStore:
         the canonical retention change) clears the record again.
         """
         rows = conn.execute(
-            "SELECT source_expires_at FROM sync_change_records r "
+            "SELECT r.entity_type, r.source_expires_at FROM sync_change_records r "
             "WHERE r.owner_id = ? AND r.operation = 'upsert' "
             "AND r.source_expires_at IS NOT NULL "
             "AND CAST(r.commit_seq AS INTEGER) <= CAST(? AS INTEGER) "
@@ -335,8 +339,16 @@ class SnapshotStore:
             "AND CAST(n.commit_seq AS INTEGER) <= CAST(? AS INTEGER))",
             (owner, snapshot["watermark"], snapshot["watermark"]),
         ).fetchall()
+        created = datetime.fromisoformat(snapshot["created_at"])
         return any(
-            datetime.fromisoformat(row["source_expires_at"]) <= now for row in rows
+            deadline <= now
+            # An expired field this base already left out (``_changes``) cannot
+            # void it; any other expired copy still does.
+            and not (
+                row["entity_type"] in FIELD_EXPIRY_ENTITIES and deadline <= created
+            )
+            for row in rows
+            if (deadline := datetime.fromisoformat(row["source_expires_at"]))
         )
 
     @staticmethod

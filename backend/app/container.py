@@ -53,7 +53,9 @@ from app.modules.tasks.rust_adapter import RustCore
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.modules.tasks.sync.authority import IdentityScopeAuthority
+from app.modules.tasks.sync.change_log import ChangeLog
 from app.modules.tasks.sync.receipts import Authority, ReceiptStore
+from app.modules.tasks.sync.retention import SyncRetention, sync_owner_ids
 from app.modules.tasks.sync.review_projection import ReviewCommandBoundary
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
 from app.repositories import (
@@ -156,6 +158,9 @@ class Container:
     # Spec 026 PR-25: the one SQLite transaction Tasks, Review and job intents
     # share. Opt-in; existing call sites keep their own commits.
     task_unit_of_work: TaskUnitOfWork
+    # Spec 026 PR-50: independent cleanup of every sync copy (receipt content,
+    # feed after-images, snapshots, transfers). Needs no flag or authority.
+    sync_retention: SyncRetention
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -807,6 +812,11 @@ def build_container(
         navigator_service=navigator_service,
         job_repository=job_repository,
         task_unit_of_work=task_unit_of_work,
+        sync_retention=SyncRetention(
+            task_unit_of_work,
+            ChangeLog(rust_core),
+            lambda: sync_owner_ids(task_repo.db_path),
+        ),
         job_execution=JobExecutionGate(
             job_repository,
             # Identity is the scope authority: an owner that no longer resolves

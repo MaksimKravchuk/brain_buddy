@@ -17,6 +17,8 @@ from uuid import uuid4
 from app.exceptions import RepositoryError
 from app.modules.tasks.rust_adapter import RustCore
 
+from .retention import redact_expired_receipts, source_expiry
+
 if TYPE_CHECKING:
     from .unit_of_work import OwnerUnitOfWork
 
@@ -297,7 +299,7 @@ class ChangeLog(AtomicChangeLog[Connection]):
                 row.get("edit_revision"),
                 row["operation"],
                 encode(row["value"]) if row["value"] is not None else None,
-                None,
+                source_expiry(row["entity_type"], row["value"]),
             ),
         )
 
@@ -352,10 +354,7 @@ class ChangeLog(AtomicChangeLog[Connection]):
     def prune(self, unit: OwnerUnitOfWork[Connection], *, now: datetime) -> None:
         """Remove expired copies; keep the content-free final deletion versions."""
         conn, owner = unit.connection, unit.owner_id
-        conn.execute(
-            "UPDATE sync_command_receipts SET result = NULL WHERE owner_id = ? AND expires_at <= ?",
-            (owner, now.isoformat()),
-        )
+        redact_expired_receipts(conn, owner, now)
         conn.execute(
             "DELETE FROM sync_change_transactions WHERE owner_id = ? AND committed_at <= ?",
             (owner, (now - timedelta(days=90)).isoformat()),
