@@ -201,6 +201,8 @@ public final class Workspace {
     private(set) var rustSyncState: RustWorkspaceSyncState?
     /// Where an explicit "Rebuild synced copy" stands (design D-03).
     var rustRebuild = RuntimeSyncRecovery.Rebuild.idle
+    /// Requests submitted for issue decisions, reused by a repeated Apply.
+    @ObservationIgnored var rustResolutions = RuntimeIssueResolutionLedger()
     /// The stable code the shared runtime failed to open with, for the recovery state.
     var rustLoadFailureCode: String?
 
@@ -1455,6 +1457,7 @@ extension Workspace {
         rustFacade = nil
         rustGestureSaver = nil
         rustStatusRequestID &+= 1
+        rustResolutions.removeAll()
         rustTaskFrames = [:]
         rustTaskInterests = [:]
         rustProjectInterests = [:]
@@ -2621,6 +2624,7 @@ extension Workspace {
         rustSelection = selection
         rustSyncState = nil
         rustRebuild = .idle
+        rustResolutions.removeAll()
         rustLoadFailureCode = nil
         runtimeIssues = []
         runtimeTransportUnavailable = false

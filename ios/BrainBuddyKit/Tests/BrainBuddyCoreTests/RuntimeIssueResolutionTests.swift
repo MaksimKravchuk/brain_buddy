@@ -65,7 +65,7 @@ struct RuntimeIssueResolutionTests {
         func plan(_ resolution: RuntimeIssueResolution) throws -> RustIssueResolveRequest {
             try RuntimeIssueResolutionPlanner.plan(resolution, among: [primary], makeCommandID: Self.ids())
         }
-        func decision(keep: [String] = [], retry: [String] = [], discard: [String] = []) -> RuntimeIssueResolution {
+        func decision(keep: [String] = [], retry: [RetryDependent] = [], discard: [String] = []) -> RuntimeIssueResolution {
             RuntimeIssueResolution(
                 issueID: primary.id, outcome: .useAccountVersion, shownRevision: "2", keepForLater: keep,
                 retry: retry, discard: discard)
@@ -93,7 +93,7 @@ struct RuntimeIssueResolutionTests {
         let request = try RuntimeIssueResolutionPlanner.plan(
             RuntimeIssueResolution(
                 issueID: primary.id, outcome: .keepMine, shownRevision: "3", keepForLater: ["cmd-4"],
-                retry: ["cmd-3"], discard: ["cmd-5"]),
+                retry: [RetryDependent(id: "cmd-3")], discard: ["cmd-5"]),
             among: [primary, retried], makeCommandID: Self.ids())
         #expect(request.dependents.map(\.commandID) == ["cmd-3", "cmd-4", "cmd-5"])
         guard case .retry(let replacement) = request.dependents[0].choice else { Issue.record("expected retry"); return }
@@ -115,7 +115,7 @@ struct RuntimeIssueResolutionTests {
             dependsOn: ["cmd-2", "cmd-1"])
         let request = try RuntimeIssueResolutionPlanner.plan(
             RuntimeIssueResolution(
-                issueID: primary.id, outcome: .useAccountVersion, shownRevision: "7", retry: ["cmd-3"]),
+                issueID: primary.id, outcome: .useAccountVersion, shownRevision: "7", retry: [RetryDependent(id: "cmd-3")]),
             among: [primary, retried], makeCommandID: Self.ids())
         guard case .retry(let replacement) = request.dependents[0].choice else { Issue.record("expected retry"); return }
         #expect(Self.preconditions(replacement).first?["edit_revision"] as? String == "7")
@@ -141,5 +141,61 @@ struct RuntimeIssueResolutionTests {
         var rebuilding = RuntimeSyncRecovery()
         rebuilding.rebuild = .rebuilding
         #expect(rebuilding.needsAttention)
+    }
+
+    @Test("026-FR-010: a retried action on another entity is approved against the revision its own preview showed")
+    func retryOnAnotherEntityUsesItsDisplayedRevision() throws {
+        let primary = Self.issue("cmd-2", dependents: ["cmd-3", "cmd-4"])
+        let other = Self.issue(
+            "cmd-3", reason: "BLOCKED_DEPENDENCY", entity: "task-9", preconditions: [Self.revision("task-9", "5")],
+            dependsOn: ["cmd-2"])
+        let same = Self.issue(
+            "cmd-4", reason: "BLOCKED_DEPENDENCY", preconditions: [Self.revision("task-1", "2")], dependsOn: ["cmd-2"])
+        let request = try RuntimeIssueResolutionPlanner.plan(
+            RuntimeIssueResolution(
+                issueID: primary.id, outcome: .keepMine, shownRevision: "3",
+                retry: [RetryDependent(id: "cmd-3", shownRevision: "8"), RetryDependent(id: "cmd-4")]),
+            among: [primary, other, same], makeCommandID: Self.ids())
+        guard case .retry(let onOther) = request.dependents[0].choice,
+            case .retry(let onSame) = request.dependents[1].choice
+        else { Issue.record("expected retries"); return }
+        let otherShown = Self.preconditions(onOther).first
+        #expect(otherShown?["edit_revision"] as? String == "8")
+        #expect(otherShown?["entity_id"] as? String == "task-9")
+        // On the issue's own record it still follows the kept edit's replacement.
+        #expect((Self.preconditions(onSame).first?["after_command"] as? [String: Any])?["command_id"] as? String == "new-1")
+        // Without a displayed revision the action's own precondition is untouched.
+        let untouched = try RuntimeIssueResolutionPlanner.plan(
+            RuntimeIssueResolution(
+                issueID: primary.id, outcome: .keepMine, shownRevision: "3",
+                keepForLater: ["cmd-4"], retry: [RetryDependent(id: "cmd-3")]),
+            among: [primary, other, same], makeCommandID: Self.ids())
+        guard case .retry(let kept) = untouched.dependents[0].choice else { Issue.record("expected retry"); return }
+        #expect(Self.preconditions(kept).first?["edit_revision"] as? String == "5")
+    }
+
+    @Test("026-FR-007: a repeated Apply reuses the exact submitted request, minted IDs included")
+    func ledgerReusesSubmittedRequest() throws {
+        let primary = Self.issue("cmd-2", preconditions: [Self.revision("task-1", "1")])
+        let resolution = RuntimeIssueResolution(issueID: primary.id, outcome: .keepMine, shownRevision: "4")
+        var ledger = RuntimeIssueResolutionLedger()
+        let first = try ledger.request(for: resolution, among: [primary], makeCommandID: Self.ids())
+        // The issue has left the list since (it was resolved, the answer was lost): same request.
+        let again = try ledger.request(for: resolution, among: [], makeCommandID: Self.ids())
+        #expect(first == again)
+        guard case .keepMine(let replacement) = again.choice else { Issue.record("expected keepMine"); return }
+        #expect(replacement.commandID == "new-1")
+        // Uncertain failures keep it; proof that nothing was stored drops it.
+        ledger.settle(issueID: primary.id, error: .failed(code: "CANCELLED"))
+        #expect(try ledger.request(for: resolution, among: [], makeCommandID: Self.ids()) == first)
+        ledger.settle(issueID: primary.id, error: .changedAgain)
+        #expect(throws: RuntimeIssueResolutionError.unknownIssue) {
+            try ledger.request(for: resolution, among: [], makeCommandID: Self.ids())
+        }
+        // A different decision for the same issue is planned anew.
+        let other = RuntimeIssueResolution(issueID: primary.id, outcome: .keepMine, shownRevision: "5")
+        let replanned = try ledger.request(for: other, among: [primary], makeCommandID: Self.ids())
+        guard case .keepMine(let fresh) = replanned.choice else { Issue.record("expected keepMine"); return }
+        #expect(Self.preconditions(fresh).first?["edit_revision"] as? String == "5")
     }
 }

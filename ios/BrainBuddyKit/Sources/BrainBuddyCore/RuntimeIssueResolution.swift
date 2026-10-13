@@ -24,14 +24,15 @@ public struct RuntimeIssueResolution: Equatable, Sendable {
     public let shownRevision: String?
     /// Held actions that stay held (and stay issues).
     public let keepForLater: [String]
-    /// Held actions the person reviewed and approved to be queued again under new IDs.
-    public let retry: [String]
+    /// Held actions the person reviewed and approved to be queued again under new IDs, each with
+    /// the revision of its own record that the person was shown when approving it.
+    public let retry: [RetryDependent]
     /// Held actions dropped. Include an ID only after the person confirmed the named list.
     public let discard: [String]
 
     public init(
         issueID: String, outcome: Outcome, shownRevision: String?, keepForLater: [String] = [],
-        retry: [String] = [], discard: [String] = []
+        retry: [RetryDependent] = [], discard: [String] = []
     ) {
         self.issueID = issueID
         self.outcome = outcome
@@ -39,6 +40,20 @@ public struct RuntimeIssueResolution: Equatable, Sendable {
         self.keepForLater = keepForLater
         self.retry = retry
         self.discard = discard
+    }
+}
+
+/// A held action approved for retry. `shownRevision` is the revision of the record that action
+/// edits, as displayed in the retry preview; it is the precondition of the new command when that
+/// record is not the issue's own (an action on another entity), so a reviewed retry does not fail
+/// against a revision it was never shown. `nil` keeps the action's own precondition.
+public struct RetryDependent: Equatable, Sendable {
+    public let id: String
+    public let shownRevision: String?
+
+    public init(id: String, shownRevision: String? = nil) {
+        self.id = id
+        self.shownRevision = shownRevision
     }
 }
 
@@ -234,7 +249,7 @@ public enum RuntimeIssueResolutionPlanner {
             throw RuntimeIssueResolutionError.unknownIssue
         }
         let held = issue.dependentIDs
-        let listed = resolution.keepForLater + resolution.retry + resolution.discard
+        let listed = resolution.keepForLater + resolution.retry.map(\.id) + resolution.discard
         guard Set(listed) == Set(held), listed.count == held.count else {
             throw RuntimeIssueResolutionError.incompleteDecision
         }
@@ -246,18 +261,19 @@ public enum RuntimeIssueResolutionPlanner {
         case .useAccountVersion, .keepDeleted:
             choice = .useCurrent
         case .keepMine:
-            let replacement = try replacement(for: issue, primary: true, scope: scope, makeCommandID: makeCommandID)
+            let replacement = try replacement(for: issue, primary: true, shownRevision: nil, scope: scope, makeCommandID: makeCommandID)
             scope.replaced[issue.commandID] = replacement.commandID
             choice = .keepMine(replacement)
         }
         var dependents: [(commandID: String, choice: RustDependentChoice)] = []
         for id in held {
-            if resolution.retry.contains(id) {
+            if let retried = resolution.retry.first(where: { $0.id == id }) {
                 guard let dependent = issues.first(where: { $0.commandID == id || $0.id == id }) else {
                     throw RuntimeIssueResolutionError.incompleteDecision
                 }
                 let replacement = try replacement(
-                    for: dependent, primary: false, scope: scope, makeCommandID: makeCommandID)
+                    for: dependent, primary: false, shownRevision: retried.shownRevision, scope: scope,
+                    makeCommandID: makeCommandID)
                 scope.replaced[dependent.commandID] = replacement.commandID
                 dependents.append((id, .retry(replacement)))
             } else if resolution.discard.contains(id) {
@@ -286,7 +302,8 @@ public enum RuntimeIssueResolutionPlanner {
     }
 
     private static func replacement(
-        for issue: RustWorkspaceIssue, primary: Bool, scope: Scope, makeCommandID: () -> String
+        for issue: RustWorkspaceIssue, primary: Bool, shownRevision: String?, scope: Scope,
+        makeCommandID: () -> String
     ) throws -> RustIssueReplacement {
         let intent = try intent(of: issue)
         let newPrimary = scope.replaced[scope.primaryID]
@@ -297,6 +314,11 @@ public enum RuntimeIssueResolutionPlanner {
                     after["command_id"] = new
                     precondition["after_command"] = after
                 }
+            } else if precondition["entity_id"] as? String != scope.target, !primary, let shownRevision,
+                precondition["entity_id"] as? String == intent["entity_id"] as? String
+            {
+                // Another entity: approved against the revision its preview displayed.
+                precondition["edit_revision"] = shownRevision
             } else if precondition["entity_id"] as? String == scope.target, let target = scope.target {
                 if primary {
                     if let revision = scope.revision { precondition["edit_revision"] = revision }
@@ -323,4 +345,36 @@ public enum RuntimeIssueResolutionPlanner {
         }
         return RustIssueReplacement(commandID: makeCommandID(), preconditions: data, dependsOn: dependsOn)
     }
+}
+
+/// The exact requests submitted for issues, kept until the workspace binding ends, so an Apply
+/// repeated after a lost or uncertain completion (or a double tap) sends the same new command IDs
+/// and the runtime answers it as a repeat instead of a new decision.
+public struct RuntimeIssueResolutionLedger: Sendable {
+    private var submitted: [String: (resolution: RuntimeIssueResolution, request: RustIssueResolveRequest)] = [:]
+
+    public init() {}
+
+    /// The request for `resolution`: the stored one when the same decision was submitted before,
+    /// otherwise a freshly planned one, which is stored before it is sent.
+    public mutating func request(
+        for resolution: RuntimeIssueResolution, among issues: [RustWorkspaceIssue], makeCommandID: () -> String
+    ) throws -> RustIssueResolveRequest {
+        if let known = submitted[resolution.issueID], known.resolution == resolution { return known.request }
+        let request = try RuntimeIssueResolutionPlanner.plan(resolution, among: issues, makeCommandID: makeCommandID)
+        submitted[resolution.issueID] = (resolution, request)
+        return request
+    }
+
+    /// A refusal that proves nothing was stored drops the request, so the next decision plans anew;
+    /// an uncertain failure keeps it for the repeat. Success keeps it too: a repeat answers `repeated`.
+    public mutating func settle(issueID: String, error: RuntimeIssueResolutionError?) {
+        switch error {
+        case .changedAgain, .alreadyResolved, .unknownIssue, .notResolvable, .itemDeleted, .incompleteDecision:
+            submitted[issueID] = nil
+        case .notReady, .failed, nil: break
+        }
+    }
+
+    public mutating func removeAll() { submitted = [:] }
 }

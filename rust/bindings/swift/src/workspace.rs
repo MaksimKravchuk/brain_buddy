@@ -1710,18 +1710,25 @@ impl BridgeWorkspace {
         let store = held
             .as_mut()
             .ok_or_else(|| Failure::new("WORKSPACE_CLOSED", None))?;
+        let mut arbitration = None;
         Ok(guarded(&AtomicU8::new(OPEN), || {
-            let mut state = operation
-                .state
-                .lock()
-                .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
-            if *state == OperationState::Cancelled || self.state.load(Ordering::Acquire) != OPEN {
-                return Err(Failure::new("CANCELLED", None));
-            }
-            // The operation lock stays held through the SQLite commit.
+            // Cancellation wins until the hook right before the SQLite commit takes the
+            // operation lock; from there it is held through the commit.
+            let before_commit = || {
+                let lock = operation.state.lock().map_err(|_| StoreError::Corrupt)?;
+                if *lock == OperationState::Cancelled || self.state.load(Ordering::Acquire) != OPEN
+                {
+                    return Err(ExecuteError::Cancelled);
+                }
+                arbitration = Some(lock);
+                Ok(())
+            };
             let resolved =
-                bb_client::resolve_issue(store, &mut RandomIds, &request).map_err(issue_failure)?;
-            *state = OperationState::Committed;
+                bb_client::resolve_issue_with(store, &mut RandomIds, &request, before_commit)
+                    .map_err(issue_failure)?;
+            if let Some(lock) = &mut arbitration {
+                **lock = OperationState::Committed;
+            }
             let id = |id: bb_protocol::wire::CommandId| id.as_str().to_owned();
             Ok(BridgeResolved {
                 replaced: resolved

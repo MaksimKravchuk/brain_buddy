@@ -69,7 +69,7 @@ pub use issues::{
     Choice, CurrentRecord, DecisionDraft, DependentChoice, DependentDraft, DraftAction, Issue,
     IssueError, IssueReason, IssueState, IssueView, LoadedDraft, Replacement, ResolveRequest,
     Resolved, issue, load_draft, open_issues, record_rejection, record_rejection_in, resolve_issue,
-    save_draft,
+    resolve_issue_with, save_draft,
 };
 pub use legacy_outbox::{
     LegacyAnswer, LegacyConversionPage, LegacyConversionPlan, LegacyConversionProgress,

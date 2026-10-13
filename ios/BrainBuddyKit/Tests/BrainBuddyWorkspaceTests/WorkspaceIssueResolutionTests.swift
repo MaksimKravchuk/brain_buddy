@@ -39,6 +39,16 @@ struct WorkspaceIssueResolutionTests {
         await #expect(throws: RuntimeIssueResolutionError.notReady) { try await workspace.resolveIssue(resolution) }
     }
 
+    @Test("026-FR-007: an account version read that outlives its binding is rejected, not shown")
+    @MainActor
+    func accountVersionFencedByBinding() async throws {
+        let (workspace, directory) = try await workspace()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        await #expect(throws: RuntimeIssueResolutionError.notReady) {
+            _ = try await workspace.accountVersion(ofIssue: "issue_missing") { await workspace.closeRuntime() }
+        }
+    }
+
     @Test("026-FR-010: a fresh runtime reports no recovery, and the epoch and link are read as values")
     @MainActor
     func recoveryDefaults() async throws {
