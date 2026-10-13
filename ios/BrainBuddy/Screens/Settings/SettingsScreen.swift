@@ -35,7 +35,7 @@ struct SettingsScreen: View {
             accountSection
             if workspace.account != nil {
                 syncSection
-            } else if !workspace.issues.isEmpty {
+            } else if issueCount > 0 {
                 Section { syncIssuesLink }
             }
             // Weekly review (spec 020, M-23); shown only while it is exposed.
@@ -219,7 +219,7 @@ struct SettingsScreen: View {
                 }
             }
             syncNowButton
-            if !workspace.issues.isEmpty {
+            if issueCount > 0 {
                 syncIssuesLink
             }
         } header: {
@@ -231,15 +231,18 @@ struct SettingsScreen: View {
     /// ago"), which also says when it last synced.
     private var syncStatusRow: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let description = SyncStatusLabel.describe(
-                workspace.syncStatus,
-                pendingChanges: workspace.pendingChangeCount,
-                now: context.date,
-                deviceName: SyncStatusLabel.deviceName
-            )
+            let description = SyncStatusLabel.describe(workspace, now: context.date)
             LabeledContent {
-                Text(description.text)
-                    .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(description.text)
+                        .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)
+                    if let detail = description.detail {
+                        Text(detail)
+                            .font(BBFont.caption)
+                            .foregroundStyle(BBColor.textTertiary)
+                    }
+                }
+                .multilineTextAlignment(.trailing)
             } label: {
                 Label {
                     Text("Status")
@@ -285,12 +288,17 @@ struct SettingsScreen: View {
         .disabled(isSyncing)
     }
 
+    /// Open issues of whichever engine runs the workspace.
+    private var issueCount: Int {
+        workspace.isRustSelected ? workspace.runtimeIssues.count : workspace.issues.count
+    }
+
     private var syncIssuesLink: some View {
         NavigationLink(value: AppRoute.syncIssues) {
             HStack {
                 Label("Sync issues", systemImage: "exclamationmark.triangle")
                 Spacer(minLength: BBSpacing.s2)
-                Text(workspace.issues.count, format: .number)
+                Text(issueCount, format: .number)
                     .monospacedDigit()
                     .foregroundStyle(BBColor.textTertiary)
             }

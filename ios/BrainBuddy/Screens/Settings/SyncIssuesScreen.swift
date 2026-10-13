@@ -12,8 +12,17 @@ struct SyncIssuesScreen: View {
     init() {}
 
     var body: some View {
+        if workspace.isRustSelected {
+            RuntimeIssuesList()
+                .navigationTitle("Sync issues")
+        } else {
+            legacyIssues
+        }
+    }
+
+    private var legacyIssues: some View {
         let issues = workspace.issues.sorted { $0.occurredAt > $1.occurredAt }
-        Group {
+        return Group {
             if issues.isEmpty {
                 EmptyStateView(
                     title: "No sync issues",
