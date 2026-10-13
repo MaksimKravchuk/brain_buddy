@@ -14,6 +14,7 @@ from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
     FormulationSettingsDocument,
     ProjectDocument,
+    SmartAddTaskResultDocument,
     TagDocument,
     TaskCommentDocument,
     TaskDocument,
@@ -22,6 +23,8 @@ from app.modules.tasks.domain import (
 from app.modules.tasks.review_domain import FormulationView
 from app.schemas.tasks import (
     ProjectResponse,
+    SmartAddCreatedResponse,
+    SmartAddTaskResponse,
     TagResponse,
     TaskCommentResponse,
     TaskFormulationResponse,
@@ -169,7 +172,36 @@ def tag_response(
     )
 
 
+def smart_add_response(
+    result: SmartAddTaskResultDocument,
+    *,
+    task_service: TaskService,
+    owner_id: str,
+) -> SmartAddTaskResponse:
+    return SmartAddTaskResponse(
+        task=command_task_response(
+            task_service, owner_id, result.task, result.formulation_settings
+        ),
+        project=(
+            project_response(
+                result.project, task_service=task_service, owner_id=owner_id
+            )
+            if result.project
+            else None
+        ),
+        tags=[
+            tag_response(tag, task_service=task_service, owner_id=owner_id)
+            for tag in result.tags
+        ],
+        created=SmartAddCreatedResponse(
+            project_id=result.created.project_id,
+            tag_ids=result.created.tag_ids,
+        ),
+    )
+
+
 __all__ = [
+    "smart_add_response",
     "command_task_response",
     "project_response",
     "tag_response",

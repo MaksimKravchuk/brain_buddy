@@ -119,6 +119,12 @@ class PublicProjector(Protocol):
 
     def tag(self, owner: str, tag: Any) -> dict[str, Any]: ...
 
+    def subtask(self, owner: str, subtask: Any) -> dict[str, Any]: ...
+
+    def comment(self, owner: str, comment: Any) -> dict[str, Any]: ...
+
+    def smart_add(self, owner: str, result: Any) -> dict[str, Any]: ...
+
 
 class RestProjector:
     """``PublicProjector`` over the API's own mappers (one source of shape)."""
@@ -142,6 +148,22 @@ class RestProjector:
     def tag(self, owner: str, tag: Any) -> dict[str, Any]:
         response = self._map.tag_response(
             tag, task_service=self._service, owner_id=owner
+        )
+        return response.model_dump(mode="json")
+
+    def subtask(self, owner: str, subtask: Any) -> dict[str, Any]:
+        return self._map.subtask_response(subtask).model_dump(mode="json")
+
+    def comment(self, owner: str, comment: Any) -> dict[str, Any]:
+        return self._map.comment_response(comment).model_dump(mode="json")
+
+    def smart_add(self, owner: str, result: Any) -> dict[str, Any]:
+        """The Smart Add body, projected with the owner's current clock settings."""
+        stamped = result.model_copy(
+            update={"formulation_settings": self._service.formulation_settings(owner)}
+        )
+        response = self._map.smart_add_response(
+            stamped, task_service=self._service, owner_id=owner
         )
         return response.model_dump(mode="json")
 
@@ -172,7 +194,8 @@ class TaskDeviceExecutor:
             if blocked is not None:
                 return blocked
             handler = getattr(self, "_" + kind.replace(".", "_"))
-            return handler(command, envelope, dict(payload))  # type: ignore[no-any-return]
+            body = self._resolve_aliases(command, envelope, dict(payload))
+            return handler(command, envelope, body)  # type: ignore[no-any-return]
         except ValidationError:
             raise _invalid() from None
 
@@ -201,6 +224,59 @@ class TaskDeviceExecutor:
                 "DEPENDENCY_PENDING", details={"dependency_ids": pending}
             )
         return None
+
+    def _resolve_aliases(
+        self,
+        command: ReceiptCommand[Connection],
+        envelope: Mapping[str, Any],
+        body: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Replace Smart Add ``{after_command, alias_id, entity_type}`` references.
+
+        The envelope is never rewritten: each alias is read from the declared
+        predecessor's retained ``id_bindings`` into the in-memory body only.
+        """
+        if not str(envelope["type"]).startswith("task."):
+            return body
+        kinds = {"project_id": "project", "tag_ids": "tag"}
+        kinds |= {"add_tag_ids": "tag", "remove_tag_ids": "tag"}
+
+        def one(value: Any, kind: str) -> Any:
+            if not isinstance(value, dict):
+                return value
+            if (
+                set(value) != {"after_command", "alias_id", "entity_type"}
+                or value["entity_type"] != kind
+                or value["after_command"] not in envelope["depends_on"]
+            ):
+                raise _invalid()
+            receipt = self._receipt(command, value["after_command"])
+            for binding in (receipt or {}).get("id_bindings", []):
+                if (binding["entity_type"], binding["alias_id"]) == (
+                    kind,
+                    value["alias_id"],
+                ):
+                    return binding["entity_id"]
+            raise _invalid()
+
+        def resolve(fields: dict[str, Any]) -> dict[str, Any]:
+            return {
+                key: (
+                    (
+                        [one(item, kinds[key]) for item in value]
+                        if isinstance(value, list)
+                        else one(value, kinds[key])
+                    )
+                    if key in kinds
+                    else value
+                )
+                for key, value in fields.items()
+            }
+
+        resolved = resolve(body)
+        if isinstance(resolved.get("tag_changes"), dict):
+            resolved["tag_changes"] = resolve(resolved["tag_changes"])
+        return resolved
 
     @staticmethod
     def _receipt(command: ReceiptCommand[Connection], command_id: str) -> Any:

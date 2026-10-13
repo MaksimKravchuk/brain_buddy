@@ -602,6 +602,17 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             for row in rows
         ]
 
+    def child_id_taken(self, table: str, child_id: str, *, owner_id: str) -> bool:
+        """Whether an owner's subtask or comment already uses ``child_id``."""
+        if table not in {"subtasks", "comments"}:
+            raise ValueError(table)
+        with self._connection(self._thread_state) as conn:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE owner_id = ? AND id = ?",  # noqa: S608
+                (owner_id, child_id),
+            ).fetchone()
+        return row is not None
+
     def get_subtask_for_owner(
         self, subtask_id: str, *, owner_id: str, task_id: str
     ) -> TaskSubtaskDocument:

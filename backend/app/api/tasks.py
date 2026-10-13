@@ -24,6 +24,7 @@ from app.api.dependencies import (
 from app.api.task_mapping import command_task_response as _with_formulation
 from app.api.task_mapping import comment_response as _to_comment_response
 from app.api.task_mapping import project_response as _to_project_response
+from app.api.task_mapping import smart_add_response as _to_smart_add_response
 from app.api.task_mapping import subtask_response as _to_subtask_response
 from app.api.task_mapping import tag_response as _to_tag_response
 from app.api.task_mapping import task_response as _to_response
@@ -37,7 +38,6 @@ from app.modules.tasks.autocomplete import (
     TaskTitleAutocompleteService,
 )
 from app.modules.tasks.domain import (
-    SmartAddTaskResultDocument,
     TaskDocument,
 )
 from app.modules.tasks.review_domain import FormulationView
@@ -64,7 +64,6 @@ from app.schemas.tasks import (
     ProjectListState,
     ProjectResponse,
     ProjectUpdateRequest,
-    SmartAddCreatedResponse,
     SmartAddTaskCreateRequest,
     SmartAddTaskResponse,
     TagCreateRequest,
@@ -1239,32 +1238,4 @@ def _command_response(
 ) -> TaskResponse:
     return _with_formulation(
         task_service, owner_id, result.task, result.formulation_settings
-    )
-
-
-def _to_smart_add_response(
-    result: SmartAddTaskResultDocument,
-    *,
-    task_service: TaskService,
-    owner_id: str,
-) -> SmartAddTaskResponse:
-    return SmartAddTaskResponse(
-        task=_with_formulation(
-            task_service, owner_id, result.task, result.formulation_settings
-        ),
-        project=(
-            _to_project_response(
-                result.project, task_service=task_service, owner_id=owner_id
-            )
-            if result.project
-            else None
-        ),
-        tags=[
-            _to_tag_response(tag, task_service=task_service, owner_id=owner_id)
-            for tag in result.tags
-        ],
-        created=SmartAddCreatedResponse(
-            project_id=result.created.project_id,
-            tag_ids=result.created.tag_ids,
-        ),
     )
