@@ -32,7 +32,8 @@ into ignored paths, from `rust/Cargo.lock` and the toolchain pinned in
 missing. CI runs the script before every Swift lane; `swift-linux.sh` does it in the
 official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 
-- Only `Sources/BrainBuddyCore/BrainBuddyRustBridge.swift` imports the generated module;
+- Only `Sources/BrainBuddyCore/BrainBuddyRustBridge.swift` and `BrainBuddyRustSyncBridge.swift`
+  import the generated module;
   its `RustBridgeRuntime` takes and returns owned values, throws `RustBridgeError`
   (`code`, `retryable`, `field`, never payload text), runs off the caller's actor and
   honours task cancellation. Change the Rust interface and the facade together.
@@ -69,6 +70,29 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   until the status says `mayRun` (every entry classified, no `unsent` intent left), and the UI must
   not say "synced" unless `fullySynced`. The `unsent` intents are the runtime's to turn into new
   commands (use the entry's idempotency key as the command ID so a retry is idempotent).
+- `BrainBuddyWorkspace/RustRuntimeLauncher` + `RustRuntimeSelectionStore` choose the runtime per install
+  (T044, pilot): `runtime/selection.json` beside the stores (App Group on iOS, the Mac's folder on
+  macOS) names the Rust workspace identity; no file means legacy. Only the app writes it, and only
+  after the PR-41/42 importers finished with `mayRun`; the default-OFF pilot switch
+  (`RustRuntimePilotSwitch`, a local `UserDefaults` key, never a server flag) gates that first move
+  alone. An existing selection that cannot be opened is `unavailable`, never a fallback to the
+  retired file. Widgets and App Intents (`SharedWorkspace.make()`) read only the file and open the
+  store through `Workspace.openForExtension`. The sync host plugs in at `RustTransportProvider`;
+  `HostRustAccountLifecycle` is the production `RustAccountLifecyclePort` over the core's
+  `link_account` / `remove_account_copy` (one transaction each, under the store's lock).
+- `BrainBuddySync/RustSyncHost` is the Apple host of the shared sync loop (`bb-client`
+  `transport.rs`/`subscriptions.rs`, `rust/bindings/swift/src/sync.rs`) and a `SyncRuntimePort`.
+  The core's own threads run it (one sync worker over its own store connection, one hint-stream
+  reader while foregrounded); Swift supplies the ports: `URLSessionRustSyncTransport` and
+  `URLSessionRustSyncHintStream` (same-origin `URLSession`, no redirects, cancellation polled while
+  blocked) over `BrainBuddyAPI.SessionCookieCredential`, which keeps the session token in the
+  `SessionTokenStore` and applies the client's cookie rules (`Set-Cookie` renewal, 401 forgets the
+  token sent). No token ever enters Rust. Build one after the account link is recorded with
+  `RustSyncHost.start(…)` and install it as the selection's `transport`; call `enterBackground()`
+  when the scene leaves the foreground. `UPGRADE_REQUIRED` reads as `SyncRuntimeWakeResult.updateNeeded`
+  (`Workspace.runtimeSyncNeedsUpdate`, `RuntimeSyncRecovery.syncNeedsUpdate`). Tests use
+  `BrainBuddyFakeServer`'s `StubServer` (URLProtocol); `RustSyncHostBackendTests` is the opt-in run
+  against the real backend (`BB_BACKEND_PYTHON`).
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.

@@ -80,6 +80,7 @@ struct CaptureTaskIntent: AppIntent {
         }
         try await SharedWorkspace.didWrite(workspace)
 
+        _ = try? await workspace.prepareTaskRecords([taskID])
         guard let record = workspace.task(taskID) else {
             throw BrainBuddyIntentError(.taskNotFound)
         }

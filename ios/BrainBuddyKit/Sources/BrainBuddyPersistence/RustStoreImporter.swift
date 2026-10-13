@@ -161,10 +161,24 @@ public struct RustStoreImporter: Sendable {
     /// stay unchanged. Nothing is exposed until every preparation step succeeds.
     public func prepareAccountlessRuntime(facade: RustDomainFacade, reviewEnabled: Bool = false)
         async throws -> RustWorkspaceRuntime {
+        let prepared = try await prepareImportedRuntime(facade: facade, reviewEnabled: reviewEnabled, requireAccountless: true)
+        return prepared.runtime
+    }
+
+    /// The same preparation for a file of either kind (T044, pilot selection): an account-less
+    /// document is the account-less bootstrap above; a signed-in one is imported already linked
+    /// to its account (the core records it), so no account-less authority or local Review
+    /// fragment is established and the sync host binds the scope and device at its first session.
+    /// Nothing is exposed until every preparation step succeeded and the outbox status says
+    /// `mayRun`. `account` is the legacy document's, for the caller to record.
+    public func prepareImportedRuntime(facade: RustDomainFacade, reviewEnabled: Bool = false,
+                                       requireAccountless: Bool = false)
+        async throws -> (runtime: RustWorkspaceRuntime, account: LinkedAccount?) {
         let report = try await run()
         let source = try await retainedSource(report)
         let document = source.document
-        guard document.account == nil else {
+        let accountless = document.account == nil
+        guard accountless || !requireAccountless else {
             throw RustStoreImportError.failed(RustBridgeError(code: "INVALID_REQUEST", field: "account_less_import"))
         }
         let retained = retainedSourceURL(report)
@@ -194,8 +208,8 @@ public struct RustStoreImporter: Sendable {
                 let prepared = try facade.workspacePrepareLegacyReview(document.base, bindings: bindings)
                 _ = try await workspace.activateLegacyReview(metadata, prepared: prepared, context: context)
             }
-            try await workspace.establishAccountlessFromImport(retainedSourceURL: retained)
-            for source in Self.privateReviewSources(in: document.base) {
+            if accountless { try await workspace.establishAccountlessFromImport(retainedSourceURL: retained) }
+            for source in accountless ? Self.privateReviewSources(in: document.base) : [] {
                 if try await workspace.localReviewPrivateSourceCompleted(retainedSourceURL: retained, selected: source) { continue }
                 var cursor: String?
                 repeat {
@@ -208,7 +222,7 @@ public struct RustStoreImporter: Sendable {
             }
             let outbox = RustOutboxImporter(runtime: runtime, databaseURL: databaseURL, workspaceID: workspaceID,
                 busyTimeoutMilliseconds: busyTimeoutMilliseconds, now: now)
-            if try await outbox.run().mayRun { return workspace }
+            if try await outbox.run().mayRun { return (workspace, document.account) }
             // Prepare the verified ORIGINAL sequence once, including converted
             // prefixes. Re-encoding a suffix from base loses dependency lineage.
             let original = try await Task.detached(priority: .userInitiated) {
@@ -251,7 +265,7 @@ public struct RustStoreImporter: Sendable {
                 if plan.atomicGroup { _ = try await workspace.finalizeLegacyConversion(token: plan.token) }
             }
             guard try await outbox.run().mayRun else { throw RustBridgeError(code: "LEGACY_OUTBOX_NOT_READY") }
-            return workspace
+            return (workspace, document.account)
         } catch {
             try? await workspace.close()
             throw error

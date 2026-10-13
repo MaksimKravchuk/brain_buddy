@@ -22,6 +22,7 @@
 //! that import carried: a send whose receipt proves its outcome is settled, one that
 //! may have reached the server stays an issue and is never reissued.
 
+mod account_link;
 mod admission;
 mod apply_changes;
 mod epochs;
@@ -35,6 +36,7 @@ mod local_review_fragments;
 mod local_review_import;
 mod localfacts;
 mod locking;
+mod rebase;
 mod receipts;
 mod replay;
 mod review_content_stamps;
@@ -46,6 +48,9 @@ mod sync_session;
 mod transport;
 mod workspace_query;
 
+pub use account_link::{
+    LinkOutcome, RemovalCheck, RemovalOutcome, link_account_with, remove_account_copy_with,
+};
 pub use admission::{ShownFrameToken, ShownTaskFrame};
 pub use apply_changes::{
     Applied, ApplyError, ApplyStage, FeedStep, Fence, Recovery, TransferFault, TransferProgress,
@@ -82,6 +87,7 @@ pub use legacy_outbox::{
     legacy_unsent, resolve_legacy_outbox, stage_legacy_page_with,
 };
 pub use locking::{LockMode, MigrationLock};
+pub use rebase::{AccountBinding, MergeOutcome, link_and_merge_with};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
 pub use replay::{ReplayError, Replayed, replay, replay_in};
 pub use snapshot::{

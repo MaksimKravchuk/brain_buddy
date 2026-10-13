@@ -40,6 +40,7 @@ struct SettingsScreen: View {
             }
             // Weekly review (spec 020, M-23); shown only while it is exposed.
             ReviewSettingsSection()
+            if diagnostics != nil { RustRuntimePilotRow() }
             aboutSection
             deleteAccountSection
         }

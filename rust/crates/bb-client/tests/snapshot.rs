@@ -11,11 +11,11 @@
 //! describes and decoding it with the `bb-protocol` codecs.
 
 use bb_client::{
-    Activated, ApplyError, ApplyStage, DecisionDraft, ExecuteContext, ExecuteRequest, Fence,
-    IdSource, OpenOptions, Recovery, SnapshotProgress, Store, StoreError, TransferFault,
-    abandon_snapshot, activate_snapshot, activate_snapshot_with, apply_changes, apply_receipt,
-    begin_snapshot, capture_fence, execute, load_draft, open_issues, save_draft, sha256_hex,
-    stage_snapshot_page,
+    AccountBinding, Activated, ApplyError, ApplyStage, DecisionDraft, ExecuteContext,
+    ExecuteRequest, Fence, IdSource, OpenOptions, Recovery, SnapshotProgress, Store, StoreError,
+    TransferFault, abandon_snapshot, activate_snapshot, activate_snapshot_with, apply_changes,
+    apply_receipt, begin_snapshot, capture_fence, establish_account_less_with, execute,
+    link_and_merge_with, load_draft, open_issues, save_draft, sha256_hex, stage_snapshot_page,
 };
 use bb_domain::types::{ActorId, Policy, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -942,6 +942,224 @@ mod snapshot {
         assert_eq!(issues[0].issue.local_text, Some(json!({ "title": "Mine" })));
         let restored = load_draft(&mut store, &issue_id).unwrap().unwrap();
         assert_eq!(restored.draft.keep_mine, Some(true));
+    }
+
+    #[test]
+    fn snapshot_026_fr_003_merged_local_work_stays_over_the_first_snapshot_until_its_commands_confirm()
+     {
+        let path = scratch("merged");
+        let mut store = open(&path).unwrap();
+        establish_account_less_with(&mut store, || Ok(())).unwrap();
+        let mut ids = SeqIds(0);
+        create_task(&mut store, &mut ids, 1, "Written before the account");
+        let binding = AccountBinding {
+            account: Id::parse("account-1").unwrap(),
+            scope: Id::parse(SCOPE).unwrap(),
+            device: Id::parse("device-1").unwrap(),
+        };
+        link_and_merge_with(&mut store, &binding, &context(), || Ok(())).unwrap();
+        // A finished bootstrap needs the server's generation and an active epoch.
+        store
+            .write(|tx| {
+                tx.execute(
+                    "UPDATE sync_meta SET server_generation = ?1, cursor = 'cursor-0',
+                        base_watermark = '0', device_epoch_state = 'active'",
+                    params![GENERATION],
+                )
+            })
+            .unwrap();
+        assert_eq!(titles(&mut store), set(&["Written before the account"]));
+
+        let fx = snapshot(
+            "snap-merge",
+            GENERATION,
+            5,
+            &[task_change(T, "Server", 1, 3)],
+        );
+        let done = install(&mut store, &fx);
+
+        // The snapshot is the base; the merged task is pending over it, not clobbered.
+        assert_eq!(confirmed(&mut store).len(), 1);
+        assert_eq!(
+            titles(&mut store),
+            set(&["Server", "Written before the account"])
+        );
+        assert_eq!(done.replayed.unwrap().applied.len(), 1);
+        let queue = states(&mut store);
+        assert_eq!(
+            queue
+                .values()
+                .filter(|state| state.as_str() == "queued")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn snapshot_026_fr_003_merged_review_state_and_private_overlays_survive_the_first_snapshot() {
+        let path = scratch("merged-review");
+        let mut store = open(&path).unwrap();
+        establish_account_less_with(&mut store, || Ok(())).unwrap();
+        let mut ids = SeqIds(0);
+        let review = |mut request: ExecuteRequest| {
+            request.context.policy.weekly_review = true;
+            request
+        };
+        create_task(&mut store, &mut ids, 1, "Written before the account");
+        execute(
+            &mut store,
+            &mut ids,
+            &review(request(
+                cmd(2),
+                CommandType::ReviewExplainerAck,
+                Some(WORKSPACE),
+                json!({"time_zone": "UTC"}),
+                vec![],
+            )),
+        )
+        .unwrap();
+        execute(
+            &mut store,
+            &mut ids,
+            &review(request(
+                cmd(3),
+                CommandType::ReviewSettings,
+                Some(WORKSPACE),
+                json!({"threshold_days": 21, "onboarded": true}),
+                vec![Precondition::Revision(RevisionPrecondition {
+                    entity_type: EntityType::ReviewSettings,
+                    entity_id: Id::parse(WORKSPACE).unwrap(),
+                    edit_revision: Counter::parse("2").unwrap(),
+                })],
+            )),
+        )
+        .unwrap();
+        let session = execute(
+            &mut store,
+            &mut ids,
+            &review(request(
+                cmd(4),
+                CommandType::ReviewSessionStart,
+                None,
+                json!({"mode": "quick", "entry": "list", "origin": "ios", "skip_steps": [], "replace_open": false}),
+                vec![],
+            )),
+        )
+        .unwrap()
+        .entity_id;
+        store
+            .write(|tx| {
+                tx.execute(
+                    "INSERT INTO drafts (workspace_id, draft_id, editor_kind, fields, updated_at)
+                     VALUES (?1, 'runtime:local-review-private:session', 'runtime_local_review_private',
+                             x'7b7d', ?2)",
+                    params![WORKSPACE, NOW],
+                )
+            })
+            .unwrap();
+        let review_before = review_records(&mut store);
+        let overlays_before = private_overlays(&mut store);
+        assert_eq!(
+            overlays_before.len(),
+            3,
+            "the manual one and the two the rules wrote"
+        );
+        assert_eq!(
+            review_before.len(),
+            2,
+            "settings and the session: {review_before:?}"
+        );
+
+        let binding = AccountBinding {
+            account: Id::parse("account-1").unwrap(),
+            scope: Id::parse(SCOPE).unwrap(),
+            device: Id::parse("device-1").unwrap(),
+        };
+        let mut merge_context = context();
+        merge_context.policy.weekly_review = true;
+        let outcome = link_and_merge_with(&mut store, &binding, &merge_context, || Ok(())).unwrap();
+        assert!(
+            matches!(
+                outcome,
+                bb_client::MergeOutcome::Merged {
+                    review_records_kept_local: 1,
+                    ..
+                }
+            ),
+            "{outcome:?}"
+        );
+        store
+            .write(|tx| {
+                tx.execute(
+                    "UPDATE sync_meta SET server_generation = ?1, cursor = 'cursor-0',
+                        base_watermark = '0', device_epoch_state = 'active'",
+                    params![GENERATION],
+                )
+            })
+            .unwrap();
+        let fx = snapshot(
+            "snap-review",
+            GENERATION,
+            5,
+            &[task_change(T, "Server", 1, 3)],
+        );
+        install(&mut store, &fx);
+
+        // The snapshot is the base, and not one public Review record or private overlay is gone.
+        assert_eq!(
+            titles(&mut store),
+            set(&["Server", "Written before the account"])
+        );
+        assert_eq!(
+            review_records(&mut store),
+            review_before,
+            "session {}",
+            session.as_str()
+        );
+        assert_eq!(private_overlays(&mut store), overlays_before);
+        // A second activation (a rebuild from the account) keeps them too.
+        let again = snapshot(
+            "snap-review-2",
+            GENERATION,
+            6,
+            &[task_change(T, "Server", 2, 4)],
+        );
+        install(&mut store, &again);
+        assert_eq!(review_records(&mut store), review_before);
+        assert_eq!(private_overlays(&mut store), overlays_before);
+    }
+
+    /// The private Review overlays, by draft id.
+    fn private_overlays(store: &mut Store) -> BTreeMap<String, Vec<u8>> {
+        store
+            .read(|tx| {
+                let mut statement = tx.prepare(
+                    "SELECT draft_id, fields FROM drafts WHERE draft_id LIKE 'runtime:local-review-private:%'",
+                )?;
+                let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                rows.collect()
+            })
+            .unwrap()
+    }
+
+    /// The visible Review records, by `(type, key)`.
+    fn review_records(store: &mut Store) -> BTreeMap<(String, String), Value> {
+        store
+            .read(|tx| {
+                let mut statement = tx.prepare(
+                    "SELECT record_type, record_key, body FROM visible_records
+                     WHERE record_type LIKE 'review_%'",
+                )?;
+                let rows = statement.query_map([], |row| {
+                    let body: Vec<u8> = row.get(2)?;
+                    Ok((
+                        (row.get(0)?, row.get(1)?),
+                        serde_json::from_slice(&body).unwrap(),
+                    ))
+                })?;
+                rows.collect()
+            })
+            .unwrap()
     }
 
     #[test]

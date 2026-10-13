@@ -42,6 +42,7 @@ struct CompleteTaskIntent: AppIntent {
         try SharedWorkspace.requireLoaded(workspace)
 
         let id = TaskID(task.id)
+        _ = try? await workspace.prepareTaskRecords([id])
         guard let record = workspace.task(id) else {
             throw BrainBuddyIntentError(.taskNotFound)
         }
