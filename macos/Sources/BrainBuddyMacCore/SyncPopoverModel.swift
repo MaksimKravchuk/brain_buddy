@@ -275,7 +275,7 @@ package enum SyncPopoverModel {
 
     static func runtimeRows(_ issues: [SyncRuntimeIssue]) -> [SyncPopoverRuntimeIssue] {
         let blocked = Set(issues.flatMap(\.dependentIDs))
-        return issues.filter { !blocked.contains($0.id) }.map { issue in
+        return issues.filter { !blocked.contains($0.id) && !blocked.contains($0.commandID) }.map { issue in
             SyncPopoverRuntimeIssue(
                 id: issue.id, attempted: shortened(issue.summary), why: issue.kind.why,
                 referenceID: issue.referenceID, kind: issue.kind, laterActions: issue.dependentIDs.count
@@ -359,13 +359,16 @@ package enum SyncRuntimeIssueKind: Equatable, Sendable {
     case dependencyRejected
     /// Any other rejection: kept and shown, never dropped.
     case rejected
+    /// The send may or may not have reached the account. Never resolvable here: the runtime reconciles
+    /// it first, and nothing here may suggest a retry is safe.
+    case unknownOutcome
 
     package init(reason: String) {
         switch reason.lowercased().filter({ $0 != "_" && $0 != "-" }) {
         case "revisionconflict": self = .versionConflict
         case "entitydeleted": self = .deletedElsewhere
         case "dependencyrejected": self = .dependencyRejected
-        default: self = .rejected
+        default: self = RuntimeIssueKind(reason: reason) == .unknownOutcome ? .unknownOutcome : .rejected
         }
     }
 
@@ -375,6 +378,8 @@ package enum SyncRuntimeIssueKind: Equatable, Sendable {
         case .deletedElsewhere: return "This item was deleted on another device. Your edit is saved in this issue."
         case .dependencyRejected: return "An earlier change wasn't accepted. This change is saved here."
         case .rejected: return "This change isn't accepted. It is saved here."
+        case .unknownOutcome:
+            return "We can't tell whether this change reached your account. It is kept and won't be sent again as a new change."
         }
     }
 }
@@ -391,12 +396,16 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
     package var savedEdit: String?
     package var shownBaseRevision: String?
     package var dependentIDs: [String]
+    /// The commands this one's own command waits on (for what a retry would be refused for).
+    package var waitsOn: [String]
+    /// The record the issue's own command edits.
+    package var targetEntity: String?
     /// Safe, opaque id to copy: it carries no task, AI or auth content.
     package var referenceID: String? { id.isEmpty ? nil : id }
 
     package init(
         id: String, commandID: String, reason: String, summary: String, savedEdit: String? = nil,
-        shownBaseRevision: String? = nil, dependentIDs: [String] = []
+        shownBaseRevision: String? = nil, dependentIDs: [String] = [], waitsOn: [String] = [], targetEntity: String? = nil
     ) {
         self.id = id
         self.commandID = commandID
@@ -405,16 +414,17 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
         self.savedEdit = savedEdit
         self.shownBaseRevision = shownBaseRevision
         self.dependentIDs = dependentIDs
+        self.waitsOn = waitsOn
+        self.targetEntity = targetEntity
     }
 
-    /// From the kit's issue: the saved text keys read are `summary`, `title`, `after`, `text`.
+    /// From the kit's issue: every saved text member is kept (`RustWorkspaceIssue.savedFields`).
     package init(_ issue: RustWorkspaceIssue) {
-        let text = issue.localText
         self.init(
             id: issue.id, commandID: issue.commandID, reason: issue.reason,
-            summary: text["summary"] ?? text["title"] ?? "Saved change",
-            savedEdit: text["after"] ?? text["title"] ?? text["text"],
-            shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs
+            summary: issue.savedSummary, savedEdit: issue.savedEditText,
+            shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs, waitsOn: issue.waitsOn,
+            targetEntity: issue.targetEntity
         )
     }
 }
@@ -434,7 +444,8 @@ package struct SyncPopoverRuntimeIssue: Equatable, Sendable, Identifiable {
 
 package enum SyncConflictVersion: String, Equatable, Sendable, Codable { case yours, account }
 
-package enum SyncDependentChoice: String, Equatable, Sendable, Codable { case keepForLater, reviewAndRetry, discard }
+/// The Mac's name for the shared choice (`DependentChoice`, BrainBuddyCore).
+package typealias SyncDependentChoice = DependentChoice
 
 /// A later action blocked behind the conflicted one (D-02.11).
 package struct SyncBlockedAction: Equatable, Sendable, Identifiable {
@@ -444,10 +455,19 @@ package struct SyncBlockedAction: Equatable, Sendable, Identifiable {
     package var choice: SyncDependentChoice = .keepForLater
     /// "Review and retry" needs an explicit approval of the shown preview; never a default.
     package var retryApproved = false
+    /// Whether "Review and retry" can be chosen now (the runtime would not refuse it).
+    package var retryAvailable = true
+    /// The other held actions this one waits on; nil when it is not a saved issue and so can't be
+    /// retried from here.
+    package var retryWaitsOn: [String]? = []
+    /// For an action on another record than the issue's own, the revision its retry preview shows.
+    package var shownRevision: String?
 
-    package init(id: String, summary: String) {
+    package init(id: String, summary: String, retryWaitsOn: [String]? = [], shownRevision: String? = nil) {
         self.id = id
         self.summary = summary
+        self.retryWaitsOn = retryWaitsOn
+        self.shownRevision = shownRevision
     }
 }
 
@@ -464,19 +484,32 @@ package struct SyncConflictResolution: Equatable, Sendable {
     package var shownRevision: String?
     package var keep: [String]
     package var retry: [String]
+    package var retryRevisions: [String: String] = [:]
     package var discard: [String]
+
+    /// The decision as the workspace takes it: Yours keeps the user's edit, Account uses the
+    /// account's version, and a deleted item stays deleted. Every held action is in exactly one list.
+    package var runtime: RuntimeIssueResolution {
+        let mapped: RuntimeIssueResolution.Outcome
+        switch outcome {
+        case .version(.yours): mapped = .keepMine
+        case .version(.account): mapped = .useAccountVersion
+        case .keepDeleted: mapped = .keepDeleted
+        }
+        return RuntimeIssueResolution(
+            issueID: issueID, outcome: mapped, shownRevision: shownRevision, keepForLater: keep,
+            retry: RetryDependent.list(ids: retry, revisions: retryRevisions), discard: discard)
+    }
 }
 
-/// The draft that survives closing, Back, Cancel and relaunch: restoring it never submits.
-package struct SyncConflictDraft: Equatable, Sendable, Codable {
-    package var issueID: String
-    package var selected: SyncConflictVersion?
-    package var choices: [String: SyncDependentChoice]
-    package var approvedRetries: Set<String>
-}
+/// The draft that survives closing, Back, Cancel and relaunch: restoring it never submits. It is the
+/// same value the iPhone keeps (`ConflictDecisionDraft`).
+package typealias SyncConflictDraft = ConflictDecisionDraft
 
 /// D-02's state machine as a value: a radio choice with no default, Apply gated on every needed
-/// decision, discard behind the named confirmation, a changed account side clearing approvals.
+/// decision, discard behind the named confirmation, a changed account side clearing approvals. The
+/// decision itself (choices, approvals, discard confirmation, what the runtime would refuse) is the
+/// shared `ConflictDecisionDraft`; this adds the Mac's wording, phases and focus.
 package struct SyncConflictModel: Equatable, Sendable {
     package enum Phase: Equatable, Sendable {
         case choosing
@@ -491,28 +524,91 @@ package struct SyncConflictModel: Equatable, Sendable {
 
     package let issueID: String
     package let kind: SyncRuntimeIssueKind
-    package private(set) var shownRevision: String?
     package private(set) var accountVersion: String?
     package let yourEdit: String
-    package private(set) var selected: SyncConflictVersion?
-    package private(set) var actions: [SyncBlockedAction]
-    package private(set) var phase: Phase = .choosing
+    private var core: ConflictDecisionDraft
+    private let held: [SyncBlockedAction]
+    private var storedWaiting = false
+
+    /// The account's record could not be read, so there is no revision to decide against yet.
+    private var accountUnreadable: Bool
 
     package init(issue: SyncRuntimeIssue, accountVersion: String?, blocked: [SyncBlockedAction] = []) {
-        issueID = issue.id
-        kind = issue.kind
-        shownRevision = issue.shownBaseRevision
-        self.accountVersion = accountVersion
-        yourEdit = issue.savedEdit ?? issue.summary
-        actions = blocked
+        self.init(
+            issue: issue, accountVersion: accountVersion, shownRevision: issue.shownBaseRevision, unreadable: false,
+            blocked: blocked)
     }
 
-    package var title: String { kind == .deletedElsewhere ? "Deleted on another device" : "Choose a title" }
+    /// With the account's record as the workspace read it: its text is the account side, and its
+    /// edit revision is the one a kept edit is decided against. `nil` means it could not be read; then
+    /// nothing can be applied until it is (a deleted-elsewhere item needs no account version).
+    package init(issue: SyncRuntimeIssue, account: RuntimeIssueAccountVersion?, blocked: [SyncBlockedAction] = []) {
+        self.init(
+            issue: issue, accountVersion: account.flatMap(Self.text(of:)), shownRevision: account?.revision,
+            unreadable: account == nil && issue.kind != .deletedElsewhere, blocked: blocked)
+    }
+
+    private init(
+        issue: SyncRuntimeIssue, accountVersion: String?, shownRevision: String?, unreadable: Bool,
+        blocked: [SyncBlockedAction]
+    ) {
+        issueID = issue.id
+        kind = issue.kind
+        self.accountVersion = accountVersion
+        accountUnreadable = unreadable
+        yourEdit = issue.savedEdit ?? issue.summary
+        held = blocked
+        var rules: [String: [String]] = [:]
+        var revisions: [String: String] = [:]
+        for action in blocked {
+            if let waitsOn = action.retryWaitsOn { rules[action.id] = waitsOn }
+            if let shown = action.shownRevision { revisions[action.id] = shown }
+        }
+        core = ConflictDecisionDraft(
+            dependentIDs: blocked.map(\.id), shownRevision: shownRevision, issueID: issue.id,
+            requiresVersion: issue.kind != .deletedElsewhere, retryDependencies: rules,
+            dependentRevisions: revisions)
+    }
+
+    package var shownRevision: String? { core.shownRevision }
+
+    package var selected: SyncConflictVersion? {
+        core.version.map { $0 == .saved ? SyncConflictVersion.yours : .account }
+    }
+
+    package var actions: [SyncBlockedAction] {
+        held.map { action in
+            var action = action
+            action.choice = core.choice(for: action.id)
+            action.retryApproved = core.approvedRetries.contains(action.id)
+            action.retryAvailable = core.canRetry(action.id)
+            return action
+        }
+    }
+
+    package var phase: Phase {
+        if storedWaiting { return .waiting }
+        switch core.phase {
+        case .choosing: return .choosing
+        case .confirmingDiscard: return .confirmingDiscard
+        case .saving: return .saving
+        case .saveFailed: return .saveFailed
+        case .changedAgain: return .changedAgain
+        }
+    }
+
+    package var title: String {
+        switch kind {
+        case .deletedElsewhere: "Deleted on another device"
+        case .unknownOutcome: "Earlier changes need verification"
+        default: "Choose a title"
+        }
+    }
     package var versionLabels: [(SyncConflictVersion, String)] {
         [(.yours, "Your saved edit"), (.account, "Current account version")]
     }
     package var blockedHeading: String? {
-        actions.isEmpty ? nil : "\(actions.count) later action\(actions.count == 1 ? "" : "s") need your decision"
+        held.isEmpty ? nil : "\(held.count) later action\(held.count == 1 ? "" : "s") need your decision"
     }
     package var statusLine: String? {
         switch phase {
@@ -520,14 +616,14 @@ package struct SyncConflictModel: Equatable, Sendable {
         case .saveFailed: return "Your choice wasn't saved. Try again."
         case .waiting: return "Your choice is saved and waiting to sync."
         case .changedAgain: return "This task changed again. Review both versions."
-        case .choosing, .confirmingDiscard: return nil
+        case .choosing, .confirmingDiscard: return accountUnreadable ? "Couldn't read the account's version. Try again." : nil
         }
     }
 
-    private var discardCount: Int { actions.filter { $0.choice == .discard }.count }
+    private var discardCount: Int { core.discardedIDs.count }
     package var confirmDiscardTitle: String { "Discard these \(discardCount) saved action\(discardCount == 1 ? "" : "s")?" }
     package var confirmDiscardButton: String { "Discard \(discardCount) action\(discardCount == 1 ? "" : "s")" }
-    package let confirmDiscardDetail = "They will not be sent. Other saved actions will be kept."
+    package let confirmDiscardDetail = ConflictDecisionDraft.discardExplanation
     /// The exact summaries the confirmation names. Cancel is its initially focused control.
     package var discardSummaries: [String] { actions.filter { $0.choice == .discard }.map(\.summary) }
 
@@ -537,97 +633,105 @@ package struct SyncConflictModel: Equatable, Sendable {
     /// later actions need a decision, otherwise the title. Each is a rendered, focusable view.
     package var initialFocus: InitialFocus {
         if phase == .confirmingDiscard { return .cancelDiscard }
-        return actions.isEmpty ? .title : .blockedHeading
+        return held.isEmpty ? .title : .blockedHeading
     }
 
     package var isEditable: Bool { phase == .choosing || phase == .changedAgain || phase == .saveFailed }
 
     /// Apply stays disabled until a version is picked (no default) and every retry is approved.
-    package var applyEnabled: Bool {
-        guard isEditable else { return false }
-        if kind != .deletedElsewhere, selected == nil { return false }
-        return actions.allSatisfy { $0.choice != .reviewAndRetry || $0.retryApproved }
-    }
+    package var isResolvable: Bool { kind != .unknownOutcome }
+    package var applyEnabled: Bool { isResolvable && isEditable && !accountUnreadable && core.readyToApply }
+
+    /// Why "Review and retry" can't be chosen for `id` yet, or nil when it can.
+    package func retryUnavailableReason(for id: String) -> String? { core.retryUnavailableReason(for: id) }
 
     package mutating func select(_ version: SyncConflictVersion) {
         guard isEditable else { return }
-        selected = version
-        phase = .choosing
+        core.choose(version == .yours ? .saved : .account)
     }
 
     package mutating func setChoice(_ choice: SyncDependentChoice, for id: String) {
-        guard isEditable, let i = actions.firstIndex(where: { $0.id == id }) else { return }
-        actions[i].choice = choice
-        actions[i].retryApproved = false
+        guard isEditable else { return }
+        core.setChoice(choice, for: id)
     }
 
     package mutating func approveRetry(_ id: String) {
-        guard isEditable, let i = actions.firstIndex(where: { $0.id == id }), actions[i].choice == .reviewAndRetry
-        else { return }
-        actions[i].retryApproved = true
+        guard isEditable else { return }
+        core.approveRetry(for: id)
+    }
+
+    package mutating func withdrawRetryApproval(_ id: String) {
+        guard isEditable else { return }
+        core.withdrawRetryApproval(for: id)
     }
 
     /// "Apply choice": asks for the named discard confirmation, or submits.
     package mutating func apply() -> SyncConflictResolution? {
         guard applyEnabled else { return nil }
         if discardCount > 0 {
-            phase = .confirmingDiscard
+            core.requestDiscard()
             return nil
         }
         return begin()
     }
 
     package mutating func confirmDiscard() -> SyncConflictResolution? {
-        guard phase == .confirmingDiscard else { return nil }
+        guard core.phase == .confirmingDiscard else { return nil }
+        core.confirmDiscard()
         return begin()
     }
 
     /// Cancel returns to the sheet with every choice kept.
-    package mutating func cancelDiscard() { if phase == .confirmingDiscard { phase = .choosing } }
+    package mutating func cancelDiscard() { core.cancelDiscard() }
 
-    private mutating func begin() -> SyncConflictResolution {
-        phase = .saving
+    private mutating func begin() -> SyncConflictResolution? {
+        guard let decision = core.apply() else { return nil }
         return SyncConflictResolution(
             issueID: issueID, outcome: kind == .deletedElsewhere ? .keepDeleted : .version(selected ?? .yours),
-            shownRevision: shownRevision, keep: ids(.keepForLater), retry: ids(.reviewAndRetry),
-            discard: ids(.discard)
-        )
+            shownRevision: decision.againstRevision, keep: decision.keepForLater, retry: decision.retry,
+            retryRevisions: decision.retryRevisions, discard: decision.discard)
     }
 
-    private func ids(_ choice: SyncDependentChoice) -> [String] { actions.filter { $0.choice == choice }.map(\.id) }
+    package mutating func saveFailed() { core.saveFailed() }
+    package mutating func savedWhileOffline() { if core.phase == .saving { storedWaiting = true } }
 
-    package mutating func saveFailed() { if phase == .saving { phase = .saveFailed } }
-    package mutating func savedWhileOffline() { if phase == .saving { phase = .waiting } }
+    /// What became of the applied decision (the workspace's answer). A record that changed again
+    /// shows the account's new text and keeps the draft; any other refusal keeps it and offers a retry.
+    package mutating func finish(_ outcome: RuntimeIssueApplyOutcome) {
+        if case .changedAgain(let current) = outcome {
+            accountVersion = current.flatMap(Self.text(of:))
+            if current != nil { accountUnreadable = false }
+        }
+        core.finish(outcome, keepingVersion: true)
+    }
+
+    /// The account's text for the field the user edited, in the keys `SyncRuntimeIssue` reads.
+    package static func text(of version: RuntimeIssueAccountVersion) -> String? {
+        guard !version.isDeleted else { return nil }
+        return version.fields["after"] ?? version.fields["title"] ?? version.fields["text"]
+            ?? version.fields.sorted { $0.key < $1.key }.first?.value
+    }
 
     /// The account side moved after the card opened: show it, keep the user's draft and original
     /// edit, clear every approval and require an explicit apply again (D-02.08).
     package mutating func accountChanged(revision: String?, accountVersion: String?) {
+        if accountUnreadable {
+            // The first successful read: nothing changed, there was just nothing to compare with.
+            accountUnreadable = false
+            self.accountVersion = accountVersion
+            core.adoptRevision(revision)
+            return
+        }
         guard revision != shownRevision || accountVersion != self.accountVersion else { return }
-        shownRevision = revision
         self.accountVersion = accountVersion
-        for i in actions.indices { actions[i].retryApproved = false }
-        phase = .changedAgain
+        storedWaiting = false
+        core.markChangedAgain(revision: revision, keepingVersion: true)
     }
 
-    package var draft: SyncConflictDraft {
-        SyncConflictDraft(
-            issueID: issueID, selected: selected,
-            choices: Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0.choice) }),
-            approvedRetries: Set(actions.filter(\.retryApproved).map(\.id))
-        )
-    }
+    package var draft: SyncConflictDraft { core }
 
     /// Relaunch: the draft returns as it was; nothing is submitted and no discard is pre-confirmed.
-    package mutating func restore(_ draft: SyncConflictDraft) {
-        guard draft.issueID == issueID else { return }
-        selected = draft.selected
-        for i in actions.indices {
-            let choice = draft.choices[actions[i].id] ?? .keepForLater
-            actions[i].choice = choice
-            actions[i].retryApproved = choice == .reviewAndRetry && draft.approvedRetries.contains(actions[i].id)
-        }
-        phase = .choosing
-    }
+    package mutating func restore(_ draft: SyncConflictDraft) { core.restore(from: draft) }
 }
 
 // MARK: - D-03 recovery
@@ -691,6 +795,24 @@ package struct SyncRecoveryContent: Equatable, Sendable {
             title = "Connect to finish recovery"
             detail = "Your waiting changes are saved. Recovery resumes from where it stopped."
             actions = []
+        }
+    }
+}
+
+extension SyncRecoveryCondition {
+    /// The recovery state the workspace reports. `updateNeededSync` has no signal from the runtime
+    /// yet, so it is never produced here.
+    package init?(_ recovery: RuntimeSyncRecovery) {
+        if recovery.storeNeedsUpdate {
+            self = .updateNeededStore
+        } else if recovery.rebuild == .rebuilding {
+            self = .rebuilding
+        } else if case .failed(let reference) = recovery.rebuild {
+            self = .rebuildFailed(referenceID: reference)
+        } else if recovery.epochClosed {
+            self = .migrationUncertain
+        } else {
+            return nil
         }
     }
 }

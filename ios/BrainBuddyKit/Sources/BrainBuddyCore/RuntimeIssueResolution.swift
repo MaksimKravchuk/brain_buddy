@@ -113,6 +113,19 @@ public enum RuntimeIssueResolutionError: Error, Equatable, Sendable {
     }
 }
 
+/// What became of an applied decision, for the screen that submitted it.
+public enum RuntimeIssueApplyOutcome: Equatable, Sendable {
+    /// Stored durably; the issue is closed.
+    case resolved
+    /// Someone else already resolved it, or it is gone: there is nothing left to decide.
+    case gone
+    /// The account's record moved after it was shown. Nothing was saved. Carries the record as it is
+    /// now, where it could be read.
+    case changedAgain(RuntimeIssueAccountVersion?)
+    /// Nothing was saved. The decision can be applied again.
+    case failed(RuntimeIssueResolutionError)
+}
+
 /// The account's copy of an issue's record, read-only: what the "account version" side of a
 /// conflict shows.
 public struct RuntimeIssueAccountVersion: Equatable, Sendable {

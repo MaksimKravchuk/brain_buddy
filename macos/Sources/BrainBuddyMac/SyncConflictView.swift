@@ -6,7 +6,7 @@ import SwiftUI
 /// versions as a radio choice with no default, the blocked later actions (Keep for later / Review and
 /// retry / Discard action), the named discard confirmation with Cancel focused first, and Apply choice.
 /// Bounded: it scrolls inside the popover's 480 pt and shows each long text in a scrollable box.
-/// `submit` is nil until the workspace can store a resolution atomically; Apply then stays disabled.
+/// `submit` hands the applied decision to the workspace; it is nil only where none can be stored, and Apply is then disabled.
 struct SyncConflictView: View {
     @Binding var model: SyncConflictModel
     let blockedPreview: (SyncBlockedAction) -> String?
@@ -55,19 +55,23 @@ struct SyncConflictView: View {
                     .foregroundStyle(model.phase == .saveFailed ? .red : .orange)
                     .accessibilityElement(children: .combine)
             }
-            if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
-            if let heading = model.blockedHeading { blockedBody(heading) }
-            Button("Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.applyEnabled || submit == nil)
-                .focused($focus, equals: .apply)
+            if model.kind == .unknownOutcome {
+                unknownBody
+            } else {
+                if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
+                if let heading = model.blockedHeading { blockedBody(heading) }
+                Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.applyEnabled || submit == nil)
+                    .focused($focus, equals: .apply)
+            }
         }
     }
 
     private var versionsBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(model.versionLabels, id: \.0) { version, label in
-                let text = version == .yours ? model.yourEdit : (model.accountVersion ?? "")
+                let text = version == .yours ? model.yourEdit : (model.accountVersion ?? "Not available")
                 Button {
                     model.select(version)
                 } label: {
@@ -96,6 +100,23 @@ struct SyncConflictView: View {
             .frame(maxHeight: 72)
             .padding(6)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// An uncertain send is never resolved here and never suggested as safe to retry: the runtime
+    /// checks what reached the account first. Only the saved edit can be copied.
+    private var unknownBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("We can't tell whether this change reached your account. It is kept and won't be sent again as a new change.")
+                .font(.callout)
+            versionText(model.yourEdit)
+            Button(copied ? "Copied" : "Copy saved edit") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(model.yourEdit, forType: .string)
+                copied = true
+                AccessibilityNotification.Announcement("Copied").post()
+            }
+            .focused($focus, equals: .copyEdit)
+        }
     }
 
     private var deletedBody: some View {
@@ -134,6 +155,9 @@ struct SyncConflictView: View {
                     .pickerStyle(.radioGroup)
                     .disabled(!model.isEditable)
                     .focused($focus, equals: .action(action.id))
+                    if let reason = model.retryUnavailableReason(for: action.id), action.choice != .reviewAndRetry {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
                     if action.choice == .reviewAndRetry {
                         retryPreview(action)
                     }
@@ -152,7 +176,8 @@ struct SyncConflictView: View {
             }
             if blockedPreview(action) != nil {
                 Toggle("Approve this retry", isOn: Binding(
-                    get: { action.retryApproved }, set: { if $0 { model.approveRetry(action.id) } }
+                    get: { action.retryApproved },
+                    set: { if $0 { model.approveRetry(action.id) } else { model.withdrawRetryApproval(action.id) } }
                 ))
             }
         }

@@ -33,6 +33,25 @@ extension Workspace {
         }
     }
 
+    /// `resolveIssue` as the screens use it: every refusal becomes an outcome the draft can take in
+    /// (`ConflictDecisionDraft.finish`). Nothing is saved unless the outcome is `.resolved`.
+    public func submit(_ resolution: RuntimeIssueResolution) async -> RuntimeIssueApplyOutcome {
+        do {
+            _ = try await resolveIssue(resolution)
+            return .resolved
+        } catch let error as RuntimeIssueResolutionError {
+            switch error {
+            case .changedAgain:
+                let current = try? await accountVersion(ofIssue: resolution.issueID)
+                return .changedAgain(current ?? nil)
+            case .alreadyResolved, .unknownIssue: return .gone
+            default: return .failed(error)
+            }
+        } catch {
+            return .failed(.failed(code: "UNKNOWN"))
+        }
+    }
+
     /// The account's copy of the issue's record, read-only, for the "account version" side of a
     /// conflict. Nil when the issue is gone or has no known record.
     public func accountVersion(ofIssue issueID: String) async throws -> RuntimeIssueAccountVersion? {
@@ -91,5 +110,19 @@ extension Workspace {
         }
         await refreshRustStatus()
         return result
+    }
+}
+
+extension SyncRuntimeRebuildResult {
+    /// What to tell the person once "Rebuild synced copy" returned, or nil where the recovery card
+    /// already says it (a failure keeps its card and reference). A rebuild that never ran must not
+    /// read as done.
+    public var notice: String? {
+        switch self {
+        case .rebuilt: "Synced copy rebuilt."
+        case .transportUnavailable:
+            "Syncing isn't available in this version of the app yet, so nothing was rebuilt. Your waiting changes and saved issues are kept."
+        case .failed: nil
+        }
     }
 }

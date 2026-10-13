@@ -24,8 +24,14 @@ struct SyncStatusLabel: View {
         var needsAttention: Bool
         /// Overrides the combined label where the typed status has a fuller one.
         var accessibilityLabel: String?
+        /// Why Sync now is off, when it is (offline, session ended, update required).
+        var syncNowDisabledReason: String?
 
-        init(text: String, detail: String?, symbolName: String, needsAttention: Bool, accessibilityLabel: String? = nil) {
+        init(
+            text: String, detail: String?, symbolName: String, needsAttention: Bool, accessibilityLabel: String? = nil,
+            syncNowDisabledReason: String? = nil
+        ) {
+            self.syncNowDisabledReason = syncNowDisabledReason
             self.text = text
             self.detail = detail
             self.symbolName = symbolName
@@ -54,10 +60,11 @@ struct SyncStatusLabel: View {
             failure = TransportFailure(referenceID: nil)
         }
         let status = RuntimeSyncStatusPresenter.describe(
-            workspace.syncSnapshot, updateNeeded: false, transportFailure: failure, now: now, device: device)
+            workspace.syncSnapshot, updateNeeded: workspace.syncRecovery.storeNeedsUpdate, transportFailure: failure, now: now, device: device)
         return Description(
             text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction, device: device),
-            needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel)
+            needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel,
+            syncNowDisabledReason: status.syncNowDisabledReason)
     }
 
     nonisolated static func symbolName(_ distinction: RuntimeSyncStatus.Distinction, device: DeviceKind) -> String {

@@ -1,5 +1,6 @@
 import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyPersistence
 import BrainBuddyWorkspace
 import Foundation
 import Observation
@@ -42,6 +43,8 @@ package final class MacSyncController {
     /// `presentSignOut()`.
     package private(set) var signOutRequests = 0
     @ObservationIgnored package var triggers: SyncTriggerSource?
+    /// Where an unsent conflict decision waits between launches (D-02): choices only, never text.
+    @ObservationIgnored package let conflictDrafts: any ConflictDraftStore
 
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private let calendar: Calendar
@@ -51,9 +54,14 @@ package final class MacSyncController {
     package init(
         host: WorkspaceHost, router: MacPresentationRouter = MacPresentationRouter(),
         now: @escaping @Sendable () -> Date = { Date() }, calendar: Calendar = .current, log: any MacLogSink = SystemMacLog(),
-        defaultServer: @escaping @MainActor () -> URL = { MacHostConfiguration.knownServers().first ?? BrainBuddyAPI.defaultServerURL }
+        defaultServer: @escaping @MainActor () -> URL = { MacHostConfiguration.knownServers().first ?? BrainBuddyAPI.defaultServerURL },
+        conflictDrafts: (any ConflictDraftStore)? = nil
     ) {
         self.host = host
+        self.conflictDrafts =
+            conflictDrafts
+            ?? FileConflictDraftStore(
+                directory: host.configuration.directory.appendingPathComponent("ConflictDrafts", isDirectory: true))
         self.router = router
         self.now = now
         self.calendar = calendar
@@ -70,11 +78,13 @@ package final class MacSyncController {
     /// A snapshot change: describe again.
     package func observeSnapshot() {
         line.update(workspace.syncSnapshot, at: now())
+        line.setUpdateNeeded(recoveryCondition?.isBlocking == true, at: now())
     }
 
     /// The line's timer.
     package func refreshLine() {
         line.update(workspace.syncSnapshot, at: now())
+        line.setUpdateNeeded(recoveryCondition?.isBlocking == true, at: now())
     }
 
     /// The polite announcement to post, once.
@@ -100,9 +110,65 @@ package final class MacSyncController {
     package func popoverContent() -> SyncPopoverContent {
         SyncPopoverModel.content(
             snapshot: workspace.syncSnapshot, issues: workspace.issues, state: workspace.state,
-            files: host.importer.upgradeFiles(), discarded: discards.ids, now: now(), device: .mac, calendar: calendar
+            files: host.importer.upgradeFiles(), discarded: discards.ids, recovery: recoveryCondition, now: now(),
+            device: .mac, calendar: calendar
         )
     }
+
+    // MARK: D-03 recovery
+
+    /// What the runtime reports about recovery, as the popover words it. Nil when nothing needs showing.
+    package var recoveryCondition: SyncRecoveryCondition? { SyncRecoveryCondition(workspace.syncRecovery) }
+
+    /// "Try again" on a failed rebuild: runs the rebuild. Returns what to tell the person where the
+    /// card doesn't already say it; a rebuild that could not run is said so, never shown as done.
+    package func rebuildSyncedCopy() async -> String? { await workspace.rebuildSyncedCopy().notice }
+
+    // MARK: D-02 conflict detail
+
+    /// The conflict detail for runtime issue `id`: the account's record as the runtime holds it now,
+    /// the later actions held behind it, and the draft left from earlier, if any (restoring submits
+    /// nothing). Nil when the issue is gone.
+    package func openConflict(_ id: String) async -> SyncConflictModel? {
+        let issues = workspace.runtimeIssues.map(SyncRuntimeIssue.init)
+        guard let issue = issues.first(where: { $0.id == id }) else { return nil }
+        let blocked = issue.dependentIDs.map { dependent -> SyncBlockedAction in
+            let known = issues.first { $0.id == dependent || $0.commandID == dependent }
+            let other = known.flatMap { $0.targetEntity != issue.targetEntity ? $0.shownBaseRevision : nil }
+            return SyncBlockedAction(
+                id: dependent, summary: known?.summary ?? "Saved action", retryWaitsOn: known?.waitsOn,
+                shownRevision: other)
+        }
+        let account = try? await workspace.accountVersion(ofIssue: id)
+        var model = SyncConflictModel(issue: issue, account: account, blocked: blocked)
+        if let saved = conflictDrafts.load(issueID: id) { model.restore(saved) }
+        return model
+    }
+
+    /// The account side may have moved while the conflict is open (a sync brought a newer record):
+    /// show it, keep the draft, clear every approval (D-02.08).
+    package func refreshConflict(_ model: inout SyncConflictModel) async {
+        guard let account = try? await workspace.accountVersion(ofIssue: model.issueID) else { return }
+        model.accountChanged(revision: account.revision, accountVersion: SyncConflictModel.text(of: account))
+    }
+
+    /// Stores the decision the person applied. Success is durable when this returns `.resolved`; any
+    /// refusal saved nothing.
+    package func submit(_ resolution: SyncConflictResolution) async -> RuntimeIssueApplyOutcome {
+        await workspace.submit(resolution.runtime)
+    }
+
+    /// Keeps the draft across Back, Cancel, closing and relaunch; an untouched one is not kept.
+    package func keepDraft(_ model: SyncConflictModel) {
+        if model.draft.isUntouched {
+            conflictDrafts.clear(issueID: model.issueID)
+        } else {
+            conflictDrafts.save(model.draft, issueID: model.issueID)
+        }
+    }
+
+    /// A resolution was stored (or the issue was already gone): its draft is no longer wanted.
+    package func discardDraft(issueID: String) { conflictDrafts.clear(issueID: issueID) }
 
     /// "Dismiss" on an issue: it goes, and focus moves as the design says.
     package func dismissIssue(_ id: SyncIssue.ID) {

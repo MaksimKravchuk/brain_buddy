@@ -199,6 +199,7 @@ struct SettingsScreen: View {
     private var syncSection: some View {
         Section {
             syncStatusRow
+            if workspace.isRustSelected { SyncRecoveryRow() }
             if let lastSyncedAt = staleLastSyncedAt {
                 TimelineView(.periodic(from: .now, by: 60)) { _ in
                     valueRow(
@@ -274,18 +275,24 @@ struct SettingsScreen: View {
     }
 
     private var syncNowButton: some View {
-        Button {
-            Task { await workspace.syncNow() }
-        } label: {
-            HStack {
-                Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
-                Spacer()
-                if isSyncing {
-                    ProgressView()
+        let reason = SyncStatusLabel.describe(workspace, now: Date()).syncNowDisabledReason
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                Task { await workspace.syncNow() }
+            } label: {
+                HStack {
+                    Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                    Spacer()
+                    if isSyncing {
+                        ProgressView()
+                    }
                 }
             }
+            .disabled(isSyncing || reason != nil)
+            if let reason {
+                Text(reason).font(BBFont.caption).foregroundStyle(BBColor.textTertiary)
+            }
         }
-        .disabled(isSyncing)
     }
 
     /// Open issues of whichever engine runs the workspace.

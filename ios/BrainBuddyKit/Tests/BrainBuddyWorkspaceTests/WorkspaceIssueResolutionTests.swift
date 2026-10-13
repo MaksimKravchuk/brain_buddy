@@ -39,6 +39,64 @@ struct WorkspaceIssueResolutionTests {
         await #expect(throws: RuntimeIssueResolutionError.notReady) { try await workspace.resolveIssue(resolution) }
     }
 
+    @Test("026-FR-007: submitting for an issue that is gone answers gone; a closed runtime answers a failure and saves nothing")
+    @MainActor
+    func submitOutcomes() async throws {
+        let (workspace, directory) = try await workspace()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resolution = RuntimeIssueResolution(issueID: "issue_missing", outcome: .useAccountVersion, shownRevision: "2")
+        #expect(await workspace.submit(resolution) == .gone)
+        #expect(workspace.pendingChangeCount == 0)
+        await workspace.closeRuntime()
+        #expect(await workspace.submit(resolution) == .failed(.notReady))
+        // A draft that outcome leaves behind stays editable and applies again.
+        var draft = ConflictDecisionDraft(dependentIDs: [], shownRevision: "2", issueID: "issue_missing")
+        draft.choose(.account)
+        let decision = draft.apply()
+        #expect(decision != nil)
+        draft.finish(await workspace.submit(resolution))
+        #expect(draft.phase == .saveFailed && draft.canApply && draft.version == .account)
+    }
+
+    @Test("026-FR-010: a draft written by one launch is read by the next, holds no text, and is forgotten once resolved")
+    func draftStoreSurvivesRelaunch() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var draft = ConflictDecisionDraft(dependentIDs: ["a", "b"], shownRevision: "7", issueID: "issue_1")
+        draft.choose(.saved)
+        draft.setChoice(.discard, for: "b")
+        draft.requestDiscard()
+        draft.confirmDiscard()
+
+        let first = FileConflictDraftStore(directory: directory)
+        #expect(first.save(draft, issueID: "issue_1"))
+        // A new store value over the same folder is a relaunch.
+        let second = FileConflictDraftStore(directory: directory)
+        let loaded = try #require(second.load(issueID: "issue_1"))
+        var restored = ConflictDecisionDraft(dependentIDs: ["a", "b"], shownRevision: "7", issueID: "issue_1")
+        restored.restore(from: loaded)
+        #expect(restored.version == .saved && restored.choice(for: "b") == .discard)
+        #expect(restored.phase == .choosing && !restored.canApply, "restoring neither submits nor pre-confirms the discard")
+        #expect(second.load(issueID: "issue_2") == nil)
+        let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        #expect(files.count == 1 && files[0].hasSuffix(".json") && !files[0].contains("issue"), "the id never names a path")
+
+        #expect(!second.save(draft, issueID: "issue_2") || second.load(issueID: "issue_2") == nil, "a draft only reads back for its own issue")
+        let other = ConflictDecisionDraft(dependentIDs: [], shownRevision: "1", issueID: "issue_2")
+        second.save(other, issueID: "issue_2")
+        second.prune(keeping: ["issue_2"])
+        #expect(second.load(issueID: "issue_1") == nil && second.load(issueID: "issue_2") != nil)
+        second.clear(issueID: "issue_2")
+        #expect(FileConflictDraftStore(directory: directory).load(issueID: "issue_2") == nil)
+    }
+
+    @Test("026-FR-010: a rebuild that could not run is said so, and never reads as done")
+    func rebuildNotices() {
+        #expect(SyncRuntimeRebuildResult.rebuilt.notice == "Synced copy rebuilt.")
+        #expect(SyncRuntimeRebuildResult.transportUnavailable.notice?.contains("nothing was rebuilt") == true)
+        #expect(SyncRuntimeRebuildResult.failed(referenceID: "r").notice == nil)
+    }
+
     @Test("026-FR-007: an account version read that outlives its binding is rejected, not shown")
     @MainActor
     func accountVersionFencedByBinding() async throws {
