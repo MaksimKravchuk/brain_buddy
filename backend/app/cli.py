@@ -6,6 +6,7 @@ Run via ``python -m app.cli <command>`` inside the backend container.
 whose deletion grace period has elapsed (the maintenance sweep does the
 same on a timer — this is the manual/ops entrypoint). ``review-metrics``
 prints the weekly-review read-out (spec 020): aggregates only.
+``sync-restore-control-plane`` finishes a task-DB restore (spec 026 PR-52).
 """
 
 from __future__ import annotations
@@ -19,11 +20,17 @@ from datetime import date, datetime, timedelta
 
 import typer
 
-from app.container import build_container
+from app.container import Container, build_container
 from app.core import get_config
 from app.core.config import AppConfig, AppEnvironment
 from app.exceptions import BrainBuddyError
 from app.modules.tasks.review_flow import ReviewMetrics
+from app.modules.tasks.sync.control_ledger import LedgerIncomplete
+from app.modules.tasks.sync.restore import (
+    RestoreNotReady,
+    reopen,
+    restore_control_plane,
+)
 from app.schemas.auth import Invite
 from app.schemas.review import ExplainerAcknowledgeRequest
 from app.schemas.tasks import TaskCreateRequest
@@ -95,6 +102,78 @@ def migrate_auth(
         typer.echo(str(error), err=True)
         raise typer.Exit(1) from None
     typer.echo(json.dumps(asdict(result), sort_keys=True))
+
+
+class _ContainerRestoreEffects:
+    """Restore-time purge and session revocation through the real services."""
+
+    def __init__(self, container: Container) -> None:
+        self._container = container
+
+    def purge_owner(self, owner_id: str) -> None:
+        self._container.account_service.purge_account(owner_id)
+
+    def revoke_sessions(self, owner_id: str) -> None:
+        self._container.session_repo.delete_all_for_user(owner_id)
+
+
+@app.command("sync-restore-control-plane")
+def sync_restore_control_plane(
+    backup_taken_at: str | None = typer.Option(
+        None, help="UTC time of the restored task backup (ISO 8601, with offset)."
+    ),
+    writers_stopped: bool = typer.Option(
+        False, "--writers-stopped", help="Acknowledge the backend is stopped."
+    ),
+    reopen_access: bool = typer.Option(
+        False, "--reopen", help="Admit owners again after replay."
+    ),
+    external_effects_reconciled: bool = typer.Option(
+        False,
+        "--external-effects-reconciled",
+        help="With --reopen: provider/mail effects were reconciled separately.",
+    ),
+) -> None:
+    """Replay the control ledger over a restored task DB, or reopen access.
+
+    Run once with --backup-taken-at right after restoring tasks.sqlite3 and
+    again with --reopen --external-effects-reconciled when reconciliation is
+    done. Access stays closed if completeness cannot be proven.
+    """
+
+    if not writers_stopped:
+        typer.echo("Refusing: pass --writers-stopped.", err=True)
+        raise typer.Exit(2)
+    container = build_container(get_config())
+    db_path = container.task_repo.db_path
+    ledger = container.control_ledger
+    try:
+        if reopen_access:
+            reopen(
+                db_path,
+                ledger,
+                external_effects_reconciled=external_effects_reconciled,
+            )
+            typer.echo("Access reopened.")
+            return
+        try:
+            taken = datetime.fromisoformat(backup_taken_at or "")
+        except ValueError:
+            taken = None
+        if taken is None or taken.tzinfo is None:
+            typer.echo("--backup-taken-at needs an ISO time with offset.", err=True)
+            raise typer.Exit(2)
+        report = restore_control_plane(
+            db_path,
+            ledger,
+            _ContainerRestoreEffects(container),
+            backup_taken_at=taken,
+            now=utcnow(),
+        )
+    except (LedgerIncomplete, RestoreNotReady) as error:
+        typer.echo(f"Access stays closed: {error}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(asdict(report), sort_keys=True))
 
 
 def _require_test_environment() -> AppConfig:

@@ -54,6 +54,7 @@ from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.modules.tasks.sync.authority import IdentityScopeAuthority
 from app.modules.tasks.sync.change_log import ChangeLog
+from app.modules.tasks.sync.control_ledger import ControlLedger
 from app.modules.tasks.sync.receipts import Authority, ReceiptStore
 from app.modules.tasks.sync.retention import SyncRetention, sync_owner_ids
 from app.modules.tasks.sync.review_projection import ReviewCommandBoundary
@@ -161,6 +162,8 @@ class Container:
     # Spec 026 PR-50: independent cleanup of every sync copy (receipt content,
     # feed after-images, snapshots, transfers). Needs no flag or authority.
     sync_retention: SyncRetention
+    # Spec 026 PR-52: deletion/revocation decisions a task-backup restore replays.
+    control_ledger: ControlLedger
     # Spec 026: the one replaceable Rust runtime every sync surface shares.
     rust_core: RustCoreHolder
 
@@ -760,6 +763,10 @@ def build_container(
         auth_store, secret_box, provider_gateway, deletion_grace=deletion_grace
     )
     account_service.apple_lifecycle = apple_lifecycle
+    control_ledger = ControlLedger(
+        data_root / "sync_control_ledger.sqlite3", now=utcnow()
+    )
+    account_service.attach_control_ledger(control_ledger)
     modern_auth_service = ModernAuthService(
         auth_service=auth_service,
         account_service=account_service,
@@ -815,6 +822,7 @@ def build_container(
         navigator_service=navigator_service,
         job_repository=job_repository,
         task_unit_of_work=task_unit_of_work,
+        control_ledger=control_ledger,
         rust_core=rust_core,
         sync_retention=SyncRetention(
             task_unit_of_work,
