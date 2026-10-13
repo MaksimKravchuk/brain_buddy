@@ -63,6 +63,9 @@ struct DecisionFormView: View {
     let expectedTask: ShownTask?
     /// The exact task record shown by the card that opened this form.
     let shownRecord: TaskRecord?
+    /// Set when suggestions were shown and not used (spec 026): recorded with the decision.
+    let aiUse: AIUse
+    let navigatorRequestID: String?
     /// Previews only: starts the field with this text instead of a draft.
     private let seedText: String?
 
@@ -94,9 +97,11 @@ struct DecisionFormView: View {
         form: DecisionForm, taskID: TaskID, formulationID: FormulationID?, stallReason: StallReason?,
         sessionID: ReviewSessionID? = nil, isDirty: Binding<Bool>, onSaved: @escaping (DecisionID, DecisionType, String) -> Void,
         onStale: @escaping () -> Void, onCloseCard: @escaping () -> Void, expectedTask: ShownTask? = nil,
-        shownRecord: TaskRecord? = nil,
+        shownRecord: TaskRecord? = nil, aiUse: AIUse = .none, navigatorRequestID: String? = nil,
         seedText: String? = nil
     ) {
+        self.aiUse = aiUse
+        self.navigatorRequestID = navigatorRequestID
         self.expectedTask = expectedTask
         self.shownRecord = shownRecord
         self.form = form
@@ -447,12 +452,14 @@ struct DecisionFormView: View {
             switch form {
             case .reformulate:
                 decisionID = try await workspace.decide(
-                    .reformulate, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
+                    .reformulate, on: taskID, title: value, stallReason: stallReason, aiUse: aiUse,
+                    navigatorRequestID: navigatorRequestID, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask, editorID: editorID
                 )
             case .firstStep:
                 decisionID = try await workspace.decide(
-                    .firstStep, on: taskID, title: value, stallReason: stallReason, sessionID: sessionID, formulationID: formulationID,
+                    .firstStep, on: taskID, title: value, stallReason: stallReason, aiUse: aiUse,
+                    navigatorRequestID: navigatorRequestID, sessionID: sessionID, formulationID: formulationID,
                     expectedTask: expectedTask, editorID: editorID
                 )
             case .waiting:

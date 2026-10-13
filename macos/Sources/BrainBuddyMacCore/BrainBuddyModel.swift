@@ -1,3 +1,4 @@
+import class BrainBuddyAPI.BrainBuddyAPIClient
 import BrainBuddyCore
 import BrainBuddyWorkspace
 import Foundation
@@ -1290,6 +1291,71 @@ package final class BrainBuddyModel {
     package func retrySaving() async {
         await workspace.flush()
         if workspace.storageError == nil { lastUnarchivedName = nil }
+    }
+
+    // MARK: Review suggestions (spec 026 T060)
+
+    /// The Weekly Review suggestion capability on one task. It is the iPhone's capability and the
+    /// kit's `ReviewSuggestionModel`; the Mac adds no state machine, only where it is offered.
+    /// Offered only while the review is exposed (the same flag and release switch as the review
+    /// itself) and only where the ordinary decision the suggestion would apply is allowed: a
+    /// Next action. `VoiceCapture` stays transcription and is not a way in.
+    package func reviewSuggestionKinds(for task: TaskRecord) -> [SuggestionKind] {
+        guard workspace.reviewExposed, DecisionType.reformulate.allowedStates.contains(task.state) else { return [] }
+        return [.reformulate, .firstStep]
+    }
+
+    /// What the task detail shows for the suggestion entry. While the editor has unsaved fields the
+    /// entry is blocked with a message: an applied wording is saved at once, and a later editor save
+    /// of an older title or notes must not overwrite it.
+    package enum ReviewSuggestionEntry: Equatable {
+        case hidden
+        case blocked(String)
+        case available([SuggestionKind])
+    }
+
+    package static let suggestionBlockedByEditor = "Save or discard your changes to this task to ask for suggestions."
+
+    package func reviewSuggestionEntry(for task: TaskRecord, editorDirty: Bool) -> ReviewSuggestionEntry {
+        let kinds = reviewSuggestionKinds(for: task)
+        if kinds.isEmpty { return .hidden }
+        return editorDirty ? .blocked(Self.suggestionBlockedByEditor) : .available(kinds)
+    }
+
+    /// The adapter over the shared Rust policy, with the executors this Mac can run (none when it
+    /// has no on-device model). Nil when the bridge cannot start; the entry then stays hidden.
+    package func reviewSuggestionAdapter(executors: [any LocalAIExecutor]) -> LocalAIAdapter? {
+        guard let runtime = try? RustBridgeRuntime() else { return nil }
+        return LocalAIAdapter(policy: runtime, executors: executors)
+    }
+
+    /// The navigator the cloud route would use, only while signed in: the account's server and the
+    /// stored session. Account-less, there is none and remote inference is prohibited. Tests set it.
+    @ObservationIgnored package var navigatorRemote: (any NavigatorRemote)?
+
+    private func reviewSuggestionRemote() -> (any NavigatorRemote)? {
+        if let navigatorRemote { return navigatorRemote }
+        guard let account = workspace.account else { return nil }
+        return BrainBuddyAPIClient(
+            baseURL: account.serverURL, tokenStore: WorkspaceHost.systemTokenStore(), identity: WorkspaceHost.clientIdentity)
+    }
+
+    /// The one shared model for this task and kind: closing the sheet leaves a live request in it,
+    /// reopening finds it. `nil` when the task is not eligible.
+    package func reviewSuggestionModel(
+        for task: TaskRecord, kind: SuggestionKind, adapter: LocalAIAdapter, journal: (any ReviewSuggestionJournal)? = nil
+    ) -> ReviewSuggestionModel? {
+        guard reviewSuggestionKinds(for: task).contains(kind) else { return nil }
+        let remote = reviewSuggestionRemote()
+        return workspace.reviewSuggestionModel(
+            for: task.id, kind: kind, adapter: adapter, remote: remote,
+            privacy: remote == nil ? .onDeviceOnly : .remoteAllowed, shown: workspace.suggestionShownTask(task.id),
+            journal: journal)
+    }
+
+    /// After applied, manual continuation or discard.
+    package func releaseReviewSuggestion(for taskID: TaskID, kind: SuggestionKind) {
+        workspace.releaseReviewSuggestionModel(for: taskID, kind: kind)
     }
 
     // MARK: Footer
