@@ -353,6 +353,13 @@ class AccountService:
             for name, records in self.task_repo.iter_review_export(user.id):
                 write_json(f"review/{name}", records)
 
+            # Spec 026 (FR-003): the owner's scope generations and registered
+            # device epochs. Receipts, fingerprints, jobs, lease fences and
+            # transfer/snapshot copies are protected and named in `excluded`.
+            sync_identity = self.task_repo.export_sync_identity(owner_id=user.id)
+            write_json("sync/scope.json", sync_identity["scope"])
+            write_json("sync/devices.json", sync_identity["devices"])
+
             relay = self.agent_repo.export_owner_data(owner_id=user.id, now=now)
             write_json("relay/relay.json", relay)
 
@@ -393,6 +400,7 @@ class AccountService:
                         "tasks": len(tasks),
                         "voice_operations": len(operations),
                         "voice_audio_chunks": audio_chunks,
+                        "sync_device_epochs": len(sync_identity["devices"]),
                         "relay_connections": len(relay["connections"]),
                         "relay_runs": len(relay["runs"]),
                         "relay_events": len(relay["events"]),
@@ -407,6 +415,10 @@ class AccountService:
                         "of data already exported)",
                         "navigator_usage (weekly-review AI suggestion cost and call "
                         "counters: operational, content-free, deleted after 35 days)",
+                        "sync command receipts, request fingerprints, legacy key "
+                        "digests, change-feed images, snapshot and transfer pages, "
+                        "jobs and lease fences (protected dedup/control state and "
+                        "copies of data already exported)",
                         "relay credentials, inbound signing secrets, and sealed secret boxes",
                         "relay idempotency keys and raw request/response receipts",
                         "relay content already expired or redacted under the retention policy",

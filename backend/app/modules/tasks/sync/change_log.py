@@ -113,6 +113,34 @@ def purge_owner(conn: Connection, owner_id: str) -> None:
         conn.execute("DELETE FROM jobs WHERE scope = ?", (owner_id,))
 
 
+def export_owner(conn: Connection, owner_id: str) -> dict[str, list[dict[str, Any]]]:
+    """The owner's own sync identity for a safe content export (026-FR-003).
+
+    Only the scope generations and the device epochs the person registered.
+    Receipts, fingerprints, legacy key digests, change images, transfer and
+    snapshot pages, jobs and lease material are protected control state or
+    copies of domain data already exported, so none of them is read here.
+    """
+
+    scope = conn.execute(
+        "SELECT server_generation, feed_generation, access_generation, "
+        "storage_epoch, commit_seq FROM sync_scopes WHERE owner_id = ?",
+        (owner_id,),
+    ).fetchall()
+    epochs = conn.execute(
+        "SELECT e.device_id, e.device_epoch, e.status, e.server_generation, "
+        "e.registered_at, e.closed_at, e.close_reason, d.bound_at "
+        "FROM sync_device_epochs e JOIN sync_devices d USING(device_id) "
+        "WHERE e.owner_id = ? AND d.owner_id = ? "
+        "ORDER BY e.device_id, e.device_epoch",
+        (owner_id, owner_id),
+    ).fetchall()
+    return {
+        "scope": [dict(row) for row in scope],
+        "devices": [dict(row) for row in epochs],
+    }
+
+
 def encode(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 

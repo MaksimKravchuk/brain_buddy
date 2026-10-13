@@ -26,6 +26,7 @@ mod admission;
 mod apply_changes;
 mod epochs;
 mod execute;
+mod export;
 mod import;
 mod issues;
 mod legacy_outbox;
@@ -41,7 +42,9 @@ mod review_content_stamps;
 mod review_forms;
 mod snapshot;
 mod storage;
+mod subscriptions;
 mod sync_session;
+mod transport;
 mod workspace_query;
 
 pub use admission::{ShownFrameToken, ShownTaskFrame};
@@ -59,6 +62,10 @@ pub use execute::{
     RandomIds, ReportedExecuteError, Stage, VisibleSnapshot, execute, execute_batch,
     execute_batch_reported_with, execute_batch_with, execute_with, lookup_known_batch,
     projection_generation, visible_snapshot,
+};
+pub use export::{
+    EXPORT_FORMAT, ExportError, ExportReport, ExportStage, ExportedAlias, ExportedDraft,
+    ExportedIntent, ExportedIssue, ExportedRecord, WorkspaceExport, export_workspace,
 };
 pub use import::{
     AccountlessImportProof, ImportError, ImportMarker, ImportReport, ImportRequest, ImportStage,
@@ -87,9 +94,19 @@ pub use snapshot::{
     begin_snapshot, stage_snapshot_page,
 };
 pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
+pub use subscriptions::{
+    Action, ChangeKind, HintReader, HintStream, HintWatcher, Invalidation, InvalidationHub,
+    SSE_MAX_EVENT_BYTES, Scheduler, SseItem, SseOverflow, SseParser, Step, StreamEnd,
+    StreamFailure, Subscription, SubscriptionError, SyncLoop, Wake, WakeSet, Waker,
+};
 pub use sync_session::{
     Authentication, CapabilitiesCheck, EndCause, ErrorAction, Request, RequestKind, SessionBinding,
     SessionError, SyncSession,
+};
+pub use transport::{
+    API, Backoff, CATCH_UP_WINDOW, Cancellation, Changes, Clock, Halt, HttpRequest, HttpResponse,
+    Jitter, Method, MonotonicClock, PullReport, RoundReport, Schedule, SplitMix, Syncer, Transport,
+    TransportFailure, encode,
 };
 pub use workspace_query::{
     IssuePage, QueryError, QueryPage, WorkspaceDraft, WorkspaceRecordPage, WorkspaceSyncStatus,
