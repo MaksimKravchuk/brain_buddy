@@ -328,3 +328,20 @@ def test_026_FR_021_the_production_container_port_refuses_an_invalid_proposal(
         )
     assert refused.value.detail["reason"] == "invalid_payload"
     assert container.task_repo.list_for_owner(owner_id=owner_id) == before
+
+
+def test_026_FR_019_a_poisoned_injected_runtime_is_replaced_for_the_next_request(
+    navigator: Any,
+) -> None:
+    """A closed or poisoned injected runtime must not fail every later request."""
+
+    client, service = navigator
+    injected = RecordingCore()
+    service._rust_core = injected
+    with allure.step("the injected runtime stops being usable"):
+        injected.close()
+    assert not injected.is_open
+    with allure.step("the next suggestion still succeeds on a fresh runtime"):
+        response = _suggest(client)
+    assert response.status_code == 200, response.text
+    assert service.provider.calls == 1

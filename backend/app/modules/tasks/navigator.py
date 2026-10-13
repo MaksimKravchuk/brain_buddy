@@ -1223,7 +1223,7 @@ class NavigatorService:
         provider = self.provider.category
         navigator_input = build_navigator_input(request)
         input_tokens = estimate_input_tokens(navigator_input)
-        routed = (self._rust_core or shared_policy_core()).ai_route(
+        routed = self._core().ai_route(
             self._route_request(owner_id, request, provider, input_tokens)
         )
         if routed["route"] != "remote" or provider is None:
@@ -1237,6 +1237,14 @@ class NavigatorService:
             record.outcome = "navigator_rate_limited"
             raise NavigatorRateLimited(self.rate_limiter.retry_after_seconds(owner_id))
         return provider, navigator_input
+
+    def _core(self) -> RustCore:
+        """The injected runtime while it is usable, else the replaceable shared one."""
+
+        injected = self._rust_core
+        if injected is not None and injected.is_open:
+            return injected
+        return shared_policy_core()
 
     def _route_request(
         self,
@@ -1308,7 +1316,7 @@ class NavigatorService:
             navigator_input,
             proposals=result.proposals,
             clarifying_question=result.clarifying_question,
-            core=self._rust_core,
+            core=self._core(),
         )
         actual = self.provider.estimate_cost_usd(
             input_tokens=(
