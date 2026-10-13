@@ -94,8 +94,10 @@ public final class SignInCancellation: Sendable {
     public var isCancelled: Bool { state.withLock { $0 == .cancelled } }
     public var isCommitted: Bool { state.withLock { $0 == .committed } }
 
-    /// The engine, right before it saves the link: true to save it, false when Cancel came first.
-    func commit() -> Bool {
+    /// The engine, or a Rust lifecycle port, right before it saves the link: true to save it,
+    /// false when Cancel came first. Once true, a later `cancel()` returns false and changes
+    /// nothing. Claim it once, and only if `isCommitted` is false.
+    public func commit() -> Bool {
         let won = state.withLock { state in
             if state == .open { state = .committed }
             return state == .committed

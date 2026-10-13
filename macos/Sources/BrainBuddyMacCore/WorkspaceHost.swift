@@ -145,7 +145,8 @@ package final class WorkspaceHost {
         configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil,
         transport: (any HTTPTransport)? = nil, now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() }, tickScheduler: (any SyncScheduler)? = nil,
-        syncScheduler: (any SyncScheduler)? = nil, log: any MacLogSink = SystemMacLog()
+        syncScheduler: (any SyncScheduler)? = nil, log: any MacLogSink = SystemMacLog(),
+        rust: RustWorkspaceSelection? = nil, rustLifecycle: (any RustAccountLifecyclePort)? = nil
     ) {
         self.configuration = configuration
         self.now = now
@@ -164,7 +165,8 @@ package final class WorkspaceHost {
             identity: identity
         )
         workspace = Workspace(
-            store: store, sync: engine, now: now, makeID: makeID, tickScheduler: tickScheduler ?? TaskSyncScheduler()
+            store: store, sync: engine, rust: rust, rustLifecycle: rustLifecycle, now: now, makeID: makeID,
+            tickScheduler: tickScheduler ?? TaskSyncScheduler()
         )
         firstWriteRecorded = localState.load()?.workspaceFirstWrittenAt != nil
         workspace.didPersist = { [weak self] in self?.recordFirstWrite() }
