@@ -329,6 +329,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync commands API",
         "Command and capability routes expose the frozen contract",
     ),
+    "sync_delta": (
+        EPIC_TASKS,
+        "Sync delta feed",
+        "Pages carry whole commit-ordered transactions",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",
