@@ -169,6 +169,24 @@ class RustCore:
         result: dict[str, Any] = body["result"]
         return result
 
+    def ai_route(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Shared AI route policy (remote-only server). A denial is a value."""
+        return self._ai(self._runtime.ai_route, request)
+
+    def ai_validate_navigator(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Navigator output rules 1-4 over a provider's raw answer."""
+        return self._ai(self._runtime.ai_validate_navigator, request)
+
+    def ai_confirm_proposal(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Type an allow-listed command proposal and confirm it on current facts."""
+        return self._ai(self._runtime.ai_confirm_proposal, request)
+
+    def _ai(
+        self, call: Callable[[bytes], bytes], request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = json.loads(self._call(call, _encode(request)))
+        return body
+
 
 def _encode(value: object) -> bytes:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()

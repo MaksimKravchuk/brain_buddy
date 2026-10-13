@@ -16,6 +16,8 @@
 //! * failures are the typed [`BridgeError`] `(code, retryable, field)`; `field`
 //!   is a static rule name and no error ever carries payload text.
 
+mod ai;
+
 use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -384,6 +386,40 @@ impl Runtime {
         let (kind, data) = (kind.to_owned(), data.to_vec());
         let state = Arc::clone(&self.state);
         let out = py.detach(move || guarded(&state, || persistence(&kind, &data)))?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// Shared AI route policy (T048): JSON in, the `Route` as JSON out. A denial
+    /// is a value; only a malformed request is a `BridgeError`.
+    fn ai_route<'py>(&self, py: Python<'py>, request: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
+        let request = request.to_vec();
+        let state = Arc::clone(&self.state);
+        let out = py.detach(move || guarded(&state, || ai::route(&request)))?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// Rules 1-4 of the navigator output contract, as the shared Rust core has them.
+    fn ai_validate_navigator<'py>(
+        &self,
+        py: Python<'py>,
+        request: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let request = request.to_vec();
+        let state = Arc::clone(&self.state);
+        let out = py.detach(move || guarded(&state, || ai::validate_navigator(&request)))?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// Types an allow-listed command proposal and applies an explicit confirmation
+    /// against the current facts; the result is inert until submitted as a command.
+    fn ai_confirm_proposal<'py>(
+        &self,
+        py: Python<'py>,
+        request: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let request = request.to_vec();
+        let state = Arc::clone(&self.state);
+        let out = py.detach(move || guarded(&state, || ai::confirm_proposal(&request)))?;
         Ok(PyBytes::new(py, &out))
     }
 

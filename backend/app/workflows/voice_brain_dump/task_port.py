@@ -33,6 +33,13 @@ class TaskPort(Protocol):
 
 
 CreateNativeInboxTask = Callable[..., CreatedTask]
+ProposalCheck = Callable[..., object]
+"""Shared structural check of a confirmed create action (spec 026 T048).
+
+Called as ``check(title, task_ref=...)`` and raising on a refusal. The Tasks
+module owns it (ADR-0001: this workflow never imports ``app.modules.tasks``), so
+the composition root injects it.
+"""
 
 
 class InProcessTaskPort:
@@ -44,8 +51,13 @@ class InProcessTaskPort:
     self-adaptation this replaces.
     """
 
-    def __init__(self, create_native_inbox_task: CreateNativeInboxTask) -> None:
+    def __init__(
+        self,
+        create_native_inbox_task: CreateNativeInboxTask,
+        proposal_check: ProposalCheck | None = None,
+    ) -> None:
         self._create_native_inbox_task = create_native_inbox_task
+        self._proposal_check = proposal_check
 
     def create_native_inbox_task(
         self,
@@ -55,6 +67,11 @@ class InProcessTaskPort:
         source_capture_ids: list[str],
         idempotency_key: str,
     ) -> CreatedTask:
+        # An AgentRun result is a proposal: the shared core types it against the
+        # allow-listed catalog before the ordinary, fenced Task write. The
+        # deterministic child key doubles as the proposal's stable reference.
+        if self._proposal_check is not None:
+            self._proposal_check(title, task_ref=idempotency_key)
         return self._create_native_inbox_task(
             owner_id=owner_id,
             title=title,
