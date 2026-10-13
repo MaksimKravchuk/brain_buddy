@@ -5,12 +5,13 @@ use super::{
     BridgeError, BridgeRefusal, CLOSED, Failure, OPEN, POISONED, guarded, parse_json, to_json,
 };
 use bb_client::{
-    ExecuteContext, ExecuteError, ExecuteRequest, OpenOptions, QueryError, RandomIds,
-    ReportedExecuteError, Store, StoreError, StoreStatus, WorkspaceDraft, WorkspaceWatch,
-    convert_legacy_prepared_with, delete_workspace_draft_with, execute_batch_reported_with,
-    legacy_unsent, load_workspace_draft, query_collection_page, resolve_workspace_identities,
-    save_workspace_draft_with, visible_snapshot, workspace_issues_page, workspace_read,
-    workspace_sync_status, workspace_watch,
+    Choice, DependentChoice, ExecuteContext, ExecuteError, ExecuteRequest, IssueError, OpenOptions,
+    QueryError, RandomIds, Replacement, ReportedExecuteError, ResolveRequest, Store, StoreError,
+    StoreStatus, WorkspaceDraft, WorkspaceWatch, convert_legacy_prepared_with,
+    delete_workspace_draft_with, execute_batch_reported_with, legacy_unsent, load_workspace_draft,
+    query_collection_page, resolve_workspace_identities, save_workspace_draft_with,
+    visible_snapshot, workspace_issues_page, workspace_read, workspace_sync_status,
+    workspace_watch,
 };
 use bb_domain::types::{ActorId, Policy, Query, QueryInputs, ZoneName};
 use bb_protocol::{
@@ -441,6 +442,124 @@ fn requests(
             })
         })
         .collect()
+}
+
+/// A new command that takes the place of a rejected or held one: a new ID, the
+/// revisions the user was shown (a JSON `Precondition` array) and the approved
+/// dependency chain.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeReplacement {
+    pub command_id: String,
+    pub preconditions: Vec<u8>,
+    pub depends_on: Vec<String>,
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum BridgeIssueChoice {
+    /// Use the current version, or keep the item deleted.
+    UseCurrent,
+    /// Keep my version: queue it again against the shown version.
+    KeepMine { replacement: BridgeReplacement },
+}
+
+#[derive(Clone, Debug, uniffi::Enum)]
+pub enum BridgeDependentChoice {
+    KeepForLater,
+    Retry { replacement: BridgeReplacement },
+    Discard { confirmed: bool },
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeDependentDecision {
+    pub command_id: String,
+    pub choice: BridgeDependentChoice,
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct BridgeResolveRequest {
+    pub issue_id: String,
+    pub choice: BridgeIssueChoice,
+    pub dependents: Vec<BridgeDependentDecision>,
+    pub context: BridgeExecuteContext,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeReplaced {
+    pub old_command_id: String,
+    pub new_command_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeResolved {
+    pub replaced: Vec<BridgeReplaced>,
+    pub discarded: Vec<String>,
+    pub kept: Vec<String>,
+    /// True when this answers a retry of an already stored resolution.
+    pub repeated: bool,
+}
+
+/// The record an issue conflicts with, as the confirmed base holds it now.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BridgeIssueCurrent {
+    pub entity_type: String,
+    pub record_version: String,
+    pub edit_revision: Option<String>,
+    pub deleted: bool,
+    /// JSON body; `None` for a tombstone.
+    pub record: Option<Vec<u8>>,
+}
+
+fn issue_failure(error: IssueError) -> Failure {
+    match error {
+        IssueError::Store(error) => Failure::from(&error),
+        IssueError::Execute(error) => execute_failure(error),
+        other => Failure::new(other.code(), None),
+    }
+}
+
+fn owned_replacement(replacement: &BridgeReplacement) -> Result<Replacement, Failure> {
+    let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
+    Ok(Replacement {
+        command_id: CommandId::parse(&replacement.command_id).map_err(|_| invalid("command_id"))?,
+        shown: parse_json::<Vec<Precondition>>(&replacement.preconditions, "preconditions")?,
+        depends_on: replacement
+            .depends_on
+            .iter()
+            .map(|id| CommandId::parse(id).map_err(|_| invalid("depends_on")))
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn owned_resolution(request: &BridgeResolveRequest) -> Result<ResolveRequest, Failure> {
+    let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
+    Ok(ResolveRequest {
+        issue_id: request.issue_id.clone(),
+        choice: match &request.choice {
+            BridgeIssueChoice::UseCurrent => Choice::UseCurrent,
+            BridgeIssueChoice::KeepMine { replacement } => {
+                Choice::KeepMine(owned_replacement(replacement)?)
+            }
+        },
+        dependents: request
+            .dependents
+            .iter()
+            .map(|decision| {
+                Ok((
+                    CommandId::parse(&decision.command_id).map_err(|_| invalid("dependents"))?,
+                    match &decision.choice {
+                        BridgeDependentChoice::KeepForLater => DependentChoice::KeepForLater,
+                        BridgeDependentChoice::Retry { replacement } => {
+                            DependentChoice::Retry(owned_replacement(replacement)?)
+                        }
+                        BridgeDependentChoice::Discard { confirmed } => DependentChoice::Discard {
+                            confirmed: *confirmed,
+                        },
+                    },
+                ))
+            })
+            .collect::<Result<_, Failure>>()?,
+        context: owned_context(&request.context)?,
+    })
 }
 
 #[derive(uniffi::Object)]
@@ -1563,6 +1682,89 @@ impl BridgeWorkspace {
                     collection_next_cursor: page.next_cursor,
                 },
             })
+        })?)
+    }
+
+    /// Resolves one sync issue and every action held behind it in one
+    /// transaction (runtime-ffi.md `resolve_issue`): nothing is saved unless
+    /// all of it is. The shown revision travels in the replacements'
+    /// preconditions; if the record changed again the answer is
+    /// `REVISION_CONFLICT` and nothing was written. Cancellation arbitrates
+    /// with the commit like every durable call.
+    pub fn resolve_issue(
+        &self,
+        request: BridgeResolveRequest,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeResolved, BridgeError> {
+        let request = owned_resolution(&request)?;
+        if operation.used.swap(true, Ordering::AcqRel) {
+            return Err(Failure::new("OPERATION_ALREADY_USED", None).into());
+        }
+        if self.state.load(Ordering::Acquire) != OPEN {
+            return Err(Failure::new("WORKSPACE_CLOSED", None).into());
+        }
+        let mut held = self
+            .store
+            .lock()
+            .map_err(|_| Failure::new("INTERNAL_ERROR", None))?;
+        let store = held
+            .as_mut()
+            .ok_or_else(|| Failure::new("WORKSPACE_CLOSED", None))?;
+        let mut arbitration = None;
+        Ok(guarded(&AtomicU8::new(OPEN), || {
+            // Cancellation wins until the hook right before the SQLite commit takes the
+            // operation lock; from there it is held through the commit.
+            let before_commit = || {
+                let lock = operation.state.lock().map_err(|_| StoreError::Corrupt)?;
+                if *lock == OperationState::Cancelled || self.state.load(Ordering::Acquire) != OPEN
+                {
+                    return Err(ExecuteError::Cancelled);
+                }
+                arbitration = Some(lock);
+                Ok(())
+            };
+            let resolved =
+                bb_client::resolve_issue_with(store, &mut RandomIds, &request, before_commit)
+                    .map_err(issue_failure)?;
+            if let Some(lock) = &mut arbitration {
+                **lock = OperationState::Committed;
+            }
+            let id = |id: bb_protocol::wire::CommandId| id.as_str().to_owned();
+            Ok(BridgeResolved {
+                replaced: resolved
+                    .replaced
+                    .into_iter()
+                    .map(|(old, new)| BridgeReplaced {
+                        old_command_id: id(old),
+                        new_command_id: id(new),
+                    })
+                    .collect(),
+                discarded: resolved.discarded.into_iter().map(id).collect(),
+                kept: resolved.kept.into_iter().map(id).collect(),
+                repeated: resolved.repeated,
+            })
+        })?)
+    }
+
+    /// The record an issue conflicts with, read from the confirmed base now.
+    /// `None` when the issue is unknown or has no known target.
+    pub fn issue_current(
+        &self,
+        issue_id: String,
+    ) -> Result<Option<BridgeIssueCurrent>, BridgeError> {
+        Ok(self.with_store(|store| {
+            let view = bb_client::issue(store, &issue_id).map_err(issue_failure)?;
+            view.and_then(|view| view.current)
+                .map(|current| {
+                    Ok(BridgeIssueCurrent {
+                        entity_type: current.entity_type,
+                        record_version: current.record_version,
+                        edit_revision: current.edit_revision,
+                        deleted: current.deleted,
+                        record: current.record.as_ref().map(to_json).transpose()?,
+                    })
+                })
+                .transpose()
         })?)
     }
 

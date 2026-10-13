@@ -664,10 +664,28 @@ pub fn resolve_issue(
     ids: &mut impl IdSource,
     request: &ResolveRequest,
 ) -> Result<Resolved, IssueError> {
+    resolve_issue_with(store, ids, request, || Ok(()))
+}
+
+/// As [`resolve_issue`], with a hook run after all the work and right before
+/// the commit; an error from it rolls everything back (cancellation arbitrates
+/// with the commit there).
+///
+/// # Errors
+///
+/// [`IssueError`]; whatever it is, nothing was saved.
+pub fn resolve_issue_with(
+    store: &mut Store,
+    ids: &mut impl IdSource,
+    request: &ResolveRequest,
+    before_commit: impl FnOnce() -> Result<(), ExecuteError>,
+) -> Result<Resolved, IssueError> {
     store.try_write(|tx| {
         let workspace_id: String =
             tx.query_row("SELECT workspace_id FROM sync_meta", [], |row| row.get(0))?;
-        resolve_in(tx, ids, &workspace_id, request)
+        let resolved = resolve_in(tx, ids, &workspace_id, request)?;
+        before_commit().map_err(IssueError::Execute)?;
+        Ok(resolved)
     })
 }
 
