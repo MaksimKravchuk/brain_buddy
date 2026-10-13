@@ -608,7 +608,10 @@ impl Syncer {
                 self.capabilities_checked = true;
                 Ok(())
             }
-            Ok(CapabilitiesCheck::Ignored) => Err(Halt::Stale),
+            // Not for the base this device holds (e.g. another server generation
+            // after a restore): nothing to learn from it. Pull next, which finds
+            // the reset; the check repeats on the next round.
+            Ok(CapabilitiesCheck::Ignored) => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
@@ -988,7 +991,9 @@ impl Syncer {
             Ok(())
         });
         if result.is_err() {
-            // The answer never counted: whether the server committed is unknown.
+            // The answer never counted. `ever_sent` is one-way by design, so even a
+            // refusal leaves the command as possibly sent: it is looked up, and
+            // never rekeyed, until the server's verdict is known.
             mark_unknown(store, id)?;
         }
         result

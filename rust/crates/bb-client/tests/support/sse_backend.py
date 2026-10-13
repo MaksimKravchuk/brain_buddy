@@ -25,6 +25,16 @@ def main(data_dir: str, port: int) -> None:
     # The module-level application is the production one: it mounts the sync
     # routers (PR-63). It reads the environment above when it is imported.
     from app.main import app
+
+    # Test-only: shrink the feed's inline page limits so a handful of records
+    # force the oversized-transaction transfer path (the wire is unchanged).
+    limits = os.environ.get("BB_E2E_PAGE_LIMITS")
+    if limits:
+        from app.modules.tasks.sync import delta, transfers
+
+        hard, target, page = (int(part) for part in limits.split(","))
+        delta.INLINE_HARD_BYTES, delta.INLINE_TARGET_BYTES = hard, target
+        transfers.chunks.__defaults__ = (page,)
     from app.schemas.auth import Invite
     from app.utils.time import utcnow
 
