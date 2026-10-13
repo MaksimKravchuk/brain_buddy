@@ -258,6 +258,34 @@ nothing written). Command ids are not exposed by the runtime, so the confirmatio
 plus the generation (every local write moves it); both operations take the bridge's cancellable
 commit arbitration like the other lifecycle operations.
 
+First-sign-in merge (T044, `rebase.rs`): `link_and_merge_with(binding, context)` links an
+account-less workspace and queues its local records as new owner-bound commands in the same
+write transaction. Tags and projects first, then each task (a Next task with a running clock is
+created in the Inbox at its creation instant and moved to Next at the instant its clock started,
+under the clock's own formulation id, so the creation, the clock and the formulation identity
+survive), the terminal transition of finished tasks, project archives, subtasks and their
+transitions, comments, and, while Review is exposed on the device (`policy.weekly_review`), the
+owner's `review.explainer_ack` and `review.settings` at the instants the settings carry. Command
+ids are name-based (v5 layout over SHA-256) of workspace, entity type, record key, revision and
+step, so a repeat dedupes; dependencies and `after_command` preconditions come from the ordinary
+execute path; each command is decided at the instant its record carries. The migrated records
+leave the confirmed base and projection and are held only by the queued commands, so a later
+snapshot activation keeps them on top of its base until the commands confirm. `link_checkpoint`
+records what was included; a retry of a committed merge is `AlreadyLinked`.
+
+Review records that are not settings (sessions, decision queues, decisions, receipts, park
+acknowledgements, bulk releases, Navigator consent) and settings while Review is not exposed are
+not rebuilt as commands: they record outcomes already applied to tasks under a session, a
+formulation and an Undo window that no longer exist, and replaying them would apply them twice
+or be refused as stale. They stay in the base as they are, and a copy of each is kept in the
+reserved `merge-retained:` draft namespace (editor kind `merge_retained_record`, invisible to host
+draft CRUD). A snapshot activation puts back every retained record the snapshot does not carry
+(`INSERT OR IGNORE`: a key the snapshot holds wins), so no public Review record is lost by the
+first snapshot or by a rebuild. The private overlays (`runtime:local-review-private:`) are drafts
+and survive activation untouched. Not carried: a Next task's clock extensions, its stalled
+count, and park markers (the task keeps its list); these stay available only through the
+retained records' history.
+
 LOCAL Undo evidence additionally preserves a replaced receipt and session activity
 before-state. A receipt is restored only while the current receipt still belongs
 to the decision/bulk being undone; its task revision is rebound only when the

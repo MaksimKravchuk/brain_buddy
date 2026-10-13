@@ -11,9 +11,10 @@
 mod support;
 
 use bb_client::{
-    Authentication, Cancellation, ExecuteContext, ExecuteRequest, HttpRequest, HttpResponse,
-    Method, MonotonicClock, OpenOptions, RandomIds, Schedule, SessionBinding, SplitMix, Store,
-    SyncSession, Syncer, Transport, TransportFailure, execute, open_issues,
+    AccountBinding, Authentication, Cancellation, ExecuteContext, ExecuteRequest, HttpRequest,
+    HttpResponse, Method, MonotonicClock, OpenOptions, RandomIds, Schedule, SessionBinding,
+    SplitMix, Store, SyncSession, Syncer, Transport, TransportFailure, establish_account_less_with,
+    execute, link_and_merge_with, open_issues,
 };
 use bb_domain::types::{ActorId, Policy, ZoneName};
 use bb_protocol::catalog::{CommandType, EntityType};
@@ -714,5 +715,273 @@ fn e2e_026_fr_010_reset_required_recovers_through_a_snapshot_and_keeps_pending_w
         states[held.as_str()],
         "unknown",
         "still held for reconciliation"
+    );
+}
+
+/// The tail of `device`: a session over a store that is already linked.
+fn device_over(backend: &Backend, name: &str, mut store: Store) -> Device {
+    let session = SyncSession::start(
+        &mut store,
+        &SessionBinding {
+            account_id: Id::parse(&backend.owner).unwrap(),
+            scope_id: Id::parse(&backend.owner).unwrap(),
+            device_id: Id::parse(format!("device-{name}")).unwrap(),
+            authentication: Authentication::Fresh,
+        },
+    )
+    .unwrap();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let hook = Arc::new(Mutex::new(None));
+    let syncer = Syncer::new(
+        Box::new(Spy {
+            inner: backend.transport(),
+            log: Arc::clone(&log),
+            hook: Arc::clone(&hook),
+        }),
+        session,
+        Box::new(context),
+        Arc::new(MonotonicClock::new()),
+        Box::new(SplitMix::from_entropy()),
+        Schedule::default(),
+    );
+    Device {
+        store,
+        syncer,
+        log,
+        hook,
+    }
+}
+
+#[test]
+fn e2e_026_fr_003_the_first_sign_in_merge_reaches_the_real_server_once() {
+    let Some(backend) = start("merge") else {
+        return;
+    };
+    // An account-less workspace with real work in it.
+    let path = std::env::temp_dir()
+        .join(format!(
+            "bb-e2e-merge-{}-{}",
+            backend.addr.port(),
+            std::process::id()
+        ))
+        .join("workspace.sqlite3");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let mut store = Store::open(&OpenOptions {
+        path,
+        workspace_id: "workspace-local".to_string(),
+        busy_timeout: Duration::from_millis(5_000),
+    })
+    .unwrap();
+    establish_account_less_with(&mut store, || Ok(())).unwrap();
+    let mut local = Device {
+        store,
+        syncer: device(&backend, "scratch").syncer,
+        log: Arc::default(),
+        hook: Arc::default(),
+    };
+    let mut ids = Commands(0);
+    let (_, tag) = save(
+        &mut local,
+        &mut ids,
+        CommandType::TagCreate,
+        None,
+        json!({"name": "errands"}),
+        vec![],
+    );
+    let (_, project) = save(
+        &mut local,
+        &mut ids,
+        CommandType::ProjectCreate,
+        None,
+        json!({"name": "Home"}),
+        vec![],
+    );
+    let (_, plumber) = save(
+        &mut local,
+        &mut ids,
+        CommandType::TaskCreate,
+        None,
+        json!({"title": "Call the plumber", "state": "next", "project_id": project, "tag_ids": [tag], "priority": "high"}),
+        vec![],
+    );
+    let (_, done) = save(
+        &mut local,
+        &mut ids,
+        CommandType::TaskCreate,
+        None,
+        json!({"title": "Already done"}),
+        vec![],
+    );
+    save(
+        &mut local,
+        &mut ids,
+        CommandType::TaskTransition,
+        Some(&done),
+        json!({"action": "complete"}),
+        vec![Precondition::Revision(RevisionPrecondition {
+            entity_type: EntityType::Task,
+            entity_id: Id::parse(&done).unwrap(),
+            edit_revision: Counter::parse("1").unwrap(),
+        })],
+    );
+    save(
+        &mut local,
+        &mut ids,
+        CommandType::SubtaskCreate,
+        None,
+        json!({"task_id": plumber, "title": "Find the number"}),
+        vec![],
+    );
+    save(
+        &mut local,
+        &mut ids,
+        CommandType::CommentCreate,
+        None,
+        json!({"task_id": plumber, "body": "Left a message"}),
+        vec![],
+    );
+    // Review state: the owner's activation and settings (which travel as commands) and a
+    // session (a public Review record that stays on the device).
+    let mut review = |kind, entity: Option<&str>, payload: Value, pre| {
+        let mut request = ExecuteRequest {
+            command_id: ids.next(),
+            command_type: kind,
+            entity_id: entity.map(|id| Id::parse(id).unwrap()),
+            payload: payload.as_object().unwrap().clone(),
+            preconditions: pre,
+            depends_on: Vec::new(),
+            admission_tokens: Vec::new(),
+            context: context(),
+        };
+        request.context.policy.weekly_review = true;
+        request
+    };
+    let ack = review(
+        CommandType::ReviewExplainerAck,
+        Some("local-owner"),
+        json!({"time_zone": "UTC"}),
+        vec![],
+    );
+    execute(&mut local.store, &mut RandomIds, &ack).unwrap();
+    let settings = review(
+        CommandType::ReviewSettings,
+        Some("local-owner"),
+        json!({"threshold_days": 21, "onboarded": true}),
+        vec![Precondition::Revision(RevisionPrecondition {
+            entity_type: EntityType::ReviewSettings,
+            entity_id: Id::parse("local-owner").unwrap(),
+            edit_revision: Counter::parse("2").unwrap(),
+        })],
+    );
+    execute(&mut local.store, &mut RandomIds, &settings).unwrap();
+    let started = review(
+        CommandType::ReviewSessionStart,
+        None,
+        json!({"mode": "quick", "entry": "list", "origin": "ios", "skip_steps": [], "replace_open": false}),
+        vec![],
+    );
+    let session = execute(&mut local.store, &mut RandomIds, &started)
+        .unwrap()
+        .entity_id;
+    let mut store = local.store;
+
+    // The merge: one transaction, then the ordinary sync round sends the queue.
+    let binding = AccountBinding {
+        account: Id::parse(&backend.owner).unwrap(),
+        scope: Id::parse(&backend.owner).unwrap(),
+        device: Id::parse("device-merge").unwrap(),
+    };
+    let mut merge_context = context();
+    merge_context.policy.weekly_review = true;
+    let outcome = link_and_merge_with(&mut store, &binding, &merge_context, || Ok(())).unwrap();
+    assert!(
+        matches!(
+            outcome,
+            bb_client::MergeOutcome::Merged {
+                commands: 10,
+                review_records_kept_local: 1,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
+    let mut device = device_over(&backend, "merge", store);
+    let report = device.syncer.round(&mut device.store);
+    assert_eq!(report.halt, None, "{report:#?}");
+    assert!(report.registered, "the pending epoch registers first");
+    // What waits for a receipt (a command built on another) goes in the rounds after.
+    let mut sent = report.sent;
+    for _ in 0..4 {
+        let more = device.syncer.round(&mut device.store);
+        assert_eq!(more.halt, None, "{more:#?}");
+        sent += more.sent;
+    }
+    assert_eq!(sent, 10, "{report:#?}");
+
+    // The server holds the account-less work, with its structure.
+    let all = rest_get(&backend, "/api/tasks?limit=200");
+    let mut found: Vec<String> = all["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["title"].as_str().unwrap().to_string())
+        .collect();
+    found.sort();
+    // The list shows open tasks; the finished one is read on its own below.
+    assert_eq!(found, ["Call the plumber"]);
+    let detail = rest_get(&backend, &format!("/api/tasks/{plumber}"));
+    assert_eq!(detail["state"], "next");
+    assert_eq!(detail["subtasks"][0]["title"], "Find the number");
+    assert!(detail.to_string().contains("Left a message"), "{detail}");
+    assert!(
+        detail.to_string().contains(&tag) && detail.to_string().contains(&project),
+        "{detail}"
+    );
+    assert_eq!(
+        rest_get(&backend, &format!("/api/tasks/{done}"))["state"],
+        "completed"
+    );
+
+    // The server holds the owner's Review settings and activation, as the device had them.
+    let state = rest_get(&backend, "/api/review/state");
+    assert_eq!(state["settings"]["threshold_days"], 21, "{state}");
+    assert!(
+        state["settings"]["onboarded_at"].is_string()
+            && state["activated"].as_bool() != Some(false),
+        "{state}"
+    );
+    // ... and the session is still the device's own, session records included.
+    let kept: i64 = device
+        .store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT COUNT(*) FROM visible_records WHERE record_type = 'review_session'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(kept, 1, "session {}", session.as_str());
+
+    // The device converges, and a repeat of the merge queues nothing new.
+    let again = device.syncer.round(&mut device.store);
+    assert_eq!(again.halt, None, "{again:#?}");
+    assert!(
+        outbox(&mut device.store)
+            .values()
+            .all(|state| matches!(state.as_str(), "completed" | "accepted_awaiting_feed")),
+        "{:?}",
+        outbox(&mut device.store)
+    );
+    assert_eq!(
+        link_and_merge_with(&mut device.store, &binding, &context(), || Ok(())).unwrap(),
+        bb_client::MergeOutcome::AlreadyLinked
+    );
+    assert_eq!(
+        rest_get(&backend, "/api/tasks?limit=200")["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 }

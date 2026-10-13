@@ -36,6 +36,7 @@ mod local_review_fragments;
 mod local_review_import;
 mod localfacts;
 mod locking;
+mod rebase;
 mod receipts;
 mod replay;
 mod review_content_stamps;
@@ -86,6 +87,7 @@ pub use legacy_outbox::{
     legacy_unsent, resolve_legacy_outbox, stage_legacy_page_with,
 };
 pub use locking::{LockMode, MigrationLock};
+pub use rebase::{AccountBinding, MergeOutcome, link_and_merge_with};
 pub use receipts::{Looked, Settled, Settlement, apply_lookup, apply_receipt};
 pub use replay::{ReplayError, Replayed, replay, replay_in};
 pub use snapshot::{

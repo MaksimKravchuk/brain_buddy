@@ -55,6 +55,11 @@ def main(data_dir: str, port: int) -> None:
     container.feature_flag_service.set_mode(
         "rust_core_sync", "on", operator_id="bb-client-test"
     )
+    # The merge test migrates Review settings, which the owner's device sends only while
+    # the weekly review is exposed.
+    container.feature_flag_service.set_mode(
+        "weekly_review", "on", operator_id="bb-client-test"
+    )
     cookie = "; ".join(f"{c.name}={c.value}" for c in client.cookies.jar)
     client.close()
     db_path = container.task_repo.db_path
