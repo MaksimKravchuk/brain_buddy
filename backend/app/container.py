@@ -45,6 +45,7 @@ from app.modules.tasks.navigator import (
     NavigatorLimits,
     NavigatorProvider,
     NavigatorService,
+    check_task_create_proposal,
 )
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
@@ -569,6 +570,7 @@ def build_container(
         rate_limiter=navigator_rate_limiter,
         command_boundary=review_boundary,
         sync_enabled=_rust_core_sync_for_owner,
+        rust_core=rust_core,
     )
 
     def _voice_enabled_for_owner(owner_id: str) -> bool:
@@ -600,7 +602,10 @@ def build_container(
             config
         ),
         audio_limits=config.voice.audio_limits,
-        task_port=InProcessTaskPort(task_service.create_native_inbox_task),
+        task_port=InProcessTaskPort(
+            task_service.create_native_inbox_task,
+            proposal_check=check_task_create_proposal,
+        ),
         voice_enabled_for_owner=_voice_enabled_for_owner,
     )
 

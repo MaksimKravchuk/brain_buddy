@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
 import time
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -29,7 +30,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from app.exceptions import IdempotencyConflictError
+from app.exceptions import IdempotencyConflictError, ValidationFailure
 from app.schemas.review import (
     NavigatorConsentGrantRequest,
     NavigatorSuggestionRequest,
@@ -45,7 +46,7 @@ from .review_domain import (
     NavigatorUsageDocument,
     ReviewRequestError,
 )
-from .review_rules import drop_duplicate_proposals
+from .rust_adapter import RustCore
 from .service import _NOT_SYNC_DISPATCHED, serialized_write
 from .sync.legacy_adapter import review_request, revoke_collision_key
 from .sync.review_projection import (
@@ -243,7 +244,6 @@ def reduce_notes(notes: str) -> tuple[str, bool]:
 MAX_PROPOSALS = 3
 MAX_PROPOSAL_CHARS = 200
 MAX_QUESTION_CHARS = 500
-_SMART_ADD_LEFT_WRAPPERS = "([{"
 
 _EN_DATE_WORDS = frozenset(
     {
@@ -331,44 +331,6 @@ class NavigatorOutput:
     clarifying_question: str | None
 
 
-def _single_line(value: str, limit: int) -> str | None:
-    """Rule 1 shape: trimmed, non-empty, one line, at most ``limit`` scalars."""
-
-    text = value.strip()
-    if not text or len(text.splitlines()) != 1 or len(text) > limit:
-        return None
-    return text
-
-
-def _is_name_char(char: str) -> bool:
-    return char == "_" or unicodedata.category(char)[0] in {"L", "M", "N"}
-
-
-def _has_smart_add_token(text: str) -> bool:
-    """A ``#``/``@`` tag or a ``!`` priority marker the task parser would read.
-
-    The sigil must start a word (string start, whitespace or an opening
-    bracket), as in the Smart Add grammar; a ``!`` ending a word is kept.
-    """
-
-    for index, sigil in enumerate(text):
-        if sigil not in "#@!":
-            continue
-        if index and not (
-            text[index - 1].isspace() or text[index - 1] in _SMART_ADD_LEFT_WRAPPERS
-        ):
-            continue
-        following = text[index + 1 : index + 2]
-        if not following:
-            continue
-        if sigil == "!":
-            if not following.isspace():
-                return True
-        elif following == '"' or _is_name_char(following):
-            return True
-    return False
-
-
 def is_date_word(key: str) -> bool:
     """A month, weekday or relative day word (``formulation_key`` form, §2
     rule 3), English or Russian, in any case once keyed."""
@@ -444,24 +406,22 @@ def grounding_terms(text: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _input_keys(navigator_input: NavigatorInput) -> tuple[str, ...]:
-    fields = (
-        navigator_input.task_title,
-        navigator_input.task_notes,
-        navigator_input.project_name,
-        *navigator_input.open_task_titles,
-    )
-    return tuple(f" {formulation_key(value)} " for value in fields if value)
+_policy_core: RustCore | None = None
+_policy_core_lock = threading.Lock()
 
 
-def _is_grounded(text: str, input_keys: tuple[str, ...]) -> bool:
-    """Rule 3 (FR-021): every grounding term occurs, after ``formulation_key``,
-    as whole words in one input field (case-insensitively)."""
+def shared_policy_core() -> RustCore:
+    """The process-wide bridge runtime for the stateless AI policy calls.
 
-    return all(
-        any(f" {term} " in field for field in input_keys)
-        for term in grounding_terms(text)
-    )
+    A closed or poisoned runtime is replaced, so one contained panic does not
+    leave every later suggestion failing.
+    """
+
+    global _policy_core  # noqa: PLW0603 - one lazily opened runtime per process
+    with _policy_core_lock:
+        if _policy_core is None or not _policy_core.is_open:
+            _policy_core = RustCore()
+        return _policy_core
 
 
 def validate_navigator_output(
@@ -469,37 +429,130 @@ def validate_navigator_output(
     *,
     proposals: Sequence[str],
     clarifying_question: str | None,
+    core: RustCore | None = None,
 ) -> NavigatorOutput | None:
-    """Rules 1–4 of contracts/navigator.md §2; ``None`` means ``malformed``.
+    """Rules 1-4 of contracts/navigator.md §2; ``None`` means ``malformed``.
 
-    Identical on the server and in the Swift and web validators; rule 5 (the
+    The rules are the shared Rust core's (``bb_domain::proposal``), so the server,
+    the Swift core and the web validate one answer identically; rule 5 (the
     project-wide duplicate filter beyond the 20 sent titles) is the clients'.
     """
 
-    shaped = [
-        text
-        for text in (_single_line(value, MAX_PROPOSAL_CHARS) for value in proposals)
-        if text is not None and not _has_smart_add_token(text)
-    ]
-    unique = drop_duplicate_proposals(
-        shaped,
-        current_title=navigator_input.task_title or "",
-        open_titles=navigator_input.open_task_titles,
+    outcome = (core or shared_policy_core()).ai_validate_navigator(
+        {
+            "kind": navigator_input.kind,
+            "task_title": navigator_input.task_title,
+            "task_notes": navigator_input.task_notes,
+            "stall_reason": navigator_input.stall_reason,
+            "project_name": navigator_input.project_name,
+            "open_task_titles": list(navigator_input.open_task_titles),
+            "proposals": list(proposals),
+            "clarifying_question": clarifying_question,
+        }
     )
-    input_keys = _input_keys(navigator_input)
-    grounded = [text for text in unique if _is_grounded(text, input_keys)]
-    if grounded:
+    if outcome["status"] == "proposals":
         return NavigatorOutput(
-            proposals=tuple(grounded[:MAX_PROPOSALS]), clarifying_question=None
+            proposals=tuple(outcome["proposals"]), clarifying_question=None
         )
-    question = (
-        None
-        if clarifying_question is None
-        else _single_line(clarifying_question, MAX_QUESTION_CHARS)
-    )
-    if question is not None and _is_grounded(question, input_keys):
-        return NavigatorOutput(proposals=None, clarifying_question=question)
+    if outcome["status"] == "question":
+        return NavigatorOutput(proposals=None, clarifying_question=outcome["question"])
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmedProposal:
+    """An explicitly confirmed proposal: a typed command, not yet executed.
+
+    It carries the revision precondition the model's basis implies. Applying it
+    is an ordinary Task command through the fenced shared command handler; an
+    AgentRun result alone never mutates a Task.
+    """
+
+    target: str
+    command_type: str
+    payload: dict[str, object]
+    preconditions: tuple[dict[str, str], ...]
+
+
+def confirm_command_proposal(
+    *,
+    command_type: str,
+    target: str,
+    payload: dict[str, object],
+    basis_entity_id: str,
+    basis_revision: str,
+    current_revision: str | None,
+    source: dict[str, str],
+    current_source: dict[str, str] | None = None,
+    consent_text_version: int | None = None,
+    core: RustCore | None = None,
+) -> ConfirmedProposal:
+    """Type an allow-listed proposal and confirm it against the current facts.
+
+    ``source`` is who produced the proposal (``{"kind": "remote", "provider":
+    ...}``) and ``current_source`` who would produce it now (default: the same);
+    a changed revision, provider or consent text is refused as stale. A refusal
+    raises ``ValidationFailure`` carrying only the reason code and field, never
+    the proposed text.
+    """
+
+    outcome = (core or shared_policy_core()).ai_confirm_proposal(
+        {
+            "candidate": {
+                "command_type": command_type,
+                "target": target,
+                "payload": payload,
+            },
+            "basis": {
+                "check": {
+                    "entity_type": "task",
+                    "entity_id": basis_entity_id,
+                    "edit_revision": basis_revision,
+                },
+                "source": source,
+                "consent_text_version": consent_text_version,
+            },
+            "current": {
+                "edit_revision": current_revision,
+                "source": current_source or source,
+                "consent_text_version": consent_text_version,
+            },
+        }
+    )
+    if outcome["status"] != "confirmed":
+        error = outcome["error"]
+        raise ValidationFailure(
+            "The proposal cannot be applied.",
+            {"reason": error["reason"], "field": error.get("field")},
+        )
+    return ConfirmedProposal(
+        target=outcome["target"],
+        command_type=outcome["command"]["type"],
+        payload=outcome["command"]["payload"],
+        preconditions=tuple(outcome["preconditions"]),
+    )
+
+
+_BRAIN_DUMP_SOURCE = {"kind": "remote", "provider": "brain_dump_agent_run"}
+
+
+def check_task_create_proposal(title: str, *, task_ref: str) -> ConfirmedProposal:
+    """The shared structural check of one confirmed Brain Dump create action.
+
+    The person's confirmation in the ADR-0002 operation workspace is the explicit
+    apply; nothing existed when the AgentRun proposed, so the basis revision is
+    ``"0"``. The ordinary execute boundary still validates against current state.
+    """
+
+    return confirm_command_proposal(
+        command_type="task.create",
+        target=task_ref,
+        payload={"title": title},
+        basis_entity_id=task_ref,
+        basis_revision="0",
+        current_revision="0",
+        source=_BRAIN_DUMP_SOURCE,
+    )
 
 
 # ------------------------------------------------------------- consent E8
@@ -634,6 +687,8 @@ class NavigatorLimits:
     max_output_tokens: int = 300
     max_cost_usd: float = 0.01
     max_daily_cost_usd: float = 0.20
+    timeout_ms: int = 8_000
+    """The ``Terms`` handed to the shared route; the adapter owns the deadline."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -690,6 +745,37 @@ def build_navigator_input(request: NavigatorSuggestionRequest) -> NavigatorInput
         open_task_titles=() if project is None else tuple(project.open_task_titles),
         notes_truncated=truncated,
     )
+
+
+_DENIAL_REASONS = {
+    "local_unavailable": "navigator_disabled",
+    "remote_disabled": "navigator_disabled",
+    "credentials_missing": "navigator_disabled",
+    "provider_mismatch": "navigator_consent_required",
+    "consent_required": "navigator_consent_required",
+    "input_too_large": "navigator_input_too_large",
+    # The server has no cancel input on a synchronous request; never reached.
+    "cancelled": "navigator_disabled",
+}
+"""A route denial of the shared core and the http §7 reason it is reported as."""
+
+
+def _instant(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _stored_consent(consent: NavigatorConsentDocument) -> dict[str, object]:
+    return {
+        "owner": consent.owner_id,
+        "provider": consent.provider,
+        "consent": {
+            "granted_at": _instant(consent.granted_at),
+            "revoked_at": (
+                None if consent.revoked_at is None else _instant(consent.revoked_at)
+            ),
+            "consent_text_version": consent.consent_text_version,
+        },
+    }
 
 
 def _round_usd(value: float) -> float:
@@ -754,7 +840,11 @@ class NavigatorService:
         request_ids: Callable[[], str] = lambda: str(uuid4()),
         command_boundary: ReviewCommandBoundary | None = None,
         sync_enabled: Callable[[str], bool] | None = None,
+        rust_core: RustCore | None = None,
     ) -> None:
+        # Spec 026 T048: route and output rules are the shared core's; a
+        # composition root may hand in its own runtime, else the process-wide one.
+        self._rust_core = rust_core
         # Spec 026 PR-28: consent grant and the owner-wide revoke are legacy
         # commands of the shared receipt boundary while ``rust_core_sync`` is
         # effective for the owner (or a receipt already owns the key).
@@ -1123,29 +1213,70 @@ class NavigatorService:
     def _admit(
         self, owner_id: str, request: NavigatorSuggestionRequest, record: _Outcome
     ) -> tuple[str, NavigatorInput]:
-        """Everything decided before any cost: provider, consent, input size."""
+        """Everything decided before any cost: provider, consent, input size.
+
+        The order and the verdicts are the shared core's (``ai_policy::route``):
+        no provider call without a configured provider, its credentials, the
+        request's echoed consent and this owner's stored, current consent.
+        """
 
         provider = self.provider.category
-        if provider is None:
-            raise self._fail(record, "navigator_disabled")
-        echoed = request.consent
-        if not echoed.external_processing_allowed or echoed.provider != provider:
-            raise self._fail(record, "navigator_consent_required")
-        if not consent_is_current(
-            self._consent(owner_id, provider),
-            provider=provider,
-            version=self.consent_text_version,
-        ):
-            raise self._fail(record, "navigator_consent_required")
         navigator_input = build_navigator_input(request)
+        input_tokens = estimate_input_tokens(navigator_input)
+        routed = self._core().ai_route(
+            self._route_request(owner_id, request, provider, input_tokens)
+        )
+        if routed["route"] != "remote" or provider is None:
+            if routed.get("denial") == "input_too_large":
+                record.notes_truncated = navigator_input.notes_truncated
+                record.input_tokens = input_tokens
+            raise self._fail(record, _DENIAL_REASONS[routed.get("denial", "")])
         record.notes_truncated = navigator_input.notes_truncated
-        record.input_tokens = estimate_input_tokens(navigator_input)
-        if record.input_tokens > self.limits.max_input_tokens:
-            raise self._fail(record, "navigator_input_too_large")
+        record.input_tokens = input_tokens
         if not self.rate_limiter.check(owner_id):
             record.outcome = "navigator_rate_limited"
             raise NavigatorRateLimited(self.rate_limiter.retry_after_seconds(owner_id))
         return provider, navigator_input
+
+    def _core(self) -> RustCore:
+        """The injected runtime while it is usable, else the replaceable shared one."""
+
+        injected = self._rust_core
+        if injected is not None and injected.is_open:
+            return injected
+        return shared_policy_core()
+
+    def _route_request(
+        self,
+        owner_id: str,
+        request: NavigatorSuggestionRequest,
+        provider: str | None,
+        input_tokens: int,
+    ) -> dict[str, object]:
+        stored = None if provider is None else self._consent(owner_id, provider)
+        echoed = request.consent
+        return {
+            "owner": owner_id,
+            "cancelled": False,
+            "deterministic_sufficient": False,
+            "remote": {
+                "provider": provider,
+                # A provider reports a category only while it holds its credentials.
+                "credentials_configured": provider is not None,
+                "consent_text_version": self.consent_text_version,
+                "echoed_consent": {
+                    "external_processing_allowed": echoed.external_processing_allowed,
+                    "provider": echoed.provider,
+                },
+                "consents": [] if stored is None else [_stored_consent(stored)],
+            },
+            "estimated_input_tokens": input_tokens,
+            "terms": {
+                "timeout_ms": self.limits.timeout_ms,
+                "max_input_tokens": self.limits.max_input_tokens,
+                "max_output_tokens": self.limits.max_output_tokens,
+            },
+        }
 
     def _suggest(
         self, owner_id: str, request: NavigatorSuggestionRequest, record: _Outcome
@@ -1185,6 +1316,7 @@ class NavigatorService:
             navigator_input,
             proposals=result.proposals,
             clarifying_question=result.clarifying_question,
+            core=self._core(),
         )
         actual = self.provider.estimate_cost_usd(
             input_tokens=(
@@ -1280,6 +1412,7 @@ __all__ = [
     "NOTES_SEPARATOR",
     "NOTES_TAIL_CHARS",
     "PROMPT_VERSION",
+    "ConfirmedProposal",
     "NavigatorInput",
     "NavigatorInternalError",
     "NavigatorKind",
@@ -1295,6 +1428,8 @@ __all__ = [
     "NavigatorStatus",
     "NavigatorSuggestion",
     "build_navigator_input",
+    "check_task_create_proposal",
+    "confirm_command_proposal",
     "consent_is_current",
     "estimate_input_tokens",
     "granted_consent",
@@ -1303,6 +1438,7 @@ __all__ = [
     "navigator_error",
     "reduce_notes",
     "revoked_consent",
+    "shared_policy_core",
     "system_prompt",
     "user_prompt",
     "validate_navigator_output",
