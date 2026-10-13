@@ -223,6 +223,11 @@ package struct MacLaunchEnvironment {
     /// The kit's 15 s ticker and the engine's timers; nil is real time (tests pass manual ones).
     package var tickScheduler: (any SyncScheduler)?
     package var syncScheduler: (any SyncScheduler)?
+    /// The shared Rust runtime's environment (spec 026, T044); nil keeps the launch exactly the
+    /// legacy one. With it, the launch follows the persisted selection in the Mac's folder (the
+    /// same one the app reads), and the pilot switch decides whether a first selection is made.
+    package var rustRuntime: RustRuntimeEnvironment?
+    package var rustPilot: RustRuntimePilotSwitch
 
     package init(
         configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil, transport: (any HTTPTransport)? = nil,
@@ -230,8 +235,11 @@ package struct MacLaunchEnvironment {
         knownServers: [URL] = [], now: @escaping @Sendable () -> Date = { Date() },
         makeID: @escaping @Sendable () -> UUID = { UUID() }, log: any MacLogSink = SystemMacLog(),
         legacyLocking: any LegacyStoreLocking = LockfLegacyStoreLocking(), importHooks: LegacyImportTestHooks = LegacyImportTestHooks(),
-        tickScheduler: (any SyncScheduler)? = nil, syncScheduler: (any SyncScheduler)? = nil
+        tickScheduler: (any SyncScheduler)? = nil, syncScheduler: (any SyncScheduler)? = nil,
+        rustRuntime: RustRuntimeEnvironment? = nil, rustPilot: RustRuntimePilotSwitch = RustRuntimePilotSwitch()
     ) {
+        self.rustRuntime = rustRuntime
+        self.rustPilot = rustPilot
         self.tickScheduler = tickScheduler
         self.syncScheduler = syncScheduler
         self.configuration = configuration
@@ -252,8 +260,29 @@ package struct MacLaunchEnvironment {
     package static func live(_ configuration: MacHostConfiguration) -> MacLaunchEnvironment {
         MacLaunchEnvironment(
             configuration: configuration, cookieJar: HTTPCookieStorage.shared, responseCache: URLCache.shared,
-            cacheDirectory: MacHostConfiguration.legacyCacheDirectory, knownServers: MacHostConfiguration.knownServers()
+            cacheDirectory: MacHostConfiguration.legacyCacheDirectory, knownServers: MacHostConfiguration.knownServers(),
+            rustRuntime: try? RustRuntimeEnvironment.mac(configuration)
         )
+    }
+}
+
+extension RustRuntimeEnvironment {
+    /// The Mac's environment: its own folder, its login-keychain token store and its REST identity.
+    /// A dry run (`BRAINBUDDY_MAC_DATA_DIR`) opens no Keychain item until a sign-in the person starts.
+    package static func mac(
+        _ configuration: MacHostConfiguration, tokenStore: (any SessionTokenStore)? = nil,
+        transports: (any RustTransportProvider)? = nil
+    ) throws -> RustRuntimeEnvironment {
+        let base: @Sendable () -> any SessionTokenStore = { tokenStore ?? WorkspaceHost.systemTokenStore() }
+        let tokens: any SessionTokenStore = configuration.isDryRun ? DeferredSessionTokenStore(opening: base) : base()
+        return RustRuntimeEnvironment(
+            location: .directory(configuration.directory), legacyStoreURL: configuration.storeURL,
+            bridge: try RustBridgeRuntime(),
+            // The Mac syncs for the life of the process (no background signal): its foreground,
+            // window and network events reach the host through the workspace.
+            transports: transports ?? RustSyncTransportProvider(
+                tokenStore: tokens, identity: .macOS(version: BrainBuddyAPI.bundleVersion)),
+            server: APIRustAccountServer(tokenStore: tokens, identity: .macOS(version: BrainBuddyAPI.bundleVersion)))
     }
 }
 
@@ -362,11 +391,31 @@ package final class MacLaunch {
             }
         }
 
+        // The runtime (spec 026, T044): the install's persisted selection, the same file the iOS
+        // app and its widgets read in their folder. With the pilot switch off and no selection
+        // this is `.legacy` and nothing above or below changes. A store that cannot be opened
+        // stops the launch like a failed import: the retired file is never opened instead.
+        var rustSelection: RustWorkspaceSelection?
+        var rustLifecycle: (any RustAccountLifecyclePort)?
+        if let rustEnvironment = environment.rustRuntime {
+            switch await RustRuntimeLauncher(environment: rustEnvironment, pilot: environment.rustPilot).resolve() {
+            case .legacy:
+                break
+            case .unavailable(let code):
+                environment.log.log(.import, "rust runtime unavailable code=\(code)")
+                phase = .importFailed
+                return
+            case .rust(let selection, let lifecycle):
+                rustSelection = selection
+                rustLifecycle = lifecycle
+            }
+        }
+
         // Steps 4 and 5. A `store.json` that cannot be read is X-09 (`loadError`), never replaced.
         let host = WorkspaceHost(
             configuration: environment.configuration, tokenStore: environment.tokenStore, transport: environment.transport,
             now: environment.now, makeID: environment.makeID, tickScheduler: environment.tickScheduler,
-            syncScheduler: environment.syncScheduler, log: environment.log
+            syncScheduler: environment.syncScheduler, log: environment.log, rust: rustSelection, rustLifecycle: rustLifecycle
         )
         await host.workspace.load()
         let model = BrainBuddyModel(workspace: host.workspace, localStateStore: host.localState, now: environment.now)

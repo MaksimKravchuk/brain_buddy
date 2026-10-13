@@ -5,13 +5,14 @@ use super::{
     BridgeError, BridgeRefusal, CLOSED, Failure, OPEN, POISONED, guarded, parse_json, to_json,
 };
 use bb_client::{
-    Choice, DependentChoice, ExecuteContext, ExecuteError, ExecuteRequest, IssueError, OpenOptions,
-    QueryError, RandomIds, Replacement, ReportedExecuteError, ResolveRequest, Store, StoreError,
+    AccountBinding, Choice, DependentChoice, ExecuteContext, ExecuteError, ExecuteRequest,
+    IssueError, LinkOutcome, MergeOutcome, OpenOptions, QueryError, RandomIds, RemovalCheck,
+    RemovalOutcome, Replacement, ReportedExecuteError, ResolveRequest, Store, StoreError,
     StoreStatus, WorkspaceDraft, WorkspaceWatch, convert_legacy_prepared_with,
-    delete_workspace_draft_with, execute_batch_reported_with, legacy_unsent, load_workspace_draft,
-    query_collection_page, resolve_workspace_identities, save_workspace_draft_with,
-    visible_snapshot, workspace_issues_page, workspace_read, workspace_sync_status,
-    workspace_watch,
+    delete_workspace_draft_with, execute_batch_reported_with, legacy_unsent, link_account_with,
+    link_and_merge_with, load_workspace_draft, query_collection_page, remove_account_copy_with,
+    resolve_workspace_identities, save_workspace_draft_with, visible_snapshot,
+    workspace_issues_page, workspace_read, workspace_sync_status, workspace_watch,
 };
 use bb_domain::types::{ActorId, Policy, Query, QueryInputs, ZoneName};
 use bb_protocol::{
@@ -39,6 +40,39 @@ pub struct BridgeStoreRequest {
 pub enum BridgeStoreStatus {
     Ready,
     ReadOnlyRecovery { found: i64 },
+}
+
+/// What binding the workspace to a signed-in account did (T044).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeLinkOutcome {
+    Linked,
+    AlreadyLinked,
+    OtherAccount,
+    /// Local work no import carries into an account yet; nothing changed.
+    LocalWorkNotMerged {
+        records: u64,
+        queued: u64,
+    },
+}
+
+/// What the first-sign-in merge did (PR-54b): the account-less records became commands, or it
+/// already had, or another account owns the workspace.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeMergeOutcome {
+    Merged {
+        records: u64,
+        commands: u64,
+        review_records_kept_local: u64,
+    },
+    AlreadyLinked,
+    OtherAccount,
+}
+
+/// What removing the account's local copy did (T044).
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum BridgeRemoval {
+    Removed,
+    Changed { unsent: u64, open_issues: u64 },
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -870,6 +904,102 @@ impl BridgeWorkspace {
             execute_failure,
         )?;
         Ok(())
+    }
+
+    /// Binds an account-less (or unchosen) workspace to the account that signed in. Refuses to
+    /// link a workspace that holds local work, and another account's workspace, by outcome.
+    pub fn link_account(
+        &self,
+        account_id: String,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeLinkOutcome, BridgeError> {
+        let account = Id::parse(account_id)
+            .map_err(|_| Failure::new("INVALID_REQUEST", Some("account_id")))?;
+        let outcome = self.mutate_local_review(
+            operation,
+            |store, before_commit| link_account_with(store, &account, before_commit),
+            execute_failure,
+        )?;
+        Ok(match outcome {
+            LinkOutcome::Linked => BridgeLinkOutcome::Linked,
+            LinkOutcome::AlreadyLinked => BridgeLinkOutcome::AlreadyLinked,
+            LinkOutcome::OtherAccount => BridgeLinkOutcome::OtherAccount,
+            LinkOutcome::LocalWorkNotMerged { records, queued } => {
+                BridgeLinkOutcome::LocalWorkNotMerged { records, queued }
+            }
+        })
+    }
+
+    /// The explicit first-sign-in merge: binds account, scope and device and queues the local
+    /// records as new commands in one transaction (a crash before the commit changes nothing; a
+    /// retry after it is `AlreadyLinked`). The caller has shown the person what this does.
+    pub fn link_and_merge(
+        &self,
+        account_id: String,
+        scope_id: String,
+        device_id: String,
+        context: BridgeExecuteContext,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeMergeOutcome, BridgeError> {
+        let invalid = |field| Failure::new("INVALID_REQUEST", Some(field));
+        let binding = AccountBinding {
+            account: Id::parse(account_id).map_err(|_| invalid("account_id"))?,
+            scope: Id::parse(scope_id).map_err(|_| invalid("scope_id"))?,
+            device: Id::parse(device_id).map_err(|_| invalid("device_id"))?,
+        };
+        let context = owned_context(&context)?;
+        let outcome = self.mutate_local_review(
+            operation,
+            |store, before_commit| link_and_merge_with(store, &binding, &context, before_commit),
+            execute_failure,
+        )?;
+        Ok(match outcome {
+            MergeOutcome::Merged {
+                records,
+                commands,
+                review_records_kept_local,
+            } => BridgeMergeOutcome::Merged {
+                records,
+                commands,
+                review_records_kept_local,
+            },
+            MergeOutcome::AlreadyLinked => BridgeMergeOutcome::AlreadyLinked,
+            MergeOutcome::OtherAccount => BridgeMergeOutcome::OtherAccount,
+        })
+    }
+
+    /// Removes the account's local copy when it still is what the sign-out confirmation named,
+    /// checked under the store's lock. The store is a fresh unchosen workspace afterwards.
+    pub fn remove_account_copy(
+        &self,
+        max_unsent: u64,
+        generation: u64,
+        issue_ids: Vec<String>,
+        operation: Arc<BridgeOperation>,
+    ) -> Result<BridgeRemoval, BridgeError> {
+        if issue_ids.len() > 10_000 {
+            return Err(Failure::new("TOO_MANY_ITEMS", Some("issue_ids")).into());
+        }
+        let check = RemovalCheck {
+            max_unsent,
+            generation,
+            issue_ids: issue_ids.into_iter().collect(),
+        };
+        let outcome = self.mutate_local_review(
+            operation,
+            |store, before_commit| remove_account_copy_with(store, &check, before_commit),
+            execute_failure,
+        )?;
+        Ok(match outcome {
+            RemovalOutcome::Removed => BridgeRemoval::Removed,
+            RemovalOutcome::Changed {
+                unsent,
+                open_issues,
+            } => BridgeRemoval::Changed {
+                unsent,
+                open_issues,
+            },
+        })
     }
 
     /// Bounded, coalescable private-beforeimage upkeep, even when Review is OFF.

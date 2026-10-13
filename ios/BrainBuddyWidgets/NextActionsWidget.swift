@@ -191,8 +191,12 @@ enum NextActionsLoader {
         let records: [TaskRecord]
         switch choice {
         case .next:
+            await workspace.prepareList(.list(.next))
             records = openTasks(in: workspace.list(.list(.next)))
         case .today:
+            // The selected Rust runtime answers a list once it is prepared; the legacy one needs nothing.
+            await workspace.prepareList(.dateView(.overdue))
+            await workspace.prepareList(.dateView(.today))
             records = openTasks(in: workspace.list(.dateView(.overdue)))
                 + openTasks(in: workspace.list(.dateView(.today)))
         }

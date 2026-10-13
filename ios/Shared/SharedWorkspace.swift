@@ -31,14 +31,21 @@ enum SharedWorkspace {
             await appWorkspace.reloadIfChangedExternally()
             return appWorkspace
         }
-        // Extension processes still open the legacy App Group file. Opening the Rust store here
-        // needs the selected workspace identity persisted in the App Group, which does not exist
-        // before the production cutover; a process-local setting from the app cannot reach
-        // another process. The package seam for that cutover is
-        // `Workspace.extensionWorkspace(over:)` with `Workspace.rustDatabaseURL(appGroupID:workspaceID:)`.
-        let workspace = Workspace.live(appGroupID: SharedConstants.appGroupID, enableSync: false)
-        await workspace.load()
-        return workspace
+        // The install's runtime is the selection file in the App Group (spec 026, T044): with one,
+        // the store of the selected workspace identity opens through the same database lock as
+        // the app and never syncs; without one the install is still legacy and opens the file.
+        switch await Workspace.openForExtension(location: .appGroup(SharedConstants.appGroupID)) {
+        case .rust(let workspace):
+            await workspace.load()
+            return workspace
+        case .unavailable(let code):
+            // Never the retired file: the work is in the Rust store. `requireLoaded` refuses writes.
+            return Workspace.unavailable(code: code)
+        case .legacy:
+            let workspace = Workspace.live(appGroupID: SharedConstants.appGroupID, enableSync: false)
+            await workspace.load()
+            return workspace
+        }
     }
 
     /// Stops an intent from writing when the store could not be read, for

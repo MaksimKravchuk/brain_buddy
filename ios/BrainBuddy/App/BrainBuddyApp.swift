@@ -15,13 +15,27 @@ struct BrainBuddyApp: App {
     @State private var workspace: Workspace
     /// Beta performance diagnostics; nil when the build turns them off.
     @State private var diagnostics: PerformanceDiagnostics?
+    /// Whether this launch resolves the runtime (spec 026, T044): the install has a persisted
+    /// selection, or the local pilot switch is on. Otherwise nothing below runs and the app is
+    /// exactly the legacy app.
+    private let resolvesRuntime: Bool
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let usesPreviewData = ProcessInfo.processInfo.arguments.contains(AppConstants.previewDataLaunchArgument)
+        let location = RustRuntimeLocation.appGroup(AppConstants.appGroupID)
+        // An unreadable selection counts: the install must not fall back to the retired file.
+        let selection: Bool
+        do {
+            selection = try RustRuntimeSelectionStore(location: location).load() != nil
+        } catch {
+            selection = true
+        }
+        let resolves = !usesPreviewData && (selection || RustRuntimePilotSwitch().isEnabled)
+        resolvesRuntime = resolves
         let workspace = usesPreviewData
             ? Workspace.preview()
-            : Workspace.live(appGroupID: AppConstants.appGroupID)
+            : selection && resolves ? Workspace.pending() : Workspace.live(appGroupID: AppConstants.appGroupID)
         // The weekly review's account-less release switch (spec 020), set
         // before the first load so load-time upkeep sees it.
         workspace.accountlessReviewEnabled = ReviewExposure.accountlessReleaseSwitch
@@ -41,7 +55,7 @@ struct BrainBuddyApp: App {
                 .environment(workspace)
                 .environment(diagnostics)
                 .task { await diagnostics?.start() }
-                .task { await loadIfNeeded() }
+                .task { await start() }
                 .task { await observeExternalWrites() }
                 .task { await observeNetwork() }
                 .onChange(of: scenePhase) { _, phase in
@@ -57,6 +71,48 @@ struct BrainBuddyApp: App {
     }
 
     // MARK: Lifecycle
+
+    /// The runtime is resolved before the first load, so the legacy store is never read once the
+    /// install has moved and the import never races a running legacy workspace.
+    private func start() async {
+        if resolvesRuntime { await resolveRuntime() }
+        await loadIfNeeded()
+    }
+
+    private func resolveRuntime() async {
+        guard !workspace.isLoaded else { return }
+        let environment: RustRuntimeEnvironment
+        do {
+            environment = try RustRuntimeEnvironment.appGroup(
+                AppConstants.appGroupID, reviewEnabled: ReviewExposure.accountlessReleaseSwitch)
+        } catch {
+            // The install is the Rust runtime's: never the retired file instead.
+            let location = RustRuntimeLocation.appGroup(AppConstants.appGroupID)
+            let hasSelection: Bool
+            do {
+                hasSelection = try RustRuntimeSelectionStore(location: location).load() != nil
+            } catch {
+                hasSelection = true
+            }
+            if hasSelection { replaceWorkspace(Workspace.unavailable(code: "BRIDGE_UNAVAILABLE")) }
+            return
+        }
+        switch await RustRuntimeLauncher(environment: environment).resolve() {
+        case .legacy:
+            break
+        case .unavailable(let code):
+            replaceWorkspace(Workspace.unavailable(code: code))
+        case .rust(let selection, let lifecycle):
+            replaceWorkspace(Workspace.selected(selection, lifecycle: lifecycle))
+        }
+    }
+
+    private func replaceWorkspace(_ next: Workspace) {
+        next.accountlessReviewEnabled = ReviewExposure.accountlessReleaseSwitch
+        SharedWorkspace.adopt(next)
+        next.didPersist = { WidgetCenter.shared.reloadAllTimelines() }
+        workspace = next
+    }
 
     private func loadIfNeeded() async {
         guard !workspace.isLoaded else { return }
@@ -85,6 +141,9 @@ struct BrainBuddyApp: App {
             diagnostics?.sceneEnteredBackground()
             Task {
                 await workspace.flush()
+                // A selected runtime stops polling and closes its hint stream until the next
+                // foreground; the legacy engine ignores it.
+                await workspace.enterBackground()
                 WidgetCenter.shared.reloadAllTimelines()
                 BackgroundRefresh.schedule(for: workspace)
             }

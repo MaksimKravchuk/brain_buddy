@@ -45,8 +45,8 @@ struct SyncStatusLabel: View {
     }
 
     /// The label for the workspace: the typed runtime status (spec 026 M-01) when the shared core
-    /// runs it, otherwise the legacy engine's status. `updateNeeded` is false until the workspace
-    /// exposes the runtime's unsupported-version state.
+    /// runs it, otherwise the legacy engine's status. `updateNeeded` is the store being newer than
+    /// this build or the sync transport's `UPGRADE_REQUIRED`.
     @MainActor static func describe(_ workspace: Workspace, now: Date) -> Description {
         guard workspace.isRustSelected else {
             return describe(
@@ -60,7 +60,7 @@ struct SyncStatusLabel: View {
             failure = TransportFailure(referenceID: nil)
         }
         let status = RuntimeSyncStatusPresenter.describe(
-            workspace.syncSnapshot, updateNeeded: workspace.syncRecovery.storeNeedsUpdate, transportFailure: failure, now: now, device: device)
+            workspace.syncSnapshot, updateNeeded: workspace.syncRecovery.storeNeedsUpdate || workspace.syncRecovery.syncNeedsUpdate, transportFailure: failure, now: now, device: device)
         return Description(
             text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction, device: device),
             needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel,

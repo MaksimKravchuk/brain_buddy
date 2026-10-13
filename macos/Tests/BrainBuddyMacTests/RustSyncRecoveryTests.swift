@@ -455,6 +455,9 @@ struct RustSyncRecoveryTests {
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery()) == nil)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true)) == .updateNeededStore)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true, storeUnavailable: true)) == .updateNeededStore)
+        // The sync server newer than this build (`UPGRADE_REQUIRED`); a newer store outranks it.
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(syncNeedsUpdate: true)) == .updateNeededSync)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true, syncNeedsUpdate: true)) == .updateNeededStore)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .rebuilding)) == .rebuilding)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .failed(referenceID: "ref-9"))) == .rebuildFailed(referenceID: "ref-9"))
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(epoch: .closed)) == .migrationUncertain, "a closed epoch is never shown as quiet")

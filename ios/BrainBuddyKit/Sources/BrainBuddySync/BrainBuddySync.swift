@@ -28,9 +28,21 @@ public protocol SyncRuntimePort: Sendable {
     /// Rebuilds the synced copy from the account while keeping every waiting change and saved
     /// issue (design D-03). A port without a transport answers `.transportUnavailable`.
     func rebuildSyncedCopy() async -> SyncRuntimeRebuildResult
+    /// The scene left the foreground: no polls or pulls until the next foreground request.
+    func enterBackground() async
+    /// Stops all work on the store and releases it, but stays usable: the next request starts
+    /// again. Called before the account's copy is removed, so nothing writes or holds the file.
+    func quiesce() async
+    /// Hears every status the transport reaches, including those between requests (a hint pull,
+    /// a poll, a retry). Called on the transport's own thread: hand off and return. Replaces an
+    /// earlier handler; nil removes it.
+    func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async
 }
 
 extension SyncRuntimePort {
+    public func enterBackground() async {}
+    public func quiesce() async {}
+    public func setStatusHandler(_ handler: (@Sendable (SyncRuntimeWakeResult) -> Void)?) async {}
     public func rebuildSyncedCopy() async -> SyncRuntimeRebuildResult { .transportUnavailable }
 }
 
@@ -44,6 +56,9 @@ public enum SyncRuntimeRebuildResult: Hashable, Sendable {
 
 public enum SyncRuntimeWakeResult: Hashable, Sendable {
     case status(SyncStatus)
+    /// The server or its protocol is newer than this build (`UPGRADE_REQUIRED`): sync is stopped
+    /// until the app updates. Waiting changes and saved issues stay on the device.
+    case updateNeeded
     /// The accepted transport slice has not been installed. Pending local
     /// commands remain durable; this is never represented as synced.
     case transportUnavailable
