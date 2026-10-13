@@ -17,7 +17,7 @@ public member and never leave this module.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta
@@ -113,6 +113,21 @@ def boundary_active() -> bool:
     """
 
     return _ACTIVE.get()
+
+
+@contextmanager
+def executing() -> Iterator[None]:
+    """Mark a command as running inside a receipt (see ``boundary_active``).
+
+    The device executor opens its receipt in the sync route, so it enters here
+    itself where ``ReviewCommandBoundary.run`` would.
+    """
+
+    token = _ACTIVE.set(True)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(token)
 
 
 def public_value(value: Any) -> Any:
@@ -407,12 +422,9 @@ class ReviewCommandBoundary:
             )
 
     @contextmanager
-    def _executing(self) -> Any:
-        token = _ACTIVE.set(True)
-        try:
+    def _executing(self) -> Iterator[None]:
+        with executing():
             yield
-        finally:
-            _ACTIVE.reset(token)
 
     def run[Result](  # noqa: PLR0913 - the command's whole context
         self,

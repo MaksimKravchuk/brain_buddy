@@ -329,6 +329,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync commands API",
         "Command and capability routes expose the frozen contract",
     ),
+    "sync_device_review": (
+        EPIC_TASKS,
+        "Sync device Review commands",
+        "Review and Navigator consent commands execute on the device route",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",
