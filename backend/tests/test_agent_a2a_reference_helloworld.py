@@ -41,6 +41,10 @@ from .a2a_reference import (
 OWNER = "user_reference"
 PASSWORD = "correct-horse-battery-staple"
 SAMPLE_PORT = 9999
+
+# The sample binds that one fixed port, so the module's tests share one
+# process: under `pytest -n --dist loadgroup` they all run on the same worker.
+pytestmark = pytest.mark.xdist_group("a2a-helloworld-port-9999")
 SAMPLE_URL = f"http://127.0.0.1:{SAMPLE_PORT}"
 CARD_URL = f"{SAMPLE_URL}/.well-known/agent-card.json"
 

@@ -827,10 +827,10 @@ jobs:
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("ios-kit job gates itself on the changed-stack filter", completed.stderr)
 
-    def test_workflow_rejects_e2e_queued_behind_gates_that_do_not_guard_it(self) -> None:
-        # Waiting on backend and frontend is allowed -- they are the cheap checks
-        # that should fail before the stack is built. Waiting on the markdown
-        # gate, or on a service that ships in neither image, is not.
+    def test_workflow_rejects_e2e_queued_behind_the_service_lanes(self) -> None:
+        # E2E consumes nothing another job produces. Queued behind the backend
+        # suite it was the longest chain in the run, so every edge is surplus --
+        # the service lanes included, not just the markdown gate.
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "ci.yml"
             workflow.write_text(
@@ -841,7 +841,6 @@ jobs:
     needs:
       - backend
       - frontend
-      - ios-kit
       - spec-kit
     steps:
       - run: make test-e2e
@@ -853,25 +852,20 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("e2e job declares needs it does not consume", completed.stderr)
-        self.assertIn("ios-kit", completed.stderr)
+        self.assertIn("'backend'", completed.stderr)
         self.assertIn("spec-kit", completed.stderr)
-        # The legitimate cost gates must not be reported as surplus.
-        self.assertNotIn("'backend'", completed.stderr)
+        self.assertIn("it must run as an independent lane", completed.stderr)
 
-    def test_workflow_accepts_expensive_lanes_gated_on_the_cheap_service_lanes(self) -> None:
+    def test_workflow_accepts_e2e_and_docker_as_independent_lanes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "ci.yml"
             workflow.write_text(
                 """
 jobs:
   e2e:
-    needs:
-      - backend
-      - frontend
     steps:
       - run: make test-e2e
   docker:
-    needs: e2e
     steps:
       - run: docker buildx build .
 """.strip(),
@@ -884,11 +878,9 @@ jobs:
         # is that the job-graph rule raised no complaint about these two.
         self.assertNotIn("declares needs it does not consume", completed.stderr)
 
-    def test_workflow_rejects_docker_restating_the_edges_e2e_already_carries(self) -> None:
-        # docker waits on e2e for cache locality. Naming backend/frontend as well
-        # restates edges e2e already holds, which is the noise the rule exists to
-        # keep out -- and it would let the pair drift back into running in
-        # parallel and paying the identical image build twice.
+    def test_workflow_rejects_docker_queued_behind_e2e(self) -> None:
+        # Ordering docker after e2e bought a warm cache on a runner nobody was
+        # waiting on and put a whole job on the end of the critical path.
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "ci.yml"
             workflow.write_text(
@@ -896,10 +888,7 @@ jobs:
 jobs:
   docker:
     name: Docker Images
-    needs:
-      - e2e
-      - backend
-      - frontend
+    needs: e2e
     steps:
       - run: docker buildx build .
 """.strip(),
@@ -910,7 +899,7 @@ jobs:
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("docker job declares needs it does not consume", completed.stderr)
-        self.assertIn("backend", completed.stderr)
+        self.assertIn("'e2e'", completed.stderr)
 
     def test_workflow_rejects_a_job_absent_from_the_full_ci_gate(self) -> None:
         # A flat graph makes full-ci the only thing that makes a job required,
@@ -1795,12 +1784,15 @@ jobs:
             "    name: Backend mutation head measurement\n"
             "    runs-on: ubuntu-latest\n"
             "    timeout-minutes: 90\n"
-            "    needs:\n"
-            "      - changes\n"
-            "      - backend\n"
+            "    needs: changes\n"
         )
         serialised = conformant.replace(
-            head_job, head_job + "      - mutation-base\n", 1
+            head_job,
+            head_job.replace(
+                "    needs: changes\n",
+                "    needs:\n      - changes\n      - mutation-base\n",
+            ),
+            1,
         )
         self.assertNotEqual(serialised, conformant, "fixture edit did not apply")
 
@@ -1860,16 +1852,23 @@ jobs:
         )
 
     def test_workflow_accepts_an_outcome_propagating_job_level_if(self) -> None:
-        # docker carries one so the required check still reports when E2E fails
-        # instead of vanishing in the case it exists to explain.
+        # A condition that only propagates another job's outcome (docker carried
+        # one while it waited on E2E, so the check still reported when E2E
+        # failed) is not path filtering and stays allowed.
         conformant = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("!cancelled() && needs.e2e.result != 'skipped'", conformant)
+        propagating = conformant.replace(
+            "  mutation-gate:\n    name: Backend mutation gate\n",
+            "  mutation-gate:\n    name: Backend mutation gate\n"
+            "    if: ${{ !cancelled() && needs.mutation-head.result != 'skipped' }}\n",
+            1,
+        )
+        self.assertNotEqual(propagating, conformant, "fixture edit did not apply")
 
         with tempfile.TemporaryDirectory() as tmp:
             workflow = Path(tmp) / "ci.yml"
-            workflow.write_text(conformant, encoding="utf-8")
+            workflow.write_text(propagating, encoding="utf-8")
 
             completed = self.run_validator(
                 "workflow",

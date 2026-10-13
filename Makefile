@@ -23,7 +23,7 @@ dev-frontend:
 test-backend:
 	rm -rf backend/allure-results && mkdir -p backend/allure-results
 	touch backend/allure-results/.run-started-at
-	cd backend && pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+	cd backend && pytest -n auto --dist loadgroup --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
 	python3 scripts/validate_coverage_floor.py --stack backend --format cobertura \
 		--report backend/coverage.xml --floor backend/coverage-floor.json
 	python3 scripts/validate_allure_taxonomy.py --path backend/allure-results --label backend-pytest \

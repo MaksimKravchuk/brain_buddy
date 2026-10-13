@@ -627,10 +627,11 @@ def _path_filter_errors(workflow_text: str) -> list[str]:
         # check that quietly did not execute.
         #
         # A condition that only propagates another job's outcome is not that.
-        # `docker` needs one: with a bare `needs: e2e` it was skipped the moment
-        # E2E failed, so the required check went missing in exactly the case it
-        # exists to explain. Banning every job-level `if` cost that check its
-        # purpose; what stays banned is reading the path filter here.
+        # `docker` needed one while it waited on E2E: with a bare `needs: e2e`
+        # it was skipped the moment E2E failed, so the required check went
+        # missing in exactly the case it exists to explain. Banning every
+        # job-level `if` cost that check its purpose; what stays banned is
+        # reading the path filter here.
         expression = job_if.group("expr")
         if "needs.changes.outputs" in expression or "env.RUN" in expression:
             errors.append(
@@ -943,23 +944,20 @@ LANE_DEPENDENCY_LIMITS = {
     # when the CLI itself changed.
     "cli-native": {"changes"},
     "cli-artifacts": {"changes", "cli-native"},
-    # The whole-stack lane. It consumes nothing the service lanes produce, but
-    # it may wait for them so a failing linter or unit test stops the run before
-    # anything pays to boot the stack. It may wait for NOTHING ELSE: not the
-    # iOS lanes (which ship in neither image), and not docker.
-    "e2e": {"backend", "frontend"},
-    # The image build, ordered after E2E for cache locality: the two build
-    # byte-identical images, so running them in parallel paid the same build
-    # twice on every cold cache. `backend`/`frontend` are deliberately absent --
-    # e2e already waits on them, and restating a transitive edge is the noise
-    # this rule exists to keep out.
-    "docker": {"e2e"},
-    # The mutation measurements consume the enforced-scope decision from
-    # `changes`, and wait on `backend` for cost: mutmut re-runs the backend suite
-    # hundreds of times, so it is the most expensive thing in the workflow to
-    # point at code whose own tests are already failing.
-    "mutation-base": {"changes", "backend"},
-    "mutation-head": {"changes", "backend"},
+    # The whole-stack lane consumes nothing any other job produces. It used to
+    # wait for `backend` and `frontend` as cheap checks, but the backend suite
+    # is not cheap: queued behind it, E2E was the longest chain in the run.
+    "e2e": set(),
+    # The image build. It used to follow E2E so its build hit the cache E2E had
+    # just written; that saved runner time nobody waited on and added a job to
+    # the end of the critical path. Both now read the cache `main` wrote.
+    "docker": set(),
+    # The mutation measurements consume only the enforced-scope decision. They
+    # do not wait on `backend`: mutmut runs the clean suite before any mutant
+    # and stops when it fails, so a red suite fails here early anyway, and the
+    # wait put the backend suite in front of ten minutes of mutmut.
+    "mutation-base": {"changes"},
+    "mutation-head": {"changes"},
     # The gate genuinely consumes both measurements -- it compares them.
     "mutation-gate": {"changes", "mutation-base", "mutation-head"},
 }

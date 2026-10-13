@@ -479,17 +479,21 @@ jobs:
           MODE: ${{ steps.select.outputs.mode }}
           SELECTION: ${{ steps.select.outputs.selection }}
         run: |
+          # One worker per core. loadgroup spreads tests one at a time except
+          # those sharing an xdist_group (a module bound to a fixed port), and
+          # pytest-cov merges every worker's data, test contexts included.
+          parallel=(-n auto --dist loadgroup)
           if [ "${MODE}" = "selected" ]; then
             # A partial run cannot meet the whole-suite 95% bar; the floor is
             # enforced on the landing path, which always runs everything.
             mapfile -t tests < "${SELECTION}"
-            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
+            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
               --cov-fail-under=0 "${tests[@]}"
           elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
+            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results \
               --cov-context=test
           else
-            pytest --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
+            pytest "${parallel[@]}" --cov=app --cov-report=term --cov-report=xml --alluredir=allure-results
           fi
 
       - name: Build the backend test-impact map
@@ -714,10 +718,45 @@ jobs:
         with:
           toolchain: 1.99.0
 
+      # The bridge is a pure function of the committed rust/ tree, the script
+      # that builds it and the toolchain that compiles and links it, so it is
+      # cached under exactly those and rebuilt only when one of them changes.
+      # The git tree id covers every committed file under rust/, the
+      # rust-toolchain.toml pin included. A pull request reads only its own
+      # entries and main's, never another branch's.
+      - name: Key the Rust bridge on its inputs
+        id: bridge-key
+        if: env.RUN == 'true'
+        working-directory: .
+        run: |
+          inputs="$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD:rust HEAD:ios/scripts/build-rust-bridge.sh)
+          $(swift --version 2>&1)
+          $(cc --version | head -n 1)
+          $(uname -m)"
+          echo "key=rust-bridge-linux-$(printf '%s' "${inputs}" | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/linux
+            ios/BrainBuddyKit/Sources/BrainBuddyRustFFI/include/BrainBuddyRustFFI.h
+            ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
+
       - name: Build the Rust bridge
         if: env.RUN == 'true'
         working-directory: .
-        run: sh ios/scripts/build-rust-bridge.sh linux
+        env:
+          CACHE_HIT: ${{ steps.bridge-cache.outputs.cache-hit }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then
+            echo "Rust bridge restored for these exact inputs; nothing to build"
+            exit 0
+          fi
+          sh ios/scripts/build-rust-bridge.sh linux
 
       - name: Build the package
         if: env.RUN == 'true'
@@ -823,9 +862,39 @@ jobs:
           toolchain: 1.99.0
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Cached under its inputs exactly as the ios-kit lane caches the Linux
+      # bridge; here the selected Xcode is the toolchain that links it. A cold
+      # build of all five slices is most of this lane's wall clock.
+      - name: Key the Rust bridge on its inputs
+        id: bridge-key
+        if: env.RUN == 'true'
+        run: |
+          inputs="$(git rev-parse HEAD:rust HEAD:ios/scripts/build-rust-bridge.sh)
+          $(xcodebuild -version)
+          $(uname -m)
+          ${BB_APPLE_TARGETS:-all}"
+          echo "key=rust-bridge-apple-$(printf '%s' "${inputs}" | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/BrainBuddyRustFFI.xcframework
+            ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
+
       - name: Build the Rust bridge
         if: env.RUN == 'true'
-        run: sh ios/scripts/build-rust-bridge.sh apple
+        env:
+          CACHE_HIT: ${{ steps.bridge-cache.outputs.cache-hit }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then
+            echo "Rust bridge restored for these exact inputs; nothing to build"
+            exit 0
+          fi
+          sh ios/scripts/build-rust-bridge.sh apple
 
       - name: Install XcodeGen (pinned, checksum-verified)
         if: env.RUN == 'true'
@@ -936,11 +1005,42 @@ jobs:
           toolchain: 1.99.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Cached under its inputs as in the iOS lanes. The Mac's two-slice
+      # XCFramework differs from the iPhone's five-slice one, so the target
+      # list is part of the key.
+      - name: Key the Rust bridge on its inputs
+        id: bridge-key
+        if: env.RUN == 'true'
+        env:
+          BB_APPLE_TARGETS: aarch64-apple-darwin x86_64-apple-darwin
+        run: |
+          inputs="$(git rev-parse HEAD:rust HEAD:ios/scripts/build-rust-bridge.sh)
+          $(xcodebuild -version)
+          $(uname -m)
+          ${BB_APPLE_TARGETS:-all}"
+          echo "key=rust-bridge-apple-$(printf '%s' "${inputs}" | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Rust bridge
+        id: bridge-cache
+        if: env.RUN == 'true'
+        uses: actions/cache@v6
+        with:
+          key: ${{ steps.bridge-key.outputs.key }}
+          path: |
+            ios/BrainBuddyKit/Artifacts/BrainBuddyRustFFI.xcframework
+            ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift
+
       - name: Build the Rust bridge
         if: env.RUN == 'true'
         env:
           BB_APPLE_TARGETS: aarch64-apple-darwin x86_64-apple-darwin
-        run: sh ios/scripts/build-rust-bridge.sh apple
+          CACHE_HIT: ${{ steps.bridge-cache.outputs.cache-hit }}
+        run: |
+          if [ "${CACHE_HIT}" = "true" ]; then
+            echo "Rust bridge restored for these exact inputs; nothing to build"
+            exit 0
+          fi
+          sh ios/scripts/build-rust-bridge.sh apple
 
       # --only-use-versions-from-resolved-file builds exactly what
       # macos/Package.resolved pins and fails on a stale pin file, instead of
@@ -1008,17 +1108,17 @@ jobs:
   # the two campaigns overlap and a pull request pays one campaign's wall-clock
   # rather than two. Only mutation-gate waits, and it just reads two artifacts.
   # A push has no base to measure, so every step below skips in seconds.
-  # mutmut re-runs the backend suite hundreds of times. Measuring the
-  # mutation score of code whose own unit tests are failing burns the most
-  # runner minutes in the workflow to learn nothing, so this waits for the
-  # backend lane. `changes` stays: it carries the enforced-scope decision.
+  # It does not wait for the backend lane. Queued behind it, the campaign put
+  # the whole backend suite in front of ten minutes of mutmut on every landing
+  # push -- the longest chain in the run -- and bought nothing a red suite does
+  # not already cost: mutmut runs the clean suite first and stops when it
+  # fails, so a broken change fails here within minutes too. `changes` carries
+  # the enforced-scope decision.
   mutation-base:
     name: Backend mutation base measurement
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs:
-      - changes
-      - backend
+    needs: changes
     # No job-level `if`: a skipped job fails Full CI (ADR-0008). The steps below
     # carry the condition instead.
     env:
@@ -1122,18 +1222,13 @@ jobs:
   # the two campaigns overlap: an earlier shape had the gate both measure and
   # judge, which forced `needs: mutation-base` and serialised them, doubling a
   # pull request's wall-clock for no reason. Measuring and judging are split so
-  # only the judging waits.
-  # mutmut re-runs the backend suite hundreds of times. Measuring the
-  # mutation score of code whose own unit tests are failing burns the most
-  # runner minutes in the workflow to learn nothing, so this waits for the
-  # backend lane. `changes` stays: it carries the enforced-scope decision.
+  # only the judging waits. Like mutation-base it starts at once rather than
+  # behind the backend lane; see there for why that costs nothing.
   mutation-head:
     name: Backend mutation head measurement
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    needs:
-      - changes
-      - backend
+    needs: changes
     env:
       RUN: ${{ needs.changes.outputs.mutation }}
     steps:
@@ -1315,39 +1410,20 @@ jobs:
   # check on main (docs/autonomous-delivery-runbook.md), so the job name is
   # load-bearing and must not be renamed.
   #
-  # Gated on `e2e`, and this is the one edge in the graph that exists for
-  # neither of the usual two reasons -- it is there for cache locality.
+  # An independent lane. It used to wait on `e2e` for cache locality -- the two
+  # build byte-identical images, and ordered after E2E this build was a sure
+  # hit on the cache E2E had just written. That saved about forty seconds of a
+  # runner nobody was waiting on and put the same forty seconds, plus a job
+  # start, on the end of the longest chain in the run. In parallel this reads
+  # the `stack-*` cache `main` last wrote, exactly as E2E does, and a service
+  # the change touched rebuilds here too; it still finishes long before E2E.
   #
-  # This job and the E2E lane build byte-identical images: same Dockerfiles,
-  # same build args, same `stack-*` cache scopes. Running them in parallel meant
-  # paying that build twice whenever the cache was cold, which on a `main` push
-  # is every time. Ordering this one after E2E makes its build a guaranteed hit
-  # on the cache E2E just wrote: measured, roughly 1:01 down to ~20s.
-  #
-  # It costs no wall clock -- E2E is not the last job, so this still lands
-  # before allure-report -- and it keeps the diagnostic value of a separate
-  # check: when E2E goes red, `Docker Images` says at a glance whether the
-  # images built or the journeys failed. `backend`/`frontend` are not listed
-  # because E2E already waits on them; restating a transitive edge is exactly
-  # what the graph rule rejects. It does not wait on the iOS lanes, which ship
-  # in neither image.
-  #
-  # The condition is what makes the diagnostic above actually hold. With a bare
-  # `needs: e2e`, GitHub skips this job the moment E2E fails -- so the separate
-  # required check went missing in precisely the case it exists to explain, and
-  # `full-ci` saw a skipped result on top of the real failure. Spelled out:
-  #   E2E failed   -> run, so `Docker Images` still reports whether the images
-  #                   built when the Playwright journeys are what went red
-  #   E2E skipped  -> skip, because its own gate already decided the services
-  #                   are too broken to be worth building images from
-  #   cancelled    -> skip
-  # This is not path filtering and never hides a check behind the diff, which
-  # is what the job-level `if` ban exists to prevent.
+  # It keeps the diagnostic value of a separate check: when E2E goes red,
+  # `Docker Images` says at a glance whether the images built or the journeys
+  # failed. It does not wait on the iOS lanes, which ship in neither image.
   docker:
     name: Docker Images
     runs-on: ubuntu-latest
-    needs: e2e
-    if: ${{ !cancelled() && needs.e2e.result != 'skipped' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1407,21 +1483,15 @@ jobs:
   # a reason to skip it -- a change on either side of the wire can break the pair
   # while both services' own suites stay green.
   #
-  # It is still gated on those two services, though. Booting a stack built from
-  # code whose own linter or unit tests just failed proves nothing, and this is
-  # the job that would waste the most runner time doing it. Cheap checks first,
-  # then the expensive one. Same reasoning as the docker job, and like it this
-  # lane does not wait on the iOS lanes, which are not part of the Compose
-  # stack.
-  #
-  # It does NOT need `docker`. That edge existed only because both jobs built
-  # the same images, and the shared layer cache below replaces it.
+  # It is an independent lane. It used to wait for `backend` and `frontend` so
+  # a failing unit test stopped the run before the stack booted, but the backend
+  # lane is not a cheap check: queued behind it, E2E started twenty minutes
+  # into the run and was the longest chain in the workflow. A red unit test
+  # still fails the run; it just no longer delays every green one. It needs
+  # neither `docker` nor the native lanes, none of which feed the Compose stack.
   e2e:
     name: Compose Playwright E2E
     runs-on: ubuntu-latest
-    needs:
-      - backend
-      - frontend
     env:
       # Pinned so the prebuilt images below are exactly what Compose starts.
       BRAIN_BUDDY_BACKEND_IMAGE: brain-buddy-backend:ci
