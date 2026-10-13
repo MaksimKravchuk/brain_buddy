@@ -268,6 +268,46 @@ class ReviewService:
             return None
         return facade if self._rust_core_enabled(owner_id) else None
 
+    def publishes_internal(self, owner_id: str) -> bool:
+        """Whether maintenance writes for this owner go through the receipt boundary."""
+
+        return self._boundary is not None and self.rust(owner_id) is not None
+
+    def internal_write(  # noqa: PLR0913 - the effect's whole context
+        self,
+        owner_id: str,
+        kind: str,
+        effect_key: str,
+        execute: Callable[[], object],
+        *,
+        cleanup: bool = False,
+    ) -> bool:
+        """Run one maintenance write under the owner lock (spec 026 PR-29).
+
+        Retention, clock repair, sweep-gap floors, idle close, sweep parks and the
+        operator seed are job-origin or operator writers, not client commands.
+        With the sync boundary wired and ``rust_core_sync`` effective each is one
+        receipt, one unit and one feed commit, rechecking the bound fence and
+        scope before ``execute`` writes (``cleanup`` keeps retention running for
+        an owner whose deletion has begun). Otherwise it is the plain owner-locked
+        write, byte for byte. ``False`` means a wired effect published nothing:
+        it wrote no public state, or the same effect had already committed.
+        """
+
+        boundary = self._boundary
+        if boundary is None or self.rust(owner_id) is None:
+            with owner_write_lock(self.task_repo, owner_id, cleanup=cleanup):
+                execute()
+            return True
+        return boundary.run_internal(
+            kind,
+            effect_key,
+            owner_id=owner_id,
+            now=self.clock(),
+            execute=execute,
+            cleanup=cleanup,
+        )
+
     def sync_dispatch(  # noqa: PLR0913 - the command's whole context
         self,
         service: object,
@@ -1715,7 +1755,9 @@ class ReviewService:
             if any(item.clock_before is not None for item in release.released)
         ]
         nulled = 0
-        with owner_write_lock(self.task_repo, owner_id, cleanup=True):
+
+        def retain() -> None:
+            nonlocal nulled
             # The records hold whole result documents (titles, notes, an
             # extension reason in ``clock_before``): they go at 24 h, not 7 d.
             self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
@@ -1741,6 +1783,20 @@ class ReviewService:
             self.task_repo.delete_navigator_usage_before(
                 owner_id, (now - USAGE_RETENTION).date()
             )
+
+        # Nulled snapshots change public Review state, so they publish with the
+        # unit. Purging records and usage alone has no public member: it stays a
+        # plain cleanup write, and so does a unit that found nothing to publish.
+        if (decisions or releases) and self.internal_write(
+            owner_id,
+            "internal.review_retention",
+            f"retention:{owner_id}:{_effect_digest(*decisions, '|', *releases)}",
+            retain,
+            cleanup=True,
+        ):
+            return nulled
+        with owner_write_lock(self.task_repo, owner_id, cleanup=True):
+            retain()
         return nulled
 
     def run_auto_park_sweep(self, now: datetime) -> tuple[int, int, int, int]:
@@ -1795,13 +1851,27 @@ class ReviewService:
 
     def _expose_owner(self, owner_id: str, now: datetime) -> tuple[int, int, int]:
         candidates = self.task_repo.list_next_tasks(owner_id)
-        with owner_write_lock(self.task_repo, owner_id):
+        gap = False
+        live = True
+
+        def note() -> None:
+            nonlocal gap, live
             current = self.task_repo.get_review_settings(owner_id)
             if current is None or current.activated_at is None:
                 # Purge may finish after the preliminary exposure read. Never
                 # recreate its deleted settings from the default document.
-                return 0, 0, 0
+                live = False
+                return
             gap = self._note_effective_sweep(owner_id, now)
+
+        floor_key = self._floor_key(owner_id, now)
+        if floor_key is not None:
+            self.internal_write(owner_id, "internal.review_sweep_gap", floor_key, note)
+        else:
+            with owner_write_lock(self.task_repo, owner_id):
+                note()
+        if not live:
+            return 0, 0, 0
         clock_settings = self.settings_for(owner_id).clock_settings()
         due = [
             task.id
@@ -1818,28 +1888,91 @@ class ReviewService:
             parked += batch_parked
         return int(gap), repaired, parked
 
+    def _floor_key(self, owner_id: str, now: datetime) -> str | None:
+        """The effect key of a sweep that would raise the owner's park floor.
+
+        Only a changed floor is public settings state. The per-tick
+        ``last_effective_sweep_at`` bookkeeping is private and publishes nothing,
+        so it never gets a receipt (``None``).
+        """
+
+        current = self.task_repo.get_review_settings(owner_id)
+        if current is None or not self.publishes_internal(owner_id):
+            return None
+        last = current.last_effective_sweep_at
+        if last is not None and now - last < SWEEP_GAP:
+            return None
+        floored = formulation.apply_sweep_gap(current.clock_settings(), now=now)
+        if floored.owner_park_floor_at == current.owner_park_floor_at:
+            return None
+        return f"sweep-gap:{owner_id}:{'never' if last is None else last.isoformat()}"
+
     def _sweep_batch(
         self, owner_id: str, task_ids: list[str], *, now: datetime
     ) -> tuple[int, int]:
         repaired = parked = 0
+        published = self.publishes_internal(owner_id)
         with owner_write_lock(self.task_repo, owner_id):
             self.task_repo.purge_expired_idempotency(owner_id=owner_id, now=now)
+            if not published:
+                for task_id in task_ids:
+                    done, parks = self._sweep_task(owner_id, task_id, now=now)
+                    repaired += done
+                    parked += parks
+        if published:
+            # One receipt per repair or park, so each carries its own effect key.
             for task_id in task_ids:
-                try:
-                    task = self.tasks.get_task(task_id, owner_id=owner_id)
-                except NotFoundError:
-                    continue
-                if task.state != "next":
-                    continue
-                if task.formulation_started_at is None:
-                    clock = formulation.repair_clock(
-                        task_clock(task), now=now, formulation_id=generate_id("form")
-                    )
-                    self.task_repo.save(with_clock(task, clock))
-                    repaired += 1
-                    continue
-                parked += self._sweep_park(task, owner_id=owner_id)
+                done, parks = self._sweep_task_published(owner_id, task_id, now=now)
+                repaired += done
+                parked += parks
         return repaired, parked
+
+    def _sweep_task(
+        self, owner_id: str, task_id: str, *, now: datetime
+    ) -> tuple[int, int]:
+        """Repair or park one Next task, re-read under the owner lock."""
+
+        try:
+            task = self.tasks.get_task(task_id, owner_id=owner_id)
+        except NotFoundError:
+            return 0, 0
+        if task.state != "next":
+            return 0, 0
+        if task.formulation_started_at is None:
+            clock = formulation.repair_clock(
+                task_clock(task), now=now, formulation_id=generate_id("form")
+            )
+            self.task_repo.save(with_clock(task, clock))
+            return 1, 0
+        return 0, self._sweep_park(task, owner_id=owner_id)
+
+    def _sweep_task_published(
+        self, owner_id: str, task_id: str, *, now: datetime
+    ) -> tuple[int, int]:
+        """``_sweep_task`` as one receipt: a repair, or the park of §4's key."""
+
+        try:
+            seen = self.tasks.get_task(task_id, owner_id=owner_id)
+        except NotFoundError:
+            return 0, 0
+        counts = (0, 0)
+
+        def run() -> None:
+            nonlocal counts
+            counts = self._sweep_task(owner_id, task_id, now=now)
+
+        if seen.formulation_started_at is None:
+            kind, key = (
+                "internal.review_clock_repair",
+                f"clock-repair:{seen.id}:{seen.revision}",
+            )
+        else:
+            kind, key = (
+                "review.auto_park",
+                f"auto-park:{seen.id}:{seen.formulation_id}:{seen.revision}",
+            )
+        self.internal_write(owner_id, kind, key, run)
+        return counts
 
     def _sweep_park(self, task: TaskDocument, *, owner_id: str) -> int:
         """Park with the deterministic ``auto-park:<task>:<form>:<rev>`` key (§4)."""
@@ -2342,6 +2475,12 @@ def _changed_settings(
     if payload.onboarded and current.onboarded_at is None:
         update["onboarded_at"] = now
     return current.model_copy(update=update)
+
+
+def _effect_digest(*parts: str) -> str:
+    """A short stable digest naming exactly the rows a maintenance effect decided on."""
+
+    return hashlib.sha256("\0".join(sorted(parts)).encode("utf-8")).hexdigest()[:32]
 
 
 def _sweep_hash(key: str) -> str:

@@ -32,6 +32,7 @@ from app.exceptions import (
     NotFoundError,
 )
 from app.modules.tasks.domain import TaskDocument
+from app.modules.tasks.jobs.execution import current_execution
 from app.modules.tasks.repository import IDEMPOTENCY_RETENTION, TaskRepository
 from app.modules.tasks.review_domain import (
     NavigatorConsentDocument,
@@ -82,6 +83,10 @@ PUBLIC_REVIEW_ENTITY_TYPES: Final = (
 )
 
 _ACTIVE: ContextVar[bool] = ContextVar("review_command_boundary_active", default=False)
+
+
+class _NothingPublished(Exception):  # noqa: N818 - control flow, never surfaced
+    """Rolls an internal unit back when it wrote no public Review state."""
 
 
 def boundary_active() -> bool:
@@ -420,6 +425,55 @@ class ReviewCommandBoundary:
             if exc.code == "IDEMPOTENCY_KEY_REUSED":
                 raise IdempotencyConflictError() from None
             raise
+
+    def run_internal(  # noqa: PLR0913 - the effect's whole context
+        self,
+        kind: str,
+        effect_key: str,
+        *,
+        owner_id: str,
+        now: datetime,
+        execute: Callable[[], object],
+        cleanup: bool = False,
+    ) -> bool:
+        """Run a maintenance effect as one receipt, one unit and one feed commit.
+
+        Spec 026 PR-29: retention, clock repair, sweep-gap floors, idle close and
+        sweep parks are not client commands. Their origin is derived here from the
+        bound job execution (``job``, identity from ``effect_key``) or, for the
+        in-process scheduler and the operator CLI, ``legacy`` keyed by the same
+        effect key; a caller never picks it. The fence and scope recheck happens
+        in the unit's lock before ``execute`` runs. An effect that wrote nothing
+        public is rolled back and leaves no receipt, so a 60 s sweep tick adds no
+        feed noise; so does a replay of an effect already published. ``True``
+        means the effect committed with its feed transaction.
+        """
+
+        body: Json = {"command_type": kind, "effect": effect_key}
+        request = (
+            CommandRequest.job(owner_id, kind, body, effect_id=effect_key)
+            if current_execution() is not None
+            else CommandRequest.legacy(
+                owner_id, effect_key, kind, body, entity_id=owner_id, route=kind
+            )
+        )
+        try:
+            with self._receipts.command(
+                self._units, request, self._authority, now=now, cleanup=cleanup
+            ) as receipt:
+                if receipt.replay is not None:
+                    return False
+                with self._executing():
+                    execute()
+                changes = self.projection.changes_for_writes(
+                    owner_id, receipt.unit.writes
+                )
+                if not changes:
+                    raise _NothingPublished
+                receipt.accept(changes)
+                return True
+        except _NothingPublished:
+            return False
 
     def _replay[Result](
         self,

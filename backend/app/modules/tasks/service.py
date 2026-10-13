@@ -300,6 +300,7 @@ class TaskService:
                 "create_comment",
                 "update_comment",
                 "smart_add_task",
+                "create_native_inbox_task",
             }
             or handler is None
             or (
@@ -340,14 +341,8 @@ class TaskService:
             return handler.run_legacy_child(
                 self, command, args, kwargs, raw_command, now=self.clock()
             )
-        if command == "smart_add_task":
-            return handler.run_legacy_smart_add(
-                self,
-                cast(SmartAddTaskCreateRequest, args[0]),
-                kwargs,
-                raw_command,
-                now=self.clock(),
-            )
+        if command in {"create_native_inbox_task", "smart_add_task"}:
+            return self._sync_standalone_dispatch(command, args, kwargs, raw_command)
         if command == "create_tag":
             return handler.create_tag(
                 self,
@@ -371,6 +366,28 @@ class TaskService:
             cast(ExpectedRevisionRequest, args[1]),
             owner_id=cast(str, kwargs["owner_id"]),
             idempotency_key=cast(str, kwargs["idempotency_key"]),
+            now=self.clock(),
+        )
+
+    def _sync_standalone_dispatch(
+        self,
+        command: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        raw_command: Callable[..., object],
+    ) -> object:
+        """The creates that carry their own result: Smart Add and the Capture port."""
+        handler = self._legacy_tag_handler
+        assert handler is not None
+        if command == "create_native_inbox_task":
+            return handler.run_native_inbox_task(
+                self, raw_command, kwargs, now=self.clock()
+            )
+        return handler.run_legacy_smart_add(
+            self,
+            cast(SmartAddTaskCreateRequest, args[0]),
+            kwargs,
+            raw_command,
             now=self.clock(),
         )
 

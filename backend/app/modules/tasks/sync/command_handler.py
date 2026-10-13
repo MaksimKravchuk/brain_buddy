@@ -27,7 +27,7 @@ from app.modules.tasks.domain import (
     TaskDocument,
     TaskSubtaskDocument,
 )
-from app.modules.tasks.jobs.execution import owner_write_lock
+from app.modules.tasks.jobs.execution import current_execution, owner_write_lock
 from app.modules.tasks.repository import (
     IDEMPOTENCY_RETENTION,
     TaskRepository,
@@ -602,6 +602,80 @@ class LegacyTagCommandHandler:
     @staticmethod
     def _task_mutation_binding(entity_id: str, alias: str) -> dict[str, str]:
         return {"entity_type": "task", "alias_id": alias, "entity_id": entity_id}
+
+    def run_native_inbox_task(
+        self,
+        service: LegacyTagService,
+        raw_command: Callable[..., object],
+        kwargs: dict[str, object],
+        *,
+        now: datetime,
+    ) -> TaskDocument:
+        """The Capture task port as a receipt (spec 026 PR-29).
+
+        The workflow is not a client, so the origin is derived (a bound job
+        execution, else legacy under the deterministic commit-child key). The
+        kept ``create_native_inbox_task`` record stays the replay source until
+        account purge, whichever origin first committed it; the receipt only
+        publishes the Tasks effect to the feed in the same commit.
+        """
+
+        owner_id = cast(str, kwargs["owner_id"])
+        key = cast(str, kwargs["idempotency_key"])
+        body: dict[str, Any] = {
+            "command_type": "task.create",
+            "body": {
+                "title": kwargs["title"],
+                "source_capture_ids": kwargs["source_capture_ids"],
+            },
+        }
+        request = (
+            CommandRequest.job(owner_id, "task.create", body, effect_id=key)
+            if current_execution() is not None
+            else CommandRequest.legacy(
+                owner_id,
+                key,
+                "task.create",
+                body,
+                entity_id=TASK_ALIAS,
+                route="create_native_inbox_task",
+            )
+        )
+        try:
+            with self._receipts.command(
+                self._units, request, self._authority, now=now
+            ) as receipt:
+                old = self._repo.get_idempotency(owner_id=owner_id, key=key)
+                if receipt.replay is not None:
+                    if old is None:
+                        raise SyncCommandError("COMMAND_INTEGRITY")
+                    return TaskDocument.model_validate(old.response_body)
+                before: TaskDocument | None = None
+                if old is not None:
+                    with suppress(NotFoundError):
+                        before = self._repo.get_for_owner(
+                            old.resource_id, owner_id=owner_id
+                        )
+                task = cast(TaskDocument, raw_command(service, **kwargs))
+                receipt.accept(
+                    (
+                        [
+                            {
+                                "operation": "upsert",
+                                "entity_type": "task",
+                                "value": encode_task(task),
+                            }
+                        ]
+                        if before is None or before.revision < task.revision
+                        else []
+                    ),
+                    result=task.model_dump(mode="json"),
+                )
+                return task
+        except SyncCommandError as exc:
+            if exc.code == "IDEMPOTENCY_KEY_REUSED":
+                raise ConflictError("Idempotency-Key", key) from None
+            raise
 
     def run_legacy_child(
         self,

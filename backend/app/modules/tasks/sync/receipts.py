@@ -160,7 +160,7 @@ type Authority[ConnectionT] = Callable[[OwnerUnitOfWork[ConnectionT]], ScopeAuth
 
 class CommandUnits[ConnectionT](Protocol):
     def begin(
-        self, owner_id: str
+        self, owner_id: str, *, cleanup: bool = False
     ) -> AbstractContextManager[OwnerUnitOfWork[ConnectionT]]: ...
 
 
@@ -214,8 +214,12 @@ class CommandReceipts[ConnectionT](ABC):
         authorize: Authority[ConnectionT],
         *,
         now: datetime,
+        cleanup: bool = False,
     ) -> Iterator[ReceiptCommand[ConnectionT]]:
         """Yield a replay or unseen command. The caller validates/decides a miss.
+
+        ``cleanup`` is the narrower job-owner check for destructive retention
+        only (spec 026 PR-29): the owner need only still exist.
 
         No current execution schema, size or epoch check is applied to replay.
         Device ingress must check active epoch *only* on a miss. A known command
@@ -224,7 +228,11 @@ class CommandReceipts[ConnectionT](ABC):
         if now.tzinfo is None:
             raise SyncCommandError("INVALID_REQUEST")
         now = now.astimezone(UTC)
-        with uow.begin(request.owner_id) as unit:
+        with (
+            uow.begin(request.owner_id, cleanup=True)
+            if cleanup
+            else uow.begin(request.owner_id)
+        ) as unit:
             execution = current_execution()
             if request.origin == "job":
                 if (
