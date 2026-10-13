@@ -203,4 +203,33 @@ struct ConflictDecisionWiringTests {
         let resolution = RuntimeIssueResolution(issueID: primary.id, decision: decision)
         #expect(resolution.retry == [RetryDependent(id: "cmd-3", shownRevision: "8"), RetryDependent(id: "cmd-4")])
     }
+
+    @Test("026-FR-007: every text member the core keeps is shown, in reading order, and a change without text says so")
+    func savedFieldsKeepEveryMember() {
+        let issue = RuntimeIssueResolutionTests.issue(
+            "cmd-1", text: ["body": "B", "title": "T", "waiting_for": "W", "reason_text": "R", "name": "N", "extra": "X"])
+        #expect(issue.savedFields.map(\.name) == ["title", "name", "waiting_for", "body", "reason_text", "extra"])
+        #expect(issue.savedEditText?.hasPrefix("title: T\nname: N") == true)
+        #expect(RuntimeIssueResolutionTests.issue("cmd-2", text: ["name": "Garden"]).savedEditText == "Garden")
+        let none = RuntimeIssueResolutionTests.issue("cmd-3", text: [:])
+        #expect(none.savedEditText == nil && none.savedSummary == "Saved change")
+        #expect(RuntimeIssuePresenter.card(none).savedFields.isEmpty, "the screen adds its own saved-change option")
+    }
+
+    @Test("026-FR-010: a closed epoch with nothing else wrong still shows a recovery card, and the update help names no store page")
+    func closedEpochSurfaces() throws {
+        let card = try #require(RuntimeRecoveryCard(RuntimeSyncRecovery(epoch: .closed), pendingCount: 2))
+        #expect(card.condition == .verifying && card.title == "Earlier changes need verification" && !card.isBlocking)
+        #expect(card.actions == [.tryAgain])
+        #expect(RuntimeRecoveryCard(RuntimeSyncRecovery(epoch: .closed, storeNeedsUpdate: true), pendingCount: 0)?.condition == .updateNeededStore)
+        #expect(!RuntimeRecoveryCard.updateHelp.contains("apps.apple.com"))
+    }
+
+    @Test("026-FR-007: a first read of the account record is adopted without calling it a change")
+    func adoptedRevision() {
+        var draft = Self.draft([])
+        draft.choose(.saved)
+        draft.adoptRevision("12")
+        #expect(draft.shownRevision == "12" && draft.phase == .choosing && draft.version == .saved)
+    }
 }

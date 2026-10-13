@@ -104,6 +104,7 @@ struct RuntimeIssueDetail: View {
     /// which submits nothing); a later read that moved the record clears approvals and asks again.
     private func loadAccount(_ issue: RustWorkspaceIssue) async {
         let version: RuntimeIssueAccountVersion?
+        let wasUnreadable = account == .unreadable
         do {
             guard let read = try await workspace.accountVersion(ofIssue: issue.id) else { return }
             version = read
@@ -121,7 +122,11 @@ struct RuntimeIssueDetail: View {
             return
         }
         guard next.phase != .saving, let version else { return }
-        next.refresh(currentRevision: version.revision)
+        if wasUnreadable {
+            next.adoptRevision(version.revision)  // nothing to compare with before: not a change
+        } else {
+            next.refresh(currentRevision: version.revision)
+        }
         draft = next
     }
 
@@ -185,6 +190,14 @@ struct RuntimeIssueDetail: View {
         Section {
             ForEach(card.savedFields, id: \.name) { field in
                 versionRow("Your saved edit", field: field.name, text: field.value, version: .saved, draft: draft, selectable: card.kind == .versionConflict)
+            }
+            if card.savedFields.isEmpty, card.kind == .versionConflict {
+                // A change without text (a setting, say) still has a version to keep.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your saved change").font(BBFont.bodyMedium)
+                    Text("Your change is saved on this device.").font(BBFont.secondary)
+                    selectionButton(.saved, draft)
+                }
             }
             if card.kind == .versionConflict {
                 VStack(alignment: .leading, spacing: 4) {
@@ -396,7 +409,11 @@ struct SyncRecoveryRow: View {
         switch action {
         case .updateApp:
             Button("Update app") {
-                if let url = URL(string: "itms-apps://apps.apple.com/") { UIApplication.shared.open(url) }
+                // No App Store ID is known for this build; TestFlight is where builds are delivered.
+                guard let url = URL(string: "itms-beta://") else { return }
+                UIApplication.shared.open(url) { opened in
+                    if !opened { notice = RuntimeRecoveryCard.updateHelp }
+                }
             }
             .frame(minHeight: 44)
         case .tryAgain:

@@ -359,13 +359,16 @@ package enum SyncRuntimeIssueKind: Equatable, Sendable {
     case dependencyRejected
     /// Any other rejection: kept and shown, never dropped.
     case rejected
+    /// The send may or may not have reached the account. Never resolvable here: the runtime reconciles
+    /// it first, and nothing here may suggest a retry is safe.
+    case unknownOutcome
 
     package init(reason: String) {
         switch reason.lowercased().filter({ $0 != "_" && $0 != "-" }) {
         case "revisionconflict": self = .versionConflict
         case "entitydeleted": self = .deletedElsewhere
         case "dependencyrejected": self = .dependencyRejected
-        default: self = .rejected
+        default: self = RuntimeIssueKind(reason: reason) == .unknownOutcome ? .unknownOutcome : .rejected
         }
     }
 
@@ -375,6 +378,8 @@ package enum SyncRuntimeIssueKind: Equatable, Sendable {
         case .deletedElsewhere: return "This item was deleted on another device. Your edit is saved in this issue."
         case .dependencyRejected: return "An earlier change wasn't accepted. This change is saved here."
         case .rejected: return "This change isn't accepted. It is saved here."
+        case .unknownOutcome:
+            return "We can't tell whether this change reached your account. It is kept and won't be sent again as a new change."
         }
     }
 }
@@ -413,13 +418,11 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
         self.targetEntity = targetEntity
     }
 
-    /// From the kit's issue: the saved text keys read are `summary`, `title`, `after`, `text`.
+    /// From the kit's issue: every saved text member is kept (`RustWorkspaceIssue.savedFields`).
     package init(_ issue: RustWorkspaceIssue) {
-        let text = issue.localText
         self.init(
             id: issue.id, commandID: issue.commandID, reason: issue.reason,
-            summary: text["summary"] ?? text["title"] ?? "Saved change",
-            savedEdit: text["after"] ?? text["title"] ?? text["text"],
+            summary: issue.savedSummary, savedEdit: issue.savedEditText,
             shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs, waitsOn: issue.waitsOn,
             targetEntity: issue.targetEntity
         )
@@ -528,7 +531,7 @@ package struct SyncConflictModel: Equatable, Sendable {
     private var storedWaiting = false
 
     /// The account's record could not be read, so there is no revision to decide against yet.
-    private let accountUnreadable: Bool
+    private var accountUnreadable: Bool
 
     package init(issue: SyncRuntimeIssue, accountVersion: String?, blocked: [SyncBlockedAction] = []) {
         self.init(
@@ -594,7 +597,13 @@ package struct SyncConflictModel: Equatable, Sendable {
         }
     }
 
-    package var title: String { kind == .deletedElsewhere ? "Deleted on another device" : "Choose a title" }
+    package var title: String {
+        switch kind {
+        case .deletedElsewhere: "Deleted on another device"
+        case .unknownOutcome: "Earlier changes need verification"
+        default: "Choose a title"
+        }
+    }
     package var versionLabels: [(SyncConflictVersion, String)] {
         [(.yours, "Your saved edit"), (.account, "Current account version")]
     }
@@ -630,7 +639,8 @@ package struct SyncConflictModel: Equatable, Sendable {
     package var isEditable: Bool { phase == .choosing || phase == .changedAgain || phase == .saveFailed }
 
     /// Apply stays disabled until a version is picked (no default) and every retry is approved.
-    package var applyEnabled: Bool { isEditable && !accountUnreadable && core.readyToApply }
+    package var isResolvable: Bool { kind != .unknownOutcome }
+    package var applyEnabled: Bool { isResolvable && isEditable && !accountUnreadable && core.readyToApply }
 
     /// Why "Review and retry" can't be chosen for `id` yet, or nil when it can.
     package func retryUnavailableReason(for id: String) -> String? { core.retryUnavailableReason(for: id) }
@@ -688,7 +698,10 @@ package struct SyncConflictModel: Equatable, Sendable {
     /// What became of the applied decision (the workspace's answer). A record that changed again
     /// shows the account's new text and keeps the draft; any other refusal keeps it and offers a retry.
     package mutating func finish(_ outcome: RuntimeIssueApplyOutcome) {
-        if case .changedAgain(let current) = outcome { accountVersion = current.flatMap(Self.text(of:)) }
+        if case .changedAgain(let current) = outcome {
+            accountVersion = current.flatMap(Self.text(of:))
+            if current != nil { accountUnreadable = false }
+        }
         core.finish(outcome, keepingVersion: true)
     }
 
@@ -702,6 +715,13 @@ package struct SyncConflictModel: Equatable, Sendable {
     /// The account side moved after the card opened: show it, keep the user's draft and original
     /// edit, clear every approval and require an explicit apply again (D-02.08).
     package mutating func accountChanged(revision: String?, accountVersion: String?) {
+        if accountUnreadable {
+            // The first successful read: nothing changed, there was just nothing to compare with.
+            accountUnreadable = false
+            self.accountVersion = accountVersion
+            core.adoptRevision(revision)
+            return
+        }
         guard revision != shownRevision || accountVersion != self.accountVersion else { return }
         self.accountVersion = accountVersion
         storedWaiting = false
@@ -789,6 +809,8 @@ extension SyncRecoveryCondition {
             self = .rebuilding
         } else if case .failed(let reference) = recovery.rebuild {
             self = .rebuildFailed(referenceID: reference)
+        } else if recovery.epochClosed {
+            self = .migrationUncertain
         } else {
             return nil
         }

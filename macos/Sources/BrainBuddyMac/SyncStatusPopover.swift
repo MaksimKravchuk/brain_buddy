@@ -171,7 +171,7 @@ struct SyncStatusPopover: View {
         case .rebuildSyncedCopy:
             Task { rebuildNotice = await controller.rebuildSyncedCopy() }
         case .updateApp:
-            if let url = URL(string: "macappstore://apps.apple.com/") { NSWorkspace.shared.open(url) }
+            rebuildNotice = RuntimeRecoveryCard.updateHelp  // no store page of its own to open
         case .openImportReport:
             if let file = controller.host.importer.upgradeFiles().report { NSWorkspace.shared.activateFileViewerSelecting([file]) }
         case .exportSavedData, .copyReference:

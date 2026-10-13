@@ -55,12 +55,16 @@ struct SyncConflictView: View {
                     .foregroundStyle(model.phase == .saveFailed ? .red : .orange)
                     .accessibilityElement(children: .combine)
             }
-            if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
-            if let heading = model.blockedHeading { blockedBody(heading) }
-            Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.applyEnabled || submit == nil)
-                .focused($focus, equals: .apply)
+            if model.kind == .unknownOutcome {
+                unknownBody
+            } else {
+                if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
+                if let heading = model.blockedHeading { blockedBody(heading) }
+                Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.applyEnabled || submit == nil)
+                    .focused($focus, equals: .apply)
+            }
         }
     }
 
@@ -96,6 +100,23 @@ struct SyncConflictView: View {
             .frame(maxHeight: 72)
             .padding(6)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// An uncertain send is never resolved here and never suggested as safe to retry: the runtime
+    /// checks what reached the account first. Only the saved edit can be copied.
+    private var unknownBody: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("We can't tell whether this change reached your account. It is kept and won't be sent again as a new change.")
+                .font(.callout)
+            versionText(model.yourEdit)
+            Button(copied ? "Copied" : "Copy saved edit") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(model.yourEdit, forType: .string)
+                copied = true
+                AccessibilityNotification.Announcement("Copied").post()
+            }
+            .focused($focus, equals: .copyEdit)
+        }
     }
 
     private var deletedBody: some View {

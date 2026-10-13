@@ -457,7 +457,7 @@ struct RustSyncRecoveryTests {
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true, storeUnavailable: true)) == .updateNeededStore)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .rebuilding)) == .rebuilding)
         #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .failed(referenceID: "ref-9"))) == .rebuildFailed(referenceID: "ref-9"))
-        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(epoch: .closed)) == nil)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(epoch: .closed)) == .migrationUncertain, "a closed epoch is never shown as quiet")
         let everything: [RuntimeSyncRecovery] = [
             RuntimeSyncRecovery(), RuntimeSyncRecovery(storeNeedsUpdate: true), RuntimeSyncRecovery(rebuild: .rebuilding),
             RuntimeSyncRecovery(rebuild: .failed(referenceID: nil)),
@@ -502,5 +502,49 @@ struct RustSyncRecoveryTests {
         let applied = model.apply()
         let runtime = try #require(applied).runtime
         #expect(runtime.retry == [RetryDependent(id: "later-1", shownRevision: "8"), RetryDependent(id: "later-2")])
+    }
+
+    private static func rustIssue(reason: String, text: [String: String]) -> RustWorkspaceIssue {
+        RustWorkspaceIssue(
+            id: "issue_c1", commandID: "c1", reason: reason, localIntent: Data(), localText: text,
+            shownBaseRevision: "r1", dependentIDs: [], createdAt: Date(timeIntervalSince1970: 0))
+    }
+
+    @Test("026-FR-007 every saved text member survives into the Mac's issue, and no placeholder replaces existing text")
+    func savedTextKeysArePreserved() {
+        let name = SyncRuntimeIssue(Self.rustIssue(reason: "ENTITY_DELETED", text: ["name": "Garden"]))
+        #expect(name.summary == "Garden" && name.savedEdit == "Garden")
+        let many = SyncRuntimeIssue(
+            Self.rustIssue(reason: "REVISION_CONFLICT", text: ["details": "Dig", "waiting_for": "Sam", "desired_outcome": "Done"]))
+        #expect(many.summary != "Saved change")
+        #expect(many.savedEdit == "details: Dig\nwaiting_for: Sam\ndesired_outcome: Done")
+        let body = SyncRuntimeIssue(Self.rustIssue(reason: "REVISION_CONFLICT", text: ["body": "A note"]))
+        #expect(body.savedEdit == "A note")
+        #expect(SyncRuntimeIssue(Self.rustIssue(reason: "REVISION_CONFLICT", text: [:])).summary == "Saved change")
+    }
+
+    @Test("026-FR-010 an uncertain send never enters the resolution flow: nothing to apply, nothing to retry")
+    func unknownOutcomeIsCopyOnly() {
+        let issue = SyncRuntimeIssue(id: "u", commandID: "c", reason: "OUTCOME_UNKNOWN", summary: "s", savedEdit: "Mine", shownBaseRevision: "r", dependentIDs: ["later-1"])
+        #expect(issue.kind == .unknownOutcome && issue.kind.why.contains("won't be sent again"))
+        var model = SyncConflictModel(issue: issue, account: Self.account("r2"), blocked: Self.blocked())
+        model.select(.yours)
+        model.setChoice(.reviewAndRetry, for: "later-1")
+        #expect(!model.isResolvable && !model.applyEnabled && model.apply() == nil && model.confirmDiscard() == nil)
+        #expect(model.title == "Earlier changes need verification" && model.yourEdit == "Mine")
+    }
+
+    @Test("026-FR-007 once the account record reads, Apply is available again")
+    func unreadableLatchClears() {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: nil)
+        model.select(.yours)
+        #expect(!model.applyEnabled)
+        model.accountChanged(revision: "rev-9", accountVersion: "Order soil")
+        #expect(model.applyEnabled && model.shownRevision == "rev-9" && model.phase == .choosing)
+        #expect(model.statusLine == nil)
+        var viaOutcome = SyncConflictModel(issue: Self.conflictIssue(), account: nil)
+        viaOutcome.select(.yours)
+        viaOutcome.finish(.changedAgain(Self.account("rev-9")))
+        #expect(viaOutcome.applyEnabled)
     }
 }

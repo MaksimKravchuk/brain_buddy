@@ -66,6 +66,32 @@ public struct RuntimeIssueCard: Identifiable, Equatable, Sendable {
     public let accessibilityLabel: String
 }
 
+extension RustWorkspaceIssue {
+    /// The text members the core keeps for an issue (`bb-client` `issues.rs` `TEXT_FIELDS`), in the
+    /// order they read: the item's name first, then what was written about it.
+    public static let savedFieldOrder = ["title", "name", "details", "waiting_for", "desired_outcome", "body", "reason_text"]
+
+    /// The saved text members in `savedFieldOrder`, then any other member by name. Nothing is dropped.
+    public var savedFields: [(name: String, value: String)] {
+        let known = Self.savedFieldOrder.compactMap { key in localText[key].map { (name: key, value: $0) } }
+        let rest = localText.filter { !Self.savedFieldOrder.contains($0.key) }.sorted { $0.key < $1.key }
+            .map { (name: $0.key, value: $0.value) }
+        return known + rest
+    }
+
+    /// The user's edit as one text, exactly as saved: the value itself when there is one member, else
+    /// one "name: value" line per member. Nil when the change carries no text (a setting, say).
+    public var savedEditText: String? {
+        let fields = savedFields
+        if fields.count == 1 { return fields[0].value }
+        return fields.isEmpty ? nil : fields.map { "\($0.name): \($0.value)" }.joined(separator: "\n")
+    }
+
+    /// One line saying what was attempted: the first saved member, or "Saved change" when the
+    /// change carries no text.
+    public var savedSummary: String { savedFields.first?.value ?? "Saved change" }
+}
+
 public enum RuntimeIssuePresenter {
     /// Cards for `issues`, oldest unresolved first so dependants follow their predecessor.
     public static func cards(_ issues: [RustWorkspaceIssue]) -> [RuntimeIssueCard] {
@@ -74,7 +100,7 @@ public enum RuntimeIssuePresenter {
 
     public static func card(_ issue: RustWorkspaceIssue) -> RuntimeIssueCard {
         let kind = RuntimeIssueKind(reason: issue.reason)
-        let fields = issue.localText.sorted { $0.key < $1.key }.map { RuntimeSavedField(name: $0.key, value: $0.value) }
+        let fields = issue.savedFields.map { RuntimeSavedField(name: $0.name, value: $0.value) }
         let dependents = issue.dependentIDs.count
         var title = "", message = "", actions: [RuntimeIssueAction] = []
         switch kind {
@@ -129,7 +155,7 @@ public enum RuntimeIssuePresenter {
         let byID = Dictionary(all.flatMap { [($0.id, $0), ($0.commandID, $0)] }, uniquingKeysWith: { first, _ in first })
         return issue.dependentIDs.map { id in
             let known = byID[id]
-            let text = known?.localText.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: " · ")
+            let text = known?.savedFields.map { "\($0.name): \($0.value)" }.joined(separator: " · ")
             return DependentSummary(id: id, summary: (text?.isEmpty == false ? text : nil) ?? "Saved action",
                                     shownVersion: known?.shownBaseRevision)
         }
@@ -321,6 +347,10 @@ public struct ConflictDecisionDraft: Equatable, Sendable, Codable {
         guard currentRevision != shownRevision else { return }
         markChangedAgain(revision: currentRevision, keepingVersion: keepingVersion)
     }
+
+    /// A first read of the account's record, where none could be read before: its revision becomes the
+    /// one decided against, without calling that a change.
+    public mutating func adoptRevision(_ revision: String?) { shownRevision = revision }
 
     /// The same, where the account's record is known to have moved even if its revision reads alike.
     public mutating func markChangedAgain(revision: String?, keepingVersion: Bool = false) {
@@ -576,7 +606,7 @@ public struct RuntimeRecoveryCard: Equatable, Sendable {
     }
 
     public enum Condition: Equatable, Sendable {
-        case updateNeededStore, rebuilding, rebuildFailed(referenceID: String?)
+        case updateNeededStore, rebuilding, rebuildFailed(referenceID: String?), verifying
     }
 
     public let condition: Condition
@@ -586,6 +616,10 @@ public struct RuntimeRecoveryCard: Equatable, Sendable {
     /// Sync is stopped until the person acts.
     public let isBlocking: Bool
     public let accessibilityLabel: String
+
+    /// What "Update app" tells the person: the app is not in a store this build can name, so it
+    /// points at where it was installed from instead of a store home page.
+    public static let updateHelp = "Open TestFlight, or the place you installed Brain Buddy from, and update it there."
 
     public init?(_ recovery: RuntimeSyncRecovery, pendingCount: Int) {
         let condition: Condition, title: String, detail: String, actions: [Action]
@@ -606,6 +640,11 @@ public struct RuntimeRecoveryCard: Equatable, Sendable {
             detail = "Your waiting changes are saved."
             actions = [.tryAgain] + (failedReference.map { [.copyReference($0)] } ?? [])
             reference = failedReference
+        } else if recovery.epochClosed {
+            condition = .verifying
+            title = "Earlier changes need verification"
+            detail = "Your earlier store and waiting changes are kept while sync checks what reached your account."
+            actions = [.tryAgain]
         } else {
             return nil
         }
