@@ -59,6 +59,9 @@ Smart Add bindings are scoped, typed, immutable and returned as content-free rec
 | --- | --- |
 | `modules/tasks/service.py` | Routed. `serialized_write` dispatches REST/MCP/CLI/workflow commands to `sync/command_handler.py` when `rust_core_sync` is effective or the key already has a receipt. The Capture port `create_native_inbox_task` is `task.create` through the same handler. |
 | `modules/tasks/sync/command_handler.py` | The boundary. Its writes run inside a receipt unit; `purge_expired_idempotency` after finalization is private bookkeeping. |
+| `modules/tasks/sync/device_executor.py` | The boundary for device-origin project/tag/task commands (`POST /api/sync/v1/commands`). Its writes run inside the receipt unit the route opened, so the receipt id is the device `command_id`. |
+| `modules/tasks/sync/device_executor_children.py` | The boundary for device-origin `subtask.*`, `comment.*` and `task.smart_add` commands. Its writes run inside the receipt unit the route opened; the parent task row is never written. |
+| `modules/tasks/sync/device_executor_review.py` | The boundary for device-origin Review and Navigator consent commands. Runs inside the route's receipt unit and calls the same `ReviewService`/`ReviewFlowService`/`NavigatorService` writers as the web path (so it has no store write call of its own); the feed transaction is `ReviewProjection` over what they wrote. |
 | `modules/tasks/review_service.py` | Routed. Review commands dispatch through `ReviewCommandBoundary`; maintenance runs through `ReviewService.internal_write` (below). |
 | `modules/tasks/review_flow.py` | Routed. Run commands dispatch through `ReviewCommandBoundary`; idle close runs through `internal_write`. |
 | `modules/tasks/navigator.py` | Routed. Consent grant/revoke through `ReviewCommandBoundary`; usage and reservations are private rows with no feed member. |

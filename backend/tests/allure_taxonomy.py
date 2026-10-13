@@ -330,6 +330,26 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync authority and device epochs",
         "Current authorization fences sync execution",
     ),
+    "sync_commands_api": (
+        EPIC_TASKS,
+        "Sync commands API",
+        "Command and capability routes expose the frozen contract",
+    ),
+    "sync_device_review": (
+        EPIC_TASKS,
+        "Sync device Review commands",
+        "Review and Navigator consent commands execute on the device route",
+    ),
+    "sync_delta": (
+        EPIC_TASKS,
+        "Sync delta feed",
+        "Pages carry whole commit-ordered transactions",
+    ),
+    "sync_hints": (
+        EPIC_TASKS,
+        "Sync hints",
+        "Authenticated SSE wakes clients for committed changes",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",

@@ -21,8 +21,12 @@ from app.api.dependencies import (
     require_voice_brain_dump_enabled,
     voice_brain_dump_enabled,
 )
+from app.api.task_mapping import command_task_response as _with_formulation
 from app.api.task_mapping import comment_response as _to_comment_response
+from app.api.task_mapping import project_response as _to_project_response
+from app.api.task_mapping import smart_add_response as _to_smart_add_response
 from app.api.task_mapping import subtask_response as _to_subtask_response
+from app.api.task_mapping import tag_response as _to_tag_response
 from app.api.task_mapping import task_response as _to_response
 from app.core.config import AppConfig
 from app.core.rate_limit import title_completion_rate_limiter
@@ -34,10 +38,6 @@ from app.modules.tasks.autocomplete import (
     TaskTitleAutocompleteService,
 )
 from app.modules.tasks.domain import (
-    FormulationSettingsDocument,
-    ProjectDocument,
-    SmartAddTaskResultDocument,
-    TagDocument,
     TaskDocument,
 )
 from app.modules.tasks.review_domain import FormulationView
@@ -64,7 +64,6 @@ from app.schemas.tasks import (
     ProjectListState,
     ProjectResponse,
     ProjectUpdateRequest,
-    SmartAddCreatedResponse,
     SmartAddTaskCreateRequest,
     SmartAddTaskResponse,
     TagCreateRequest,
@@ -1234,96 +1233,9 @@ def _formulation(
     return task_service.formulation_views(owner_id, [task]).get(task.id)
 
 
-def _with_formulation(
-    task_service: TaskService,
-    owner_id: str,
-    task: TaskDocument,
-    settings: FormulationSettingsDocument | None,
-) -> TaskResponse:
-    """A command's task with the projection its stored result was made with.
-
-    ``settings`` is the idempotency record's snapshot, so a same-key replay
-    returns the original ``formulation`` (http "Mutations"); ``None`` (a
-    record from before the snapshot) projects with the live settings.
-    """
-
-    views = task_service.formulation_views(owner_id, [task], settings=settings)
-    return _to_response(task, formulation=views.get(task.id))
-
-
 def _command_response(
     task_service: TaskService, owner_id: str, result: TaskCommandResult
 ) -> TaskResponse:
     return _with_formulation(
         task_service, owner_id, result.task, result.formulation_settings
-    )
-
-
-def _to_smart_add_response(
-    result: SmartAddTaskResultDocument,
-    *,
-    task_service: TaskService,
-    owner_id: str,
-) -> SmartAddTaskResponse:
-    return SmartAddTaskResponse(
-        task=_with_formulation(
-            task_service, owner_id, result.task, result.formulation_settings
-        ),
-        project=(
-            _to_project_response(
-                result.project, task_service=task_service, owner_id=owner_id
-            )
-            if result.project
-            else None
-        ),
-        tags=[
-            _to_tag_response(tag, task_service=task_service, owner_id=owner_id)
-            for tag in result.tags
-        ],
-        created=SmartAddCreatedResponse(
-            project_id=result.created.project_id,
-            tag_ids=result.created.tag_ids,
-        ),
-    )
-
-
-def _to_project_response(
-    project: ProjectDocument,
-    *,
-    task_service: TaskService,
-    owner_id: str,
-    open_task_count: int | None = None,
-) -> ProjectResponse:
-    """``open_task_count`` is given by the list route, which counts in one pass."""
-
-    return ProjectResponse(
-        id=project.id,
-        name=project.name,
-        color=project.color,
-        state=project.state,
-        revision=project.revision,
-        open_task_count=(
-            open_task_count
-            if open_task_count is not None
-            else task_service.open_task_count_for_project(project.id, owner_id=owner_id)
-        ),
-        desired_outcome=project.desired_outcome,
-        archived_at=project.archived_at,
-        archived_before_lossless=project.archived_before_lossless,
-        created_at=project.created_at,
-    )
-
-
-def _to_tag_response(
-    tag: TagDocument, *, task_service: TaskService, owner_id: str
-) -> TagResponse:
-    return TagResponse(
-        id=tag.id,
-        name=tag.name,
-        # Legacy stored rows may still carry "archived"; the public contract
-        # only exposes "active" and "deleted".
-        state="deleted" if tag.state == "archived" else tag.state,
-        revision=tag.revision,
-        open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
-        created_at=tag.created_at,
     )

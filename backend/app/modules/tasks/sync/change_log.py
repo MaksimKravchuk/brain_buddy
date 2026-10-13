@@ -25,6 +25,8 @@ SYNC_TABLES = (
     "sync_devices",
     "sync_change_records",
     "sync_change_transactions",
+    "sync_transfer_pages",
+    "sync_transfers",
     "sync_legacy_keys",
     "sync_command_receipts",
     "sync_record_versions",
@@ -63,6 +65,17 @@ _SCHEMA = (
     "device_epoch TEXT NOT NULL, owner_id TEXT NOT NULL, status TEXT NOT NULL, "
     "server_generation TEXT NOT NULL, registered_at TEXT NOT NULL, "
     "closed_at TEXT, close_reason TEXT, PRIMARY KEY(device_id,device_epoch))",
+    "CREATE TABLE IF NOT EXISTS sync_transfers (owner_id TEXT NOT NULL, "
+    "transfer_id TEXT NOT NULL, commit_seq TEXT NOT NULL, transaction_id TEXT NOT NULL, "
+    "source_command_id TEXT NOT NULL, feed_generation TEXT NOT NULL, "
+    "access_generation TEXT NOT NULL, page_count INTEGER NOT NULL, "
+    "record_count INTEGER NOT NULL, total_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, "
+    "created_at TEXT NOT NULL, expires_at TEXT NOT NULL, "
+    "PRIMARY KEY(owner_id,transfer_id))",
+    "CREATE TABLE IF NOT EXISTS sync_transfer_pages (owner_id TEXT NOT NULL, "
+    "transfer_id TEXT NOT NULL, page_index INTEGER NOT NULL, payload BLOB NOT NULL, "
+    "page_sha256 TEXT NOT NULL, PRIMARY KEY(owner_id,transfer_id,page_index))",
+    "CREATE INDEX IF NOT EXISTS sync_transfer_commit ON sync_transfers(owner_id,commit_seq)",
     "CREATE INDEX IF NOT EXISTS sync_receipt_expiry ON sync_command_receipts(owner_id,expires_at)",
     "CREATE INDEX IF NOT EXISTS sync_change_record_history ON sync_change_records(owner_id,entity_type,record_key)",
 )
@@ -316,6 +329,8 @@ class ChangeLog(AtomicChangeLog[Connection]):
             "AND entity_type = ? AND record_key = ?",
             (owner, entity_type, encode(record_key)),
         )
+        # Materialized oversized-transaction copies hold the same content.
+        conn.execute("DELETE FROM sync_transfer_pages WHERE owner_id = ?", (owner,))
         conn.execute(
             "UPDATE sync_scopes SET feed_generation = ? WHERE owner_id = ?",
             (str(uuid4()), owner),

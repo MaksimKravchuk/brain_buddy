@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
 import logging
@@ -155,6 +156,7 @@ def serialized_write[Writer: SerializedWriter, **P, Result](
     re-checked under the lock, before the idempotency lookup or any write.
     """
 
+    @functools.wraps(command)
     def wrapped(service: Writer, /, *args: P.args, **kwargs: P.kwargs) -> Result:
         reject_caller_origin(kwargs)
         dispatch = getattr(service, "_sync_dispatch", None)
