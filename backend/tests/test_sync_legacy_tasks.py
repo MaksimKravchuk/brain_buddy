@@ -25,6 +25,7 @@ from app.modules.tasks.domain import IdempotencyRecord
 from app.modules.tasks.jobs import JobRepository
 from app.modules.tasks.rust_adapter import DomainRefusal, RustCore
 from app.modules.tasks.rust_task_facade import RustTaskFacade
+from app.modules.tasks.sync.command_handler import LegacyTagCommandHandler
 from app.modules.tasks.sync.receipts import (
     ReceiptStore,
     ScopeAuthority,
@@ -4171,13 +4172,32 @@ class _WriterMatrix:
                 self._frozen[cache_key] = 1
         return self._frozen[cache_key]
 
-    def snapshot(self) -> dict[str, int]:
+    def snapshot(self) -> dict[str, object]:
+        """Receipt/feed counts plus every affected entity's full encoded state."""
+        repo = self.repo
+
+        def dump(items):
+            return sorted(
+                (item.model_dump(mode="json") for item in items),
+                key=lambda row: row["id"],
+            )
+
+        tasks = repo.list_for_owner(owner_id=OWNER)
         return {
-            "receipts": _count(self.repo, "sync_command_receipts"),
-            "transactions": _count(self.repo, "sync_change_transactions"),
-            "records": _count(self.repo, "sync_change_records"),
-            "tags": len(self.repo.list_tags_for_owner(owner_id=OWNER)),
-            "tasks": len(self.repo.list_for_owner(owner_id=OWNER)),
+            "receipts": _count(repo, "sync_command_receipts"),
+            "transactions": _count(repo, "sync_change_transactions"),
+            "records": _count(repo, "sync_change_records"),
+            "tags": dump(repo.list_tags_for_owner(owner_id=OWNER)),
+            "projects": dump(repo.list_projects_for_owner(owner_id=OWNER)),
+            "tasks": dump(tasks),
+            "subtasks": {
+                task.id: dump(repo.list_subtasks(owner_id=OWNER, task_id=task.id))
+                for task in tasks
+            },
+            "comments": {
+                task.id: dump(repo.list_comments(owner_id=OWNER, task_id=task.id))
+                for task in tasks
+            },
         }
 
     def call(self, name: str, key: str, variant: int):  # noqa: C901, PLR0911, PLR0912
@@ -4339,3 +4359,162 @@ def test_026_FR_014_every_legacy_writer_owns_its_key_across_operations(
             with pytest.raises(ConflictError):
                 matrix.call(other, key, 1)
             assert matrix.snapshot() == after
+
+
+@pytest.fixture
+def transport_client(monkeypatch, request):
+    """The signed-in API app with durable sync and the MCP transport enabled."""
+    monkeypatch.setenv("BRAIN_BUDDY_MCP_ENABLED", "1")
+    monkeypatch.setenv("BRAIN_BUDDY_MCP_ALLOWED_HOSTS", "testserver")
+    client = request.getfixturevalue("api_client")
+    flags = client.app.state.container.feature_flag_service
+    flags.set_mode("task_mcp", "on", operator_id="pr27")
+    flags.set_mode("rust_core_sync", "on", operator_id="pr27")
+    # Production wires no Identity authority yet (T030 adds sync/authority.py),
+    # so the web app's service has no durable handler; install the same one the
+    # service fixture builds, on the very service the HTTP and MCP routes use.
+    container = client.app.state.container
+    service = container.task_service
+    facade = service._rust_facade
+    assert facade is not None
+    service._legacy_tag_handler = LegacyTagCommandHandler(
+        ReceiptStore(facade._core),
+        container.task_unit_of_work,
+        lambda unit: ScopeAuthority(
+            unit.owner_id, "server-1", "feed-1", "access-1", "sqlite-1"
+        ),
+        facade,
+        container.task_repo,
+    )
+    with client:
+        yield client
+
+
+class _Transports:
+    """The same create/project command sent through service, HTTP and MCP."""
+
+    def __init__(self, client) -> None:
+        self.client = client
+        container = client.app.state.container
+        self.service = container.task_service
+        self.repo = container.task_repo
+        owner = container.user_repo.get_by_email("primary@example.com")
+        assert owner is not None
+        self.owner = owner.id
+
+    def create(self, transport: str, key: str, title: str) -> tuple[bool, str | None]:
+        """Return (accepted, task id) for one create-task call."""
+        if transport == "service":
+            try:
+                task = self.service.create_task(
+                    TaskCreateRequest(title=title),
+                    owner_id=self.owner,
+                    idempotency_key=key,
+                )
+            except ConflictError:
+                return False, None
+            return True, task.id
+        if transport == "http":
+            response = self.client.post(
+                "/api/tasks",
+                headers={"Idempotency-Key": key},
+                json={"title": title},
+            )
+            assert response.status_code in {201, 409}, response.text
+            if response.status_code == 409:
+                return False, None
+            return True, response.json()["id"]
+        assert transport == "mcp"
+        token = self.client.cookies.get("brainbuddy_session")
+        response = self.client.post(
+            "/api/mcp/",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": "2025-06-18",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_task",
+                    "arguments": {"title": title, "idempotency_key": key},
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()["result"]
+        if result.get("isError"):
+            return False, None
+        return True, result["structuredContent"]["id"]
+
+    def create_project(self, transport: str, key: str) -> bool:
+        """Whether a different operation under the same key was accepted."""
+        if transport == "service":
+            try:
+                self.service.create_project(
+                    ProjectCreateRequest(name="Other operation"),
+                    owner_id=self.owner,
+                    idempotency_key=key,
+                )
+            except ConflictError:
+                return False
+            return True
+        assert transport == "http"
+        response = self.client.post(
+            "/api/projects",
+            headers={"Idempotency-Key": key},
+            json={"name": "Other operation"},
+        )
+        assert response.status_code in {201, 409}, response.text
+        return response.status_code == 201
+
+    def state(self) -> dict[str, object]:
+        return {
+            "receipts": _count(self.repo, "sync_command_receipts"),
+            "transactions": _count(self.repo, "sync_change_transactions"),
+            "records": _count(self.repo, "sync_change_records"),
+            "tasks": [
+                task.model_dump(mode="json")
+                for task in self.repo.list_for_owner(owner_id=self.owner)
+            ],
+            "projects": [
+                project.model_dump(mode="json")
+                for project in self.repo.list_projects_for_owner(owner_id=self.owner)
+            ],
+        }
+
+
+_TRANSPORTS = ("service", "http", "mcp")
+
+
+@pytest.mark.parametrize("first", _TRANSPORTS)
+@pytest.mark.parametrize("second", _TRANSPORTS)
+def test_026_FR_014_same_legacy_key_dedupes_across_transports(
+    transport_client, first, second
+):
+    transports = _Transports(transport_client)
+    key = "cross-transport-key"
+
+    with allure.step(f"{first} creates the task and publishes one receipt"):
+        before = transports.state()
+        accepted, task_id = transports.create(first, key, "Cross transport")
+        assert accepted
+        after = transports.state()
+        assert after["receipts"] == before["receipts"] + 1
+        assert after["transactions"] == before["transactions"] + 1
+        assert [t["id"] for t in after["tasks"]] == [task_id]
+
+    with allure.step(f"{second} replays the same body without a second effect"):
+        assert transports.create(second, key, "Cross transport") == (True, task_id)
+        assert transports.state() == after
+
+    with allure.step(f"{second} cannot change the body under the same key"):
+        assert transports.create(second, key, "Changed body") == (False, None)
+        assert transports.state() == after
+
+    if second != "mcp":
+        with allure.step(f"{second} cannot run another operation under the key"):
+            assert transports.create_project(second, key) is False
+            assert transports.state() == after
