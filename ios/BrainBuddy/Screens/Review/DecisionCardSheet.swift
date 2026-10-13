@@ -74,6 +74,11 @@ struct DecisionCardSheet: View {
     @State private var hasDecided = false
     @State private var isSaving = false
     @State private var editorID = UUID().uuidString
+    /// The suggestion sheet (M-04, spec 026) opened from the card.
+    @State private var suggestion: ReviewSuggestionTarget?
+    /// What a manual decision records after suggestions were shown and not used (spec 026, FR-020).
+    @State private var manualAIUse = AIUse.none
+    @State private var manualNavigatorRequestID: String?
 
     init(taskID: TaskID, review: ReviewDecisionContext? = nil) {
         self.taskID = taskID
@@ -111,13 +116,20 @@ struct DecisionCardSheet: View {
                             path = []
                         },
                         onCloseCard: closeCard,
-                        expectedTask: opened?.stamp, shownRecord: opened?.task
+                        expectedTask: opened?.stamp, shownRecord: opened?.task,
+                        aiUse: manualAIUse, navigatorRequestID: manualNavigatorRequestID
                     )
                 }
         }
         // FR-047: a large sheet outside a review (ReviewPresentation.largeSheet).
         .presentationDetents([.large])
         .interactiveDismissDisabled(formIsDirty)
+        .sheet(item: $suggestion) { target in
+            ReviewSuggestionSheet(
+                taskID: taskID, kind: target.kind, stallReason: stallReason, shown: opened?.stamp,
+                sessionID: review?.sessionID, onApplied: suggestionApplied(_:title:),
+                onManual: { manualAIUse = $0; manualNavigatorRequestID = $1 })
+        }
         .onAppear(perform: recordOpenedWording)
         .task {
             if let reviewRead { try? await workspace.prepareReviewRead(reviewRead) }
@@ -145,7 +157,7 @@ struct DecisionCardSheet: View {
             DecisionCardContent(
                 model: DecisionCardModel(task: task, workspace: workspace,
                 formulation: cardFormulation), stallReason: $stallReason, problem: problem,
-                onChoose: choose
+                onChoose: choose, onSuggest: { suggestion = ReviewSuggestionTarget(kind: $0) }
             )
         } else {
             DecisionCardStaleView(
@@ -266,6 +278,18 @@ struct DecisionCardSheet: View {
         }
     }
 
+    /// A suggestion was applied through the ordinary decision command. Inside a review it counts as
+    /// the run's decision (Undo as for a manual one); outside, it is a plain title update.
+    private func suggestionApplied(_ decisionID: DecisionID?, title: String) {
+        hasDecided = true
+        if let review, let decisionID, let kind = suggestion?.kind {
+            review.onDecided(decisionID, kind == .firstStep ? .firstStep : .reformulate, title)
+            return
+        }
+        dismiss()
+        toasts.show("Wording updated.")
+    }
+
     /// Close, or "Not now" inside a review (the step sets the task aside).
     private func closeCard() {
         if let review { review.onNotNow() } else { dismiss() }
@@ -366,6 +390,8 @@ struct DecisionCardContent: View {
     @Binding var stallReason: StallReason?
     let problem: String?
     let onChoose: (DecisionType) -> Void
+    /// Opens the suggestion sheet (M-04); nil where the screen cannot present it.
+    let onSuggest: ((SuggestionKind) -> Void)?
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// VoiceOver starts on the card title, as Process inbox does.
@@ -373,12 +399,13 @@ struct DecisionCardContent: View {
 
     init(
         model: DecisionCardModel, stallReason: Binding<StallReason?>, problem: String?,
-        onChoose: @escaping (DecisionType) -> Void
+        onChoose: @escaping (DecisionType) -> Void, onSuggest: ((SuggestionKind) -> Void)? = nil
     ) {
         self.model = model
         _stallReason = stallReason
         self.problem = problem
         self.onChoose = onChoose
+        self.onSuggest = onSuggest
     }
 
     private var recommended: DecisionType? { StallReasonRecommendation.decision(for: stallReason) }
@@ -397,6 +424,7 @@ struct DecisionCardContent: View {
                 }
                 reasons
                 decisions
+                suggestions
                 if model.extensionUsed {
                     Text(ReviewCopy.extensionUsed)
                         .font(BBFont.meta)
@@ -465,6 +493,28 @@ struct DecisionCardContent: View {
                     ReasonChip(title: ReviewCopy.stallReasonLabel(reason), isSelected: stallReason == reason) {
                         // Tapping the chosen reason again clears it.
                         stallReason = stallReason == reason ? nil : reason
+                    }
+                }
+            }
+        }
+    }
+
+    /// Only where the card offers a new wording or a first step (the decisions the suggestion applies to).
+    @ViewBuilder private var suggestions: some View {
+        if let onSuggest {
+            let kinds: [(DecisionType, SuggestionKind, String)] = [
+                (.reformulate, .reformulate, "Suggest new wording"), (.firstStep, .firstStep, "Suggest a first step"),
+            ]
+            let offered = kinds.filter { model.decisions.contains($0.0) }
+            if !offered.isEmpty {
+                VStack(alignment: .leading, spacing: BBSpacing.s2) {
+                    Text("Need an idea?").font(BBFont.subtitle).foregroundStyle(BBColor.textSecondary)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(offered, id: \.1.rawValue) { _, kind, title in
+                        Button { onSuggest(kind) } label: {
+                            Label(title, systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
                     }
                 }
             }
