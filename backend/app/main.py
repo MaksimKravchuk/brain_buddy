@@ -19,6 +19,9 @@ from app.api.middleware import CorrelationIdMiddleware
 from app.api.modern_auth import router as modern_auth_router
 from app.api.review import register_review_exception_handlers
 from app.api.sync import router as sync_router
+from app.api.sync_delta import router as sync_delta_router
+from app.api.sync_hints import router as sync_hints_router
+from app.api.sync_snapshots import router as sync_snapshots_router
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
@@ -115,6 +118,14 @@ def _run_privacy_maintenance_sweep(
         if retained
         else 0
     )
+
+    # Spec 026 PR-50: sync copies expire independently of owner activity and
+    # flags, so the legacy loop runs the cleanup whenever it owns privacy.
+    if retained:
+        _isolated_step(
+            lambda: container.sync_retention.run_retention_sweep(),
+            "Sync retention sweep iteration failed",
+        )
 
     # Spec 020: its own block, so a review failure stops neither purge nor
     # relay retention, and the 3-tuple above stays this function's contract.
@@ -378,6 +389,8 @@ def _install_durable_scheduler(
             container.crt_command_repo,
             gate,
             cadence=privacy,
+            # Stub containers in the handoff tests predate this port.
+            sync_retention=getattr(container, "sync_retention", None),
         )
     )
     handoff.assign(Responsibility.PRIVACY_RETENTION, owned)
@@ -580,6 +593,19 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix=f"{config.api_prefix}/admin")
     app.include_router(api_router, prefix=config.api_prefix)
     app.include_router(sync_router, prefix=config.api_prefix)
+    app.include_router(sync_delta_router, prefix=config.api_prefix)
+    app.include_router(sync_snapshots_router, prefix=config.api_prefix)
+    app.include_router(sync_hints_router, prefix=config.api_prefix)
+
+    @app.on_event("shutdown")
+    async def close_sync_hints() -> None:
+        # Open SSE streams would otherwise hold uvicorn's graceful shutdown. The
+        # hub is built lazily by the first hints request; async so the wake-up
+        # runs on the event loop that owns the streams.
+        hub = getattr(app.state, "sync_hint_hub", None)
+        if hub is not None:
+            hub.close()
+
     if config.mcp_enabled:
         install_task_mcp(app, app.state.container, config)
 

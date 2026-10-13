@@ -17,6 +17,8 @@ from uuid import uuid4
 from app.exceptions import RepositoryError
 from app.modules.tasks.rust_adapter import RustCore
 
+from .retention import redact_expired_receipts, source_expiry
+
 if TYPE_CHECKING:
     from .unit_of_work import OwnerUnitOfWork
 
@@ -27,6 +29,8 @@ SYNC_TABLES = (
     "sync_change_transactions",
     "sync_transfer_pages",
     "sync_transfers",
+    "sync_snapshot_pages",
+    "sync_snapshots",
     "sync_legacy_keys",
     "sync_command_receipts",
     "sync_record_versions",
@@ -75,6 +79,15 @@ _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS sync_transfer_pages (owner_id TEXT NOT NULL, "
     "transfer_id TEXT NOT NULL, page_index INTEGER NOT NULL, payload BLOB NOT NULL, "
     "page_sha256 TEXT NOT NULL, PRIMARY KEY(owner_id,transfer_id,page_index))",
+    "CREATE TABLE IF NOT EXISTS sync_snapshots (owner_id TEXT NOT NULL, "
+    "snapshot_id TEXT NOT NULL, watermark TEXT NOT NULL, feed_generation TEXT NOT NULL, "
+    "access_generation TEXT NOT NULL, page_count INTEGER NOT NULL, "
+    "record_count INTEGER NOT NULL, total_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, "
+    "created_at TEXT NOT NULL, expires_at TEXT NOT NULL, "
+    "PRIMARY KEY(owner_id,snapshot_id))",
+    "CREATE TABLE IF NOT EXISTS sync_snapshot_pages (owner_id TEXT NOT NULL, "
+    "snapshot_id TEXT NOT NULL, page_index INTEGER NOT NULL, payload BLOB NOT NULL, "
+    "page_sha256 TEXT NOT NULL, PRIMARY KEY(owner_id,snapshot_id,page_index))",
     "CREATE INDEX IF NOT EXISTS sync_transfer_commit ON sync_transfers(owner_id,commit_seq)",
     "CREATE INDEX IF NOT EXISTS sync_receipt_expiry ON sync_command_receipts(owner_id,expires_at)",
     "CREATE INDEX IF NOT EXISTS sync_change_record_history ON sync_change_records(owner_id,entity_type,record_key)",
@@ -286,7 +299,7 @@ class ChangeLog(AtomicChangeLog[Connection]):
                 row.get("edit_revision"),
                 row["operation"],
                 encode(row["value"]) if row["value"] is not None else None,
-                None,
+                source_expiry(row["entity_type"], row["value"]),
             ),
         )
 
@@ -331,6 +344,8 @@ class ChangeLog(AtomicChangeLog[Connection]):
         )
         # Materialized oversized-transaction copies hold the same content.
         conn.execute("DELETE FROM sync_transfer_pages WHERE owner_id = ?", (owner,))
+        # So do materialized snapshots: a late page reads RESET_REQUIRED.
+        conn.execute("DELETE FROM sync_snapshot_pages WHERE owner_id = ?", (owner,))
         conn.execute(
             "UPDATE sync_scopes SET feed_generation = ? WHERE owner_id = ?",
             (str(uuid4()), owner),
@@ -339,10 +354,7 @@ class ChangeLog(AtomicChangeLog[Connection]):
     def prune(self, unit: OwnerUnitOfWork[Connection], *, now: datetime) -> None:
         """Remove expired copies; keep the content-free final deletion versions."""
         conn, owner = unit.connection, unit.owner_id
-        conn.execute(
-            "UPDATE sync_command_receipts SET result = NULL WHERE owner_id = ? AND expires_at <= ?",
-            (owner, now.isoformat()),
-        )
+        redact_expired_receipts(conn, owner, now)
         conn.execute(
             "DELETE FROM sync_change_transactions WHERE owner_id = ? AND committed_at <= ?",
             (owner, (now - timedelta(days=90)).isoformat()),

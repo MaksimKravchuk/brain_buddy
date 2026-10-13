@@ -721,7 +721,8 @@ class ReceiptStore(CommandReceipts[Connection]):
         self, unit: OwnerUnitOfWork[Connection], command_id: str
     ) -> None:
         unit.connection.execute(
-            "UPDATE sync_command_receipts SET result = NULL "
+            "UPDATE sync_command_receipts SET result = NULL, "
+            "metadata = json_set(metadata, '$.result_redacted', json('true')) "
             "WHERE owner_id = ? AND command_id = ?",
             (unit.owner_id, command_id),
         )

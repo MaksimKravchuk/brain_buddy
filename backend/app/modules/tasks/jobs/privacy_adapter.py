@@ -24,6 +24,10 @@ port of this slice and its ownership is unchanged:
   receipt retention port is invoked here);
 * the weekly-review maintenance sweep (PR-22, the Review adapter).
 
+PR-50 adds one optional step beyond the legacy sweep: ``sync_retention``, the
+independent sync-copy cleanup (receipt content, feed after-images, snapshots and
+transfers). It reads no flag and no authority, like the purge above it.
+
 Each step is a call into another module with its own recovery contract (the
 purge writes a durable deletion marker before it erases, then re-runs after a
 crash; the retention sweeps are idempotent). A crash between steps is therefore
@@ -74,6 +78,15 @@ PRIVACY_RESPONSIBILITY: Final = MaintenanceResponsibility(
 )
 
 
+#: Spec 026 PR-50: the sync receipt/feed/snapshot/transfer copies have no step in
+#: the legacy sweep, so this one is not part of ``PRIVACY_RESPONSIBILITY`` (whose
+#: steps mirror that sweep one for one). It runs last, only when the adapter is
+#: given the port, and cannot starve or be starved by the steps above.
+SYNC_RETENTION_STEP: Final = MaintenanceStep(
+    "sync_retention", "SyncRetention.run_retention_sweep"
+)
+
+
 class AccountPurgePort(Protocol):
     def purge_due_accounts(self) -> int: ...
 
@@ -84,6 +97,10 @@ class RelayRetentionPort(Protocol):
 
 class ReceiptRetentionPort(Protocol):
     def purge_expired(self) -> int: ...
+
+
+class SyncRetentionPort(Protocol):
+    def run_retention_sweep(self) -> int: ...
 
 
 class PrivacyMaintenanceAdapter:
@@ -100,10 +117,12 @@ class PrivacyMaintenanceAdapter:
         gate: JobExecutionGate,
         *,
         cadence: timedelta = PRIVACY_DEFAULT_CADENCE,
+        sync_retention: SyncRetentionPort | None = None,
     ) -> None:
         self._accounts = accounts
         self._relay = relay
         self._receipts = receipts
+        self._sync_retention = sync_retention
         self._gate = gate
         self._cadence = require_positive(cadence)
 
@@ -117,12 +136,12 @@ class PrivacyMaintenanceAdapter:
             "relay_retention": self._relay.run_retention_sweep,
             "crt_receipt_retention": self._receipts.purge_expired,
         }
-        return run_maintenance_steps(
-            context,
-            self._gate,
-            [(step.name, ports[step.name]) for step in PRIVACY_RESPONSIBILITY.steps],
-            isolate_failures=True,
-        )
+        calls = [(step.name, ports[step.name]) for step in PRIVACY_RESPONSIBILITY.steps]
+        if self._sync_retention is not None:
+            calls.append(
+                (SYNC_RETENTION_STEP.name, self._sync_retention.run_retention_sweep)
+            )
+        return run_maintenance_steps(context, self._gate, calls, isolate_failures=True)
 
 
 __all__ = [
@@ -131,8 +150,10 @@ __all__ = [
     "PRIVACY_JOB_TYPE",
     "PRIVACY_RESPONSIBILITY",
     "PRIVACY_SCHEDULE_KEY",
+    "SYNC_RETENTION_STEP",
     "AccountPurgePort",
     "PrivacyMaintenanceAdapter",
     "ReceiptRetentionPort",
     "RelayRetentionPort",
+    "SyncRetentionPort",
 ]

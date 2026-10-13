@@ -24,7 +24,7 @@ from .receipts import STABLE_REPLAY_BYTES, ReceiptCommand, ScopeAuthority
 PROTOCOL_VERSIONS = (1,)
 RULE_VERSION = 1
 PROJECTION_SCHEMA_VERSION = 1
-SNAPSHOT_SUPPORTED = False  # PR-33 serves snapshots; it flips this
+SNAPSHOT_SUPPORTED = True
 COMMAND_BYTES = 4 * 1024 * 1024
 MIB = 1024 * 1024
 _UNDO_DAYS = 7
@@ -181,6 +181,23 @@ def registration_request(raw: bytes) -> dict[str, Any]:
     if version not in PROTOCOL_VERSIONS:
         raise ProtocolFailure(
             "UPGRADE_REQUIRED", details={"reason": "protocol_version"}
+        )
+    return body
+
+
+def snapshot_request(raw: bytes) -> dict[str, Any]:
+    """The ``SnapshotRequest`` body; unknown fields and versions are refused."""
+    body = strict_object(raw)
+    if set(body) != {"scope_id", "projection_schema_version"} or not (
+        isinstance(body["scope_id"], str) and body["scope_id"]
+    ):
+        raise ProtocolFailure("INVALID_REQUEST")
+    version = body["projection_schema_version"]
+    if type(version) not in (int, str):
+        raise ProtocolFailure("INVALID_REQUEST")
+    if str(version) != str(PROJECTION_SCHEMA_VERSION):
+        raise ProtocolFailure(
+            "UPGRADE_REQUIRED", details={"reason": "projection_schema_version"}
         )
     return body
 
