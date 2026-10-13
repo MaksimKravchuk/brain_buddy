@@ -466,6 +466,11 @@ public final class RustBridgeRuntime: Sendable {
         try await offActor { (runtime: BridgeRuntime) throws -> Data in try runtime.aiRoute(request: request) }
     }
 
+    /// The shared notes reduction (head and tail, at most 6 003 scalars) before a model sees notes.
+    public func aiReduceNotes(_ notes: Data) async throws -> Data {
+        try await offActor { (runtime: BridgeRuntime) throws -> Data in try runtime.aiReduceNotes(notes: notes) }
+    }
+
     /// Validates one model answer with the shared navigator rules (JSON in and out).
     public func aiValidateAnswer(_ answer: Data) async throws -> Data {
         try await offActor { (runtime: BridgeRuntime) throws -> Data in try runtime.aiValidateAnswer(answer: answer) }

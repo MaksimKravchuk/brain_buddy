@@ -13,7 +13,7 @@ use bb_domain::ai_policy::{
 };
 use bb_domain::proposal::{
     NavigatorInput, NavigatorKind, NavigatorOutput, ProposalRefusal, drop_known_duplicates,
-    validate_navigator_output,
+    reduce_notes, validate_navigator_output,
 };
 use bb_domain::types::{NavigatorConsent, ProviderName, TextVersion};
 use bb_protocol::wire::Id;
@@ -322,6 +322,19 @@ pub(crate) fn validate_json(data: &[u8]) -> Result<Vec<u8>, Failure> {
     to_json(&answer)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NotesIn {
+    notes: String,
+}
+
+/// The shared notes reduction (navigator contract section 1): at most 6 003 scalars.
+pub(crate) fn reduce_notes_json(data: &[u8]) -> Result<Vec<u8>, Failure> {
+    let input: NotesIn = parse_json(data, "notes")?;
+    let (notes, truncated) = reduce_notes(&input.notes);
+    to_json(&json!({"notes": notes, "truncated": truncated}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,5 +411,21 @@ mod tests {
         let bytes = validate_json(&serde_json::to_vec(&request).expect("json")).expect("ok");
         let answer: Value = serde_json::from_slice(&bytes).expect("answer");
         assert_eq!(answer["outcome"], "malformed");
+    }
+
+    #[test]
+    fn ai_026_fr_019_notes_reduction_is_the_shared_head_tail_rule() {
+        let long = (0..3000)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let request = json!({"notes": long});
+        let bytes = reduce_notes_json(&serde_json::to_vec(&request).expect("json")).expect("ok");
+        let answer: Value = serde_json::from_slice(&bytes).expect("answer");
+        assert_eq!(answer["truncated"], true);
+        assert!(answer["notes"].as_str().expect("text").chars().count() <= 6_003);
+        let short = reduce_notes_json(b"{\"notes\":\"abc\"}").expect("ok");
+        let answer: Value = serde_json::from_slice(&short).expect("answer");
+        assert_eq!(answer["truncated"], false);
     }
 }

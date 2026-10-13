@@ -927,6 +927,11 @@ impl BridgeRuntime {
         Ok(guarded(&self.state, || ai::route_json(&request))?)
     }
 
+    /// The shared notes reduction before any model sees the notes; JSON in and out.
+    pub fn ai_reduce_notes(&self, notes: Vec<u8>) -> Result<Vec<u8>, BridgeError> {
+        Ok(guarded(&self.state, || ai::reduce_notes_json(&notes))?)
+    }
+
     /// Validates one model answer (navigator contract rules 1-5); JSON in and out.
     pub fn ai_validate_answer(&self, answer: Vec<u8>) -> Result<Vec<u8>, BridgeError> {
         Ok(guarded(&self.state, || ai::validate_json(&answer))?)
