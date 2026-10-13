@@ -125,6 +125,12 @@ impl Request {
         self.cancelled.load(Ordering::SeqCst)
     }
 
+    /// The flag a reset or the end of the session raises, for the host
+    /// transport to abort the network call it is making for this request.
+    pub fn cancellation(&self) -> &AtomicBool {
+        &self.cancelled
+    }
+
     /// The fence as captured when the request was issued, cancelled or not.
     pub fn fence(&self) -> &Fence {
         &self.fence
@@ -619,6 +625,12 @@ impl SyncSession {
 
     fn drop_authority(&mut self) {
         self.standing = Standing::Ended;
+        self.cancel_all();
+    }
+
+    /// Cancels every request in flight and keeps the session: the transport's
+    /// `close`. Nothing durable changes, so a later request is issued normally.
+    pub fn cancel_requests(&mut self) {
         self.cancel_all();
     }
 
