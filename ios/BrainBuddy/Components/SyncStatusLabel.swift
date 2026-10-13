@@ -12,13 +12,7 @@ struct SyncStatusLabel: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let description = Self.describe(
-                workspace.syncStatus,
-                pendingChanges: workspace.pendingChangeCount,
-                now: context.date,
-                deviceName: Self.deviceName
-            )
-            SyncStatusContent(description: description)
+            SyncStatusContent(description: Self.describe(workspace, now: context.date))
         }
     }
 
@@ -28,10 +22,48 @@ struct SyncStatusLabel: View {
         var detail: String?
         var symbolName: String
         var needsAttention: Bool
+        /// Overrides the combined label where the typed status has a fuller one.
+        var accessibilityLabel: String?
+
+        init(text: String, detail: String?, symbolName: String, needsAttention: Bool, accessibilityLabel: String? = nil) {
+            self.text = text
+            self.detail = detail
+            self.symbolName = symbolName
+            self.needsAttention = needsAttention
+            self.accessibilityLabel = accessibilityLabel
+        }
     }
 
     @MainActor static var deviceName: String {
         UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+    }
+
+    /// The label for the workspace: the typed runtime status (spec 026 M-01) when the shared core
+    /// runs it, otherwise the legacy engine's status. `updateNeeded` is false until the workspace
+    /// exposes the runtime's unsupported-version state.
+    @MainActor static func describe(_ workspace: Workspace, now: Date) -> Description {
+        guard workspace.isRustSelected else {
+            return describe(
+                workspace.syncStatus, pendingChanges: workspace.pendingChangeCount, now: now, deviceName: deviceName)
+        }
+        let status = RuntimeSyncStatusPresenter.describe(
+            workspace.syncSnapshot, updateNeeded: false, now: now,
+            device: .iPhone)
+        return Description(
+            text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction),
+            needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel)
+    }
+
+    nonisolated static func symbolName(_ distinction: RuntimeSyncStatus.Distinction) -> String {
+        switch distinction {
+        case .localOnly: "iphone"
+        case .savedLocally: "icloud.slash"
+        case .pending: "arrow.triangle.2.circlepath.icloud"
+        case .synced: "checkmark.icloud"
+        case .signInNeeded: "person.crop.circle.badge.exclamationmark"
+        case .updateNeeded: "arrow.down.app"
+        case .hasIssues, .failing: "exclamationmark.icloud"
+        }
     }
 
     nonisolated static func describe(
@@ -104,5 +136,8 @@ private struct SyncStatusContent: View {
         }
         .font(BBFont.meta)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            description.accessibilityLabel
+                ?? [description.text, description.detail].compactMap { $0 }.joined(separator: ". "))
     }
 }
