@@ -104,7 +104,7 @@ final class FakePort: ReviewSuggestionPort {
     var grantCalls = 0
     var revokeCalls = 0
     private(set) var saves: [(notes: String, editorID: String)] = []
-    private(set) var applies: [(title: String, aiUse: AIUse, requestID: String?, editorID: String)] = []
+    private(set) var applies: [(title: String, aiUse: AIUse, requestID: String?, editorID: String, session: ReviewSessionID?)] = []
     /// Notes written by distinct edit identities; a repeated identity is the same edit.
     private var committed: [String: String] = [:]
     private(set) var appendedAnswers = 0
@@ -147,9 +147,10 @@ final class FakePort: ReviewSuggestionPort {
         }
     }
     func applySuggestion(kind: SuggestionKind, taskID: TaskID, title: String, aiUse: AIUse, navigatorRequestID: String?,
-                         expected: ShownTask, editorID: String) async throws {
-        applies.append((title, aiUse, navigatorRequestID, editorID))
+                         expected: ShownTask, sessionID: ReviewSessionID?, editorID: String) async throws -> DecisionID? {
+        applies.append((title, aiUse, navigatorRequestID, editorID, sessionID))
         if let applyOutcome { throw applyOutcome }
+        return sessionID.map { _ in DecisionID("decision-1") }
     }
 }
 
@@ -465,6 +466,35 @@ final class PortKeeper {
         #expect(sut.phase == .proposals)
         await sut.apply("Draft the outline")
         #expect(sut.phase == .applied && port.applies.count == 2)
+    }
+
+    @Test("026-FR-020 applied inside a review run, the model reports the session-bound decision")
+    func applyInSessionReturnsDecision() async {
+        let port = FakePort()
+        port.shown = ShownTask(Self.record())
+        let sut = await started(model(port))
+        let session = ReviewSessionID("session-1")
+        await sut.apply("Draft the outline", sessionID: session)
+        #expect(sut.phase == .applied && sut.appliedDecisionID == DecisionID("decision-1"))
+        #expect(port.applies.first?.session == session)
+    }
+
+    @Test("026-FR-020 applied outside a run, no decision is reported")
+    func applyOutsideSessionHasNoDecision() async {
+        let port = FakePort()
+        port.shown = ShownTask(Self.record())
+        let sut = await started(model(port))
+        await sut.apply("Draft the outline")
+        #expect(sut.phase == .applied && sut.appliedDecisionID == nil && port.applies.first?.session == nil)
+    }
+
+    @Test("026-FR-020 the navigator request ID is exposed for a later manual decision with the not-used code")
+    func manualDecisionCarriesAIUse() async {
+        let port = FakePort()
+        granted(port)
+        let sut = await started(model(port, executor: nil, remote: FakeRemote(), privacy: .remoteAllowed))
+        sut.keepCurrentWording()
+        #expect(sut.aiUseForManualDecision == .notUsed && sut.navigatorRequestID == "nav_req_1")
     }
 
     static func record() -> TaskRecord {

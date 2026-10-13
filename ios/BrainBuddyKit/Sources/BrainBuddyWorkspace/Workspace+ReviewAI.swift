@@ -82,13 +82,23 @@ extension Workspace: ReviewSuggestionPort {
         catch { throw Self.suggestionPortError(error) }
     }
 
-    /// The ordinary decision command, checked against the version the sheet showed.
+    /// Inside a review run: the same session-bound decision the manual card records (counted in the run,
+    /// Undo-able, checked against `expected`). Outside a run: a plain wording update, checked the same way.
+    @discardableResult
     public func applySuggestion(kind: SuggestionKind, taskID: TaskID, title: String, aiUse: AIUse,
-                                navigatorRequestID: String?, expected: ShownTask, editorID: String) async throws {
+                                navigatorRequestID: String?, expected: ShownTask, sessionID: ReviewSessionID?,
+                                editorID: String) async throws -> DecisionID? {
         do {
-            _ = try await decide(kind == .firstStep ? .firstStep : .reformulate, on: taskID, title: title,
-                                 aiUse: aiUse, navigatorRequestID: navigatorRequestID, expectedTask: expected,
-                                 editorID: editorID)
+            if let sessionID {
+                return try await decide(kind == .firstStep ? .firstStep : .reformulate, on: taskID, title: title,
+                                        aiUse: aiUse, navigatorRequestID: navigatorRequestID, sessionID: sessionID,
+                                        expectedTask: expected, editorID: editorID)
+            }
+            guard expected.matches(state.tasks[taskID], localChildEdits: localChildEdits[taskID]) else {
+                throw SuggestionPortError.conflict
+            }
+            try await updateTask(taskID, TaskChanges(title: .set(title)), editorID: editorID)
+            return nil
         } catch { throw Self.suggestionPortError(error) }
     }
 
