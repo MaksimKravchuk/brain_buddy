@@ -152,9 +152,10 @@ class _RestResults:
     """Decision, Undo and auto-park results as the Review API returns them."""
 
     def __init__(self, review: ReviewService, owner: str) -> None:
-        from app.api import review as rest  # noqa: PLC0415 - api is above modules
+        from app.api import review_mapping  # noqa: PLC0415
 
-        self._rest, self._review, self._owner = rest, review, owner
+        self._rest = review_mapping
+        self._review, self._owner = review, owner
 
     def decision(self, result: DecisionResultDocument) -> Json:
         response = self._rest.decision_response(result, self._review, self._owner)

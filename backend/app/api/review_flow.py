@@ -23,11 +23,8 @@ from app.api.dependencies import (
     require_weekly_review_enabled,
 )
 from app.api.middleware import CORRELATION_HEADER
-from app.api.review import (
-    require_idempotency_key,
-    session_response,
-    tasks_with_formulation,
-)
+from app.api.review import require_idempotency_key, session_response
+from app.api.review_mapping import tasks_with_formulation
 from app.modules.tasks.review_domain import ReviewBulkReleaseDocument
 from app.modules.tasks.review_flow import (
     OpenSessionExistsError,

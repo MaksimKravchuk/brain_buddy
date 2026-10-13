@@ -568,7 +568,9 @@ def test_020_FR_011_the_stored_settings_snapshot_keeps_every_clock_input() -> No
 def test_020_FR_004_both_routers_share_the_public_task_mapper() -> None:
     """``TaskResponse`` comes from ``app.api.task_mapping`` for every router."""
 
-    from app.api import review, task_mapping, tasks
+    from app.api import review_mapping, task_mapping, tasks
 
     assert tasks._to_response is task_mapping.task_response
-    assert review.task_response is task_mapping.task_response
+    # The review router's mapping lives in review_mapping (framework-free, shared
+    # with the device executor); it must use the same task mapper.
+    assert review_mapping.task_response is task_mapping.task_response

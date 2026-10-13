@@ -20,17 +20,17 @@ from app.api.dependencies import (
     weekly_review_enabled,
 )
 from app.api.middleware import CORRELATION_HEADER
-from app.api.task_mapping import task_response
+from app.api.review_mapping import (
+    auto_park_response,
+    decision_response,
+    receipt_response,
+    undo_response,
+)
 from app.exceptions import ValidationFailure
-from app.modules.tasks.domain import FormulationSettingsDocument, TaskDocument
 from app.modules.tasks.review_domain import (
-    AutoParkResultDocument,
-    DecisionResultDocument,
-    ReviewReceiptDocument,
     ReviewRequestError,
     ReviewSessionDocument,
     ReviewSettingsDocument,
-    UndoResultDocument,
 )
 from app.modules.tasks.review_service import ReviewService, ReviewStateView
 from app.schemas.api import ErrorResponse
@@ -38,24 +38,20 @@ from app.schemas.auth import User
 from app.schemas.review import (
     AutoParkRequest,
     AutoParkResponse,
-    DecisionRecordResponse,
     DecisionRequest,
     DecisionResponse,
     ExplainerAcknowledgeRequest,
     LastCountedReviewResponse,
     ParkAcknowledgeRequest,
-    ReviewReceiptResponse,
     ReviewSettingsResponse,
     ReviewSettingsUpdateRequest,
     ReviewStateCounts,
     ReviewStateResponse,
-    SessionCounts,
     SessionResponse,
     UndoDecisionRequest,
     UndoDecisionResponse,
     UnseenParkResponse,
 )
-from app.schemas.tasks import TaskResponse
 from app.services import FeatureFlagService
 
 router = APIRouter(tags=["review"])
@@ -122,15 +118,6 @@ def session_response(session: ReviewSessionDocument) -> SessionResponse:
     )
 
 
-def receipt_response(receipt: ReviewReceiptDocument) -> ReviewReceiptResponse:
-    return ReviewReceiptResponse(
-        task_id=receipt.task_id,
-        kind=receipt.kind,
-        hidden_until=receipt.hidden_until,
-        task_revision=receipt.task_revision,
-    )
-
-
 def state_response(state: ReviewStateView) -> ReviewStateResponse:
     last = state.last_counted_review
     return ReviewStateResponse(
@@ -178,90 +165,6 @@ def require_idempotency_key(idempotency_key: str | None) -> str:
     if not idempotency_key:
         raise ValidationFailure("Idempotency-Key header is required.")
     return idempotency_key
-
-
-def tasks_with_formulation(
-    review_service: ReviewService,
-    owner_id: str,
-    settings: FormulationSettingsDocument | None,
-    *tasks: TaskDocument | None,
-) -> list[TaskResponse | None]:
-    """Map tasks with one settings read for all of them (http §2).
-
-    ``settings`` is the stored result's snapshot, so a same-key replay returns
-    the original projection (http "Mutations"); ``None`` reads live settings.
-    """
-
-    present = [task for task in tasks if task is not None]
-    views = review_service.formulation_views(owner_id, present, settings=settings)
-    return [
-        None if task is None else task_response(task, formulation=views.get(task.id))
-        for task in tasks
-    ]
-
-
-def decision_response(
-    result: DecisionResultDocument, review_service: ReviewService, owner_id: str
-) -> DecisionResponse:
-    decision = result.decision
-    task, created = tasks_with_formulation(
-        review_service,
-        owner_id,
-        result.formulation_settings,
-        result.task,
-        result.created_task,
-    )
-    assert task is not None
-    return DecisionResponse(
-        decision=DecisionRecordResponse(
-            id=decision.id,
-            type=decision.type,
-            task_id=decision.task_id,
-            session_id=decision.session_id,
-            decided_at=decision.decided_at,
-            substantive=decision.substantive,
-            stall_reason=decision.stall_reason,
-            ai_use=decision.ai_use,
-            yielded_auto_park=decision.yielded_auto_park,
-        ),
-        task=task,
-        created_task=created,
-        receipt=None if result.receipt is None else receipt_response(result.receipt),
-        session_counts=(
-            None
-            if result.session_counts is None
-            else SessionCounts.model_validate(result.session_counts.model_dump())
-        ),
-    )
-
-
-def undo_response(
-    result: UndoResultDocument, review_service: ReviewService, owner_id: str
-) -> UndoDecisionResponse:
-    (task,) = tasks_with_formulation(
-        review_service, owner_id, result.formulation_settings, result.task
-    )
-    assert task is not None
-    return UndoDecisionResponse(
-        task=task,
-        undone_decision_id=result.undone_decision_id,
-        deleted_task_id=result.deleted_task_id,
-        session_counts=(
-            None
-            if result.session_counts is None
-            else SessionCounts.model_validate(result.session_counts.model_dump())
-        ),
-    )
-
-
-def auto_park_response(
-    result: AutoParkResultDocument, review_service: ReviewService, owner_id: str
-) -> AutoParkResponse:
-    (task,) = tasks_with_formulation(
-        review_service, owner_id, result.formulation_settings, result.task
-    )
-    assert task is not None
-    return AutoParkResponse(applied=result.applied, task=task)
 
 
 # ----------------------------------------------------------------- routes

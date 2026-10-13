@@ -35,6 +35,7 @@ from app.modules.tasks.sync.hints import (
     HintHub,
     SqliteCommitCounter,
 )
+from tests.allure_evidence import attach_json
 from tests.conftest import (
     TEST_USER_EMAIL,
     TEST_USER_PASSWORD,
@@ -104,6 +105,7 @@ def test_026_FR_004_the_initial_event_is_content_free_and_closes_the_race():
         stream = source.hub().stream("owner", source.admission, "corr-1")
         first = await asyncio.wait_for(anext(stream), SECONDS)
         with allure.step("the first frame is one scope_changed event with 5 fields"):
+            attach_json("frame", str(first))
             event = parse(first)
             assert set(event) == EVENT_KEYS
             assert event["scope_id"] == "owner"
@@ -149,6 +151,7 @@ def test_026_FR_004_one_watcher_serves_every_connection_but_not_their_authority(
         for stream in (first, second):
             assert await asyncio.wait_for(anext(stream), SECONDS)
         with allure.step("two connections of one scope share one watcher"):
+            attach_json("watched", hub.watched_scopes)
             assert hub.watched_scopes == 1
         with allure.step("revoking one connection closes only that one"):
             revoked.generations = None
@@ -211,6 +214,7 @@ def test_026_FR_004_heartbeats_and_the_age_cap_bound_a_connection():
         )
         frames = [frame async for frame in stream]
         with allure.step("silence is a comment heartbeat, then the stream reopens"):
+            attach_json("frames", [str(f) for f in frames])
             assert parse(frames[0])
             assert frames[1:] and set(frames[1:]) == {HEARTBEAT}
             assert HEARTBEAT.startswith(b":") and not HEARTBEAT.startswith(b"event")
@@ -235,6 +239,7 @@ def test_026_FR_004_a_failing_commit_counter_fails_closed_and_close_ends_streams
         survivor = hub.stream("owner", source.admission, "corr-2")
         assert await asyncio.wait_for(anext(survivor), SECONDS)
         with allure.step("shutdown closes every open stream"):
+            attach_json("watched before close", hub.watched_scopes)
             hub.close()
             with pytest.raises(StopAsyncIteration):
                 await asyncio.wait_for(anext(survivor), SECONDS)
@@ -248,8 +253,10 @@ def test_026_SC_004_the_committed_counter_is_read_from_the_shared_database(tmp_p
         conn.execute("CREATE TABLE sync_scopes (owner_id TEXT, commit_seq TEXT)")
     counter = SqliteCommitCounter(database)
     with allure.step("no scope row reads as no sequence"):
+        attach_json("counter", counter("owner"))
         assert counter("owner") is None
     with allure.step("a committed row is visible, an open transaction is not"):
+        attach_json("expected sequence", "7")
         writer = sqlite3.connect(database, isolation_level=None)
         writer.execute("BEGIN IMMEDIATE")
         writer.execute("INSERT INTO sync_scopes VALUES ('owner', '7')")
@@ -385,6 +392,7 @@ def test_026_FR_004_the_route_streams_unbuffered_content_free_hints(world):
     async def scenario() -> None:
         async with world.open(**{"Last-Event-ID": "99"}) as stream:
             with allure.step("success is an unbuffered text/event-stream"):
+                attach_json("headers", dict(stream.headers))
                 assert stream.status == 200
                 assert stream.headers["content-type"].startswith("text/event-stream")
                 assert stream.headers["cache-control"] == "no-store"
@@ -452,10 +460,12 @@ def test_026_FR_011_foreign_unknown_and_unauthenticated_scopes_are_refused(world
                 assert scope not in json.dumps(body)
                 bodies.append(body)
         with allure.step("both 404s differ only by correlation ID"):
+            attach_json("codes", [b["error"]["code"] for b in bodies])
             assert bodies[0]["error"]["code"] == "RESOURCE_NOT_FOUND"
             assert [b["error"] for b in bodies][0] == bodies[1]["error"]
         async with Asgi(world.app, f"scope_id={world.owner}", {}) as anonymous:
             with allure.step("no session cookie is 401 AUTH_REQUIRED"):
+                attach_json("status", anonymous.status)
                 assert anonymous.status == 401
                 assert json.loads(await anonymous.body())["error"]["code"] == (
                     "AUTH_REQUIRED"
@@ -463,6 +473,7 @@ def test_026_FR_011_foreign_unknown_and_unauthenticated_scopes_are_refused(world
         world.set_flag(False)
         async with world.open() as disabled:
             with allure.step("a scope whose sync is off is not opened"):
+                attach_json("status", disabled.status)
                 assert disabled.status == 403
                 assert json.loads(await disabled.body())["error"]["code"] == (
                     "ACCESS_DENIED"

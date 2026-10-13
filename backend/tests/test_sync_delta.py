@@ -668,6 +668,7 @@ def test_026_FR_011_account_purge_removes_the_feed_and_transfers(
     oversized(gateway, owner)
     pull(client, owner, start)
     with allure.step("transfer metadata and pages exist before the purge"):
+        attach_json("pages", len(sql(gateway, "SELECT 1 FROM sync_transfer_pages")))
         assert sql(gateway, "SELECT 1 FROM sync_transfer_pages")
     with allure.step("purge_owner removes every sync table row of the scope"):
         conn = sqlite3.connect(gateway.units._repo.db_path)
