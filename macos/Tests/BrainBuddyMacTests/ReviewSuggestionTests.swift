@@ -59,6 +59,34 @@ struct ReviewSuggestionTests {
         #expect(outdated.lines.first == "The consent text changed since you last allowed it.")
     }
 
+    @Test("026-FR-019 the consent field list equals the fields of the real request body, project context included")
+    func consentListMatchesTheRequestBody() throws {
+        let body = NavigatorSuggestionBody(
+            kind: "reformulate", consent: .init(externalProcessingAllowed: true, provider: "openai"),
+            task: .init(title: "t", notes: "n", stallReason: "unclear"),
+            project: .init(name: "p", openTaskTitles: ["a"]))
+        let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any])
+        var paths = Set<String>()
+        for (key, value) in json where key != "consent" {
+            if let nested = value as? [String: Any] { nested.keys.forEach { paths.insert("\(key).\($0)") } } else { paths.insert(key) }
+        }
+        #expect(paths == Set(Screen.sentFieldPaths.map(\.path)), "every sent field is listed, and nothing else")
+        #expect(Screen.sentFields.count == 6)
+    }
+
+    @Test("026-FR-019 026-FR-020 journal and consent-change failures have their own copy; a failed revoke says consent is still on")
+    func newUnavailableCases() {
+        let journal = screen(.unavailable(.journalFailed))
+        #expect(journal.lines == ["This Mac couldn't save its local record of the request, so nothing was sent."])
+        #expect(titles(journal).first == "Continue without AI")
+        let change = screen(.unavailable(.consentChangeFailed))
+        #expect(change.lines == [Screen.revokeFailedLine])
+        var live = input(.requesting)
+        live.revokeFailed = true
+        let requesting = Screen.make(live)
+        #expect(requesting.lines.last == Screen.revokeFailedLine, "consent stays on and the person is told")
+    }
+
     @Test("026-FR-019 revoked consent reads as off and offers no send, only manual work or an explicit new request")
     func consentOff() {
         let off = screen(.consentOff)
@@ -225,7 +253,7 @@ struct ReviewSuggestionTests {
         #expect(app.model.reviewSuggestionKinds(for: nextTask) == [.reformulate, .firstStep])
         let waitingTask = try #require(app.workspace.task(waiting))
         #expect(app.model.reviewSuggestionKinds(for: waitingTask).isEmpty, "the decision it would apply is not allowed there")
-        #expect(app.model.reviewSuggestionModel(for: waitingTask, kind: .reformulate, adapter: try adapter([])) == nil)
+        #expect(app.model.reviewSuggestionModel(for: waitingTask, kind: .reformulate, adapter: try adapter([]), journal: InMemoryReviewSuggestionJournal()) == nil)
     }
 
     @Test("026-FR-020 an editor with unsaved fields blocks the entry with a message, so a later editor save cannot overwrite an applied wording")
@@ -246,7 +274,7 @@ struct ReviewSuggestionTests {
         app.workspace.accountlessReviewEnabled = true
         let id = try app.add("Sort out the bike", .next)
         let task = try #require(app.workspace.task(id))
-        let suggestion = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: try adapter([])))
+        let suggestion = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: try adapter([]), journal: InMemoryReviewSuggestionJournal()))
         suggestion.request()
         await suggestion.settled()
         guard case .unavailable(.localUnavailable) = suggestion.phase else {
@@ -268,10 +296,10 @@ struct ReviewSuggestionTests {
         let task = try #require(app.workspace.task(id))
         let executor = ScriptedExecutor()
         let adapter = try adapter([executor])
-        let first = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: adapter))
-        let again = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: adapter))
+        let first = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: adapter, journal: InMemoryReviewSuggestionJournal()))
+        let again = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: adapter, journal: InMemoryReviewSuggestionJournal()))
         #expect(first === again, "closing and reopening the sheet finds the same model")
-        let other = try #require(app.model.reviewSuggestionModel(for: task, kind: .firstStep, adapter: adapter))
+        let other = try #require(app.model.reviewSuggestionModel(for: task, kind: .firstStep, adapter: adapter, journal: InMemoryReviewSuggestionJournal()))
         #expect(first !== other)
 
         first.request()
@@ -286,7 +314,7 @@ struct ReviewSuggestionTests {
 
         app.model.releaseReviewSuggestion(for: id, kind: .reformulate)
         let reread = try #require(app.workspace.task(id))
-        let fresh = try #require(app.model.reviewSuggestionModel(for: reread, kind: .reformulate, adapter: adapter))
+        let fresh = try #require(app.model.reviewSuggestionModel(for: reread, kind: .reformulate, adapter: adapter, journal: InMemoryReviewSuggestionJournal()))
         #expect(fresh !== first, "after release a reopened sheet starts clean")
         #expect(fresh.phase == .idle)
     }
@@ -297,7 +325,7 @@ struct ReviewSuggestionTests {
         app.workspace.accountlessReviewEnabled = true
         let id = try app.add("Sort out the bike", .next)
         let task = try #require(app.workspace.task(id))
-        let suggestion = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: try adapter([ScriptedExecutor()])))
+        let suggestion = try #require(app.model.reviewSuggestionModel(for: task, kind: .reformulate, adapter: try adapter([ScriptedExecutor()]), journal: InMemoryReviewSuggestionJournal()))
         suggestion.request()
         await suggestion.settled()
         try app.workspace.updateTask(id, TaskChanges(details: .set("Changed on another window")))

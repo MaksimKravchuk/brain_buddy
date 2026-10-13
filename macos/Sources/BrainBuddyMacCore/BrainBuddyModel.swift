@@ -1343,13 +1343,14 @@ package final class BrainBuddyModel {
     /// The one shared model for this task and kind: closing the sheet leaves a live request in it,
     /// reopening finds it. `nil` when the task is not eligible.
     package func reviewSuggestionModel(
-        for task: TaskRecord, kind: SuggestionKind, adapter: LocalAIAdapter
+        for task: TaskRecord, kind: SuggestionKind, adapter: LocalAIAdapter, journal: (any ReviewSuggestionJournal)? = nil
     ) -> ReviewSuggestionModel? {
         guard reviewSuggestionKinds(for: task).contains(kind) else { return nil }
         let remote = reviewSuggestionRemote()
         return workspace.reviewSuggestionModel(
             for: task.id, kind: kind, adapter: adapter, remote: remote,
-            privacy: remote == nil ? .onDeviceOnly : .remoteAllowed, shown: workspace.suggestionShownTask(task.id))
+            privacy: remote == nil ? .onDeviceOnly : .remoteAllowed, shown: workspace.suggestionShownTask(task.id),
+            journal: journal)
     }
 
     /// After applied, manual continuation or discard.

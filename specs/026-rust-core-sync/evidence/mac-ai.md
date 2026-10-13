@@ -44,5 +44,8 @@ Known gaps to confirm or close before this can pass:
 - The Foundation Models executor reports availability, languages and memory as the system exposes them
   (memory is not exposed, so no requirement is stated); how the policy treats a real "ready" Mac is
   unobserved.
-- Applying while the task editor has unsaved fields: the apply is checked against the saved task, the
-  editor's fields are not refreshed from it.
+- Entry blocked with a message ("Save or discard your changes to this task to ask for suggestions.")
+  while the task editor has unsaved changes: confirm on a real Mac, including that the entry returns
+  after Save or Discard.
+- Journal, consent-change and failed-revoke copy ("couldn't save its local record", "Your consent is
+  still on") is covered at the mapping level only; the failure paths themselves need a real run.

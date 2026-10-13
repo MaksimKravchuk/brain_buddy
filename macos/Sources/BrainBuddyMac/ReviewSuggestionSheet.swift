@@ -49,6 +49,8 @@ struct ReviewSuggestionScreen: Equatable {
         var notesTruncated = false
         var question: String?
         var leaving = false
+        /// Revoking the cloud consent did not complete; the grant stays current.
+        var revokeFailed = false
     }
 
     var heading: String
@@ -76,13 +78,26 @@ struct ReviewSuggestionScreen: Equatable {
             firstFocus: .keepEditing, showsAnswerField: false)
     }
 
-    /// The fields the existing review navigator sends (020-FR-019), in the order the consent shows them.
-    static let sentFields = [
-        "Task title", "Task notes", "Why it stalled, if you chose a reason", "Project name",
-        "Up to 20 other open task titles in that project", "The kind of suggestion you asked for",
+    /// What the consent lists and the request body field each line stands for (020-FR-019); a test
+    /// compares the paths with the encoded `NavigatorSuggestionBody`, so the list cannot drift from it.
+    static let sentFieldPaths: [(label: String, path: String)] = [
+        ("Task title", "task.title"), ("Task notes", "task.notes"),
+        ("Why it stalled, if you chose a reason", "task.stall_reason"), ("Project name", "project.name"),
+        ("Up to 20 other open task titles in that project", "project.open_task_titles"),
+        ("The kind of suggestion you asked for", "kind"),
     ]
 
+    static var sentFields: [String] { sentFieldPaths.map(\.label) }
+
     static func make(_ input: Input) -> ReviewSuggestionScreen {
+        var screen = base(input)
+        if input.revokeFailed, !screen.lines.contains(revokeFailedLine) { screen.lines.append(revokeFailedLine) }
+        return screen
+    }
+
+    static let revokeFailedLine = "Cloud suggestions could not be turned off. Your consent is still on."
+
+    private static func base(_ input: Input) -> ReviewSuggestionScreen {
         if input.leaving { return leavePrompt() }
         let continueButton = Control(action: .continueWithoutAI, title: "Continue without AI")
         switch input.phase {
@@ -225,6 +240,10 @@ struct ReviewSuggestionScreen: Equatable {
         case .invalidProposal: screen.lines = ["The answer couldn't be used. Nothing changed."]
         case .inputTooLarge: screen.lines = ["This task has too much text for a suggestion."]
         case .taskGone: screen.lines = ["This task is no longer available."]
+        case .journalFailed:
+            screen.lines = ["This Mac couldn't save its local record of the request, so nothing was sent."]
+        case .consentChangeFailed:
+            screen.lines = ["Cloud suggestions could not be turned off. Your consent is still on."]
         }
         if !saved { buttons.append(Control(action: .requestAgain, title: "Request again")) }
         screen.buttons = buttons
@@ -251,7 +270,8 @@ extension ReviewSuggestionScreen.Input {
         self.init(
             phase: model.phase, kind: model.kind, cloudPossible: cloudPossible, canTryCloud: model.canTryCloud,
             answerSaved: model.answerSaved, referenceID: model.referenceID, applyFailure: model.applyFailure,
-            notesTruncated: model.notesTruncated, question: model.question, leaving: leaving)
+            notesTruncated: model.notesTruncated, question: model.question, leaving: leaving,
+            revokeFailed: model.revokeFailed)
     }
 }
 
