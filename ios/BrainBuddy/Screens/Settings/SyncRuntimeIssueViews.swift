@@ -204,7 +204,11 @@ struct RuntimeIssueDetail: View {
                             get: { draft.wrappedValue.approvedRetries.contains(dependent.id) },
                             set: { on in
                                 var next = draft.wrappedValue
-                                if on { next.approveRetry(for: dependent.id) }
+                                if on {
+                                    next.approveRetry(for: dependent.id)
+                                } else {
+                                    next.withdrawRetryApproval(for: dependent.id)
+                                }
                                 draft.wrappedValue = next
                             }))
                     }

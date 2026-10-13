@@ -25,9 +25,15 @@ public enum SyncTiming {
 }
 
 public enum DeviceKind: Sendable {
-    case mac, iPhone
+    case mac, iPhone, iPad
 
-    public var noun: String { self == .mac ? "Mac" : "iPhone" }
+    public var noun: String {
+        switch self {
+        case .mac: "Mac"
+        case .iPhone: "iPhone"
+        case .iPad: "iPad"
+        }
+    }
 }
 
 /// What the line is told, from the workspace (data-model E6).

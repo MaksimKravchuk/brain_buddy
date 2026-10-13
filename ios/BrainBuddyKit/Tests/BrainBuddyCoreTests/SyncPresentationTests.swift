@@ -667,4 +667,43 @@ struct RuntimeSyncPresentationTests {
         #expect(failing.accessibilityLabel.contains("Reference ID: ref-9"))
         #expect(Self.status(Self.snapshot()).referenceID == nil)
     }
+
+    @Test("026-FR-005 a transport failure reported by the runtime shows Retry and its reference ID, not Synced")
+    func runtimeTransportFailure() {
+        let quiet = Self.snapshot()
+        let failing = RuntimeSyncStatusPresenter.describe(
+            quiet, transportFailure: TransportFailure(referenceID: "ref-3"), now: Self.t0, device: .iPhone)
+        #expect(failing.distinction == .failing && failing.action == .retry && failing.referenceID == "ref-3")
+        #expect(failing.headline == "Couldn't sync · Retry" && failing.needsAttention)
+        let unavailable = RuntimeSyncStatusPresenter.describe(
+            quiet, transportFailure: TransportFailure(referenceID: nil), now: Self.t0, device: .iPhone)
+        #expect(unavailable.distinction == .failing && unavailable.referenceID == nil)
+        let signedOut = RuntimeSyncStatusPresenter.describe(
+            Self.snapshot { $0.sessionEnded = true }, transportFailure: TransportFailure(referenceID: "r"),
+            now: Self.t0, device: .iPhone)
+        #expect(signedOut.distinction == .signInNeeded, "sign-in outranks a transport failure")
+    }
+
+    @Test("026-FR-004 Not synced yet is its own non-success state")
+    func notSyncedYetIsNotSynced() {
+        let first = Self.status(SyncSnapshot(account: Self.linkedAccount))
+        #expect(first.headline == "Not synced yet" && first.distinction == .notSyncedYet)
+    }
+
+    @Test("026-FR-004 the iPad reads as the iPad, not the iPhone")
+    func ipadNoun() {
+        let status = RuntimeSyncStatusPresenter.describe(SyncSnapshot(account: .none), now: Self.t0, device: .iPad)
+        #expect(status.headline == "On this iPad · Sign in to sync")
+    }
+
+    @Test("026-FR-010 switching a retry approval off withdraws it and Apply follows")
+    func retryApprovalWithdrawn() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a"], shownRevision: "7")
+        draft.choose(.saved)
+        draft.setChoice(.reviewAndRetry, for: "a")
+        draft.approveRetry(for: "a")
+        #expect(draft.canApply)
+        draft.withdrawRetryApproval(for: "a")
+        #expect(draft.approvedRetries.isEmpty && !draft.canApply)
+    }
 }

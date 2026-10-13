@@ -46,17 +46,24 @@ struct SyncStatusLabel: View {
             return describe(
                 workspace.syncStatus, pendingChanges: workspace.pendingChangeCount, now: now, deviceName: deviceName)
         }
+        let device: DeviceKind = UIDevice.current.userInterfaceIdiom == .pad ? .iPad : .iPhone
+        var failure: TransportFailure?
+        if case .failing(_, let referenceID, _) = workspace.syncStatus {
+            failure = TransportFailure(referenceID: referenceID)
+        } else if workspace.runtimeTransportUnavailable {
+            failure = TransportFailure(referenceID: nil)
+        }
         let status = RuntimeSyncStatusPresenter.describe(
-            workspace.syncSnapshot, updateNeeded: false, now: now,
-            device: .iPhone)
+            workspace.syncSnapshot, updateNeeded: false, transportFailure: failure, now: now, device: device)
         return Description(
-            text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction),
+            text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction, device: device),
             needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel)
     }
 
-    nonisolated static func symbolName(_ distinction: RuntimeSyncStatus.Distinction) -> String {
+    nonisolated static func symbolName(_ distinction: RuntimeSyncStatus.Distinction, device: DeviceKind) -> String {
         switch distinction {
-        case .localOnly: "iphone"
+        case .localOnly: device == .iPad ? "ipad" : "iphone"
+        case .notSyncedYet: "icloud"
         case .savedLocally: "icloud.slash"
         case .pending: "arrow.triangle.2.circlepath.icloud"
         case .synced: "checkmark.icloud"

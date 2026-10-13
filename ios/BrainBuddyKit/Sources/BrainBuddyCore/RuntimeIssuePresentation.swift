@@ -222,6 +222,12 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
         approvedRetries.insert(id)
     }
 
+    /// Switching the approval off withdraws it, and `canApply` follows.
+    public mutating func withdrawRetryApproval(for id: String) {
+        guard phase != .saving else { return }
+        approvedRetries.remove(id)
+    }
+
     /// Opens the named confirmation (M-02.12). No effect without something selected to discard.
     public mutating func requestDiscard() {
         guard phase == .choosing, !discardedIDs.isEmpty else { return }
@@ -293,7 +299,7 @@ public enum RuntimeSyncAction: Equatable, Sendable {
 
 public struct RuntimeSyncStatus: Equatable, Sendable {
     public enum Distinction: Equatable, Sendable {
-        case localOnly, savedLocally, pending, synced, signInNeeded, updateNeeded, hasIssues, failing
+        case localOnly, savedLocally, pending, notSyncedYet, synced, signInNeeded, updateNeeded, hasIssues, failing
     }
 
     public let distinction: Distinction
@@ -309,13 +315,27 @@ public struct RuntimeSyncStatus: Equatable, Sendable {
     public let accessibilityLabel: String
 }
 
+/// The runtime's transport is failing (not offline, not signed out). The reference ID is opaque.
+public struct TransportFailure: Equatable, Sendable {
+    public let referenceID: String?
+    public init(referenceID: String?) { self.referenceID = referenceID }
+}
+
 public enum RuntimeSyncStatusPresenter {
     /// Priority (design M-01): update needed, session ended, issues, persistent failure, offline,
     /// waiting, synced. Reuses `SyncStatusDescriber` for the quiet texts and timings of spec 021.
     public static func describe(
-        _ snapshot: SyncSnapshot, updateNeeded: Bool = false, now: Date, device: DeviceKind,
-        calendar: Calendar = Calendar(identifier: .gregorian)
+        _ input: SyncSnapshot, updateNeeded: Bool = false, transportFailure: TransportFailure? = nil,
+        now: Date, device: DeviceKind, calendar: Calendar = Calendar(identifier: .gregorian)
     ) -> RuntimeSyncStatus {
+        var snapshot = input
+        // A transport failure the runtime reports now is persistent by the time it is reported: it
+        // is given the timing of the legacy engine's failure, so it surfaces as "Couldn't sync".
+        if let transportFailure, snapshot.failingSince == nil {
+            snapshot.failingSince = now.addingTimeInterval(-SyncTiming.failureSurfacesAfter - 1)
+            snapshot.lastFailedAttemptAt = now
+            snapshot.lastFailureReferenceID = transportFailure.referenceID
+        }
         let base = SyncStatusDescriber.describe(snapshot, now: now, device: device, calendar: calendar)
         let saved = "Your changes are saved on this device."
         var distinction = RuntimeSyncStatus.Distinction.synced
@@ -348,7 +368,7 @@ public enum RuntimeSyncStatusPresenter {
                 detail = saved
                 disabled = "Connect to sync."
             case .notSyncedYet:
-                distinction = snapshot.pendingCount > 0 ? .pending : .synced
+                distinction = snapshot.pendingCount > 0 ? .pending : .notSyncedYet
             case .synced:
                 distinction = snapshot.pendingCount > 0 ? .pending : .synced
             }
