@@ -108,6 +108,8 @@ struct RuntimeIssueDetail: View {
             guard let read = try await workspace.accountVersion(ofIssue: issue.id) else { return }
             version = read
             account = .loaded(read)
+        } catch RuntimeIssueResolutionError.notReady {
+            return  // the runtime changed under the read: keep what is shown, the draft included
         } catch {
             version = nil
             account = .unreadable

@@ -393,12 +393,14 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
     package var dependentIDs: [String]
     /// The commands this one's own command waits on (for what a retry would be refused for).
     package var waitsOn: [String]
+    /// The record the issue's own command edits.
+    package var targetEntity: String?
     /// Safe, opaque id to copy: it carries no task, AI or auth content.
     package var referenceID: String? { id.isEmpty ? nil : id }
 
     package init(
         id: String, commandID: String, reason: String, summary: String, savedEdit: String? = nil,
-        shownBaseRevision: String? = nil, dependentIDs: [String] = [], waitsOn: [String] = []
+        shownBaseRevision: String? = nil, dependentIDs: [String] = [], waitsOn: [String] = [], targetEntity: String? = nil
     ) {
         self.id = id
         self.commandID = commandID
@@ -408,6 +410,7 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
         self.shownBaseRevision = shownBaseRevision
         self.dependentIDs = dependentIDs
         self.waitsOn = waitsOn
+        self.targetEntity = targetEntity
     }
 
     /// From the kit's issue: the saved text keys read are `summary`, `title`, `after`, `text`.
@@ -417,7 +420,8 @@ package struct SyncRuntimeIssue: Equatable, Sendable, Identifiable {
             id: issue.id, commandID: issue.commandID, reason: issue.reason,
             summary: text["summary"] ?? text["title"] ?? "Saved change",
             savedEdit: text["after"] ?? text["title"] ?? text["text"],
-            shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs, waitsOn: issue.waitsOn
+            shownBaseRevision: issue.shownBaseRevision, dependentIDs: issue.dependentIDs, waitsOn: issue.waitsOn,
+            targetEntity: issue.targetEntity
         )
     }
 }
@@ -453,11 +457,14 @@ package struct SyncBlockedAction: Equatable, Sendable, Identifiable {
     /// The other held actions this one waits on; nil when it is not a saved issue and so can't be
     /// retried from here.
     package var retryWaitsOn: [String]? = []
+    /// For an action on another record than the issue's own, the revision its retry preview shows.
+    package var shownRevision: String?
 
-    package init(id: String, summary: String, retryWaitsOn: [String]? = []) {
+    package init(id: String, summary: String, retryWaitsOn: [String]? = [], shownRevision: String? = nil) {
         self.id = id
         self.summary = summary
         self.retryWaitsOn = retryWaitsOn
+        self.shownRevision = shownRevision
     }
 }
 
@@ -474,6 +481,7 @@ package struct SyncConflictResolution: Equatable, Sendable {
     package var shownRevision: String?
     package var keep: [String]
     package var retry: [String]
+    package var retryRevisions: [String: String] = [:]
     package var discard: [String]
 
     /// The decision as the workspace takes it: Yours keeps the user's edit, Account uses the
@@ -486,8 +494,8 @@ package struct SyncConflictResolution: Equatable, Sendable {
         case .keepDeleted: mapped = .keepDeleted
         }
         return RuntimeIssueResolution(
-            issueID: issueID, outcome: mapped, shownRevision: shownRevision, keepForLater: keep, retry: retry,
-            discard: discard)
+            issueID: issueID, outcome: mapped, shownRevision: shownRevision, keepForLater: keep,
+            retry: RetryDependent.list(ids: retry, revisions: retryRevisions), discard: discard)
     }
 }
 
@@ -548,10 +556,15 @@ package struct SyncConflictModel: Equatable, Sendable {
         yourEdit = issue.savedEdit ?? issue.summary
         held = blocked
         var rules: [String: [String]] = [:]
-        for action in blocked { if let waitsOn = action.retryWaitsOn { rules[action.id] = waitsOn } }
+        var revisions: [String: String] = [:]
+        for action in blocked {
+            if let waitsOn = action.retryWaitsOn { rules[action.id] = waitsOn }
+            if let shown = action.shownRevision { revisions[action.id] = shown }
+        }
         core = ConflictDecisionDraft(
             dependentIDs: blocked.map(\.id), shownRevision: shownRevision, issueID: issue.id,
-            requiresVersion: issue.kind != .deletedElsewhere, retryDependencies: rules)
+            requiresVersion: issue.kind != .deletedElsewhere, retryDependencies: rules,
+            dependentRevisions: revisions)
     }
 
     package var shownRevision: String? { core.shownRevision }
@@ -666,7 +679,7 @@ package struct SyncConflictModel: Equatable, Sendable {
         return SyncConflictResolution(
             issueID: issueID, outcome: kind == .deletedElsewhere ? .keepDeleted : .version(selected ?? .yours),
             shownRevision: decision.againstRevision, keep: decision.keepForLater, retry: decision.retry,
-            discard: decision.discard)
+            retryRevisions: decision.retryRevisions, discard: decision.discard)
     }
 
     package mutating func saveFailed() { core.saveFailed() }

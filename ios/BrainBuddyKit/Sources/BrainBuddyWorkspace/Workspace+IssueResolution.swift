@@ -17,7 +17,7 @@ extension Workspace {
         guard !isSigningOut else { throw RuntimeIssueResolutionError.notReady }
         let binding = runtimeBindingID
         let ids = makeID
-        let request = try RuntimeIssueResolutionPlanner.plan(resolution, among: runtimeIssues) {
+        let request = try rustResolutions.request(for: resolution, among: runtimeIssues) {
             ids().uuidString.lowercased()
         }
         do {
@@ -27,7 +27,9 @@ extension Workspace {
             if binding == runtimeBindingID { await refreshRustStatus() }
             return result
         } catch let error as RustBridgeError {
-            throw RuntimeIssueResolutionError(code: error.code)
+            let typed = RuntimeIssueResolutionError(code: error.code)
+            if binding == runtimeBindingID { rustResolutions.settle(issueID: resolution.issueID, error: typed) }
+            throw typed
         }
     }
 
@@ -53,9 +55,20 @@ extension Workspace {
     /// The account's copy of the issue's record, read-only, for the "account version" side of a
     /// conflict. Nil when the issue is gone or has no known record.
     public func accountVersion(ofIssue issueID: String) async throws -> RuntimeIssueAccountVersion? {
+        try await accountVersion(ofIssue: issueID, afterRead: nil)
+    }
+
+    /// `afterRead` runs between the runtime's answer and the binding check (a test seam).
+    func accountVersion(ofIssue issueID: String, afterRead: (@MainActor () async -> Void)?) async throws
+        -> RuntimeIssueAccountVersion? {
         guard let runtime = rustRuntime, isRustBound else { throw RuntimeIssueResolutionError.notReady }
-        guard let current = try await runtime.issueCurrent(issueID) else { return nil }
+        let binding = runtimeBindingID
         let keys = Set(runtimeIssues.first(where: { $0.id == issueID })?.localText.keys.map { $0 } ?? [])
+        let read = try await runtime.issueCurrent(issueID)
+        await afterRead?()
+        // Sign-in, sign-out or a replaced binding while reading: the text may belong to another account.
+        guard binding == runtimeBindingID, isRustBound else { throw RuntimeIssueResolutionError.notReady }
+        guard let current = read else { return nil }
         var fields: [String: String] = [:]
         if let body = current.record,
             let object = try JSONSerialization.jsonObject(with: body) as? [String: Any]

@@ -54,8 +54,8 @@ struct ConflictDecisionWiringTests {
         draft.confirmDiscard()
         let decision = try Self.applied(&draft)
         let resolution = RuntimeIssueResolution(issueID: "issue-1", decision: decision)
-        #expect(resolution.keepForLater == ["b"] && resolution.retry == ["a"] && resolution.discard == ["c"])
-        #expect(Set(resolution.keepForLater + resolution.retry + resolution.discard) == ["a", "b", "c"])
+        #expect(resolution.keepForLater == ["b"] && resolution.retry.map(\.id) == ["a"] && resolution.discard == ["c"])
+        #expect(Set(resolution.keepForLater + resolution.retry.map(\.id) + resolution.discard) == ["a", "b", "c"])
     }
 
     @Test("026-FR-010: a retry the runtime would refuse is not offered: it waits on a held action that is not retried")
@@ -188,5 +188,19 @@ struct ConflictDecisionWiringTests {
         #expect(failed.accessibilityLabel.contains("Reference ID: ref-9") && failed.detail == "Your waiting changes are saved.")
         let noReference = try #require(RuntimeRecoveryCard(RuntimeSyncRecovery(rebuild: .failed(referenceID: nil)), pendingCount: 1))
         #expect(noReference.actions == [.tryAgain])
+    }
+
+    @Test("026-FR-010: a retry on another record carries the revision its preview showed, into the runtime resolution")
+    func retryCarriesDisplayedRevision() throws {
+        let primary = RuntimeIssueResolutionTests.issue("cmd-2", dependents: ["cmd-3", "cmd-4"])
+        let other = RuntimeIssueResolutionTests.issue("cmd-3", reason: "BLOCKED_DEPENDENCY", entity: "task-9", dependsOn: ["cmd-2"], revision: "8")
+        let same = RuntimeIssueResolutionTests.issue("cmd-4", reason: "BLOCKED_DEPENDENCY", dependsOn: ["cmd-2"], revision: "2")
+        var draft = RuntimeIssuePresenter.draft(for: primary, among: [primary, other, same])
+        #expect(draft.dependentRevisions == ["cmd-3": "8"], "only another record needs its own revision")
+        draft.choose(.account)
+        for id in ["cmd-3", "cmd-4"] { draft.setChoice(.reviewAndRetry, for: id); draft.approveRetry(for: id) }
+        let decision = try Self.applied(&draft)
+        let resolution = RuntimeIssueResolution(issueID: primary.id, decision: decision)
+        #expect(resolution.retry == [RetryDependent(id: "cmd-3", shownRevision: "8"), RetryDependent(id: "cmd-4")])
     }
 }

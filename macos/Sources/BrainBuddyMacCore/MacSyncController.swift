@@ -134,8 +134,10 @@ package final class MacSyncController {
         guard let issue = issues.first(where: { $0.id == id }) else { return nil }
         let blocked = issue.dependentIDs.map { dependent -> SyncBlockedAction in
             let known = issues.first { $0.id == dependent || $0.commandID == dependent }
+            let other = known.flatMap { $0.targetEntity != issue.targetEntity ? $0.shownBaseRevision : nil }
             return SyncBlockedAction(
-                id: dependent, summary: known?.summary ?? "Saved action", retryWaitsOn: known?.waitsOn)
+                id: dependent, summary: known?.summary ?? "Saved action", retryWaitsOn: known?.waitsOn,
+                shownRevision: other)
         }
         let account = try? await workspace.accountVersion(ofIssue: id)
         var model = SyncConflictModel(issue: issue, account: account, blocked: blocked)

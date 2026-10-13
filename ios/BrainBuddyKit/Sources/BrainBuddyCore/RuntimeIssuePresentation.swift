@@ -179,6 +179,9 @@ public struct ConflictDecisionDraft: Equatable, Sendable, Codable {
     /// refuses a replacement that waits on a held action which is not itself queued again, so such a
     /// retry is never offered.
     public private(set) var retryDependencies: [String: [String]]?
+    /// For a later action on another record than the issue's own, the revision of that record the
+    /// retry preview shows: the precondition its new command is approved against. Not persisted.
+    public private(set) var dependentRevisions: [String: String] = [:]
 
     private enum CodingKeys: String, CodingKey {
         case shownRevision, version, choices, approvedRetries, dependentIDs, issueID
@@ -187,8 +190,9 @@ public struct ConflictDecisionDraft: Equatable, Sendable, Codable {
     /// Every later action starts as Keep for later, the safe choice.
     public init(
         dependentIDs: [String], shownRevision: String?, issueID: String? = nil, requiresVersion: Bool = true,
-        retryDependencies: [String: [String]]? = nil
+        retryDependencies: [String: [String]]? = nil, dependentRevisions: [String: String] = [:]
     ) {
+        self.dependentRevisions = dependentRevisions
         self.dependentIDs = dependentIDs
         self.shownRevision = shownRevision
         self.issueID = issueID
@@ -334,7 +338,8 @@ public struct ConflictDecisionDraft: Equatable, Sendable, Codable {
         phase = .saving
         return ConflictDecision(
             version: version, againstRevision: shownRevision,
-            keepForLater: dependentIDs.filter { choices[$0] == .keepForLater }, retry: retryIDs, discard: discardedIDs)
+            keepForLater: dependentIDs.filter { choices[$0] == .keepForLater }, retry: retryIDs,
+            retryRevisions: dependentRevisions.filter { retryIDs.contains($0.key) }, discard: discardedIDs)
     }
 
     /// The write failed locally: keep everything and let the user try again (M-02.05).
@@ -388,7 +393,29 @@ public struct ConflictDecision: Equatable, Sendable {
     public let againstRevision: String?
     public let keepForLater: [String]
     public let retry: [String]
+    /// The displayed revision of each retried action on another record (see `dependentRevisions`).
+    public let retryRevisions: [String: String]
     public let discard: [String]
+
+    public init(
+        version: ConflictVersion?, againstRevision: String?, keepForLater: [String], retry: [String],
+        retryRevisions: [String: String] = [:], discard: [String]
+    ) {
+        self.version = version
+        self.againstRevision = againstRevision
+        self.keepForLater = keepForLater
+        self.retry = retry
+        self.retryRevisions = retryRevisions
+        self.discard = discard
+    }
+}
+
+extension RetryDependent {
+    /// The retry list of a resolution: the one place the draft's retried ids and the revisions their
+    /// previews showed become `RetryDependent`s.
+    public static func list(ids: [String], revisions: [String: String]) -> [RetryDependent] {
+        ids.map { RetryDependent(id: $0, shownRevision: revisions[$0]) }
+    }
 }
 
 extension RuntimeIssueResolution {
@@ -404,7 +431,8 @@ extension RuntimeIssueResolution {
         }
         self.init(
             issueID: issueID, outcome: outcome, shownRevision: decision.againstRevision,
-            keepForLater: decision.keepForLater, retry: decision.retry, discard: decision.discard)
+            keepForLater: decision.keepForLater,
+            retry: RetryDependent.list(ids: decision.retry, revisions: decision.retryRevisions), discard: decision.discard)
     }
 }
 
@@ -419,16 +447,26 @@ extension RuntimeIssuePresenter {
         for issue: RustWorkspaceIssue, among all: [RustWorkspaceIssue], account: RuntimeIssueAccountVersion? = nil
     ) -> ConflictDecisionDraft {
         var rules: [String: [String]] = [:]
+        var revisions: [String: String] = [:]
+        let target = issue.targetEntity
         for id in issue.dependentIDs {
-            if let known = all.first(where: { $0.commandID == id || $0.id == id }) { rules[id] = known.waitsOn }
+            guard let known = all.first(where: { $0.commandID == id || $0.id == id }) else { continue }
+            rules[id] = known.waitsOn
+            if let shown = known.shownBaseRevision, known.targetEntity != target { revisions[id] = shown }
         }
         return ConflictDecisionDraft(
             dependentIDs: issue.dependentIDs, shownRevision: account.map(\.revision) ?? issue.shownBaseRevision,
-            issueID: issue.id, requiresVersion: RuntimeIssueKind(reason: issue.reason) != .deletedElsewhere, retryDependencies: rules)
+            issueID: issue.id, requiresVersion: RuntimeIssueKind(reason: issue.reason) != .deletedElsewhere, retryDependencies: rules,
+            dependentRevisions: revisions)
     }
 }
 
 extension RustWorkspaceIssue {
+    /// The record this issue's own command edits.
+    public var targetEntity: String? {
+        (try? JSONSerialization.jsonObject(with: localIntent) as? [String: Any])?["entity_id"] as? String
+    }
+
     /// The commands this issue's own command waits on (`depends_on` of its saved intent).
     public var waitsOn: [String] {
         guard let intent = try? JSONSerialization.jsonObject(with: localIntent) as? [String: Any] else { return [] }

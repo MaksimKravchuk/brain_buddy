@@ -354,7 +354,7 @@ struct RustSyncRecoveryTests {
         let appliedYours = yours.apply()
         let runtime = try #require(appliedYours).runtime
         #expect(runtime.outcome == .keepMine && runtime.issueID == "issue-1")
-        #expect(runtime.keepForLater == ["later-2"] && runtime.retry == ["later-1"] && runtime.discard.isEmpty)
+        #expect(runtime.keepForLater == ["later-2"] && runtime.retry.map(\.id) == ["later-1"] && runtime.discard.isEmpty)
 
         var account = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"))
         account.select(.account)
@@ -488,5 +488,19 @@ struct RustSyncRecoveryTests {
         #expect(restored.selected == .yours && restored.actions[1].choice == .discard && restored.phase == .choosing)
         relaunched.discardDraft(issueID: "issue-1")
         #expect(controller.conflictDrafts.load(issueID: "issue-1") == nil)
+    }
+
+    @Test("026-FR-010 a retry on another record carries its displayed revision into the runtime resolution")
+    func retryRevisionReachesTheRuntime() throws {
+        let blocked = [
+            SyncBlockedAction(id: "later-1", summary: "Move task 1", shownRevision: "8"),
+            SyncBlockedAction(id: "later-2", summary: "Move task 2"),
+        ]
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: blocked)
+        model.select(.account)
+        for id in ["later-1", "later-2"] { model.setChoice(.reviewAndRetry, for: id); model.approveRetry(id) }
+        let applied = model.apply()
+        let runtime = try #require(applied).runtime
+        #expect(runtime.retry == [RetryDependent(id: "later-1", shownRevision: "8"), RetryDependent(id: "later-2")])
     }
 }
