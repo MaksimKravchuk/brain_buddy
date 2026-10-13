@@ -361,9 +361,17 @@ class TagDeleteResult:
 class RustTaskFacade:
     """Decides task and organization commands with the shared Rust rules."""
 
-    def __init__(self, core: RustCore, task_repo: TaskRepository) -> None:
+    def __init__(
+        self,
+        core: RustCore,
+        task_repo: TaskRepository,
+        *,
+        client_ids_only: bool = False,
+    ) -> None:
         self._core = core
         self._repo = task_repo
+        # Device commands carry every client-created ID; the server mints none.
+        self._client_ids_only = client_ids_only
 
     # ------------------------------------------------------------------ tasks
 
@@ -934,7 +942,7 @@ class RustTaskFacade:
         return self._core.decide(
             read_set,
             _envelope(command_type, entity_id, body, now, expected),
-            _inputs(now, owner_id),
+            _inputs(now, owner_id, allocate=not self._client_ids_only),
         )
 
     def _decide(
@@ -1108,7 +1116,7 @@ def _envelope(
     }
 
 
-def _inputs(now: datetime, owner_id: str) -> dict[str, Any]:
+def _inputs(now: datetime, owner_id: str, *, allocate: bool = True) -> dict[str, Any]:
     """Explicit execution facts; the formulation ID is minted here, not in Rust."""
 
     return {
@@ -1118,7 +1126,7 @@ def _inputs(now: datetime, owner_id: str) -> dict[str, Any]:
         "origin": "legacy",
         "actor_id": owner_id,
         "authoritative": True,
-        "allocated_ids": [generate_id("form")],
+        "allocated_ids": [generate_id("form")] if allocate else [],
         "policy": {
             "weekly_review": False,
             "navigator_provider": None,

@@ -1030,7 +1030,16 @@ def test_026_FR_005_device_due_date_move_emits_the_review_event_like_a_web_updat
     live.app.state.container.task_service  # noqa: B018 - the container is wired
     assert (
         run(
-            live, owner, 1, "task.create", task, {"title": "A", "state": "next"}
+            live,
+            owner,
+            1,
+            "task.create",
+            task,
+            {
+                "title": "A",
+                "state": "next",
+                "new_formulation_id": "form_00000000-0000-4000-8000-0000000000cc",
+            },
         ).status_code
         == 200
     )
@@ -1388,3 +1397,83 @@ def test_026_FR_023_task_family_registry_and_policy_edges(monkeypatch):
         with pytest.raises(ModuleNotFoundError) as missing:
             device_executor.build_executor(object(), None)  # type: ignore[arg-type]
         attach_json("missing", missing.value.name)
+
+
+def test_026_FR_005_task_family_device_commands_never_mint_a_formulation_id(
+    live, owner
+):
+    inbox, nxt = uid("task", 1), uid("task", 2)
+    form = "form_00000000-0000-4000-8000-0000000000aa"
+    make(live, owner, 1, "task.create", inbox, {"title": "Plain inbox item"})
+    before = rows(live)
+    with allure.step(
+        "entering Next without a client formulation id is 422, no receipt"
+    ):
+        create = run(
+            live, owner, 2, "task.create", nxt, {"title": "B", "state": "next"}
+        )
+        move = run(
+            live,
+            owner,
+            3,
+            "task.transition",
+            inbox,
+            {"action": "move", "to_state": "next"},
+            rev=1,
+        )
+        for response in (create, move):
+            attach_json("response", response.json())
+            assert (response.status_code, error_code(response)) == (
+                422,
+                "INVALID_REQUEST",
+            )
+        check_equal("rows", rows(live), before)
+    with allure.step("the same commands with the client's id are accepted"):
+        created = run(
+            live,
+            owner,
+            4,
+            "task.create",
+            nxt,
+            {"title": "B", "state": "next", "new_formulation_id": form},
+        )
+        assert created.json()["outcome"] == "accepted", created.text
+        assert created.json()["result"]["formulation"]["id"] == form
+    with allure.step("a substantive title edit of a Next task needs one too"):
+        stale_free = run(
+            live,
+            owner,
+            5,
+            "task.update",
+            nxt,
+            {"title": "Entirely different words here"},
+            rev=1,
+        )
+        assert (stale_free.status_code, error_code(stale_free)) == (
+            422,
+            "INVALID_REQUEST",
+        )
+        edited = run(
+            live,
+            owner,
+            6,
+            "task.update",
+            nxt,
+            {
+                "title": "Entirely different words here",
+                "new_formulation_id": "form_00000000-0000-4000-8000-0000000000ab",
+            },
+            rev=1,
+        )
+        assert edited.json()["outcome"] == "accepted", edited.text
+
+
+def test_026_FR_005_task_family_legacy_rest_still_mints_the_formulation_id(live, owner):
+    created = live.post(
+        "/api/tasks",
+        headers={"Idempotency-Key": "next-1"},
+        json={"title": "Web next", "state": "next"},
+    )
+    attach_json("legacy", {"status": created.status_code})
+    assert created.status_code == 201
+    assert created.json()["formulation"]["id"].startswith("form_")

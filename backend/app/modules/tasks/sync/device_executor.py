@@ -524,6 +524,8 @@ class TaskDeviceExecutor:
     @staticmethod
     def _refuse(command: ReceiptCommand[Connection], decision: Decision) -> Receipt:
         assert decision.refusal is not None
+        if decision.refusal.reason == "formulation_id_required":
+            raise _invalid()  # the device must send its own ID; no receipt
         return command.reject(decision.refusal)
 
     @staticmethod
@@ -553,7 +555,7 @@ def _task_family(container: Any, core: RustCore) -> DeviceCommandExecutor:
     tasks = container.task_service
     return TaskDeviceExecutor(
         tasks.task_repo,
-        RustTaskFacade(core, tasks.task_repo),
+        RustTaskFacade(core, tasks.task_repo, client_ids_only=True),
         RestProjector(tasks),
         tasks._log_due_date_move,
     )
