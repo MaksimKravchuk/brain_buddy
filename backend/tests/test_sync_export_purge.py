@@ -274,7 +274,9 @@ def test_026_FR_022_purge_erases_every_sync_table_for_the_owner_only(two_owners)
     _request_deletion(client_a)
     _backdate_deletion(client_a, owner_a, days=15)
     with allure.step("the existing deletion authority purges the owner"):
-        assert container.account_service.purge_due_accounts() == 1
+        purged = container.account_service.purge_due_accounts()
+        attach_json("purged", purged)
+        assert purged == 1
     with allure.step("every sync table and job is empty for the purged owner"):
         after_a = _counts(client_a, owner_a)
         attach_json("after", after_a)

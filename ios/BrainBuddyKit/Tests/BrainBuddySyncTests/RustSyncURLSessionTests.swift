@@ -172,16 +172,27 @@ struct RustSyncURLSessionTests {
     }
 
     @Test("026-FR-005 raising the cancellation aborts a call in flight")
-    func cancellationAbortsTheCall() async throws {
+    func cancellationAbortsTheCall() throws {
         let (server, _, transport) = rig()
         server.respond { _ in .hang }
         let cancel = RustSyncCancellation()
-        let call = Task.detached { () -> Result<RustSyncResponse, RustSyncTransportFailure> in
-            do throws(RustSyncTransportFailure) { return .success(try transport.send(get(timeout: 30), cancel: cancel)) } catch { return .failure(error) }
-        }
+        let request = get(timeout: 30)
+        // `send` blocks its caller like the core's sync worker thread: give it a thread of its own,
+        // never one of the cooperative pool the parallel tests share.
+        let outcome = Mutex<Result<RustSyncResponse, RustSyncTransportFailure>?>(nil)
+        let finished = DispatchSemaphore(value: 0)
+        Thread {
+            let result: Result<RustSyncResponse, RustSyncTransportFailure>
+            do throws(RustSyncTransportFailure) { result = .success(try transport.send(request, cancel: cancel)) } catch {
+                result = .failure(error)
+            }
+            outcome.withLock { $0 = result }
+            finished.signal()
+        }.start()
         #expect(server.wait { requests, _ in requests.count == 1 }, "the request reached the server")
         cancel.cancel()
-        #expect(await call.value == .failure(.cancelled))
+        #expect(finished.wait(timeout: .now() + 10) == .success, "the call returned")
+        #expect(outcome.withLock { $0 } == .failure(.cancelled))
         #expect(server.wait { _, stopped in stopped == 1 }, "the connection was released")
         // Already raised: nothing is sent at all.
         #expect(throws: RustSyncTransportFailure.cancelled) { try transport.send(get(), cancel: cancel) }
@@ -367,13 +378,19 @@ struct RustSyncRedirectRefusalTests {
         let answers = Mutex<[URLRequest?]>([])
     }
 
-    private func refuse(with delegate: any URLSessionTaskDelegate, status: Int) throws -> [URLRequest?] {
+    /// Asks `redirect` (one delegate's `willPerformHTTPRedirection`, called on the concrete class: the
+    /// protocol requirement is optional on Apple platforms and not in swift-corelibs-foundation)
+    /// what to do with a redirect away from the origin.
+    private func refuse(
+        status: Int,
+        _ redirect: (URLSession, URLSessionTask, HTTPURLResponse, URLRequest, @escaping @Sendable (URLRequest?) -> Void) -> Void
+    ) throws -> [URLRequest?] {
         let origin = URL(string: "https://brainbuddy.example.test/api/sync/v1/changes")!
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         // Created, never resumed.
         let task = session.dataTask(with: origin)
-        let redirect = try #require(
+        let response = try #require(
             HTTPURLResponse(
                 url: origin, statusCode: status, httpVersion: "HTTP/1.1",
                 headerFields: ["Location": "https://elsewhere.example.test/steal"]
@@ -382,22 +399,26 @@ struct RustSyncRedirectRefusalTests {
         var onward = URLRequest(url: URL(string: "https://elsewhere.example.test/steal")!)
         onward.setValue("brainbuddy_session=tok-1", forHTTPHeaderField: "Cookie")
         let recorder = Recorder()
-        delegate.urlSession?(session, task: task, willPerformHTTPRedirection: redirect, newRequest: onward) {
-            request in recorder.answers.withLock { $0.append(request) }
-        }
+        redirect(session, task, response, onward) { request in recorder.answers.withLock { $0.append(request) } }
         return recorder.answers.withLock { $0 }
     }
 
     @Test("026-FR-005 the request transport's delegate refuses every redirect", arguments: [301, 302, 303, 307, 308])
     func requestDelegateRefuses(status: Int) throws {
-        let answers = try refuse(with: RefuseRedirects(), status: status)
+        let delegate = RefuseRedirects()
+        let answers = try refuse(status: status) {
+            delegate.urlSession($0, task: $1, willPerformHTTPRedirection: $2, newRequest: $3, completionHandler: $4)
+        }
         #expect(answers.count == 1)
         #expect(answers.allSatisfy { $0 == nil })
     }
 
     @Test("026-FR-007 the hint stream's delegate refuses every redirect", arguments: [301, 302, 303, 307, 308])
     func streamDelegateRefuses(status: Int) throws {
-        let answers = try refuse(with: HintPump(), status: status)
+        let delegate = HintPump()
+        let answers = try refuse(status: status) {
+            delegate.urlSession($0, task: $1, willPerformHTTPRedirection: $2, newRequest: $3, completionHandler: $4)
+        }
         #expect(answers.count == 1)
         #expect(answers.allSatisfy { $0 == nil })
     }
