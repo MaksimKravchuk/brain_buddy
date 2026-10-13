@@ -2427,6 +2427,11 @@ private struct ChipFlowLayout: Layout {
     }
 }
 
+private struct SuggestionRequest: Identifiable {
+    let kind: SuggestionKind
+    var id: String { kind.rawValue }
+}
+
 /// Subtasks and comments: each saves at once through the kit, as before.
 private struct TaskDetailExtras: View {
     let task: TaskRecord
@@ -2440,6 +2445,7 @@ private struct TaskDetailExtras: View {
     @State private var subtaskTitles: [SubtaskID: String] = [:]
     @State private var commentBodies: [CommentID: String] = [:]
     @State private var editingCommentIDs: Set<CommentID> = []
+    @State private var suggesting: SuggestionRequest?
 
     private var completedSubtasks: Int { task.subtasks.filter { $0.state == .completed }.count }
 
@@ -2500,10 +2506,38 @@ private struct TaskDetailExtras: View {
             Text("Subtasks and comments save immediately. Discard keeps those saved changes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            suggestionEntry
         }
         .font(.subheadline)
+        // presentation-region: review and clarify sheets
+        .sheet(item: $suggesting) { request in
+            ReviewSuggestionSheetLoader(model: model, task: task, kind: request.kind) { suggesting = nil }
+        }
+        // presentation-region-end
         .onChange(of: newSubtask) { _, _ in reportDirty() }
         .onChange(of: newComment) { _, _ in reportDirty() }
+    }
+
+    /// The bounded entry of the Weekly Review suggestions (D-04): only on a Next action while the
+    /// review is exposed. A choice here opens the sheet; nothing is requested or changed by it.
+    @ViewBuilder
+    private var suggestionEntry: some View {
+        let kinds = model.reviewSuggestionKinds(for: task)
+        if !kinds.isEmpty {
+            Menu("Suggest with AI…") {
+                ForEach(kinds, id: \.rawValue) { kind in
+                    Button(kind == .firstStep ? "Suggest a first step" : "Suggest clearer wording") {
+                        suggesting = SuggestionRequest(kind: kind)
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("Suggest with AI for \(task.title)")
+            Text("Suggestions are proposals. Nothing changes until you apply one.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func setModified(_ id: String, dirty: Bool) {
