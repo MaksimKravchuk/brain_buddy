@@ -471,3 +471,239 @@ struct SyncPresentationTests {
         #expect(!strings.isEmpty && strings.allSatisfy { !$0.contains("—") })
     }
 }
+
+@Suite("Runtime issue and status presentation (spec 026 M-01/M-02/M-03)")
+struct RuntimeSyncPresentationTests {
+    static let t0 = Date(timeIntervalSince1970: 1_790_000_000)
+
+    static func issue(
+        _ id: String, reason: String, text: [String: String] = [:], revision: String? = "7",
+        dependents: [String] = [], at offset: TimeInterval = 0
+    ) -> RustWorkspaceIssue {
+        RustWorkspaceIssue(
+            id: id, commandID: "cmd-\(id)", reason: reason, localIntent: Data(), localText: text,
+            shownBaseRevision: revision, dependentIDs: dependents, createdAt: t0.addingTimeInterval(offset))
+    }
+
+    @Test("026-FR-007 a conflict card keeps the saved text verbatim, the shown version and a safe reference")
+    func conflictCard() {
+        let text = "  Buy oat milk 🥛\nand more  "
+        let card = RuntimeIssuePresenter.card(Self.issue("iss-1", reason: "REVISION_CONFLICT", text: ["title": text]))
+        #expect(card.kind == .versionConflict)
+        #expect(card.savedFields == [RuntimeSavedField(name: "title", value: text)])
+        #expect(card.shownVersion == "7")
+        #expect(card.referenceID == "iss-1")
+        #expect(card.actions == [.chooseVersion, .copySavedEdit, .copyReference])
+        #expect(card.accessibilityLabel.contains(text) && card.accessibilityLabel.contains("Reference ID: iss-1"))
+    }
+
+    @Test("026-FR-008 deleted elsewhere offers copy and keep deleted, never a recreate action")
+    func deletedElsewhere() {
+        let card = RuntimeIssuePresenter.card(Self.issue("iss-2", reason: "ENTITY_DELETED", text: ["name": "Chores"]))
+        #expect(card.kind == .deletedElsewhere)
+        #expect(card.message == "This item was deleted on another device. Your edit is saved in this issue.")
+        #expect(card.actions == [.copySavedEdit, .keepItemDeleted, .copyReference])
+    }
+
+    @Test("026-FR-010 blocked dependants are counted, kept and offered the three safe choices")
+    func blockedDependants() {
+        let parent = Self.issue("p", reason: "REVISION_CONFLICT", text: ["title": "A"], dependents: ["cmd-c1", "c2"])
+        let child = Self.issue("c1", reason: "BLOCKED_DEPENDENCY", text: ["notes": "later"], at: 1)
+        let card = RuntimeIssuePresenter.card(parent)
+        #expect(card.blockedDependentCount == 2)
+        #expect(card.message.contains("2 later actions need your decision."))
+        #expect(card.actions.contains(.reviewDependents))
+        #expect(RuntimeIssuePresenter.card(child).actions == [.keepForLater, .reviewAndRetry, .discardAction, .copyReference])
+        let summaries = RuntimeIssuePresenter.dependentSummaries(of: parent, among: [parent, child])
+        #expect(summaries.map(\.summary) == ["notes: later", "Saved action"])
+    }
+
+    @Test("026-FR-010 unknown outcomes and other refusals are distinguished and never get a retry action")
+    func unknownOutcome() {
+        let unknown = RuntimeIssuePresenter.card(Self.issue("u", reason: "OUTCOME_UNKNOWN", text: ["title": "T"]))
+        #expect(unknown.kind == .unknownOutcome)
+        #expect(!unknown.actions.contains(.reviewAndRetry))
+        #expect(RuntimeIssueKind(reason: "title_too_long") == .rejected(code: "title_too_long"))
+    }
+
+    @Test("026-FR-007 cards are ordered oldest first so dependants follow their predecessor")
+    func ordering() {
+        let cards = RuntimeIssuePresenter.cards([
+            Self.issue("b", reason: "BLOCKED_DEPENDENCY", at: 5), Self.issue("a", reason: "REVISION_CONFLICT", at: 1),
+        ])
+        #expect(cards.map(\.id) == ["a", "b"])
+    }
+
+    @Test("026-FR-007 Apply stays off until a version is chosen; there is no default choice")
+    func applyNeedsChoice() {
+        var draft = ConflictDecisionDraft(dependentIDs: [], shownRevision: "7")
+        #expect(draft.version == nil && !draft.canApply && draft.apply() == nil)
+        draft.choose(.saved)
+        #expect(draft.canApply)
+        #expect(draft.apply() == ConflictDecision(version: .saved, againstRevision: "7", keepForLater: [], retry: [], discard: []))
+    }
+
+    @Test("026-FR-007 a second apply while saving creates no second resolution, and a failed save keeps the draft")
+    func applyOnce() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a"], shownRevision: "7")
+        draft.choose(.account)
+        #expect(draft.apply() != nil)
+        #expect(draft.phase == .saving && draft.title == "Saving your choice…")
+        #expect(draft.apply() == nil)
+        draft.saveFailed()
+        #expect(draft.phase == .choosing && draft.version == .account && draft.choice(for: "a") == .keepForLater)
+    }
+
+    @Test("026-FR-010 later actions start as Keep for later and Review and retry needs explicit approval")
+    func retryNeedsApproval() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a", "b"], shownRevision: "7")
+        #expect(draft.title == "2 later actions need your decision")
+        draft.choose(.saved)
+        #expect(draft.canApply && draft.discardedIDs.isEmpty)
+        draft.setChoice(.reviewAndRetry, for: "a")
+        #expect(!draft.canApply)
+        draft.approveRetry(for: "a")
+        #expect(draft.canApply)
+        draft.setChoice(.keepForLater, for: "a")
+        draft.setChoice(.reviewAndRetry, for: "a")
+        #expect(!draft.canApply, "changing the choice withdraws the approval")
+        draft.approveRetry(for: "b")
+        #expect(!draft.approvedRetries.contains("b"), "approval only for an action marked for retry")
+    }
+
+    @Test("026-FR-010 discard needs the named confirmation; Cancel keeps every selection")
+    func discardConfirmation() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a", "b"], shownRevision: "7")
+        draft.choose(.account)
+        draft.requestDiscard()
+        #expect(draft.phase == .choosing, "nothing selected to discard")
+        draft.setChoice(.discard, for: "a")
+        draft.setChoice(.discard, for: "b")
+        #expect(!draft.canApply)
+        draft.requestDiscard()
+        #expect(draft.phase == .confirmingDiscard)
+        #expect(draft.discardPrompt == "Discard these 2 saved actions?")
+        #expect(draft.discardConfirmTitle == "Discard 2 actions")
+        #expect(ConflictDecisionDraft.discardExplanation == "They will not be sent. Other saved actions will be kept.")
+        draft.cancelDiscard()
+        #expect(draft.phase == .choosing && draft.discardedIDs == ["a", "b"] && !draft.canApply)
+        draft.requestDiscard()
+        draft.confirmDiscard()
+        #expect(draft.canApply)
+        #expect(draft.apply()?.discard == ["a", "b"])
+    }
+
+    @Test("026-FR-007 a version change keeps the draft, clears the choice and approvals and requires apply again")
+    func changedAgain() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a", "b"], shownRevision: "7")
+        draft.choose(.saved)
+        draft.setChoice(.reviewAndRetry, for: "a")
+        draft.approveRetry(for: "a")
+        draft.setChoice(.discard, for: "b")
+        draft.refresh(currentRevision: "7")
+        #expect(draft.phase == .choosing && draft.version == .saved, "same version: nothing changes")
+        draft.refresh(currentRevision: "8")
+        #expect(draft.phase == .changedAgain && draft.title == "This task changed again. Review both versions.")
+        #expect(draft.version == nil && draft.approvedRetries.isEmpty && !draft.canApply)
+        #expect(draft.choice(for: "a") == .reviewAndRetry && draft.choice(for: "b") == .discard)
+        #expect(draft.shownRevision == "8")
+        draft.choose(.account)
+        #expect(draft.phase == .choosing && !draft.canApply, "retry and discard still need approval")
+    }
+
+    @Test("026-FR-010 a draft is plain data: restoring it submits nothing")
+    func interruptionKeepsDraft() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a"], shownRevision: "7")
+        draft.choose(.saved)
+        draft.setChoice(.discard, for: "a")
+        let restored = draft
+        #expect(restored == draft && restored.phase == .choosing && !restored.canApply)
+    }
+
+    static func snapshot(_ change: (inout SyncSnapshot) -> Void = { _ in }) -> SyncSnapshot {
+        var snapshot = SyncSnapshot(account: .linked(email: "a@example.com"), lastSyncedAt: t0.addingTimeInterval(-180))
+        change(&snapshot)
+        return snapshot
+    }
+
+    static func status(_ snapshot: SyncSnapshot, updateNeeded: Bool = false) -> RuntimeSyncStatus {
+        RuntimeSyncStatusPresenter.describe(snapshot, updateNeeded: updateNeeded, now: t0, device: .iPhone)
+    }
+
+    @Test("026-FR-004 locally saved, pending, synced, auth, update and failure read differently")
+    func statusDistinctions() {
+        #expect(Self.status(Self.snapshot()).distinction == .synced)
+        let account = Self.status(SyncSnapshot(account: .none))
+        #expect(account.distinction == .localOnly && account.headline == "On this iPhone · Sign in to sync")
+        let offline = Self.status(Self.snapshot { $0.isOnline = false })
+        #expect(offline.distinction == .savedLocally && offline.detail == "Your changes are saved on this device.")
+        #expect(offline.syncNowDisabledReason != nil)
+        let waiting = Self.status(
+            SyncSnapshot(
+                account: Self.linkedAccount, lastSyncedAt: Self.t0.addingTimeInterval(-180), pendingCount: 3,
+                oldestPendingAt: Self.t0.addingTimeInterval(-30)))
+        #expect(waiting.distinction == .pending && waiting.headline.contains("3 changes waiting"))
+        let auth = Self.status(Self.snapshot { $0.sessionEnded = true })
+        #expect(auth.distinction == .signInNeeded && auth.action == .signInAgain && auth.headline == "Sign in again to sync")
+        #expect(auth.detail?.contains("Your waiting changes stay with this account.") == true)
+        let update = Self.status(Self.snapshot(), updateNeeded: true)
+        #expect(update.distinction == .updateNeeded && update.action == .updateApp && update.headline == "Update needed to sync")
+    }
+
+    static let linkedAccount = SyncSnapshot.Account.linked(email: "a@example.com")
+
+    @Test("026-FR-023 priority: update, then session ended, then issues, then failure; a reference ID shows only on failure")
+    func statusPriority() {
+        let both = Self.snapshot { $0.sessionEnded = true; $0.issueCount = 1 }
+        #expect(Self.status(both, updateNeeded: true).distinction == .updateNeeded)
+        #expect(Self.status(both).distinction == .signInNeeded)
+        let issues = Self.status(Self.snapshot { $0.issueCount = 1 })
+        #expect(issues.distinction == .hasIssues && issues.action == .openIssues && issues.headline == "1 change couldn't sync")
+        let failing = Self.status(Self.snapshot {
+            $0.failingSince = Self.t0.addingTimeInterval(-120); $0.lastFailedAttemptAt = Self.t0.addingTimeInterval(-10)
+            $0.lastFailureReferenceID = "ref-9"
+        })
+        #expect(failing.distinction == .failing && failing.action == .retry && failing.referenceID == "ref-9")
+        #expect(failing.accessibilityLabel.contains("Reference ID: ref-9"))
+        #expect(Self.status(Self.snapshot()).referenceID == nil)
+    }
+
+    @Test("026-FR-005 a transport failure reported by the runtime shows Retry and its reference ID, not Synced")
+    func runtimeTransportFailure() {
+        let quiet = Self.snapshot()
+        let failing = RuntimeSyncStatusPresenter.describe(
+            quiet, transportFailure: TransportFailure(referenceID: "ref-3"), now: Self.t0, device: .iPhone)
+        #expect(failing.distinction == .failing && failing.action == .retry && failing.referenceID == "ref-3")
+        #expect(failing.headline == "Couldn't sync · Retry" && failing.needsAttention)
+        let unavailable = RuntimeSyncStatusPresenter.describe(
+            quiet, transportFailure: TransportFailure(referenceID: nil), now: Self.t0, device: .iPhone)
+        #expect(unavailable.distinction == .failing && unavailable.referenceID == nil)
+        let signedOut = RuntimeSyncStatusPresenter.describe(
+            Self.snapshot { $0.sessionEnded = true }, transportFailure: TransportFailure(referenceID: "r"),
+            now: Self.t0, device: .iPhone)
+        #expect(signedOut.distinction == .signInNeeded, "sign-in outranks a transport failure")
+    }
+
+    @Test("026-FR-004 Not synced yet is its own non-success state")
+    func notSyncedYetIsNotSynced() {
+        let first = Self.status(SyncSnapshot(account: Self.linkedAccount))
+        #expect(first.headline == "Not synced yet" && first.distinction == .notSyncedYet)
+    }
+
+    @Test("026-FR-004 the iPad reads as the iPad, not the iPhone")
+    func ipadNoun() {
+        let status = RuntimeSyncStatusPresenter.describe(SyncSnapshot(account: .none), now: Self.t0, device: .iPad)
+        #expect(status.headline == "On this iPad · Sign in to sync")
+    }
+
+    @Test("026-FR-010 switching a retry approval off withdraws it and Apply follows")
+    func retryApprovalWithdrawn() {
+        var draft = ConflictDecisionDraft(dependentIDs: ["a"], shownRevision: "7")
+        draft.choose(.saved)
+        draft.setChoice(.reviewAndRetry, for: "a")
+        draft.approveRetry(for: "a")
+        #expect(draft.canApply)
+        draft.withdrawRetryApproval(for: "a")
+        #expect(draft.approvedRetries.isEmpty && !draft.canApply)
+    }
+}

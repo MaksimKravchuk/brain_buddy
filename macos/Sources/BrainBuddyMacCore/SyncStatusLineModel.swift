@@ -53,13 +53,44 @@ package struct SyncStatusLineModel: Equatable, Sendable {
         return true
     }
 
+    /// D-01.10: the protocol or store version is unknown, so the line says "Update needed to sync"
+    /// above every other state (design priority), with no change to any threshold below it.
+    package private(set) var updateNeeded = false
+    private var wasUpdateNeeded = false
+
+    package mutating func setUpdateNeeded(_ needed: Bool, at now: Date) {
+        guard needed != updateNeeded else { return }
+        updateNeeded = needed
+        describe(at: now)
+    }
+
     private mutating func describe(at now: Date) {
         let previous = description
-        description = SyncStatusDescriber.describe(snapshot, now: now, device: device, calendar: calendar)
+        var next = SyncStatusDescriber.describe(snapshot, now: now, device: device, calendar: calendar)
+        if updateNeeded, snapshot.account != .none { Self.applyUpdateNeeded(to: &next) }
+        description = next
         describedAt = now
         // Calm changes (minutes ticking, syncing, waiting) are never announced; an attention state is
         // announced when it appears, and staying in it says nothing more.
-        if description.announceOnEntry, description.state != previous.state { announce() }
+        let enteredUpdateNeeded = updateNeeded && !wasUpdateNeeded
+        if description.announceOnEntry, description.state != previous.state || enteredUpdateNeeded { announce() }
+        wasUpdateNeeded = updateNeeded
+    }
+
+    /// Reads as an attention state and offers recovery, not Retry (no sync can run).
+    private static func applyUpdateNeeded(to line: inout SyncStatusDescription) {
+        let text = "Update needed to sync"
+        line.text = text
+        line.leading = text
+        line.trailingActionTitle = nil
+        line.tone = .attention
+        line.glyph = .warning
+        line.action = .showIssues
+        line.accessibilityLabel = "Sync status: \(text). Show details"
+        line.tooltip = "Your saved tasks and waiting changes stay on this device. Click for details."
+        line.announceOnEntry = true
+        line.syncNowEnabled = false
+        line.lastTriedText = nil
     }
 
     private mutating func announce() {

@@ -14,12 +14,29 @@ struct SyncStatusPopover: View {
     let controller: MacSyncController
     @FocusState private var focus: SyncPopoverControl?
     @State private var copied: SyncPopoverControl?
+    /// The conflict detail (D-02) shown in place of the list; Back returns with the draft kept.
+    @State private var conflict: SyncConflictModel?
+    @State private var drafts: [String: SyncConflictDraft] = [:]
+
+    private var runtimeIssues: [SyncRuntimeIssue] { controller.workspace.runtimeIssues.map(SyncRuntimeIssue.init) }
 
     var body: some View {
-        let content = controller.popoverContent()
-        ViewThatFits(in: .vertical) {
-            sections(content)
-            ScrollView { sections(content) }
+        let content = SyncPopoverModel.adding(
+            runtimeIssues: runtimeIssues, pendingCount: controller.workspace.syncSnapshot.pendingCount,
+            to: controller.popoverContent()
+        )
+        Group {
+            if let model = Binding($conflict) {
+                SyncConflictView(
+                    model: model, blockedPreview: { action in "Retry: \(action.summary)" }, submit: nil,
+                    back: closeConflict
+                )
+            } else {
+                ViewThatFits(in: .vertical) {
+                    sections(content)
+                    ScrollView { sections(content) }
+                }
+            }
         }
         .frame(width: 360)
         .frame(maxHeight: 480)
@@ -43,8 +60,91 @@ struct SyncStatusPopover: View {
         }
     }
 
+    /// Open D-02 for `id`: the blocked later actions are the issues it lists; a kept draft returns.
+    private func openConflict(_ id: String) {
+        let issues = runtimeIssues
+        guard let issue = issues.first(where: { $0.id == id }) else { return }
+        let blocked = issue.dependentIDs.map { dependent in
+            SyncBlockedAction(id: dependent, summary: issues.first { $0.id == dependent }?.summary ?? "Saved action")
+        }
+        var model = SyncConflictModel(issue: issue, accountVersion: nil, blocked: blocked)
+        if let draft = drafts[id] { model.restore(draft) }
+        conflict = model
+    }
+
+    /// Back, Cancel or closing keeps every original and the decision draft; nothing is submitted.
+    private func closeConflict() {
+        if let model = conflict { drafts[model.issueID] = model.draft }
+        conflict = nil
+        if let initial = controller.popoverContent().initialFocus {
+            controller.router.handle(.focusInside(.inPopover(initial)))
+        }
+    }
+
+    private func recoveryView(_ recovery: SyncRecoveryContent) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(recovery.title, systemImage: "arrow.triangle.2.circlepath")
+                .font(.headline)
+                .foregroundStyle(recovery.condition.isBlocking ? .orange : .primary)
+            Text(recovery.detail).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                ForEach(recovery.actions, id: \.self) { action in
+                    switch action {
+                    case .copyReference(let reference): copyButton(reference, control: .recovery(action))
+                    default:
+                        Button(Self.title(of: action)) { perform(action) }
+                            .focused($focus, equals: .recovery(action))
+                    }
+                }
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .contain)
+    }
+
+    private static func title(of action: SyncRecoveryAction) -> String {
+        switch action {
+        case .updateApp: return "Update app"
+        case .tryAgain: return "Try again"
+        case .rebuildSyncedCopy: return "Rebuild synced copy"
+        case .exportSavedData: return "Export saved data"
+        case .openImportReport: return "Open import report"
+        case .copyReference: return "Copy"
+        }
+    }
+
+    private func perform(_ action: SyncRecoveryAction) {
+        switch action {
+        case .tryAgain: Task { await controller.syncNow() }
+        case .updateApp:
+            if let url = URL(string: "macappstore://apps.apple.com/") { NSWorkspace.shared.open(url) }
+        case .openImportReport:
+            if let file = controller.host.importer.upgradeFiles().report { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+        case .rebuildSyncedCopy, .exportSavedData, .copyReference:
+            break  // wired by the workspace's recovery API (not present yet); see PR-46 notes
+        }
+    }
+
+    private func runtimeIssueRow(_ issue: SyncPopoverRuntimeIssue) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(issue.attempted).font(.callout.weight(.medium)).lineLimit(1)
+            Text(issue.why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if issue.laterActions > 0 {
+                Text("\(issue.laterActions) later action\(issue.laterActions == 1 ? "" : "s") need your decision")
+                    .font(.callout)
+            }
+            HStack(spacing: 10) {
+                if let reference = issue.referenceID { copyButton(reference, control: .runtimeCopy(issue.id)) }
+                Button("Review") { openConflict(issue.id) }
+                    .accessibilityLabel(issue.actionAccessibilityLabel)
+                    .focused($focus, equals: .openConflict(issue.id))
+            }
+        }
+    }
+
     private func sections(_ content: SyncPopoverContent) -> some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let recovery = content.recovery { recoveryView(recovery) }
             if let notice = content.notice { noticeView(notice) }
             if content.lastSynced != nil || content.queue != nil {
                 VStack(alignment: .leading, spacing: 4) {
@@ -53,7 +153,7 @@ struct SyncStatusPopover: View {
                 }
                 .font(.callout)
             }
-            if !content.issues.isEmpty { issuesView(content) }
+            if !content.issues.isEmpty || !content.runtimeIssues.isEmpty { issuesView(content) }
             if content.syncNowShown {
                 Button("Sync now") {
                     Task { await controller.syncNow() }
@@ -134,6 +234,7 @@ struct SyncStatusPopover: View {
             ForEach(content.issues) { issue in
                 issueRow(issue, content: content)
             }
+            ForEach(content.runtimeIssues) { issue in runtimeIssueRow(issue) }
         }
     }
 
