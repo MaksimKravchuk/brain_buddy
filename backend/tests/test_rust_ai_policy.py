@@ -340,7 +340,12 @@ def test_026_FR_019_a_poisoned_injected_runtime_is_replaced_for_the_next_request
     service._rust_core = injected
     with allure.step("the injected runtime stops being usable"):
         injected.close()
-    assert not injected.is_open
+        assert not injected.is_open
+        allure.attach(
+            f"is_open={injected.is_open}",
+            name="injected runtime",
+            attachment_type=allure.attachment_type.TEXT,
+        )
     with allure.step("the next suggestion still succeeds on a fresh runtime"):
         response = _suggest(client)
     assert response.status_code == 200, response.text
