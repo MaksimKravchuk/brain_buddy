@@ -17,7 +17,15 @@ struct SyncConflictView: View {
     @State private var copied = false
 
     private enum Field: Hashable {
-        case heading, version(SyncConflictVersion), copyEdit, keepDeleted, action(String), cancelDiscard, apply
+        case title, blockedHeading, version(SyncConflictVersion), copyEdit, keepDeleted, action(String), cancelDiscard, apply
+    }
+
+    private static func field(_ focus: SyncConflictModel.InitialFocus) -> Field {
+        switch focus {
+        case .title: return .title
+        case .blockedHeading: return .blockedHeading
+        case .cancelDiscard: return .cancelDiscard
+        }
     }
 
     var body: some View {
@@ -32,13 +40,15 @@ struct SyncConflictView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .defaultFocus($focus, model.phase == .confirmingDiscard ? .cancelDiscard : .heading)
+        .defaultFocus($focus, Self.field(model.initialFocus))
     }
 
     private var sheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button("Back", action: back).buttonStyle(.link)
             Text(model.title).font(.headline).accessibilityAddTraits(.isHeader)
+                .focusable()
+                .focused($focus, equals: .title)
             if let status = model.statusLine {
                 Text(status)
                     .font(.callout)
@@ -92,7 +102,6 @@ struct SyncConflictView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("This item was deleted on another device. Your edit is saved in this issue.")
                 .font(.callout)
-                .focused($focus, equals: .heading)
             versionText(model.yourEdit)
             Button(copied ? "Copied" : "Copy saved edit") {
                 NSPasteboard.general.clearContents()
@@ -113,7 +122,7 @@ struct SyncConflictView: View {
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
                 .focusable()
-                .focused($focus, equals: .heading)
+                .focused($focus, equals: .blockedHeading)
             ForEach(model.actions) { action in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(action.summary).font(.callout.weight(.medium))

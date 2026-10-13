@@ -235,6 +235,22 @@ struct RustSyncRecoveryTests {
         #expect(resolution.shownRevision == "rev-2")
     }
 
+    @Test("026-FR-007 initial focus per state is always a rendered target: title, blocked heading, Cancel")
+    func initialFocusPerState() {
+        var plain = SyncConflictModel(issue: Self.conflictIssue(), accountVersion: "x")
+        #expect(plain.initialFocus == .title)
+        let deleted = SyncRuntimeIssue(id: "t", commandID: "c", reason: "ENTITY_DELETED", summary: "s", savedEdit: "e")
+        #expect(SyncConflictModel(issue: deleted, accountVersion: nil).initialFocus == .title)
+        plain.accountChanged(revision: "rev-9", accountVersion: "y")
+        #expect(plain.initialFocus == .title)
+        var blocked = SyncConflictModel(issue: Self.conflictIssue(), accountVersion: "x", blocked: Self.blocked())
+        #expect(blocked.initialFocus == .blockedHeading)
+        blocked.select(.account)
+        blocked.setChoice(.discard, for: "later-1")
+        _ = blocked.apply()
+        #expect(blocked.initialFocus == .cancelDiscard)
+    }
+
     @Test("026-FR-023 recovery: update needed outranks and takes first focus; actions are the design's")
     func recoveryStates() {
         let sync = Self.content(recovery: .updateNeededSync)

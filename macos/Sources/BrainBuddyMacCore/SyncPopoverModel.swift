@@ -531,6 +531,15 @@ package struct SyncConflictModel: Equatable, Sendable {
     /// The exact summaries the confirmation names. Cancel is its initially focused control.
     package var discardSummaries: [String] { actions.filter { $0.choice == .discard }.map(\.summary) }
 
+    package enum InitialFocus: Equatable, Sendable { case title, blockedHeading, cancelDiscard }
+
+    /// Where focus starts: Cancel in the discard confirmation, the dependent-actions heading when
+    /// later actions need a decision, otherwise the title. Each is a rendered, focusable view.
+    package var initialFocus: InitialFocus {
+        if phase == .confirmingDiscard { return .cancelDiscard }
+        return actions.isEmpty ? .title : .blockedHeading
+    }
+
     package var isEditable: Bool { phase == .choosing || phase == .changedAgain || phase == .saveFailed }
 
     /// Apply stays disabled until a version is picked (no default) and every retry is approved.
