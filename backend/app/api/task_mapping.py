@@ -10,13 +10,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from app.modules.tasks import TaskService
 from app.modules.tasks.domain import (
+    FormulationSettingsDocument,
+    ProjectDocument,
+    TagDocument,
     TaskCommentDocument,
     TaskDocument,
     TaskSubtaskDocument,
 )
 from app.modules.tasks.review_domain import FormulationView
 from app.schemas.tasks import (
+    ProjectResponse,
+    TagResponse,
     TaskCommentResponse,
     TaskFormulationResponse,
     TaskParkResponse,
@@ -104,7 +110,69 @@ def task_response(
     )
 
 
+def command_task_response(
+    task_service: TaskService,
+    owner_id: str,
+    task: TaskDocument,
+    settings: FormulationSettingsDocument | None,
+) -> TaskResponse:
+    """A command's task with the projection its stored result was made with.
+
+    ``settings`` is the idempotency record's snapshot, so a same-key replay
+    returns the original ``formulation`` (http "Mutations"); ``None`` (a
+    record from before the snapshot) projects with the live settings.
+    """
+
+    views = task_service.formulation_views(owner_id, [task], settings=settings)
+    return task_response(task, formulation=views.get(task.id))
+
+
+def project_response(
+    project: ProjectDocument,
+    *,
+    task_service: TaskService,
+    owner_id: str,
+    open_task_count: int | None = None,
+) -> ProjectResponse:
+    """``open_task_count`` is given by the list route, which counts in one pass."""
+
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        color=project.color,
+        state=project.state,
+        revision=project.revision,
+        open_task_count=(
+            open_task_count
+            if open_task_count is not None
+            else task_service.open_task_count_for_project(project.id, owner_id=owner_id)
+        ),
+        desired_outcome=project.desired_outcome,
+        archived_at=project.archived_at,
+        archived_before_lossless=project.archived_before_lossless,
+        created_at=project.created_at,
+    )
+
+
+def tag_response(
+    tag: TagDocument, *, task_service: TaskService, owner_id: str
+) -> TagResponse:
+    return TagResponse(
+        id=tag.id,
+        name=tag.name,
+        # Legacy stored rows may still carry "archived"; the public contract
+        # only exposes "active" and "deleted".
+        state="deleted" if tag.state == "archived" else tag.state,
+        revision=tag.revision,
+        open_task_count=task_service.open_task_count_for_tag(tag.id, owner_id=owner_id),
+        created_at=tag.created_at,
+    )
+
+
 __all__ = [
+    "command_task_response",
+    "project_response",
+    "tag_response",
     "comment_response",
     "formulation_response",
     "subtask_response",

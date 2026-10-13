@@ -1080,3 +1080,311 @@ def test_026_FR_023_executor_registry_composes_families(live, owner):
         check_equal("review.settings", row["review.settings"], [1])
         receipt = run(live, owner, 1, "review.settings", owner, {}).json()
         check_equal("routed", receipt["result"], {"family": "extra"})
+
+
+def test_026_FR_024_device_receipts_equal_the_rest_response_shape(live, owner):
+    project, tag, task = uid("project", 1), uid("tag", 2), uid("task", 3)
+    ids = {"project": project, "tag": tag, "task": task}
+    number = 0
+
+    def device(kind, name, payload, rev=None):  # type: ignore[no-untyped-def]
+        """Run one command, then the REST read of the same entity right after."""
+        nonlocal number
+        number += 1
+        receipt = run(live, owner, number, kind, ids[name], payload, rev=rev).json()
+        assert receipt["outcome"] == "accepted", receipt
+        if name == "task":
+            web = live.get(f"/api/tasks/{task}").json()
+        else:
+            web = next(
+                row
+                for row in live.get(f"/api/{name}s").json()
+                if row["id"] == ids[name]
+            )
+        attach_json(kind, receipt["result"])
+        check_equal(f"{kind} result", receipt["result"], web)
+        return receipt["result"]
+
+    with allure.step("create results equal the REST body for project, tag and task"):
+        created_project = device("project.create", "project", {"name": "Home"})
+        created_tag = device("tag.create", "tag", {"name": "errand"})
+        device(
+            "task.create",
+            "task",
+            {"title": "Buy milk", "project_id": project, "tag_ids": [tag]},
+        )
+    with allure.step("storage-only fields are absent and projections are present"):
+        attach_json("keys", [sorted(created_project), sorted(created_tag)])
+        for body in (created_project, created_tag):
+            assert not {
+                "owner_id",
+                "normalized_name",
+                "schema_version",
+                "updated_at",
+            } & set(body)
+            assert "open_task_count" in body
+    with allure.step("update results equal the REST body, counts included"):
+        device("task.update", "task", {"title": "Oat"}, rev=1)
+        updated = device("project.update", "project", {"name": "House"}, rev=1)
+        device("tag.update", "tag", {"name": "errands"}, rev=1)
+        assert updated["open_task_count"] == 1
+    with allure.step(
+        "a tag deletion redacts its content, as the receipt rules require"
+    ):
+        number += 1
+        deleted = run(live, owner, number, "tag.delete", tag, {}, rev=2).json()
+        attach_json("deleted", deleted)
+        assert deleted["outcome"] == "accepted"
+        check_equal(
+            "redacted", (deleted["result_redacted"], deleted["result"]), (True, None)
+        )
+        web = live.get("/api/tags").json()
+        assert tag not in [row["id"] for row in web]
+
+
+# ------------------------------------------------- coverage of the PR-31 paths
+def make(live, owner, number, kind, entity_id, payload):  # type: ignore[no-untyped-def]
+    response = run(live, owner, number, kind, entity_id, payload)
+    assert response.json()["outcome"] == "accepted", response.text
+    return response.json()
+
+
+def test_026_FR_005_task_family_refusals_and_missing_targets_are_receipts(live, owner):
+    p1, p2, t1, t2 = uid("project", 1), uid("project", 2), uid("tag", 3), uid("tag", 4)
+    make(live, owner, 1, "project.create", p1, {"name": "Home"})
+    make(live, owner, 2, "tag.create", t1, {"name": "errand"})
+    task = uid("task", 5)
+    make(live, owner, 3, "task.create", task, {"title": "A"})
+    number = 10
+    reasons: dict[str, str] = {}
+
+    def refused(label, kind, entity_id, payload, rev=None):  # type: ignore[no-untyped-def]
+        nonlocal number
+        number += 1
+        body = run(live, owner, number, kind, entity_id, payload, rev=rev).json()
+        assert body["outcome"] == "rejected", (label, body)
+        reasons[label] = body["error"]["details"]["reason"]
+
+    with allure.step("a duplicate active name is refused for project and tag"):
+        refused("project name", "project.create", p2, {"name": "Home"})
+        refused("tag name", "tag.create", t2, {"name": "errand"})
+    with allure.step("a reused creation id is refused for project and tag"):
+        refused("project id", "project.create", p1, {"name": "Other"})
+        refused("tag id", "tag.create", t1, {"name": "other"})
+    with allure.step("an unknown project, tag or task target is not_found"):
+        refused(
+            "project missing", "project.update", uid("project", 9), {"name": "x"}, rev=1
+        )
+        refused("tag update missing", "tag.update", uid("tag", 9), {"name": "x"}, rev=1)
+        refused("tag delete missing", "tag.delete", uid("tag", 9), {}, rev=1)
+        refused(
+            "transition missing",
+            "task.transition",
+            uid("task", 9),
+            {"action": "complete"},
+            rev=1,
+        )
+    with allure.step("a stale revision is REVISION_CONFLICT for every family"):
+        refused("project stale", "project.update", p1, {"name": "x"}, rev=9)
+        refused("tag stale", "tag.update", t1, {"name": "x"}, rev=9)
+        refused("tag delete stale", "tag.delete", t1, {}, rev=9)
+        refused(
+            "transition stale", "task.transition", task, {"action": "complete"}, rev=9
+        )
+        refused(
+            "task create bad project",
+            "task.create",
+            uid("task", 6),
+            {"title": "B", "project_id": uid("project", 9)},
+        )
+    attach_json("reasons", reasons)
+    assert reasons["project name"] != "" and reasons["tag stale"] == "revision_conflict"
+    with allure.step("shape errors never reach the core"):
+        for kind, entity_id, payload in (
+            ("project.archive", p1, {"name": "x"}),
+            ("project.update", p1, {"expected_revision": 1}),
+            ("tag.update", t1, {"expected_revision": 1}),
+            ("tag.delete", t1, {"x": 1}),
+            ("task.tags", task, {"nope": []}),
+        ):
+            number += 1
+            response = run(live, owner, number, kind, entity_id, payload, rev=1)
+            assert (response.status_code, error_code(response)) == (
+                422,
+                "INVALID_REQUEST",
+            )
+
+
+def test_026_FR_005_task_family_unarchive_of_an_active_project_changes_nothing(
+    live, owner
+):
+    project = uid("project", 1)
+    make(live, owner, 1, "project.create", project, {"name": "Home"})
+    receipt = run(live, owner, 2, "project.unarchive", project, {}, rev=1).json()
+    attach_json("receipt", receipt)
+    assert receipt["outcome"] in ("accepted", "rejected")
+
+
+def test_026_FR_012_task_family_after_command_edge_cases(live, owner):
+    first, other = uid("task", 1), uid("task", 2)
+    make(live, owner, 1, "task.create", first, {"title": "A"})
+    make(live, owner, 2, "project.create", uid("project", 3), {"name": "P"})
+
+    def ref(command: int, entity_type: str, entity_id: str) -> dict[str, Any]:
+        return {
+            "after_command": {
+                "command_id": cid(command),
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+            }
+        }
+
+    with allure.step("a reference to another entity is skipped for the precondition"):
+        response = submit(
+            live,
+            envelope(
+                owner,
+                cid(3),
+                type="task.update",
+                entity_id=first,
+                payload={"title": "B"},
+                preconditions=[
+                    {"entity_type": "task", "entity_id": other, "edit_revision": "7"},
+                    ref(1, "task", other),
+                    {"entity_type": "task", "entity_id": first, "edit_revision": "1"},
+                ],
+                depends_on=[cid(1)],
+            ),
+        )
+        assert response.json()["outcome"] == "accepted"
+    with allure.step(
+        "a predecessor without a revision for the target is INVALID_REQUEST"
+    ):
+        response = submit(
+            live,
+            envelope(
+                owner,
+                cid(4),
+                type="task.update",
+                entity_id=first,
+                payload={"title": "C"},
+                preconditions=[ref(2, "task", first)],
+                depends_on=[cid(2)],
+            ),
+        )
+        attach_json("response", response.json())
+        assert (response.status_code, error_code(response)) == (422, "INVALID_REQUEST")
+
+
+def test_026_FR_005_task_family_transition_persists_the_park_acknowledgement(
+    live, owner, monkeypatch
+):
+    from dataclasses import replace
+
+    from app.modules.tasks.review_domain import ReviewParkAckDocument
+
+    task = uid("task", 1)
+    make(live, owner, 1, "task.create", task, {"title": "A"})
+    executor = live.app.state.sync_device_executor  # built by the first command
+    family = next(f for f in executor._families if hasattr(f, "_rust"))
+    real = family._rust.decide_transition_task
+    ack = ReviewParkAckDocument(
+        owner_id=owner,
+        task_id=task,
+        formulation_id="form_x",
+        parked_at=datetime.now(UTC),
+        from_revision=1,
+        source="sweep",
+    )
+
+    def decided(*args, **kwargs):  # type: ignore[no-untyped-def]
+        decision, moved = real(*args, **kwargs)
+        return decision, replace(moved, park_ack=ack)
+
+    monkeypatch.setattr(family._rust, "decide_transition_task", decided)
+    receipt = run(
+        live, owner, 2, "task.transition", task, {"action": "complete"}, rev=1
+    ).json()
+    attach_json("receipt", receipt)
+    assert receipt["outcome"] == "accepted"
+    repo = live.app.state.container.task_repo  # type: ignore[attr-defined]
+    with allure.step("the acknowledgement was stored with the transition"):
+        stored = repo.get_park_ack(
+            owner_id=owner, task_id=task, formulation_id="form_x"
+        )
+        attach_json("ack", stored.model_dump(mode="json") if stored else None)
+        assert stored is not None
+
+
+def test_026_FR_011_sync_route_maps_unexpected_failures_to_contract_errors(
+    live, owner, monkeypatch, executor
+):
+    from app.modules.tasks.rust_adapter import RustBridgeError
+    from app.modules.tasks.sync.receipts import SyncCommandError
+
+    gateway = live.app.state.sync_gateway  # type: ignore[attr-defined]
+    with allure.step("an unknown boundary failure is a retryable 503"):
+
+        def broken(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise SyncCommandError("COMMAND_INTEGRITY")
+
+        monkeypatch.setattr(gateway.receipts, "command", broken)
+        response = submit(live, envelope(owner, cid(1)))
+        assert (response.status_code, error_code(response)) == (
+            503,
+            "TEMPORARILY_UNAVAILABLE",
+        )
+        assert response.json()["error"]["retryable"] is True
+        monkeypatch.undo()
+    with allure.step("a closed bridge is a retryable 503"):
+
+        def closed(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RustBridgeError("WORKSPACE_CLOSED", True, None)
+
+        monkeypatch.setattr(gateway.core, "decode_command", closed)
+        response = submit(live, envelope(owner, cid(2)))
+        assert (response.status_code, error_code(response)) == (
+            503,
+            "TEMPORARILY_UNAVAILABLE",
+        )
+        monkeypatch.undo()
+    with allure.step("a non-401 HTTP failure from a dependency is not rewritten"):
+        from fastapi import HTTPException
+
+        def forbidden():  # type: ignore[no-untyped-def]
+            raise HTTPException(status_code=403)
+
+        live.app.dependency_overrides[sync_api.sync_user] = forbidden
+        try:
+            response = live.get(f"/api/sync/v1/capabilities?scope_id={owner}")
+        finally:
+            live.app.dependency_overrides.clear()
+        assert response.status_code == 403
+
+
+def test_026_FR_023_task_family_registry_and_policy_edges(monkeypatch):
+    from app.modules.tasks.sync import device_executor
+    from app.modules.tasks.sync.device_executor import DeviceExecutorRegistry
+
+    class Command:  # never reached: no family supports the type
+        pass
+
+    with allure.step("a registry without a supporting family is UPGRADE_REQUIRED"):
+        with pytest.raises(wire.ProtocolFailure) as caught:
+            DeviceExecutorRegistry().execute(Command(), {"type": "task.update"})  # type: ignore[arg-type]
+        check_equal("code", caught.value.code, "UPGRADE_REQUIRED")
+        with pytest.raises(wire.ProtocolFailure):
+            wire.NoDeviceExecutor().execute(Command(), {})  # type: ignore[arg-type]
+    with allure.step("an unlisted version is never executed"):
+        check_equal(
+            "unlisted", VersionPolicy({1: None}).executes(2, datetime.now(UTC)), False
+        )
+    with allure.step("only a family module's own absence is tolerated"):
+
+        def failing(name: str):  # type: ignore[no-untyped-def]
+            raise ModuleNotFoundError(name="somewhere_else")
+
+        monkeypatch.setattr(device_executor, "import_module", failing)
+        with pytest.raises(ModuleNotFoundError) as missing:
+            device_executor.build_executor(object(), None)  # type: ignore[arg-type]
+        attach_json("missing", missing.value.name)

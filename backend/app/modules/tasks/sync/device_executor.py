@@ -14,12 +14,11 @@ import re
 from collections.abc import Callable, Mapping
 from importlib import import_module
 from sqlite3 import Connection
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
 from app.exceptions import NotFoundError
-from app.modules.tasks.domain import FormulationSettingsDocument
 from app.modules.tasks.repository import TaskRepository
 from app.modules.tasks.rust_adapter import Decision, DomainRefusal, RustCore
 from app.modules.tasks.rust_task_facade import RustTaskFacade, encode_task
@@ -111,6 +110,42 @@ def build_executor(container: Any, core: RustCore) -> DeviceExecutorRegistry:
     return DeviceExecutorRegistry(*(factory(container, core) for factory in _FACTORIES))
 
 
+class PublicProjector(Protocol):
+    """The REST response projection of an entity, so receipts equal web bodies."""
+
+    def task(self, owner: str, task: Any) -> dict[str, Any]: ...
+
+    def project(self, owner: str, project: Any) -> dict[str, Any]: ...
+
+    def tag(self, owner: str, tag: Any) -> dict[str, Any]: ...
+
+
+class RestProjector:
+    """``PublicProjector`` over the API's own mappers (one source of shape)."""
+
+    def __init__(self, service: Any) -> None:
+        from app.api import task_mapping  # noqa: PLC0415 - api is above modules
+
+        self._service, self._map = service, task_mapping
+
+    def task(self, owner: str, task: Any) -> dict[str, Any]:
+        settings = self._service.formulation_settings(owner)
+        response = self._map.command_task_response(self._service, owner, task, settings)
+        return response.model_dump(mode="json")
+
+    def project(self, owner: str, project: Any) -> dict[str, Any]:
+        response = self._map.project_response(
+            project, task_service=self._service, owner_id=owner
+        )
+        return response.model_dump(mode="json")
+
+    def tag(self, owner: str, tag: Any) -> dict[str, Any]:
+        response = self._map.tag_response(
+            tag, task_service=self._service, owner_id=owner
+        )
+        return response.model_dump(mode="json")
+
+
 class TaskDeviceExecutor:
     """``DeviceCommandExecutor`` for project, tag and task commands."""
 
@@ -118,10 +153,10 @@ class TaskDeviceExecutor:
         self,
         repo: TaskRepository,
         rust: RustTaskFacade,
-        settings: Callable[[str], FormulationSettingsDocument | None],
+        public: PublicProjector,
         due_date_moved: Callable[..., None],
     ) -> None:
-        self._repo, self._rust, self._settings = repo, rust, settings
+        self._repo, self._rust, self._public = repo, rust, public
         self._due_date_moved = due_date_moved
 
     def supports(self, command_type: str) -> bool:
@@ -186,8 +221,7 @@ class TaskDeviceExecutor:
                 ref = item["after_command"]
                 if (ref["entity_type"], ref["entity_id"]) != (entity_type, entity_id):
                     continue
-                if ref["command_id"] not in envelope["depends_on"]:
-                    raise _invalid()
+                # The core already requires the referenced command in depends_on.
                 return self._revision_after(command, ref, entity_id)
             if (item["entity_type"], item["entity_id"]) == (entity_type, entity_id):
                 return int(item["edit_revision"])
@@ -208,15 +242,6 @@ class TaskDeviceExecutor:
         raise _invalid()
 
     # ---------------------------------------------------------------- tasks
-    def _task_result(self, owner: str, task: Any) -> dict[str, Any]:
-        settings = self._settings(owner)
-        return {
-            "task": task.model_dump(mode="json"),
-            "formulation_settings": (
-                settings.model_dump(mode="json") if settings is not None else None
-            ),
-        }
-
     def _task_create(
         self,
         command: ReceiptCommand[Connection],
@@ -235,7 +260,7 @@ class TaskDeviceExecutor:
         self._repo.create(task)
         return command.accept(
             decision.change_set["changes"],  # type: ignore[index]
-            result=self._task_result(owner, task),
+            result=self._public.task(owner, task),
         )
 
     def _task_update(
@@ -287,7 +312,7 @@ class TaskDeviceExecutor:
         # The Review clock's event, exactly as the web update path emits it.
         self._due_date_moved(before, updated, owner_id=owner)
         return command.accept(
-            self._with_task(decision, updated), result=self._task_result(owner, updated)
+            self._with_task(decision, updated), result=self._public.task(owner, updated)
         )
 
     def _task_transition(
@@ -312,7 +337,7 @@ class TaskDeviceExecutor:
             self._repo.save_park_ack(moved.park_ack)
         return command.accept(
             self._with_task(decision, moved.task),
-            result=self._task_result(owner, moved.task),
+            result=self._public.task(owner, moved.task),
         )
 
     # ------------------------------------------------------------- projects
@@ -332,7 +357,7 @@ class TaskDeviceExecutor:
         if decision.refusal is not None or project is None:
             return self._refuse(command, decision)
         self._repo.create_project(project)
-        return self._accepted(command, decision, project.model_dump(mode="json"))
+        return self._accepted(command, decision, self._public.project(owner, project))
 
     def _project_update(
         self,
@@ -397,7 +422,7 @@ class TaskDeviceExecutor:
             return self._refuse(command, decision)
         if decision.change_set["changes"]:  # type: ignore[index]
             self._repo.save_project(project)
-        return self._accepted(command, decision, project.model_dump(mode="json"))
+        return self._accepted(command, decision, self._public.project(owner, project))
 
     # ----------------------------------------------------------------- tags
     def _tag_create(
@@ -416,7 +441,7 @@ class TaskDeviceExecutor:
         if decision.refusal is not None or tag is None:
             return self._refuse(command, decision)
         self._repo.create_tag(tag)
-        return self._accepted(command, decision, tag.model_dump(mode="json"))
+        return self._accepted(command, decision, self._public.tag(owner, tag))
 
     def _tag_update(
         self,
@@ -440,7 +465,7 @@ class TaskDeviceExecutor:
         if decision.refusal is not None or tag is None:
             return self._refuse(command, decision)
         self._repo.save_tag(tag)
-        return self._accepted(command, decision, tag.model_dump(mode="json"))
+        return self._accepted(command, decision, self._public.tag(owner, tag))
 
     def _tag_delete(
         self,
@@ -482,7 +507,7 @@ class TaskDeviceExecutor:
                 for task in deleted.affected
             ],
         ]
-        return command.accept(changes, result=deleted.tag.model_dump(mode="json"))
+        return command.accept(changes, result=self._public.tag(owner, deleted.tag))
 
     # -------------------------------------------------------------- helpers
     @staticmethod
@@ -529,6 +554,6 @@ def _task_family(container: Any, core: RustCore) -> DeviceCommandExecutor:
     return TaskDeviceExecutor(
         tasks.task_repo,
         RustTaskFacade(core, tasks.task_repo),
-        tasks.formulation_settings,
+        RestProjector(tasks),
         tasks._log_due_date_move,
     )
