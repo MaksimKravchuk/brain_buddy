@@ -350,6 +350,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Sync hints",
         "Authenticated SSE wakes clients for committed changes",
     ),
+    "sync_snapshots": (
+        EPIC_TASKS,
+        "Sync snapshots",
+        "A snapshot is one consistent base at one watermark",
+    ),
     "sync_writer_boundary": (
         EPIC_TASKS,
         "Task sync writer boundary",
