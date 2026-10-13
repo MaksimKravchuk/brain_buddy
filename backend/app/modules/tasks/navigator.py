@@ -24,7 +24,7 @@ import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -46,7 +46,13 @@ from .review_domain import (
     ReviewRequestError,
 )
 from .review_rules import drop_duplicate_proposals
-from .service import serialized_write
+from .service import _NOT_SYNC_DISPATCHED, serialized_write
+from .sync.legacy_adapter import review_request, revoke_collision_key
+from .sync.review_projection import (
+    ReviewCommandBoundary,
+    boundary_active,
+    none_codec,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .repository import TaskRepository
@@ -697,10 +703,12 @@ class _NoBody(BaseModel):
 _NO_BODY = _NoBody()
 
 
-def _revoke_collision_key(key: str) -> str:
-    """Where a revoke records itself when another command already owns ``key``."""
+def _nothing() -> None:
+    """A replay or adoption executes nothing."""
 
-    return f"{key}#navigator_consent_revoke"
+
+_revoke_collision_key = revoke_collision_key
+"""Where a revoke records itself when another command already owns ``key``."""
 
 
 def _grant_result(status: NavigatorStatus) -> NavigatorGrantResultDocument:
@@ -744,7 +752,14 @@ class NavigatorService:
         rate_limiter: NavigatorRateLimiter,
         consent_text_version: int = CONSENT_TEXT_VERSION,
         request_ids: Callable[[], str] = lambda: str(uuid4()),
+        command_boundary: ReviewCommandBoundary | None = None,
+        sync_enabled: Callable[[str], bool] | None = None,
     ) -> None:
+        # Spec 026 PR-28: consent grant and the owner-wide revoke are legacy
+        # commands of the shared receipt boundary while ``rust_core_sync`` is
+        # effective for the owner (or a receipt already owns the key).
+        self._boundary = command_boundary
+        self._sync_enabled = sync_enabled
         self.task_repo = task_repo
         self.provider = provider
         self.limits = limits
@@ -814,6 +829,8 @@ class NavigatorService:
         request_hash: str,
         result: BaseModel,
     ) -> None:
+        if boundary_active():
+            return
         self.task_repo.save_idempotency(
             owner_id=owner_id,
             record=IdempotencyRecord(
@@ -911,13 +928,8 @@ class NavigatorService:
             ):
                 logger.info("navigator_consent outcome=replayed owner_id=%s", owner_id)
                 return
-        revoked = 0
         now = self.clock()
-        for consent in self.task_repo.list_navigator_consents(owner_id):
-            updated = revoked_consent(consent, now=now)
-            if updated != consent:
-                self.task_repo.save_navigator_consent(updated)
-                revoked += 1
+        revoked = self._revoke_all(owner_id, now=now)
         self._store_result(
             owner_id=owner_id,
             key=(
@@ -929,6 +941,143 @@ class NavigatorService:
             request_hash=request_hash,
             result=NavigatorRevokeResultDocument(revoked_at=now, revoked=revoked),
         )
+        logger.info(
+            "navigator_consent outcome=revoked owner_id=%s revoked=%d",
+            owner_id,
+            revoked,
+        )
+
+    def _revoke_all(self, owner_id: str, *, now: datetime) -> int:
+        """Revoke every stored grant of the owner; how many were still live."""
+
+        revoked = 0
+        for consent in self.task_repo.list_navigator_consents(owner_id):
+            updated = revoked_consent(consent, now=now)
+            if updated != consent:
+                self.task_repo.save_navigator_consent(updated)
+                revoked += 1
+        return revoked
+
+    # --------------------------------------------------- receipt boundary
+    @property
+    def _sync_dispatch(self) -> Callable[..., object] | None:
+        """The receipt-boundary hook ``serialized_write`` looks for (PR-28).
+
+        ``None`` without a wired boundary, so the unwired path is unchanged.
+        """
+
+        return self._dispatch_sync if self._boundary is not None else None
+
+    def _dispatch_sync(
+        self,
+        command: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        raw_command: Callable[..., object],
+    ) -> object:
+        """Grant and revoke as legacy commands of the shared receipt boundary."""
+
+        boundary = self._boundary
+        assert boundary is not None  # ``_sync_dispatch`` is None without one
+        owner_id = str(kwargs["owner_id"])
+        key = str(kwargs["idempotency_key"])
+        if not (
+            (self._sync_enabled is not None and self._sync_enabled(owner_id))
+            or boundary.has_key(owner_id, key)
+            or boundary.has_key(owner_id, _revoke_collision_key(key))
+        ):
+            return _NOT_SYNC_DISPATCHED
+        if command == "revoke_consent":
+            self._sync_revoke(boundary, owner_id, key)
+            return None
+        payload = args[0]
+        assert isinstance(payload, NavigatorConsentGrantRequest)
+        return boundary.run(
+            review_request(
+                owner_id,
+                key,
+                "review.consent_grant",
+                payload,
+                route="grant_consent",
+                entity_id=owner_id,
+            ),
+            owner_id=owner_id,
+            key=key,
+            now=self.clock(),
+            execute=lambda: cast(NavigatorStatus, raw_command(self, *args, **kwargs)),
+            dump=lambda status: _grant_result(status).model_dump(mode="json"),
+            load=lambda stored: _status_from(
+                NavigatorGrantResultDocument.model_validate(stored)
+            ),
+        )
+
+    def _sync_revoke(
+        self, boundary: ReviewCommandBoundary, owner_id: str, key: str
+    ) -> None:
+        """Owner-wide revoke with the accepted legacy key-collision exception.
+
+        The dedicated collision identity is consulted first, then the caller's
+        own key. A key some other command owns keeps its receipt untouched and
+        the revoke is recorded, once and atomically with its feed changes,
+        under the stable server-derived collision identity. A known revoke is
+        answered without writing, so it can never revoke a newer grant.
+        """
+
+        collision = _revoke_collision_key(key)
+        command = f"navigator_consent_revoke:{owner_id}"
+        request_hash = request_fingerprint(command, _NO_BODY)
+
+        def is_revoke(stored: IdempotencyRecord | None) -> bool:
+            return (
+                stored is not None
+                and stored.command == command
+                and stored.request_hash == request_hash
+            )
+
+        def run(used: str, *, effect: bool) -> None:
+            boundary.run(
+                review_request(
+                    owner_id,
+                    used,
+                    "review.consent_revoke",
+                    None,
+                    route="revoke_consent",
+                    entity_id=owner_id,
+                ),
+                owner_id=owner_id,
+                key=used,
+                now=self.clock(),
+                execute=(
+                    (lambda: self._revoke_effect(owner_id)) if effect else _nothing
+                ),
+                # A revoke has no content, so a redacted receipt still replays.
+                recoverable=True,
+                dump=none_codec()[0],
+                load=none_codec()[1],
+            )
+
+        if boundary.has_key(owner_id, collision) or is_revoke(
+            self.task_repo.get_idempotency(owner_id=owner_id, key=collision)
+        ):
+            return run(collision, effect=False)
+        used = key
+        if boundary.has_key(owner_id, key):
+            try:
+                # A receipt owns the key: only its replay can happen here.
+                return run(key, effect=False)
+            except IdempotencyConflictError:
+                used = collision
+        else:
+            record = self.task_repo.get_idempotency(owner_id=owner_id, key=key)
+            if is_revoke(record):
+                return run(key, effect=False)
+            if record is not None:
+                used = collision
+        return run(used, effect=True)
+
+    def _revoke_effect(self, owner_id: str) -> None:
+        now = self.clock()
+        revoked = self._revoke_all(owner_id, now=now)
         logger.info(
             "navigator_consent outcome=revoked owner_id=%s revoked=%d",
             owner_id,

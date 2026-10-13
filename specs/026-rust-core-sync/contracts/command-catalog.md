@@ -51,6 +51,33 @@ Smart Add bindings are scoped, typed, immutable and returned as content-free rec
 | Account deletion/export: `backend/app/services/account_service.py` | Identity/account authority through Tasks' purge/export port, with tasks/Review/feed/receipts/jobs/transfer objects included. Purge is a control operation, not a client task-delete command; restore points are retired before successful purge completion. |
 | Test/operator paths: `backend/app/cli.py` including review seed/sweep | Production-authorized mutations use the same boundary; test-only direct setup must be isolated to test data and cannot remain a production bypass. |
 
+### Writer inventory (PR-29 boundary audit)
+
+`backend/tests/test_sync_writer_boundary.py` scans every call site of the Tasks store's write API (`create*`, `save*`, `delete*`, `purge*` on the task repository) and fails when a file or call is missing from this table. Routes, MCP and workflows never write the store themselves; they reach it through the services below.
+
+| Writer file | Boundary |
+| --- | --- |
+| `modules/tasks/service.py` | Routed. `serialized_write` dispatches REST/MCP/CLI/workflow commands to `sync/command_handler.py` when `rust_core_sync` is effective or the key already has a receipt. The Capture port `create_native_inbox_task` is `task.create` through the same handler. |
+| `modules/tasks/sync/command_handler.py` | The boundary. Its writes run inside a receipt unit; `purge_expired_idempotency` after finalization is private bookkeeping. |
+| `modules/tasks/review_service.py` | Routed. Review commands dispatch through `ReviewCommandBoundary`; maintenance runs through `ReviewService.internal_write` (below). |
+| `modules/tasks/review_flow.py` | Routed. Run commands dispatch through `ReviewCommandBoundary`; idle close runs through `internal_write`. |
+| `modules/tasks/navigator.py` | Routed. Consent grant/revoke through `ReviewCommandBoundary`; usage and reservations are private rows with no feed member. |
+| `cli.py` | Routed. `review-run-sweep` calls `run_maintenance_sweep`; the TEST-only `review-seed-aged-task` backdates through `internal_write`, and refuses to run outside `BRAIN_BUDDY_ENV=test`. |
+| `services/account_service.py` | Exception. GDPR purge is a control operation through Tasks' purge port, not a client command. |
+
+The agent relay reads Tasks through `TaskSnapshot` only and has no Task write port; the CRT, Voice and Agent stores are separate files with their own locks.
+
+**Internal effects.** Maintenance writers are not client commands and are not accepted from a public envelope. `ReviewService.internal_write` makes each one a receipt only when `rust_core_sync` is effective for the owner and the boundary is wired; otherwise it is the plain owner-locked write. The origin is derived: `job` when a job execution is bound (identity from the effect key), `legacy` keyed by the same effect key for the in-process scheduler and operator CLI; the job fence and current scope are rechecked in the unit's lock before the first write. An effect that wrote no public state is rolled back without a receipt, so the 60 second tick adds no feed noise.
+
+| Effect type | Effect key | Public changes |
+| --- | --- | --- |
+| `review.auto_park` | `auto-park:<task>:<formulation>:<from_revision>` | Parked task, park marker. |
+| `internal.review_clock_repair` | `clock-repair:<task>:<revision>` | Task with the repaired clock. |
+| `internal.review_sweep_gap` | `sweep-gap:<owner>:<previous sweep>` | Settings with the raised park floor. |
+| `internal.review_retention` | `retention:<owner>:<digest of the nulled records>` | Decisions and bulk releases whose seven-day snapshot was nulled. Runs with the narrower `cleanup` owner check, so it continues for an owner whose deletion has begun. Idempotency-record and Navigator-usage purging is private and publishes nothing. |
+| `internal.review_idle_close` | `idle-close:<owner>:<digest of the closed runs>` | Ended runs with their decision queues. |
+| `internal.test_seed_aged_task` | random per invocation | The backdated task (TEST stack only). |
+
 A writer-origin string in client JSON grants nothing. New write paths must reuse an existing catalog command or add a contract before execution. No sync pilot can run while a live domain writer still bypasses receipt/feed/fence handling. Navigator suggestion/reserve/settle, title completion, Capture media and A2A observation are not task commands: only their confirmed Tasks effect goes into this feed; their own consent, budget and operation contracts remain in force.
 
 ## Limits and compatibility

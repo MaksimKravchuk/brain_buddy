@@ -145,8 +145,13 @@ class OwnerUnitOfWork[ConnectionT]:
         repo: OwnerRepository,
         jobs: JobScheduler[ConnectionT],
         conn: ConnectionT,
+        *,
+        cleanup: bool = False,
     ) -> None:
         self.owner_id = owner_id
+        # Retention cleanup of an owner whose deletion has begun (the narrower
+        # owner check); Identity admission reads it, a caller cannot widen it.
+        self.cleanup = cleanup
         self._repo = repo
         self._jobs = jobs
         self._conn = conn
@@ -326,7 +331,11 @@ class TaskUnitOfWork:
         with self._repo.writer_guard():
             with owner_write_lock(self._repo, owner_id, cleanup=cleanup):
                 unit = OwnerUnitOfWork(
-                    owner_id, self._repo, self._jobs, self._repo.active_connection()
+                    owner_id,
+                    self._repo,
+                    self._jobs,
+                    self._repo.active_connection(),
+                    cleanup=cleanup,
                 )
                 self._repo.bind_unit(unit)
                 try:

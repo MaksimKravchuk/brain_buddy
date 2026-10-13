@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -44,7 +44,6 @@ from app.utils.identifiers import generate_id
 
 from . import formulation, review_rules
 from .domain import ProjectDocument, TaskDocument
-from .jobs.execution import owner_write_lock
 from .repository import TaskRepository
 from .review_domain import (
     BulkReleasedItemDocument,
@@ -70,6 +69,7 @@ from .review_service import (
 )
 from .rust_review_facade import ReviewRefused, RustReviewFacade
 from .service import serialized_write
+from .sync.review_projection import dict_codec, model_codec, replaying
 
 logger = logging.getLogger("app.modules.tasks.review")
 
@@ -196,6 +196,89 @@ class ReviewFlowService:
 
     def _reconcile_idempotent_result(self, *, owner_id: str, key: str) -> None:
         self.review._reconcile_idempotent_result(owner_id=owner_id, key=key)
+
+    @property
+    def _sync_dispatch(self) -> Callable[..., object] | None:
+        """The receipt-boundary hook ``serialized_write`` looks for (PR-28).
+
+        ``None`` without a wired boundary, so the unwired path is unchanged.
+        """
+
+        return self._dispatch_sync if self.review._boundary is not None else None
+
+    def _dispatch_sync(
+        self,
+        command: str,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+        raw_command: Callable[..., object],
+    ) -> object:
+        """Opt the run and bulk commands into the shared receipt boundary."""
+
+        owner_id = cast(str, kwargs["owner_id"])
+        command_type, payload, entity_id, path, codec = self._sync_plan(command, args)
+        return self.review.sync_dispatch(
+            self,
+            owner_id,
+            cast(str, kwargs["idempotency_key"]),
+            raw_command,
+            args,
+            kwargs,
+            command_type=command_type,
+            route=command,
+            payload=payload,
+            entity_id=entity_id,
+            path=path,
+            codec=codec,
+            # Each of these answers a stored matching record or its own state
+            # without writing, so a redacted receipt can still be recovered.
+            recoverable=True,
+        )
+
+    @staticmethod
+    def _sync_plan(
+        command: str, args: tuple[object, ...]
+    ) -> tuple[str, BaseModel | None, str, dict[str, str] | None, tuple[Any, Any]]:
+        """``(catalog command, payload, entity, path, codec)``."""
+
+        match command:
+            case "start_session":
+                start = cast(SessionStartRequest, args[0])
+                return (
+                    "review.session_start",
+                    start,
+                    start.id or "review_pending",
+                    None,
+                    model_codec(ReviewSessionDocument),
+                )
+            case "progress_session" | "finish_session":
+                kind = "progress" if command == "progress_session" else "finish"
+                session_id = cast(str, args[0])
+                return (
+                    f"review.session_{kind}",
+                    cast(BaseModel, args[1]),
+                    session_id,
+                    {"session_id": session_id},
+                    model_codec(ReviewSessionDocument),
+                )
+            case "bulk_release":
+                release = cast(BulkReleaseRequest, args[0])
+                return (
+                    "review.bulk_release",
+                    release,
+                    release.id or "bulk_pending",
+                    None,
+                    model_codec(ReviewBulkReleaseDocument),
+                )
+            case _:  # ``undo_bulk_release``, the last decorated writer
+                bulk_id = cast(str, args[0])
+                return (
+                    "review.bulk_undo",
+                    None,
+                    bulk_id,
+                    {"bulk_id": bulk_id},
+                    dict_codec(),
+                )
 
     # ------------------------------------------------------------------ runs
     @serialized_write
@@ -597,7 +680,9 @@ class ReviewFlowService:
         closed = 0
         if not candidates:
             return closed
-        with owner_write_lock(self.task_repo, owner_id):
+
+        def close() -> None:
+            nonlocal closed
             for session_id in candidates:
                 session = self.task_repo.get_review_session(owner_id, session_id)
                 if (
@@ -614,6 +699,16 @@ class ReviewFlowService:
                 self.task_repo.save_review_session(ended)
                 _log_run(ended, event="idle_close", outcome="applied", t0=None)
                 closed += 1
+
+        # One receipt and feed commit per owner (spec 026 PR-29); the candidate
+        # runs name the effect, so a retry of an unfinished close repeats it.
+        digest = hashlib.sha256("\0".join(sorted(candidates)).encode()).hexdigest()
+        self.review.internal_write(
+            owner_id,
+            "internal.review_idle_close",
+            f"idle-close:{owner_id}:{digest[:32]}",
+            close,
+        )
         return closed
 
     # ---------------------------------------------------------------- queues
@@ -1368,6 +1463,8 @@ def _log_run(
 ) -> None:
     """``review_run`` (plan Observability): mode, status and counts only."""
 
+    if replaying():
+        return
     logger.info(
         "review_run owner_id=%s session_id=%s event=%s mode=%s status=%s "
         "counts=%s qualifying=%s outcome=%s duration_ms=%d",
@@ -1386,6 +1483,8 @@ def _log_run(
 def _log_bulk(
     release: ReviewBulkReleaseDocument, *, event: str, outcome: str, t0: float
 ) -> None:
+    if replaying():
+        return
     logger.info(
         "review_bulk_release owner_id=%s bulk_id=%s event=%s kind=%s released=%d "
         "skipped=%d outcome=%s duration_ms=%d",
@@ -1401,6 +1500,8 @@ def _log_bulk(
 
 
 def _log_refusal(owner_id: str, record_id: str, reason: str) -> None:
+    if replaying():
+        return
     logger.info(
         "review_flow_refused owner_id=%s id=%s outcome=%s", owner_id, record_id, reason
     )

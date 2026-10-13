@@ -51,7 +51,9 @@ from app.modules.tasks.review_service import ReviewService
 from app.modules.tasks.rust_adapter import RustCore
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
+from app.modules.tasks.sync.authority import IdentityScopeAuthority
 from app.modules.tasks.sync.receipts import Authority, ReceiptStore
+from app.modules.tasks.sync.review_projection import ReviewCommandBoundary
 from app.modules.tasks.sync.unit_of_work import TaskUnitOfWork
 from app.repositories import (
     CrtCommandRepository,
@@ -446,6 +448,13 @@ def build_container(
         relay_capability_available=relay_capability_available,
     )
 
+    # Spec 026 PR-30: the live writers (web, MCP, CLI) get the Identity-backed
+    # authority unless a caller injects one. Every Task/Review dispatch is still
+    # gated per owner by ``rust_core_sync`` (default OFF), so with the flag off
+    # no writer enters the receipt boundary and behaviour is unchanged.
+    if task_sync_authority is None:
+        task_sync_authority = IdentityScopeAuthority(user_repo)
+
     tree_service = TreeService(tree_repo, index_repo)
 
     def _owner_is_live(owner_id: str) -> bool:
@@ -522,11 +531,25 @@ def build_container(
 
     # Spec 020: the review service reads ``task_service.clock``, so the one
     # ``frozen_clock`` seam drives decisions, activation and the sweep too.
+    # Spec 026 PR-28: Review writers and Navigator consent share the Tasks
+    # receipt boundary; without a sync authority it stays dark, like Tasks.
+    review_boundary = (
+        ReviewCommandBoundary(
+            ReceiptStore(rust_core),
+            task_unit_of_work,
+            task_sync_authority,
+            task_repo,
+            rust_core,
+        )
+        if task_sync_authority is not None
+        else None
+    )
     review_service = ReviewService(
         task_service,
         is_exposed=_weekly_review_exposed_for_owner,
         rust_facade=RustReviewFacade(rust_core, task_repo),
         rust_core_enabled=_rust_core_sync_for_owner,
+        command_boundary=review_boundary,
     )
     review_flow_service = ReviewFlowService(review_service)
     review_service.idle_session_closer = review_flow_service.close_idle_sessions
@@ -544,6 +567,8 @@ def build_container(
         # navigator's usage day too (research R21).
         clock=lambda: task_service.clock(),
         rate_limiter=navigator_rate_limiter,
+        command_boundary=review_boundary,
+        sync_enabled=_rust_core_sync_for_owner,
     )
 
     def _voice_enabled_for_owner(owner_id: str) -> bool:

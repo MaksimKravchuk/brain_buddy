@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID, uuid5
+
+from pydantic import BaseModel
 
 from app.modules.tasks.sync.receipts import CommandRequest
 from app.schemas.tasks import (
@@ -30,6 +33,45 @@ TASK_TRANSITION_ALIAS = "task_transition"
 _TAG_NAMESPACE = UUID("1aa8f7f3-fb9d-5fb3-901a-cbc027c731b1")
 _PROJECT_NAMESPACE = UUID("dba0a1e4-1d74-5e11-a7d4-4d0c66a5d7c6")
 _TASK_NAMESPACE = UUID("117241fd-9a2a-5eac-b7f3-026c0150da19")
+
+
+def review_request(  # noqa: PLR0913 - the one legacy Review envelope
+    owner_id: str,
+    key: str,
+    command_type: str,
+    payload: BaseModel | None,
+    *,
+    route: str,
+    entity_id: str,
+    path: dict[str, str] | None = None,
+) -> CommandRequest:
+    """The legacy Review envelope: owner/key is the identity, the rest a check.
+
+    ``command_type`` is the frozen catalog name (``review.decide`` ...). Path ids
+    ride in the body so another target under the same key is a key reuse.
+    """
+
+    body: dict[str, Any] = {
+        "command_type": command_type,
+        "body": {} if payload is None else payload.model_dump(mode="json"),
+    }
+    if payload is not None:
+        body["fields_set"] = sorted(payload.model_fields_set)
+    if path:
+        body["path"] = path
+    return CommandRequest.legacy(
+        owner_id, key, command_type, body, entity_id=entity_id, route=route
+    )
+
+
+def revoke_collision_key(key: str) -> str:
+    """The stable, server-derived key a colliding Navigator revoke records under.
+
+    Never selectable from a wire field: only the trusted legacy adapter derives
+    it, from the caller's own key (sync-v1 section 4, legacy revoke exception).
+    """
+
+    return f"{key}#navigator_consent_revoke"
 
 
 def tag_create_request(

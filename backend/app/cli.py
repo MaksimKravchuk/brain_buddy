@@ -137,10 +137,17 @@ def review_seed_aged_task(
         idempotency_key=f"cli-review-seed-{uuid.uuid4()}",
     )
     started = container.task_service.clock() - timedelta(days=days)
-    with container.task_repo.command_lock(user.id):
-        container.task_repo.save(
+    # The backdate is a Tasks write: through the review service it publishes with
+    # the unit when the sync boundary is wired (spec 026 PR-29), and is otherwise
+    # the plain owner-locked save.
+    container.review_service.internal_write(
+        user.id,
+        "internal.test_seed_aged_task",
+        f"cli-review-seed-age-{uuid.uuid4()}",
+        lambda: container.task_repo.save(
             task.model_copy(update={"formulation_started_at": started})
-        )
+        ),
+    )
     typer.echo(task.id)
 
 

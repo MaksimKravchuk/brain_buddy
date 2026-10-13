@@ -924,8 +924,13 @@ class Apps:
     on_decisions: list[int]
 
 
-@pytest.fixture
-def apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Apps]:
+@pytest.fixture(params=["receipt-boundary", "engine-only"])
+def apps(
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Apps]:
+    """Both ON paths must match OFF: through the receipt boundary that
+    ``build_container`` wires, and the engine-only path an unwired service keeps."""
+
     clients = []
     for subdir in ("parity-off", "parity-on"):
         client, _ = _build_authenticated_client(
@@ -937,6 +942,8 @@ def apps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Apps]:
         )
         clients.append(client)
     off, on = clients
+    if request.param == "engine-only":
+        _container(on).task_service._legacy_tag_handler = None
     clocks = (FrozenClock(), FrozenClock())
     for client, clock in zip(clients, clocks, strict=True):
         clock.install(_container(client))
