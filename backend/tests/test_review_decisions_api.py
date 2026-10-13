@@ -22,6 +22,7 @@ from app.container import Container
 from app.modules.tasks import review_domain as rd
 from app.modules.tasks.domain import IdempotencyRecord
 from app.modules.tasks.repository import IDEMPOTENCY_RETENTION
+from tests.allure_evidence import attach_json
 
 from .conftest import FrozenClock
 
@@ -925,6 +926,7 @@ def test_020_FR_011_a_replay_of_a_record_without_a_settings_snapshot_projects_li
     assert first.status_code == 200, first.text
     with allure.step("Drop the snapshot, as a record written before it was added"):
         api.strip_formulation_settings(headers)
+        attach_json("first decision status", first.status_code)
     api.put_settings(threshold_days=28)
 
     replay = api.decide_raw(task, "extend", headers=headers, **body)

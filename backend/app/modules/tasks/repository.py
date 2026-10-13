@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import ClassVar, TextIO, TypeVar
+from typing import Any, ClassVar, TextIO, TypeVar
 
 from pydantic import BaseModel
 
@@ -35,7 +35,7 @@ from .domain import (
     TaskSubtaskDocument,
 )
 from .review_repository import ReviewRepositoryMixin, WriteScope
-from .sync.change_log import initialize, purge_owner
+from .sync.change_log import export_owner, initialize, purge_owner
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -818,6 +818,15 @@ class TaskRepository(ReviewRepositoryMixin, SQLiteRepositorySupport, BaseReposit
             )
             for row in rows
         ]
+
+    def export_sync_identity(self, *, owner_id: str) -> dict[str, list[dict[str, Any]]]:
+        """The owner's sync scope and device epochs for the account export."""
+
+        with (
+            self._connection(self._thread_state) as conn,
+            self._sqlite_guard("sync identity", owner_id),
+        ):
+            return export_owner(conn, owner_id)
 
     def delete_all_for_owner(self, *, owner_id: str) -> None:
         """Erase every record and JSON mirror belonging to one owner.
