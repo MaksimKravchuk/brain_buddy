@@ -6,7 +6,7 @@ import SwiftUI
 /// versions as a radio choice with no default, the blocked later actions (Keep for later / Review and
 /// retry / Discard action), the named discard confirmation with Cancel focused first, and Apply choice.
 /// Bounded: it scrolls inside the popover's 480 pt and shows each long text in a scrollable box.
-/// `submit` is nil until the workspace can store a resolution atomically; Apply then stays disabled.
+/// `submit` hands the applied decision to the workspace; it is nil only where none can be stored, and Apply is then disabled.
 struct SyncConflictView: View {
     @Binding var model: SyncConflictModel
     let blockedPreview: (SyncBlockedAction) -> String?
@@ -57,7 +57,7 @@ struct SyncConflictView: View {
             }
             if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
             if let heading = model.blockedHeading { blockedBody(heading) }
-            Button("Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
+            Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
                 .buttonStyle(.borderedProminent)
                 .disabled(!model.applyEnabled || submit == nil)
                 .focused($focus, equals: .apply)
@@ -67,7 +67,7 @@ struct SyncConflictView: View {
     private var versionsBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(model.versionLabels, id: \.0) { version, label in
-                let text = version == .yours ? model.yourEdit : (model.accountVersion ?? "")
+                let text = version == .yours ? model.yourEdit : (model.accountVersion ?? "Not available")
                 Button {
                     model.select(version)
                 } label: {
@@ -134,6 +134,9 @@ struct SyncConflictView: View {
                     .pickerStyle(.radioGroup)
                     .disabled(!model.isEditable)
                     .focused($focus, equals: .action(action.id))
+                    if let reason = model.retryUnavailableReason(for: action.id), action.choice != .reviewAndRetry {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
                     if action.choice == .reviewAndRetry {
                         retryPreview(action)
                     }
@@ -152,7 +155,8 @@ struct SyncConflictView: View {
             }
             if blockedPreview(action) != nil {
                 Toggle("Approve this retry", isOn: Binding(
-                    get: { action.retryApproved }, set: { if $0 { model.approveRetry(action.id) } }
+                    get: { action.retryApproved },
+                    set: { if $0 { model.approveRetry(action.id) } else { model.withdrawRetryApproval(action.id) } }
                 ))
             }
         }

@@ -199,6 +199,7 @@ struct SettingsScreen: View {
     private var syncSection: some View {
         Section {
             syncStatusRow
+            if workspace.isRustSelected { SyncRecoveryRow() }
             if let lastSyncedAt = staleLastSyncedAt {
                 TimelineView(.periodic(from: .now, by: 60)) { _ in
                     valueRow(

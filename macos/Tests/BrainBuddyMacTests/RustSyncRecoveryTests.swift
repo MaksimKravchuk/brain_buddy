@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyPersistence
 import Foundation
 import Testing
 
@@ -322,5 +323,170 @@ struct RustSyncRecoveryTests {
         )
         let line = SyncStatusLineModel(snapshot: failing, now: start.addingTimeInterval(SyncTiming.failureSurfacesAfter))
         #expect(line.description.text == "Couldn't sync · Retry")
+    }
+
+    // MARK: Wired to the workspace (PR-46 part 2)
+
+    private static func account(_ revision: String?, title: String = "Order soil (account)", deleted: Bool = false)
+        -> RuntimeIssueAccountVersion
+    {
+        RuntimeIssueAccountVersion(revision: revision, isDeleted: deleted, fields: deleted ? [:] : ["title": title])
+    }
+
+    @Test("026-FR-007 the account side is the record the runtime holds, and the edit is decided against its revision")
+    func accountRecordIsTheShownVersion() throws {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"))
+        #expect(model.accountVersion == "Order soil (account)")
+        #expect(model.shownRevision == "rev-9", "not the revision the edit was based on")
+        model.select(.yours)
+        let applied = model.apply()
+        let resolution = try #require(applied)
+        #expect(resolution.shownRevision == "rev-9")
+        #expect(resolution.runtime.outcome == .keepMine && resolution.runtime.shownRevision == "rev-9")
+    }
+
+    @Test("026-FR-007 yours keeps my edit, account uses the account's, deleted keeps it deleted; every later action in one list")
+    func resolutionMapsOntoTheRuntime() throws {
+        var yours = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        yours.select(.yours)
+        yours.setChoice(.reviewAndRetry, for: "later-1")
+        yours.approveRetry("later-1")
+        let appliedYours = yours.apply()
+        let runtime = try #require(appliedYours).runtime
+        #expect(runtime.outcome == .keepMine && runtime.issueID == "issue-1")
+        #expect(runtime.keepForLater == ["later-2"] && runtime.retry == ["later-1"] && runtime.discard.isEmpty)
+
+        var account = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"))
+        account.select(.account)
+        let appliedAccount = account.apply()
+        #expect(try #require(appliedAccount).runtime.outcome == .useAccountVersion)
+
+        let deletedIssue = SyncRuntimeIssue(id: "t", commandID: "c", reason: "ENTITY_DELETED", summary: "s", savedEdit: "e", shownBaseRevision: "r")
+        var deleted = SyncConflictModel(issue: deletedIssue, account: Self.account("r2", deleted: true))
+        let appliedDeleted = deleted.apply()
+        #expect(try #require(appliedDeleted).runtime.outcome == .keepDeleted)
+    }
+
+    @Test("026-FR-010 a discard is never submitted before the named confirmation, and relaunch does not pre-confirm it")
+    func discardStaysBehindTheConfirmation() throws {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        model.select(.account)
+        model.setChoice(.discard, for: "later-1")
+        #expect(model.apply() == nil && model.phase == .confirmingDiscard)
+        let confirmed = model.confirmDiscard()
+        #expect(try #require(confirmed).runtime.discard == ["later-1"])
+        model.saveFailed()
+        // After a failed save the person confirms again rather than the old confirmation standing.
+        #expect(model.apply() == nil && model.phase == .confirmingDiscard)
+
+        var fresh = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        fresh.restore(model.draft)
+        #expect(fresh.actions[0].choice == .discard && fresh.phase == .choosing)
+        #expect(fresh.apply() == nil && fresh.phase == .confirmingDiscard)
+    }
+
+    @Test("026-FR-010 a retry the runtime would refuse is not offered; it unlocks when what it waits on is retried")
+    func retryBehindAnotherHeldAction() {
+        let blocked = [
+            SyncBlockedAction(id: "later-1", summary: "Move task 1", retryWaitsOn: []),
+            SyncBlockedAction(id: "later-2", summary: "Move task 2", retryWaitsOn: ["later-1"]),
+            SyncBlockedAction(id: "gone", summary: "Saved action", retryWaitsOn: nil),
+        ]
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: blocked)
+        model.select(.account)
+        #expect(model.actions.map(\.retryAvailable) == [true, false, false])
+        model.setChoice(.reviewAndRetry, for: "later-2")
+        model.setChoice(.reviewAndRetry, for: "gone")
+        #expect(model.actions[1].choice == .keepForLater && model.actions[2].choice == .keepForLater)
+        #expect(model.retryUnavailableReason(for: "later-2") != nil)
+        model.setChoice(.reviewAndRetry, for: "later-1")
+        #expect(model.actions[1].retryAvailable)
+    }
+
+    @Test("026-FR-007 changed again: nothing saved, the account's new text shows, the draft and selection stay")
+    func changedAgainOutcome() throws {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"))
+        model.select(.yours)
+        let applied = model.apply()
+        _ = try #require(applied)
+        model.finish(.changedAgain(Self.account("rev-10", title: "Order soil v3")))
+        #expect(model.phase == .changedAgain && model.accountVersion == "Order soil v3" && model.shownRevision == "rev-10")
+        #expect(model.selected == .yours && model.applyEnabled, "the draft is kept; Apply asks again")
+    }
+
+    @Test("026-FR-007 any other refusal is a failed save that keeps the draft; a stored resolution leaves nothing to edit")
+    func failedAndResolvedOutcomes() throws {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"))
+        model.select(.account)
+        let first = model.apply()
+        _ = try #require(first)
+        #expect(model.apply() == nil, "double submit is ignored")
+        model.finish(.failed(.failed(code: "STORE_BUSY")))
+        #expect(model.phase == .saveFailed && model.statusLine == "Your choice wasn't saved. Try again.")
+        #expect(model.selected == .account && model.applyEnabled)
+        let again = model.apply()
+        _ = try #require(again)
+        model.finish(.resolved)
+        #expect(!model.isEditable, "the detail closes on resolved; it never becomes editable again")
+    }
+
+    @Test("026-FR-007 an unreadable account record blocks Apply, except where the item was deleted elsewhere")
+    func unreadableAccountRecord() {
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: nil)
+        model.select(.yours)
+        #expect(!model.applyEnabled && model.statusLine == "Couldn't read the account's version. Try again.")
+        let deletedIssue = SyncRuntimeIssue(id: "t", commandID: "c", reason: "ENTITY_DELETED", summary: "s", savedEdit: "e")
+        #expect(SyncConflictModel(issue: deletedIssue, account: nil).applyEnabled)
+    }
+
+    @Test("026-FR-007 a draft saved against another revision restores as changed again and submits nothing")
+    func restoredAgainstMovedRecord() {
+        var old = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        old.select(.yours)
+        old.setChoice(.discard, for: "later-1")
+        var moved = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-12"), blocked: Self.blocked())
+        moved.restore(old.draft)
+        #expect(moved.phase == .changedAgain && moved.selected == nil && moved.actions[0].choice == .discard)
+        #expect(moved.apply() == nil)
+    }
+
+    @Test("026-FR-010 the runtime's recovery facts become the popover's conditions; update-needed-sync has no signal and stays unreachable")
+    func recoveryConditionsFromTheRuntime() {
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery()) == nil)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true)) == .updateNeededStore)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(storeNeedsUpdate: true, storeUnavailable: true)) == .updateNeededStore)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .rebuilding)) == .rebuilding)
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(rebuild: .failed(referenceID: "ref-9"))) == .rebuildFailed(referenceID: "ref-9"))
+        #expect(SyncRecoveryCondition(RuntimeSyncRecovery(epoch: .closed)) == nil)
+        let everything: [RuntimeSyncRecovery] = [
+            RuntimeSyncRecovery(), RuntimeSyncRecovery(storeNeedsUpdate: true), RuntimeSyncRecovery(rebuild: .rebuilding),
+            RuntimeSyncRecovery(rebuild: .failed(referenceID: nil)),
+        ]
+        #expect(everything.allSatisfy { SyncRecoveryCondition($0) != .updateNeededSync })
+    }
+
+    @Test("026-FR-010 the controller keeps the draft across a relaunch, drops it once resolved, and says a rebuild could not run")
+    @MainActor
+    func controllerKeepsDraftAndReportsRebuild() async throws {
+        let rig = await MacSyncFlowTests.Rig()
+        let controller = rig.controller
+        #expect(controller.recoveryCondition == nil)
+        #expect(await controller.openConflict("issue-missing") == nil)
+        #expect(await controller.rebuildSyncedCopy()?.contains("nothing was rebuilt") == true)
+
+        var model = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        controller.keepDraft(model)
+        #expect(controller.conflictDrafts.load(issueID: "issue-1") == nil, "an untouched draft is not kept")
+        model.select(.yours)
+        model.setChoice(.discard, for: "later-2")
+        controller.keepDraft(model)
+        // A second controller over the same folder is a relaunch.
+        let relaunched = MacSyncController(host: rig.host, now: rig.clock.provider, log: rig.log)
+        let saved = try #require(relaunched.conflictDrafts.load(issueID: "issue-1"))
+        var restored = SyncConflictModel(issue: Self.conflictIssue(), account: Self.account("rev-9"), blocked: Self.blocked())
+        restored.restore(saved)
+        #expect(restored.selected == .yours && restored.actions[1].choice == .discard && restored.phase == .choosing)
+        relaunched.discardDraft(issueID: "issue-1")
+        #expect(controller.conflictDrafts.load(issueID: "issue-1") == nil)
     }
 }

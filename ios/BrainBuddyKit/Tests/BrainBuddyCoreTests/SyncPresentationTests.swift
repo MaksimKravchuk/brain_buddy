@@ -551,7 +551,8 @@ struct RuntimeSyncPresentationTests {
         #expect(draft.phase == .saving && draft.title == "Saving your choice…")
         #expect(draft.apply() == nil)
         draft.saveFailed()
-        #expect(draft.phase == .choosing && draft.version == .account && draft.choice(for: "a") == .keepForLater)
+        #expect(draft.phase == .saveFailed && draft.title == "Your choice wasn't saved. Try again.")
+        #expect(draft.version == .account && draft.choice(for: "a") == .keepForLater && draft.canApply)
     }
 
     @Test("026-FR-010 later actions start as Keep for later and Review and retry needs explicit approval")

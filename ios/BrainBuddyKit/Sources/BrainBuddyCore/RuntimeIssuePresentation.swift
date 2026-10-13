@@ -145,16 +145,20 @@ public struct DependentSummary: Identifiable, Equatable, Sendable {
 // MARK: - M-02 decision draft
 
 /// Which version of the conflicting field the user chose.
-public enum ConflictVersion: Equatable, Sendable { case saved, account }
+public enum ConflictVersion: String, Codable, Equatable, Sendable { case saved, account }
 
 /// What to do with one later action.
-public enum DependentChoice: Equatable, Sendable { case keepForLater, reviewAndRetry, discard }
+public enum DependentChoice: String, Codable, Equatable, Sendable { case keepForLater, reviewAndRetry, discard }
 
-/// The user's unsent decision for one conflict (M-02.01, .08, .11, .12). Holding a draft never
-/// submits anything: relaunch restores it, and only `apply` (after `canApply`) produces a decision.
-public struct ConflictDecisionDraft: Equatable, Sendable {
+/// The user's unsent decision for one conflict (M-02.01, .08, .11, .12; Mac D-02). Holding a draft
+/// never submits anything: relaunch restores it, and only `apply` (after `canApply`) produces a
+/// decision. The iPhone detail and the Mac popover both run on this one value.
+///
+/// Only the choices are persisted (`Codable`): never the phase, a discard confirmation or any of the
+/// user's text, so a restored draft cannot submit and cannot arrive with a discard already confirmed.
+public struct ConflictDecisionDraft: Equatable, Sendable, Codable {
     public enum Phase: Equatable, Sendable {
-        case choosing, confirmingDiscard, saving, changedAgain
+        case choosing, confirmingDiscard, saving, saveFailed, changedAgain
     }
 
     public private(set) var phase: Phase = .choosing
@@ -165,11 +169,31 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
     public private(set) var approvedRetries: Set<String> = []
     public private(set) var discardConfirmed = false
     public let dependentIDs: [String]
+    /// The issue the draft belongs to, where the caller keeps drafts for several.
+    public let issueID: String?
+    /// False where there is no version to pick (the item was deleted elsewhere): the only way to
+    /// resolve it is to keep it deleted.
+    public private(set) var requiresVersion = true
+    /// For each later action the runtime could queue again, the other held actions it waits on.
+    /// An action absent from the map cannot be retried. `nil` leaves retry unrestricted. The runtime
+    /// refuses a replacement that waits on a held action which is not itself queued again, so such a
+    /// retry is never offered.
+    public private(set) var retryDependencies: [String: [String]]?
+
+    private enum CodingKeys: String, CodingKey {
+        case shownRevision, version, choices, approvedRetries, dependentIDs, issueID
+    }
 
     /// Every later action starts as Keep for later, the safe choice.
-    public init(dependentIDs: [String], shownRevision: String?) {
+    public init(
+        dependentIDs: [String], shownRevision: String?, issueID: String? = nil, requiresVersion: Bool = true,
+        retryDependencies: [String: [String]]? = nil
+    ) {
         self.dependentIDs = dependentIDs
         self.shownRevision = shownRevision
+        self.issueID = issueID
+        self.requiresVersion = requiresVersion
+        self.retryDependencies = retryDependencies
         self.choices = Dictionary(uniqueKeysWithValues: dependentIDs.map { ($0, .keepForLater) })
     }
 
@@ -191,12 +215,36 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
 
     public func choice(for id: String) -> DependentChoice { choices[id] ?? .keepForLater }
 
+    /// Nothing chosen yet: there is nothing to keep across a relaunch.
+    public var isUntouched: Bool { version == nil && choices.values.allSatisfy { $0 == .keepForLater } }
+
+    /// Whether "Review and retry" may be offered for `id` now: it is a known saved action, and every
+    /// earlier held action it waits on is itself being retried.
+    public func canRetry(_ id: String) -> Bool {
+        guard let rules = retryDependencies else { return true }
+        guard let waitsOn = rules[id] else { return false }
+        let held = Set(dependentIDs)
+        return waitsOn.allSatisfy { $0 == id || !held.contains($0) || choices[$0] == .reviewAndRetry }
+    }
+
+    /// Why "Review and retry" is not available for `id`, or nil when it is.
+    public func retryUnavailableReason(for id: String) -> String? {
+        guard !canRetry(id) else { return nil }
+        return retryDependencies?[id] == nil
+            ? "This action can't be retried from here. Keep it for later."
+            : "It waits on an earlier saved action. Retry that one first, or keep this for later."
+    }
+
     /// Apply is possible only once a version is chosen, every retry is approved against the shown
     /// version, and any discard was confirmed by name.
-    public var canApply: Bool {
-        guard phase == .choosing || phase == .confirmingDiscard, version != nil else { return false }
-        guard Set(retryIDs).isSubset(of: approvedRetries) else { return false }
-        return discardedIDs.isEmpty || discardConfirmed
+    public var canApply: Bool { readyToApply && (discardedIDs.isEmpty || discardConfirmed) }
+
+    /// Everything `canApply` needs except the named discard confirmation, which the Mac asks for as
+    /// its Apply step.
+    public var readyToApply: Bool {
+        guard phase != .saving else { return false }
+        if requiresVersion, version == nil { return false }
+        return Set(retryIDs).isSubset(of: approvedRetries) && retryIDs.allSatisfy(canRetry)
     }
 
     /// Choosing the account's version drops the user's edit, so later actions that build on it need
@@ -206,15 +254,31 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
     public mutating func choose(_ version: ConflictVersion) {
         guard phase != .saving else { return }
         self.version = version
-        if phase == .changedAgain { phase = .choosing }
+        if phase == .changedAgain || phase == .saveFailed { phase = .choosing }
     }
 
     public mutating func setChoice(_ choice: DependentChoice, for id: String) {
         guard phase != .saving, choices[id] != nil else { return }
+        if choice == .reviewAndRetry, !canRetry(id) { return }
         choices[id] = choice
         if choice != .reviewAndRetry { approvedRetries.remove(id) }
+        normalizeRetries()
         discardConfirmed = false
         if phase == .confirmingDiscard { phase = .choosing }
+    }
+
+    /// A retry whose predecessor is no longer retried would be refused by the runtime: it goes back
+    /// to Keep for later, and its approval with it.
+    private mutating func normalizeRetries() {
+        var changed = true
+        while changed {
+            changed = false
+            for id in retryIDs where !canRetry(id) {
+                choices[id] = .keepForLater
+                approvedRetries.remove(id)
+                changed = true
+            }
+        }
     }
 
     public mutating func approveRetry(for id: String) {
@@ -230,7 +294,7 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
 
     /// Opens the named confirmation (M-02.12). No effect without something selected to discard.
     public mutating func requestDiscard() {
-        guard phase == .choosing, !discardedIDs.isEmpty else { return }
+        guard phase != .saving, phase != .confirmingDiscard, !discardedIDs.isEmpty else { return }
         phase = .confirmingDiscard
     }
 
@@ -247,11 +311,17 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
     }
 
     /// The account side changed after the card opened (M-02.08): the draft is kept, but the version
-    /// choice, retry approvals and discard confirmation are cleared so the user applies again.
-    public mutating func refresh(currentRevision: String?) {
+    /// choice (unless `keepingVersion`), retry approvals and discard confirmation are cleared so the
+    /// user applies again.
+    public mutating func refresh(currentRevision: String?, keepingVersion: Bool = false) {
         guard currentRevision != shownRevision else { return }
-        shownRevision = currentRevision
-        version = nil
+        markChangedAgain(revision: currentRevision, keepingVersion: keepingVersion)
+    }
+
+    /// The same, where the account's record is known to have moved even if its revision reads alike.
+    public mutating func markChangedAgain(revision: String?, keepingVersion: Bool = false) {
+        shownRevision = revision
+        if !keepingVersion { version = nil }
         approvedRetries = []
         discardConfirmed = false
         phase = .changedAgain
@@ -260,34 +330,110 @@ public struct ConflictDecisionDraft: Equatable, Sendable {
     /// The decision to store, or nil unless `canApply`. Moves to `.saving`; a second call is a no-op,
     /// so a resubmission cannot create a second resolution.
     public mutating func apply() -> ConflictDecision? {
-        guard canApply, let version else { return nil }
+        guard canApply else { return nil }
         phase = .saving
         return ConflictDecision(
-            version: version, againstRevision: shownRevision, keepForLater: dependentIDs.filter { choices[$0] == .keepForLater },
-            retry: retryIDs, discard: discardedIDs)
+            version: version, againstRevision: shownRevision,
+            keepForLater: dependentIDs.filter { choices[$0] == .keepForLater }, retry: retryIDs, discard: discardedIDs)
     }
 
     /// The write failed locally: keep everything and let the user try again (M-02.05).
     public mutating func saveFailed() {
-        if phase == .saving { phase = .choosing }
+        if phase == .saving { phase = .saveFailed }
+    }
+
+    /// Takes in what became of the decision `apply` produced. A stored (or already gone) resolution
+    /// leaves nothing to keep: the caller drops the draft. A record that changed again keeps the draft
+    /// and asks for a new decision; any other refusal keeps it and offers a retry.
+    public mutating func finish(_ outcome: RuntimeIssueApplyOutcome, keepingVersion: Bool = false) {
+        guard phase == .saving else { return }
+        switch outcome {
+        case .resolved, .gone: break
+        case .changedAgain(let current): markChangedAgain(revision: current?.revision, keepingVersion: keepingVersion)
+        case .failed: phase = .saveFailed
+        }
+    }
+
+    /// Relaunch: puts back what `saved` held, for the actions this issue still has. Nothing is
+    /// submitted and no discard arrives confirmed. A draft saved against another revision of the
+    /// record returns as "changed again", with its choices but no version or approval.
+    public mutating func restore(from saved: ConflictDecisionDraft) {
+        guard saved.issueID == issueID else { return }
+        version = saved.version
+        approvedRetries = []
+        for id in dependentIDs { choices[id] = saved.choices[id] ?? .keepForLater }
+        normalizeRetries()
+        approvedRetries = Set(retryIDs.filter { saved.approvedRetries.contains($0) })
+        discardConfirmed = false
+        phase = .choosing
+        if saved.shownRevision != shownRevision { markChangedAgain(revision: shownRevision) }
     }
 
     public var title: String {
         switch phase {
         case .saving: "Saving your choice…"
+        case .saveFailed: "Your choice wasn't saved. Try again."
         case .changedAgain: "This task changed again. Review both versions."
-        case .choosing, .confirmingDiscard: dependentIDs.isEmpty ? "Choose a version" : "\(RuntimeIssuePresenter.laterActions(dependentIDs.count)) need your decision"
+        case .choosing, .confirmingDiscard:
+            dependentIDs.isEmpty
+                ? "Choose a version" : "\(RuntimeIssuePresenter.laterActions(dependentIDs.count)) need your decision"
         }
     }
 }
 
 /// What the user decided; durable once stored, and always against `againstRevision`.
 public struct ConflictDecision: Equatable, Sendable {
-    public let version: ConflictVersion
+    /// Nil where the item was deleted elsewhere and the only choice is to keep it deleted.
+    public let version: ConflictVersion?
     public let againstRevision: String?
     public let keepForLater: [String]
     public let retry: [String]
     public let discard: [String]
+}
+
+extension RuntimeIssueResolution {
+    /// The draft's decision as the runtime takes it: the saved version is `.keepMine`, the account's
+    /// is `.useAccountVersion`, and no version (deleted elsewhere) is `.keepDeleted`. Every held
+    /// action is in exactly one of keepForLater, retry and discard.
+    public init(issueID: String, decision: ConflictDecision) {
+        let outcome: Outcome
+        switch decision.version {
+        case .saved?: outcome = .keepMine
+        case .account?: outcome = .useAccountVersion
+        case nil: outcome = .keepDeleted
+        }
+        self.init(
+            issueID: issueID, outcome: outcome, shownRevision: decision.againstRevision,
+            keepForLater: decision.keepForLater, retry: decision.retry, discard: decision.discard)
+    }
+}
+
+extension RuntimeIssuePresenter {
+    /// A fresh draft for `issue`: Keep for later for every held action, retry offered only for an
+    /// action that is itself a known saved issue and whose held predecessors can be retried too.
+    ///
+    /// The draft is decided against the revision of the account's record the person is shown
+    /// (`account.revision`), so a record that moves afterwards is caught as "changed again". Without
+    /// the account's record it falls back to the revision the user edited.
+    public static func draft(
+        for issue: RustWorkspaceIssue, among all: [RustWorkspaceIssue], account: RuntimeIssueAccountVersion? = nil
+    ) -> ConflictDecisionDraft {
+        var rules: [String: [String]] = [:]
+        for id in issue.dependentIDs {
+            if let known = all.first(where: { $0.commandID == id || $0.id == id }) { rules[id] = known.waitsOn }
+        }
+        return ConflictDecisionDraft(
+            dependentIDs: issue.dependentIDs, shownRevision: account.map(\.revision) ?? issue.shownBaseRevision,
+            issueID: issue.id, requiresVersion: RuntimeIssueKind(reason: issue.reason) != .deletedElsewhere, retryDependencies: rules)
+    }
+}
+
+extension RustWorkspaceIssue {
+    /// The commands this issue's own command waits on (`depends_on` of its saved intent).
+    public var waitsOn: [String] {
+        guard let intent = try? JSONSerialization.jsonObject(with: localIntent) as? [String: Any] else { return [] }
+        return intent["depends_on"] as? [String] ?? []
+    }
 }
 
 // MARK: - M-01 / M-03 status
@@ -378,5 +524,59 @@ public enum RuntimeSyncStatusPresenter {
         return RuntimeSyncStatus(
             distinction: distinction, headline: headline, detail: detail, action: action, needsAttention: attention,
             syncNowDisabledReason: disabled, referenceID: reference, accessibilityLabel: "Sync status: \(label)")
+    }
+}
+
+// MARK: - M-03 recovery card
+
+/// What the recovery card says and offers for the runtime's recovery state (design M-03; the Mac's
+/// D-03 reads the same facts). Waiting changes and saved issues are always named as kept.
+public struct RuntimeRecoveryCard: Equatable, Sendable {
+    public enum Action: Equatable, Sendable {
+        case updateApp, tryAgain
+        case copyReference(String)
+    }
+
+    public enum Condition: Equatable, Sendable {
+        case updateNeededStore, rebuilding, rebuildFailed(referenceID: String?)
+    }
+
+    public let condition: Condition
+    public let title: String
+    public let detail: String
+    public let actions: [Action]
+    /// Sync is stopped until the person acts.
+    public let isBlocking: Bool
+    public let accessibilityLabel: String
+
+    public init?(_ recovery: RuntimeSyncRecovery, pendingCount: Int) {
+        let condition: Condition, title: String, detail: String, actions: [Action]
+        var reference: String?
+        if recovery.storeNeedsUpdate {
+            condition = .updateNeededStore
+            title = "Update needed to open tasks"
+            detail = "Nothing is written and nothing syncs until you update."
+            actions = [.updateApp, .tryAgain]
+        } else if recovery.rebuild == .rebuilding {
+            condition = .rebuilding
+            title = "Rebuilding synced copy…"
+            detail = "\(SyncCopy.changes(pendingCount)) waiting. Your waiting changes and saved conflicts will be kept."
+            actions = []
+        } else if case .failed(let failedReference) = recovery.rebuild {
+            condition = .rebuildFailed(referenceID: failedReference)
+            title = "Couldn't rebuild the synced copy."
+            detail = "Your waiting changes are saved."
+            actions = [.tryAgain] + (failedReference.map { [.copyReference($0)] } ?? [])
+            reference = failedReference
+        } else {
+            return nil
+        }
+        self.condition = condition
+        self.title = title
+        self.detail = detail
+        self.actions = actions
+        isBlocking = condition == .updateNeededStore
+        accessibilityLabel = [title, detail, reference.map { "Reference ID: \($0)" }].compactMap { $0 }
+            .joined(separator: ". ")
     }
 }

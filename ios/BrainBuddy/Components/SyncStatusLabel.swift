@@ -54,7 +54,7 @@ struct SyncStatusLabel: View {
             failure = TransportFailure(referenceID: nil)
         }
         let status = RuntimeSyncStatusPresenter.describe(
-            workspace.syncSnapshot, updateNeeded: false, transportFailure: failure, now: now, device: device)
+            workspace.syncSnapshot, updateNeeded: workspace.syncRecovery.storeNeedsUpdate, transportFailure: failure, now: now, device: device)
         return Description(
             text: status.headline, detail: status.detail, symbolName: symbolName(status.distinction, device: device),
             needsAttention: status.needsAttention, accessibilityLabel: status.accessibilityLabel)
