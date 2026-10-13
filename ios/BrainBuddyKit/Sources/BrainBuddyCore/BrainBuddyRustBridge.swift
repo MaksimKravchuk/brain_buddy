@@ -1131,6 +1131,31 @@ public final class RustWorkspaceRuntime: Sendable {
         try await committing { workspace, operation in try workspace.saveDraft(draft: draft, operation: operation) }
     }
 
+    /// Resolves one sync issue and everything held behind it in one transaction. Nothing is saved
+    /// unless all of it is; a record that changed after it was shown answers `REVISION_CONFLICT`.
+    public func resolveIssue(_ request: RustIssueResolveRequest, context: RustWorkspaceContext)
+        async throws -> RuntimeIssueResolutionResult {
+        let request = request.bridged(context: context)
+        let resolved = try await committing { workspace, operation in
+            try workspace.resolveIssue(request: request, operation: operation)
+        }
+        return RuntimeIssueResolutionResult(
+            replaced: resolved.replaced.map {
+                RuntimeReplacedCommand(oldCommandID: $0.oldCommandId, newCommandID: $0.newCommandId)
+            }, discarded: resolved.discarded, kept: resolved.kept, repeated: resolved.repeated)
+    }
+
+    /// The record an issue conflicts with as the confirmed base holds it now; nil when the issue
+    /// is gone or has no known target.
+    public func issueCurrent(_ issueID: String) async throws -> RustWorkspaceIssueCurrent? {
+        try await offActor { workspace in
+            try workspace.issueCurrent(issueId: issueID).map {
+                RustWorkspaceIssueCurrent(entityType: $0.entityType, recordVersion: $0.recordVersion,
+                    editRevision: $0.editRevision, deleted: $0.deleted, record: $0.record)
+            }
+        }
+    }
+
     public func deleteDraft(_ draftID: String) async throws {
         try await committing { workspace, operation in try workspace.deleteDraft(draftId: draftID, operation: operation) }
     }
@@ -1322,5 +1347,40 @@ public final class RustWorkspaceSubscription: Sendable {
             if Task.isCancelled { throw RustBridgeError.cancelled }
             return try outcome.get()
         } onCancel: { subscription.cancel() }
+    }
+}
+
+public struct RustWorkspaceIssueCurrent: Equatable, Sendable {
+    public let entityType: String
+    public let recordVersion: String
+    public let editRevision: String?
+    public let deleted: Bool
+    /// The record's JSON body; nil for a tombstone.
+    public let record: Data?
+}
+
+extension RustIssueReplacement {
+    fileprivate var bridged: BridgeReplacement {
+        BridgeReplacement(commandId: commandID, preconditions: preconditions, dependsOn: dependsOn)
+    }
+}
+
+extension RustIssueResolveRequest {
+    fileprivate func bridged(context: RustWorkspaceContext) -> BridgeResolveRequest {
+        let choice: BridgeIssueChoice
+        switch self.choice {
+        case .useCurrent: choice = .useCurrent
+        case .keepMine(let replacement): choice = .keepMine(replacement: replacement.bridged)
+        }
+        return BridgeResolveRequest(issueId: issueID, choice: choice,
+            dependents: dependents.map { held in
+                let decision: BridgeDependentChoice
+                switch held.choice {
+                case .keepForLater: decision = .keepForLater
+                case .retry(let replacement): decision = .retry(replacement: replacement.bridged)
+                case .discard(let confirmed): decision = .discard(confirmed: confirmed)
+                }
+                return BridgeDependentDecision(commandId: held.commandID, choice: decision)
+            }, context: context.bridged)
     }
 }

@@ -663,7 +663,12 @@ pub fn workspace_issues_page(
         let mut items = Vec::with_capacity(limit as usize + 1);
         while let Some(row) = rows.next().map_err(StoreError::from)? {
             let intent: Vec<u8> = row.get(3).map_err(StoreError::from)?;
-            let text: Option<Vec<u8>> = row.get(4).map_err(StoreError::from)?;
+            // `local_text` is stored as JSON text; accept a blob too, as older rows may hold one.
+            let text: Option<Vec<u8>> = match row.get_ref(4).map_err(StoreError::from)? {
+                rusqlite::types::ValueRef::Null => None,
+                rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => Some(bytes.to_vec()),
+                _ => return Err(QueryError::Store(StoreError::Corrupt)),
+            };
             let dependents: String = row.get(6).map_err(StoreError::from)?;
             items.push(serde_json::json!({"issue_id":row.get::<_,String>(0).map_err(StoreError::from)?, "command_id":row.get::<_,String>(1).map_err(StoreError::from)?, "reason":row.get::<_,String>(2).map_err(StoreError::from)?, "local_intent":serde_json::from_slice::<serde_json::Value>(&intent).map_err(|_| QueryError::Store(StoreError::Corrupt))?, "local_text":text.map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes)).transpose().map_err(|_| QueryError::Store(StoreError::Corrupt))?, "shown_base_revision":row.get::<_,Option<String>>(5).map_err(StoreError::from)?, "dependent_ids":serde_json::from_str::<serde_json::Value>(&dependents).map_err(|_| QueryError::Store(StoreError::Corrupt))?, "created_at":row.get::<_,String>(7).map_err(StoreError::from)?}));
         }
