@@ -535,7 +535,15 @@ impl SyncSession {
         }
         let details = &error.error.details;
         let reset = error.error.code == "RESET_REQUIRED";
-        match error.error.code.as_str() {
+        // The server answers a send from an epoch it has never heard of (a
+        // restore to an image older than the registration) with the same 404 as
+        // any foreign ID. The send is stamped with this device's own epoch, so
+        // that epoch is gone: it is closed like an explicit `EPOCH_CLOSED`.
+        let code = match (error.error.code.as_str(), request.kind, &request.epoch) {
+            ("RESOURCE_NOT_FOUND", RequestKind::Send, Some(_)) => "EPOCH_CLOSED",
+            (other, _, _) => other,
+        };
+        match code {
             "RESET_REQUIRED" | "EPOCH_CLOSED" => {
                 // A reset that is not an explicit closure keeps the epoch.
                 let closing = !reset || details.epoch_status == Some(EpochStatus::Closed);
