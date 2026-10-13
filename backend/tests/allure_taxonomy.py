@@ -284,6 +284,11 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
         "Rust review facade",
         "Flag ON and OFF give identical Review HTTP",
     ),
+    "rust_core_holder": (
+        EPIC_TASKS,
+        "Rust core holder",
+        "A poisoned runtime is replaced for the next call",
+    ),
     "task_jobs": (EPIC_TASKS, "Durable job ledger", "Leases, fencing and retries"),
     "task_job_worker": (
         EPIC_TASKS,

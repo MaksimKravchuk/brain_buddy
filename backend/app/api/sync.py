@@ -118,7 +118,7 @@ def get_sync_gateway(
     with _BUILD:
         gateway = getattr(request.app.state, "sync_gateway", None)
         if gateway is None:
-            core = RustCore()
+            core = container.rust_core
             receipts = ReceiptStore(core)
             flags = container.feature_flag_service
             gateway = SyncGateway(

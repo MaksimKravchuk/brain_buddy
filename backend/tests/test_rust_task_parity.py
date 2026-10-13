@@ -1091,10 +1091,16 @@ def test_026_FR_014_flag_applies_per_command_in_both_directions(apps: Apps) -> N
     assert apps.on_decisions[0] == 2
 
 
-def test_026_FR_014_a_bridge_failure_fails_closed_without_writing(apps: Apps) -> None:
+def test_026_FR_014_a_bridge_failure_fails_closed_without_writing(
+    apps: Apps, monkeypatch: pytest.MonkeyPatch
+) -> None:
     facade = _container(apps.on).task_service._rust_facade
     assert facade is not None
-    facade._core.close()
+    # The holder would replace a closed runtime; pin it to a dead one to prove
+    # a bridge failure itself fails closed (replacement: test_rust_core_holder).
+    dead = RustCore()
+    dead.close()
+    monkeypatch.setattr(facade._core, "get", lambda: dead)
     with allure.step("a closed core refuses the write and nothing is stored"):
         service = _container(apps.on).task_service
         owner = apps.on.get("/api/account").json()["id"]

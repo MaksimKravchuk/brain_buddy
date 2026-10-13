@@ -49,7 +49,7 @@ from app.modules.tasks.navigator import (
 )
 from app.modules.tasks.review_flow import ReviewFlowService
 from app.modules.tasks.review_service import ReviewService
-from app.modules.tasks.rust_adapter import RustCore
+from app.modules.tasks.rust_adapter import RustCoreHolder
 from app.modules.tasks.rust_review_facade import RustReviewFacade
 from app.modules.tasks.rust_task_facade import RustTaskFacade
 from app.modules.tasks.sync.authority import IdentityScopeAuthority
@@ -161,6 +161,8 @@ class Container:
     # Spec 026 PR-50: independent cleanup of every sync copy (receipt content,
     # feed after-images, snapshots, transfers). Needs no flag or authority.
     sync_retention: SyncRetention
+    # Spec 026: the one replaceable Rust runtime every sync surface shares.
+    rust_core: RustCoreHolder
 
 
 class _UnavailableRelaySecretBox(SecretBox):
@@ -501,8 +503,9 @@ def build_container(
             return False
         return feature_flag_service.is_effective("rust_core_sync", user)
 
-    # One bridge runtime serves the task and the Review facades.
-    rust_core = RustCore()
+    # One replaceable runtime holder serves the Task and Review facades, the
+    # sync gateway and the navigator; a poisoned runtime is swapped, not kept.
+    rust_core = RustCoreHolder()
     job_repository = JobRepository(task_repo.db_path)
     task_unit_of_work = TaskUnitOfWork(task_repo, job_repository)
     task_service = TaskService(
@@ -812,6 +815,7 @@ def build_container(
         navigator_service=navigator_service,
         job_repository=job_repository,
         task_unit_of_work=task_unit_of_work,
+        rust_core=rust_core,
         sync_retention=SyncRetention(
             task_unit_of_work,
             ChangeLog(rust_core),
