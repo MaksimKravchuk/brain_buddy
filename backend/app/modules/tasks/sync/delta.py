@@ -37,6 +37,8 @@ MAX_PAGE_TRANSACTIONS: int = LIMITS["inline_page_transactions"]
 # The response envelope (cursors, common fields, brackets) shares the hard limit.
 ENVELOPE_ALLOWANCE = 4096
 _READ_BATCH = 8
+# A scope's commit sequence never approaches 20 digits; a longer counter is forged.
+MAX_COUNTER_DIGITS = 20
 
 
 def _reset(reason: str) -> ProtocolFailure:
@@ -64,6 +66,18 @@ def encode_cursor(current: ScopeAuthority, commit_seq: str) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
+def _canonical_counter(text: str) -> bool:
+    """A bounded canonical decimal; checked before any ``int()`` conversion."""
+    if text == "0":
+        return True
+    return (
+        len(text) <= MAX_COUNTER_DIGITS
+        and text.isascii()
+        and text.isdecimal()
+        and text[0] != "0"
+    )
+
+
 def decode_cursor(token: str) -> Cursor:
     try:
         body = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
@@ -71,7 +85,7 @@ def decode_cursor(token: str) -> Cursor:
         valid = (
             body["v"] == 1
             and all(isinstance(field, str) and field for field in fields)
-            and (fields[3] == "0" or fields[3].isdecimal() and fields[3][0] != "0")
+            and _canonical_counter(fields[3])
         )
     except ValueError, KeyError, TypeError:
         valid = False

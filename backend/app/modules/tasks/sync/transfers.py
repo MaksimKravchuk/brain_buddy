@@ -269,6 +269,10 @@ class TransferStore:
             raise ProtocolFailure(
                 "RESET_REQUIRED", details={"reset_reason": "feed_changed"}
             )
+        if self._content_expired(conn, owner, row, now):
+            raise ProtocolFailure(
+                "RESET_REQUIRED", details={"reset_reason": "content_expired"}
+            )
         stored = conn.execute(
             "SELECT payload, page_sha256 FROM sync_transfer_pages "
             "WHERE owner_id = ? AND transfer_id = ? AND page_index = ?",
@@ -305,4 +309,24 @@ class TransferStore:
         conn.execute(
             "DELETE FROM sync_transfers WHERE owner_id = ? AND expires_at <= ?",
             (owner, _instant(now - _METADATA_RETENTION)),
+        )
+
+    @staticmethod
+    def _content_expired(
+        conn: Connection, owner: str, transfer: Any, now: datetime
+    ) -> bool:
+        """Any record past its absolute retention, or gone, voids the copy.
+
+        The deadline is read from the feed on every fetch, not frozen at
+        materialization, so a later-assigned expiry also applies.
+        """
+        rows = conn.execute(
+            "SELECT source_expires_at FROM sync_change_records "
+            "WHERE owner_id = ? AND commit_seq = ?",
+            (owner, transfer["commit_seq"]),
+        ).fetchall()
+        return len(rows) != transfer["record_count"] or any(
+            row["source_expires_at"] is not None
+            and datetime.fromisoformat(row["source_expires_at"]) <= now
+            for row in rows
         )

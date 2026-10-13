@@ -704,6 +704,7 @@ def test_026_FR_008_canonical_json_matches_the_rust_rfc8785_core():
         for bad in (float("nan"), object()):
             with pytest.raises((ValueError, TypeError)):
                 transfers.canonical_json([bad])
+        attach_json("refused", ["nan", "object"])
 
 
 def test_026_FR_008_an_empty_or_exact_multiple_stream_still_has_pages():
@@ -755,3 +756,84 @@ def test_026_FR_010_a_window_pruned_to_nothing_resets_instead_of_an_empty_page(
         assert (response.status_code, error_code(response)) == (409, "RESET_REQUIRED")
         details = response.json()["error"]["details"]
         check_equal("reason", details["reset_reason"], "cursor_expired")
+
+
+def test_026_FR_010_a_transfer_fails_closed_once_its_content_passes_retention(
+    client, owner, gateway
+):
+    start = cursor_at(gateway, owner)
+    oversized(gateway, owner)
+    manifest = pull(client, owner, start).json()["transaction_manifest"]
+    url = f"/api/sync/v1/transactions/{manifest['transfer_id']}"
+    token = manifest["first_page_token"]
+    with allure.step("a page is served while the content is inside its deadline"):
+        conn = sqlite3.connect(gateway.units._repo.db_path)
+        with conn:
+            conn.execute(
+                "UPDATE sync_change_records SET source_expires_at = ? "
+                "WHERE record_key LIKE '%task_00003%'",
+                ((gateway.clock() + timedelta(days=7)).isoformat(),),
+            )
+        ok = client.get(url, params={"page_token": token})
+        check_equal("status", ok.status_code, 200)
+    with allure.step("after the deadline every stored page is refused"):
+        later = gateway.clock() + timedelta(days=8)
+        client.app.state.sync_gateway = dataclasses.replace(
+            gateway, clock=lambda: later
+        )
+        # Keep the transfer itself unexpired so only retention can refuse it.
+        with conn:
+            conn.execute(
+                "UPDATE sync_transfers SET expires_at = ?",
+                ((later + timedelta(minutes=5)).isoformat(timespec="microseconds"),),
+            )
+        for page_token in (token, transfers.page_token(manifest["transfer_id"], 1)):
+            response = client.get(url, params={"page_token": page_token})
+            assert (response.status_code, error_code(response)) == (
+                409,
+                "RESET_REQUIRED",
+            )
+            check_equal(
+                "reason",
+                response.json()["error"]["details"]["reset_reason"],
+                "content_expired",
+            )
+    conn.close()
+
+
+def test_026_FR_011_oversized_and_malformed_cursors_are_invalid_requests_not_errors(
+    client, owner, gateway
+):
+    current = ScopeAuthority(owner, "s", "feed", "access", "epoch")
+    good = cursor_at(gateway, owner)
+
+    def forge(**override: Any) -> str:
+        body = {"v": 1, "o": owner, "a": "x", "f": "y", "s": "1", **override}
+        raw = json.dumps(body).encode()
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    hostile = {
+        "4301 digits": forge(s="9" * 4301),
+        "40k digits": forge(s="9" * 40_000),
+        "21 digits": forge(s="1" + "0" * 20),
+        "unicode digits": forge(s="١٢٣"),
+        "superscript": forge(s="²"),
+        "plus sign": forge(s="+1"),
+        "number not string": forge(s=1),
+        "null owner": forge(o=None),
+        "version 2": forge(v=2),
+        "json array": base64.urlsafe_b64encode(b"[1]").decode(),
+        "not json": base64.urlsafe_b64encode(b"\xff\xfe").decode(),
+        "padding only": "====",
+    }
+    with allure.step("each hostile cursor is INVALID_REQUEST through the real router"):
+        seen = {}
+        for label, token in hostile.items():
+            response = pull(client, owner, token)
+            seen[label] = response.status_code
+            assert error_code(response) == "INVALID_REQUEST", label
+        check_equal("statuses", set(seen.values()), {422})
+    with allure.step("the largest accepted counter is still served"):
+        edge = delta.encode_cursor(current, "9" * 20)
+        assert delta.decode_cursor(edge).commit_seq == "9" * 20
+        assert pull(client, owner, good).status_code == 200
