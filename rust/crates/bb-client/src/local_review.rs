@@ -238,8 +238,19 @@ pub(crate) fn private_read_set(
     public: &ReadSet,
     now: &Instant,
 ) -> Result<ReadSet, ExecuteError> {
+    Ok(private_overlay(conn, workspace, public, now)?.unwrap_or_else(|| public.clone()))
+}
+
+/// [`private_read_set`] that copies the public set only when some private
+/// evidence applies to it, and answers `None` (use `public` as is) otherwise.
+pub(crate) fn private_overlay(
+    conn: &Connection,
+    workspace: &str,
+    public: &ReadSet,
+    now: &Instant,
+) -> Result<Option<ReadSet>, ExecuteError> {
     let now = instant(now)?;
-    let mut result = public.clone();
+    let mut result: Option<ReadSet> = None;
     let mut statement = conn.prepare(
         "SELECT record_type,record_key,fields FROM drafts WHERE workspace_id=?1 AND editor_kind=?2",
     )?;
@@ -311,7 +322,7 @@ pub(crate) fn private_read_set(
             return Err(StoreError::Corrupt.into());
         }
         inject(&mut record, overlay.private)?;
-        crate::execute::file(&mut result, record);
+        crate::execute::file(result.get_or_insert_with(|| public.clone()), record);
     }
     Ok(result)
 }

@@ -320,18 +320,13 @@ private struct TagButton: View {
 }
 
 /// Sync state in words, trailing on the Settings row: "Synced just now",
-/// "Offline — 3 changes waiting"; amber when it needs the person's attention.
+/// "Offline · 3 changes waiting"; amber when it needs the person's attention.
 private struct HubSyncStatus: View {
     @Environment(Workspace.self) private var workspace
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let description = SyncStatusLabel.describe(
-                workspace.syncStatus,
-                pendingChanges: workspace.pendingChangeCount,
-                now: context.date,
-                deviceName: SyncStatusLabel.deviceName
-            )
+            let description = SyncStatusLabel.describe(workspace, now: context.date)
             Text(description.text)
                 .font(BBFont.meta)
                 .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)

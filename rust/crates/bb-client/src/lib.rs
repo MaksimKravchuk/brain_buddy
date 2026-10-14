@@ -37,6 +37,7 @@ mod local_review_fragments;
 mod local_review_import;
 mod localfacts;
 mod locking;
+mod projection_cache;
 mod rebase;
 mod receipts;
 mod replay;
@@ -99,7 +100,9 @@ pub use snapshot::{
     Activated, SnapshotProgress, abandon_snapshot, activate_snapshot, activate_snapshot_with,
     begin_snapshot, stage_snapshot_page,
 };
-pub use storage::{OpenOptions, SCHEMA_VERSION, Store, StoreError, StoreStatus};
+pub use storage::{
+    OpenOptions, ProjectionCacheStats, SCHEMA_VERSION, Store, StoreError, StoreStatus,
+};
 pub use subscriptions::{
     Action, ChangeKind, HintReader, HintStream, HintWatcher, Invalidation, InvalidationHub,
     SSE_MAX_EVENT_BYTES, Scheduler, SseItem, SseOverflow, SseParser, Step, StreamEnd,

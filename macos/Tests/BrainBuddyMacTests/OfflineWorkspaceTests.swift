@@ -285,6 +285,9 @@ struct OfflineWorkspaceTests {
         for number in 0..<70 {
             _ = try await model.workspace.createProject(name: "Project \(number)", editorID: "review-fixture:project:\(number)")
         }
+        // The subscription watcher invalidates queries asynchronously after each write; let it
+        // finish before preparing, or its late invalidation flips a settled query back to loading.
+        await model.workspace.settleRustInvalidations()
         let items = await model.loadProjectReview()
         #expect(items.count == 70)
         #expect(model.projectReviewReadiness == .ready)

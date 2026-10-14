@@ -431,9 +431,13 @@ fn resolution_json(resolution: &Resolution) -> serde_json::Value {
 
 /// Resolve a draft against an owned read set, as capture would right now.
 fn resolve_smart_add(read_set: &[u8], draft: &[u8]) -> Result<Vec<u8>, Failure> {
-    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    resolve_smart_add_in(&parse_json(read_set, "read_set")?, draft)
+}
+
+/// [`resolve_smart_add`] over a read set already in memory (no JSON round trip).
+pub(crate) fn resolve_smart_add_in(read_set: &ReadSet, draft: &[u8]) -> Result<Vec<u8>, Failure> {
     let draft: Draft = parse_json::<DraftInput>(draft, "draft")?.into();
-    to_json(&resolution_json(&smart_add::resolve(&read_set, &draft)))
+    to_json(&resolution_json(&smart_add::resolve(read_set, &draft)))
 }
 
 /// The `task.smart_add` payload capture would send, or the draft's first problem.
@@ -442,10 +446,18 @@ fn propose_smart_add(
     draft: &[u8],
     minted: &[u8],
 ) -> Result<BridgeAnswer, Failure> {
-    let read_set: ReadSet = parse_json(read_set, "read_set")?;
+    propose_smart_add_in(&parse_json(read_set, "read_set")?, draft, minted)
+}
+
+/// [`propose_smart_add`] over a read set already in memory.
+pub(crate) fn propose_smart_add_in(
+    read_set: &ReadSet,
+    draft: &[u8],
+    minted: &[u8],
+) -> Result<BridgeAnswer, Failure> {
     let draft: Draft = parse_json::<DraftInput>(draft, "draft")?.into();
     let minted: MintedIds = parse_json(minted, "minted_ids")?;
-    let resolution = smart_add::resolve(&read_set, &draft);
+    let resolution = smart_add::resolve(read_set, &draft);
     if resolution.problem.is_none() {
         // `propose` mints lazily and cannot fail on a short supply, so it is checked here.
         let new_project = resolution
@@ -463,7 +475,7 @@ fn propose_smart_add(
     let mut project = minted.project;
     let mut tags = minted.tags.into_iter();
     let proposal = smart_add::propose(
-        &read_set,
+        read_set,
         &draft,
         || project.take().unwrap_or_else(|| spare_project.clone()),
         || tags.next().unwrap_or_else(|| spare_tag.clone()),

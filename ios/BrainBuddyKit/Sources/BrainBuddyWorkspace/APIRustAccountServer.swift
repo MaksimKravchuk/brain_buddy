@@ -42,6 +42,52 @@ public struct APIRustAccountServer: RustAccountServer {
         return RustServerLogin(account: account, deletionCancelled: me.deletionCancelled, previousToken: previous)
     }
 
+    public func authenticate(serverURL: URL, credential: NativeSignInCredential) async throws -> RustServerAuthentication {
+        guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
+            throw SignInFailure(message: "Use an https server address.")
+        }
+        // The candidate session lives in a jar of its own until it is accepted: nothing touches
+        // the live token store before the link is decided.
+        let session = NativeAuthenticationSession(serverURL: url, transport: transport, clientVersion: identity.version)
+        let completion: AuthCompletionDTO
+        do {
+            completion = try await session.complete(credential)
+        } catch {
+            await discard(session, on: url)
+            if error.isUncertainOutcome {
+                throw SignInFailure(message: "We couldn't confirm whether this finished. Your local tasks are kept. Start a fresh sign-in.", referenceID: error.referenceID)
+            }
+            throw Self.failure(error)
+        }
+        switch completion {
+        case .signedIn(let me, let deletionCancelled):
+            guard !me.id.isEmpty, !me.email.isEmpty, let token = session.candidateToken else {
+                await discard(session, on: url)
+                throw SignInFailure(message: "The server returned an unexpected sign-in response.")
+            }
+            let previous = try? tokenStore.token(for: url)
+            do { try tokenStore.setToken(token, for: url) } catch {
+                await discard(session, on: url)
+                throw SignInFailure(message: "Brain Buddy couldn't save your sign-in on this device.")
+            }
+            session.forgetCandidate()
+            let account = LinkedAccount(id: me.id, email: me.email, displayName: me.displayName, serverURL: url, linkedAt: now())
+            return .signedIn(RustServerLogin(account: account, deletionCancelled: deletionCancelled, previousToken: previous))
+        case .verifyMailbox, .resetReady, .existingAccountRequired:
+            return .continuation(completion)
+        default:
+            await discard(session, on: url)
+            throw SignInFailure(message: "The server returned an unexpected sign-in response.")
+        }
+    }
+
+    /// Ends a candidate session that was never accepted.
+    private func discard(_ session: NativeAuthenticationSession, on url: URL) async {
+        guard let token = session.candidateToken else { return }
+        session.forgetCandidate()
+        await end(PendingLogout(serverURL: url, token: token, signedOutAt: now()))
+    }
+
     public func abandon(_ login: RustServerLogin) async {
         let url = login.account.serverURL
         let created = (try? tokenStore.token(for: url)) ?? nil

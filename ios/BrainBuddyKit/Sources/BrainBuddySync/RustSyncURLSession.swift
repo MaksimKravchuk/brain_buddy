@@ -79,6 +79,24 @@ public final class URLSessionRustSyncTransport: RustSyncTransport {
     private let credential: SessionCookieCredential
     private let identity: ClientIdentity
     private let session: URLSession
+    private let failureCorrelationID = Mutex<String?>(nil)
+
+    /// The `X-Correlation-ID` of the most recent non-2xx answer (nil when that answer carried none or
+    /// a malformed one), taken by the caller: reading it clears it. A later 2xx does not clear it, so
+    /// a round that failed and then retried successfully hands over the failed request's ID only
+    /// until the host reads it at the end of each round. Content-free: the ID only, never a body.
+    public func takeLastFailureCorrelationID() -> String? {
+        failureCorrelationID.withLock { value in
+            defer { value = nil }
+            return value
+        }
+    }
+
+    /// True for the opaque IDs the server mints (UUIDs); anything else is not shown to people.
+    static func isPlainCorrelationID(_ value: String) -> Bool {
+        (1...64).contains(value.count)
+            && value.unicodeScalars.allSatisfy { ($0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains($0))) || $0 == "-" || $0 == "_" }
+    }
 
     public init(
         serverURL: URL, tokenStore: any SessionTokenStore, identity: ClientIdentity = .iOS,
@@ -151,6 +169,10 @@ public final class URLSessionRustSyncTransport: RustSyncTransport {
         guard let http = result.response as? HTTPURLResponse else { throw .connection }
         credential.observe(
             statusCode: http.statusCode, setCookie: Self.header(http, "Set-Cookie"), sentToken: sentToken)
+        if !(200..<300).contains(http.statusCode) {
+            let id = Self.header(http, "X-Correlation-ID")?.trimmingCharacters(in: .whitespaces)
+            failureCorrelationID.withLock { $0 = id.flatMap { Self.isPlainCorrelationID($0) ? $0 : nil } }
+        }
         return RustSyncResponse(
             status: http.statusCode, retryAfter: RustSyncURLSession.retryAfter(Self.header(http, "Retry-After")),
             body: result.data ?? Data())

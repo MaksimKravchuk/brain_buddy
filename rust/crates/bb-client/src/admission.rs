@@ -39,12 +39,14 @@ fn changed(task: &TaskId) -> ExecuteError {
     .into()
 }
 
+/// The newest local subtask/comment edit of a task, by the indexed
+/// `outbox.child_task_id` (schema v3).
+pub(crate) const CHILD_WITNESS_SQL: &str = "SELECT COALESCE(MAX(local_seq),0) FROM outbox
+     WHERE workspace_id=?1 AND child_task_id=?2";
+
 fn child_witness(conn: &Connection, workspace: &str, task: &TaskId) -> Result<String, StoreError> {
     let seq: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(local_seq),0) FROM outbox WHERE workspace_id=?1
-         AND json_extract(CAST(envelope AS TEXT),'$.type') IN
-         ('subtask.create','subtask.update','subtask.transition','comment.create','comment.update')
-         AND json_extract(CAST(envelope AS TEXT),'$.payload.task_id')=?2",
+        CHILD_WITNESS_SQL,
         params![workspace, task.as_str()],
         |row| row.get(0),
     )?;
@@ -52,6 +54,21 @@ fn child_witness(conn: &Connection, workspace: &str, task: &TaskId) -> Result<St
         .map(|seq| seq.to_string())
         .map_err(|_| StoreError::Corrupt)
 }
+
+pub(crate) const DETAIL_KNOWN_SQL: &str =
+    "SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.workspace_id=?1
+           AND o.state NOT IN ('rejected','blocked_dependency') AND o.superseded_by IS NULL
+           AND o.command_type IN ('task.create','task.smart_add')
+           AND o.target_id=?2
+           AND EXISTS(SELECT 1 FROM json_each(CAST(o.local_result AS TEXT),'$.versions') v
+             WHERE json_extract(v.value,'$.entity_type')='task'
+               AND json_array_length(json_extract(v.value,'$.record_key'))=1
+               AND json_extract(v.value,'$.record_key[0]')=?2
+               AND json_extract(v.value,'$.edit_revision') IS NOT NULL))
+         OR EXISTS(SELECT 1 FROM staging_bases b JOIN sync_meta m USING(workspace_id)
+           WHERE b.workspace_id=?1 AND b.kind='snapshot' AND b.state='activated'
+           AND b.target_generation=m.server_generation
+           AND json_extract(CAST(b.manifest AS TEXT),'$.snapshot_id') IS NOT NULL)";
 
 fn detail_known(conn: &Connection, workspace: &str, task: &TaskId) -> Result<bool, StoreError> {
     let carrier: Option<Vec<u8>> = conn.query_row(
@@ -71,23 +88,11 @@ fn detail_known(conn: &Connection, workspace: &str, task: &TaskId) -> Result<boo
     // Their retained result must prove this exact task was actually produced;
     // command type alone cannot turn an imported partial frame into a full one.
     // A complete active server snapshot independently proves source completeness.
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM outbox o WHERE o.workspace_id=?1
-           AND o.state NOT IN ('rejected','blocked_dependency') AND o.superseded_by IS NULL
-           AND json_extract(CAST(o.envelope AS TEXT),'$.type') IN ('task.create','task.smart_add')
-           AND json_extract(CAST(o.envelope AS TEXT),'$.entity_id')=?2
-           AND EXISTS(SELECT 1 FROM json_each(CAST(o.local_result AS TEXT),'$.versions') v
-             WHERE json_extract(v.value,'$.entity_type')='task'
-               AND json_array_length(json_extract(v.value,'$.record_key'))=1
-               AND json_extract(v.value,'$.record_key[0]')=?2
-               AND json_extract(v.value,'$.edit_revision') IS NOT NULL))
-         OR EXISTS(SELECT 1 FROM staging_bases b JOIN sync_meta m USING(workspace_id)
-           WHERE b.workspace_id=?1 AND b.kind='snapshot' AND b.state='activated'
-           AND b.target_generation=m.server_generation
-           AND json_extract(CAST(b.manifest AS TEXT),'$.snapshot_id') IS NOT NULL)",
-        params![workspace, task.as_str()],
-        |row| row.get(0),
-    )?)
+    Ok(
+        conn.query_row(DETAIL_KNOWN_SQL, params![workspace, task.as_str()], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 fn digest(
