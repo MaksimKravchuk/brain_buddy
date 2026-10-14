@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>027 · Invite step for a new identity — design</title>
+<style>
+:root{--base:#f8fafc;--sunken:#f1f5f9;--raised:#fff;--ink:#0f172a;--muted:#475569;--border:#e2e8f0;--sky:#0369a1;--sky-light:#087bab;--warning:#92400e;--warning-bg:#fffbeb;--warning-border:#fde68a;--rose:#be123c;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--shadow:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}body{margin:0;background:var(--base);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif}
+main{max-width:1184px;margin:auto;padding:24px}h1{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;margin:0 0 12px}h2{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 12px}h3{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px}h4{font-size:14px;font-weight:600;margin:0 0 4px}p{margin:0 0 12px}a{color:var(--sky)}
+.intro,.explain{max-width:900px;color:var(--muted)}.draft{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--warning-bg);border:1px solid var(--warning-border);color:var(--warning);margin-bottom:12px}
+section.review{margin-bottom:32px}.pair{display:grid;grid-template-columns:minmax(0,390px) minmax(0,1fr);gap:24px;align-items:start}figure{margin:0;min-width:0}figcaption{font-size:12px;color:var(--muted);margin-bottom:8px}figcaption strong{color:var(--ink)}
+.surface{background:var(--raised);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}.mobile{max-width:390px;min-height:520px;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--base);min-height:44px}.bar strong{font-size:15px;font-weight:600}.bar button{border-color:transparent;background:transparent;padding:8px}
+.content{padding:24px 20px;display:flex;flex-direction:column;flex:1}.secondary{color:var(--muted)}.micro{font-size:12px;color:var(--muted)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.actions>*{flex:1 1 auto}.mobile .actions{flex-direction:column}
+button{font:inherit;display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;background:#fff;border:1px solid var(--border);border-radius:8px;color:var(--sky);cursor:pointer;white-space:normal;text-align:center;line-height:1.4}
+button.primary{background:var(--sky);border-color:var(--sky);color:#fff}button:hover{background:var(--sunken)}button.primary:hover{background:var(--sky-light)}button:active{transform:scale(.98)}button:disabled{color:var(--muted);background:var(--sunken);border-color:var(--border);cursor:default;transform:none}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:none;box-shadow:var(--focus)}
+.web-card{max-width:440px;margin:24px auto;background:#fff;border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);padding:20px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:14px}label.f span{font-weight:500;color:#334155}
+input{font:14px ui-monospace,SFMono-Regular,Menlo,monospace;min-height:44px;border:1px solid var(--border);border-radius:6px;padding:8px 12px;background:#fff;color:var(--ink);width:100%}
+.err{color:var(--rose);font-size:14px;margin:8px 0 0}
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.variant{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--base);min-width:0}.variant p{margin-bottom:8px}.variant button{width:100%;margin-top:8px}
+.surface p,.variant p{overflow-wrap:anywhere}.foot{border-top:1px solid var(--border);padding:20px 0;color:var(--muted);font-size:13px}
+@media(max-width:760px){main{padding:16px}.pair{grid-template-columns:minmax(0,1fr)}.mobile{max-width:none}.actions{flex-direction:column}h1{font-size:24px}}
+@media(prefers-reduced-motion:reduce){button:active{transform:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<span class="draft">Owner decision 2026-10-14 · every new account needs an invite (FR-007)</span>
+<h1>Invite step for a new identity</h1>
+<p class="intro">When email-code, Apple or Google sign-in completes for an identity with no account, the server answers <code>INVITE_REQUIRED</code> with an opaque, single-use, short-lived pending handoff. Nothing has been created yet. The existing sign-in surface then asks for an invite code and resubmits. An existing account never sees this step. Password signup keeps its existing “Invite code” field. The Mac (D-05) offers password sign-in only and can't create accounts, so it has no invite step. iPhone on the left, web on the right. Buttons are illustrative.</p>
+</header>
+
+<section class="review" aria-labelledby="default-title">
+<h2 id="default-title">M-03 / D-04 · .01 Enter your invite code</h2>
+<p class="explain">Focus lands on the field. Enter or Return submits. Cancel abandons the handoff; nothing is created.</p>
+<div class="pair">
+<figure><figcaption><strong>M-03.01</strong> · iPhone · step in the existing sign-in sheet</figcaption>
+<article class="surface mobile" aria-label="iPhone invite step">
+<div class="bar"><button type="button">Cancel</button><strong>Sign in</strong><span aria-hidden="true"></span></div>
+<div class="content">
+<h3>Enter your invite code</h3>
+<p class="secondary">Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
+<label class="f" for="m-invite"><span>Invite code</span></label>
+<input id="m-invite" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+<div class="actions"><button class="primary" type="button">Continue</button></div>
+</div></article></figure>
+<figure><figcaption><strong>D-04.01</strong> · Web · step on the existing sign-in / provider-completion page</figcaption>
+<article class="surface" aria-label="Web invite step">
+<div class="web-card">
+<h3>Enter your invite code</h3>
+<p class="secondary" id="d-invite-help">Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.</p>
+<label class="f" for="d-invite"><span>Invite code</span></label>
+<input id="d-invite" type="text" autocomplete="off" aria-describedby="d-invite-help">
+<div class="actions"><button class="primary" type="button">Continue</button><button type="button">Cancel</button></div>
+</div></article></figure>
+</div>
+</section>
+
+<section class="review" aria-labelledby="other-title">
+<h2 id="other-title">M-03 / D-04 · Other states</h2>
+<div class="states">
+<div class="variant"><h4>.02 · Submitting</h4><p class="micro">Field read-only. Web: the existing Spinner after 300 ms. iPhone: the existing busy indicator.</p><button type="button" disabled>Please wait…</button></div>
+<div class="variant"><h4>.03 · Invalid or used code</h4><input type="text" value="BB-7Q2K-91XD" aria-label="Invite code" aria-describedby="e3"><p class="err" id="e3" role="alert">That invite code isn't valid or has already been used. Check it and try again. Reference: demo-027-invite-01</p><p class="micro">iPhone: “Reference ID: …”. The same wording covers invalid and used codes. Focus returns to the field.</p></div>
+<div class="variant"><h4>.04 · Handoff expired</h4><p>This sign-in has expired. Start again to create your account.</p><button class="primary" type="button">Back to sign in</button><p class="micro">Nothing was created; the invite isn't used.</p></div>
+<div class="variant"><h4>.05 · Offline</h4><p class="micro">Existing network error; the code is kept. iPhone: “Your local tasks are kept. Connect to the internet to sign in.” If the handoff expires meanwhile, the next try shows .04.</p></div>
+<div class="variant"><h4>.06 · Existing account</h4><p class="micro">No invite step. Sign-in completes as today.</p></div>
+<div class="variant"><h4>.07 · Too many attempts</h4><p class="err" role="alert">Too many requests. Try again in a few minutes.</p><button type="button" disabled>Continue</button></div>
+<div class="variant"><h4>.08 · Update required</h4><p class="micro">A 426 here shows D-02.04 on the web and M-01.04 on iPhone.</p></div>
+</div>
+</section>
+<footer class="foot"><p>Screens M-03, D-04 (D-05 Mac reserved, not applicable). States are listed in design.md. Static mock: no rendering, device or accessibility runtime checks performed.</p></footer>
+</main>
+</body>
+</html>

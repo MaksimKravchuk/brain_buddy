@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>027 · Fresh start after update — design</title>
+<style>
+:root{--base:#f8fafc;--sunken:#f1f5f9;--raised:#fff;--ink:#0f172a;--muted:#475569;--border:#e2e8f0;--sky:#0369a1;--sky-light:#087bab;--warning:#92400e;--warning-bg:#fffbeb;--warning-border:#fde68a;--rose:#be123c;--rose-light:#e11d48;--focus:0 0 0 2px #fff,0 0 0 4px rgba(14,165,233,.5);--shadow:0 1px 2px rgba(15,23,42,.04),0 12px 32px -16px rgba(15,23,42,.18)}
+*{box-sizing:border-box}body{margin:0;background:var(--base);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Segoe UI",sans-serif}
+main{max-width:1184px;margin:auto;padding:24px}h1{font-size:28px;line-height:1.2;font-weight:600;letter-spacing:-.02em;margin:0 0 12px}h2{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 12px}h3{font-size:20px;font-weight:600;letter-spacing:-.015em;margin:0 0 8px}h4{font-size:14px;font-weight:600;margin:0 0 4px}p{margin:0 0 12px}a{color:var(--sky)}
+.intro,.explain{max-width:900px;color:var(--muted)}.draft{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--warning-bg);border:1px solid var(--warning-border);color:var(--warning);margin-bottom:12px}
+.nav{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 24px}.nav a{display:inline-flex;align-items:center;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;text-decoration:none}
+section.review{margin-bottom:32px}.pair{display:grid;grid-template-columns:minmax(0,390px) minmax(0,1fr);gap:24px;align-items:start}figure{margin:0;min-width:0}figcaption{font-size:12px;color:var(--muted);margin-bottom:8px}figcaption strong{color:var(--ink)}
+.surface{background:var(--raised);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}.mobile{max-width:390px;min-height:560px;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--base);min-height:44px}.bar strong{font-size:15px;font-weight:600}.bar button{border-color:transparent;background:transparent;padding:8px}
+.content{padding:24px 20px;display:flex;flex-direction:column;flex:1}.secondary{color:var(--muted)}.micro{font-size:12px;color:var(--muted)}
+.spacer{flex:1}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.actions>*{flex:1 1 auto}.mobile .actions{flex-direction:column}
+button{font:inherit;display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:10px 16px;background:#fff;border:1px solid var(--border);border-radius:8px;color:var(--sky);cursor:pointer;white-space:normal;text-align:center;line-height:1.4}
+button.primary{background:var(--sky);border-color:var(--sky);color:#fff}button.danger{background:var(--rose);border-color:var(--rose);color:#fff}button:hover{background:var(--sunken)}button.primary:hover{background:var(--sky-light)}button.danger:hover{background:var(--rose-light)}button:active{transform:scale(.98)}button:disabled{color:var(--muted);background:var(--sunken);border-color:var(--border);cursor:default;transform:none}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:none;box-shadow:var(--focus)}.focused{box-shadow:var(--focus)}
+.mac{max-width:560px;margin:auto}.mac .content{padding:28px}
+.empty{border:1px dashed #cbd5e1;border-radius:12px;padding:24px;text-align:center;background:#fff}
+.field{display:block;min-height:44px;border:1px solid #cbd5e1;border-radius:6px;padding:10px 12px;color:var(--muted);margin-bottom:8px;background:#fff}
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.variant{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--base);min-width:0}.variant p{margin-bottom:8px}.variant button{width:100%;margin-top:8px}
+.attention{color:var(--warning)}.surface p,.variant p{overflow-wrap:anywhere}.foot{border-top:1px solid var(--border);padding:20px 0;color:var(--muted);font-size:13px}
+@media(max-width:760px){main{padding:16px}.pair{grid-template-columns:minmax(0,1fr)}.mobile{max-width:none}.actions{flex-direction:column}h1{font-size:24px}}
+@media(prefers-reduced-motion:reduce){button:active{transform:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<span class="draft">Owner decision 2026-10-14 · confirm before deleting</span>
+<h1>Fresh start after update</h1>
+<p class="intro">027 FR-021, Constitution I and V. When the updated iPhone or Mac app first learns that its server runs the new release epoch, and earlier tasks, waiting changes or drafts exist on the device, it asks before deleting them. A new build alone never triggers this: against the old server the app works normally (.00). Flow: confirm → delete → existing sign-in → existing empty Inbox. iPhone on the left, Mac on the right. Buttons are illustrative.</p>
+<nav class="nav" aria-label="Review sections"><a href="#confirm">.01 Confirm</a><a href="#signin">.03 Sign-in</a><a href="#inbox">.04 Empty Inbox</a><a href="#around">Other states</a></nav>
+</header>
+
+<section class="review" id="confirm" aria-labelledby="confirm-title">
+<h2 id="confirm-title">M-02 / D-03 · .01 Confirm fresh start</h2>
+<p class="explain">Nothing is deleted until “Delete and continue”. “Not now” has initial focus and is the default; the destructive action is never default. Counts are shown when known.</p>
+<div class="pair">
+<figure><figcaption><strong>M-02.01</strong> · iPhone · full screen, counts known</figcaption>
+<article class="surface mobile" aria-label="iPhone confirm fresh start">
+<div class="content">
+<div class="spacer"></div>
+<h3>A fresh start</h3>
+<p>This version of Brain Buddy starts with an empty workspace.</p>
+<p class="secondary">The 12 tasks and 3 waiting changes on this iPhone from the earlier version will be deleted. They can't be recovered.</p>
+<div class="spacer"></div>
+<div class="actions"><button class="primary focused" type="button">Not now</button><button class="danger" type="button">Delete and continue</button></div>
+</div></article></figure>
+<figure><figcaption><strong>D-03.01</strong> · Mac · window-modal sheet, counts known</figcaption>
+<article class="surface mac" aria-label="Mac confirm fresh start">
+<div class="content">
+<h3>A fresh start</h3>
+<p>This version of Brain Buddy starts with an empty workspace.</p>
+<p class="secondary">The 12 tasks and 3 waiting changes on this Mac from the earlier version will be deleted. They can't be recovered.</p>
+<div class="actions" style="justify-content:flex-end"><button class="danger" type="button" style="flex:0 0 auto">Delete and continue</button><button class="primary focused" type="button" style="flex:0 0 auto">Not now</button></div>
+<p class="micro" style="margin-top:12px">Return and Escape both mean “Not now”.</p>
+</div></article></figure>
+</div>
+<div class="states" style="margin-top:16px">
+<div class="variant"><h4>.01 · Counts unknown</h4><p>The tasks and waiting changes on this iPhone from the earlier version will be deleted. They can't be recovered.</p><p class="micro">Singular: “1 task”, “1 waiting change”. A zero part is dropped. If drafts exist, the list ends “and your drafts”.</p></div>
+<div class="variant"><h4>.11 · After “Not now”</h4><p>Your earlier data is untouched. Brain Buddy can't sync or sign in until you continue.</p><p class="micro">The same screen stays. No sync, no sign-in, no network. Asked again on next launch.</p><button class="primary" type="button">Not now</button><button class="danger" type="button">Delete and continue</button></div>
+<div class="variant"><h4>.02 · Deleting</h4><p class="micro">Both buttons disabled; announced once after 1 s. No network.</p><button type="button" disabled>Not now</button><button type="button" disabled>Deleting…</button></div>
+</div>
+</section>
+
+<section class="review" id="signin" aria-labelledby="signin-title">
+<h2 id="signin-title">M-02 / D-03 · .03 Signed out after deletion</h2>
+<p class="explain">The earlier session was deleted with the rest, so the existing sign-in sheet follows, unchanged. The new server starts empty, so the owner first creates the account with an invite, on the web or iPhone (invite step D-04 / M-03); the Mac cannot create accounts. Cancel leaves the empty account-less workspace.</p>
+<div class="pair">
+<figure><figcaption><strong>M-02.03</strong> · iPhone · existing sign-in sheet</figcaption>
+<article class="surface mobile" aria-label="iPhone existing sign-in sheet after fresh start">
+<div class="bar"><button type="button">Cancel</button><strong>Sign in</strong><span aria-hidden="true"></span></div>
+<div class="content">
+<h4>Sign in or create an account</h4>
+<span class="field">Email</span>
+<div class="actions" style="margin-top:4px"><button class="primary" type="button">Continue with email</button><button type="button">Use your password</button></div>
+<div class="spacer"></div>
+<p class="micro">Existing sheet; no copy changes.</p>
+</div></article></figure>
+<figure><figcaption><strong>D-03.03</strong> · Mac · existing sign-in sheet</figcaption>
+<article class="surface mac" aria-label="Mac existing sign-in sheet after fresh start">
+<div class="bar"><strong>Sign in to Brain Buddy</strong><span aria-hidden="true"></span></div>
+<div class="content">
+<p class="secondary">Use the same tasks on this Mac, your iPhone and the web.</p>
+<span class="field">Email</span>
+<span class="field">Password</span>
+<div class="actions"><button type="button">Cancel</button><button class="primary" type="button">Sign in</button></div>
+<p class="micro" style="margin-top:12px">Existing sheet; no copy changes.</p>
+</div></article></figure>
+</div>
+</section>
+
+<section class="review" id="inbox" aria-labelledby="inbox-title">
+<h2 id="inbox-title">M-02 / D-03 · .04 First-run empty Inbox</h2>
+<p class="explain">After sign-in (or Cancel) the existing empty Inbox appears. Existing copy, no new empty state.</p>
+<div class="pair">
+<figure><figcaption><strong>M-02.04</strong> · iPhone · existing Inbox empty state</figcaption>
+<article class="surface mobile" aria-label="iPhone empty Inbox">
+<div class="bar"><span aria-hidden="true"></span><strong>Inbox</strong><span aria-hidden="true"></span></div>
+<div class="content">
+<div class="spacer"></div>
+<div class="empty"><h4>Inbox zero</h4><p class="secondary" style="margin:0">Capture anything on your mind with the bar below.</p></div>
+<div class="spacer"></div>
+<span class="field">Capture…</span>
+</div></article></figure>
+<figure><figcaption><strong>D-03.04</strong> · Mac · existing Inbox empty state</figcaption>
+<article class="surface mac" aria-label="Mac empty Inbox">
+<div class="bar"><strong>Inbox</strong><span aria-hidden="true"></span></div>
+<div class="content">
+<div class="empty"><h4>Inbox is clear</h4><p class="secondary" style="margin:0">Capture new items without classifying them first.</p></div>
+</div></article></figure>
+</div>
+</section>
+
+<section class="review" id="around" aria-labelledby="around-title">
+<h2 id="around-title">M-02 / D-03 · Other states</h2>
+<div class="states">
+<div class="variant"><h4>.00 · Waiting for new server</h4><p class="micro">New build; <code>GET /api/meta</code> returned 404 (old server, epoch 0) or hasn't answered (offline). The app works normally and syncs with the old server; nothing is asked or deleted. The check runs before any sign-in or sync push; <code>server_epoch &gt;= 1</code> moves to .01.</p></div>
+<div class="variant"><h4>.05 · Couldn't delete</h4><p class="attention">Brain Buddy couldn't finish deleting the earlier data.</p><p>Nothing was sent. Try again, or restart your iPhone and open Brain Buddy again.</p><button class="primary" type="button">Try again</button><p class="micro">Mac: “… restart your Mac …”. Sync and sign-in stay off until deletion finishes.</p></div>
+<div class="variant"><h4>.06 · Interrupted</h4><p class="micro">After confirmation: the next launch resumes the deletion without asking again. Before confirmation: nothing was deleted, and .01 is shown again.</p></div>
+<div class="variant"><h4>.07 · Offline</h4><p class="micro">At launch: the epoch is unknown, so the app stays in .00. After confirmation: deletion needs no network; the existing sign-in sheet shows its offline line (iPhone: “Your local tasks are kept. Connect to the internet to sign in.”, meaning tasks created since the fresh start; Mac: “Can't reach the server. Check your connection.”).</p></div>
+<div class="variant"><h4>.08 · Fresh install or nothing to lose</h4><p class="micro">The earlier store holds no tasks, waiting changes or drafts (or there is no earlier store): .01 is skipped; leftover files and the old session are removed without asking; then .03.</p></div>
+</div>
+</section>
+<footer class="foot"><p>Screens M-02, D-03. States .00–.11 are listed in design.md. Static mock: no rendering, device or accessibility runtime checks performed.</p></footer>
+</main>
+</body>
+</html>
