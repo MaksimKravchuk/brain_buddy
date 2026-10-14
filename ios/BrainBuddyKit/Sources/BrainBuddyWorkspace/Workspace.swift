@@ -154,6 +154,8 @@ public final class Workspace {
     @ObservationIgnored private var syncStartedFor: String?
     @ObservationIgnored private var isSigningIn = false
     @ObservationIgnored private var nativeSignInID: UUID?
+    /// The Cancel of a two-phase sign-in on a selected runtime while its completion runs.
+    @ObservationIgnored private var nativeSignInCancellation: SignInCancellation?
     @ObservationIgnored private var networkUpdates: Task<Void, Never>?
     /// Fires `.periodic` while the app is in the foreground (`setForegroundActive`).
     @ObservationIgnored private let foregroundTicker: PeriodicSyncTicker?
@@ -205,6 +207,11 @@ public final class Workspace {
         }
     }
     private(set) var rustSyncState: RustWorkspaceSyncState?
+    /// The run of failed rounds the shared runtime's transport reported (spec 026 FR-023), with the
+    /// legacy engine's semantics: it starts at the first failed round, keeps its start while the
+    /// failure lasts (offline included), and a success or a sign-out ends it. The reference ID is
+    /// the one the failed round carried; none is made up.
+    private var rustFailure: (since: Date, lastAttempt: Date, referenceID: String?)?
     /// Where an explicit "Rebuild synced copy" stands (design D-03).
     var rustRebuild = RuntimeSyncRecovery.Rebuild.idle
     /// Requests submitted for issue decisions, reused by a repeated Apply.
@@ -617,7 +624,8 @@ public final class Workspace {
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
         if isRustSelected {
-            return try await signInRust(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
+            _ = try await signInRust(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
+            return
         }
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
@@ -662,7 +670,7 @@ public final class Workspace {
 
     /// Additive iOS authentication; legacy password callers keep their contract.
     public func beginSignIn(serverURL: URL) async throws -> NativeSignInAttempt {
-        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
+        if isRustSelected { return try beginSignInRust(serverURL: serverURL) }
         guard let sync else { throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil) }
         await flush()
         await installEventHandlerIfNeeded(sync)
@@ -676,7 +684,7 @@ public final class Workspace {
     }
 
     public func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
-        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
+        if isRustSelected { return try await completeSignInRust(attempt, credential: credential) }
         guard let sync, nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil) }
         await flush()
         guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
@@ -707,7 +715,11 @@ public final class Workspace {
     }
 
     public func cancelSignIn(_ attempt: NativeSignInAttempt) async {
-        guard !isRustSelected else { return }
+        if isRustSelected {
+            // Before the link was claimed this links nothing; after it, the sign-in finishes as usual.
+            if nativeSignInID == attempt.id { nativeSignInID = nil; nativeSignInCancellation?.cancel() }
+            return
+        }
         if nativeSignInID == attempt.id { nativeSignInID = nil; isSigningIn = false }
         await sync?.cancelSignIn(attempt)
         refreshDerivedState()
@@ -860,8 +872,8 @@ public final class Workspace {
                 sessionEnded: syncStatus == .needsSignIn, isOnline: networkIsAvailable, isSyncing: syncStatus == .syncing,
                 lastSyncedAt: rustSyncState?.lastSuccessAt, pendingCount: pendingChangeCount,
                 oldestPendingAt: rustSyncState?.oldestPendingAt, initialUploadRemaining: 0,
-                issueCount: Int(clamping: rustSyncState?.openIssues ?? 0), failingSince: nil,
-                lastFailedAttemptAt: nil, lastFailureReferenceID: nil)
+                issueCount: Int(clamping: rustSyncState?.openIssues ?? 0), failingSince: rustFailure?.since,
+                lastFailedAttemptAt: rustFailure?.lastAttempt, lastFailureReferenceID: rustFailure?.referenceID)
         }
         let operations = document.outbox + unpersisted
         let linkedAt = account?.linkedAt
@@ -1755,9 +1767,23 @@ extension Workspace {
 
     private func adoptTransportResult(_ result: SyncRuntimeWakeResult) {
         switch result {
-        case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
+        case .status(let status):
+            runtimeTransportUnavailable = false
+            runtimeSyncNeedsUpdate = false
+            syncStatus = status
+            trackRustFailure(status)
         case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
+        }
+    }
+
+    private func trackRustFailure(_ status: SyncStatus) {
+        switch status {
+        case .failing(_, let referenceID, _):
+            let instant = now()
+            rustFailure = (rustFailure?.since ?? instant, instant, referenceID)
+        case .idle, .needsSignIn, .localOnly: rustFailure = nil
+        case .offline, .syncing: break
         }
     }
 
@@ -1787,6 +1813,12 @@ extension Workspace {
         let binding = runtimeBindingID
         let instant = now()
         let witnesses = localChildEdits
+        // A task entering Next starts its formulation clock whether or not the Weekly Review is
+        // exposed, and the sync server (sync-v1, spec 020 formulation clock) accepts a device
+        // command only when it carries the device's own `new_formulation_id`: stamp it here, not
+        // behind `reviewExposed` as the legacy `perform` does.
+        let makeID = self.makeID
+        let commands = commands.map { Self.stampingFormulationID($0) { FormulationID.make(makeID()) } }
         let result = try await saver.save(editorID: editorID, authoredIntent: authoredIntent) {
             for command in commands {
                 if case .decideTask(let decision) = command {
@@ -1900,7 +1932,7 @@ extension Workspace {
             guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
             guard case .answered(let proposal) = proposed else { throw RustDomainError.malformedResult }
             let command = facade.workspaceCaptureCommand(taskID: TaskID(Self.rawID(self.makeID())),
-                commandID: self.makeID(), proposal: proposal)
+                commandID: self.makeID(), proposal: proposal, formulationID: FormulationID.make(self.makeID()))
             return RustWorkspaceGesture(authoredIntent: intent, commands: [command], context: try self.rustExecuteContext(at: instant))
         }
         switch result {
@@ -2594,8 +2626,10 @@ extension Workspace {
 extension Workspace {
     private static let rustAccountUnavailable = "This account change isn't available yet. Your work is kept."
 
-    fileprivate func signInRust(serverURL: URL, email: String, password: String,
-                                cancellation: SignInCancellation) async throws {
+    @discardableResult
+    fileprivate func signInRust(serverURL: URL, email: String = "", password: String = "",
+                                credential: NativeSignInCredential? = nil,
+                                cancellation: SignInCancellation) async throws -> AuthCompletionDTO? {
         try refuseAnotherAccountChange()
         guard let lifecycle = rustLifecycle, let selection = rustSelection, isRustBound else {
             throw WorkspaceError.signInFailed(message: Self.rustAccountUnavailable, referenceID: nil)
@@ -2609,10 +2643,12 @@ extension Workspace {
         let outcome: RustSignInOutcome
         do {
             outcome = try await lifecycle.signIn(RustSignInRequest(serverURL: url, email: email, password: password,
-                cancellation: cancellation, current: selection, mergesLocalWork: account == nil))
+                cancellation: cancellation, current: selection, mergesLocalWork: account == nil, credential: credential))
         } catch {
             throw Self.signInFailure(error)
         }
+        // A mailbox check or reset step: nothing was linked and the binding stays as it is.
+        if let step = outcome.continuation { return step }
         let next = outcome.selection
         let sameRuntime = next.runtime === selection.runtime
         // An owner that is not the linked one, or a Cancel that won, links nothing.
@@ -2635,6 +2671,51 @@ extension Workspace {
         await bindRustRuntime()
         if account != linked { account = linked }
         if let error = loadError { throw WorkspaceError.signInFailed(message: error, referenceID: nil) }
+        return nil
+    }
+
+    /// The two-phase sheet on a selected runtime. Begin only checks and remembers the attempt:
+    /// no session is opened, so abandoning it leaves nothing to undo. Completion runs the same
+    /// path as `signIn` (login, claim, link-and-merge); the session token goes only to the
+    /// `SessionTokenStore`. Other credentials are exchanged by the host's server port into the token store.
+    fileprivate func beginSignInRust(serverURL: URL) throws -> NativeSignInAttempt {
+        try refuseAnotherAccountChange()
+        guard rustLifecycle != nil, isRustBound else {
+            throw WorkspaceError.signInFailed(message: Self.rustAccountUnavailable, referenceID: nil)
+        }
+        guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
+            throw WorkspaceError.signInFailed(message: "Use an https server address.", referenceID: nil)
+        }
+        if let owner = account, owner.serverURL != url {
+            throw WorkspaceError.signInFailed(message: "Use the server linked to this iPhone. Your local tasks are kept.", referenceID: nil)
+        }
+        let attempt = NativeSignInAttempt(id: UUID(), serverURL: url, expectedAccountID: account?.id)
+        nativeSignInID = attempt.id
+        return attempt
+    }
+
+    fileprivate func completeSignInRust(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
+        guard nativeSignInID == attempt.id else {
+            throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil)
+        }
+        guard nativeSignInCancellation == nil else {
+            throw WorkspaceError.signInFailed(message: Self.signInOnItsWayMessage, referenceID: nil)
+        }
+        let cancellation = SignInCancellation()
+        nativeSignInCancellation = cancellation
+        defer { nativeSignInCancellation = nil }
+        // A failure keeps the attempt, so a wrong password can be retried on it.
+        var email = "", password = "", other: NativeSignInCredential?
+        if case .password(let mail, let secret) = credential { email = mail; password = secret } else { other = credential }
+        if let step = try await signInRust(serverURL: attempt.serverURL, email: email, password: password,
+                                           credential: other, cancellation: cancellation) {
+            return .continuation(step)
+        }
+        guard let linked = account else {
+            throw WorkspaceError.signInFailed(message: "Couldn't sign in. Your work is kept.", referenceID: nil)
+        }
+        if nativeSignInID == attempt.id { nativeSignInID = nil }
+        return .signedIn(SignInResult(account: linked, deletionCancelled: signInCancelledAccountDeletion))
     }
 
     fileprivate func signOutRust(removing confirmed: Set<PendingChange>) async throws {
@@ -2687,6 +2768,7 @@ extension Workspace {
     private func replaceRustBinding(with selection: RustWorkspaceSelection) {
         rustSelection = selection
         rustSyncState = nil
+        rustFailure = nil
         rustRebuild = .idle
         rustResolutions.removeAll()
         rustLoadFailureCode = nil
@@ -2699,6 +2781,7 @@ extension Workspace {
         state = .empty
         account = nil
         syncStatus = .localOnly
+        rustFailure = nil
         pendingChangeCount = 0
         rustLocalReview = LocalReviewState()
         rustReviewState = nil

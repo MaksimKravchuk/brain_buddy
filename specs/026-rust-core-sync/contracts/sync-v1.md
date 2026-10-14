@@ -228,7 +228,7 @@ Command POST returns HTTP 200 with a terminal receipt, including domain rejectio
 | `IDEMPOTENCY_KEY_REUSED` / 409 | Same ID with changed semantics; no execution, actionable issue. |
 | `DEPENDENCY_PENDING` / 409 | Retryable; predecessor not terminal yet. |
 | `REVISION_CONFLICT`, `ENTITY_DELETED`, `DEPENDENCY_REJECTED`, canonical validation reason / terminal receipt | Keep rejected intent as issue; block dependent actions only. |
-| `INVALID_REQUEST` / 400 or 422; `COMMAND_TOO_LARGE` / 413 | Fix request compatibility/validation, never partially execute. |
+| `INVALID_REQUEST` / 400 or 422; `COMMAND_TOO_LARGE` / 413 | Fix request compatibility/validation, never partially execute. A command send refused this way is a verdict without a receipt: the client settles it as rejected with an issue that keeps its intent, holds its dependants, and never resends it (a framework-shaped 400/413/422 without an error envelope counts the same). |
 | `RATE_LIMITED` / 429; `TEMPORARILY_UNAVAILABLE` / 503 | Backoff; honor Retry-After, preserve same ID. Transport timeout/5xx means unknown outcome. |
 
 ### Foreground SSE hints

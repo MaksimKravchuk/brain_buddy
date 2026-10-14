@@ -9,6 +9,7 @@
 //! process from an older build never writes into a newer schema.
 
 use crate::locking::{LockMode, MigrationLock};
+use crate::projection_cache::{Slot, Txn};
 use rusqlite::{
     Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
@@ -20,10 +21,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The schema version this build reads and writes (`PRAGMA user_version`).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// `MIGRATIONS[n]` moves the schema from version `n` to `n + 1`.
-const MIGRATIONS: [&str; 2] = [SCHEMA_V1, SCHEMA_V2];
+const MIGRATIONS: [&str; 3] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3];
 
 /// Why the store could not do what was asked. Every variant means nothing
 /// of the failed operation was saved; only `Busy` is worth retrying as is.
@@ -118,6 +119,17 @@ pub struct OpenOptions {
 pub struct Store {
     conn: Connection,
     status: StoreStatus,
+    /// The decoded visible projection, reused while provably exact
+    /// (see `projection_cache`).
+    cache: Option<Slot>,
+    cache_stats: ProjectionCacheStats,
+}
+
+/// How often this handle reused its decoded projection or had to decode it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProjectionCacheStats {
+    pub reused: u64,
+    pub decoded: u64,
 }
 
 impl Store {
@@ -169,7 +181,12 @@ impl Store {
             .query_row("SELECT workspace_id FROM sync_meta", [], |row| row.get(0))
             .optional()?;
         match bound {
-            Some(bound) if bound == options.workspace_id => Ok(Self { conn, status }),
+            Some(bound) if bound == options.workspace_id => Ok(Self {
+                conn,
+                status,
+                cache: None,
+                cache_stats: ProjectionCacheStats::default(),
+            }),
             Some(_) => Err(StoreError::WorkspaceMismatch),
             None => Err(StoreError::Corrupt),
         }
@@ -210,6 +227,63 @@ impl Store {
         let value = body(&transaction)?;
         transaction.commit().map_err(StoreError::from)?;
         Ok(value)
+    }
+
+    /// [`Store::try_write`] for the one writer that keeps the decoded visible
+    /// projection current. `body` gets the cache of this transaction and hands it
+    /// back with its result; an error drops it, and so does any write the body
+    /// did not account for (see `projection_cache`).
+    pub(crate) fn try_write_cached<T, E: From<StoreError>>(
+        &mut self,
+        body: impl FnOnce(&Transaction<'_>, Txn) -> Result<(T, Txn), E>,
+    ) -> Result<T, E> {
+        if let StoreStatus::ReadOnlyRecovery { found } = self.status {
+            return Err(StoreError::UpgradeRequired { found }.into());
+        }
+        let slot = self.cache.take();
+        let transaction = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
+        let found = user_version(&transaction)?;
+        if found != SCHEMA_VERSION {
+            return Err(StoreError::UpgradeRequired { found }.into());
+        }
+        let (value, txn) = body(&transaction, Txn::with(slot))?;
+        let (reused, decoded) = (txn.reused, txn.decoded);
+        let kept = txn.into_slot(&transaction);
+        transaction.commit().map_err(StoreError::from)?;
+        self.cache = kept;
+        self.cache_stats.reused += reused;
+        self.cache_stats.decoded += decoded;
+        Ok(value)
+    }
+
+    /// [`Store::read`] that may reuse and refresh the decoded visible projection.
+    pub(crate) fn read_projected<T>(
+        &mut self,
+        body: impl FnOnce(&Transaction<'_>, &mut Txn) -> rusqlite::Result<T>,
+    ) -> Result<T, StoreError> {
+        let mut txn = Txn::with(self.cache.take());
+        let transaction = self.conn.transaction()?;
+        let value = body(&transaction, &mut txn)?;
+        let (reused, decoded) = (txn.reused, txn.decoded);
+        let kept = txn.into_slot(&transaction);
+        drop(transaction);
+        self.cache = kept;
+        self.cache_stats.reused += reused;
+        self.cache_stats.decoded += decoded;
+        Ok(value)
+    }
+
+    pub fn projection_cache_stats(&self) -> ProjectionCacheStats {
+        self.cache_stats
+    }
+
+    /// Releases the decoded projection (for example on a memory warning). The
+    /// next read decodes it again.
+    pub fn drop_projection_cache(&mut self) {
+        self.cache = None;
     }
 
     /// Runs `body` against one consistent snapshot of the store.
@@ -491,3 +565,91 @@ ALTER TABLE sync_meta ADD COLUMN projection_stale INTEGER NOT NULL DEFAULT 0;
 UPDATE sync_meta SET projection_stale = 1
 WHERE EXISTS (SELECT 1 FROM confirmed_records) OR EXISTS (SELECT 1 FROM outbox);
 ";
+
+/// Version 3: indexed lookups for the hot read paths (026 SC-003).
+///
+/// A shown task frame asks, per task, for the newest queued subtask or comment
+/// edit and for the task's device-only origin. Both used to scan the whole
+/// outbox (`json_extract` over every envelope) or every draft, so a screen cost
+/// grew with the queue times the rows shown. The envelope is immutable, so what
+/// is read out of it can be derived once:
+///
+/// - `command_type`, `target_id` and `child_task_id` are VIRTUAL generated
+///   columns over the envelope. SQLite computes them for every writer on insert
+///   (there is no code path that can forget to fill them), and creating the
+///   index below backfills every existing row inside this migration's single
+///   exclusive transaction, so a crash leaves the file at version 2 and the
+///   next open runs the whole step again.
+/// - `json_valid` guards the extraction so a row whose envelope is not JSON
+///   yields NULL instead of failing the insert or the index build.
+const SCHEMA_V3: &str = "
+ALTER TABLE outbox ADD COLUMN command_type TEXT GENERATED ALWAYS AS (
+    CASE WHEN json_valid(CAST(envelope AS TEXT))
+         THEN json_extract(CAST(envelope AS TEXT), '$.type') END) VIRTUAL;
+ALTER TABLE outbox ADD COLUMN target_id TEXT GENERATED ALWAYS AS (
+    CASE WHEN json_valid(CAST(envelope AS TEXT))
+         THEN json_extract(CAST(envelope AS TEXT), '$.entity_id') END) VIRTUAL;
+-- The task a subtask or comment command edits (a frame's local-edit witness).
+ALTER TABLE outbox ADD COLUMN child_task_id TEXT GENERATED ALWAYS AS (
+    CASE WHEN json_valid(CAST(envelope AS TEXT))
+          AND json_extract(CAST(envelope AS TEXT), '$.type') IN
+              ('subtask.create', 'subtask.update', 'subtask.transition',
+               'comment.create', 'comment.update')
+         THEN json_extract(CAST(envelope AS TEXT), '$.payload.task_id') END) VIRTUAL;
+CREATE INDEX outbox_child_edits ON outbox (workspace_id, child_task_id, local_seq)
+    WHERE child_task_id IS NOT NULL;
+CREATE INDEX outbox_by_target ON outbox (workspace_id, command_type, target_id);
+
+-- A task's device-only origin is found by its record key, not by a scan.
+CREATE INDEX drafts_by_record ON drafts (workspace_id, record_key, editor_kind);
+";
+
+#[cfg(test)]
+mod plans {
+    //! 026 SC-003: the per-task lookups of a shown frame must stay index probes.
+    use super::*;
+
+    fn plan(sql: &str) -> String {
+        let directory =
+            std::env::temp_dir().join(format!("bb-plans-{}-{}", std::process::id(), sql.len()));
+        let _ = fs::remove_dir_all(&directory);
+        let mut store = Store::open(&OpenOptions {
+            path: directory.join("store").join("workspace.sqlite3"),
+            workspace_id: "w".to_owned(),
+            busy_timeout: Duration::from_secs(1),
+        })
+        .unwrap();
+        let rows: Vec<String> = store
+            .read(|tx| {
+                let mut statement = tx.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                let rows = statement.query_map(rusqlite::params!["w", "task-1"], |row| {
+                    row.get::<_, String>(3)
+                })?;
+                rows.collect()
+            })
+            .unwrap();
+        let _ = fs::remove_dir_all(&directory);
+        rows.join("\n")
+    }
+
+    #[test]
+    fn plans_026_sc_003_child_witness_is_one_covering_index_probe() {
+        let plan = plan(crate::admission::CHILD_WITNESS_SQL);
+        assert!(plan.contains("outbox_child_edits"), "{plan}");
+        assert!(!plan.contains("SCAN"), "{plan}");
+    }
+
+    #[test]
+    fn plans_026_sc_003_task_origin_lookup_uses_the_record_key_index() {
+        let plan = plan(crate::localfacts::ORIGIN_SQL);
+        assert!(plan.contains("drafts_by_record"), "{plan}");
+        assert!(!plan.contains("SCAN drafts"), "{plan}");
+    }
+
+    #[test]
+    fn plans_026_sc_003_detail_known_finds_its_constructor_by_index() {
+        let plan = plan(crate::admission::DETAIL_KNOWN_SQL);
+        assert!(plan.contains("outbox_by_target"), "{plan}");
+        assert!(!plan.contains("SCAN o"), "{plan}");
+    }
+}

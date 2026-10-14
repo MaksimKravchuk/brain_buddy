@@ -348,12 +348,7 @@ private struct ListSubtitle: ViewModifier {
 
     private var subtitle: String {
         let _ = tick
-        let sync = SyncStatusLabel.describe(
-            workspace.syncStatus,
-            pendingChanges: workspace.pendingChangeCount,
-            now: Date(),
-            deviceName: SyncStatusLabel.deviceName
-        ).text
+        let sync = SyncStatusLabel.describe(workspace, now: Date()).text
         guard let summary else { return sync }
         return summary + " · " + sync
     }
