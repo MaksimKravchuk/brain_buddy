@@ -3,6 +3,7 @@
 Date: 2026-10-06
 Status: Accepted for the owner-authorized implementation scope; technical decision by the implementing agent
 Supersedes: ADR-0001 only where Identity assumes JSON-backed accounts/sessions and invite-only ordinary onboarding
+Amended by: ADR-0032 (proposed 2026-10-14): every account-creation method, including provider sign-up, requires an invite
 Related: ADR-0008, ADR-0017, ADR-0021, spec 022
 
 Google, Apple and email codes must grant access to the same immutable account as

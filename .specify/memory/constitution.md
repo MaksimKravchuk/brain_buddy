@@ -1,5 +1,21 @@
 <!--
 Sync Impact Report:
+- Version change: 4.0.0 -> 4.0.1
+- Why PATCH: clarification only. The Operational Guardrail naming `backend/data`
+  as the data location is qualified for the server move to Rust (ADR-0032,
+  specs/027-rust-server): after cutover persistent data lives in the managed
+  PostgreSQL and object store, and the sensitivity and no-version-control rule
+  still applies unchanged to every store.
+- Modified principles: None
+- Modified sections: Operational Guardrails (data location bullet)
+- Added sections: None
+- Removed sections: None
+- Dependent docs updated: docs/decisions/0032-server-in-rust.md
+- Templates updated: None
+- Follow-up TODOs: none
+-->
+<!--
+Prior Sync Impact Report (4.0.0), preserved:
 - Version change: 3.0.0 -> 4.0.0
 - Why MAJOR: Owner-accepted narrow breaking clarification of Principle IV
   (specs/026-rust-core-sync/approval.md; ADR-0031, enacted in PR-01). The absolute
@@ -100,7 +116,7 @@ The repository contains pre-adoption specs and requirements that must remain rea
 ## Operational Guardrails
 Security, configuration, delivery, and release constraints apply to all work.
 - Follow `.env.example` for environment setup; never hardcode secrets. Compose and Fly deployments MUST respect API key and session-auth controls.
-- Backend data persists under `backend/data` with an LRU cache and optional volumes; treat stored data as sensitive and keep it out of version control.
+- Backend data persists under `backend/data` with an LRU cache and optional volumes; after the cutover to the Rust server (ADR-0032) persistent data lives in managed PostgreSQL and object storage instead. Either way, treat stored data as sensitive and keep it out of version control.
 - Frontend defaults to `/api`; remote stacks require explicit proxy/origin configuration that preserves cookies and same-origin behavior where expected.
 - Verified CI on the exact landed SHA is the merge gate, not a pull request. Work happens in isolated branches/worktrees; every change is classified Ship/Show/Ask under ADR-0008. Eligible SHIP and SHOW work uses ADR-0023's one risk-selected independent gate, then lands PR-less through `scripts/submit_to_trunk.sh` and the default-branch release workflow, which fast-forwards `main` only to a SHA that passed full required CI. ASK-class changes (auth/privacy, destructive data/schema, billing/provider credentials, CI/CD/security/infra, irreversible external effects) never land automatically: a PR carries their review evidence, but merging it does not by itself update `main` — see `AGENTS.md` and `docs/autonomous-delivery-runbook.md` for the recorded-approval and ruleset requirements. `main` deploys through the normal Fly release path in both cases.
 
@@ -119,4 +135,4 @@ This constitution supersedes conflicting local practices and guides all reviews.
 - Compliance is checked by ADR-0023's risk-selected independent gate before SHIP/SHOW release and by the full review path for ineligible or ASK work; violations need documented justification plus a remediation plan and owner.
 - Accepted ADRs under `docs/decisions/` may refine this constitution for their decision scope, but broad governance changes belong here.
 
-**Version**: 4.0.0 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-09
+**Version**: 4.0.1 | **Ratified**: 2025-12-20 | **Last Amended**: 2026-10-14

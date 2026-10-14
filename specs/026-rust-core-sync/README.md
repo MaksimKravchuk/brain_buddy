@@ -1,3 +1,5 @@
+> **Superseded by [specification 027](../027-rust-server/spec.md) and [ADR-0032](../../docs/decisions/0032-server-in-rust.md).** The server moves to Rust with PostgreSQL; the FastAPI/PyO3 stage and the separate PostgreSQL stage (PR-55 to PR-57) are dropped. Draft PR #377 is closed with a link to the ADR. Kept as history.
+
 # Brain Buddy Rust core and custom synchronization
 
 Specification accepted October 9, 2026. The owner approved the prepared scope, design, governance proposal and residual risks after six-lens review and correction closure. The [acceptance record](approval.md) preserves that decision and the [approved review status](evidence/026-native-20261009-1/accepted-summary.json) for its original digest. The owner subsequently requested the 64-PR delivery amendment: separate tasks, an explicit graph, concurrent ready workers and an 800-line full-diff cap. Earlier pending labels in unchanged baseline documents are historical. Complex slice sizing remains mandatory before implementation. This describes an accepted specification for future implementation, not a completed migration.

@@ -1,6 +1,6 @@
 # ADR-0031: Shared Rust core and custom task sync
 
-- **Status**: Accepted
+- **Status**: Accepted; partly superseded by [ADR-0032](0032-server-in-rust.md) (proposed 2026-10-14): the "FastAPI stays / PyO3" backend and the separate PostgreSQL stage no longer apply
 - **Date**: 2026-10-08 (drafted); accepted 2026-10-09
 - **Decision owner**: MaksimKravchuk (product owner)
 - **Sign-off**: the owner accepted the specification 026 technical baseline and its
