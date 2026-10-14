@@ -71,16 +71,141 @@ pub(crate) fn load(conn: &Connection, workspace: &str) -> Result<Facts, StoreErr
     Ok(facts)
 }
 
+/// The facts a single gesture can read or change: every runtime row (rare, and
+/// the only ones carrying candidates a settlement may clear), with the stored
+/// bytes of each so a later save compares in memory instead of re-reading.
+/// Imported carriers are not loaded here; [`adopt_legacy`] derives the one a
+/// gesture touches, exactly as [`load`] would for it.
+pub(crate) fn load_runtime(
+    conn: &Connection,
+    workspace: &str,
+) -> Result<(Facts, BTreeMap<TaskId, Vec<u8>>), StoreError> {
+    let mut facts = Facts::new();
+    let mut stored = BTreeMap::new();
+    let mut statement = conn.prepare(
+        "SELECT record_key, fields FROM drafts WHERE workspace_id = ?1 AND editor_kind = ?2",
+    )?;
+    for row in statement.query_map(params![workspace, KIND], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+    })? {
+        let (key, body) = row?;
+        let key: Vec<String> = decode(key.as_bytes())?;
+        let id = TaskId::parse(key.first().ok_or(StoreError::Corrupt)?)
+            .map_err(|_| StoreError::Corrupt)?;
+        facts.insert(id.clone(), decode(&body)?);
+        stored.insert(id, body);
+    }
+    Ok((facts, stored))
+}
+
+/// The task a change concerns, as [`project`] reads it.
+fn changed_task(change: &DomainChange) -> Option<TaskId> {
+    match change {
+        DomainChange::Upsert(Record::Task(task)) => Some(task.id.clone()),
+        DomainChange::Tombstone {
+            entity_type: EntityType::Task,
+            record_key,
+        } => record_key.first().and_then(|id| TaskId::parse(id).ok()),
+        _ => None,
+    }
+}
+
+/// Makes `facts` hold what [`load`] would hold for the task `change` concerns:
+/// when it has no runtime row, the fact derived from its imported carrier.
+pub(crate) fn adopt_legacy(
+    conn: &Connection,
+    workspace: &str,
+    facts: &mut Facts,
+    change: &DomainChange,
+) -> Result<(), StoreError> {
+    let Some(id) = changed_task(change) else {
+        return Ok(());
+    };
+    if facts.contains_key(&id) {
+        return Ok(());
+    }
+    let carrier: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT fields FROM drafts WHERE workspace_id = ?1 AND record_key = ?2
+               AND editor_kind = 'legacy_task_local'",
+            params![workspace, serde_json::json!([id.as_str()]).to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(body) = carrier {
+        let body: serde_json::Value = decode(&body)?;
+        let origin = body
+            .get("lastOpenList")
+            .filter(|v| !v.is_null())
+            .map(|v| serde_json::from_value(v.clone()).map_err(|_| StoreError::Corrupt))
+            .transpose()?;
+        facts.insert(
+            id,
+            Fact {
+                confirmed: origin,
+                visible: origin,
+                ..Fact::default()
+            },
+        );
+    }
+    Ok(())
+}
+
+/// [`save`] against the bytes [`load_runtime`] read, with no per-fact query.
+pub(crate) fn save_changed(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    facts: &Facts,
+    stored: &BTreeMap<TaskId, Vec<u8>>,
+) -> Result<usize, StoreError> {
+    let mut writes = 0;
+    for (id, fact) in facts {
+        let body = serde_json::to_vec(fact).map_err(|_| StoreError::Corrupt)?;
+        if stored.get(id) == Some(&body) {
+            continue;
+        }
+        write_fact(tx, workspace, id, &body)?;
+        writes += 1;
+    }
+    Ok(writes)
+}
+
+fn write_fact(
+    tx: &Transaction<'_>,
+    workspace: &str,
+    id: &TaskId,
+    body: &[u8],
+) -> Result<(), StoreError> {
+    tx.execute(
+        "INSERT OR REPLACE INTO drafts (workspace_id, draft_id, editor_kind, record_type, record_key, fields, base_revision, updated_at)
+         VALUES (?1, ?2, ?3, 'task', ?4, ?5, NULL, '1970-01-01T00:00:00Z')",
+        params![
+            workspace,
+            format!("runtime-task-local:{}", id.as_str()),
+            KIND,
+            serde_json::json!([id.as_str()]).to_string(),
+            body
+        ],
+    )?;
+    Ok(())
+}
+
+/// The device-only origin carrier of one task, found by `drafts_by_record`.
+pub(crate) const ORIGIN_SQL: &str = "SELECT editor_kind, fields FROM drafts WHERE workspace_id=?1 AND record_key=?2 AND editor_kind IN ('runtime_task_local','legacy_task_local') ORDER BY editor_kind DESC LIMIT 1";
+
 /// Exact visible origin for one task, under the query's read transaction.
 pub fn local_task_origin_in(
     conn: &Connection,
     workspace: &str,
     id: &TaskId,
 ) -> Result<Option<OpenList>, StoreError> {
-    let row:Option<(String,Vec<u8>)>=conn.query_row(
-        "SELECT editor_kind, fields FROM drafts WHERE workspace_id=?1 AND record_key=?2 AND editor_kind IN ('runtime_task_local','legacy_task_local') ORDER BY editor_kind DESC LIMIT 1",
-        params![workspace,serde_json::json!([id.as_str()]).to_string()], |row|Ok((row.get(0)?,row.get(1)?))
-    ).optional()?;
+    let row: Option<(String, Vec<u8>)> = conn
+        .query_row(
+            ORIGIN_SQL,
+            params![workspace, serde_json::json!([id.as_str()]).to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
     match row {
         Some((kind, body)) if kind == KIND => Ok(decode::<Fact>(&body)?.visible),
         Some((_, body)) => {
@@ -153,6 +278,21 @@ pub(crate) fn project(
     change: &DomainChange,
     command: &CommandId,
 ) {
+    project_with(
+        facts,
+        &|id| read_set.tasks.get(id).map(|task| task.state),
+        change,
+        command,
+    );
+}
+
+/// [`project`] with the task states before the change given by `state_of`.
+pub(crate) fn project_with(
+    facts: &mut Facts,
+    state_of: &dyn Fn(&TaskId) -> Option<TaskState>,
+    change: &DomainChange,
+    command: &CommandId,
+) {
     let (id, after) = match change {
         DomainChange::Upsert(Record::Task(task)) => (task.id.clone(), Some(task.state)),
         DomainChange::Tombstone {
@@ -166,7 +306,7 @@ pub(crate) fn project(
         }
         _ => return,
     };
-    let prior = read_set.tasks.get(&id).map(|task| task.state);
+    let prior = state_of(&id);
     if !facts.contains_key(&id) && transition(prior, after, None).is_none() {
         return;
     }
@@ -199,11 +339,7 @@ pub(crate) fn save(
         if old.as_deref() == Some(body.as_slice()) {
             continue;
         }
-        tx.execute(
-            "INSERT OR REPLACE INTO drafts (workspace_id, draft_id, editor_kind, record_type, record_key, fields, base_revision, updated_at)
-             VALUES (?1, ?2, ?3, 'task', ?4, ?5, NULL, '1970-01-01T00:00:00Z')",
-            params![workspace, draft, KIND, serde_json::json!([id.as_str()]).to_string(), body],
-        )?;
+        write_fact(tx, workspace, id, &body)?;
         writes += 1;
     }
     Ok(writes)

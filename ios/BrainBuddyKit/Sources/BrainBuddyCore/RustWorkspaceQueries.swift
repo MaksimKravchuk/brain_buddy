@@ -160,10 +160,22 @@ extension RustDomainFacade {
         return try RustJSON.data(minted)
     }
 
-    public func workspaceCaptureCommand(taskID: TaskID, commandID: UUID, proposal: RustWorkspacePage) -> RustWorkspaceCommand {
+    /// `formulationID` is the device's own id for the formulation a capture into Next starts: the
+    /// sync server refuses a Next entry without it (`INVALID_REQUEST`), whether or not the Weekly
+    /// Review is exposed, so it is stamped here for every capture whose list is Next.
+    public func workspaceCaptureCommand(
+        taskID: TaskID, commandID: UUID, proposal: RustWorkspacePage, formulationID: @autoclosure () -> FormulationID? = nil
+    ) -> RustWorkspaceCommand {
         var ids = RustIDTable()
+        var payload = proposal.result
+        if var object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
+           object["state"] as? String == "next", object["new_formulation_id"] == nil || object["new_formulation_id"] is NSNull,
+           let formulationID = formulationID() {
+            object["new_formulation_id"] = ids.newFormulation(formulationID)
+            if let stamped = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { payload = stamped }
+        }
         return RustWorkspaceCommand(commandID: commandID.uuidString.lowercased(), commandType: "task.smart_add",
-            entityID: ids.task(taskID), payload: proposal.result)
+            entityID: ids.task(taskID), payload: payload)
     }
 
     public func workspaceListQuery(_ destination: Destination, options: ListOptions,

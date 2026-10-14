@@ -92,7 +92,10 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   when the scene leaves the foreground. `UPGRADE_REQUIRED` reads as `SyncRuntimeWakeResult.updateNeeded`
   (`Workspace.runtimeSyncNeedsUpdate`, `RuntimeSyncRecovery.syncNeedsUpdate`). Tests use
   `BrainBuddyFakeServer`'s `StubServer` (URLProtocol); `RustSyncHostBackendTests` is the opt-in run
-  against the real backend (`BB_BACKEND_PYTHON`).
+  against the real backend (`BB_BACKEND_PYTHON`). The `Rehearsal/` tests beside it (and `macos/Tests/.../MacRehearsalTests.swift`)
+  are the opt-in automated rehearsal of the pilot scenarios Q01-Q12, skipped unless `BB_REHEARSAL_TARGET=local|prod`
+  is set; `prod` is guarded (confirm variable, Keychain credentials, 300-request budget) and its results are never
+  reference-device evidence (`ios/scripts/rehearsal_report.py` writes the evidence section).
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.
@@ -176,7 +179,7 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 - Copy: English, sentence case everywhere ("Move to next actions", not "Move
   To Next Actions"), calm second person, short imperatives. List names are
   "Inbox", "Next actions", "Waiting for", "Someday / maybe". Use `·` between
-  inline metadata. Sync state is always words ("Offline — 3 changes
+  inline metadata. Sync state is always words ("Offline · 3 changes
   waiting"), never a colour alone. No emoji. Weekly review is flag-gated: a
   non-interactive `coming later` entry while the `weekly_review` flag is off
   (account-less: while its release switch is off; ADR-0027).

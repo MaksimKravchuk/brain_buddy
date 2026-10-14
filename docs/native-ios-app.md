@@ -303,7 +303,7 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
   move (trailing); a context menu offers every transition.
 - Completing animates in under 600 ms and respects Reduce Motion (spec 016);
   an undo toast reopens into the previous list.
-- Sync state is always words ("Synced 2 minutes ago", "Offline — 3 changes
+- Sync state is always words ("Synced 2 minutes ago", "Offline · 3 changes
   waiting", "Sign in again to sync"), never a coloured dot alone.
 
 ### Liquid Glass and the design system

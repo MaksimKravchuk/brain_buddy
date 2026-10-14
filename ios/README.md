@@ -367,7 +367,7 @@ data, or need a sign-in.
       Control Center control updates the app.
 - [ ] Siri / Shortcuts capture and completion work and appear in the app.
 - [ ] Force-quit and relaunch: everything above is still there.
-- [ ] The sync status reads "Offline — N changes waiting" in words.
+- [ ] The sync status reads "Offline · N changes waiting" in words.
 - [ ] Turn the network on and sign in: local data uploads, the status reaches
       "Synced …", and the web app shows the same tasks, projects and tags.
 

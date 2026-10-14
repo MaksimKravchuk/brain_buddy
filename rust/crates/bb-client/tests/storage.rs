@@ -489,3 +489,248 @@ fn storage_026_fr_001_enqueued_envelope_is_immutable() {
         .unwrap();
     assert_eq!(row, (b"{}".to_vec(), 1, 1));
 }
+
+// ---------------------------------------------------------------- schema v3 (SC-003)
+
+const V3_OBJECTS: [&str; 3] = ["outbox_child_edits", "outbox_by_target", "drafts_by_record"];
+
+/// `(command_id, command_type, target_id, child_task_id)` of one outbox row.
+type DerivedColumns = (String, Option<String>, Option<String>, Option<String>);
+
+fn envelope(kind: &str, task: &str) -> String {
+    format!(r#"{{"type":"{kind}","entity_id":"e-{task}","payload":{{"task_id":"{task}"}}}}"#)
+}
+
+/// A store as the previous release wrote it, holding queued work.
+fn version_2_store(path: &Path) {
+    let mut store = open(path, 1_000).unwrap();
+    store
+        .write(|tx| {
+            let rows: [(&str, Vec<u8>); 7] = [
+                ("c1", envelope("subtask.create", "t1").into_bytes()),
+                ("c2", envelope("comment.update", "t1").into_bytes()),
+                ("c3", envelope("task.update", "t1").into_bytes()),
+                ("c4", envelope("subtask.transition", "t2").into_bytes()),
+                ("c5", envelope("task.create", "t3").into_bytes()),
+                // Not JSON at all: the migration must not fail on it.
+                ("c6", b"not json".to_vec()),
+                ("c7", envelope("comment.create", "t1").into_bytes()),
+            ];
+            for (n, (command, body)) in rows.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO outbox (workspace_id, command_id, device_epoch, local_seq,
+                        envelope, envelope_digest, created_at)
+                     VALUES (?1, ?2, 'epoch-1', ?3, ?4, x'00', '2026-10-09T00:00:00Z')",
+                    params![WORKSPACE, command, n as i64 + 1, body],
+                )?;
+            }
+            tx.execute("UPDATE sync_meta SET next_local_seq = 8", [])?;
+            tx.execute(
+                "INSERT INTO drafts (workspace_id, draft_id, editor_kind, record_type,
+                    record_key, fields, updated_at)
+                 VALUES (?1, 'd1', 'legacy_task_local', 'task', '[\"t1\"]', x'7b7d', 'now')",
+                [WORKSPACE],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    store.close().unwrap();
+    let connection = Connection::open(path).unwrap();
+    for index in V3_OBJECTS {
+        connection
+            .execute_batch(&format!("DROP INDEX {index};"))
+            .unwrap();
+    }
+    connection
+        .execute_batch(
+            "ALTER TABLE outbox DROP COLUMN child_task_id;
+             ALTER TABLE outbox DROP COLUMN target_id;
+             ALTER TABLE outbox DROP COLUMN command_type;
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+}
+
+fn outbox_columns(path: &Path) -> Vec<String> {
+    let connection = Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT name FROM pragma_table_xinfo('outbox')")
+        .unwrap();
+    statement
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+fn version(path: &Path) -> i64 {
+    Connection::open(path)
+        .unwrap()
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn storage_026_sc_003_version_2_store_migrates_to_indexed_lookups_with_a_correct_backfill() {
+    let path = scratch("v3-migrate");
+    version_2_store(&path);
+    assert_eq!(version(&path), 2);
+    assert!(!outbox_columns(&path).contains(&"child_task_id".to_owned()));
+
+    let mut store = open(&path, 1_000).unwrap();
+    assert_eq!(store.status(), StoreStatus::Ready);
+    assert_eq!(version(&path), SCHEMA_VERSION);
+    assert_eq!(SCHEMA_VERSION, 3);
+
+    // Existing rows were backfilled: only subtask/comment edits name a task.
+    let rows: Vec<DerivedColumns> = store
+        .read(|tx| {
+            let mut statement = tx.prepare(
+                "SELECT command_id, command_type, target_id, child_task_id
+                 FROM outbox ORDER BY local_seq",
+            )?;
+            let rows = statement.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
+            rows.collect()
+        })
+        .unwrap();
+    let some = |text: &str| Some(text.to_owned());
+    assert_eq!(
+        rows,
+        [
+            (
+                "c1".into(),
+                some("subtask.create"),
+                some("e-t1"),
+                some("t1")
+            ),
+            (
+                "c2".into(),
+                some("comment.update"),
+                some("e-t1"),
+                some("t1")
+            ),
+            ("c3".into(), some("task.update"), some("e-t1"), None),
+            (
+                "c4".into(),
+                some("subtask.transition"),
+                some("e-t2"),
+                some("t2")
+            ),
+            ("c5".into(), some("task.create"), some("e-t3"), None),
+            ("c6".into(), None, None, None),
+            (
+                "c7".into(),
+                some("comment.create"),
+                some("e-t1"),
+                some("t1")
+            ),
+        ]
+    );
+
+    // The indexed witness equals the scan it replaced, for every task.
+    for task in ["t1", "t2", "t3", "absent"] {
+        let (indexed, scanned): (i64, i64) = store
+            .read(|tx| {
+                let indexed = tx.query_row(
+                    "SELECT COALESCE(MAX(local_seq),0) FROM outbox
+                     WHERE workspace_id=?1 AND child_task_id=?2",
+                    params![WORKSPACE, task],
+                    |row| row.get(0),
+                )?;
+                let scanned = tx.query_row(
+                    "SELECT COALESCE(MAX(local_seq),0) FROM outbox WHERE workspace_id=?1
+                     AND json_valid(CAST(envelope AS TEXT))
+                     AND json_extract(CAST(envelope AS TEXT),'$.type') IN
+                     ('subtask.create','subtask.update','subtask.transition','comment.create','comment.update')
+                     AND json_extract(CAST(envelope AS TEXT),'$.payload.task_id')=?2",
+                    params![WORKSPACE, task],
+                    |row| row.get(0),
+                )?;
+                Ok((indexed, scanned))
+            })
+            .unwrap();
+        assert_eq!(indexed, scanned, "witness of {task}");
+    }
+    assert_eq!(
+        store
+            .read(|tx| tx.query_row(
+                "SELECT COALESCE(MAX(local_seq),0) FROM outbox
+                 WHERE workspace_id=?1 AND child_task_id='t1'",
+                [WORKSPACE],
+                |row| row.get::<_, i64>(0),
+            ))
+            .unwrap(),
+        7
+    );
+
+    // New rows are derived by SQLite itself, whoever inserts them.
+    store.write(|tx| enqueue(tx, "later")).unwrap();
+    let names: Vec<String> = Connection::open(&path)
+        .unwrap()
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for index in V3_OBJECTS {
+        assert!(names.contains(&index.to_owned()), "{index} in {names:?}");
+    }
+    store.close().unwrap();
+
+    // Opening again is a no-op, not a second migration.
+    let mut again = open(&path, 1_000).unwrap();
+    assert_eq!(command_ids(&mut again).len(), 8);
+    assert_eq!(version(&path), SCHEMA_VERSION);
+}
+
+#[test]
+fn storage_026_sc_003_failed_upgrade_leaves_version_2_untouched_and_reruns_whole() {
+    let path = scratch("v3-crash");
+    version_2_store(&path);
+    // Make the last statement of the step fail, after the columns and the first
+    // indexes were already created in the same transaction.
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE drafts_by_record (x);")
+        .unwrap();
+
+    assert!(open(&path, 1_000).is_err());
+    assert_eq!(version(&path), 2, "the version moves only with the schema");
+    let columns = outbox_columns(&path);
+    assert!(
+        !columns.contains(&"child_task_id".to_owned())
+            && !columns.contains(&"command_type".to_owned()),
+        "rolled back as a unit: {columns:?}"
+    );
+    let leftovers: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('outbox_child_edits','outbox_by_target')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(leftovers, 0);
+
+    // The next start runs the whole step again and the data is intact.
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("DROP TABLE drafts_by_record;")
+        .unwrap();
+    let mut store = open(&path, 1_000).unwrap();
+    assert_eq!(version(&path), SCHEMA_VERSION);
+    assert_eq!(command_ids(&mut store).len(), 7);
+    let child: Option<String> = store
+        .read(|tx| {
+            tx.query_row(
+                "SELECT child_task_id FROM outbox WHERE command_id = 'c4'",
+                [],
+                |row| row.get(0),
+            )
+        })
+        .unwrap();
+    assert_eq!(child.as_deref(), Some("t2"));
+}

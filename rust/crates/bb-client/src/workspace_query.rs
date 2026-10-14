@@ -2,7 +2,7 @@
 //! The shared domain remains the rule authority; this adapter binds its cursors
 //! to the durable projection generation and keeps SQLite behind the bridge.
 
-use crate::execute::{ExecuteError, read_projection, unsigned};
+use crate::execute::{ExecuteError, unsigned};
 use crate::{Store, StoreError, sha256_hex};
 use bb_domain::{
     dispatch,
@@ -178,7 +178,7 @@ pub fn query_collection_page(
             "limit",
         )));
     }
-    store.read(|tx| {
+    store.read_projected(|tx, cache| {
         Ok((|| {
             let (workspace, generation, stale): (String, i64, i64) = tx
                 .query_row(
@@ -212,7 +212,8 @@ pub fn query_collection_page(
                 }
                 page.after = Some(cursor.after);
             }
-            let state = read_projection(tx, &workspace)?;
+            let visible = cache.visible(tx, &workspace)?;
+            let state = &visible.read_set;
             let fingerprint = sha256_hex(
                 &serde_json::to_vec(&(&query, inputs))
                     .map_err(|_| QueryError::Store(StoreError::Corrupt))?,
@@ -233,16 +234,16 @@ pub fn query_collection_page(
                     return Err(QueryError::RestartRequired);
                 }
                 let mut result = QueryResult::TaskList(
-                    bb_domain::queries::native_task_views(&state, task_ids).map_err(|error| {
+                    bb_domain::queries::native_task_views(state, task_ids).map_err(|error| {
                         QueryError::RefusedAt {
                             error,
                             projection_generation: generation,
                         }
                     })?,
                 );
-                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+                decorate_task_views(tx, &workspace, state, &mut result, inputs, generation)?;
                 let task_frames =
-                    crate::admission::query_frames(tx, &workspace, &state, &result, false)?;
+                    crate::admission::query_frames(tx, &workspace, state, &result, false)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     result,
@@ -264,7 +265,7 @@ pub fn query_collection_page(
                     .transpose()
                     .map_err(|_| QueryError::RestartRequired)?;
                 let (view, next) =
-                    native_task_detail(&state, task_id, collection_limit, after.as_ref()).map_err(
+                    native_task_detail(state, task_id, collection_limit, after.as_ref()).map_err(
                         |error| QueryError::RefusedAt {
                             error,
                             projection_generation: generation,
@@ -285,13 +286,13 @@ pub fn query_collection_page(
                     })
                     .transpose()?;
                 let mut result = QueryResult::TaskDetail(view);
-                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+                decorate_task_views(tx, &workspace, state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
                         tx,
                         &workspace,
-                        &state,
+                        state,
                         &result,
                         collection_after.is_none() && collection_next_cursor.is_none(),
                     )?,
@@ -323,10 +324,10 @@ pub fn query_collection_page(
                         | Query::NativeProjects { .. }
                         | Query::NativeTags { .. }
                 ) {
-                    bb_domain::queries::classification_page(&state, &query, collection_limit, after)
+                    bb_domain::queries::classification_page(state, &query, collection_limit, after)
                 } else if matches!(query, Query::OpenReleases { .. }) {
                     bb_domain::review_sessions::native_release_page(
-                        &state,
+                        state,
                         &query,
                         inputs,
                         collection_limit,
@@ -334,7 +335,7 @@ pub fn query_collection_page(
                     )
                 } else {
                     bb_domain::review_sessions::native_task_page(
-                        &state,
+                        state,
                         &query,
                         inputs,
                         collection_limit,
@@ -356,13 +357,13 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
-                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+                decorate_task_views(tx, &workspace, state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
                         tx,
                         &workspace,
-                        &state,
+                        state,
                         &result,
                         collection_after.is_none() && collection_next_cursor.is_none(),
                     )?,
@@ -380,14 +381,14 @@ pub fn query_collection_page(
                 let after = cursor.as_ref().and_then(|cursor| cursor.key.as_deref());
                 let (mut result, next) = if matches!(query, Query::ReviewState {}) {
                     bb_domain::review_sessions::native_state_page(
-                        &state,
+                        state,
                         inputs,
                         collection_limit,
                         after,
                     )
                 } else {
                     bb_domain::review_sessions::native_queue_page(
-                        &state,
+                        state,
                         &query,
                         inputs,
                         collection_limit,
@@ -409,13 +410,13 @@ pub fn query_collection_page(
                         .map_err(|_| QueryError::Store(StoreError::Corrupt))
                     })
                     .transpose()?;
-                decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+                decorate_task_views(tx, &workspace, state, &mut result, inputs, generation)?;
                 return Ok(QueryPage {
                     projection_generation: generation,
                     task_frames: crate::admission::query_frames(
                         tx,
                         &workspace,
-                        &state,
+                        state,
                         &result,
                         collection_after.is_none() && collection_next_cursor.is_none(),
                     )?,
@@ -440,7 +441,7 @@ pub fn query_collection_page(
                     }
                 };
                 let result = bb_domain::list_modes::native_list_mode_with_origin_lookup(
-                    &state, mode, options, page, inputs, &lookup,
+                    state, mode, options, page, inputs, &lookup,
                 )
                 .map(QueryResult::ListMode);
                 if let Some(error) = origin_error.into_inner() {
@@ -453,16 +454,16 @@ pub fn query_collection_page(
                 // Private clocks feed only the owning derived formulation
                 // calculation. Its closed DTO contains no private records.
                 let private =
-                    crate::local_review::private_read_set(tx, &workspace, &state, &inputs.now)?;
+                    crate::local_review::private_read_set(tx, &workspace, state, &inputs.now)?;
                 dispatch::query(&private, &query, inputs)
             } else {
-                dispatch::query(&state, &query, inputs)
+                dispatch::query(state, &query, inputs)
             };
             let mut result = answered.map_err(|error| QueryError::RefusedAt {
                 error,
                 projection_generation: generation,
             })?;
-            decorate_task_views(tx, &workspace, &state, &mut result, inputs, generation)?;
+            decorate_task_views(tx, &workspace, state, &mut result, inputs, generation)?;
             if collection_after.is_some() {
                 return Err(QueryError::RestartRequired);
             }
@@ -476,7 +477,7 @@ pub fn query_collection_page(
                         task_frames: crate::admission::query_frames(
                             tx,
                             &workspace,
-                            &state,
+                            state,
                             &result,
                             collection_after.is_none() && collection_next_cursor.is_none(),
                         )?,
@@ -500,7 +501,7 @@ pub fn query_collection_page(
                 task_frames: crate::admission::query_frames(
                     tx,
                     &workspace,
-                    &state,
+                    state,
                     &result,
                     collection_after.is_none() && collection_next_cursor.is_none(),
                 )?,
@@ -582,7 +583,7 @@ pub fn workspace_read<T>(
     expected_generation: Option<u64>,
     read: impl FnOnce(&bb_domain::types::ReadSet) -> T,
 ) -> Result<(u64, T), QueryError> {
-    store.read(|tx| {
+    store.read_projected(|tx, cache| {
         Ok((|| {
             let (workspace, generation, stale): (String, i64, i64) = tx
                 .query_row(
@@ -598,8 +599,8 @@ pub fn workspace_read<T>(
             if expected_generation.is_some_and(|expected| expected != generation) {
                 return Err(QueryError::RestartRequired);
             }
-            let state = read_projection(tx, &workspace)?;
-            Ok((generation, read(&state)))
+            let visible = cache.visible(tx, &workspace)?;
+            Ok((generation, read(&visible.read_set)))
         })())
     })?
 }

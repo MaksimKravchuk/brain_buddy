@@ -1024,10 +1024,47 @@ fn faults_026_fr_010_a_restore_that_forgot_the_device_epoch_does_not_block_new_w
     );
 }
 
-/// A command the server refuses for good, with no verdict the client can record,
-/// holds back only what depends on it.
+/// A framework-shaped 422 (no error envelope) and a 413 are the same verdict: the
+/// command is an issue, not an endlessly retried unknown.
 #[test]
-fn faults_026_fr_005_a_command_stuck_unknown_blocks_only_its_dependants() {
+fn faults_026_fr_007_an_unenveloped_422_or_a_413_also_settles_as_an_issue() {
+    for (status, body, code) in [
+        (422, json!({"detail": []}), "INVALID_REQUEST"),
+        (
+            413,
+            json!({
+                "error": {"code": "COMMAND_TOO_LARGE", "retryable": false, "message": "m", "details": {}},
+                "correlation_id": "corr-big",
+            }),
+            "COMMAND_TOO_LARGE",
+        ),
+    ] {
+        let Some(backend) = start("refused-shape") else {
+            return;
+        };
+        let clock = ManualClock::new();
+        let mut device = open_device(&backend, "refused-shape", &clock, true);
+        bootstrap(&mut device);
+        let (refused, _) = create(&mut device, "Refused");
+        device.net.refuse(COMMANDS, refused.as_str(), status, body);
+        let report = device.syncer.round(&mut device.store);
+        assert_eq!(report.halt, None, "{status}: {report:?}");
+        assert_eq!(state_of(&mut device, &refused), "rejected", "{status}");
+        let issues = open_issues(&mut device.store).unwrap();
+        assert_eq!(issues.len(), 1, "{status}: {issues:?}");
+        assert_eq!(issues[0].issue.reason.code(), code);
+        let sends = device.net.count(COMMANDS);
+        device.syncer.resume();
+        let _ = device.syncer.round(&mut device.store);
+        assert_eq!(device.net.count(COMMANDS), sends, "{status}: not resent");
+    }
+}
+
+/// A command the server refuses for good (`INVALID_REQUEST`, no receipt) is a
+/// terminal verdict: it becomes a rejected command with a visible issue, is never
+/// sent again however often the loop is woken, and holds back only its dependants.
+#[test]
+fn faults_026_fr_005_a_refused_command_becomes_an_issue_and_blocks_only_its_dependants() {
     let Some(backend) = start("head-of-line") else {
         return;
     };
@@ -1046,10 +1083,25 @@ fn faults_026_fr_005_a_command_stuck_unknown_blocks_only_its_dependants() {
             "correlation_id": "corr-stuck",
         }),
     );
-    for _ in 0..3 {
-        let _ = device.syncer.round(&mut device.store);
+    let first = device.syncer.round(&mut device.store);
+    assert_eq!(
+        first.halt, None,
+        "a verdict is not a failing sync: {first:?}"
+    );
+    assert!(first.changes.issues, "{first:?}");
+    let sends = device.net.count(COMMANDS);
+    for _ in 0..4 {
+        // A foreground, network-return or manual wake forgives held commands.
+        device.syncer.resume();
+        let report = device.syncer.round(&mut device.store);
+        assert_eq!(report.halt, None, "{report:?}");
         clock.advance(Duration::from_secs(120));
     }
+    assert_eq!(
+        device.net.count(COMMANDS),
+        sends,
+        "a refused command is never resent"
+    );
     assert_eq!(
         state_of(&mut device, &free),
         "completed",
@@ -1058,14 +1110,26 @@ fn faults_026_fr_005_a_command_stuck_unknown_blocks_only_its_dependants() {
     assert_eq!(effects(&backend, &free), 1);
     assert_eq!(
         state_of(&mut device, &stuck),
-        "unknown",
-        "kept, not dropped"
+        "rejected",
+        "kept as an issue"
     );
     assert_eq!(effects(&backend, &stuck), 0);
+    let issues = open_issues(&mut device.store).unwrap();
+    assert_eq!(
+        issues.len(),
+        2,
+        "the refusal and its held dependant: {issues:?}"
+    );
+    let reasons: Vec<String> = issues.iter().map(|view| view.issue.reason.code()).collect();
+    assert_eq!(
+        reasons,
+        ["INVALID_REQUEST", "BLOCKED_DEPENDENCY"],
+        "{issues:?}"
+    );
     assert_eq!(
         state_of(&mut device, &dependant),
-        "queued",
-        "dependant waits"
+        "blocked_dependency",
+        "the dependant is held, not dropped"
     );
     assert_eq!(effects(&backend, &dependant), 0);
     assert_eq!(server_titles(&backend), ["Independent"]);
