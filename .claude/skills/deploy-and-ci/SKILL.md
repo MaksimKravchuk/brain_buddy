@@ -35,12 +35,16 @@ CI has passed on `main`.
 An edge earns its place for one of three reasons only:
 
 1. the job consumes the other's output;
-2. the other is a cheap check that should fail the run before an expensive one
-   spends runner minutes (`e2e` and the mutation jobs wait on the service lanes
-   for this);
+2. the other is a *genuinely* cheap check that should fail the run before an
+   expensive one spends runner minutes;
 3. the two build byte-identical artifacts and ordering them lets the second
-   reuse the first's cache (`docker` waits on `e2e` for this, turning a
-   duplicated cold build into a ~20s cache hit).
+   reuse the first's cache.
+
+Wall clock wins ties: `e2e`, `docker` and the mutation measurements are
+independent lanes. Each used to wait (on the ~20-minute backend lane, or on
+`e2e`), which made the critical path backend → E2E → Docker → Allure, about 37
+minutes. A red unit test still fails the run; mutmut stops on a failing clean
+suite by itself.
 
 `scripts/validate_ci_artifacts.py workflow` rejects any other edge — including a
 transitive one restated — and rejects a job missing from `full-ci`'s `needs`
@@ -57,7 +61,14 @@ map (`--cov-context=test`) into the Actions cache;
 function bodies, imports and signatures of measured `app/*.py` files, and for
 `rust/` changes through the `bb_core` bridge, and answers `ALL` for anything
 else. A narrowed run skips the coverage floor, which the landing path still
-enforces on the whole suite.
+enforces on the whole suite. Whatever runs is spread over every core with
+`pytest -n auto --dist loadgroup`; a module bound to a fixed port carries
+`pytest.mark.xdist_group` so it stays on one worker, and `tests/__init__.py`
+gives each worker its own data directory.
+
+The Swift lanes (`ios-kit`, `ios-app`, `macos-app`) cache the built Rust bridge
+under the git tree id of `rust/`, the build script, the target list and the
+linking toolchain, so it rebuilds only when one of those changes.
 
 `allure-report` closes the run — it is the last job before `full-ci`, so the
 aggregate report and the link posted to the pull request always describe a

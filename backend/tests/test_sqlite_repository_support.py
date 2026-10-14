@@ -96,13 +96,16 @@ def test_public_command_lock_preserves_exact_owner_error(
 
 @pytest.mark.parametrize("repository_cls", [TaskRepository, OperationRepository])
 def test_public_command_lock_rolls_back_closes_and_restores_thread_state(
-    repository_cls, tmp_path: Path
+    repository_cls, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = repository_cls.__new__(repository_cls)
     if repository_cls is TaskRepository:
         repository.db_path = tmp_path / "tasks.sqlite3"
     previous = object()
-    repository._thread_state.conn = previous
+    # `_thread_state` is a class-level thread local shared by every repository
+    # on this thread; left behind, the sentinel reads as an open unit of work
+    # to whichever test runs next here (under xdist, any of them).
+    monkeypatch.setattr(repository._thread_state, "conn", previous, raising=False)
     connection = TrackedConnection()
     repository._connect = lambda: connection
     with pytest.raises(KeyboardInterrupt), repository.command_lock("owner"):
@@ -113,13 +116,13 @@ def test_public_command_lock_rolls_back_closes_and_restores_thread_state(
 
 @pytest.mark.parametrize("repository_cls", [TaskRepository, OperationRepository])
 def test_public_command_lock_commits_and_closes_on_success(
-    repository_cls, tmp_path: Path
+    repository_cls, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repository = repository_cls.__new__(repository_cls)
     if repository_cls is TaskRepository:
         repository.db_path = tmp_path / "tasks.sqlite3"
-    if hasattr(repository._thread_state, "conn"):
-        del repository._thread_state.conn
+    # Restored at teardown: the command lock leaves `conn = None` behind.
+    monkeypatch.delattr(repository._thread_state, "conn", raising=False)
     connection = TrackedConnection()
     repository._connect = lambda: connection
     with repository.command_lock("owner"):
