@@ -39,7 +39,9 @@ use crate::apply_changes::{
 };
 use crate::epochs::{apply_registration, send_candidates};
 use crate::execute::ExecuteContext;
+use crate::issues::{IssueReason, record_rejection_in};
 use crate::receipts::{Looked, Settlement, apply_lookup, apply_receipt};
+use crate::replay::ReplayError;
 use crate::snapshot::{activate_snapshot, begin_snapshot, stage_snapshot_page};
 use crate::storage::{Store, StoreError};
 use crate::sync_session::{
@@ -1080,6 +1082,14 @@ impl Syncer {
                 other => Err(self.halt_for(store, &request, other)),
             });
         report.sent += 1;
+        // The server refused the request itself (`INVALID_REQUEST`, too large): it
+        // wrote no receipt and executed nothing, and the same bytes will be refused
+        // again. That is a terminal verdict, not an unknown outcome.
+        if let Err(Halt::Failed(code)) = &outcome
+            && let Some(reason) = request_refusal(code)
+        {
+            return self.reject_refused(store, &request, id, &context, &reason, report);
+        }
         let result = outcome.and_then(|body| {
             let receipt: Receipt = parse(&body)?;
             if receipt.command_id != *id {
@@ -1100,6 +1110,42 @@ impl Syncer {
             mark_unknown(store, id)?;
         }
         result
+    }
+
+    /// Settles a command the server refused as a request: it becomes `rejected`
+    /// with an open issue that keeps its intent and text, its dependants are
+    /// held, and it is never sent again (sync-v1 section 11: `INVALID_REQUEST`
+    /// and `COMMAND_TOO_LARGE` never partially execute). Independent commands go on.
+    fn reject_refused(
+        &mut self,
+        store: &mut Store,
+        request: &Request,
+        id: &CommandId,
+        context: &ExecuteContext,
+        reason: &IssueReason,
+        report: &mut RoundReport,
+    ) -> Result<(), Halt> {
+        let fence = request.live_fence()?.clone();
+        let rejected = store.try_write(|tx| {
+            if fence_in(tx)? != fence {
+                return Ok::<_, ReplayError>(false);
+            }
+            record_rejection_in(tx, context, id, reason).map(|_| true)
+        });
+        match rejected {
+            Ok(true) => {
+                self.settled(Settlement::Rejected, report);
+                Ok(())
+            }
+            Ok(false) => {
+                mark_unknown(store, id)?;
+                Err(Halt::Stale)
+            }
+            Err(error) => {
+                mark_unknown(store, id)?;
+                Err(Halt::Failed(error.code().to_owned()))
+            }
+        }
     }
 
     fn settled(&self, settlement: Settlement, report: &mut RoundReport) {
@@ -1219,6 +1265,21 @@ fn refusal(response: &HttpResponse) -> Answer {
         None if response.status == 401 => Answer::Refused(Box::new(local_error("AUTH_REQUIRED"))),
         None if retryable_status => Answer::Retry(response.retry_after),
         None => Answer::Invalid(response.status),
+    }
+}
+
+/// The issue reason when a send was refused as a request the server will never
+/// accept: a structured `INVALID_REQUEST`/`COMMAND_TOO_LARGE` error, or a bare
+/// 400/413/422 whose body is not the error envelope.
+fn request_refusal(code: &str) -> Option<IssueReason> {
+    match code {
+        "INVALID_REQUEST" | "HTTP_400" | "HTTP_422" => {
+            Some(IssueReason::Validation("INVALID_REQUEST".to_owned()))
+        }
+        "COMMAND_TOO_LARGE" | "HTTP_413" => {
+            Some(IssueReason::Validation("COMMAND_TOO_LARGE".to_owned()))
+        }
+        _ => None,
     }
 }
 

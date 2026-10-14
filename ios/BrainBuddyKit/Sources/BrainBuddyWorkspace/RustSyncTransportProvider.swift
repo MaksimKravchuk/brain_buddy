@@ -17,12 +17,16 @@ public struct RustSyncTransportProvider: RustTransportProvider {
     private let urlSessionConfiguration: @Sendable () -> URLSessionConfiguration
     private let pollInterval: TimeInterval?
     private let now: @Sendable () -> Date
+    private let transportWrapper: (@Sendable (any RustSyncTransport) -> any RustSyncTransport)?
 
+    /// `transportWrapper` is a test seam (the pilot rehearsal's fault injection); production passes nil.
     public init(
         tokenStore: any SessionTokenStore, identity: ClientIdentity = .iOS,
         urlSessionConfiguration: @escaping @Sendable () -> URLSessionConfiguration = { RustSyncURLSession.defaultConfiguration },
-        pollInterval: TimeInterval? = nil, now: @escaping @Sendable () -> Date = { Date() }
+        pollInterval: TimeInterval? = nil, now: @escaping @Sendable () -> Date = { Date() },
+        transportWrapper: (@Sendable (any RustSyncTransport) -> any RustSyncTransport)? = nil
     ) {
+        self.transportWrapper = transportWrapper
         self.tokenStore = tokenStore
         self.identity = identity
         self.urlSessionConfiguration = urlSessionConfiguration
@@ -34,7 +38,8 @@ public struct RustSyncTransportProvider: RustTransportProvider {
         guard let account = context.account else { return PendingRustSyncRuntimePort() }
         return RustSyncHostPort(
             context: context, account: account, tokenStore: tokenStore, identity: identity,
-            urlSessionConfiguration: urlSessionConfiguration, pollInterval: pollInterval, now: now)
+            urlSessionConfiguration: urlSessionConfiguration, pollInterval: pollInterval, now: now,
+            transportWrapper: transportWrapper)
     }
 }
 
@@ -50,6 +55,7 @@ actor RustSyncHostPort: SyncRuntimePort {
     private let urlSessionConfiguration: @Sendable () -> URLSessionConfiguration
     private let pollInterval: TimeInterval?
     private let now: @Sendable () -> Date
+    private let transportWrapper: (@Sendable (any RustSyncTransport) -> any RustSyncTransport)?
 
     private var host: RustSyncHost?
     private var starting: Task<RustSyncHost?, Never>?
@@ -64,8 +70,10 @@ actor RustSyncHostPort: SyncRuntimePort {
     init(
         context: RustTransportContext, account: LinkedAccount, tokenStore: any SessionTokenStore,
         identity: ClientIdentity, urlSessionConfiguration: @escaping @Sendable () -> URLSessionConfiguration,
-        pollInterval: TimeInterval?, now: @escaping @Sendable () -> Date
+        pollInterval: TimeInterval?, now: @escaping @Sendable () -> Date,
+        transportWrapper: (@Sendable (any RustSyncTransport) -> any RustSyncTransport)? = nil
     ) {
+        self.transportWrapper = transportWrapper
         self.context = context
         self.account = account
         self.tokenStore = tokenStore
@@ -111,7 +119,8 @@ actor RustSyncHostPort: SyncRuntimePort {
                 context: RustWorkspaceContext(
                     now: instant, timeZone: TimeZone.current.identifier, actorID: RustDomainContext().actorID, policy: policy),
                 serverURL: account.serverURL, tokenStore: tokenStore, identity: identity,
-                urlSessionConfiguration: urlSessionConfiguration(), pollInterval: pollInterval, now: now)
+                urlSessionConfiguration: urlSessionConfiguration(), pollInterval: pollInterval, now: now,
+                transportWrapper: transportWrapper)
             // Later restarts resume the session this start bound.
             fresh = false
             updateRequired = false
