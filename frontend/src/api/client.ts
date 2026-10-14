@@ -60,6 +60,7 @@ import type {
   AgentRunSummaryResponse
 } from "./agentTypes";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
+import { clientEpochHeaders } from "./clientEpoch";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -108,6 +109,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: JsonRequestOptions): Promise<T> {
   const { body, ...rest } = options;
   const headers = new Headers(rest.headers);
+  for (const [name, value] of Object.entries(clientEpochHeaders())) headers.set(name, value);
   const method = options.method ?? "GET";
   const hasBody = body !== undefined && body !== null;
 

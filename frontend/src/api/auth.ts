@@ -1,4 +1,5 @@
 import { ApiError } from "./client";
+import { clientEpochHeaders } from "./clientEpoch";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -41,6 +42,7 @@ async function authRequest<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(buildUrl(path), {
     ...init,
     headers: {
+      ...clientEpochHeaders(),
       "Content-Type": "application/json",
       ...(init.headers ?? {})
     },

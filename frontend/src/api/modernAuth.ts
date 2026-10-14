@@ -2,6 +2,7 @@ import type { AuthUser } from "./auth";
 import type { AccountDeleteResponse } from "./accountTypes";
 import { ApiError, getApiBaseUrl, notifyUnauthorized } from "./client";
 import { parseAttachmentFilename } from "./account";
+import { clientEpochHeaders } from "./clientEpoch";
 
 export type Provider = "google" | "apple";
 export type AuthAction = "verify_email" | "change_email" | "link:google" | "link:apple" | "unlink:google" | "unlink:apple" | "password" | "export" | "delete";
@@ -31,7 +32,7 @@ export interface AccountAction { recent_proof: string; expected_account_id: stri
 async function send(path: string, body?: unknown): Promise<Response> {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: body === undefined ? "GET" : "POST", credentials: "include",
-    cache: "no-store", headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+    cache: "no-store", headers: { ...clientEpochHeaders(), Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (!response.ok) {
