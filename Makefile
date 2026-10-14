@@ -161,6 +161,8 @@ check-specs:
 	python3 -m unittest scripts/test_check_slice_budget.py -v
 	python3 -m unittest scripts/test_check_speckit_manifests.py -v
 	python3 -m unittest scripts/test_check_gate_integrity.py -v
+	python3 -m unittest scripts/test_check_capability_inventory.py -v
+	for t in test_check_evidence_hygiene.py test_check_crate_graph.py test_fly_cutover.py; do if [ -f scripts/$$t ]; then python3 -m unittest scripts/$$t -v || exit 1; fi; done
 	python3 -m unittest scripts/test_auth_migration_guard.py -v
 	python3 -m unittest scripts/test_spec_kit_planning_review.py -v
 	python3 -m unittest scripts/test_render_feature_report.py -v
