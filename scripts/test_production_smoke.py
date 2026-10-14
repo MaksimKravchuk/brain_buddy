@@ -36,6 +36,8 @@ class _StubState:
         self.fail_delete = False
         self.fail_tree_read = False
         self.requests: list[str] = []
+        self.epochs: list[str | None] = []
+        self.user_exists = True
 
 
 class _StubHandler(BaseHTTPRequestHandler):
@@ -77,10 +79,12 @@ class _StubHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - http.server API
         self.state.requests.append(f"POST {self.path}")
+        self.state.epochs.append(self.headers.get("X-Client-Epoch"))
         if self.path == "/api/auth/login":
             body = self._body()
             if (
-                body.get("email") == SMOKE_EMAIL
+                self.state.user_exists
+                and body.get("email") == SMOKE_EMAIL
                 and body.get("password") == SMOKE_PASSWORD
             ):
                 self.state.logged_in = True
@@ -91,6 +95,17 @@ class _StubHandler(BaseHTTPRequestHandler):
                 )
             else:
                 self._send(401, {"detail": "Invalid credentials."})
+        elif self.path == "/api/auth/signup":
+            if self._body().get("invite_code") == "minted-invite":
+                self.state.user_exists = True
+                self.state.logged_in = True
+                self._send(
+                    201,
+                    self._me_payload(),
+                    set_cookie=f"brainbuddy_session={SESSION_TOKEN}; Path=/",
+                )
+            else:
+                self._send(400, {"detail": "Invalid invite."})
         elif self.path == "/api/auth/logout":
             self.state.logged_in = False
             self._send(204)
@@ -107,6 +122,7 @@ class _StubHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - http.server API
         self.state.requests.append(f"GET {self.path}")
+        self.state.epochs.append(self.headers.get("X-Client-Epoch"))
         if self.path == "/api/auth/me":
             if self._authed():
                 self._send(200, self._me_payload())
@@ -294,6 +310,43 @@ class ProductionSmokeScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not readable", combined)
         self.assertNotIn(SMOKE_PASSWORD, combined)
+
+    def test_python_target_sends_no_epoch_header(self) -> None:
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(set(self.state.epochs), {None})
+
+    def test_027_fr_018_rust_target_sends_client_epoch_on_every_request(self) -> None:
+        result = self._run({"SMOKE_TARGET": "rust"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(set(self.state.epochs), {"1"})
+        self.state.epochs.clear()
+        result = self._run({"SMOKE_TARGET": "rust", "SMOKE_CLIENT_EPOCH": "7"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(set(self.state.epochs), {"7"})
+
+    def test_027_fr_019_rust_target_mints_invite_for_missing_smoke_user(self) -> None:
+        self.state.user_exists = False
+        result = self._run(
+            {"SMOKE_TARGET": "rust", "SMOKE_INVITE_COMMAND": "echo minted-invite"}
+        )
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, combined)
+        self.assertIn("POST /api/auth/signup", self.state.requests)
+        self.assertNotIn("minted-invite", combined)
+
+    def test_python_target_never_signs_up(self) -> None:
+        self.state.user_exists = False
+        result = self._run({"SMOKE_INVITE_COMMAND": "echo minted-invite"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("POST /api/auth/signup", self.state.requests)
+
+    def test_invalid_target_or_epoch_fails_before_any_request(self) -> None:
+        for env in ({"SMOKE_TARGET": "go"}, {"SMOKE_CLIENT_EPOCH": "abc"}):
+            with self.subTest(env=env):
+                result = self._run(env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.state.requests, [])
 
 
 if __name__ == "__main__":

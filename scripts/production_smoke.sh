@@ -22,12 +22,29 @@ SMOKE_API_PREFIX="${SMOKE_API_PREFIX:-/api}"
 SMOKE_RETRY_ATTEMPTS="${SMOKE_RETRY_ATTEMPTS:-3}"
 SMOKE_RETRY_DELAY_SECONDS="${SMOKE_RETRY_DELAY_SECONDS:-5}"
 SMOKE_REQUIRED_FLAG="${SMOKE_REQUIRED_FLAG:-delivery_canary}"
+# SMOKE_TARGET=python (default, today's production) changes nothing about the
+# requests. SMOKE_TARGET=rust sends X-Client-Epoch (SMOKE_CLIENT_EPOCH, default
+# 1) on every API request and, when the smoke user does not exist yet, mints an
+# invite with SMOKE_INVITE_COMMAND (default "bb-server create-invite") and signs
+# the user up. Setting SMOKE_CLIENT_EPOCH alone also sends the header.
+SMOKE_TARGET="${SMOKE_TARGET:-python}"
+SMOKE_CLIENT_EPOCH="${SMOKE_CLIENT_EPOCH:-}"
+SMOKE_INVITE_COMMAND="${SMOKE_INVITE_COMMAND:-bb-server create-invite}"
 
 log() { echo "[production-smoke] $1"; }
 fail() {
   echo "[production-smoke] FAIL: $1" >&2
   exit 1
 }
+
+case "${SMOKE_TARGET}" in
+  python) ;;
+  rust) SMOKE_CLIENT_EPOCH="${SMOKE_CLIENT_EPOCH:-1}" ;;
+  *) fail "SMOKE_TARGET must be python or rust" ;;
+esac
+if [[ -n "${SMOKE_CLIENT_EPOCH}" && ! "${SMOKE_CLIENT_EPOCH}" =~ ^[0-9]+$ ]]; then
+  fail "SMOKE_CLIENT_EPOCH must be a non-negative integer"
+fi
 
 [[ -n "${BRAIN_BUDDY_SMOKE_EMAIL:-}" ]] || fail "BRAIN_BUDDY_SMOKE_EMAIL is not set"
 [[ -n "${BRAIN_BUDDY_SMOKE_PASSWORD:-}" ]] || fail "BRAIN_BUDDY_SMOKE_PASSWORD is not set"
@@ -72,6 +89,9 @@ request() {
     -X "${method}" -H 'Content-Type: application/json'
     -b "${COOKIE_JAR}" -c "${COOKIE_JAR}"
   )
+  if [[ -n "${SMOKE_CLIENT_EPOCH}" ]]; then
+    args+=(-H "X-Client-Epoch: ${SMOKE_CLIENT_EPOCH}")
+  fi
   if [[ -n "${payload}" ]]; then
     args+=(--data-binary "@${payload}")
   fi
@@ -108,6 +128,31 @@ while (( attempt <= SMOKE_RETRY_ATTEMPTS )); do
     sleep "${SMOKE_RETRY_DELAY_SECONDS}"
   fi
 done
+if [[ "${status}" == "401" && "${SMOKE_TARGET}" == "rust" ]]; then
+  log "smoke user not found; minting an invite and signing up..."
+  # shellcheck disable=SC2086 # the command is intentionally word-split
+  invite=$(${SMOKE_INVITE_COMMAND} 2>/dev/null | tail -n 1 | tr -d '[:space:]') || true
+  [[ -n "${invite}" ]] || fail "could not mint an invite"
+  SMOKE_INVITE_CODE="${invite}" python3 - >"${PAYLOAD_FILE}" <<'PY'
+import json
+import os
+
+print(
+    json.dumps(
+        {
+            "email": os.environ["BRAIN_BUDDY_SMOKE_EMAIL"],
+            "password": os.environ["BRAIN_BUDDY_SMOKE_PASSWORD"],
+            "invite_code": os.environ["SMOKE_INVITE_CODE"],
+        }
+    )
+)
+PY
+  status=$(request POST "/auth/signup" "${PAYLOAD_FILE}")
+  [[ "${status}" == "200" || "${status}" == "201" ]] \
+    || fail "signup with a minted invite returned HTTP ${status}"
+  # A successful signup starts the session; /auth/me below proves it.
+  status="200"
+fi
 rm -f "${PAYLOAD_FILE}"
 [[ "${status}" == "200" ]] || fail "login returned HTTP ${status}"
 log "login OK"
