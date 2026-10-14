@@ -52,6 +52,28 @@ struct RustSyncURLSessionTests {
         #expect(seen.body == body, "the body arrives byte for byte")
     }
 
+    @Test("026-FR-023 a failed answer's X-Correlation-ID is kept until taken; a later 2xx neither replaces nor clears it")
+    func recordsTheFailedAnswersCorrelationID() throws {
+        let (server, _, transport) = rig()
+        let failedID = "4e5d9a20-0000-4000-8000-000000000001"
+        server.respond { _ in .response(status: 422, headers: ["X-Correlation-ID": failedID], body: Data("{}".utf8)) }
+        _ = try transport.send(get(), cancel: RustSyncCancellation())
+        server.respond { _ in .response(status: 200, headers: ["X-Correlation-ID": "ok-id"], body: Data("{}".utf8)) }
+        _ = try transport.send(get(), cancel: RustSyncCancellation())
+        #expect(transport.takeLastFailureCorrelationID() == failedID)
+        #expect(transport.takeLastFailureCorrelationID() == nil, "taking it clears it")
+
+        server.respond { _ in .response(status: 503, headers: ["X-Correlation-ID": "second-5xx"], body: Data("{}".utf8)) }
+        _ = try transport.send(get(), cancel: RustSyncCancellation())
+        server.respond { _ in .response(status: 500, body: Data("{}".utf8)) }
+        _ = try transport.send(get(), cancel: RustSyncCancellation())
+        #expect(transport.takeLastFailureCorrelationID() == nil, "the latest failed answer had none: no stale ID")
+
+        server.respond { _ in .response(status: 400, headers: ["X-Correlation-ID": "has spaces <b>"], body: Data("{}".utf8)) }
+        _ = try transport.send(get(), cancel: RustSyncCancellation())
+        #expect(transport.takeLastFailureCorrelationID() == nil, "a malformed ID is not kept")
+    }
+
     @Test("026-FR-005 a percent-encoded query goes out unchanged")
     func keepsTheEncodedQuery() throws {
         let (server, _, transport) = rig()
@@ -308,7 +330,9 @@ struct RustSyncHintStreamTests {
     func idleTimeout() throws {
         let (server, hints) = rig()
         server.respond { _ in .stream(status: 200, StubStream()) }
-        let reader = try hints.open(path: path, idleTimeout: 0.3, cancel: RustSyncCancellation())
+        // The idle timeout also bounds the wait for the status line; 2 s keeps a loaded CI runner (Linux
+        // corelibs) from timing out the open before the silent read is reached.
+        let reader = try hints.open(path: path, idleTimeout: 2, cancel: RustSyncCancellation())
         #expect(throws: RustSyncStreamFailure.timeout) { try reader.read(maxLength: 100, cancel: RustSyncCancellation()) }
     }
 

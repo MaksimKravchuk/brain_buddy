@@ -27,6 +27,7 @@ struct RustWorkspaceJourneyTests {
         let id = try await workspace.capture(CaptureDraft(text: "Canonical capture"),
             editorID: "scene:journey:capture")
         await workspace.prepareList(.list(.inbox))
+        await workspace.settleRustWork()  // the counts follow the save behind its return
         #expect(workspace.list(.list(.inbox)).sections.flatMap(\.tasks).map(\.title) == ["Canonical capture"])
         #expect(workspace.counts().inbox == 1)
         _ = try await workspace.capture(CaptureDraft(text: "Project membership", list: .next, contextProjectID: project),

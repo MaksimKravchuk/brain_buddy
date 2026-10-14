@@ -1228,7 +1228,13 @@ fn replay_026_fr_001_an_upgraded_store_rebuilds_its_projection_before_the_next_g
     rusqlite::Connection::open(&path)
         .unwrap()
         .execute_batch(
-            "DROP TABLE visible_records;
+            "DROP INDEX outbox_child_edits;
+             DROP INDEX outbox_by_target;
+             DROP INDEX drafts_by_record;
+             ALTER TABLE outbox DROP COLUMN child_task_id;
+             ALTER TABLE outbox DROP COLUMN target_id;
+             ALTER TABLE outbox DROP COLUMN command_type;
+             DROP TABLE visible_records;
              ALTER TABLE outbox DROP COLUMN projection_generation;
              ALTER TABLE outbox DROP COLUMN local_result;
              ALTER TABLE sync_meta DROP COLUMN projection_stale;

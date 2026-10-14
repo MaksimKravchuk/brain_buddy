@@ -34,31 +34,8 @@ struct RustSyncHostBackendTests {
     func editGoesOutAndWebWriteComesIn() async throws {
         let backend = try RealBackend.start(python: try #require(Self.python))
         defer { backend.stop() }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let (workspace, root) = try await Self.openWorkspace(backend: backend)
         defer { try? FileManager.default.removeItem(at: root) }
-
-        let account = LinkedAccount(id: backend.owner, email: "bb-client@example.com", serverURL: backend.serverURL,
-            linkedAt: Date(timeIntervalSince1970: 1_789_000_000))
-        let source = root.appendingPathComponent("document.json")
-        try StoreDocumentCoding.makeEncoder().encode(StoreDocument(base: .empty, account: account)).write(to: source)
-        let database = root.appendingPathComponent("store.sqlite3")
-        let bridge = try RustBridgeRuntime()
-        _ = try await bridge.importLegacyStore(.init(workspaceID: backend.owner, databasePath: database.path,
-            sourcePath: source.path, now: "2026-09-21T00:00:00Z"))
-        let runtime = try await bridge.openStore(workspaceID: backend.owner, databaseURL: database)
-
-        let instant = Date()
-        let policy = Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8)
-        let host = try await RustSyncHost.start(
-            workspaceID: backend.owner, databaseURL: database,
-            binding: .init(accountID: backend.owner, scopeID: backend.owner, deviceID: "device-swift", freshAuthentication: true),
-            context: RustWorkspaceContext(now: instant, timeZone: "UTC", actorID: backend.owner, policy: policy),
-            serverURL: backend.serverURL, tokenStore: InMemorySessionTokenStore(tokens: [backend.serverURL: backend.token]))
-        let selection = RustWorkspaceSelection(runtime: runtime,
-            facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC")),
-            transport: host, account: account, startup: .prepared)
-        let workspace = Workspace(store: ControlledStore(), sync: nil, rust: selection, now: { Date() })
         await workspace.load()
         await workspace.syncNow()
         #expect(workspace.syncStatus != .needsSignIn)
@@ -81,10 +58,70 @@ struct RustSyncHostBackendTests {
         #expect(titles == ["Written in the app", "Written on the web"])
         await workspace.closeRuntime()
     }
+
+    @Test(
+        "026-FR-001 026-FR-007: capture and move into Next with the Weekly Review hidden are accepted by the real server (opt-in: set BB_BACKEND_PYTHON)",
+        .enabled(if: Self.python != nil, "BB_BACKEND_PYTHON is unset: the real backend is not exercised"))
+    @MainActor
+    func nextEntryWithReviewHiddenIsAccepted() async throws {
+        let backend = try RealBackend.start(python: try #require(Self.python))
+        defer { backend.stop() }
+        let (workspace, root) = try await Self.openWorkspace(backend: backend)
+        defer { try? FileManager.default.removeItem(at: root) }
+        await workspace.load()
+        await workspace.syncNow()
+        #expect(workspace.syncStatus != .needsSignIn)
+        #expect(!workspace.reviewExposed)
+
+        // A capture straight into Next, and an Inbox capture moved into Next: both start the
+        // formulation clock, so both carry the device's `new_formulation_id`.
+        _ = try await workspace.capture(CaptureDraft(text: "Captured into Next", list: .next), editorID: "scene:backend:next")
+        let moved = try await workspace.capture(CaptureDraft(text: "Moved into Next"), editorID: "scene:backend:inbox")
+        await workspace.prepareList(.list(.inbox))
+        try await workspace.moveTask(moved, to: .next, editorID: "scene:backend:move")
+
+        #expect(await backend.eventually { try backend.states() == ["Captured into Next": "next", "Moved into Next": "next"] })
+        await workspace.syncNow()
+        await workspace.refreshRustStatus()
+        #expect(workspace.pendingChangeCount == 0)
+        #expect(try backend.formulationsStarted() == 2)
+        await workspace.closeRuntime()
+    }
+
+    /// A signed-in Rust-runtime workspace over the real backend with the Weekly Review hidden
+    /// (the policy every rehearsal install starts from).
+    @MainActor
+    static func openWorkspace(backend: RealBackend) async throws -> (Workspace, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let account = LinkedAccount(id: backend.owner, email: "bb-client@example.com", serverURL: backend.serverURL,
+            linkedAt: Date(timeIntervalSince1970: 1_789_000_000))
+        let source = root.appendingPathComponent("document.json")
+        try StoreDocumentCoding.makeEncoder().encode(StoreDocument(base: .empty, account: account)).write(to: source)
+        let database = root.appendingPathComponent("store.sqlite3")
+        let bridge = try RustBridgeRuntime()
+        _ = try await bridge.importLegacyStore(.init(workspaceID: backend.owner, databasePath: database.path,
+            sourcePath: source.path, now: "2026-09-21T00:00:00Z"))
+        let runtime = try await bridge.openStore(workspaceID: backend.owner, databaseURL: database)
+
+        let instant = Date()
+        let policy = Data(#"{"weekly_review":false,"navigator_provider":null,"navigator_available":false,"consent_text_version":1}"#.utf8)
+        let host = try await RustSyncHost.start(
+            workspaceID: backend.owner, databaseURL: database,
+            binding: .init(accountID: backend.owner, scopeID: backend.owner, deviceID: "device-swift", freshAuthentication: true),
+            context: RustWorkspaceContext(now: instant, timeZone: "UTC", actorID: backend.owner, policy: policy),
+            serverURL: backend.serverURL, tokenStore: InMemorySessionTokenStore(tokens: [backend.serverURL: backend.token]))
+        let selection = RustWorkspaceSelection(runtime: runtime,
+            facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC")),
+            transport: host, account: account, startup: .prepared)
+        let workspace = Workspace(store: ControlledStore(), sync: nil, rust: selection, now: { Date() })
+        return (workspace, root)
+    }
 }
 
 /// The real application as a child process (`rust/crates/bb-client/tests/support/sse_backend.py`).
-private final class RealBackend: @unchecked Sendable {
+final class RealBackend: @unchecked Sendable {
     // Safe: set once in `start`, read-only afterwards.
     let process: Process
     let port: Int
@@ -194,6 +231,24 @@ private final class RealBackend: @unchecked Sendable {
         guard status == 200, let page = try JSONSerialization.jsonObject(with: body) as? [String: Any],
               let items = page["items"] as? [[String: Any]] else { return [] }
         return items.compactMap { $0["title"] as? String }
+    }
+
+    /// Title to list for every task the server holds.
+    func states() throws -> [String: String] {
+        let (status, body) = try request("GET", "/api/tasks?limit=200")
+        guard status == 200, let page = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let items = page["items"] as? [[String: Any]] else { return [:] }
+        return Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            (item["title"] as? String).flatMap { title in (item["state"] as? String).map { (title, $0) } }
+        })
+    }
+
+    /// How many tasks the server holds with a formulation id (every Next entry starts one).
+    func formulationsStarted() throws -> Int {
+        let (status, body) = try request("GET", "/api/tasks?limit=200")
+        guard status == 200, let page = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let items = page["items"] as? [[String: Any]] else { return 0 }
+        return items.filter { (($0["formulation"] as? [String: Any])?["id"] as? String)?.hasPrefix("form_") == true }.count
     }
 
     func createTask(_ title: String) throws {

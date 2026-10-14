@@ -150,6 +150,7 @@ struct RustAccountLifecycleTests {
         await workspace.refreshTaskDetails(id)
         try await workspace.completeTask(id, editorID: "scene:life:complete")
         await workspace.syncNow()
+        await workspace.settleRustWork()
         #expect(workspace.counts() == ListCounts())
         #expect(workspace.pendingChangeCount == 0)
         #expect(workspace.hasLocalWorkToMerge)
@@ -165,6 +166,7 @@ struct RustAccountLifecycleTests {
         let lifecycle = try await h.lifecycle(recorder: recorder)
         let workspace = try await h.workspace(scope: "a", account: h.accountA, lifecycle: lifecycle)
         _ = try await workspace.capture(CaptureDraft(text: "Not yet synced"), editorID: "scene:life:warn")
+        await workspace.settleRustWork()  // a save returns before its status refresh
         let named = workspace.pendingChanges
         #expect(named.count == 1)
 
@@ -343,11 +345,11 @@ struct Harness: Sendable {
     @MainActor
     func workspace(scope: String, account: LinkedAccount?, transport: any SyncRuntimePort = PendingRustSyncRuntimePort(),
                    startup: RustWorkspaceSelection.Startup = .prepared,
-                   lifecycle: (any RustAccountLifecyclePort)?) async throws -> Workspace {
+                   lifecycle: (any RustAccountLifecyclePort)?, clock: TestClock? = nil) async throws -> Workspace {
         let selection = try await selection(scope: scope, account: account, transport: transport, startup: startup)
         let instant = instant
         let workspace = Workspace(store: ControlledStore(), sync: nil, rust: selection, rustLifecycle: lifecycle,
-            now: { instant })
+            now: { clock?.now ?? instant })
         await workspace.load()
         #expect(workspace.isRustBound)
         return workspace

@@ -25,6 +25,7 @@
 //! is still `pending_registration` is reused by the app, the widget and App
 //! Intents until registration (sync-v1 section 5).
 
+use crate::projection_cache::Txn;
 use crate::replay::{ReplayError, replay_in};
 use crate::storage::{Store, StoreError};
 use bb_domain::dispatch;
@@ -45,6 +46,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, Read};
+use std::sync::Arc;
 
 /// The rule version the local projection is decided with.
 pub(crate) const RULE_VERSION: u32 = 1;
@@ -379,15 +381,13 @@ pub fn execute_with(
     request: &ExecuteRequest,
     mut hook: impl FnMut(Stage, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> Result<Executed, ExecuteError> {
-    store.try_write(|tx| {
-        run(
-            tx,
-            ids,
-            request,
-            None,
-            &mut hook,
-            &mut BatchEvidence::default(),
-        )
+    store.try_write_cached(|tx, cache| {
+        let mut evidence = BatchEvidence {
+            cache,
+            ..BatchEvidence::default()
+        };
+        let executed = run(tx, ids, request, None, &mut hook, &mut evidence)?;
+        Ok((executed, evidence.cache))
     })
 }
 
@@ -422,10 +422,10 @@ pub fn execute_batch_reported_with(
     requests: &[ExecuteRequest],
     before_commit: impl FnOnce(&Transaction<'_>) -> Result<(), ExecuteError>,
 ) -> Result<Vec<Executed>, ReportedExecuteError> {
-    store.try_write(|tx| {
-        let results = execute_batch_reported_in(tx, ids, requests)?;
+    store.try_write_cached(|tx, cache| {
+        let (results, cache) = execute_batch_reported_cached(tx, ids, requests, cache)?;
         before_commit(tx)?;
-        Ok(results)
+        Ok((results, cache))
     })
 }
 
@@ -442,8 +442,18 @@ fn execute_batch_reported_in(
     ids: &mut impl IdSource,
     requests: &[ExecuteRequest],
 ) -> Result<Vec<Executed>, ReportedExecuteError> {
+    execute_batch_reported_cached(tx, ids, requests, Txn::default()).map(|(results, _)| results)
+}
+
+fn execute_batch_reported_cached(
+    tx: &Transaction<'_>,
+    ids: &mut impl IdSource,
+    requests: &[ExecuteRequest],
+    cache: Txn,
+) -> Result<(Vec<Executed>, Txn), ReportedExecuteError> {
     let mut evidence = BatchEvidence {
         batch: true,
+        cache,
         ..BatchEvidence::default()
     };
     let mut meta = read_meta(tx)?;
@@ -465,22 +475,29 @@ fn execute_batch_reported_in(
                 ReplayError::Store(error) => ExecuteError::Store(error),
                 _ => ExecuteError::Store(StoreError::Corrupt),
             })?;
+            evidence.cache.forget(); // the rebuild rewrote the projection
             meta = read_meta(tx)?;
         }
-        let state = read_projection(tx, &meta.workspace_id)?;
-        evidence.start(&state);
+        let loaded = evidence.cache.visible(tx, &meta.workspace_id)?;
+        evidence.start(&loaded.read_set);
         for request in unknown {
-            crate::admission::validate(tx, &meta.workspace_id, &state, &request.admission_tokens)
-                .map_err(|error| ReportedExecuteError::for_request(error, request))?;
+            crate::admission::validate(
+                tx,
+                &meta.workspace_id,
+                &loaded.read_set,
+                &request.admission_tokens,
+            )
+            .map_err(|error| ReportedExecuteError::for_request(error, request))?;
         }
     }
-    requests
+    let results = requests
         .iter()
         .map(|request| {
             run(tx, ids, request, None, &mut |_, _| Ok(()), &mut evidence)
                 .map_err(|error| ReportedExecuteError::for_request(error, request))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((results, evidence.cache))
 }
 
 /// [`execute`] inside a transaction the caller already holds, for a command
@@ -589,6 +606,8 @@ struct BatchEvidence {
     skipped: HashMap<(String, String), Counter>,
     start_revisions: Option<HashMap<String, Counter>>,
     fresh_tasks: HashMap<String, FreshTask>,
+    /// The decoded visible projection, carried from command to command.
+    cache: Txn,
 }
 
 struct FreshTask {
@@ -795,6 +814,7 @@ fn run(
         };
     }
     if meta.projection_stale {
+        evidence.cache.forget(); // the rebuild below rewrites the projection
         // An upgraded store holds confirmed rows and queued work but no visible
         // projection yet: build it before deciding anything against it.
         replay_in(tx, &request.context).map_err(|error| match error {
@@ -803,18 +823,19 @@ fn run(
         })?;
         meta = read_meta(tx)?;
     }
-    let mut visible = load_visible(tx, &meta.workspace_id)?;
+    // Exact for this transaction: reused from the last command, or read now.
+    let base = evidence.cache.visible(tx, &meta.workspace_id)?;
     let local_authority = crate::local_review::account_less(tx)?;
-    evidence.start(&visible.read_set);
+    evidence.start(&base.read_set);
     if !evidence.batch {
         crate::admission::validate(
             tx,
             &meta.workspace_id,
-            &visible.read_set,
+            &base.read_set,
             &request.admission_tokens,
         )?;
     }
-    let mut local_facts = crate::localfacts::load(tx, &meta.workspace_id)?;
+    let (mut local_facts, stored_facts) = crate::localfacts::load_runtime(tx, &meta.workspace_id)?;
     let entity_id = match (&request.entity_id, new_entity_prefix(request.command_type)) {
         (Some(id), _) => id.clone(),
         (None, Some(prefix)) => prefixed(ids, prefix)?,
@@ -822,7 +843,7 @@ fn run(
     };
     let normalized = normalize_skipped_bulk(request, evidence)?;
     let normalized = normalize_fresh_tasks(tx, &meta.workspace_id, request, normalized, evidence)?;
-    let (preconditions, depends_on) = wire(&normalized, &entity_id, &visible.pending);
+    let (preconditions, depends_on) = wire(&normalized, &entity_id, &base.pending);
     let results = load_dependencies(tx, &meta.workspace_id, &depends_on)?;
     if local_authority {
         for dependency in &depends_on {
@@ -895,22 +916,22 @@ fn run(
             &request.command_id,
             request.command_type,
             &request.payload,
-            &visible.read_set,
+            &base.read_set,
         )?,
         policy: request.context.policy.clone(),
     };
-    if local_authority {
-        visible.read_set = crate::local_review::private_read_set(
-            tx,
-            &meta.workspace_id,
-            &visible.read_set,
-            &inputs.now,
-        )?;
-    }
-    let decided = if local_authority {
-        dispatch::decide_local_review_envelope(&visible.read_set, &envelope, &results, &inputs)
+    // Only the private Review evidence is added to the public projection, and
+    // only when some applies: the common gesture decides against the shared set.
+    let private = if local_authority {
+        crate::local_review::private_overlay(tx, &meta.workspace_id, &base.read_set, &inputs.now)?
     } else {
-        dispatch::decide_envelope(&visible.read_set, &envelope, &results, &inputs)
+        None
+    };
+    let decision_set = private.as_ref().unwrap_or(&base.read_set);
+    let decided = if local_authority {
+        dispatch::decide_local_review_envelope(decision_set, &envelope, &results, &inputs)
+    } else {
+        dispatch::decide_envelope(decision_set, &envelope, &results, &inputs)
     };
     let (changes, deferred) = match decided {
         Ok(changes) => (changes, false),
@@ -942,7 +963,7 @@ fn run(
         let key = json!(change.record_key()).to_string();
         depend_on_key(
             &mut stable.depends_on,
-            &visible.pending,
+            &base.pending,
             Some(change.entity_type()),
             &key,
         );
@@ -950,7 +971,7 @@ fn run(
             for reference in record_references(record) {
                 depend_on_key(
                     &mut stable.depends_on,
-                    &visible.pending,
+                    &base.pending,
                     None,
                     &key_json(reference),
                 );
@@ -1003,11 +1024,17 @@ fn run(
         )?;
     }
     hook(Stage::IntentStored, tx)?;
-    let mut local_read_set = visible.read_set.clone();
+    // What earlier changes of this command did to a task's state, over `base`.
+    let mut moved: HashMap<bb_domain::types::TaskId, Option<bb_domain::types::TaskState>> =
+        HashMap::new();
     for change in &changes.changes {
-        crate::localfacts::project(
+        crate::localfacts::adopt_legacy(tx, &meta.workspace_id, &mut local_facts, change)?;
+        crate::localfacts::project_with(
             &mut local_facts,
-            &local_read_set,
+            &|id| match moved.get(id) {
+                Some(state) => *state,
+                None => base.read_set.tasks.get(id).map(|task| task.state),
+            },
             change,
             &request.command_id,
         );
@@ -1022,11 +1049,21 @@ fn run(
         }
         apply(tx, &meta.workspace_id, &request.command_id, change)?;
         match change {
-            DomainChange::Upsert(record) => file(&mut local_read_set, record.clone()),
+            DomainChange::Upsert(Record::Task(task)) => {
+                moved.insert(task.id.clone(), Some(task.state));
+            }
             DomainChange::Tombstone {
-                entity_type,
+                entity_type: EntityType::Task,
                 record_key,
-            } => crate::replay::remove(&mut local_read_set, *entity_type, record_key),
+            } => {
+                if let Some(id) = record_key
+                    .first()
+                    .and_then(|id| bb_domain::types::TaskId::parse(id).ok())
+                {
+                    moved.insert(id, None);
+                }
+            }
+            _ => {}
         }
     }
     if local_authority {
@@ -1063,7 +1100,7 @@ fn run(
     let fact_writes = if deferred {
         0
     } else {
-        crate::localfacts::save(tx, &meta.workspace_id, &local_facts)?
+        crate::localfacts::save_changed(tx, &meta.workspace_id, &local_facts, &stored_facts)?
     };
     let projection_generation = projection_generation
         + i64::from(fact_writes > 0 && changes.outcome != ChangeOutcome::Applied);
@@ -1101,6 +1138,9 @@ fn run(
             }
         }
     }
+    drop(private);
+    drop(base);
+    stage_projection(tx, evidence, &request.command_id, local_authority, &changes);
     Ok(Executed {
         command_id: request.command_id.clone(),
         entity_id,
@@ -1109,6 +1149,82 @@ fn run(
         status: LocalStatus::LocallySaved,
         replayed: false,
     })
+}
+
+/// Carries the decoded projection across this command's writes, so the next
+/// command (or a list read) does not decode the whole store again. It mirrors
+/// exactly what [`apply`] stored and [`load_visible`] would read back; anything
+/// it cannot mirror exactly (the list-valued Review collections, whose order
+/// follows storage order) drops the cache instead.
+fn stage_projection(
+    tx: &Transaction<'_>,
+    evidence: &mut BatchEvidence,
+    command: &CommandId,
+    settled: bool,
+    changes: &ChangeSet,
+) {
+    let Some(mut visible) = evidence.cache.take() else {
+        return;
+    };
+    for change in &changes.changes {
+        if !mirror(&mut visible, command, settled, change) {
+            evidence.cache.forget();
+            return;
+        }
+    }
+    evidence.cache.stage(tx, Arc::new(visible));
+}
+
+/// One [`apply`] over the decoded projection; false when it cannot be mirrored.
+fn mirror(
+    visible: &mut Visible,
+    command: &CommandId,
+    settled: bool,
+    change: &DomainChange,
+) -> bool {
+    let entity_type = change.entity_type();
+    if matches!(
+        entity_type,
+        EntityType::ReviewReceipt | EntityType::ReviewParkAck | EntityType::ReviewNavigatorConsent
+    ) {
+        return false;
+    }
+    let key = json!(change.record_key()).to_string();
+    // The row (type, key) is replaced or deleted, so its owner changes.
+    if let Some(owners) = visible.pending.get_mut(&key) {
+        owners.retain(|owner| owner.entity_type != entity_type);
+        if owners.is_empty() {
+            visible.pending.remove(&key);
+        }
+    }
+    match change {
+        DomainChange::Upsert(record) => {
+            let body = json!(record.public())["value"]
+                .take()
+                .to_string()
+                .into_bytes();
+            let Ok(stored) = record_from(entity_type.as_str(), &body) else {
+                return false;
+            };
+            file(&mut visible.read_set, stored);
+            if !settled {
+                let owners = visible.pending.entry(key).or_default();
+                owners.push(Pending {
+                    entity_type,
+                    edit_revision: edit_revision(record)
+                        .and_then(|revision| Counter::parse(revision.as_str()).ok()),
+                    command: command.clone(),
+                });
+                // Loaded in storage order: by record type within a key.
+                owners.sort_by_key(|owner| owner.entity_type.as_str());
+            }
+        }
+        DomainChange::Tombstone {
+            entity_type,
+            record_key,
+        } => crate::replay::remove(&mut visible.read_set, *entity_type, record_key),
+    }
+    true
 }
 
 /// A scope or device the workspace does not have yet only types the command
@@ -1273,17 +1389,19 @@ fn known_command(
 // ---------------------------------------------------------------- the visible state
 
 /// A queued command's claim on a visible record: it last wrote it.
-struct Pending {
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Pending {
     entity_type: EntityType,
     edit_revision: Option<Counter>,
     command: CommandId,
 }
 
-struct Visible {
-    read_set: ReadSet,
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Visible {
+    pub(crate) read_set: ReadSet,
     /// By record key (a JSON array of components), for the records a queued
     /// command last wrote.
-    pending: HashMap<String, Vec<Pending>>,
+    pub(crate) pending: HashMap<String, Vec<Pending>>,
 }
 
 fn key_json(id: &str) -> String {
@@ -1292,7 +1410,10 @@ fn key_json(id: &str) -> String {
 
 /// Rereads the whole visible projection under the write lock. A command that
 /// has finished (`completed`) no longer owns a record.
-fn load_visible(tx: &Transaction<'_>, workspace_id: &str) -> Result<Visible, ExecuteError> {
+pub(crate) fn load_visible(
+    tx: &Transaction<'_>,
+    workspace_id: &str,
+) -> Result<Visible, ExecuteError> {
     let mut statement = tx.prepare(
         "SELECT v.record_type, v.record_key, v.edit_revision, v.body,
                 CASE WHEN o.state IS NOT NULL AND o.state <> 'completed'

@@ -92,7 +92,22 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   when the scene leaves the foreground. `UPGRADE_REQUIRED` reads as `SyncRuntimeWakeResult.updateNeeded`
   (`Workspace.runtimeSyncNeedsUpdate`, `RuntimeSyncRecovery.syncNeedsUpdate`). Tests use
   `BrainBuddyFakeServer`'s `StubServer` (URLProtocol); `RustSyncHostBackendTests` is the opt-in run
-  against the real backend (`BB_BACKEND_PYTHON`).
+  against the real backend (`BB_BACKEND_PYTHON`). The `Rehearsal/` tests beside it (and `macos/Tests/.../MacRehearsalTests.swift`)
+  are the opt-in automated rehearsal of the pilot scenarios Q01-Q12, skipped unless `BB_REHEARSAL_TARGET=local|prod`
+  is set; `prod` is guarded (confirm variable, Keychain credentials, 300-request budget) and its results are never
+  reference-device evidence (`ios/scripts/rehearsal_report.py` writes the evidence section).
+- A Rust-selected `Workspace` save (`capture`, `apply`, `updateTask`, …) returns once the write is durable
+  and its receipt adopted (SC-003, FR-001). What follows runs behind the return: the queries in use are
+  read again (the page stays on screen, stale-while-revalidate, after a short quiet period so a burst of
+  writes is one refresh), then the status read and the transport wake, each single-flight and latest-wins.
+  The next command waits only for a read of the tasks the last save changed (their revisions); one that
+  touched a project, tag, subtask or comment, and any review decision, waits for the full refresh.
+  Code that must see the write in a page or count (tests, a screen that reads it at once) prepares the
+  query it reads or awaits `Workspace.settleRustWork()`; `flush()` does. The capture preview is dropped
+  on submit and by `discardCapturePreviews()` (call it when the sheet is dismissed), never refreshed
+  after a save. Blocking bridge calls run on `RustBridgeExecutor` (one thread per runtime, writes and
+  the reads a save depends on ahead of query refreshes), not on the cooperative pool, and pages are
+  decoded off the main actor (`RustPreparedPage`).
 - The Apple XCFramework has one library per platform variant: iOS device (arm64), iOS
   simulator (arm64 + x86_64) and macOS (arm64 + x86_64), the two-architecture ones joined
   with `lipo`, because Xcode links the simulator and Mac builds for both architectures.
@@ -176,7 +191,7 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 - Copy: English, sentence case everywhere ("Move to next actions", not "Move
   To Next Actions"), calm second person, short imperatives. List names are
   "Inbox", "Next actions", "Waiting for", "Someday / maybe". Use `·` between
-  inline metadata. Sync state is always words ("Offline — 3 changes
+  inline metadata. Sync state is always words ("Offline · 3 changes
   waiting"), never a colour alone. No emoji. Weekly review is flag-gated: a
   non-interactive `coming later` entry while the `weekly_review` flag is off
   (account-less: while its release switch is off; ADR-0027).

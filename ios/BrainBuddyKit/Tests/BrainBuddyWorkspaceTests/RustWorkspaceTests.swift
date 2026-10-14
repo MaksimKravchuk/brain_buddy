@@ -340,3 +340,103 @@ extension RustWorkspaceTests {
         await workspace.closeRuntime()
     }
 }
+
+
+// SC-003: a save returns once the write is durable; what follows must not blank or repeat the screen.
+extension RustWorkspaceTests {
+    @Test("026-SC-003: an invalidation keeps the page on screen while its refresh runs, and a read waits for fresh data")
+    @MainActor
+    func staleWhileRevalidate() async {
+        let controlled = ControlledRustQuery()
+        let cache = RustWorkspaceAdapter(inputs: Data()) { query, inputs, cursor in
+            try await controlled.answer(query, inputs: inputs, cursor: cursor)
+        } didPublish: { _, _ in }
+        let first = Task { await cache.prepare(query) }
+        await controlled.waitForCalls(1)
+        await controlled.complete(0, generation: "1")
+        await first.value
+        #expect(cache.pageState(for: query).projectionGeneration == 1)
+
+        cache.invalidate(generation: 2)
+        #expect(cache.readiness(for: query) == .ready)
+        #expect(cache.page(for: query) != nil)
+
+        let second = Task { await cache.prepare(query) }
+        await controlled.waitForCalls(2)
+        #expect(cache.readiness(for: query) == .ready, "the old page stays while the new one is read")
+        #expect(cache.pageState(for: query).projectionGeneration == 1)
+        await controlled.complete(1, generation: "2")
+        await second.value
+        #expect(cache.pageState(for: query).projectionGeneration == 2)
+    }
+
+    @Test("026-SC-003: a burst of invalidations is one refresh of the queries in use, started after the burst")
+    @MainActor
+    func burstIsOneRefresh() async {
+        let controlled = ControlledRustQuery()
+        let cache = RustWorkspaceAdapter(inputs: Data()) { query, inputs, cursor in
+            try await controlled.answer(query, inputs: inputs, cursor: cursor)
+        } didPublish: { _, _ in }
+        let first = Task { await cache.prepare(query) }
+        await controlled.waitForCalls(1)
+        await controlled.complete(0, generation: "1")
+        await first.value
+        for generation in 2...6 { cache.invalidate(generation: UInt64(generation)) }
+        #expect(await controlled.callCount() == 1, "nothing is read while writes keep arriving")
+        let settled = Task { await cache.settle() }
+        await controlled.waitForCalls(2)
+        await controlled.complete(1, generation: "6")
+        await settled.value
+        #expect(await controlled.callCount() == 2)
+        #expect(cache.pageState(for: query).projectionGeneration == 6)
+    }
+
+    @Test("026-SC-003: the capture preview is not read again after a save and can be dropped")
+    @MainActor
+    func previewIsNotRefreshed() async {
+        let controlled = ControlledRustQuery()
+        let preview = Data("{\"draft\":{\"text\":\"a\"},\"kind\":\"capture_preview\"}".utf8)
+        let cache = RustWorkspaceAdapter(inputs: Data()) { query, inputs, cursor in
+            try await controlled.answer(query, inputs: inputs, cursor: cursor)
+        } didPublish: { _, _ in }
+        let first = Task { await cache.prepare(preview) }
+        await controlled.waitForCalls(1)
+        await controlled.complete(0, generation: "1")
+        await first.value
+        cache.invalidate(generation: 2)
+        await cache.settle()
+        #expect(await controlled.callCount() == 1)
+        cache.evictEphemeral()
+        #expect(cache.readiness(for: preview) == .notRequested)
+    }
+
+    @Test("026-SC-003: only the most recently used queries are read again right after a save")
+    @MainActor
+    func staleEntriesWaitForTheirReader() async {
+        let controlled = ControlledRustQuery()
+        let cache = RustWorkspaceAdapter(inputs: Data()) { query, inputs, cursor in
+            try await controlled.answer(query, inputs: inputs, cursor: cursor)
+        } didPublish: { _, _ in }
+        let keys = (0..<(RustWorkspaceAdapter.liveQueryLimit + 2)).map { Data("{\"kind\":\"list_counts\",\"n\":\($0)}".utf8) }
+        for (index, key) in keys.enumerated() {
+            let load = Task { await cache.prepare(key) }
+            await controlled.waitForCalls(index + 1)
+            await controlled.complete(index, generation: "1")
+            await load.value
+        }
+        let loaded = keys.count
+        cache.invalidate(generation: 2)
+        let settled = Task { await cache.settle() }
+        await controlled.waitForCalls(loaded + RustWorkspaceAdapter.liveQueryLimit)
+        for index in loaded..<(loaded + RustWorkspaceAdapter.liveQueryLimit) { await controlled.complete(index, generation: "2") }
+        await settled.value
+        #expect(await controlled.callCount() == loaded + RustWorkspaceAdapter.liveQueryLimit)
+        // The oldest entry kept its page, marked stale, and is read when its reader asks.
+        #expect(cache.pageState(for: keys[0]).projectionGeneration == 1)
+        let reader = Task { await cache.prepare(keys[0]) }
+        await controlled.waitForCalls(loaded + RustWorkspaceAdapter.liveQueryLimit + 1)
+        await controlled.complete(loaded + RustWorkspaceAdapter.liveQueryLimit, generation: "2")
+        await reader.value
+        #expect(cache.pageState(for: keys[0]).projectionGeneration == 2)
+    }
+}

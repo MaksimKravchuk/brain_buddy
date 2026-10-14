@@ -33,7 +33,7 @@ public struct RustBridgeError: Error, Equatable, Sendable, CustomStringConvertib
     /// Maps whatever the generated bindings threw. A panic that escaped the Rust guard,
     /// or any unexpected binding error, is reported as `INTERNAL_ERROR` without its
     /// message, which could embed input text.
-    fileprivate init(thrown error: any Error) {
+    init(thrown error: any Error) {
         if let bridge = error as? BridgeError, case let .Failed(code, retryable, field) = bridge {
             self.init(code: code, retryable: retryable, field: field)
         } else if let existing = error as? RustBridgeError {
@@ -909,16 +909,16 @@ public enum RustAccountCopyRemoval: Equatable, Sendable {
 /// adopt results. The generated handle owns no borrowed buffers or pointers.
 public final class RustWorkspaceRuntime: Sendable {
     private let workspace: BridgeWorkspace
+    /// Every blocking call below runs here, not on the cooperative pool.
+    private let executor = RustBridgeExecutor()
 
     fileprivate init(_ workspace: BridgeWorkspace) { self.workspace = workspace }
 
-    private func offActor<T: Sendable>(_ work: @escaping @Sendable (BridgeWorkspace) throws -> T) async throws -> T {
+    private func offActor<T: Sendable>(urgent: Bool = false, _ work: @escaping @Sendable (BridgeWorkspace) throws -> T)
+        async throws -> T {
         if Task.isCancelled { throw RustBridgeError.cancelled }
         let workspace = workspace
-        let outcome = await Task.detached(priority: .userInitiated) { () -> Result<T, RustBridgeError> in
-            do { return .success(try work(workspace)) }
-            catch { return .failure(RustBridgeError(thrown: error)) }
-        }.value
+        let outcome = await executor.run(lane: urgent ? .urgent : .normal) { try work(workspace) }
         if Task.isCancelled { throw RustBridgeError.cancelled }
         return try outcome.get()
     }
@@ -1111,7 +1111,7 @@ public final class RustWorkspaceRuntime: Sendable {
         async throws -> [RustWorkspaceSaved]? {
         let commands = commands.map(\.bridged)
         let context = context.bridged
-        return try await offActor { workspace in
+        return try await offActor(urgent: true) { workspace in
             switch try workspace.lookupKnownBatch(commands: commands, context: context) {
             case .known(let results): return results.map(RustWorkspaceSaved.init)
             case .notKnown: return nil
@@ -1132,7 +1132,7 @@ public final class RustWorkspaceRuntime: Sendable {
 
     public func resolveIdentities(_ identities: [RustWorkspaceIdentityRequest]) async throws -> [RustWorkspaceIdentityBinding] {
         let items = identities.map { BridgeIdentityRequest(entityType: $0.entityType, localId: $0.localID) }
-        return try await offActor { workspace in
+        return try await offActor(urgent: true) { workspace in
             try workspace.resolveIdentities(items: items).map {
                 RustWorkspaceIdentityBinding(entityType: $0.entityType, localID: $0.localId, canonicalID: $0.canonicalId)
             }
@@ -1143,12 +1143,12 @@ public final class RustWorkspaceRuntime: Sendable {
         try await offActor { workspace in Self.answer(try workspace.workspaceIssues(limit: limit, after: after)) }
     }
 
-    public func records(_ requests: [RustWorkspaceRecordRequest]) async throws -> RustWorkspaceAnswer {
+    public func records(_ requests: [RustWorkspaceRecordRequest], urgent: Bool = false) async throws -> RustWorkspaceAnswer {
         let items = try requests.map {
             BridgeRecordRequest(entityType: $0.entityType,
                 recordKey: try JSONSerialization.data(withJSONObject: $0.recordKey))
         }
-        return try await offActor { workspace in Self.answer(try workspace.records(items: items)) }
+        return try await offActor(urgent: urgent) { workspace in Self.answer(try workspace.records(items: items)) }
     }
 
     public func syncStatus() async throws -> Data {
@@ -1211,7 +1211,7 @@ public final class RustWorkspaceRuntime: Sendable {
     }
 
     public func loadDraft(_ draftID: String) async throws -> RustWorkspaceDraft? {
-        try await offActor { workspace in try workspace.loadDraft(draftId: draftID).map(RustWorkspaceDraft.init) }
+        try await offActor(urgent: true) { workspace in try workspace.loadDraft(draftId: draftID).map(RustWorkspaceDraft.init) }
     }
 
     public func saveDraft(_ draft: RustWorkspaceDraft) async throws {
@@ -1297,8 +1297,9 @@ public final class RustWorkspaceRuntime: Sendable {
         }
     }
 
-    public func smartAddResolve(draft: Data) async throws -> RustWorkspaceAnswer {
-        try await offActor { workspace in
+    /// `urgent` is for the resolve a save depends on; a live preview waits behind writes.
+    public func smartAddResolve(draft: Data, urgent: Bool = false) async throws -> RustWorkspaceAnswer {
+        try await offActor(urgent: urgent) { workspace in
             Self.answer(try workspace.smartAddResolve(draft: draft))
         }
     }
@@ -1317,7 +1318,7 @@ public final class RustWorkspaceRuntime: Sendable {
 
     public func smartAddPropose(draft: Data, minted: Data, expectedGeneration: String)
         async throws -> RustWorkspaceAnswer {
-        try await offActor { workspace in
+        try await offActor(urgent: true) { workspace in
             Self.answer(try workspace.smartAddPropose(draft: draft, minted: minted, expectedGeneration: expectedGeneration))
         }
     }
@@ -1365,11 +1366,7 @@ public final class RustWorkspaceRuntime: Sendable {
         let operation = BridgeOperation()
         let workspace = workspace
         return try await withTaskCancellationHandler {
-            let outcome = await Task.detached(priority: .userInitiated) {
-                () -> Result<T, RustBridgeError> in
-                do { return .success(try work(workspace, operation)) }
-                catch { return .failure(RustBridgeError(thrown: error)) }
-            }.value
+            let outcome = await executor.run(lane: .urgent) { try work(workspace, operation) }
             return try outcome.get()
         } onCancel: { _ = operation.cancel() }
     }

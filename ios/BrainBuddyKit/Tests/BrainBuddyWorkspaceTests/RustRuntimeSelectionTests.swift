@@ -242,6 +242,7 @@ struct RustRuntimeSelectionTests {
         let app = try await lane.app()
         let id = try await app.capture(CaptureDraft(text: "Written before the account"), editorID: "scene:life:pre")
         await app.prepareList(.list(.inbox))
+        await app.settleRustWork()  // the local-records read follows the save behind its return
         #expect(app.hasLocalWorkToMerge)
 
         try await app.signIn(serverURL: lane.serverURL, email: "a@example.com", password: "secret")
@@ -332,6 +333,7 @@ struct RustRuntimeSelectionTests {
         let app = try await lane.app(gate: gate)
         try await app.signIn(serverURL: lane.serverURL, email: "a@example.com", password: "secret")
         let first = try await app.capture(CaptureDraft(text: "Queued by the app"), editorID: "scene:life:one")
+        await app.settleRustWork()  // the pending list follows the save behind its return
         let named = app.pendingChanges
         #expect(named.count == 1)
         let oldIdentity = try #require(try lane.selections.load()).workspaceID

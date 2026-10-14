@@ -28,7 +28,8 @@ struct RustSyncHostWorkspaceTests {
         #expect(rig.server.requests.contains { $0.method == "POST" && $0.url.path == "/api/sync/v1/snapshots" })
 
         _ = try await workspace.capture(CaptureDraft(text: "Written offline"), editorID: "scene:host:capture")
-        // The save woke the loop; the send happens on the sync worker, not on this actor.
+        // The save woke the loop (behind its return); the send happens on the sync worker, not on this actor.
+        await workspace.settleRustWork()
         #expect(rig.server.wait(timeout: 20) { requests, _ in
             requests.contains { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }
         })
@@ -88,6 +89,7 @@ struct RustSyncHostWorkspaceTests {
 
         // Saving still works; nothing is sent.
         _ = try await workspace.capture(CaptureDraft(text: "Saved while sync is stopped"), editorID: "scene:host:update")
+        await workspace.settleRustWork()
         await workspace.refreshRustStatus()
         #expect(workspace.pendingChangeCount == 1)
         #expect(rig.model.commandsSeen == 0)
@@ -104,8 +106,39 @@ struct RustSyncHostWorkspaceTests {
         await workspace.syncNow()
         #expect(workspace.syncStatus == .needsSignIn)
         _ = try await workspace.capture(CaptureDraft(text: "Waits for sign-in"), editorID: "scene:host:401")
+        await workspace.settleRustWork()
         await workspace.refreshRustStatus()
         #expect(workspace.pendingChangeCount == 1)
+        await workspace.closeRuntime()
+    }
+
+    @Test("026-FR-023: a failed round's reference ID is the server's X-Correlation-ID, never the code, and recovery reads Synced just now")
+    @MainActor
+    func failureReferenceIsTheServerCorrelationID() async throws {
+        let rig = try await Rig.start()
+        defer { rig.cleanup() }
+        let workspace = rig.workspace
+        await workspace.load()
+        rig.outage.set(true)
+        await workspace.syncNow()
+
+        guard case .failing(_, let reference, _) = workspace.syncStatus else {
+            Issue.record("expected a failing status, got \(workspace.syncStatus)")
+            return
+        }
+        #expect(reference == Rig.outageCorrelationID, "the id support finds in the server logs, not a stable code")
+        #expect(workspace.syncSnapshot.lastFailureReferenceID == Rig.outageCorrelationID)
+        #expect(workspace.syncSnapshot.failingSince != nil)
+
+        rig.outage.set(false)
+        await workspace.syncNow()
+        await workspace.refreshRustStatus()
+        #expect(workspace.syncSnapshot.failingSince == nil)
+        #expect(workspace.syncSnapshot.lastFailureReferenceID == nil)
+        let line = SyncStatusDescriber.describe(
+            workspace.syncSnapshot, now: Date(timeIntervalSince1970: 1_790_000_000), device: .mac,
+            calendar: Calendar(identifier: .gregorian))
+        #expect(line.text == "Synced just now", "after recovery on the real host path")
         await workspace.closeRuntime()
     }
 
@@ -140,17 +173,27 @@ private func eventually(_ workspace: Workspace, _ done: (Set<String>) -> Bool) a
 
 // MARK: - Rig
 
+private final class Outage: Sendable {
+    private let on = Mutex(false)
+    var isOn: Bool { on.withLock { $0 } }
+    func set(_ value: Bool) { on.withLock { $0 = value } }
+}
+
 private final class Rig: Sendable {
     enum Sends: Sendable { case accept, offline }
 
+    static let outageCorrelationID = "7c1f2b34-0000-4000-8000-00000000abcd"
+
     let root: URL
     let server: StubServer
+    let outage: Outage
     let model: SyncModel
     let host: RustSyncHost
     let workspace: Workspace
 
-    private init(root: URL, server: StubServer, model: SyncModel, host: RustSyncHost, workspace: Workspace) {
+    private init(root: URL, server: StubServer, outage: Outage, model: SyncModel, host: RustSyncHost, workspace: Workspace) {
         self.root = root
+        self.outage = outage
         self.server = server
         self.model = model
         self.host = host
@@ -167,7 +210,11 @@ private final class Rig: Sendable {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let server = StubServer()
         let model = SyncModel(protocolVersions: protocolVersions)
+        let outage = Outage()
         server.respond { request in
+            if outage.isOn {
+                return .response(status: 503, headers: ["X-Correlation-ID": Rig.outageCorrelationID], body: Data("{}".utf8))
+            }
             if unauthorized { return .response(status: 401, body: Data("{}".utf8)) }
             if sendsAnswer == .offline, request.method == "POST", request.url.path.hasSuffix("/commands") {
                 return .fail(.notConnectedToInternet)
@@ -199,7 +246,7 @@ private final class Rig: Sendable {
             facade: RustDomainFacade(runtime: bridge, context: RustDomainContext(deviceTimeZone: "UTC")),
             transport: host, account: account, startup: .prepared)
         let workspace = Workspace(store: ControlledStore(), sync: nil, rust: selection, now: { instant })
-        return Rig(root: root, server: server, model: model, host: host, workspace: workspace)
+        return Rig(root: root, server: server, outage: outage, model: model, host: host, workspace: workspace)
     }
 }
 

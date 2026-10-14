@@ -66,6 +66,9 @@ struct RustSyncProviderLifecycleTests {
         #expect(await port.isRunning)
 
         _ = try await app.capture(CaptureDraft(text: "Sent after sign-in"), editorID: "scene:provider:capture")
+        // The transport wake runs behind the save's return (on the main actor): let it run before this
+        // thread blocks on the stub.
+        await app.settleRustWork()
         #expect(rig.stub.wait(timeout: 20) { requests, _ in
             requests.contains { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }
         })
@@ -123,9 +126,11 @@ struct RustSyncProviderLifecycleTests {
 
         try await app.signIn(serverURL: rig.serverURL, email: "a@example.com", password: "secret")
         #expect(app.account == rig.account)
+        await app.settleRustWork()
         #expect(rig.stub.wait(timeout: 30) { requests, _ in
             requests.filter { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }.count >= 2
         })
+        await app.settleRustWork()
         await app.syncNow()
         await app.refreshRustStatus()
         #expect(app.pendingChangeCount == 0)
@@ -162,6 +167,7 @@ struct RustSyncProviderLifecycleTests {
             let relaunched = try await rig.app(provider: rig.counting())
             #expect(relaunched.account == rig.account, "launch \(launch)")
             await relaunched.syncNow()
+            await relaunched.settleRustWork()
             #expect(rig.stub.wait(timeout: 30) { requests, _ in
                 requests.contains { $0.method == "POST" && $0.url.path == "/api/sync/v1/commands" }
             })

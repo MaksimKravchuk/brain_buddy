@@ -180,3 +180,35 @@ struct RustBridgeTests {
         #expect(!runtime.isOpen)
     }
 }
+
+
+@Suite("Rust bridge executor (026-SC-003)")
+struct RustBridgeExecutorTests {
+    @Test("026-SC-003: urgent work runs before queued normal work, each lane in order, on one thread")
+    func urgentLaneRunsFirst() async {
+        let executor = RustBridgeExecutor()
+        let gate = DispatchSemaphore(value: 0)
+        let order = OrderRecorder()
+        let blocker = Task { await executor.run { gate.wait(); return ObjectIdentifier(Thread.current) } }
+        // Let the blocker occupy the thread, then queue behind it.
+        try? await Task.sleep(for: .milliseconds(100))
+        let normal1 = Task { await executor.run(lane: .normal) { order.append("normal1"); return ObjectIdentifier(Thread.current) } }
+        try? await Task.sleep(for: .milliseconds(20))
+        let normal2 = Task { await executor.run(lane: .normal) { order.append("normal2"); return ObjectIdentifier(Thread.current) } }
+        try? await Task.sleep(for: .milliseconds(20))
+        let urgent = Task { await executor.run(lane: .urgent) { order.append("urgent"); return ObjectIdentifier(Thread.current) } }
+        try? await Task.sleep(for: .milliseconds(20))
+        gate.signal()
+        let threads = [await blocker.value, await normal1.value, await normal2.value, await urgent.value].compactMap { try? $0.get() }
+        #expect(order.values == ["urgent", "normal1", "normal2"])
+        #expect(threads.count == 4 && Set(threads).count == 1)
+    }
+}
+
+private final class OrderRecorder: @unchecked Sendable {
+    // Safe: every access takes the lock.
+    private let lock = NSLock()
+    private var items: [String] = []
+    func append(_ value: String) { lock.lock(); items.append(value); lock.unlock() }
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return items }
+}

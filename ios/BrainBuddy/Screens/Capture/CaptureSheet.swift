@@ -43,6 +43,9 @@ struct CaptureSheet: View {
     @State private var isClosing = false
     @State private var isSaving = false
     @State private var editorID = UUID().uuidString
+    /// The last preview the runtime answered, shown while the next one loads so the text field
+    /// is never replaced mid-typing.
+    @State private var previewHold = CapturePreviewHold()
     /// The measured height of the panel's content; zero until first layout.
     @State private var contentHeight: CGFloat = 0
     /// The sheet's height until the content has been measured.
@@ -66,14 +69,14 @@ struct CaptureSheet: View {
     }
 
     var body: some View {
-        let preview = workspace.capturePreview(draft)
         let readiness = workspace.capturePreviewReadiness(draft)
-        WorkspaceQueryContent(readiness: readiness,
-            retry: { Task { await workspace.prepareCapturePreview(draft) } }) {
+        let isReady = readiness == .ready
+        let preview = previewHold.shown(isReady: isReady) { workspace.capturePreview(draft) }
+        let failure = CapturePreviewGate.failureMessage(isFailed: Self.isFailed(readiness))
         ScrollView {
             VStack(spacing: 0) {
                 header
-                fields(preview)
+                fields(preview, previewFailure: failure)
                 // Above the chip row, so a toast never covers the Add button.
                 ToastHost()
                 controlsRow(preview)
@@ -89,8 +92,18 @@ struct CaptureSheet: View {
         .toastMagicTap()
         .presentationDetents([.height(contentHeight > 0 ? contentHeight : fallbackHeight)])
         .interactiveDismissDisabled(!draft.isBlank)
+        // The sheet and its text field stay put whatever the preview is doing; only the chips and
+        // the problem line follow it. Typing runs ahead of the runtime, so a burst of keystrokes
+        // asks once for the settled draft.
+        .task(id: draft) {
+            if workspace.isRustSelected {
+                try? await Task.sleep(for: .milliseconds(150))
+                if Task.isCancelled { return }
+            }
+            await workspace.prepareCapturePreview(draft)
+            if Task.isCancelled { return }
+            previewHold.record(workspace.capturePreview(draft), isReady: workspace.capturePreviewReadiness(draft) == .ready)
         }
-        .task(id: draft) { await workspace.prepareCapturePreview(draft) }
         .confirmationDialog("Discard this task?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
@@ -100,6 +113,8 @@ struct CaptureSheet: View {
         .onChange(of: draft) { _, _ in
             errorMessage = nil
         }
+        // Previews are ephemeral queries: drop them with the sheet so they are not kept in the cache.
+        .onDisappear { workspace.discardCapturePreviews() }
         .onChange(of: draft.list) { _, list in
             // Choosing Waiting for asks who or what at once (opening capture
             // on Waiting for keeps the focus on the task text). The field
@@ -116,6 +131,11 @@ struct CaptureSheet: View {
                 // A newer confirmation replaced this one.
             }
         }
+    }
+
+    private static func isFailed(_ readiness: WorkspaceQueryReadiness) -> Bool {
+        if case .failed = readiness { return true }
+        return false
     }
 
     // MARK: Header
@@ -152,7 +172,7 @@ struct CaptureSheet: View {
 
     /// The Smart Add field and what hangs off it: a problem, the project and
     /// tags capture will use, and the Waiting for and Notes fields.
-    private func fields(_ preview: CapturePreview) -> some View {
+    private func fields(_ preview: CapturePreview, previewFailure: String?) -> some View {
         VStack(alignment: .leading, spacing: BBSpacing.s1) {
             SmartAddTextField(
                 text: $draft.text,
@@ -161,8 +181,13 @@ struct CaptureSheet: View {
             ) {
                 add(keepOpen: true)
             }
-            if let problem = errorMessage ?? visibleProblem(preview) {
+            if let problem = errorMessage ?? visibleProblem(preview) ?? previewFailure {
                 InlineProblemText(message: problem)
+            }
+            if previewFailure != nil {
+                Button("Try again") { Task { await workspace.prepareCapturePreview(draft) } }
+                    .font(.subheadline)
+                    .frame(minHeight: BBMetrics.hitTarget, alignment: .leading)
             }
             if preview.project != nil || !preview.tags.isEmpty {
                 CapturePreviewChips(preview: preview)

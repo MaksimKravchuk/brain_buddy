@@ -985,3 +985,80 @@ fn e2e_026_fr_003_the_first_sign_in_merge_reaches_the_real_server_once() {
         1
     );
 }
+
+/// The sync-v1 server requires the device's own `new_formulation_id` for a task
+/// created in Next (the formulation clock starts on entering Next whether or not
+/// the Weekly Review is exposed). A command without it is refused with 422
+/// `INVALID_REQUEST` and no receipt: the client records that as a visible issue
+/// and never resends it, however often the loop is woken.
+#[test]
+fn e2e_026_fr_007_a_next_create_the_server_refuses_is_an_issue_and_is_never_resent() {
+    let Some(backend) = start("next-refused") else {
+        return;
+    };
+    let mut device = device(&backend, "a");
+    bootstrap(&mut device);
+    let mut ids = Commands(0);
+    let (create, _) = save(
+        &mut device,
+        &mut ids,
+        CommandType::TaskCreate,
+        None,
+        json!({"title": "Into Next", "state": "next"}),
+        vec![],
+    );
+    let first = device.syncer.round(&mut device.store);
+    assert_eq!(
+        first.halt, None,
+        "a verdict is not a failing sync: {first:#?}"
+    );
+    assert!(first.changes.issues, "{first:#?}");
+    assert_eq!(outbox(&mut device.store)[create.as_str()], "rejected");
+    let issues = open_issues(&mut device.store).unwrap();
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    let text = format!("{issues:?}");
+    assert!(
+        text.contains("INVALID_REQUEST") && text.contains("Into Next"),
+        "the code and the user's text are kept: {issues:?}"
+    );
+    let sends = device.count("POST /api/sync/v1/commands");
+    assert_eq!(sends, 1);
+    for _ in 0..5 {
+        device.syncer.resume();
+        let report = device.syncer.round(&mut device.store);
+        assert_eq!(report.halt, None, "{report:#?}");
+        assert_eq!(report.sent, 0, "{report:#?}");
+    }
+    assert_eq!(device.count("POST /api/sync/v1/commands"), sends);
+    let all = rest_get(&backend, "/api/tasks?limit=200");
+    assert!(all["items"].as_array().unwrap().is_empty(), "{all}");
+}
+
+/// The same gesture carrying the device's formulation id is accepted, and the
+/// server adopts that id.
+#[test]
+fn e2e_026_fr_001_a_next_create_with_the_devices_formulation_id_is_accepted() {
+    let Some(backend) = start("next-accepted") else {
+        return;
+    };
+    let mut device = device(&backend, "a");
+    bootstrap(&mut device);
+    let mut ids = Commands(0);
+    let formulation = "form_0190aaaa-0000-4000-8000-000000000001";
+    let (create, task) = save(
+        &mut device,
+        &mut ids,
+        CommandType::TaskCreate,
+        None,
+        json!({"title": "Into Next", "state": "next", "new_formulation_id": formulation}),
+        vec![],
+    );
+    let report = device.syncer.round(&mut device.store);
+    assert_eq!(report.halt, None, "{report:#?}");
+    assert_eq!(report.settled, 1, "{report:#?}");
+    assert!(open_issues(&mut device.store).unwrap().is_empty());
+    assert_ne!(outbox(&mut device.store)[create.as_str()], "rejected");
+    let detail = rest_get(&backend, &format!("/api/tasks/{task}"));
+    assert_eq!(detail["state"], "next");
+    assert_eq!(detail["formulation"]["id"], formulation, "{detail}");
+}

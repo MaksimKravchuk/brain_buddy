@@ -74,7 +74,12 @@ public final class Workspace {
     // MARK: Observable state
 
     /// Current state: server base plus replayed local changes.
-    public private(set) var state: GTDState = .empty
+    public private(set) var state: GTDState = .empty {
+        didSet { stateRevision &+= 1 }
+    }
+    /// Moves with every change of `state`: a page decoded off the main actor is applied only if
+    /// the state it was decoded against is still the current one.
+    @ObservationIgnored private var stateRevision: UInt64 = 0
     public private(set) var isLoaded = false
     /// Set when the stored file cannot be read; the UI offers recovery.
     public private(set) var loadError: String?
@@ -154,6 +159,8 @@ public final class Workspace {
     @ObservationIgnored private var syncStartedFor: String?
     @ObservationIgnored private var isSigningIn = false
     @ObservationIgnored private var nativeSignInID: UUID?
+    /// The Cancel of a two-phase sign-in on a selected runtime while its completion runs.
+    @ObservationIgnored private var nativeSignInCancellation: SignInCancellation?
     @ObservationIgnored private var networkUpdates: Task<Void, Never>?
     /// Fires `.periodic` while the app is in the foreground (`setForegroundActive`).
     @ObservationIgnored private let foregroundTicker: PeriodicSyncTicker?
@@ -170,8 +177,23 @@ public final class Workspace {
     @ObservationIgnored private var rustGestureSaver: RustWorkspaceGestureSaver?
     @ObservationIgnored private var rustSubscription: RustWorkspaceSubscription?
     @ObservationIgnored private var rustWatcher: Task<Void, Never>?
+    @ObservationIgnored private var rustWatcherGeneration: UInt64 = 0
+    @ObservationIgnored private var rustWatcherWaiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 @ObservationIgnored private var logoutDrain: Task<Void, Never>?
     @ObservationIgnored private var rustStatusPump: Task<Void, Never>?
+    /// What follows a durable save, off the save's return path: one status refresh and one transport
+    /// wake in flight at a time, the latest request taking the place of those it overtook.
+    @ObservationIgnored private lazy var rustStatusRefresh = CoalescedRun { [weak self] in await self?.refreshRustStatus() }
+    /// Canonical ids of the tasks a save changed whose copy in `state` (the revision the next command
+    /// is checked against) has not been read again yet.
+    @ObservationIgnored private var rustDirtyFrames: Set<String> = []
+    /// A save touched something other than tasks (a project, a tag, a subtask or comment): the
+    /// next command waits for the full query refresh instead of the quick read of the task alone.
+    @ObservationIgnored private var rustNeedsFullSettle = false
+    @ObservationIgnored private lazy var rustFrameRefresh = CoalescedRun { [weak self] in await self?.refreshDirtyFrames() }
+    @ObservationIgnored private lazy var rustTransportWake = CoalescedRun { [weak self] in
+        await self?.wakeRustTransport(.localChange)
+    }
     @ObservationIgnored private(set) var runtimeBindingID = UUID()
     @ObservationIgnored private var rustTaskFrames: [TaskID: RustWorkspaceTaskFrame] = [:]
     @ObservationIgnored private var rustTaskInterests: [Data: Set<TaskID>] = [:]
@@ -205,6 +227,11 @@ public final class Workspace {
         }
     }
     private(set) var rustSyncState: RustWorkspaceSyncState?
+    /// The run of failed rounds the shared runtime's transport reported (spec 026 FR-023), with the
+    /// legacy engine's semantics: it starts at the first failed round, keeps its start while the
+    /// failure lasts (offline included), and a success or a sign-out ends it. The reference ID is
+    /// the one the failed round carried; none is made up.
+    private var rustFailure: (since: Date, lastAttempt: Date, referenceID: String?)?
     /// Where an explicit "Rebuild synced copy" stands (design D-03).
     var rustRebuild = RuntimeSyncRecovery.Rebuild.idle
     /// Requests submitted for issue decisions, reused by a repeated Apply.
@@ -327,7 +354,7 @@ public final class Workspace {
     /// Waits until every change applied so far is on disk. When the last
     /// write failed, it tries once more; `storageError` says whether that worked.
     public func flush() async {
-        if isRustSelected { await refreshRustStatus(); return }
+        if isRustSelected { await settleRustWork(); await rustGestureSaver?.settleCleanups(); return }
         if let writer { await writer.value }
         schedulePersistence()
         if let writer { await writer.value }
@@ -617,7 +644,8 @@ public final class Workspace {
         serverURL: URL, email: String, password: String, cancellation: SignInCancellation = SignInCancellation()
     ) async throws {
         if isRustSelected {
-            return try await signInRust(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
+            _ = try await signInRust(serverURL: serverURL, email: email, password: password, cancellation: cancellation)
+            return
         }
         guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
             throw WorkspaceError.invalidServerURL
@@ -662,7 +690,7 @@ public final class Workspace {
 
     /// Additive iOS authentication; legacy password callers keep their contract.
     public func beginSignIn(serverURL: URL) async throws -> NativeSignInAttempt {
-        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
+        if isRustSelected { return try beginSignInRust(serverURL: serverURL) }
         guard let sync else { throw WorkspaceError.signInFailed(message: "Sign in from the Brain Buddy app.", referenceID: nil) }
         await flush()
         await installEventHandlerIfNeeded(sync)
@@ -676,7 +704,7 @@ public final class Workspace {
     }
 
     public func completeSignIn(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
-        guard !isRustSelected else { throw WorkspaceError.signInFailed(message: "This account change isn't available yet. Your work is kept.", referenceID: nil) }
+        if isRustSelected { return try await completeSignInRust(attempt, credential: credential) }
         guard let sync, nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil) }
         await flush()
         guard nativeSignInID == attempt.id else { throw WorkspaceError.signInFailed(message: "This sign-in was cancelled.", referenceID: nil) }
@@ -707,7 +735,11 @@ public final class Workspace {
     }
 
     public func cancelSignIn(_ attempt: NativeSignInAttempt) async {
-        guard !isRustSelected else { return }
+        if isRustSelected {
+            // Before the link was claimed this links nothing; after it, the sign-in finishes as usual.
+            if nativeSignInID == attempt.id { nativeSignInID = nil; nativeSignInCancellation?.cancel() }
+            return
+        }
         if nativeSignInID == attempt.id { nativeSignInID = nil; isSigningIn = false }
         await sync?.cancelSignIn(attempt)
         refreshDerivedState()
@@ -860,8 +892,8 @@ public final class Workspace {
                 sessionEnded: syncStatus == .needsSignIn, isOnline: networkIsAvailable, isSyncing: syncStatus == .syncing,
                 lastSyncedAt: rustSyncState?.lastSuccessAt, pendingCount: pendingChangeCount,
                 oldestPendingAt: rustSyncState?.oldestPendingAt, initialUploadRemaining: 0,
-                issueCount: Int(clamping: rustSyncState?.openIssues ?? 0), failingSince: nil,
-                lastFailedAttemptAt: nil, lastFailureReferenceID: nil)
+                issueCount: Int(clamping: rustSyncState?.openIssues ?? 0), failingSince: rustFailure?.since,
+                lastFailedAttemptAt: rustFailure?.lastAttempt, lastFailureReferenceID: rustFailure?.referenceID)
         }
         let operations = document.outbox + unpersisted
         let linkedAt = account?.linkedAt
@@ -1403,7 +1435,13 @@ extension Workspace {
             }, didPublish: { [weak self] key, page in
                 guard let self, self.runtimeBindingID == binding else { return }
                 try self.adoptRustPage(query: key, page: page)
-            }, didRefuse: { [weak self] key, refusal in
+            }, decoding: .init(
+                context: { [weak self] in self?.runtimeBindingID == binding ? self?.rustDecodeContext() : nil },
+                revision: { [weak self] in self?.rustStateRevision ?? 0 },
+                publish: { [weak self] key, page, prepared in
+                    guard let self, self.runtimeBindingID == binding else { return }
+                    try self.adoptRustPage(query: key, page: page, prepared: prepared)
+                }), didRefuse: { [weak self] key, refusal in
                 guard let self, self.runtimeBindingID == binding else { return }
                 if refusal.reason == "review_unavailable" {
                     self.rustReviewState = nil
@@ -1440,16 +1478,20 @@ extension Workspace {
                         guard let self, self.runtimeBindingID == binding else { return }
                         token = event.token
                         if let generation = UInt64(event.projectionGeneration),
-                           generation > (self.rustQueries?.generationFloor ?? 0) || !event.changedKinds.isEmpty {
+                           generation > (self.rustQueries?.generationFloor ?? 0) {
+                            // A generation at or below the floor is one this device already
+                            // invalidated for (its own save) or read: nothing is stale for it.
                             let inputs = try selection.facade.workspaceQueryInputs(at: self.now(),
                                 zone: self.deviceTimeZone().identifier, reviewExposed: selection.reviewEnabled)
                             self.rustQueries?.invalidate(generation: generation, inputs: inputs)
                         }
+                        if let generation = UInt64(event.projectionGeneration) { self.noteRustWatcherProgress(generation) }
                         if event.syncStatusChanged || event.issuesChanged { await self.refreshRustStatus() }
                         if !event.changedKinds.isEmpty { await self.maintainRuntimeDrafts() }
                     }
                 } catch {
                     guard let self, self.runtimeBindingID == binding, !Task.isCancelled else { return }
+                    self.noteRustWatcherProgress(.max)
                     self.markRustQueryError(error)
                 }
             }
@@ -1468,12 +1510,37 @@ extension Workspace {
         }
     }
 
+    private func noteRustWatcherProgress(_ generation: UInt64) {
+        rustWatcherGeneration = max(rustWatcherGeneration, generation)
+        let ready = rustWatcherWaiters.filter { $0.generation <= rustWatcherGeneration }
+        rustWatcherWaiters.removeAll { $0.generation <= rustWatcherGeneration }
+        for waiter in ready { waiter.continuation.resume() }
+    }
+
+    /// Waits until the subscription watcher has applied every store change committed so far, so
+    /// its query invalidations can no longer land afterwards (tests; the watcher is asynchronous
+    /// and coalesces events, so a late one would otherwise flip a settled query back to loading).
+    func settleRustInvalidations() async {
+        guard let runtime = rustRuntime, isRustBound else { return }
+        let binding = runtimeBindingID
+        guard let committed = try? await runtime.snapshot(),
+              let generation = UInt64(committed.projectionGeneration),
+              binding == runtimeBindingID, rustWatcherGeneration < generation else { return }
+        await withCheckedContinuation { continuation in
+            rustWatcherWaiters.append((generation, continuation))
+        }
+    }
+
     /// Fences the current binding without closing its runtime: every response it still waits for
     /// (queries, status, transport, subscription) is dropped from here on.
     fileprivate func detachRustBinding() {
         runtimeBindingID = UUID()
         rustWatcher?.cancel()
         rustWatcher = nil
+        rustWatcherGeneration = 0
+        let waiters = rustWatcherWaiters
+        rustWatcherWaiters = []
+        for waiter in waiters { waiter.continuation.resume() }
         rustStatusPump?.cancel()
         rustStatusPump = nil
         rustQueries?.close()
@@ -1483,6 +1550,10 @@ extension Workspace {
         rustFacade = nil
         rustGestureSaver = nil
         rustStatusRequestID &+= 1
+        rustHasLocalRecords = false
+        rustLocalRecordsGeneration = nil
+        rustDirtyFrames = []
+        rustNeedsFullSettle = false
         rustResolutions.removeAll()
         rustTaskFrames = [:]
         rustTaskInterests = [:]
@@ -1492,6 +1563,7 @@ extension Workspace {
 
     public func closeRuntime() async {
         guard let selection = rustSelection else { return }
+        await rustGestureSaver?.settleCleanups()
         detachRustBinding()
         state = .empty
         await selection.transport.close()
@@ -1609,6 +1681,10 @@ extension Workspace {
         var refs: [RustWorkspaceIdentityRequest] = []
         if let id = draft.contextProjectID { refs.append(.init(entityType: "project", localID: id.rawValue)) }
         if let id = draft.contextTagID { refs.append(.init(entityType: "tag", localID: id.rawValue)) }
+        // Each keystroke is a new key; only the latest preview is ever shown.
+        if let current = try? rustCapturePreviewKey(draft) {
+            for key in rustQueries?.ephemeralKeys ?? [] where key != current { rustQueries?.evict(key) }
+        }
         await prepareOwnedQuery({ try rustCapturePreviewKey(draft) }, identities: refs)
     }
 
@@ -1642,6 +1718,40 @@ extension Workspace {
         rustTaskFrames = rustTaskFrames.filter { tasks.contains($0.key) }
         state.projects = state.projects.filter { projects.contains($0.key) }
         state.tags = state.tags.filter { tags.contains($0.key) }
+    }
+
+    func rustDecodeContext() -> RustDecodeContext? {
+        guard let facade = rustFacade else { return nil }
+        return RustDecodeContext(facade: facade, state: state, revision: stateRevision, now: now())
+    }
+
+    var rustStateRevision: UInt64 { stateRevision }
+
+    /// Adopts a page that was decoded off the main actor; one decoded against an older state, or
+    /// not decoded at all, is decoded here.
+    private func adoptRustPage(query: Data, page: RustWorkspacePage, prepared: RustPreparedPage) throws {
+        guard prepared.revision == stateRevision else { return try adoptRustPage(query: query, page: page) }
+        for frame in prepared.frames { rustTaskFrames[frame.taskID] = frame }
+        switch prepared.payload {
+        case .list(let tasks), .tasks(let tasks): rustAdoptTasks(tasks, for: query)
+        case .task(let task): rustAdoptTasks([task], for: query)
+        case .projects(let projects):
+            rustProjectInterests[query] = Set(projects.map { $0.project.id })
+            for row in projects { state.projects[row.project.id] = row.project }
+            pruneRustRecords(keeping: query)
+        case .tags(let tags):
+            rustTagInterests[query] = Set(tags.map { $0.tag.id })
+            for row in tags { state.tags[row.tag.id] = row.tag }
+            pruneRustRecords(keeping: query)
+        case .records(let owned):
+            rustAdoptTasks(Array(owned.tasks.values), for: query)
+            rustProjectInterests[query] = Set(owned.projects.keys)
+            rustTagInterests[query] = Set(owned.tags.keys)
+            for (id, record) in owned.projects { state.projects[id] = record }
+            for (id, record) in owned.tags { state.tags[id] = record }
+            pruneRustRecords(keeping: query)
+        case .checked: break
+        }
     }
 
     private func adoptRustPage(query: Data, page: RustWorkspacePage) throws {
@@ -1685,10 +1795,10 @@ extension Workspace {
         }
     }
 
-    func rustReadRecords(_ requests: [RustWorkspaceRecordRequest]) async throws -> RustWorkspacePage {
+    func rustReadRecords(_ requests: [RustWorkspaceRecordRequest], urgent: Bool = false) async throws -> RustWorkspacePage {
         guard let runtime = rustRuntime else { throw RustBridgeError(code: "WORKSPACE_NOT_READY") }
         let binding = runtimeBindingID
-        let answer = try await runtime.records(requests)
+        let answer = try await runtime.records(requests, urgent: urgent)
         guard binding == runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
         switch answer {
         case .answered(let page):
@@ -1711,7 +1821,9 @@ extension Workspace {
             guard status.generation >= (rustQueries?.generationFloor ?? 0) else { return }
             // Only an account-less workspace has a first sign-in to merge; any persisted record
             // counts, terminal tasks, projects, tags and review data included.
-            if account == nil, rustLocalRecordsGeneration != status.generation {
+            // Once the store holds a record it keeps one (nothing is deleted from it while it is open),
+            // so the full read is not repeated after every save.
+            if account == nil, !rustHasLocalRecords, rustLocalRecordsGeneration != status.generation {
                 let records = try await runtime.snapshot().records
                 guard binding == runtimeBindingID, request == rustStatusRequestID else { return }
                 rustHasLocalRecords = Self.hasAnyRecord(records)
@@ -1755,9 +1867,23 @@ extension Workspace {
 
     private func adoptTransportResult(_ result: SyncRuntimeWakeResult) {
         switch result {
-        case .status(let status): runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = false; syncStatus = status
+        case .status(let status):
+            runtimeTransportUnavailable = false
+            runtimeSyncNeedsUpdate = false
+            syncStatus = status
+            trackRustFailure(status)
         case .updateNeeded: runtimeTransportUnavailable = false; runtimeSyncNeedsUpdate = true
         case .transportUnavailable: runtimeTransportUnavailable = true
+        }
+    }
+
+    private func trackRustFailure(_ status: SyncStatus) {
+        switch status {
+        case .failing(_, let referenceID, _):
+            let instant = now()
+            rustFailure = (rustFailure?.since ?? instant, instant, referenceID)
+        case .idle, .needsSignIn, .localOnly: rustFailure = nil
+        case .offline, .syncing: break
         }
     }
 
@@ -1777,7 +1903,7 @@ extension Workspace {
         await transport.setStatusHandler { continuation.yield($0) }
     }
 
-    func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown: GTDState)
+    func performAsync(_ commands: [GTDCommand], editorID: String, authoredIntent: Data, shown callerShown: GTDState)
         async throws -> RustWorkspaceSavedGesture {
         // Nothing is accepted while a sign-out commits: it would be removed unseen.
         guard !isSigningOut else { throw GTDValidationError.signingOut }
@@ -1785,8 +1911,21 @@ extension Workspace {
             throw RustBridgeError(code: "WORKSPACE_NOT_READY")
         }
         let binding = runtimeBindingID
+        // The command is checked against the revisions this copy holds: bring those up to date with
+        // the previous save first (a read of the touched tasks, or the full refresh when more than
+        // tasks changed or a review decision is being made).
+        let settled = await settleBeforeCommand(commands)
+        guard binding == runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+        let shown = settled ? state : callerShown
+        var touched: [RustWorkspaceIdentityBinding] = []
         let instant = now()
         let witnesses = localChildEdits
+        // A task entering Next starts its formulation clock whether or not the Weekly Review is
+        // exposed, and the sync server (sync-v1, spec 020 formulation clock) accepts a device
+        // command only when it carries the device's own `new_formulation_id`: stamp it here, not
+        // behind `reviewExposed` as the legacy `perform` does.
+        let makeID = self.makeID
+        let commands = commands.map { Self.stampingFormulationID($0) { FormulationID.make(makeID()) } }
         let result = try await saver.save(editorID: editorID, authoredIntent: authoredIntent) {
             for command in commands {
                 if case .decideTask(let decision) = command {
@@ -1801,6 +1940,7 @@ extension Workspace {
             let identities = try facade.workspaceIdentityRequests(for: commands, in: shown, at: instant)
             let bindings = try await runtime.resolveIdentities(identities)
             guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+            touched = bindings
             var encoded = try facade.workspaceCommands(commands, commandIDs: commands.map { _ in self.makeID() },
                 at: commands.map { _ in instant }, in: shown, bindings: bindings)
             for index in commands.indices {
@@ -1833,7 +1973,7 @@ extension Workspace {
                     precedingCommands: Array(original[..<index])) { throw error }
             throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
         case .saved(let saved):
-            await finishRustSave(saved, binding: binding)
+            finishRustSave(saved, binding: binding, touched: touched)
             return saved
         }
     }
@@ -1852,20 +1992,87 @@ extension Workspace {
 
 
 extension Workspace {
-    func finishRustSave(_ saved: RustWorkspaceSavedGesture, binding: UUID) async {
+    func finishRustSave(_ saved: RustWorkspaceSavedGesture, binding: UUID,
+                        touched: [RustWorkspaceIdentityBinding] = []) {
         guard binding == runtimeBindingID, let facade = rustFacade else { return }
         let generation = saved.receipts.compactMap { UInt64($0.projectionGeneration) }.max() ?? 0
         let inputs = try? facade.workspaceQueryInputs(at: now(), zone: deviceTimeZone().identifier,
             reviewExposed: rustSelection?.reviewEnabled == true)
+        // The write is durable and its receipt adopted: the caller gets its answer now. Pages stay
+        // on screen while the queries in use are read again behind it, and status and the transport
+        // follow in coalesced runs. `settleRustWork()` is the way to wait for all of it.
         rustQueries?.invalidate(generation: generation, inputs: inputs)
-        await refreshRustStatus()
-        for key in Array(rustQueries?.entries.keys ?? Dictionary<Data, RustWorkspaceAdapter.Entry>().keys) {
-            await prepareRustQuery(key)
+        if touched.allSatisfy({ $0.entityType == "task" }) {
+            let tasks = touched.compactMap { $0.canonicalID ?? $0.localID }
+            if !tasks.isEmpty {
+                rustDirtyFrames.formUnion(tasks)
+                rustFrameRefresh.request()
+            }
+        } else {
+            rustNeedsFullSettle = true
         }
-        await wakeRustTransport(.localChange)
-        guard binding == runtimeBindingID else { return }
+        rustStatusRefresh.request()
+        rustTransportWake.request()
         didPersist?()
     }
+
+    /// True when it waited for anything, so the caller's copy of `state` may be older than `state`.
+    private func settleBeforeCommand(_ commands: [GTDCommand]) async -> Bool {
+        var waited = rustFrameRefresh.isRunning
+        await rustFrameRefresh.settle()
+        let decides = commands.contains { if case .decideTask = $0 { true } else { false } }
+        guard rustNeedsFullSettle || decides else { return waited }
+        rustNeedsFullSettle = false
+        waited = true
+        await rustQueries?.settle()
+        return waited
+    }
+
+    /// Reads the tasks a save changed again and replaces their copies in `state`, so the next
+    /// command carries their new revisions. The pages follow from the full refresh.
+    private func refreshDirtyFrames() async {
+        while !rustDirtyFrames.isEmpty {
+            let binding = runtimeBindingID
+            let batch = Array(rustDirtyFrames.prefix(200))
+            rustDirtyFrames.subtract(batch)
+            let requests = batch.map { RustWorkspaceRecordRequest(entityType: "task", recordKey: [$0]) }
+            do {
+                let page = try await rustReadRecords(requests, urgent: true)
+                guard binding == runtimeBindingID, let facade = rustFacade else { return }
+                var owned = GTDState.empty
+                try facade.workspaceApplyRecords(from: page.result, requests: requests, to: &owned, at: now())
+                for var task in owned.tasks.values {
+                    guard let held = state.tasks[task.id] else { continue }
+                    // The read is of the task alone; its children keep what the pages last said.
+                    task.subtasks = held.subtasks
+                    task.comments = held.comments
+                    task.lastOpenList = held.lastOpenList
+                    task.childrenSyncedAt = held.childrenSyncedAt
+                    state.tasks[task.id] = task
+                }
+            } catch {
+                // The query refresh behind it brings the same state; a command sent before then is
+                // checked by the core and refused rather than applied on an old revision.
+                rustNeedsFullSettle = true
+            }
+        }
+    }
+
+    /// Waits for the work a save leaves behind: the refresh of the queries in use, the status read
+    /// and the transport wake. A save returns without it (SC-003); a caller that must see the write
+    /// in its pages or counts waits here, or prepares the query it reads.
+    public func settleRustWork() async {
+        guard isRustSelected else { return }
+        repeat {
+            await rustFrameRefresh.settle()
+            await rustStatusRefresh.settle()
+            await rustTransportWake.settle()
+            await rustQueries?.settle()
+        } while rustFrameRefresh.isRunning || rustStatusRefresh.isRunning || rustTransportWake.isRunning
+    }
+
+    /// Drops the capture preview answers: call when the capture sheet is submitted or dismissed.
+    public func discardCapturePreviews() { rustQueries?.evictEphemeral() }
 
     @discardableResult
     public func capture(_ draft: CaptureDraft, editorID: String) async throws -> TaskID {
@@ -1888,19 +2095,31 @@ extension Workspace {
         let result = try await saver.save(editorID: editorID, authoredIntent: intent) {
             let raw = try facade.workspaceCaptureDraft(draft, bindings: self.rustIdentityBindings)
             let request = try await facade.workspaceResolveReferences(raw, runtime: runtime)
-            let resolution = try await runtime.smartAddResolve(draft: request)
-            guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
-            guard case .answered(let page) = resolution else { throw RustDomainError.malformedResult }
-            let preview = try facade.workspaceCapturePreview(from: page.result, in: shown)
-            if let problem = preview.problem { throw problem }
-            let project = preview.project?.isNew == true ? ProjectID(Self.rawID(self.makeID())) : nil
-            let tags = preview.tags.filter(\.isNew).map { _ in TagID(Self.rawID(self.makeID())) }
-            let minted = try facade.workspaceCaptureMinted(projectID: project, tagIDs: tags)
-            let proposed = try await runtime.smartAddPropose(draft: request, minted: minted, expectedGeneration: page.projectionGeneration)
-            guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
-            guard case .answered(let proposal) = proposed else { throw RustDomainError.malformedResult }
+            // The projection can move between the two reads (the sync loop commits behind a save);
+            // the core then asks for the pair to be read again.
+            var attempt = 0
+            var proposal: RustWorkspacePage
+            while true {
+                do {
+                    let resolution = try await runtime.smartAddResolve(draft: request, urgent: true)
+                    guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+                    guard case .answered(let page) = resolution else { throw RustDomainError.malformedResult }
+                    let preview = try facade.workspaceCapturePreview(from: page.result, in: shown)
+                    if let problem = preview.problem { throw problem }
+                    let project = preview.project?.isNew == true ? ProjectID(Self.rawID(self.makeID())) : nil
+                    let tags = preview.tags.filter(\.isNew).map { _ in TagID(Self.rawID(self.makeID())) }
+                    let minted = try facade.workspaceCaptureMinted(projectID: project, tagIDs: tags)
+                    let proposed = try await runtime.smartAddPropose(draft: request, minted: minted, expectedGeneration: page.projectionGeneration)
+                    guard binding == self.runtimeBindingID else { throw RustBridgeError(code: "CLOSED") }
+                    guard case .answered(let answered) = proposed else { throw RustDomainError.malformedResult }
+                    proposal = answered
+                    break
+                } catch let error as RustBridgeError where error.code == "QUERY_RESTART_REQUIRED" && attempt < 3 {
+                    attempt += 1
+                }
+            }
             let command = facade.workspaceCaptureCommand(taskID: TaskID(Self.rawID(self.makeID())),
-                commandID: self.makeID(), proposal: proposal)
+                commandID: self.makeID(), proposal: proposal, formulationID: FormulationID.make(self.makeID()))
             return RustWorkspaceGesture(authoredIntent: intent, commands: [command], context: try self.rustExecuteContext(at: instant))
         }
         switch result {
@@ -1908,7 +2127,8 @@ extension Workspace {
             if let command = commands.first(where: { $0.commandID == failedCommandID }), let error = try facade.workspaceValidationError(refusal, command: command, in: shown) { throw error }
             throw RustDomainError.refused(reason: refusal.reason, field: refusal.field)
         case .saved(let saved):
-            await finishRustSave(saved, binding: binding)
+            rustQueries?.evictEphemeral()
+            finishRustSave(saved, binding: binding)
             guard let id = saved.receipts.first?.entityID else { throw RustDomainError.malformedResult }
             return TaskID(facade.workspaceLocalID(id))
         }
@@ -2433,7 +2653,7 @@ extension Workspace {
         return try JSONSerialization.data(withJSONObject: ["kind": "records", "items": items], options: [.sortedKeys])
     }
 
-    nonisolated private static func rustRecordRequests(from key: Data) throws -> [RustWorkspaceRecordRequest] {
+    nonisolated static func rustRecordRequests(from key: Data) throws -> [RustWorkspaceRecordRequest] {
         guard let root = try JSONSerialization.jsonObject(with: key) as? [String: Any],
               let items = root["items"] as? [[String: Any]], items.count <= 200 else {
             throw RustBridgeError(code: "MALFORMED_QUERY_RESULT")
@@ -2594,8 +2814,10 @@ extension Workspace {
 extension Workspace {
     private static let rustAccountUnavailable = "This account change isn't available yet. Your work is kept."
 
-    fileprivate func signInRust(serverURL: URL, email: String, password: String,
-                                cancellation: SignInCancellation) async throws {
+    @discardableResult
+    fileprivate func signInRust(serverURL: URL, email: String = "", password: String = "",
+                                credential: NativeSignInCredential? = nil,
+                                cancellation: SignInCancellation) async throws -> AuthCompletionDTO? {
         try refuseAnotherAccountChange()
         guard let lifecycle = rustLifecycle, let selection = rustSelection, isRustBound else {
             throw WorkspaceError.signInFailed(message: Self.rustAccountUnavailable, referenceID: nil)
@@ -2609,10 +2831,12 @@ extension Workspace {
         let outcome: RustSignInOutcome
         do {
             outcome = try await lifecycle.signIn(RustSignInRequest(serverURL: url, email: email, password: password,
-                cancellation: cancellation, current: selection, mergesLocalWork: account == nil))
+                cancellation: cancellation, current: selection, mergesLocalWork: account == nil, credential: credential))
         } catch {
             throw Self.signInFailure(error)
         }
+        // A mailbox check or reset step: nothing was linked and the binding stays as it is.
+        if let step = outcome.continuation { return step }
         let next = outcome.selection
         let sameRuntime = next.runtime === selection.runtime
         // An owner that is not the linked one, or a Cancel that won, links nothing.
@@ -2635,6 +2859,51 @@ extension Workspace {
         await bindRustRuntime()
         if account != linked { account = linked }
         if let error = loadError { throw WorkspaceError.signInFailed(message: error, referenceID: nil) }
+        return nil
+    }
+
+    /// The two-phase sheet on a selected runtime. Begin only checks and remembers the attempt:
+    /// no session is opened, so abandoning it leaves nothing to undo. Completion runs the same
+    /// path as `signIn` (login, claim, link-and-merge); the session token goes only to the
+    /// `SessionTokenStore`. Other credentials are exchanged by the host's server port into the token store.
+    fileprivate func beginSignInRust(serverURL: URL) throws -> NativeSignInAttempt {
+        try refuseAnotherAccountChange()
+        guard rustLifecycle != nil, isRustBound else {
+            throw WorkspaceError.signInFailed(message: Self.rustAccountUnavailable, referenceID: nil)
+        }
+        guard let url = BrainBuddyAPI.serverURL(from: serverURL.absoluteString) else {
+            throw WorkspaceError.signInFailed(message: "Use an https server address.", referenceID: nil)
+        }
+        if let owner = account, owner.serverURL != url {
+            throw WorkspaceError.signInFailed(message: "Use the server linked to this iPhone. Your local tasks are kept.", referenceID: nil)
+        }
+        let attempt = NativeSignInAttempt(id: UUID(), serverURL: url, expectedAccountID: account?.id)
+        nativeSignInID = attempt.id
+        return attempt
+    }
+
+    fileprivate func completeSignInRust(_ attempt: NativeSignInAttempt, credential: NativeSignInCredential) async throws -> NativeSignInOutcome {
+        guard nativeSignInID == attempt.id else {
+            throw WorkspaceError.signInFailed(message: "Start a fresh sign-in. Your local tasks are kept.", referenceID: nil)
+        }
+        guard nativeSignInCancellation == nil else {
+            throw WorkspaceError.signInFailed(message: Self.signInOnItsWayMessage, referenceID: nil)
+        }
+        let cancellation = SignInCancellation()
+        nativeSignInCancellation = cancellation
+        defer { nativeSignInCancellation = nil }
+        // A failure keeps the attempt, so a wrong password can be retried on it.
+        var email = "", password = "", other: NativeSignInCredential?
+        if case .password(let mail, let secret) = credential { email = mail; password = secret } else { other = credential }
+        if let step = try await signInRust(serverURL: attempt.serverURL, email: email, password: password,
+                                           credential: other, cancellation: cancellation) {
+            return .continuation(step)
+        }
+        guard let linked = account else {
+            throw WorkspaceError.signInFailed(message: "Couldn't sign in. Your work is kept.", referenceID: nil)
+        }
+        if nativeSignInID == attempt.id { nativeSignInID = nil }
+        return .signedIn(SignInResult(account: linked, deletionCancelled: signInCancelledAccountDeletion))
     }
 
     fileprivate func signOutRust(removing confirmed: Set<PendingChange>) async throws {
@@ -2687,6 +2956,7 @@ extension Workspace {
     private func replaceRustBinding(with selection: RustWorkspaceSelection) {
         rustSelection = selection
         rustSyncState = nil
+        rustFailure = nil
         rustRebuild = .idle
         rustResolutions.removeAll()
         rustLoadFailureCode = nil
@@ -2699,6 +2969,7 @@ extension Workspace {
         state = .empty
         account = nil
         syncStatus = .localOnly
+        rustFailure = nil
         pendingChangeCount = 0
         rustLocalReview = LocalReviewState()
         rustReviewState = nil

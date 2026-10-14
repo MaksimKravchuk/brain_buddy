@@ -1351,7 +1351,7 @@ impl BridgeWorkspace {
     pub fn smart_add_resolve(&self, draft: Vec<u8>) -> Result<BridgeWorkspaceAnswer, BridgeError> {
         Ok(self.with_store(|store| {
             let (generation, result) = workspace_read(store, None, |state| {
-                super::resolve_smart_add(&to_json(state)?, &draft)
+                super::resolve_smart_add_in(state, &draft)
             })
             .map_err(query_failure)?;
             Ok(BridgeWorkspaceAnswer::Answered {
@@ -1376,7 +1376,7 @@ impl BridgeWorkspace {
             .map_err(|_| Failure::new("INVALID_REQUEST", Some("expected_generation")))?;
         Ok(self.with_store(|store| {
             let (generation, result) = workspace_read(store, Some(generation), |state| {
-                super::propose_smart_add(&to_json(state)?, &draft, &minted)
+                super::propose_smart_add_in(state, &draft, &minted)
             })
             .map_err(query_failure)?;
             Ok(match result? {

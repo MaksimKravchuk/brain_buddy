@@ -39,7 +39,22 @@ final class RustWorkspaceAdapter {
         var inputs: Data
         var dirtyVersion: UInt64 = 0
         var requestID: UInt64 = 0
+        /// The page predates the latest invalidation and no refresh has run for it yet. It is still
+        /// shown (stale-while-revalidate); the next access starts the refresh.
+        var stale = false
+        /// A per-keystroke answer (the live capture preview): never refreshed after a save.
+        var ephemeral = false
     }
+
+    /// How many of the most recently used queries a save refreshes at once. The screens on show
+    /// (a tab's list, a pushed detail, a sheet) are the latest used; older entries are marked stale
+    /// and refresh when next read.
+    static let liveQueryLimit = 8
+    /// A refresh starts once invalidations have been quiet this long, and never later than
+    /// `longestRefreshDelay` after the first of a run. A reader waiting for fresh data
+    /// (`prepare`, `settle`) does not wait for either.
+    static let quietPeriod = Duration.milliseconds(60)
+    static let longestRefreshDelay = Duration.milliseconds(400)
 
     private(set) var entries: [Data: Entry] = [:]
     private(set) var generationFloor: UInt64 = 0
@@ -48,23 +63,40 @@ final class RustWorkspaceAdapter {
     @ObservationIgnored private var clock: UInt64 = 0
     @ObservationIgnored private var accessed: [Data: UInt64] = [:]
     @ObservationIgnored private var tasks: [Data: Task<Void, Never>] = [:]
+    /// Queries an invalidation marked for a refresh that has not started: the store has one
+    /// connection, so a refresh that began between two quick writes would hold up the second.
+    @ObservationIgnored private var pendingRefresh: Set<Data> = []
+    @ObservationIgnored private var pendingTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingSince: ContinuousClock.Instant?
     @ObservationIgnored private let query: @Sendable (Data, Data, String?) async throws -> RustWorkspaceAnswer
     @ObservationIgnored private let didPublish: @MainActor (Data, RustWorkspacePage) throws -> Void
     @ObservationIgnored private let didRefuse: @MainActor (Data, RustRefusal) -> Void
+    @ObservationIgnored private let decoding: Decoding?
+
+    /// Turning an answer into records off the main actor. `context` copies what decoding reads,
+    /// `revision` says whether it is still current, `publish` adopts the decoded page.
+    struct Decoding {
+        let context: @MainActor () -> RustDecodeContext?
+        let revision: @MainActor () -> UInt64
+        let publish: @MainActor (Data, RustWorkspacePage, RustPreparedPage) throws -> Void
+    }
 
     init(inputs: Data,
          query: @escaping @Sendable (Data, Data, String?) async throws -> RustWorkspaceAnswer,
          didPublish: @escaping @MainActor (Data, RustWorkspacePage) throws -> Void,
+         decoding: Decoding? = nil,
          didRefuse: @escaping @MainActor (Data, RustRefusal) -> Void = { _, _ in }) {
         self.inputs = inputs
         self.query = query
         self.didPublish = didPublish
+        self.decoding = decoding
         self.didRefuse = didRefuse
     }
 
     func page(for query: Data) -> RustWorkspacePage? {
         register(query)
         guard entries[query]?.readiness == .ready else { return nil }
+        revalidateOnRead(query)
         return entries[query]?.page
     }
 
@@ -96,7 +128,10 @@ final class RustWorkspaceAdapter {
     func prepare(_ query: Data) async {
         register(query)
         if let readiness = entries[query]?.readiness, case .failed = readiness { refresh(query) }
-        while let task = tasks[query] {
+        while true {
+            // A page an invalidation left behind is brought up to date before this returns.
+            if entries[query]?.stale == true, tasks[query] == nil { refresh(query, keepingPage: true) }
+            guard let task = tasks[query] else { return }
             await task.value
             if Task.isCancelled { return }
         }
@@ -128,18 +163,79 @@ final class RustWorkspaceAdapter {
     func invalidate(generation: UInt64, inputs replacement: Data? = nil) {
         generationFloor = max(generationFloor, generation)
         if let replacement { inputs = replacement }
+        let live = liveKeys()
         for key in Array(entries.keys) {
             guard var entry = entries[key] else { continue }
+            // A page past the first has its cursor dropped, so the page shown no longer matches
+            // its navigation state: that one reloads from the start instead of staying on screen.
+            let onFirstPage = entry.cursor == nil
             entry.dirtyVersion &+= 1
             entry.inputs = inputs
             entry.cursor = nil
             entry.history = []
+            entry.stale = true
+            if !onFirstPage { entry.page = nil; entry.readiness = .loading }
             entries[key] = entry
-            refresh(key)
+            if !onFirstPage { refresh(key) }
+            else if live.contains(key) { pendingRefresh.insert(key) }
+        }
+        scheduleRefresh()
+    }
+
+    private func scheduleRefresh() {
+        guard !pendingRefresh.isEmpty else { return }
+        let now = ContinuousClock.now
+        let since = pendingSince ?? now
+        pendingSince = since
+        let wait = min(Self.quietPeriod, max(.zero, Self.longestRefreshDelay - (now - since)))
+        pendingTask?.cancel()
+        pendingTask = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            self?.flushPending()
+        }
+    }
+
+    /// Starts the refreshes that are waiting out their quiet period.
+    private func flushPending() {
+        pendingTask?.cancel()
+        pendingTask = nil
+        pendingSince = nil
+        let keys = pendingRefresh
+        pendingRefresh = []
+        for key in keys where entries[key]?.stale == true { refresh(key, keepingPage: true) }
+    }
+
+    /// Removes the cached answers of per-keystroke queries (the capture preview): on submit and
+    /// dismiss, so they neither fill the cache nor get re-run after saves.
+    func evictEphemeral() {
+        for key in ephemeralKeys { evict(key) }
+    }
+
+    var ephemeralKeys: [Data] { entries.compactMap { $0.value.ephemeral ? $0.key : nil } }
+
+    func evict(_ key: Data) {
+        pendingRefresh.remove(key)
+        tasks.removeValue(forKey: key)?.cancel()
+        entries.removeValue(forKey: key)
+        accessed.removeValue(forKey: key)
+    }
+
+    /// Waits until every refresh in flight (and any the waiting itself uncovers) has finished.
+    func settle() async {
+        flushPending()
+        // A finished refresh can start another (an overtaken answer); a few rounds reach quiet.
+        for _ in 0..<8 where !tasks.isEmpty {
+            for task in Array(tasks.values) { await task.value }
+            if Task.isCancelled { return }
         }
     }
 
     func close() {
+        pendingTask?.cancel()
+        pendingTask = nil
+        pendingSince = nil
+        pendingRefresh = []
         epoch &+= 1
         for task in tasks.values { task.cancel() }
         tasks = [:]
@@ -156,16 +252,41 @@ final class RustWorkspaceAdapter {
             entries.removeValue(forKey: oldest)
             accessed.removeValue(forKey: oldest)
         }
-        entries[key] = Entry(inputs: inputs)
+        var entry = Entry(inputs: inputs)
+        entry.ephemeral = Self.isEphemeral(key)
+        entries[key] = entry
         if start { refresh(key) }
     }
 
-    private func refresh(_ key: Data) {
+    private static func isEphemeral(_ key: Data) -> Bool {
+        key.range(of: Data("\"kind\":\"capture_preview\"".utf8)) != nil
+    }
+
+    /// The most recently used queries a save refreshes right away.
+    private func liveKeys() -> Set<Data> {
+        let recent = entries.keys.filter { entries[$0]?.ephemeral != true }
+            .sorted { (accessed[$0] ?? 0) > (accessed[$1] ?? 0) }
+        return Set(recent.prefix(Self.liveQueryLimit))
+    }
+
+    /// A stale page that is read again is shown as it is and refreshed behind the read.
+    private func revalidateOnRead(_ key: Data) {
+        guard entries[key]?.stale == true, tasks[key] == nil, !pendingRefresh.contains(key) else { return }
+        // Not inside the reading view's update pass.
+        Task { [weak self] in
+            guard let self, self.entries[key]?.stale == true else { return }
+            self.refresh(key, keepingPage: true)
+        }
+    }
+
+    private func refresh(_ key: Data, keepingPage: Bool = false) {
         guard tasks[key] == nil, var entry = entries[key] else { return }
         clock &+= 1
         entry.requestID = clock
-        entry.readiness = .loading
-        entry.page = nil
+        if !(keepingPage && entry.readiness == .ready && entry.page != nil) {
+            entry.readiness = .loading
+            entry.page = nil
+        }
         entries[key] = entry
         let request = entry.requestID
         let dirtyVersion = entry.dirtyVersion
@@ -175,34 +296,59 @@ final class RustWorkspaceAdapter {
         let cursor = entry.cursor
         tasks[key] = Task { [weak self] in
             let outcome: Result<RustWorkspaceAnswer, any Error>
+            var prepared: RustPreparedPage?
             do {
                 let request = try Self.pagedQuery(key, cursor: cursor)
                 // Collection cursors are separate from the catalog's keyset
                 // cursor; the bridge ignores them for list_mode/task_list.
-                outcome = .success(try await query(request, inputs, cursor))
+                let answer = try await query(request, inputs, cursor)
+                outcome = .success(answer)
+                if case .answered(let page) = answer { prepared = await self?.decodeOffActor(key, page) }
             } catch { outcome = .failure(error) }
-            self?.complete(key, request: request, dirtyVersion: dirtyVersion, epoch: epoch, outcome: outcome)
+            self?.complete(key, request: request, dirtyVersion: dirtyVersion, epoch: epoch, outcome: outcome,
+                           prepared: prepared)
         }
     }
 
+    /// Decodes against a copy of the workspace's state off the main actor. When the state moved
+    /// meanwhile (another page was adopted) it decodes again; a page still out of date after that
+    /// reaches the workspace as it is and is decoded there.
+    private func decodeOffActor(_ key: Data, _ page: RustWorkspacePage) async -> RustPreparedPage? {
+        guard let decoding else { return nil }
+        var prepared: RustPreparedPage?
+        for _ in 0..<3 {
+            guard let context = decoding.context() else { return nil }
+            prepared = await Task.detached(priority: .userInitiated) {
+                RustPreparedPage.decode(query: key, page: page, context: context)
+            }.value
+            guard let latest = prepared else { return nil }
+            if latest.revision == decoding.revision() { break }
+        }
+        return prepared
+    }
+
     private func complete(_ key: Data, request: UInt64, dirtyVersion: UInt64, epoch: UInt64,
-                          outcome: Result<RustWorkspaceAnswer, any Error>) {
+                          outcome: Result<RustWorkspaceAnswer, any Error>, prepared: RustPreparedPage? = nil) {
         guard epoch == self.epoch, var entry = entries[key], request == entry.requestID else { return }
         tasks[key] = nil
+        if dirtyVersion == entry.dirtyVersion { entry.stale = false }
         switch outcome {
         case .success(.answered(let page)):
-            guard dirtyVersion == entry.dirtyVersion else { refresh(key); return }
+            guard dirtyVersion == entry.dirtyVersion else { refreshIfLive(key); return }
             guard let generation = UInt64(page.projectionGeneration) else {
                 entry.readiness = .failed("MALFORMED_QUERY_RESULT")
                 entries[key] = entry
                 return
             }
             guard generation >= generationFloor else {
-                refresh(key)
+                refresh(key, keepingPage: true)
                 return
             }
             generationFloor = max(generationFloor, generation)
-            do { try didPublish(key, page) }
+            do {
+                if let prepared, let decoding { try decoding.publish(key, page, prepared) }
+                else { try didPublish(key, page) }
+            }
             catch {
                 entry.readiness = .failed((error as? RustBridgeError)?.code ?? "MALFORMED_QUERY_RESULT")
                 entries[key] = entry
@@ -210,9 +356,10 @@ final class RustWorkspaceAdapter {
             }
             entry.page = page
             entry.readiness = .ready
+            entry.stale = false
             entries[key] = entry
         case .success(.refused(let refusal, let generation)):
-            guard dirtyVersion == entry.dirtyVersion else { refresh(key); return }
+            guard dirtyVersion == entry.dirtyVersion else { refreshIfLive(key); return }
             if let generation, let number = UInt64(generation), number < generationFloor { refresh(key); return }
             entry.readiness = .failed(refusal.reason)
             entries[key] = entry
@@ -231,7 +378,14 @@ final class RustWorkspaceAdapter {
         }
         // An invalidation received while a failing request was suspended also
         // survives that completion and gets one fresh request.
-        if dirtyVersion != entry.dirtyVersion { refresh(key) }
+        if dirtyVersion != entry.dirtyVersion { refreshIfLive(key) }
+    }
+
+    /// An answer that an invalidation overtook is dropped; the entry is asked again now when it is
+    /// one of the queries in use, and otherwise stays stale until it is read.
+    private func refreshIfLive(_ key: Data) {
+        if entries[key]?.page == nil { refresh(key) }
+        else if !pendingRefresh.contains(key), liveKeys().contains(key) { refresh(key, keepingPage: true) }
     }
 
     private static func nextCursor(_ page: RustWorkspacePage) -> String? {
