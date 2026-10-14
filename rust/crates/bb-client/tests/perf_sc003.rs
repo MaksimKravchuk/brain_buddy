@@ -4,7 +4,11 @@
 //! the equivalence test always runs on a smaller store of the same shape.
 //!
 //! The device-latency budget (<= 50 ms p95 on an iPhone 11) is judged on the
-//! device; this prints the host numbers the optimisation is measured with.
+//! device; this prints the host numbers the optimisation is measured with and
+//! the ignored run also asserts them: the pooled `execute` p95 and the p95 of
+//! each list query must stay within `BB_SC003_P95_BUDGET_MS` (default 50), so a
+//! device or CI run yields a pass or fail rather than numbers to read. The
+//! always-on small-store test never asserts a budget.
 
 use bb_client::{
     ExecuteContext, ExecuteRequest, IdSource, OpenOptions, Store, execute, query_page,
@@ -19,6 +23,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant as Clock};
 
 const WORKSPACE: &str = "workspace-local";
+/// The SC-003 p95 budget in milliseconds; override with `BB_SC003_P95_BUDGET_MS`.
+const DEFAULT_P95_BUDGET_MS: f64 = 50.0;
 const NOW: &str = "2026-10-10T09:00:00Z";
 
 struct SeqIds(u64);
@@ -206,6 +212,46 @@ fn timed<T>(body: impl FnOnce() -> T) -> (T, f64) {
     (value, start.elapsed().as_secs_f64() * 1_000.0)
 }
 
+/// The p95 figures one scenario measured, checked against the budget by the
+/// ignored run.
+struct Verdict {
+    label: String,
+    execute_p95: f64,
+    list_mode_p95: f64,
+    task_list_p95: f64,
+}
+
+fn budget_ms() -> f64 {
+    match std::env::var("BB_SC003_P95_BUDGET_MS") {
+        Ok(raw) => raw
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| panic!("BB_SC003_P95_BUDGET_MS must be a positive number: {raw:?}")),
+        Err(_) => DEFAULT_P95_BUDGET_MS,
+    }
+}
+
+/// Every measurement over `budget`, one line each; empty means SC-003 passes.
+fn violations(verdicts: &[Verdict], budget: f64) -> Vec<String> {
+    let mut found = Vec::new();
+    for verdict in verdicts {
+        for (name, p95) in [
+            ("execute (pooled)", verdict.execute_p95),
+            ("query inbox list_mode", verdict.list_mode_p95),
+            ("query inbox task_list", verdict.task_list_p95),
+        ] {
+            if p95.is_nan() || p95 > budget {
+                found.push(format!(
+                    "{}: {name} p95 {p95:.2} ms exceeds the {budget:.2} ms budget",
+                    verdict.label
+                ));
+            }
+        }
+    }
+    found
+}
+
 fn scenario(
     label: &str,
     tasks: usize,
@@ -213,7 +259,7 @@ fn scenario(
     legacy_drafts: bool,
     local_only: bool,
     operations: usize,
-) {
+) -> Verdict {
     println!(
         "{label}: {tasks} tasks, {outbox} outbox rows, legacy drafts: {legacy_drafts}, local-only: {local_only}"
     );
@@ -312,22 +358,56 @@ fn scenario(
     report("execute title edit (+token)", &mut edits);
     report("execute complete", &mut moves);
     report("execute pooled", &mut all);
+    let verdict = Verdict {
+        label: label.to_string(),
+        execute_p95: percentile(&mut all, 0.95),
+        list_mode_p95: percentile(&mut list_mode, 0.95),
+        task_list_p95: percentile(&mut task_list, 0.95),
+    };
     store.close().unwrap();
     let _ = fs::remove_dir_all(path.parent().unwrap().parent().unwrap());
+    verdict
 }
 
 #[test]
 #[ignore = "SC-003 timing evidence; run with --release --ignored --nocapture"]
 fn perf_026_sc_003_ten_thousand_tasks_thirteen_hundred_outbox_rows() {
-    scenario("linked-queue", 10_000, 1_300, false, false, 60);
-    scenario("imported-drafts", 10_000, 1_300, true, false, 60);
-    scenario("local-only", 10_000, 1_300, true, true, 60);
+    let verdicts = [
+        scenario("linked-queue", 10_000, 1_300, false, false, 60),
+        scenario("imported-drafts", 10_000, 1_300, true, false, 60),
+        scenario("local-only", 10_000, 1_300, true, true, 60),
+    ];
+    let budget = budget_ms();
+    let failed = violations(&verdicts, budget);
+    println!(
+        "SC-003 verdict ({budget:.2} ms p95 budget): {}",
+        if failed.is_empty() { "PASS" } else { "FAIL" }
+    );
+    assert!(
+        failed.is_empty(),
+        "SC-003 budget exceeded:\n{}",
+        failed.join("\n")
+    );
+}
+
+#[test]
+fn perf_026_sc_003_the_verdict_fails_a_measurement_over_the_budget() {
+    let verdict = |execute_p95, list_mode_p95, task_list_p95| Verdict {
+        label: "fixture".to_string(),
+        execute_p95,
+        list_mode_p95,
+        task_list_p95,
+    };
+    assert!(violations(&[verdict(50.0, 12.0, 0.5)], 50.0).is_empty());
+    assert_eq!(violations(&[verdict(50.01, 12.0, 0.5)], 50.0).len(), 1);
+    assert_eq!(violations(&[verdict(1.0, 60.0, 70.0)], 50.0).len(), 2);
+    assert_eq!(violations(&[verdict(f64::NAN, 1.0, 1.0)], 50.0).len(), 1);
 }
 
 #[test]
 fn perf_026_sc_003_fixture_queries_and_gestures_work_on_a_small_store() {
     // The same shape at a size that runs in every `cargo test`.
-    scenario("small", 400, 60, true, false, 8);
-    scenario("small-local", 400, 60, true, true, 8);
+    let _ = scenario("small", 400, 60, true, false, 8);
+    let _ = scenario("small-local", 400, 60, true, true, 8);
     let _: Option<Value> = None;
 }

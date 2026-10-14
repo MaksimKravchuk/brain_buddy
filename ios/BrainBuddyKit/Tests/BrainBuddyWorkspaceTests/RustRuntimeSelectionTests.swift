@@ -131,6 +131,132 @@ struct RustRuntimeSelectionTests {
         #expect(try lane.selections.load() == nil)
     }
 
+    @Test("026-FR-025: after LEGACY_CHANGED the next launch imports the changed file, keeps the racing edit and selects")
+    @MainActor
+    func raceThenRetryConverges() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        var environment = lane.environment()
+        let url = lane.legacyURL
+        environment.beforeHandoff = {
+            // An App Intent commits a capture after the import read the file and before the handoff.
+            _ = try? await FileDocumentStore(fileURL: url).update { document in
+                let created = Date(timeIntervalSince1970: 1_788_100_000)
+                document.base.tasks["task-2"] = TaskRecord(
+                    id: "task-2", title: "Raced edit", state: .next, orderKey: 2, createdAt: created, updatedAt: created)
+            }
+        }
+        let switchBox = RustRuntimePilotSwitch(suiteName: lane.suite)
+        switchBox.set(true)
+        guard case .legacy(.notReady(let code)) = await RustRuntimeLauncher(environment: environment, pilot: switchBox).resolve()
+        else {
+            Issue.record("the first attempt must stay legacy")
+            return
+        }
+        #expect(code == "LEGACY_CHANGED")
+        #expect(try lane.selections.load() == nil)
+        let raced = try Data(contentsOf: lane.legacyURL)
+
+        // The unselected store of the failed attempt was never opened by a client, so it is gone and
+        // the next launch starts clean, from the file as it is now.
+        #expect(!FileManager.default.fileExists(
+            atPath: lane.location.databaseURL(RustRuntimeLauncher.importedWorkspaceID).path))
+        guard case .rust(let selection, let lifecycle) = await lane.launcher(pilot: true).resolve() else {
+            Issue.record("the retry must import the changed file and select")
+            return
+        }
+        let app = Workspace.selected(selection, lifecycle: lifecycle)
+        await app.load()
+        await app.prepareList(.list(.next))
+        #expect(Set(app.list(.list(.next)).sections.flatMap(\.tasks).map(\.title)) == ["Imported task", "Raced edit"])
+        #expect(try lane.selections.load()?.workspaceID == RustRuntimeLauncher.importedWorkspaceID)
+        #expect(try Data(contentsOf: lane.legacyURL) == raced, "the legacy file is never modified by the import")
+        await app.closeRuntime()
+    }
+
+    /// An import that finished and whose process died before any selection: the store exists.
+    private func importWithoutHandoff(_ lane: SelectionLane) async throws {
+        let id = RustRuntimeLauncher.importedWorkspaceID
+        let prepared = try await RustStoreImporter(
+            runtime: lane.bridge, legacyFileURL: lane.legacyURL, databaseURL: lane.location.databaseURL(id),
+            workspaceID: id, now: { lane.instant }
+        ).prepareImportedRuntime(facade: lane.environment().facade())
+        try await prepared.runtime.close()
+    }
+
+    private func editLegacy(_ lane: SelectionLane) async throws {
+        _ = try await FileDocumentStore(fileURL: lane.legacyURL).update { document in
+            let created = Date(timeIntervalSince1970: 1_788_100_000)
+            document.base.tasks["task-2"] = TaskRecord(
+                id: "task-2", title: "Raced edit", state: .next, orderKey: 2, createdAt: created, updatedAt: created)
+        }
+    }
+
+    @Test("026-FR-025: a crash after the import and before any selection (marker present) is retried from the edited file")
+    @MainActor
+    func crashAfterImportWithMarkerConverges() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        try FileManager.default.createDirectory(at: lane.location.root, withIntermediateDirectories: true)
+        try Data("pending\n".utf8).write(to: lane.location.importPendingURL)
+        try await importWithoutHandoff(lane)
+        try await editLegacy(lane)
+        #expect(try lane.selections.load() == nil)
+
+        guard case .rust(let selection, let lifecycle) = await lane.launcher(pilot: true).resolve() else {
+            Issue.record("a store that was never handed over is discarded and imported again")
+            return
+        }
+        let app = Workspace.selected(selection, lifecycle: lifecycle)
+        await app.load()
+        await app.prepareList(.list(.next))
+        #expect(Set(app.list(.list(.next)).sections.flatMap(\.tasks).map(\.title)) == ["Imported task", "Raced edit"])
+        #expect(!FileManager.default.fileExists(atPath: lane.location.importPendingURL.path))
+        await app.closeRuntime()
+    }
+
+    @Test("026-FR-025: without the marker an existing store is never discarded, even with no selection")
+    @MainActor
+    func missingMarkerNeverDiscards() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        try await importWithoutHandoff(lane)
+        try await editLegacy(lane)
+        guard case .legacy(.notReady(let code)) = await lane.launcher(pilot: true).resolve() else {
+            Issue.record("a store of unknown history must not be replaced")
+            return
+        }
+        #expect(!code.isEmpty)
+        #expect(FileManager.default.fileExists(
+            atPath: lane.location.databaseURL(RustRuntimeLauncher.importedWorkspaceID).path))
+        #expect(try lane.selections.load() == nil)
+    }
+
+    @Test("026-FR-025: a successful handoff leaves no marker, and a stale one beside a selection is cleared")
+    @MainActor
+    func markerEndsWithTheSelection() async throws {
+        let lane = try SelectionLane()
+        defer { lane.cleanup() }
+        try await lane.writeLegacy(lane.legacyDocument(account: nil))
+        guard case .rust(let selection, _) = await lane.launcher(pilot: true).resolve() else {
+            Issue.record("a clean legacy file must be imported")
+            return
+        }
+        try await selection.runtime.close()
+        #expect(!FileManager.default.fileExists(atPath: lane.location.importPendingURL.path))
+        // A crash between the publish and the removal.
+        try Data("pending\n".utf8).write(to: lane.location.importPendingURL)
+        guard case .rust(let again, _) = await lane.launcher(pilot: false).resolve() else {
+            Issue.record("the selection must open")
+            return
+        }
+        try await again.runtime.close()
+        #expect(!FileManager.default.fileExists(atPath: lane.location.importPendingURL.path))
+    }
+
     // MARK: The import, gated
 
     @Test("026-FR-010: the pilot imports the legacy file once, binds the Rust store and leaves the file as it was")

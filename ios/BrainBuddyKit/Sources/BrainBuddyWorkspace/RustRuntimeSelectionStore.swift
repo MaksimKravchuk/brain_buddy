@@ -45,6 +45,11 @@ public struct RustRuntimeLocation: Hashable, Sendable {
     }
 
     public var selectionURL: URL { root.appendingPathComponent("selection.json") }
+
+    /// Present from before a legacy import starts until the selection that hands its store to the
+    /// app is published (`RustRuntimeLauncher`): a store found with this file and no selection was
+    /// never handed to any client.
+    public var importPendingURL: URL { root.appendingPathComponent("import-pending") }
 }
 
 /// The install's choice: the Rust runtime over one workspace identity.

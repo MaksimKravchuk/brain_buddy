@@ -75,7 +75,12 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   macOS) names the Rust workspace identity; no file means legacy. Only the app writes it, and only
   after the PR-41/42 importers finished with `mayRun`; the default-OFF pilot switch
   (`RustRuntimePilotSwitch`, a local `UserDefaults` key, never a server flag) gates that first move
-  alone. An existing selection that cannot be opened is `unavailable`, never a fallback to the
+  alone. A handoff refused because a legacy writer committed after the import (`LEGACY_CHANGED`)
+  removes the never-selected `imported` store (no client can open a store without a selection), so
+  the next launch imports the changed file instead of meeting `IMPORT_ALREADY_IMPORTED`. The same holds
+  after a crash: `runtime/import-pending` is written durably before the import and removed only after
+  the selection is published; a launch that finds it with no selection discards the `imported` store and
+  imports fresh. With no marker an existing store is never discarded. An existing selection that cannot be opened is `unavailable`, never a fallback to the
   retired file. Widgets and App Intents (`SharedWorkspace.make()`) read only the file and open the
   store through `Workspace.openForExtension`. The sync host plugs in at `RustTransportProvider`;
   `HostRustAccountLifecycle` is the production `RustAccountLifecyclePort` over the core's

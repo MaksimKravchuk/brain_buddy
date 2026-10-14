@@ -1,4 +1,4 @@
-"""026-FR-021: one replaceable Rust runtime holder serves every core caller.
+"""026-FR-002: one replaceable Rust runtime holder serves every core caller.
 
 A contained Rust panic leaves the runtime closed. The Task and Review facades,
 the sync receipt/device executors and the navigator hold ``RustCoreHolder``
@@ -56,7 +56,7 @@ def _decide(core: RustCore) -> Any:
     return core.decide({}, envelope, _inputs(now, "owner-1"))
 
 
-def test_026_FR_021_a_healthy_holder_keeps_one_runtime() -> None:
+def test_026_FR_002_a_healthy_holder_keeps_one_runtime() -> None:
     holder = RustCoreHolder()
     with allure.step("repeated calls resolve to the same open runtime"):
         first = holder.get()
@@ -66,7 +66,7 @@ def test_026_FR_021_a_healthy_holder_keeps_one_runtime() -> None:
         check_equal("still the same", holder.get() is first, True)
 
 
-def test_026_FR_021_a_poisoned_runtime_is_replaced_on_the_next_call() -> None:
+def test_026_FR_002_a_poisoned_runtime_is_replaced_on_the_next_call() -> None:
     holder = RustCoreHolder()
     poisoned = holder.get()
     with allure.step("the runtime is poisoned"):
@@ -87,7 +87,7 @@ def test_026_FR_021_a_poisoned_runtime_is_replaced_on_the_next_call() -> None:
     check_equal("code", closed.value.code, "WORKSPACE_CLOSED")
 
 
-def test_026_FR_021_concurrent_callers_during_replacement_get_one_runtime() -> None:
+def test_026_FR_002_concurrent_callers_during_replacement_get_one_runtime() -> None:
     created: list[RustCore] = []
     gate = threading.Event()
 
@@ -112,12 +112,13 @@ def test_026_FR_021_concurrent_callers_during_replacement_get_one_runtime() -> N
         gate.set()
         for thread in threads:
             thread.join()
+        attach_json("callers", {"threads": len(threads), "answered": len(seen)})
     with allure.step("exactly one replacement was created and shared"):
         check_equal("runtimes created", len(created), 2)
         check_equal("distinct seen", {id(c) for c in seen}, {id(created[1])})
 
 
-def test_026_FR_021_a_call_in_flight_on_the_poisoned_runtime_fails_cleanly() -> None:
+def test_026_FR_002_a_call_in_flight_on_the_poisoned_runtime_fails_cleanly() -> None:
     holder = RustCoreHolder()
     in_flight = holder.get()
     with allure.step("the runtime closes under a call that already resolved it"):
@@ -130,7 +131,7 @@ def test_026_FR_021_a_call_in_flight_on_the_poisoned_runtime_fails_cleanly() -> 
         check_equal("replaced", replacement is not in_flight, True)
 
 
-def test_026_FR_021_task_create_review_decide_and_device_commands_survive_poisoning(
+def test_026_FR_002_task_create_review_decide_and_device_commands_survive_poisoning(
     synced: Synced, device: Device
 ) -> None:
     holder = synced.container.rust_core
@@ -177,7 +178,7 @@ def test_026_FR_021_task_create_review_decide_and_device_commands_survive_poison
         check_equal("replaced", holder.get() is not poisoned, True)
 
 
-def test_026_FR_021_the_voice_proposal_check_uses_the_shared_runtime_holder(
+def test_026_FR_002_the_voice_proposal_check_uses_the_shared_runtime_holder(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The production container's brain-dump port checks proposals on the holder.

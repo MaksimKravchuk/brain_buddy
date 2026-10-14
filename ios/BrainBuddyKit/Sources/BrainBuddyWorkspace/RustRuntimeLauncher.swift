@@ -135,7 +135,12 @@ public struct RustRuntimeLauncher: Sendable {
         } catch {
             return .unavailable(code: "SELECTION_UNREADABLE")
         }
-        if let record { return await open(record) }
+        if let record {
+            // A crash between the selection and the removal of the marker leaves it behind; the
+            // selection is what counts, so the marker is stale.
+            try? FileManager.default.removeItem(at: environment.location.importPendingURL)
+            return await open(record)
+        }
         guard pilot.isEnabled else { return .legacy(.pilotOff) }
         return await select()
     }
@@ -176,6 +181,15 @@ public struct RustRuntimeLauncher: Sendable {
             var importedGeneration: Int?
             if hasLegacyFile {
                 let workspaceID = Self.importedWorkspaceID
+                // The marker is durable before the import starts. If one is already here, an
+                // earlier attempt imported (or began to) and never published a selection, so no
+                // client ever opened that store: it is derived from an older legacy file, dropped,
+                // and filled again from the file as it is now. Without a marker an existing store
+                // is never discarded (it may belong to an install whose selection was lost).
+                if FileManager.default.fileExists(atPath: environment.location.importPendingURL.path) {
+                    try discardUnselectedImport()
+                }
+                try writeImportPendingMarker()
                 let importer = RustStoreImporter(
                     runtime: environment.bridge, legacyFileURL: environment.legacyStoreURL,
                     databaseURL: environment.location.databaseURL(workspaceID), workspaceID: workspaceID,
@@ -211,8 +225,14 @@ public struct RustRuntimeLauncher: Sendable {
                     guard try await legacy.performHandoff(whenGeneration: importedGeneration, { try selections.save(record) })
                     else {
                         try? await runtime.close()
+                        // The marker stays unless the store is gone; either way the next launch is clean.
+                        if (try? discardUnselectedImport()) != nil {
+                            try? FileManager.default.removeItem(at: environment.location.importPendingURL)
+                        }
                         return .legacy(.notReady(code: "LEGACY_CHANGED"))
                     }
+                    // Only after the selection is published: a crash before this leaves the marker.
+                    try? FileManager.default.removeItem(at: environment.location.importPendingURL)
                 } else {
                     try selections.save(record)
                 }
@@ -223,6 +243,35 @@ public struct RustRuntimeLauncher: Sendable {
             return .rust(environment.selection(runtime, for: record), lifecycle: lifecycle())
         } catch {
             return .legacy(.notReady(code: Self.code(error)))
+        }
+    }
+
+    /// Removes the imported identity's store after a handoff refused because a legacy writer
+    /// committed after the import read the file. The store is derived wholly from the older file
+    /// (rows, review state, classified outbox) and was never selected: only a persisted selection
+    /// lets the app, a widget or an App Intent open a store (`open`, `openForExtension`), and none
+    /// exists, so no client command was ever written into it. Without this the core would answer
+    /// `IMPORT_ALREADY_IMPORTED` to the changed file at every later launch and the move would never
+    /// complete. The legacy file is not touched; the retry imports its current content, racing
+    /// edit included. A failed removal keeps the marker, so the next launch discards it first and stays
+    /// legacy.
+    private func discardUnselectedImport() throws {
+        let directory = environment.location.identityDirectory(Self.importedWorkspaceID)
+        if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
+    }
+
+    /// Writes the marker atomically and flushes it (and its folder) to disk before returning.
+    private func writeImportPendingMarker() throws {
+        let location = environment.location
+        try FileManager.default.createDirectory(at: location.root, withIntermediateDirectories: true)
+        try Data("pending\n".utf8).write(to: location.importPendingURL, options: [.atomic])
+        let file = try FileHandle(forReadingFrom: location.importPendingURL)
+        defer { try? file.close() }
+        try file.synchronize()
+        // The folder entry too, where the platform allows it.
+        if let folder = try? FileHandle(forReadingFrom: location.root) {
+            try? folder.synchronize()
+            try? folder.close()
         }
     }
 

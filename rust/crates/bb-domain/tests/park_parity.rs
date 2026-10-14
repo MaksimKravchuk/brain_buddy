@@ -272,7 +272,7 @@ fn park_026_fr_013_yield_reversal_vectors_match_the_server() {
 }
 
 #[test]
-fn park_026_sc_006_sweep_gap_vectors_match_the_server() {
+fn park_026_fr_016_sweep_gap_vectors_match_the_server() {
     let section = transitions_of("sweep_gap");
     let mut ran = 0;
     for vector in &section {
@@ -876,7 +876,7 @@ fn park_026_fr_013_a_device_park_is_applied_false_unless_the_server_agrees() {
 }
 
 #[test]
-fn park_026_sc_006_a_device_park_after_a_sweep_gap_applies_the_floor_first() {
+fn park_026_fr_016_a_device_park_after_a_sweep_gap_applies_the_floor_first() {
     // Flag off for 5 days, then a device park lands before the first sweep.
     let (mut sim, id, form) = due_sim();
     let now = sim.now;
@@ -914,7 +914,7 @@ fn park_026_sc_006_a_device_park_after_a_sweep_gap_applies_the_floor_first() {
 }
 
 #[test]
-fn park_026_sc_006_a_device_park_without_a_gap_leaves_the_owner_floor_alone() {
+fn park_026_fr_016_a_device_park_without_a_gap_leaves_the_owner_floor_alone() {
     let (mut sim, id, form) = due_sim();
     sim.last_sweep = Some(sim.now.plus_seconds(-60));
     let reply = sim
@@ -1804,7 +1804,7 @@ fn park_026_fr_013_a_park_the_server_disagrees_with_is_applied_false_and_writes_
 }
 
 #[test]
-fn park_026_sc_006_a_declined_park_after_a_sweep_gap_still_raises_the_owner_floor() {
+fn park_026_fr_016_a_declined_park_after_a_sweep_gap_still_raises_the_owner_floor() {
     // Flag off for 5 days, then a device park lands before the first sweep.
     let read_set = due_set(Some("2026-10-04T12:00:00Z"));
     let set =

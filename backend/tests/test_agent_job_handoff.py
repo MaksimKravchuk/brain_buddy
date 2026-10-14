@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import allure
 import pytest
 
 from app.container import Container
@@ -23,7 +24,7 @@ from app.modules.agents.a2a.client import A2A_TIMEOUT, A2AResult
 from app.modules.agents.observer import AgentObserver, SchedulerOverlapError
 from app.modules.agents.repository import AgentRepository
 from app.modules.agents.secrets import SecretBox
-from app.modules.agents.service import AgentRelayService
+from app.modules.agents.service import AgentRelayService, TaskSnapshot
 from app.modules.tasks.jobs import JobLease, JobOutcome, JobRepository, JobStatus
 from app.modules.tasks.jobs.agent_adapter import (
     RECOVER_JOB_TYPE,
@@ -37,13 +38,15 @@ from app.modules.tasks.jobs.execution import (
     current_writer_origin,
 )
 from app.modules.tasks.jobs.worker import JobContext, JobRegistry, JobWorker
-from app.schemas.tasks import TaskCreateRequest
+from app.schemas.tasks import TaskCreateRequest, TaskUpdateRequest
+from tests.allure_evidence import check_equal
 
 from .a2a_fakes import FakeA2AClient, FakeCardFetcher
 from .test_agent_observer import (
     OTHER_OWNER,
     OWNER,
     PUSH_BASE,
+    TASKS,
     Clock,
     DeferredExecutor,
     SynchronousExecutor,
@@ -404,6 +407,53 @@ def test_026_SC_007_old_and_new_passes_never_read_one_run_twice(rig: Rig) -> Non
 
     deferred.run_pending()
     assert len(rig.a2a.calls_to("GetTask")) == 1
+
+
+def test_026_FR_021_a_completed_run_leaves_the_task_unchanged_until_confirmed(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """US5 scenario 4: an AgentRun success is not a Task write."""
+
+    task_id = rig.create_task()
+    # The hand-off reads the real Task through the snapshot the relay is given.
+    monkeypatch.setitem(
+        TASKS, task_id, TaskSnapshot(id=task_id, title="Written by a job", details=None)
+    )
+    run_id = dispatched(rig.service, rig.a2a, rig.clock, task_id=task_id)
+    rig.a2a.script(
+        "GetTask",
+        A2AResult(
+            ok=True,
+            correlation_id="c",
+            task=observed_task("t1", run_id, "TASK_STATE_COMPLETED", text="All done."),
+        ),
+    )
+
+    def stored() -> dict[str, Any]:
+        (document,) = (
+            task
+            for task in rig.container.task_repo.list_for_owner(owner_id=OWNER)
+            if task.id == task_id
+        )
+        return document.model_dump(mode="json")
+
+    before = stored()
+    with allure.step("the observation job reads a completed AgentRun"):
+        rig.due()
+        rig.run(rig.observation())
+        run = rig.repo.get_run(run_id, owner_id=OWNER)
+        check_equal("run reported state", run.reported_state, "completed")
+    with allure.step("the linked Task is byte-for-byte unchanged"):
+        check_equal("task document", stored(), before)
+        check_equal("no message sent", rig.a2a.calls_to("SendMessage"), [])
+    with allure.step("only an independently confirmed Tasks command changes it"):
+        rig.container.task_service.update_task(
+            task_id,
+            TaskUpdateRequest(title="Confirmed by the user", expected_revision=1),
+            owner_id=OWNER,
+            idempotency_key="key-confirmed-edit",
+        )
+        check_equal("title", stored()["title"], "Confirmed by the user")
 
 
 def test_026_FR_015_a_verified_push_wake_reaches_the_durable_owner(rig: Rig) -> None:
