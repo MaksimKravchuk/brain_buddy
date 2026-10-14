@@ -191,6 +191,28 @@ targets:
         com.apple.security.application-groups:
           - $(BB_APP_GROUP_ID)
 
+  # Automated rehearsal of the Apple pilot (spec 026, evidence/rehearsal-*.md "S4 iOS Simulator
+  # UI"): XCUITest against a local backend only, run by scripts/rehearsal/run_ios_ui.sh through
+  # the BrainBuddyRehearsal scheme. Not part of the BrainBuddy scheme or CI, and not evidence from
+  # a reference device.
+  BrainBuddyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: BrainBuddyUITests
+    dependencies:
+      - target: BrainBuddy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(BB_BUNDLE_ID_PREFIX).ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: BrainBuddy
+        # XCUITest's main-actor API and polling closures are awkward under complete checking, and
+        # this target ships nothing.
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        TARGETED_DEVICE_FAMILY: "1"
+
 schemes:
   BrainBuddy:
     build:
@@ -219,3 +241,17 @@ schemes:
       config: Debug
     archive:
       config: Release
+  # The simulator UI rehearsal only. BrainBuddy stays the scheme CI and developers use.
+  BrainBuddyRehearsal:
+    build:
+      targets:
+        BrainBuddy: all
+        BrainBuddyWidgets: all
+        BrainBuddyUITests: [test]
+    run:
+      config: Debug
+      executable: BrainBuddy
+    test:
+      config: Debug
+      targets:
+        - BrainBuddyUITests

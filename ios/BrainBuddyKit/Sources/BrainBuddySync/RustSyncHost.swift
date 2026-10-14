@@ -52,17 +52,20 @@ public final class RustSyncHost: SyncRuntimePort {
         serverURL: URL, tokenStore: any SessionTokenStore, identity: ClientIdentity = .iOS,
         urlSessionConfiguration: URLSessionConfiguration = RustSyncURLSession.defaultConfiguration,
         pollInterval: TimeInterval? = nil, now: @escaping @Sendable () -> Date = { Date() },
-        manualRoundTimeout: TimeInterval = RustSyncHost.manualRoundTimeout
+        manualRoundTimeout: TimeInterval = RustSyncHost.manualRoundTimeout,
+        transportWrapper: (@Sendable (any RustSyncTransport) -> any RustSyncTransport)? = nil
     ) async throws -> RustSyncHost {
-        let shared = Shared(now: now)
+        // `transportWrapper` is a test seam (the pilot rehearsal's fault injection); production passes nil.
+        let urlTransport = URLSessionRustSyncTransport(
+            serverURL: serverURL, tokenStore: tokenStore, identity: identity,
+            configuration: urlSessionConfiguration)
+        let shared = Shared(now: now, failureReference: { urlTransport.takeLastFailureCorrelationID() })
         let handle = try await RustSyncHandle.start(
             configuration: RustSyncConfiguration(
                 workspaceID: workspaceID, databaseURL: databaseURL, accountID: binding.accountID,
                 scopeID: binding.scopeID, deviceID: binding.deviceID,
                 freshAuthentication: binding.freshAuthentication, context: context, pollInterval: pollInterval),
-            transport: URLSessionRustSyncTransport(
-                serverURL: serverURL, tokenStore: tokenStore, identity: identity,
-                configuration: urlSessionConfiguration),
+            transport: transportWrapper?(urlTransport) ?? urlTransport,
             hints: URLSessionRustSyncHintStream(
                 serverURL: serverURL, tokenStore: tokenStore, identity: identity,
                 configuration: urlSessionConfiguration),
@@ -167,8 +170,13 @@ private final class Shared: RustSyncObserver, Sendable {
 
     private let state = Mutex(State())
     private let now: @Sendable () -> Date
+    /// Takes the server correlation ID of the last failed request (nil when there is none).
+    private let failureReference: @Sendable () -> String?
 
-    init(now: @escaping @Sendable () -> Date) { self.now = now }
+    init(now: @escaping @Sendable () -> Date, failureReference: @escaping @Sendable () -> String? = { nil }) {
+        self.now = now
+        self.failureReference = failureReference
+    }
 
     var isClosed: Bool { state.withLock { $0.closed } }
 
@@ -207,13 +215,15 @@ private final class Shared: RustSyncObserver, Sendable {
     }
 
     func roundFinished(_ report: RustSyncReport) {
+        // Read once per round, so an ID never outlives the round that failed.
+        let reference = failureReference()
         let (handler, roundHandler, status, waiters) = state.withLock { state in
             guard !state.closed else {
                 return ((@Sendable (SyncRuntimeWakeResult) -> Void)?.none, (@Sendable (RustSyncReport) -> Void)?.none,
                         state.status, [CheckedContinuation<Void, Never>]())
             }
             if report.state == .synced { state.lastSyncedAt = now() }
-            state.status = Self.result(for: report, lastSyncedAt: state.lastSyncedAt)
+            state.status = Self.result(for: report, lastSyncedAt: state.lastSyncedAt, referenceID: reference)
             state.rounds += 1
             let waiters = Array(state.waiters.values)
             state.waiters = [:]
@@ -225,7 +235,9 @@ private final class Shared: RustSyncObserver, Sendable {
     }
 
     /// How a round's end reads in the app's words. A code is never shown as a message.
-    static func result(for report: RustSyncReport, lastSyncedAt: Date?) -> SyncRuntimeWakeResult {
+    static func result(
+        for report: RustSyncReport, lastSyncedAt: Date?, referenceID: String? = nil
+    ) -> SyncRuntimeWakeResult {
         switch report.state {
         case .synced: .status(.idle(lastSyncedAt: lastSyncedAt))
         case .offline: .status(.offline(lastSyncedAt: lastSyncedAt))
@@ -233,12 +245,12 @@ private final class Shared: RustSyncObserver, Sendable {
         case .updateRequired: .updateNeeded
         case .retrying:
             .status(.failing(
-                message: "Brain Buddy couldn't reach the sync service. It will try again.", referenceID: nil,
+                message: "Brain Buddy couldn't reach the sync service. It will try again.", referenceID: referenceID,
                 lastSyncedAt: lastSyncedAt))
         case .failed:
             .status(.failing(
                 message: "Syncing stopped. Your changes are saved on this device.",
-                referenceID: report.failureCode, lastSyncedAt: lastSyncedAt))
+                referenceID: referenceID, lastSyncedAt: lastSyncedAt))
         }
     }
 

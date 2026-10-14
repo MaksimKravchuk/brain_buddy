@@ -33,6 +33,13 @@ public struct RustServerLogin: Sendable {
     }
 }
 
+/// What a non-password credential came to on the server.
+public enum RustServerAuthentication: Sendable {
+    case signedIn(RustServerLogin)
+    /// The credential opened no session: the next step the sheet shows.
+    case continuation(AuthCompletionDTO)
+}
+
 /// A server logout that is recorded and not yet finished.
 public struct RustSignOutTicket: Sendable {
     public let logout: PendingLogout?
@@ -46,6 +53,9 @@ public struct RustSignOutTicket: Sendable {
 public protocol RustAccountServer: Sendable {
     /// Logs in and stores the new session. Throws `SignInFailure` in words for the sign-in sheet.
     func login(serverURL: URL, email: String, password: String) async throws -> RustServerLogin
+    /// Exchanges an email code, browser grant or Apple credential for a session, kept in the token
+    /// store like a password login's. Throws `SignInFailure` in words for the sign-in sheet.
+    func authenticate(serverURL: URL, credential: NativeSignInCredential) async throws -> RustServerAuthentication
     /// Ends the session a login opened and puts the previous one back (Cancel won, or the link
     /// was refused). Never throws: what cannot be sent now waits as a pending logout.
     func abandon(_ login: RustServerLogin) async
@@ -63,6 +73,9 @@ public protocol RustAccountServer: Sendable {
 }
 
 extension RustAccountServer {
+    public func authenticate(serverURL: URL, credential: NativeSignInCredential) async throws -> RustServerAuthentication {
+        throw SignInFailure(message: "This way of signing in isn't available yet. Your work is kept.")
+    }
     public func drainPendingLogouts() async {}
 }
 
@@ -91,7 +104,15 @@ public struct HostRustAccountLifecycle: RustAccountLifecyclePort {
         if current.account == nil, !request.mergesLocalWork, try await holdsLocalWork(current.runtime) {
             throw WorkspaceError.signInFailed(message: Self.localWorkKeptMessage, referenceID: nil)
         }
-        let login = try await environment.server.login(serverURL: request.serverURL, email: request.email, password: request.password)
+        let login: RustServerLogin
+        if let credential = request.credential {
+            switch try await environment.server.authenticate(serverURL: request.serverURL, credential: credential) {
+            case .signedIn(let opened): login = opened
+            case .continuation(let step): return RustSignInOutcome(selection: current, continuation: step)
+            }
+        } else {
+            login = try await environment.server.login(serverURL: request.serverURL, email: request.email, password: request.password)
+        }
         if let linked = current.account, linked.id != login.account.id {
             await environment.server.abandon(login)
             throw WorkspaceError.signInFailed(message: Self.differentAccountMessage, referenceID: nil)

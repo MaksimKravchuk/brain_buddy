@@ -84,7 +84,7 @@ struct RustSyncHostBackendTests {
 }
 
 /// The real application as a child process (`rust/crates/bb-client/tests/support/sse_backend.py`).
-private final class RealBackend: @unchecked Sendable {
+final class RealBackend: @unchecked Sendable {
     // Safe: set once in `start`, read-only afterwards.
     let process: Process
     let port: Int

@@ -1,3 +1,4 @@
+import BrainBuddyAPI
 import BrainBuddyCore
 import BrainBuddyPersistence
 import BrainBuddySync
@@ -37,16 +38,23 @@ public struct RustSignInRequest: Sendable {
     /// The first sign-in of an account-less workspace: its local work is the explicit merge into
     /// the account (the sign-in sheet says so). False when signing in again to the linked account.
     public let mergesLocalWork: Bool
+    /// The email-code, browser or Apple credential the sheet collected; when set it replaces
+    /// `email`/`password`. The host exchanges it for a session it keeps in the token store.
+    public var credential: NativeSignInCredential?
 }
 
 public struct RustSignInOutcome: Sendable {
     /// The binding for the account's workspace identity; its `account` is the linked one.
     public let selection: RustWorkspaceSelection
     public let deletionCancelled: Bool
+    /// Set when the credential did not finish a sign-in (mailbox check, password reset, existing
+    /// account required): nothing was linked and `selection` is the one signed in with.
+    public let continuation: AuthCompletionDTO?
 
-    public init(selection: RustWorkspaceSelection, deletionCancelled: Bool = false) {
+    public init(selection: RustWorkspaceSelection, deletionCancelled: Bool = false, continuation: AuthCompletionDTO? = nil) {
         self.selection = selection
         self.deletionCancelled = deletionCancelled
+        self.continuation = continuation
     }
 }
 
