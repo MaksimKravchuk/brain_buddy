@@ -12,6 +12,8 @@ reqwest.workspace = true
 lettre.workspace = true
 symphonia.workspace = true
 hickory-resolver.workspace = true
+object_store.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true

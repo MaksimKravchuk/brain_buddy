@@ -369,8 +369,10 @@ version = "0.1.0"
 dependencies = [
  "hickory-resolver",
  "lettre",
+ "object_store",
  "reqwest",
  "symphonia",
+ "tokio",
 ]
 
 [[package]]
