@@ -14,7 +14,7 @@ struct SyncEngineConflictTests {
         let a = await harness.device()
         let b = await harness.device()
         try await a.signIn()
-        try await a.apply(.createTask(.init(taskID: "x", title: "Renew passport", list: .next, priority: .low)))
+        try await a.apply(.createTask(.init(taskID: "x", title: "Renew passport", list: .next)))
         await a.sync()
         try await b.signIn()
         let onB = try #require(try await b.current().task(titled: "Renew passport"))
@@ -25,7 +25,8 @@ struct SyncEngineConflictTests {
     func resolvesStaleRevision() async throws {
         let (harness, a, b, taskOnB) = try await twoDevicesWithTask()
         try await b.apply(.updateTask(.init(taskID: taskOnB, changes: TaskChanges(title: .set("Renew passport today")))))
-        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Photos first"), priority: .set(.high)))))
+        let due = CalendarDay(year: 2026, month: 11, day: 2)!
+        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Photos first"), dueDate: .set(due)))))
         harness.clock.advance(by: 60)
         await a.sync()
         b.transport.clearLog()
@@ -36,12 +37,12 @@ struct SyncEngineConflictTests {
         #expect(patches[0].idempotencyKey != patches[1].idempotencyKey)
         #expect(patches[1].bodyText.contains(#""expected_revision":2"#))
         #expect(patches[1].bodyText.contains(#""title":"Renew passport today""#))
-        #expect(!patches[1].bodyText.contains("priority"), "only the fields b changed are sent")
+        #expect(!patches[1].bodyText.contains("due_date"), "only the fields b changed are sent")
 
         let server = try #require(harness.snapshot.tasks.values.first)
         #expect(server.title == "Renew passport today")
         #expect(server.details == "Photos first")
-        #expect(server.priority == .high)
+        #expect(server.dueDate == due)
         #expect(try await b.document().issues.isEmpty)
         #expect(try CanonicalState(await b.current(), children: false) == CanonicalState(harness.snapshot, children: false))
     }
@@ -206,7 +207,7 @@ struct SyncEngineConflictTests {
         try await a.apply(.archiveProject("garden"))
         await a.sync()
         try await b.apply(
-            .createTask(.init(taskID: "z", title: "Plant tulips", list: .someday, priority: .high, projectID: garden))
+            .createTask(.init(taskID: "z", title: "Plant tulips", list: .someday, projectID: garden))
         )
         try await b.apply(.createSubtask(.init(taskID: "z", subtaskID: "zs", title: "Buy bulbs")))
         b.transport.clearLog()
@@ -218,7 +219,6 @@ struct SyncEngineConflictTests {
         let server = try #require(harness.snapshot.task(titled: "Plant tulips"))
         #expect(server.projectID == nil)
         #expect(server.state == .someday)
-        #expect(server.priority == .high)
         #expect(server.subtasks.map(\.title) == ["Buy bulbs"])
         let document = try await b.document()
         #expect(
@@ -252,7 +252,7 @@ struct SyncEngineConflictTests {
         )
         // Meanwhile on a: the tag goes, and the task changes, so b's edit is stale first.
         try await a.apply(.deleteTag("errand"))
-        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(priority: .set(.high)))))
+        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Two litres")))))
         await a.sync()
         b.transport.clearLog()
 
@@ -262,7 +262,7 @@ struct SyncEngineConflictTests {
         #expect(Set(edits.compactMap(\.request.idempotencyKey)).count == 3)
         let server = try #require(harness.snapshot.task(titled: "Buy oat milk"))
         #expect(server.tagIDs == [try #require(harness.snapshot.tag(named: "shop")).id])
-        #expect(server.priority == .high, "a's edit is kept too")
+        #expect(server.details == "Two litres", "a's edit is kept too")
         let document = try await b.document()
         #expect(document.issues.isEmpty)
         #expect(document.outbox.isEmpty)

@@ -81,13 +81,14 @@ struct OfflineWorkspaceTests {
 
         // The editor opened before another change landed; its draft rebases instead of overwriting.
         var draft = TaskEditDraft(opened)
-        draft.priority = .high
+        let due = CalendarDay(year: 2026, month: 11, day: 2)
+        draft.dueDate = due
         try app.workspace.updateTask(id, TaskChanges(details: .set("Serial number is on the frame")))
         let rebased = draft.rebased(onto: try #require(app.workspace.task(id)))
         #expect(await app.model.saveTask(id, changes: rebased.changes()))
         let current = try #require(app.workspace.task(id))
         #expect(current.title == "Call workshop for a quote", "an untouched field keeps the newer value")
-        #expect(current.details == "Serial number is on the frame" && current.priority == .high)
+        #expect(current.details == "Serial number is on the frame" && current.dueDate == due)
     }
 
     @Test("021-FR-010 quick capture saves to Inbox offline without touching the main draft or the screen")
@@ -654,7 +655,7 @@ struct OfflineWorkspaceTests {
         #expect(app.model.tasks.first?.state == .next)
     }
 
-    @Test("021-FR-010 a capture hidden by the current search or priority filter says so")
+    @Test("021-FR-010 a capture hidden by the current search says so")
     func hiddenCaptureExplained() async throws {
         let app = await App()
         app.model.searchText = "unrelated"
@@ -662,19 +663,12 @@ struct OfflineWorkspaceTests {
         app.model.draft = "Book a van"
         await app.model.createTask()
         #expect(app.model.error == nil && app.model.tasks.isEmpty)
-        #expect(app.model.captureNotice == "Saved to Next actions. Search or priority filters may hide it from these results.")
+        #expect(app.model.captureNotice == "Saved to Next actions. Search may hide it from these results.")
         #expect(app.titles(.next) == ["Book a van"])
         app.model.clearTaskFilters()
         #expect(app.model.captureNotice == nil && app.model.searchText.isEmpty)
         #expect(app.model.tasks.contains { $0.title == "Book a van" })
 
-        app.model.priorityFilter = .high
-        app.model.reload()
-        app.model.draft = "Get a quote"
-        await app.model.createTask()
-        #expect(app.model.tasks.isEmpty && app.model.captureNotice != nil)
-        app.model.priorityFilter = .all
-        app.model.reload()
         app.model.draft = "Visible task"
         #expect(app.model.captureNotice == nil)
         await app.model.createTask()

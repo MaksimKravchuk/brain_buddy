@@ -21,14 +21,6 @@ package struct QuickOpenResult: Identifiable, Hashable, Sendable {
     package let target: QuickOpenTarget
 }
 
-package enum PriorityFilter: String, CaseIterable, Identifiable, Sendable {
-    case all, high, medium, low, none
-
-    package var id: String { rawValue }
-    package var title: String { rawValue.capitalized }
-    package var priority: TaskPriority? { self == .all ? nil : TaskPriority(rawValue: rawValue) }
-}
-
 /// One project in the Project review, with the keyed signature of its tasks taken when the review
 /// opened: a decision is refused once the tasks changed since (data-model E7.2).
 package struct ProjectReviewItem: Identifiable, Sendable {
@@ -113,7 +105,6 @@ package final class BrainBuddyModel {
     package var searchText = ""
     package var groupByProject = true
     package var showCancelled = false
-    package var priorityFilter: PriorityFilter = .all
     package var sort: TaskSort = .manual
     package var error: String?
     package var draft = "" {
@@ -138,9 +129,8 @@ package final class BrainBuddyModel {
     package private(set) var projectReviewStamps: [ProjectID: RustWorkspaceProjectContentStamp] = [:]
     package private(set) var projectReviewStampReadiness: WorkspaceQueryReadiness = .notRequested
     package private(set) var projectReviewStampGeneration: UInt64?
-    /// The search and priority the list shows: applied on submit, as before 021.
+    /// The search the list shows: applied on submit, as before 021.
     package private(set) var appliedSearch: String?
-    package private(set) var appliedPriority: TaskPriority?
 
     package init(workspace: Workspace, localStateStore: MacLocalStateStore, now: @escaping @Sendable () -> Date = { Date() }) {
         self.workspace = workspace
@@ -159,7 +149,7 @@ package final class BrainBuddyModel {
         ListOptions(
             sort: sort, groupByProject: destination == .list(.next) && groupByProject,
             showCompleted: !destination.isHistory, showCancelled: !destination.isHistory && showCancelled,
-            priorities: appliedPriority.map { [$0] } ?? [], search: appliedSearch
+            search: appliedSearch
         )
     }
     package var listReadiness: WorkspaceQueryReadiness {
@@ -333,7 +323,7 @@ package final class BrainBuddyModel {
     /// The project's name as every list shows it: "<name> · archived" for an archived one.
     package func projectLabel(_ id: ProjectID) -> String { projectDisplay(id)?.label ?? "Project" }
 
-    package var hasAppliedTaskFilter: Bool { appliedSearch != nil || appliedPriority != nil }
+    package var hasAppliedTaskFilter: Bool { appliedSearch != nil }
 
     package var isArchivedProjectDestination: Bool {
         if case .project(let id) = destination { return isArchived(id) }
@@ -343,7 +333,7 @@ package final class BrainBuddyModel {
     // MARK: The list on screen
 
     /// The screen's sections from `GTDQueries`: open ones first (by project in Next when grouped;
-    /// by list in a project), then Completed and Cancelled; the applied search and priority narrow
+    /// by list in a project), then Completed and Cancelled; the applied search narrows
     /// every section.
     package var sections: [TaskSection] {
         _ = queryRevision
@@ -384,18 +374,16 @@ package final class BrainBuddyModel {
         reload()
     }
 
-    /// Applies the typed search and the priority filter (search applies on submit).
+    /// Applies the typed search (search applies on submit).
     package func reload() {
         captureNotice = nil
         error = nil
         let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         appliedSearch = search.isEmpty ? nil : search
-        appliedPriority = priorityFilter.priority
     }
 
     package func clearTaskFilters() {
         searchText = ""
-        priorityFilter = .all
         reload()
     }
 
@@ -510,7 +498,7 @@ package final class BrainBuddyModel {
                 choose(.list(captureList))
             }
             if !tasks.contains(where: { $0.id == id }) {
-                captureNotice = "Saved to \(captureList.title). Search or priority filters may hide it from these results."
+                captureNotice = "Saved to \(captureList.title). Search may hide it from these results."
             }
         } catch {
             self.error = (error as? GTDValidationError)?.message ?? "Brain Buddy couldn't save this change. Try again."

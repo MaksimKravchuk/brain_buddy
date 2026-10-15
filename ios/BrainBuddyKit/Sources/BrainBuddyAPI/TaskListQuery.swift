@@ -3,7 +3,7 @@ import Foundation
 
 /// `GET /tasks` sort orders.
 public enum TaskSort: String, Hashable, Sendable, CaseIterable {
-    case manual, due, priority, title
+    case manual, due, title
 }
 
 /// The server accepts one due-date filter at a time.
@@ -28,8 +28,6 @@ public struct TaskListQuery: Hashable, Sendable {
     public var includeCancelled: Bool
     /// Search text; trimmed, and omitted when empty.
     public var search: String?
-    /// Sent as repeated `priority` parameters, duplicates dropped.
-    public var priorities: [TaskPriority]
     public var due: DueDateFilter?
     /// Nil uses the server default (`manual`).
     public var sort: TaskSort?
@@ -39,7 +37,7 @@ public struct TaskListQuery: Hashable, Sendable {
     public init(
         state: TaskState? = nil, projectID: String? = nil, tagID: String? = nil, unassignedProject: Bool = false,
         includeCompleted: Bool = false, includeCancelled: Bool = false, search: String? = nil,
-        priorities: [TaskPriority] = [], due: DueDateFilter? = nil, sort: TaskSort? = nil, limit: Int? = nil
+        due: DueDateFilter? = nil, sort: TaskSort? = nil, limit: Int? = nil
     ) {
         self.state = state
         self.projectID = projectID
@@ -48,7 +46,6 @@ public struct TaskListQuery: Hashable, Sendable {
         self.includeCompleted = includeCompleted
         self.includeCancelled = includeCancelled
         self.search = search
-        self.priorities = priorities
         self.due = due
         self.sort = sort
         self.limit = limit
@@ -71,10 +68,6 @@ public struct TaskListQuery: Hashable, Sendable {
         if includeCancelled { items.append(("include_cancelled", "true")) }
         if let search = search?.trimmingCharacters(in: .whitespacesAndNewlines), !search.isEmpty {
             items.append(("q", search))
-        }
-        var seen = Set<TaskPriority>()
-        for priority in priorities where seen.insert(priority).inserted {
-            items.append(("priority", priority.rawValue))
         }
         switch due {
         case .before(let day): items.append(("due_before", day.isoString))

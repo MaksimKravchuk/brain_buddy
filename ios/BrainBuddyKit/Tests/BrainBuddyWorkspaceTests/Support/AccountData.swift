@@ -16,7 +16,6 @@ struct AccountData: Hashable {
         var project: String?
         var tags: [String]
         var dueDate: CalendarDay?
-        var priority: TaskPriority
         var waitingFor: String?
         var revision: Int
         /// Nil when children are not compared.
@@ -78,7 +77,7 @@ struct AccountData: Hashable {
                 title: task.title, details: task.details, state: task.state,
                 project: task.projectID.flatMap { state.projects[$0]?.serverID },
                 tags: task.tagIDs.compactMap { state.tags[$0]?.serverID }, dueDate: task.dueDate,
-                priority: task.priority, waitingFor: task.waitingFor, revision: revision,
+                waitingFor: task.waitingFor, revision: revision,
                 subtasks: children ? subtasks : nil, comments: children ? comments : nil
             )
         }
@@ -97,7 +96,7 @@ struct AccountData: Hashable {
         for task in snapshot.tasks.values {
             tasks[task.id] = Task(
                 title: task.title, details: task.details, state: task.state, project: task.projectID, tags: task.tagIDs,
-                dueDate: task.dueDate, priority: task.priority, waitingFor: task.waitingFor, revision: task.revision,
+                dueDate: task.dueDate, waitingFor: task.waitingFor, revision: task.revision,
                 subtasks: children
                     ? Dictionary(
                         uniqueKeysWithValues: task.subtasks.map {

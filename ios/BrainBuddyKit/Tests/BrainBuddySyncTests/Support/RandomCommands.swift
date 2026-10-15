@@ -92,7 +92,7 @@ struct RandomCommands {
                 details: chance(30) ? pick(["Notes", "", "Before noon"]) : nil, list: list,
                 waitingFor: list == .waiting ? pick(Self.people) : nil,
                 dueDate: chance(30) ? CalendarDay(year: 2026, month: 10, day: Int.random(in: 1...28, using: &rng)) : nil,
-                priority: pick(TaskPriority.allCases), projectID: chance(40) ? projects.randomElement(using: &rng) : nil,
+                projectID: chance(40) ? projects.randomElement(using: &rng) : nil,
                 tagIDs: subset(tags)
             )
         )
@@ -107,7 +107,6 @@ struct RandomCommands {
         if chance(25) { changes.projectID = chance(70) ? projects.randomElement(using: &rng).map { .set($0) } ?? .clear : .clear }
         if chance(25) { changes.tagIDs = chance(80) ? .set(subset(tags)) : .clear }
         if chance(20) { changes.dueDate = chance(70) ? .set(CalendarDay(year: 2026, month: 11, day: 2)!) : .clear }
-        if chance(25) { changes.priority = .set(pick(TaskPriority.allCases)) }
         if task.state == .waiting, chance(40) { changes.waitingFor = .set(pick(Self.people)) }
         if !changes.hasChanges { changes.title = .set("\(stamp) title") }
         return .updateTask(.init(taskID: task.id, changes: changes))

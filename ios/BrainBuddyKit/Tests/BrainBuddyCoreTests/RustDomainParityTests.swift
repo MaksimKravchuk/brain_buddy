@@ -48,7 +48,7 @@ private func shape(_ state: GTDState) -> [String] {
         let tags = task.tagIDs.map(\.rawValue).sorted().joined(separator: ",")
         let fields: [String] = [
             task.id.rawValue, task.title, task.state.rawValue, task.projectID?.rawValue ?? "-", tags,
-            task.dueDate?.isoString ?? "-", task.priority.rawValue, task.details ?? "-", task.waitingFor ?? "-",
+            task.dueDate?.isoString ?? "-", task.details ?? "-", task.waitingFor ?? "-",
             task.formulation?.id.rawValue ?? "-", task.lastOpenList?.rawValue ?? "-",
         ]
         lines.append("task " + fields.joined(separator: " | "))
@@ -148,14 +148,12 @@ struct RustDomainParityTests {
             .init(
                 taskID: taskID(1),
                 changes: TaskChanges(
-                    title: .set("  Buy oat milk  "), details: .clear, tagIDs: .set([tagID(2), tagID(3)]),
-                    priority: .set(.high))))
+                    title: .set("  Buy oat milk  "), details: .clear, tagIDs: .set([tagID(2), tagID(3)]))))
         let encoded = try RustCommandEncoder.encode(edit, at: moment(1), in: state, scopeID: "local", ids: &ids)
         #expect(encoded.type == "task.update")
         #expect(encoded.entityID == "task_" + uuid(1))
         #expect(encoded.payload["title"] as? String == "Buy oat milk")
         #expect(encoded.payload["details"] is NSNull)
-        #expect(encoded.payload["priority"] as? String == "high")
         #expect(encoded.payload["project_id"] == nil)
         #expect(encoded.payload["due_date"] == nil)
         let tagChanges = try #require(encoded.payload["tag_changes"] as? [String: [String]])
@@ -167,8 +165,8 @@ struct RustDomainParityTests {
         #expect(encoded.target?.revision == 0)
     }
 
-    @Test("026-FR-002: a null title or priority is the request error the server reports")
-    func nullTitleAndPriority() {
+    @Test("026-FR-002: a null title is the request error the server reports")
+    func nullTitle() {
         var ids = RustIDTable()
         var state = GTDState.empty
         state.tasks[taskID(1)] = TaskRecord(
@@ -176,10 +174,6 @@ struct RustDomainParityTests {
         let clearTitle = GTDCommand.updateTask(.init(taskID: taskID(1), changes: TaskChanges(title: .clear)))
         #expect(throws: GTDValidationError.emptyTitle) {
             try RustCommandEncoder.encode(clearTitle, at: start, in: state, scopeID: "local", ids: &ids)
-        }
-        let clearPriority = GTDCommand.updateTask(.init(taskID: taskID(1), changes: TaskChanges(priority: .clear)))
-        #expect(throws: GTDValidationError.priorityRequired) {
-            try RustCommandEncoder.encode(clearPriority, at: start, in: state, scopeID: "local", ids: &ids)
         }
     }
 
@@ -262,7 +256,7 @@ struct RustDomainParityTests {
             .createTask(
                 .init(
                     taskID: taskID(1), title: "  Buy milk  ", details: "From the shop", list: .inbox,
-                    dueDate: today.adding(days: 70), priority: .high, projectID: projectID(1), tagIDs: [tagID(1)])),
+                    dueDate: today.adding(days: 70), projectID: projectID(1), tagIDs: [tagID(1)])),
             .createTask(.init(taskID: call, title: "Call Sam", list: .next)),
             .updateTask(.init(taskID: call, changes: TaskChanges(title: .set("Call Sam about the invoice")))),
             // Waiting needs a note: both images refuse, then accept.
@@ -284,7 +278,7 @@ struct RustDomainParityTests {
             .updateTask(
                 .init(
                     taskID: taskID(1),
-                    changes: TaskChanges(details: .clear, dueDate: .clear, priority: .set(.low)))),
+                    changes: TaskChanges(details: .clear, dueDate: .clear))),
             // A name another active project holds, and records that are not there.
             .createProject(.init(projectID: projectID(2), name: "home")),
             .updateTask(.init(taskID: taskID(99), changes: TaskChanges(title: .set("Nope")))),

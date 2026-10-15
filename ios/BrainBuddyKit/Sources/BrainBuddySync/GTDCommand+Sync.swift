@@ -238,7 +238,6 @@ extension GTDCommand {
                 projectID: Self.unsent(now.changes.projectID, sent.changes.projectID),
                 tagIDs: Self.unsent(now.changes.tagIDs, sent.changes.tagIDs),
                 dueDate: Self.unsent(now.changes.dueDate, sent.changes.dueDate),
-                priority: Self.unsent(now.changes.priority, sent.changes.priority),
                 waitingFor: Self.unsent(now.changes.waitingFor, sent.changes.waitingFor)
             )
             return changes.hasChanges ? [.updateTask(.init(taskID: now.taskID, changes: changes))] : []
@@ -271,7 +270,6 @@ extension GTDCommand {
         if now.projectID != sent.projectID { changes.projectID = now.projectID.map { .set($0) } ?? .clear }
         if now.tagIDs != sent.tagIDs { changes.tagIDs = .set(now.tagIDs) }
         if now.dueDate != sent.dueDate { changes.dueDate = now.dueDate.map { .set($0) } ?? .clear }
-        if now.priority != sent.priority { changes.priority = .set(now.priority) }
         if now.list == sent.list, now.list == .waiting, now.waitingFor != sent.waitingFor, let note = now.waitingFor {
             changes.waitingFor = .set(note)
         }

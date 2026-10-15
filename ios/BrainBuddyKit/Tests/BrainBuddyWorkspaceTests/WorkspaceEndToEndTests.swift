@@ -52,7 +52,7 @@ struct WorkspaceEndToEndTests {
         try app.moveTask(italian, to: .someday)
         try app.completeTask(milk)
         try app.cancelTask(website)
-        try app.updateTask(passport, TaskChanges(dueDate: .set(app.today), priority: .set(.high)))
+        try app.updateTask(passport, TaskChanges(dueDate: .set(app.today)))
         #expect(app.list(.list(.inbox)).isEmpty)
         #expect(app.counts() == ListCounts(inbox: 0, next: 1, waiting: 1, someday: 1, overdue: 0, today: 1))
         #expect(app.task(plumber)?.waitingFor == "Plumber to call back")
@@ -117,7 +117,6 @@ struct WorkspaceEndToEndTests {
         )
         let passportOnServer = try #require(server.task(titled: "Renew passport"))
         #expect(passportOnServer.state == .next)
-        #expect(passportOnServer.priority == .high)
         #expect(passportOnServer.dueDate == app.today)
         #expect(passportOnServer.subtasks.map(\.title) == ["Take photos", "Fill in the form"])
         #expect(passportOnServer.subtasks.map(\.state) == [.completed, .open])
@@ -217,7 +216,7 @@ struct WorkspaceEndToEndTests {
         // More work offline: shown at once. The first create was attempted, so
         // its edit waits on its own; the edit of the unsent one folds into it.
         try app.updateTask(call, TaskChanges(title: .set("Call Sam about Friday")))
-        try app.updateTask(stamps, TaskChanges(priority: .set(.low)))
+        try app.updateTask(stamps, TaskChanges(details: .set("First class")))
         await phone.settle()
         #expect(app.pendingChangeCount == 4)
         #expect(app.task(call)?.title == "Call Sam about Friday")
@@ -245,7 +244,7 @@ struct WorkspaceEndToEndTests {
             "an attempt that never arrived is not duplicated"
         )
         #expect(server.task(titled: "Book the dentist")?.state == .completed)
-        #expect(server.task(titled: "Buy stamps")?.priority == .low)
+        #expect(server.task(titled: "Buy stamps")?.details == "First class")
         try phone.expectInSyncWithServer()
     }
 
@@ -287,7 +286,7 @@ struct WorkspaceEndToEndTests {
     func twoDevicesEditDifferentFields() async throws {
         let (world, phone, tablet, onPhone, onTablet) = try await phoneAndTabletOffline()
         try phone.workspace.updateTask(onPhone, TaskChanges(title: .set("Renew passport before May")))
-        try tablet.workspace.updateTask(onTablet, TaskChanges(details: .set("Photos first"), priority: .set(.high)))
+        try tablet.workspace.updateTask(onTablet, TaskChanges(details: .set("Photos first")))
 
         await reconnect(world, first: phone, then: tablet)
 
@@ -295,12 +294,10 @@ struct WorkspaceEndToEndTests {
         let server = try #require(world.snapshot.tasks.values.first)
         #expect(server.title == "Renew passport before May")
         #expect(server.details == "Photos first")
-        #expect(server.priority == .high)
         for (device, id) in [(phone, onPhone), (tablet, onTablet)] {
             let task = try #require(device.workspace.task(id))
             #expect(task.title == "Renew passport before May")
             #expect(task.details == "Photos first")
-            #expect(task.priority == .high)
             #expect(device.workspace.state.tasks.count == 1)
             #expect(device.workspace.issues.isEmpty)
             #expect(device.workspace.pendingChangeCount == 0)

@@ -18,7 +18,6 @@ struct VisibleState: Hashable {
         var project: ProjectID?
         var tags: [TagID]
         var due: CalendarDay?
-        var priority: TaskPriority
         var waitingFor: String?
         var subtasks: [SubtaskID: String]
         var comments: [CommentID: String]
@@ -54,7 +53,7 @@ struct VisibleState: Hashable {
     static func detail(_ task: TaskRecord) -> Detail {
         Detail(
             title: task.title, notes: task.details, state: task.state, project: task.projectID, tags: task.tagIDs,
-            due: task.dueDate, priority: task.priority, waitingFor: task.waitingFor,
+            due: task.dueDate, waitingFor: task.waitingFor,
             subtasks: Dictionary(uniqueKeysWithValues: task.subtasks.map { ($0.id, "\($0.title) · \($0.state.rawValue)") }),
             comments: Dictionary(uniqueKeysWithValues: task.comments.map { ($0.id, $0.body) })
         )

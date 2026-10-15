@@ -173,23 +173,23 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
             call: { _ = try await $0.getTask(id: "task_1a2b3c4d5e6f") }
         ),
         EndpointCase(
-            name: "POST /tasks minimal always sends priority and tag_ids", response: Fixture.json(201, Fixture.task()),
+            name: "POST /tasks minimal always sends state and tag_ids", response: Fixture.json(201, Fixture.task()),
             method: .post, url: "\(base)/tasks",
-            body: #"{"priority":"none","state":"inbox","tag_ids":[],"title":"Buy milk"}"#, isMutation: true,
+            body: #"{"state":"inbox","tag_ids":[],"title":"Buy milk"}"#, isMutation: true,
             call: { _ = try await $0.createTask(TaskCreateBody(title: "Buy milk", state: .inbox), idempotencyKey: key) }
         ),
         EndpointCase(
             name: "POST /tasks with every field", response: Fixture.json(201, Fixture.task(state: "waiting")),
             method: .post, url: "\(base)/tasks",
             body:
-                #"{"details":"2 litres","due_date":"2026-10-01","priority":"high","project_id":"project_0a1b2c3d4e5f","state":"waiting","tag_ids":["tag_a","tag_b"],"title":"Buy milk","waiting_for":"Sam"}"#,
+                #"{"details":"2 litres","due_date":"2026-10-01","project_id":"project_0a1b2c3d4e5f","state":"waiting","tag_ids":["tag_a","tag_b"],"title":"Buy milk","waiting_for":"Sam"}"#,
             isMutation: true,
             call: {
                 _ = try await $0.createTask(
                     TaskCreateBody(
                         title: "Buy milk", details: "2 litres", state: .waiting, projectID: "project_0a1b2c3d4e5f",
                         tagIDs: ["tag_a", "tag_b"], dueDate: CalendarDay(year: 2026, month: 10, day: 1),
-                        priority: .high, waitingFor: "Sam"
+                        waitingFor: "Sam"
                     ),
                     idempotencyKey: key
                 )
@@ -198,12 +198,12 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
         EndpointCase(
             name: "PATCH /tasks/{id} sends only expected_revision and set fields",
             response: Fixture.json(200, Fixture.task(revision: 8)), method: .patch,
-            url: "\(base)/tasks/task_1a2b3c4d5e6f", body: #"{"expected_revision":7,"priority":"medium","title":"Buy oat milk"}"#,
+            url: "\(base)/tasks/task_1a2b3c4d5e6f", body: #"{"expected_revision":7,"title":"Buy oat milk"}"#,
             isMutation: true,
             call: {
                 _ = try await $0.updateTask(
                     id: "task_1a2b3c4d5e6f",
-                    TaskUpdateBody(expectedRevision: 7, title: .set("Buy oat milk"), priority: .set(.medium)),
+                    TaskUpdateBody(expectedRevision: 7, title: .set("Buy oat milk")),
                     idempotencyKey: key
                 )
             }
@@ -225,7 +225,7 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
             name: "PATCH /tasks/{id} sets every field", response: Fixture.json(200, Fixture.task(revision: 8)),
             method: .patch, url: "\(base)/tasks/task_1a2b3c4d5e6f",
             body:
-                #"{"details":"Oat","due_date":"2026-12-31","expected_revision":7,"priority":"low","project_id":"project_0a1b2c3d4e5f","tag_ids":["tag_a"],"title":"Milk","waiting_for":"Sam"}"#,
+                #"{"details":"Oat","due_date":"2026-12-31","expected_revision":7,"project_id":"project_0a1b2c3d4e5f","tag_ids":["tag_a"],"title":"Milk","waiting_for":"Sam"}"#,
             isMutation: true,
             call: {
                 _ = try await $0.updateTask(
@@ -233,7 +233,7 @@ struct EndpointCase: Sendable, CustomTestStringConvertible {
                     TaskUpdateBody(
                         expectedRevision: 7, title: .set("Milk"), details: .set("Oat"),
                         projectID: .set("project_0a1b2c3d4e5f"), tagIDs: .set(["tag_a"]),
-                        dueDate: .set(CalendarDay(year: 2026, month: 12, day: 31)!), priority: .set(.low),
+                        dueDate: .set(CalendarDay(year: 2026, month: 12, day: 31)!),
                         waitingFor: .set("Sam")
                     ),
                     idempotencyKey: key

@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// A compact panel that sits right above the keyboard: a header (Close, the
 /// title, and "Added" after Return), the Smart Add field, and one scrolling
-/// row of chips (list, due date, priority, notes) next to a round Add button.
+/// row of chips (list, due date, notes) next to a round Add button.
 ///
 /// - Type `@project` and `#tag` in the text; chips below the field show the
 ///   project and tags that will be used, marking the ones capture will create.
@@ -229,7 +229,6 @@ struct CaptureSheet: View {
                 HStack(spacing: BBSpacing.s2) {
                     listChip
                     dueChip
-                    priorityChip
                     notesChip
                 }
             }
@@ -286,24 +285,6 @@ struct CaptureSheet: View {
             .frame(width: 336)
             .presentationCompactAdaptation(.popover)
         }
-    }
-
-    private var priorityChip: some View {
-        Menu {
-            Picker("Priority", selection: $draft.priority) {
-                ForEach(TaskPriority.allCases, id: \.self) { priority in
-                    Label(priority.title, systemImage: priority.symbolName)
-                        .tag(priority)
-                }
-            }
-        } label: {
-            CaptureChipLabel(
-                systemImage: "flag",
-                title: draft.priority == .none ? "Priority" : draft.priority.title
-            )
-        }
-        .accessibilityLabel("Priority")
-        .accessibilityValue(draft.priority.title)
     }
 
     private var notesChip: some View {

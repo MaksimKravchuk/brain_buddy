@@ -306,7 +306,7 @@ struct CommandGenerator {
                 taskID: id, title: pick(Self.titles), details: pick(Self.details),
                 list: pick(OpenList.allCases), waitingFor: pick(Self.waiting),
                 dueDate: chance(30) ? CalendarDay(year: 2026, month: 10, day: Int.random(in: 1...28, using: &rng)) : nil,
-                priority: pick(TaskPriority.allCases), projectID: chance(40) ? likelyNewest(projects) : nil,
+                projectID: chance(40) ? likelyNewest(projects) : nil,
                 tagIDs: subset(tags)
             )
         )
@@ -323,7 +323,6 @@ struct CommandGenerator {
         }
         if chance(25) { changes.tagIDs = chance(80) ? .set(subset(tags)) : .clear }
         if chance(20) { changes.dueDate = chance(70) ? .set(CalendarDay(year: 2026, month: 11, day: 2)!) : .clear }
-        if chance(25) { changes.priority = .set(pick(TaskPriority.allCases)) }
         if chance(task.state == .waiting ? 50 : 5) { changes.waitingFor = fieldChange(Self.waiting) }
         return .updateTask(.init(taskID: id, changes: changes))
     }

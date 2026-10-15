@@ -393,7 +393,7 @@ final class SyncModel: Sendable {
             "edit_revision": "1", "operation": "upsert",
             "value": [
                 "id": id, "title": title, "details": NSNull(), "state": "inbox", "project_id": NSNull(),
-                "tag_ids": [Any](), "due_date": NSNull(), "priority": "none", "waiting_for": NSNull(),
+                "tag_ids": [Any](), "due_date": NSNull(), "waiting_for": NSNull(),
                 "waiting_since": NSNull(), "order_key": "0", "source_capture_ids": [Any](),
                 "created_at": "2026-09-21T14:13:20Z", "updated_at": "2026-09-21T14:13:20Z",
                 "completed_at": NSNull(), "cancelled_at": NSNull(), "revision": "1",

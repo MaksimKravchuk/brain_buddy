@@ -57,8 +57,6 @@ public enum TaskSort: String, CaseIterable, Codable, Sendable, Hashable {
     case manual
     /// Dated first by date, then manual.
     case due
-    /// high → none, then manual.
-    case priority
     /// Title ignoring case, diacritics and width (the same on every
     /// platform), then `id`.
     case title
@@ -67,7 +65,6 @@ public enum TaskSort: String, CaseIterable, Codable, Sendable, Hashable {
         switch self {
         case .manual: "Manual"
         case .due: "Due date"
-        case .priority: "Priority"
         case .title: "Title"
         }
     }
@@ -88,8 +85,6 @@ public struct ListOptions: Hashable, Codable, Sendable {
     public var showCompleted: Bool
     /// As `showCompleted`, for cancelled tasks.
     public var showCancelled: Bool
-    /// Empty means every priority.
-    public var priorities: Set<TaskPriority>
     /// Narrow to tasks carrying this tag (GTD "context").
     public var tagFilter: TagID?
     /// Narrow the destination with canonical title/notes search before paging.
@@ -97,13 +92,12 @@ public struct ListOptions: Hashable, Codable, Sendable {
 
     public init(
         sort: TaskSort = .manual, groupByProject: Bool = false, showCompleted: Bool = false,
-        showCancelled: Bool = false, priorities: Set<TaskPriority> = [], tagFilter: TagID? = nil, search: String? = nil
+        showCancelled: Bool = false, tagFilter: TagID? = nil, search: String? = nil
     ) {
         self.sort = sort
         self.groupByProject = groupByProject
         self.showCompleted = showCompleted
         self.showCancelled = showCancelled
-        self.priorities = priorities
         self.tagFilter = tagFilter
         self.search = search
     }
@@ -229,8 +223,7 @@ public struct TagSummary: Identifiable, Hashable, Sendable {
 public enum GTDQueries {
     /// The tasks a screen shows. Sections are never empty (an empty result
     /// has none); open sections come first, then "Completed", then
-    /// "Cancelled". `options.priorities` and `options.tagFilter` apply to
-    /// every section.
+    /// "Cancelled". `options.tagFilter` applies to every section.
     public static func list(
         _ destination: Destination, options: ListOptions, in state: GTDState, today: CalendarDay
     ) -> TaskListResult {

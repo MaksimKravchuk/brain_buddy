@@ -11,7 +11,6 @@ struct TaskEditDraftTests {
         var task = Fixture.task("t", "Call Ana", state: .waiting, projectID: "work", tagIDs: ["home"], waitingFor: "Ana")
         task.details = "Before noon"
         task.dueDate = Self.due
-        task.priority = .high
         return task
     }
 
@@ -28,13 +27,12 @@ struct TaskEditDraftTests {
         draft.projectID = nil
         draft.tagIDs = []
         draft.dueDate = CalendarDay(year: 2026, month: 10, day: 21)
-        draft.priority = .none
         draft.waitingFor = "Ana (legal)"
         #expect(
             draft.changes()
                 == TaskChanges(
                     title: .set("Call Ana today"), details: .clear, projectID: .clear, tagIDs: .clear,
-                    dueDate: .set(CalendarDay(year: 2026, month: 10, day: 21)!), priority: .set(.none),
+                    dueDate: .set(CalendarDay(year: 2026, month: 10, day: 21)!),
                     waitingFor: .set("Ana (legal)")
                 )
         )
@@ -60,16 +58,16 @@ struct TaskEditDraftTests {
         draft.details = "Typed locally"
         var incoming = task()
         incoming.details = "Changed elsewhere"
-        incoming.priority = .low
+        incoming.dueDate = CalendarDay(year: 2026, month: 11, day: 2)
         incoming.title = "Call Ana now"
 
         let rebased = draft.rebased(onto: incoming)
         #expect(rebased.details == "Typed locally", "the touched field is not overwritten")
-        #expect(rebased.priority == .low && rebased.title == "Call Ana now", "untouched fields show the incoming values")
+        #expect(rebased.dueDate == CalendarDay(year: 2026, month: 11, day: 2) && rebased.title == "Call Ana now", "untouched fields show the incoming values")
         #expect(rebased.changes() == TaskChanges(details: .set("Typed locally")), "only the local edit is sent")
 
         var agreeing = TaskEditDraft(task())
-        agreeing.priority = .low
+        agreeing.dueDate = CalendarDay(year: 2026, month: 11, day: 2)
         #expect(agreeing.rebased(onto: incoming).changes() == TaskChanges(), "a local edit the pull already holds is not sent")
     }
 

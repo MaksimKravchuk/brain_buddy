@@ -12,17 +12,17 @@ struct TaskListQueryTests {
         return try #require(transport.lastRequest).url.absoluteString
     }
 
-    @Test("Every filter, in a fixed order, priority repeated and deduplicated (contracts/api-client-parity.json)")
+    @Test("Every filter, in a fixed order (contracts/api-client-parity.json)")
     func everyFilter() async throws {
         let query = TaskListQuery(
             state: .inbox, projectID: "project-1", tagID: "tag-1", unassignedProject: true, includeCompleted: true,
-            includeCancelled: true, search: "  shared  ", priorities: [.high, .medium, .high],
+            includeCancelled: true, search: "  shared  ",
             due: .before(CalendarDay(year: 2026, month: 8, day: 1)!), sort: .due, limit: 25
         )
         let url = try await requestedURL(query, cursor: "page-2")
         #expect(
             url
-                == "https://api.example.test/api/tasks?state=inbox&project_id=project-1&tag_id=tag-1&unassigned_project=true&include_completed=true&include_cancelled=true&q=shared&priority=high&priority=medium&due_before=2026-08-01&sort=due&cursor=page-2&limit=25"
+                == "https://api.example.test/api/tasks?state=inbox&project_id=project-1&tag_id=tag-1&unassigned_project=true&include_completed=true&include_cancelled=true&q=shared&due_before=2026-08-01&sort=due&cursor=page-2&limit=25"
         )
     }
 

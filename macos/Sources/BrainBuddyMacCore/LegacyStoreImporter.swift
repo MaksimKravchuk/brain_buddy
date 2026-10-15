@@ -110,7 +110,6 @@ package struct LegacyImportExpectation: Sendable {
         package var projectID: ProjectID?
         package var tagIDs: [TagID]
         package var dueDate: CalendarDay?
-        package var priority: TaskPriority
         package var waitingFor: String?
         package var waitingSince: Date?
         package var createdAt: Date
@@ -302,10 +301,6 @@ package enum LegacyStoreImporter {
             let legacy = item.legacy
             let id = TaskID(builder.newID())
             let state = TaskState(rawValue: task.state) ?? .inbox
-            let priority = TaskPriority(rawValue: legacy.priority) ?? .none
-            if TaskPriority(rawValue: legacy.priority) == nil {
-                note("task priority", legacy.priority, TaskPriority.none.rawValue, "an unknown priority becomes none")
-            }
             let projectID = task.projectID.flatMap { projectIDs[$0] }
             var taskTagIDs: [TagID] = []
             for tagID in task.tagIDs.compactMap({ tagIDs[$0] }) where !taskTagIDs.contains(tagID) { taskTagIDs.append(tagID) }
@@ -328,7 +323,7 @@ package enum LegacyStoreImporter {
                 .createTask(
                     .init(
                         taskID: id, title: task.title, details: task.details, list: item.list,
-                        waitingFor: item.list == .waiting ? task.waitingFor : nil, dueDate: dueDate, priority: priority,
+                        waitingFor: item.list == .waiting ? task.waitingFor : nil, dueDate: dueDate,
                         projectID: projectID, tagIDs: taskTagIDs
                     )
                 ), at: item.createdAt, step: "task"
@@ -422,7 +417,7 @@ package enum LegacyStoreImporter {
                 .init(
                     id: id, title: task.title, details: task.details, state: state,
                     lastOpenList: state.isOpen ? nil : item.list, projectID: projectID, tagIDs: taskTagIDs, dueDate: dueDate,
-                    priority: priority, waitingFor: isOpenWaiting ? task.waitingFor : nil, waitingSince: waitingSince,
+                    waitingFor: isOpenWaiting ? task.waitingFor : nil, waitingSince: waitingSince,
                     createdAt: item.createdAt, completedAt: completedAt, cancelledAt: cancelledAt, subtasks: expectedSubtasks,
                     comments: comments.map(\.body)
                 )
@@ -543,7 +538,6 @@ package enum LegacyStoreImporter {
             if task.projectID != expected.projectID { problems.append("task project") }
             if task.tagIDs != expected.tagIDs { problems.append("task tags") }
             if task.dueDate != expected.dueDate { problems.append("task due date") }
-            if task.priority != expected.priority { problems.append("task priority") }
             if task.waitingFor != expected.waitingFor { problems.append("task waiting-for") }
             if second(task.waitingSince) != second(expected.waitingSince) { problems.append("task waiting since") }
             if second(task.createdAt) != second(expected.createdAt) { problems.append("task created") }

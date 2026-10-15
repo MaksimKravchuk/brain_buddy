@@ -80,15 +80,13 @@ import Testing
         let due = try #require(CalendarDay(year: 2026, month: 10, day: 2))
 
         try workspace.updateTask(
-            id, TaskChanges(title: .set("Call Ana back"), details: .set("About the quote"), dueDate: .set(due),
-                priority: .set(.high))
+            id, TaskChanges(title: .set("Call Ana back"), details: .set("About the quote"), dueDate: .set(due))
         )
 
         let task = try #require(workspace.task(id))
         #expect(task.title == "Call Ana back")
         #expect(task.details == "About the quote")
         #expect(task.dueDate == due)
-        #expect(task.priority == .high)
         expectRejected(.emptyTitle, in: workspace) { try workspace.updateTask(id, TaskChanges(title: .clear)) }
         expectRejected(.taskNotFound, in: workspace) {
             try workspace.updateTask("missing", TaskChanges(title: .set("x")))

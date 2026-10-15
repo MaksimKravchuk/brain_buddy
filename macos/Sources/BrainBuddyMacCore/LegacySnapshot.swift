@@ -33,7 +33,6 @@ package struct LegacySnapshot: Decodable, Sendable {
         package var projectID: String?
         package var tagIDs: [String]
         package var dueDate: String?
-        package var priority: String
         package var waitingFor: String?
         package var waitingSince: String?
         package var completedAt: String?

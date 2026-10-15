@@ -83,16 +83,16 @@ struct QueriesSearchTests {
         var fixture = QueryFixture()
         let home = fixture.project("Home", id: "p-home")
         let phone = fixture.tag("phone")
-        fixture.task("Call plumber", project: home, tags: [phone], priority: .low)
-        fixture.task("Call bank", tags: [phone], priority: .high)
-        fixture.task("Call mum", priority: .high)
-        fixture.task("Called gran", .completed, tags: [phone], priority: .high)
+        fixture.task("Call plumber", project: home, tags: [phone])
+        fixture.task("Call mum")
+        fixture.task("Call bank", tags: [phone])
+        fixture.task("Called gran", .completed, tags: [phone])
 
-        let sorted = fixture.list(.search("call"), ListOptions(sort: .priority))
+        let sorted = fixture.list(.search("call"), ListOptions(sort: .title))
         #expect(sorted.titles == [["Call bank", "Call mum", "Call plumber"], ["Called gran"]])
 
-        let filtered = fixture.list(.search("call"), ListOptions(priorities: [.high], tagFilter: phone))
-        #expect(filtered.titles == [["Call bank"], ["Called gran"]])
+        let filtered = fixture.list(.search("call"), ListOptions(tagFilter: phone))
+        #expect(filtered.titles == [["Call plumber", "Call bank"], ["Called gran"]])
 
         let grouped = fixture.list(.search("call"), ListOptions(groupByProject: true))
         #expect(grouped.sectionIDs == ["project:p-home", "none", "completed"])

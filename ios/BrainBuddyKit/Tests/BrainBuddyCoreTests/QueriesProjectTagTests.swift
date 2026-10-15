@@ -75,18 +75,17 @@ struct QueriesProjectTagTests {
         #expect(fixture.list(.project("p-missing")).sections.isEmpty)
     }
 
-    @Test("A project view applies priority and tag filters")
+    @Test("A project view applies the tag filter")
     func projectFilters() {
         var fixture = QueryFixture()
         let kitchen = fixture.project("Kitchen")
         let phone = fixture.tag("phone")
-        fixture.task("Call, high", project: kitchen, tags: [phone], priority: .high)
-        fixture.task("Call, low", project: kitchen, tags: [phone], priority: .low)
-        fixture.task("Measure, high", project: kitchen, priority: .high)
+        fixture.task("Call the tiler", project: kitchen, tags: [phone])
+        fixture.task("Measure the walls", project: kitchen)
 
-        let result = fixture.list(.project(kitchen), ListOptions(priorities: [.high], tagFilter: phone))
+        let result = fixture.list(.project(kitchen), ListOptions(tagFilter: phone))
 
-        #expect(result.allTitles == ["Call, high"])
+        #expect(result.allTitles == ["Call the tiler"])
     }
 
     @Test("A tag view shows open tasks carrying the tag in every list and project")

@@ -216,7 +216,6 @@ public struct RustDomainFacade: Sendable {
         case "reopen_requires_destination": return .reopenRequiresDestination
         case "subtask_already_in_state": return .subtaskAlreadyInState
         case "nothing_to_change": return .nothingToChange
-        case "priority_required": return .priorityRequired
         case "decision_not_allowed": return .decisionNotAllowed
         case "decision_fields_missing": return missingDecisionField(refusal.field)
         case "extension_already_used": return .extensionAlreadyUsed
@@ -399,9 +398,9 @@ public struct RustDomainFacade: Sendable {
         }
     }
 
-    /// The shared open-list query has no grouping, completed rows or priority filter.
+    /// The shared open-list query has no grouping or completed rows.
     private func requirePlainOptions(_ options: ListOptions, _ what: String) throws {
-        if options.groupByProject || options.showCompleted || options.showCancelled || !options.priorities.isEmpty {
+        if options.groupByProject || options.showCompleted || options.showCancelled {
             throw RustDomainError.unsupportedQuery("\(what) options")
         }
     }
@@ -430,7 +429,7 @@ public struct RustDomainFacade: Sendable {
         let wireOptions: WireObject = [
             "sort": options.sort.rawValue, "group_by_project": options.groupByProject,
             "show_completed": options.showCompleted, "show_cancelled": options.showCancelled,
-            "priorities": options.priorities.map(\.rawValue).sorted(), "tag_filter": tag,
+            "tag_filter": tag,
         ]
         let results = try await pages(prepared) { cursor in
             ["kind": "list_mode", "mode": mode, "options": wireOptions, "page": Self.page(cursor)]
@@ -588,7 +587,7 @@ public struct RustDomainFacade: Sendable {
     private func draftObject(_ draft: CaptureDraft, _ ids: inout RustIDTable) -> WireObject {
         [
             "text": draft.text, "list": draft.list.rawValue, "waiting_for": draft.waitingFor, "details": draft.details,
-            "due_date": wireNull(draft.dueDate?.isoString), "priority": draft.priority.rawValue,
+            "due_date": wireNull(draft.dueDate?.isoString),
             "context_project": ids.optional(draft.contextProjectID?.rawValue, prefix: "project"),
             "context_tag": ids.optional(draft.contextTagID?.rawValue, prefix: "tag"),
         ]

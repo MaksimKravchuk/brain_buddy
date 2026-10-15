@@ -237,13 +237,13 @@ struct MacIPhoneConvergenceTests {
             },
             arrived: { w in (w.task(titled: "Tag me")?.tagIDs ?? []).compactMap { w.tag($0)?.name } == ["calls"] }),
         Change(
-            name: "a task's due date and priority",
+            name: "a task's due date",
             apply: {
                 try $0.updateTask(
-                    try taskID($0, "Date me"), TaskChanges(dueDate: .set($0.today.adding(days: 3)), priority: .set(.high)))
+                    try taskID($0, "Date me"), TaskChanges(dueDate: .set($0.today.adding(days: 3))))
             },
             arrived: { w in
-                w.task(titled: "Date me")?.priority == .high && w.task(titled: "Date me")?.dueDate == w.today.adding(days: 3)
+                w.task(titled: "Date me")?.dueDate == w.today.adding(days: 3)
             }),
         Change(
             name: "a completed task",
@@ -380,7 +380,8 @@ struct MacIPhoneConvergenceTests {
         try app.capture(CaptureDraft(text: "Offline with project @Garden #calls", list: .next))  // 7
         try app.updateTask(try Self.taskID(app, "Retitle me"), TaskChanges(title: .set("Edited offline")))  // 8
         try app.updateTask(try Self.taskID(app, "Write notes"), TaskChanges(details: .set("Notes offline")))  // 9
-        try app.updateTask(try Self.taskID(app, "Date me"), TaskChanges(dueDate: .set(app.today), priority: .set(.high)))  // 10
+        let dateMeDue = app.today
+        try app.updateTask(try Self.taskID(app, "Date me"), TaskChanges(dueDate: .set(dateMeDue)))  // 10
         try app.completeTask(try Self.taskID(app, "Finish me"))  // 11
         try app.cancelTask(try Self.taskID(app, "Drop me"))  // 12
         let host = try Self.taskID(app, "Subtask host")
@@ -423,7 +424,7 @@ struct MacIPhoneConvergenceTests {
         #expect(server.tasks.count == 17)
         #expect(server.task(titled: "Edited offline") != nil)
         #expect(server.task(titled: "Write notes")?.details == "Notes offline")
-        #expect(server.task(titled: "Date me")?.priority == .high)
+        #expect(server.task(titled: "Date me")?.dueDate == dateMeDue)
         #expect(server.task(titled: "Finish me")?.state == .completed)
         #expect(server.task(titled: "Drop me")?.state == .cancelled)
         #expect(server.task(titled: "Subtask host")?.subtasks.map(\.title) == ["Offline subtask"])
@@ -455,8 +456,9 @@ struct MacIPhoneConvergenceTests {
         await phone.networkChanged(isAvailable: false)
         try mac.workspace.updateTask(
             try Self.taskID(mac.workspace, "Retitle me"), TaskChanges(title: .set("Mac title"), details: .set("Mac notes")))
+        let phoneDue = phone.workspace.today.adding(days: 2)
         try phone.workspace.updateTask(
-            try Self.taskID(phone.workspace, "Retitle me"), TaskChanges(title: .set("Phone title"), priority: .set(.high)))
+            try Self.taskID(phone.workspace, "Retitle me"), TaskChanges(title: .set("Phone title"), dueDate: .set(phoneDue)))
         await mac.settle()
         await phone.settle()
 
@@ -467,13 +469,13 @@ struct MacIPhoneConvergenceTests {
 
         let server = try #require(world.snapshot.tasks.values.first { $0.state == .next && $0.title == "Phone title" })
         #expect(server.details == "Mac notes", "a field only one device touched survives")
-        #expect(server.priority == .high)
+        #expect(server.dueDate == phoneDue)
         #expect(world.snapshot.task(titled: "Mac title") == nil)
         for device in [mac, phone] {
             #expect(device.workspace.issues.isEmpty)
             let task = try #require(device.workspace.task(titled: "Phone title"))
             #expect(task.details == "Mac notes")
-            #expect(task.priority == .high)
+            #expect(task.dueDate == phoneDue)
             try device.expectInSyncWithServer()
         }
     }

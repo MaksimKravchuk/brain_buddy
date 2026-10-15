@@ -21,7 +21,7 @@ struct CompactionTests {
     func editFoldsIntoCreation() {
         let outbox = Fixture.compacted([
             create,
-            update(.init(title: .set("Final"), details: .set("Notes"), projectID: .set("work"), priority: .set(.high))),
+            update(.init(title: .set("Final"), details: .set("Notes"), projectID: .set("work"))),
             update(.init(details: .clear, tagIDs: .set(["home"]), dueDate: .set(CalendarDay(year: 2026, month: 1, day: 2)!))),
         ])
         #expect(
@@ -29,7 +29,7 @@ struct CompactionTests {
                 .createTask(
                     .init(
                         taskID: "t", title: "Final", list: .inbox, dueDate: CalendarDay(year: 2026, month: 1, day: 2),
-                        priority: .high, projectID: "work", tagIDs: ["home"]
+                        projectID: "work", tagIDs: ["home"]
                     )
                 )
             ]
@@ -64,12 +64,12 @@ struct CompactionTests {
     @Test("Consecutive edits of a sent task merge, across unrelated operations")
     func editsMerge() {
         let outbox = Fixture.compacted([
-            update(.init(title: .set("A"), priority: .set(.low)), task: "next"),
+            update(.init(title: .set("A"), details: .set("Notes")), task: "next"),
             .createTask(.init(taskID: "other", title: "Other", list: .inbox)),
             update(.init(title: .set("B"), dueDate: .clear), task: "next"),
         ])
         #expect(outbox.count == 2)
-        #expect(outbox.first?.command == update(.init(title: .set("B"), dueDate: .clear, priority: .set(.low)), task: "next"))
+        #expect(outbox.first?.command == update(.init(title: .set("B"), details: .set("Notes"), dueDate: .clear), task: "next"))
     }
 
     @Test("A waiting-note edit does not cross a transition of its task")
@@ -87,10 +87,10 @@ struct CompactionTests {
     func fieldEditsCrossTransitions() {
         let outbox = Fixture.compacted([
             update(.init(title: .set("A")), task: "next"), transition(.complete, task: "next"),
-            update(.init(priority: .set(.high)), task: "next"),
+            update(.init(details: .set("Notes")), task: "next"),
         ])
         #expect(outbox.map(\.command) == [
-            update(.init(title: .set("A"), priority: .set(.high)), task: "next"), transition(.complete, task: "next"),
+            update(.init(title: .set("A"), details: .set("Notes")), task: "next"), transition(.complete, task: "next"),
         ])
     }
 

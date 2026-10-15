@@ -32,7 +32,7 @@ enum Fixtures {
         let task = TaskRecord(
             id: taskID, serverID: "task_1a2b3c4d5e6f", serverRevision: 3, title: "Call the plumber",
             details: "Before Friday", state: .waiting, projectID: projectID, tagIDs: [tagID],
-            dueDate: CalendarDay(year: 2026, month: 10, day: 2), priority: .high, waitingFor: "Plumber",
+            dueDate: CalendarDay(year: 2026, month: 10, day: 2), waitingFor: "Plumber",
             waitingSince: Date(timeIntervalSinceReferenceDate: 812_100_000.25), orderKey: 7,
             createdAt: createdAt, updatedAt: Date(timeIntervalSinceReferenceDate: 812_200_000.000001),
             subtasks: [SubtaskRecord(id: "subtask-1", title: "Find the number", orderKey: 0)],

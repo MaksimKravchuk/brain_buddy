@@ -14,7 +14,6 @@ struct TaskRow: Hashable, Sendable {
     var projectID: String?
     var tagIDs: [String]
     var dueDate: CalendarDay?
-    var priority: TaskPriority
     var waitingFor: String?
     var waitingSince: Date?
     var orderKey: Int
@@ -53,7 +52,7 @@ struct TaskRow: Hashable, Sendable {
     func dto(subtasks: [SubtaskDTO] = [], comments: [CommentDTO] = []) -> TaskDTO {
         TaskDTO(
             id: id, title: title, details: details, state: state, projectID: projectID, tagIDs: tagIDs,
-            dueDate: dueDate, priority: priority, waitingFor: waitingFor, waitingSince: waitingSince,
+            dueDate: dueDate, waitingFor: waitingFor, waitingSince: waitingSince,
             orderKey: orderKey, createdAt: createdAt, updatedAt: updatedAt, completedAt: completedAt,
             cancelledAt: cancelledAt, revision: revision, subtasks: subtasks, comments: comments,
             formulation: state == .next

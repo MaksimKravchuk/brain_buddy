@@ -33,7 +33,7 @@ struct ListQuery: Sendable {
     }
 }
 
-/// One element of a manual/due/priority/title sort key, compared like a Python tuple item.
+/// One element of a manual/due/title sort key, compared like a Python tuple item.
 enum SortPart: Comparable, Sendable {
     case int(Int)
     case string(String)
@@ -54,11 +54,9 @@ enum SortPart: Comparable, Sendable {
     }
 }
 
-/// `GET /tasks` (`TaskService.list_tasks`): filters, four sorts, keyset
+/// `GET /tasks` (`TaskService.list_tasks`): filters, three sorts, keyset
 /// pagination with an opaque cursor bound to the filters, open counts.
 extension ServerState {
-    private static let priorityRank: [TaskPriority: Int] = [.high: 0, .medium: 1, .low: 2, .none: 3]
-
     func listTasks(_ query: ListQuery, owner: String) throws(FakeHTTPError) -> Reply {
         let data = data(owner)
         var state: TaskState?
@@ -74,18 +72,11 @@ extension ServerState {
         let includeCompleted = try query.bool("include_completed")
         let includeCancelled = try query.bool("include_cancelled")
         let search = Self.normalizedSearch(query.value("q") ?? "")
-        var priorities: [TaskPriority] = []
-        for raw in query.values("priority") {
-            guard let priority = TaskPriority(rawValue: raw) else {
-                throw .validation(["query", "priority"], "Input should be one of the allowed values", type: "literal_error")
-            }
-            priorities.append(priority)
-        }
         let dueBefore = try query.day("due_before")
         let dueOn = try query.day("due_on")
         let dueAfter = try query.day("due_after")
         let sort = query.value("sort") ?? "manual"
-        guard ["manual", "due", "priority", "title"].contains(sort) else {
+        guard ["manual", "due", "title"].contains(sort) else {
             throw .validation(["query", "sort"], "Input should be one of the allowed values", type: "literal_error")
         }
         var limit = 50
@@ -104,9 +95,6 @@ extension ServerState {
         if [dueBefore, dueOn, dueAfter].compactMap({ $0 }).count > 1 {
             throw .rejected("Use only one due date filter at a time.")
         }
-        guard Set(priorities).count == priorities.count else {
-            throw .rejected("Priority filters cannot contain duplicates.")
-        }
 
         let filters: JSONValue = .object([
             "state": state.map { .string($0.rawValue) } ?? .null,
@@ -116,7 +104,6 @@ extension ServerState {
             "include_completed": .bool(includeCompleted),
             "include_cancelled": .bool(includeCancelled),
             "q": .string(search),
-            "priority": .array(priorities.map(\.rawValue).sorted().map(JSONValue.string)),
             "due_before": dueBefore.map { .string($0.isoString) } ?? .null,
             "due_on": dueOn.map { .string($0.isoString) } ?? .null,
             "due_after": dueAfter.map { .string($0.isoString) } ?? .null,
@@ -131,7 +118,6 @@ extension ServerState {
         let matching = data.tasks.values.filter { task in
             (projectID == nil || task.projectID == projectID) && (tagID == nil || task.tagIDs.contains(tagID!))
                 && (!unassigned || task.projectID == nil) && (search.isEmpty || Self.matches(task, search))
-                && (priorities.isEmpty || priorities.contains(task.priority))
                 && Self.matchesDue(task, before: dueBefore, on: dueOn, after: dueAfter)
         }
         var filtered = matching.filter { allowed.contains($0.state) }
@@ -183,8 +169,6 @@ extension ServerState {
         switch sort {
         case "due":
             return [.int(task.dueDate == nil ? 1 : 0), .string(task.dueDate?.isoString ?? "")] + manual
-        case "priority":
-            return [.int(priorityRank[task.priority] ?? 3)] + manual
         case "title":
             return [.string(task.title.precomposedStringWithCompatibilityMapping.lowercased()), .string(task.id)]
         default:

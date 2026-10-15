@@ -106,7 +106,7 @@ struct TaskDetailScreen: View {
 }
 
 private enum DetailField: String, Hashable {
-    case title, notes, waitingFor, priority, project, dueDate, tags
+    case title, notes, waitingFor, project, dueDate, tags
 }
 
 private struct TaskDetailForm: View {
@@ -119,7 +119,6 @@ private struct TaskDetailForm: View {
     @State private var notes: String
     @State private var waitingFor: String
     /// Picker selections mirror the stored values and save on change.
-    @State private var priority: TaskPriority
     @State private var projectID: ProjectID?
     @State private var problems: [DetailField: String] = [:]
     @State private var editorID = UUID().uuidString
@@ -141,7 +140,6 @@ private struct TaskDetailForm: View {
         _title = State(initialValue: task.title)
         _notes = State(initialValue: task.details ?? "")
         _waitingFor = State(initialValue: task.waitingFor ?? "")
-        _priority = State(initialValue: task.priority)
         _projectID = State(initialValue: task.projectID)
     }
 
@@ -170,10 +168,6 @@ private struct TaskDetailForm: View {
             .onChange(of: focus) { previous, _ in
                 if let previous { Task { await commit(previous) } }
             }
-            .onChange(of: priority) { _, newValue in
-                guard newValue != task.priority else { return }
-                Task { await save(.priority, TaskChanges(priority: .set(newValue))) }
-            }
             .onChange(of: projectID) { _, newValue in
                 guard newValue != task.projectID else { return }
                 Task { await save(.project, TaskChanges(projectID: setOrClear(newValue))) }
@@ -198,9 +192,6 @@ private struct TaskDetailForm: View {
             }
             .onChange(of: task.waitingFor) { oldValue, newValue in
                 if focus != .waitingFor && waitingFor == (oldValue ?? "") && problems[.waitingFor] == nil { waitingFor = newValue ?? "" }
-            }
-            .onChange(of: task.priority) { oldValue, newValue in
-                if priority == oldValue && problems[.priority] == nil { priority = newValue }
             }
             .onChange(of: task.projectID) { oldValue, newValue in
                 if projectID == oldValue && problems[.project] == nil { projectID = newValue }
@@ -332,7 +323,7 @@ private struct TaskDetailForm: View {
     // MARK: Properties
 
     /// Every property on its own 44 pt row: list, waiting for, project, due
-    /// date, priority and tags.
+    /// date and tags.
     private var propertiesSection: some View {
         Section {
             listRow
@@ -345,7 +336,6 @@ private struct TaskDetailForm: View {
                 Task { await save(.dueDate, TaskChanges(dueDate: setOrClear(day))) }
             }
             .labelStyle(.bbRow)
-            priorityRow
             tagsRow
         } footer: {
             propertiesFooter
@@ -432,18 +422,6 @@ private struct TaskDetailForm: View {
         .disabled(isReadOnly)
     }
 
-    private var priorityRow: some View {
-        Picker(selection: $priority) {
-            ForEach(TaskPriority.allCases, id: \.self) { priority in
-                Text(priority.title).tag(priority)
-            }
-        } label: {
-            Label("Priority", systemImage: "flag")
-                .labelStyle(.bbRow)
-        }
-        .disabled(isReadOnly)
-    }
-
     /// Tag pills trailing in the row; tapping it opens the tag sheet while the
     /// task is editable.
     @ViewBuilder private var tagsRow: some View {
@@ -493,7 +471,7 @@ private struct TaskDetailForm: View {
     /// The waiting-since line and any rejected property change, under the section.
     @ViewBuilder private var propertiesFooter: some View {
         let isWaiting = task.state == .waiting
-        let propertyFields: [DetailField] = [.project, .dueDate, .priority, .tags]
+        let propertyFields: [DetailField] = [.project, .dueDate, .tags]
         let fields: [DetailField] = isWaiting ? [.waitingFor] + propertyFields : propertyFields
         let messages = fields.compactMap { message(for: $0) }
         let since = isWaiting && message(for: .waitingFor) == nil ? task.waitingSince : nil
@@ -631,7 +609,7 @@ private struct TaskDetailForm: View {
         case .title: _ = await commitTitle()
         case .notes: _ = await commitNotes()
         case .waitingFor: _ = await commitWaitingFor()
-        case .priority, .project, .dueDate, .tags: break
+        case .project, .dueDate, .tags: break
         }
     }
 
@@ -694,15 +672,10 @@ private struct TaskDetailForm: View {
 
     @MainActor private func commitProperties() async -> Bool {
         guard task.isOpen else { return true }
-        var prioritySaved = true
-        if priority != (workspace.taskDetail(task.id) ?? task).priority {
-            prioritySaved = await save(.priority, TaskChanges(priority: .set(priority)))
-        }
-        var projectSaved = true
         if projectID != (workspace.taskDetail(task.id) ?? task).projectID {
-            projectSaved = await save(.project, TaskChanges(projectID: setOrClear(projectID)))
+            return await save(.project, TaskChanges(projectID: setOrClear(projectID)))
         }
-        return prioritySaved && projectSaved
+        return true
     }
 
     @discardableResult

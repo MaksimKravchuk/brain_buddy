@@ -77,7 +77,7 @@ struct LiveBackendTests {
         let created = try await api.createTask(
             TaskCreateBody(
                 title: "C++ review \(run)", details: "Read chapter 3", state: .next, projectID: project.id,
-                tagIDs: [tag.id], dueDate: due, priority: .high
+                tagIDs: [tag.id], dueDate: due
             ),
             idempotencyKey: UUID()
         )
@@ -85,17 +85,15 @@ struct LiveBackendTests {
         #expect(created.projectID == project.id)
         #expect(created.tagIDs == [tag.id])
         #expect(created.dueDate == due)
-        #expect(created.priority == .high)
         #expect(abs(created.createdAt.timeIntervalSinceNow) < 300)
 
         let edited = try await api.updateTask(
             id: created.id,
-            TaskUpdateBody(expectedRevision: created.revision, details: .clear, dueDate: .clear, priority: .set(.low)),
+            TaskUpdateBody(expectedRevision: created.revision, details: .clear, dueDate: .clear),
             idempotencyKey: UUID()
         )
         #expect(edited.details == nil)
         #expect(edited.dueDate == nil)
-        #expect(edited.priority == .low)
         #expect(edited.title == created.title)
         #expect(edited.projectID == project.id)
         let staleTask = await expectAPIError {

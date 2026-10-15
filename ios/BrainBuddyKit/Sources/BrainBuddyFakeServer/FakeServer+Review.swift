@@ -607,7 +607,7 @@ extension ServerState {
                 let created = followUpID ?? mintedTask
                 let row = TaskRow(
                     id: created, title: PythonText.strip(title ?? ""), state: .next, projectID: task.projectID, tagIDs: [],
-                    priority: .none, orderKey: data.nextOrderKey(.next), createdAt: now, updatedAt: now, revision: 1,
+                    orderKey: data.nextOrderKey(.next), createdAt: now, updatedAt: now, revision: 1,
                     formulation: FormulationClock(id: newID, startedAt: now)
                 )
                 data.tasks[created] = row

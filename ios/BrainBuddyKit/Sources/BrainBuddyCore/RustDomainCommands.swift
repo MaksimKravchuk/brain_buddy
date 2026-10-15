@@ -30,7 +30,7 @@ struct RustEncodedCommand {
 
 enum RustCommandEncoder {
     /// - Throws: `GTDValidationError` for a request the shared payloads cannot carry
-    ///   (a null title or priority), as the server reports them.
+    ///   (a null title), as the server reports them.
     static func encode(
         _ command: GTDCommand, at date: Date, in state: GTDState, scopeID: String, ids: inout RustIDTable,
         intendedTagMembership: [String: [TagID]] = [:], intendedDeletedTags: Set<String> = []
@@ -74,7 +74,7 @@ enum RustCommandEncoder {
                 "details": wireNull(create.details.flatMap { $0.isEmpty ? nil : $0 }),
                 "state": create.list.rawValue, "project_id": ids.optional(create.projectID?.rawValue, prefix: "project"),
                 "tag_ids": create.tagIDs.map { ids.tag($0) }, "due_date": wireNull(create.dueDate?.isoString),
-                "priority": create.priority.rawValue, "waiting_for": wireNull(create.waitingFor),
+                "waiting_for": wireNull(create.waitingFor),
             ]
             if let id = create.newFormulationID { encoded.payload["new_formulation_id"] = ids.newFormulation(id) }
             encoded.allocatedIDs = [derivedFormulation(create.taskID, date)]
@@ -189,16 +189,11 @@ enum RustCommandEncoder {
         _ changes: TaskChanges, of task: TaskRecord?, intendedTags: [TagID]?, deletedTags: Set<String>,
         into payload: inout WireObject, ids: inout RustIDTable
     ) throws {
-        // A null title or priority is a request error the shared payloads cannot carry.
+        // A null title is a request error the shared payloads cannot carry.
         switch changes.title {
         case .unchanged: break
         case .clear: throw GTDValidationError.emptyTitle
         case .set(let title): payload["title"] = NameNormalizer.stripped(title)
-        }
-        switch changes.priority {
-        case .unchanged: break
-        case .clear: throw GTDValidationError.priorityRequired
-        case .set(let priority): payload["priority"] = priority.rawValue
         }
         if let value = patch(changes.details, { $0.isEmpty ? NSNull() : $0 as Any }) { payload["details"] = value }
         switch changes.projectID {

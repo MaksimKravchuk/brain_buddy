@@ -85,7 +85,7 @@ public enum GTDReducer {
         var task = TaskRecord(
             id: command.taskID, title: title, details: details, state: taskState,
             projectID: command.projectID, tagIDs: command.tagIDs, dueDate: command.dueDate,
-            priority: command.priority, waitingFor: waitingFor, waitingSince: waitingFor == nil ? nil : date,
+            waitingFor: waitingFor, waitingSince: waitingFor == nil ? nil : date,
             orderKey: maxOrderKey.map { $0 + 1 } ?? 0, createdAt: date, updatedAt: date
         )
         // A task created in Next starts its first formulation (spec 020, FR-001).
@@ -117,11 +117,6 @@ public enum GTDReducer {
         case .unchanged: break
         case .clear: updated.details = nil
         case .set(let value): updated.details = try FieldRules.details(value)
-        }
-        switch changes.priority {
-        case .unchanged: break
-        case .clear: throw .priorityRequired
-        case .set(let value): updated.priority = value
         }
         if changes.waitingFor.isChanged {
             let note: String? = if case .set(let value) = changes.waitingFor { value } else { nil }
@@ -168,7 +163,7 @@ public enum GTDReducer {
     }
 
     /// `POST /tasks/{id}/transitions`. Transitions never touch order, project,
-    /// tags, due date, priority or notes.
+    /// tags, due date or notes.
     static func transitionTask(
         _ command: GTDCommand.TransitionTask, at date: Date, in state: inout GTDState, mode: ApplyMode
     ) throws(GTDValidationError) -> ApplyOutcome {

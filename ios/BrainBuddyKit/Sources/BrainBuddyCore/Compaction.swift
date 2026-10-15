@@ -32,7 +32,7 @@ import Foundation
 /// each operation at its `issuedAt`, so once the weekly review is exposed on
 /// the device (`clockAware: true`) a change that touches the formulation clock
 /// — a title or due-date edit, a move or a reopen — is never moved back to an
-/// earlier operation; notes, tags, project, priority, subtask and comment
+/// earlier operation; notes, tags, project, subtask and comment
 /// folds stay. An unsent decision followed by its Undo cancels out, and so
 /// does an unsent bulk release followed by its Undo. Session progress is
 /// never folded, so each change keeps its `progressID`.
@@ -131,8 +131,8 @@ public enum OutboxCompactor {
 
     private static func foldTaskEdit(_ update: GTDCommand.UpdateTask, into outbox: inout [PendingOperation]) -> Bool {
         let changes = update.changes
-        // Clearing a title, priority or waiting note is invalid; leave it for the reducer to report.
-        guard changes.title != .clear, changes.priority != .clear, changes.waitingFor != .clear,
+        // Clearing a title or waiting note is invalid; leave it for the reducer to report.
+        guard changes.title != .clear, changes.waitingFor != .clear,
             let index = unsentTarget(
                 in: outbox,
                 isTarget: { command in
@@ -505,7 +505,6 @@ extension GTDCommand.CreateTask {
         case .clear: dueDate = nil
         case .set(let day): dueDate = day
         }
-        if case .set(let value) = changes.priority { priority = value }
         switch changes.waitingFor {
         case .unchanged: break
         case .clear: waitingFor = nil

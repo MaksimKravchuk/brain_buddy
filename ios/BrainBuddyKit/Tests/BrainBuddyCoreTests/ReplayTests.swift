@@ -54,13 +54,13 @@ struct ReplayTests {
             Fixture.operation(.transitionTask(.init(taskID: "next", action: .move, toList: .someday)), at: 1),
             Fixture.operation(.createTask(.init(taskID: "t", title: "T", list: .waiting)), at: 2),
             Fixture.operation(.createSubtask(.init(taskID: "t", subtaskID: "s", title: "S")), at: 3),
-            Fixture.operation(.updateTask(.init(taskID: "inbox", changes: .init(priority: .set(.high)))), at: 4),
+            Fixture.operation(.updateTask(.init(taskID: "inbox", changes: .init(details: .set("Notes")))), at: 4),
         ]
         let result = OutboxReplayer.replay(outbox, onto: base)
         #expect(result.rejected.map(\.error) == [.taskNotOpen, .waitingForRequired, .taskNotFound])
         #expect(result.rejected.map(\.operation) == Array(outbox[0..<3]))
         #expect(result.outbox == [outbox[3]])
-        #expect(result.state.tasks["inbox"]?.priority == .high)
+        #expect(result.state.tasks["inbox"]?.details == "Notes")
     }
 
     // MARK: References that went away elsewhere

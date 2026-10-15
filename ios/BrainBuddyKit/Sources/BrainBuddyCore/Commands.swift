@@ -20,13 +20,12 @@ public struct TaskChanges: Hashable, Sendable, Codable {
     public var projectID: FieldChange<ProjectID>
     public var tagIDs: FieldChange<[TagID]>
     public var dueDate: FieldChange<CalendarDay>
-    public var priority: FieldChange<TaskPriority>
     public var waitingFor: FieldChange<String>
 
     public init(
         title: FieldChange<String> = .unchanged, details: FieldChange<String> = .unchanged,
         projectID: FieldChange<ProjectID> = .unchanged, tagIDs: FieldChange<[TagID]> = .unchanged,
-        dueDate: FieldChange<CalendarDay> = .unchanged, priority: FieldChange<TaskPriority> = .unchanged,
+        dueDate: FieldChange<CalendarDay> = .unchanged,
         waitingFor: FieldChange<String> = .unchanged
     ) {
         self.title = title
@@ -34,13 +33,12 @@ public struct TaskChanges: Hashable, Sendable, Codable {
         self.projectID = projectID
         self.tagIDs = tagIDs
         self.dueDate = dueDate
-        self.priority = priority
         self.waitingFor = waitingFor
     }
 
     public var hasChanges: Bool {
         title.isChanged || details.isChanged || projectID.isChanged || tagIDs.isChanged
-            || dueDate.isChanged || priority.isChanged || waitingFor.isChanged
+            || dueDate.isChanged || waitingFor.isChanged
     }
 
     /// Field-by-field merge where `later` wins.
@@ -48,7 +46,7 @@ public struct TaskChanges: Hashable, Sendable, Codable {
         TaskChanges(
             title: title.merged(with: later.title), details: details.merged(with: later.details),
             projectID: projectID.merged(with: later.projectID), tagIDs: tagIDs.merged(with: later.tagIDs),
-            dueDate: dueDate.merged(with: later.dueDate), priority: priority.merged(with: later.priority),
+            dueDate: dueDate.merged(with: later.dueDate),
             waitingFor: waitingFor.merged(with: later.waitingFor)
         )
     }
@@ -139,14 +137,13 @@ public enum GTDCommand: Hashable, Sendable, Codable {
         public var list: OpenList
         public var waitingFor: String?
         public var dueDate: CalendarDay?
-        public var priority: TaskPriority
         public var projectID: ProjectID?
         public var tagIDs: [TagID]
         /// The formulation a creation in Next starts (`new_formulation_id`).
         public var newFormulationID: FormulationID?
         public init(
             taskID: TaskID, title: String, details: String? = nil, list: OpenList,
-            waitingFor: String? = nil, dueDate: CalendarDay? = nil, priority: TaskPriority = .none,
+            waitingFor: String? = nil, dueDate: CalendarDay? = nil,
             projectID: ProjectID? = nil, tagIDs: [TagID] = [], newFormulationID: FormulationID? = nil
         ) {
             self.taskID = taskID
@@ -155,8 +152,7 @@ public enum GTDCommand: Hashable, Sendable, Codable {
             self.list = list
             self.waitingFor = waitingFor
             self.dueDate = dueDate
-            self.priority = priority
-            self.projectID = projectID
+                self.projectID = projectID
             self.tagIDs = tagIDs
             self.newFormulationID = newFormulationID
         }
@@ -488,8 +484,6 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
     case emptyComment
     case commentTooLong
     case nothingToChange
-    /// `priority` cannot be cleared; "no priority" is `.set(.none)` (server: "Task priority cannot be null").
-    case priorityRequired
     case projectAlreadyArchived
     case tagAlreadyDeleted
     // Spec 021 (contracts/kit-commands.md §2).
@@ -553,7 +547,6 @@ public enum GTDValidationError: Error, Hashable, Sendable, Codable {
         case .emptyComment: "Write something before saving the comment."
         case .commentTooLong: "Keep the comment under \(GTDLimits.comment) characters."
         case .nothingToChange: "There is nothing to save."
-        case .priorityRequired: "Choose a priority, or No priority."
         case .projectAlreadyArchived: "This project is already archived."
         case .tagAlreadyDeleted: "This tag was already deleted."
         case .outcomeTooLong: "Keep the desired outcome under 1,000 characters."
