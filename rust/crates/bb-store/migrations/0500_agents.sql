@@ -115,7 +115,10 @@ CREATE TABLE agents.idempotency (
     request_hash  text        NOT NULL,
     resource_id   text        NOT NULL,
     command_id    text,
-    completed     boolean     NOT NULL DEFAULT true,
+    -- Durable attempt marker written before connector I/O: a retry may resend
+    -- a never-attempted command but must reconcile an attempted one.
+    delivery_attempted boolean NOT NULL DEFAULT false,
+    completed    boolean     NOT NULL DEFAULT true,
     response_body jsonb       NOT NULL,
     created_at    timestamptz NOT NULL,
     PRIMARY KEY (owner_id, key_hash)
