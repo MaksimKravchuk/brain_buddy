@@ -11,39 +11,43 @@
 -- import) is not ported: production starts empty (FR-019).
 --
 -- Length limits mirror the 026 command catalog, counted in Unicode scalar
--- values (char_length): task title 500, details/comment 20,000, name 500,
--- project outcome 1,000. They are enforced in bb-domain; the CHECKs below are
--- the column bounds that back them. Fields not promoted to columns stay in the
--- jsonb `payload`, exactly as the document models do today.
+-- values: task title 500, details/comment 20,000, name 500, project outcome
+-- 1,000. They are enforced in bb-domain only (see NUL handling below).
+-- Fields not promoted to columns stay in `payload`, exactly as the document
+-- models do today.
+--
+-- NUL handling (1:1 port; review P2): PostgreSQL `jsonb` and `text` cannot
+-- store U+0000, but the Python API and bb-domain accept it in names, titles,
+-- details and comments, and SQLite round-trips it. So `payload` is `text`
+-- holding canonical JSON (U+0000 is the six ASCII characters \u0000, which
+-- `text` stores fine; never cast it to jsonb) and the promoted
+-- `normalized_name` is `bytea` (UTF-8) because it carries the raw characters.
+-- Consequence: payload-derived CHECKs and jsonb operators are unavailable, so
+-- no column bound or index may reach into `payload`; promote a field to a
+-- column (as done for state, order_key, ...) if a query needs it.
 
 CREATE SCHEMA IF NOT EXISTS tasks;
 
 CREATE TABLE tasks.projects (
     owner_id        text  NOT NULL,
     id              text  NOT NULL,
-    normalized_name text  NOT NULL,
+    normalized_name bytea NOT NULL,
     state           text  NOT NULL,
-    payload         jsonb NOT NULL,
+    payload         text  NOT NULL,
     PRIMARY KEY (owner_id, id),
-    CONSTRAINT projects_name_len
-        CHECK (char_length(payload->>'name') BETWEEN 1 AND 500),
     CONSTRAINT projects_normalized_name_len
-        CHECK (char_length(normalized_name) <= 500),
-    CONSTRAINT projects_outcome_len
-        CHECK (char_length(payload->>'desired_outcome') <= 1000)
+        CHECK (octet_length(normalized_name) <= 2000)
 );
 
 CREATE TABLE tasks.tags (
     owner_id        text  NOT NULL,
     id              text  NOT NULL,
-    normalized_name text  NOT NULL,
+    normalized_name bytea NOT NULL,
     state           text  NOT NULL,
-    payload         jsonb NOT NULL,
+    payload         text  NOT NULL,
     PRIMARY KEY (owner_id, id),
-    CONSTRAINT tags_name_len
-        CHECK (char_length(payload->>'name') BETWEEN 1 AND 500),
     CONSTRAINT tags_normalized_name_len
-        CHECK (char_length(normalized_name) <= 500)
+        CHECK (octet_length(normalized_name) <= 2000)
 );
 
 CREATE TABLE tasks.tasks (
@@ -53,17 +57,11 @@ CREATE TABLE tasks.tasks (
     project_id text,
     order_key  integer     NOT NULL CHECK (order_key >= 0),
     created_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text        NOT NULL,
     PRIMARY KEY (owner_id, id),
     FOREIGN KEY (owner_id, project_id)
         REFERENCES tasks.projects (owner_id, id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT tasks_title_len
-        CHECK (char_length(payload->>'title') BETWEEN 1 AND 500),
-    CONSTRAINT tasks_details_len
-        CHECK (char_length(payload->>'details') <= 20000),
-    CONSTRAINT tasks_waiting_for_len
-        CHECK (char_length(payload->>'waiting_for') <= 500)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
 CREATE TABLE tasks.task_tags (
@@ -82,24 +80,20 @@ CREATE TABLE tasks.subtasks (
     owner_id text  NOT NULL,
     task_id  text  NOT NULL,
     id       text  NOT NULL,
-    payload  jsonb NOT NULL,
+    payload  text  NOT NULL,
     PRIMARY KEY (owner_id, task_id, id),
     FOREIGN KEY (owner_id, task_id)
-        REFERENCES tasks.tasks (owner_id, id) ON DELETE CASCADE,
-    CONSTRAINT subtasks_title_len
-        CHECK (char_length(payload->>'title') BETWEEN 1 AND 500)
+        REFERENCES tasks.tasks (owner_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE tasks.comments (
     owner_id text  NOT NULL,
     task_id  text  NOT NULL,
     id       text  NOT NULL,
-    payload  jsonb NOT NULL,
+    payload  text  NOT NULL,
     PRIMARY KEY (owner_id, task_id, id),
     FOREIGN KEY (owner_id, task_id)
-        REFERENCES tasks.tasks (owner_id, id) ON DELETE CASCADE,
-    CONSTRAINT comments_body_len
-        CHECK (char_length(payload->>'body') BETWEEN 1 AND 20000)
+        REFERENCES tasks.tasks (owner_id, id) ON DELETE CASCADE
 );
 
 -- Full response kept as the exact stored text so replay is byte-identical;
@@ -119,7 +113,7 @@ CREATE TABLE tasks.idempotency_records (
 CREATE TABLE tasks.review_settings (
     owner_id text    PRIMARY KEY,
     revision integer NOT NULL,
-    payload  jsonb   NOT NULL
+    payload  text    NOT NULL
 );
 
 CREATE TABLE tasks.review_sessions (
@@ -127,7 +121,7 @@ CREATE TABLE tasks.review_sessions (
     id         text        NOT NULL,
     status     text        NOT NULL,
     started_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text        NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 
@@ -137,7 +131,7 @@ CREATE TABLE tasks.review_decisions (
     task_id    text        NOT NULL,
     session_id text,
     decided_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text        NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 
@@ -145,7 +139,7 @@ CREATE TABLE tasks.review_receipts (
     owner_id text  NOT NULL,
     task_id  text  NOT NULL,
     kind     text  NOT NULL,
-    payload  jsonb NOT NULL,
+    payload  text  NOT NULL,
     PRIMARY KEY (owner_id, task_id, kind)
 );
 
@@ -153,7 +147,7 @@ CREATE TABLE tasks.review_park_acks (
     owner_id       text  NOT NULL,
     task_id        text  NOT NULL,
     formulation_id text  NOT NULL,
-    payload        jsonb NOT NULL,
+    payload        text  NOT NULL,
     PRIMARY KEY (owner_id, task_id, formulation_id)
 );
 
@@ -161,21 +155,21 @@ CREATE TABLE tasks.review_bulk_releases (
     owner_id   text        NOT NULL,
     id         text        NOT NULL,
     created_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text        NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 
 CREATE TABLE tasks.navigator_consents (
     owner_id text  NOT NULL,
     provider text  NOT NULL,
-    payload  jsonb NOT NULL,
+    payload  text  NOT NULL,
     PRIMARY KEY (owner_id, provider)
 );
 
 CREATE TABLE tasks.navigator_usage (
     owner_id text  NOT NULL,
     day      date  NOT NULL,
-    payload  jsonb NOT NULL,
+    payload  text  NOT NULL,
     PRIMARY KEY (owner_id, day)
 );
 
