@@ -161,7 +161,7 @@ Before freeze, the implementation writer MUST produce a typed receipt using `.sp
 - [ ] T081 [US2] Implement design M-02 (.00–.11, focus and VoiceOver rules) in ios/BrainBuddy/Screens/Settings/FreshStartScreen.swift, gated from ios/BrainBuddy/App/RootView.swift before sign-in and sync; UI test ios/BrainBuddyUITests/FreshStartUITests.swift (confirm, Not now, resume, failure Try again) (027-FR-021; PR-81).
 - [ ] T082 [US2] Implement design D-03 (.00–.11, window-modal sheet, 'Not now' default and Escape) in macos/Sources/BrainBuddyMac/FreshStartSheet.swift, gated from macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift before sign-in and sync; tests in macos/Tests/BrainBuddyMacTests/FreshStartSheetTests.swift (027-FR-021; PR-82).
 - [ ] T083 [P] [US2] Implement design M-03 (.01–.10) for `INVITE_REQUIRED` in ios/BrainBuddy/Screens/Settings/SignInSheet.swift and ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift, resubmitting through `signupComplete` in ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift; tests in ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteHandoffTests.swift (027-FR-007, 027-FR-016; PR-83).
-- [ ] T171 [P] [US2] Wire `INVITE_REQUIRED` into the remaining entry points (map amendment 2026-10-15): web email-code signup in frontend/src/features/auth/AuthEntry.tsx shows D-04 (test frontend/src/features/auth/__tests__/AuthEntryInvite.test.tsx); the Rust-runtime continuation arm in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/APIRustAccountServer.swift returns the M-03 step (the legacy SyncEngine path is deleted by PR-88) (test ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteContinuationTests.swift) (027-FR-007; PR-171).
+- [ ] T171 [P] [US2] Wire `INVITE_REQUIRED` into the remaining entry points (map amendment 2026-10-15): web email-code signup in frontend/src/features/auth/AuthEntry.tsx shows D-04 (test frontend/src/features/auth/__tests__/AuthEntryInvite.test.tsx); the Rust-runtime continuation arm in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/APIRustAccountServer.swift returns the M-03 step (the legacy SyncEngine path is deleted by PR-88) (test ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/InviteContinuationTests.swift) (027-FR-007; PR-171).
 - [ ] T084 [US2] Collapse BrainBuddyWorkspace to the Rust runtime: remove every `isRustSelected` branch and the legacy path in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift, Workspace+ProjectDisplay.swift, Workspace+ReviewContentStamps.swift, Workspace+ReviewAI.swift and RustAccountLifecycle.swift, and delete RustRuntimeSelectionStore.swift (027-FR-004, 027-SC-006; PR-84).
 - [ ] T085 [US2] Remove the 72 `isRustSelected` branches and the legacy Review path from ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift (027-FR-004, 027-SC-006; PR-85).
 - [ ] T086 [US2] Remove runtime selection from the iPhone app: ios/BrainBuddy/Screens/Capture/CaptureSheet.swift, Detail/TaskDetailScreen.swift, Review/FormulationSection.swift, Lists/TaskListScreen.swift, Review/RestartScreen.swift, Settings/SettingsScreen.swift, Settings/SyncIssuesScreen.swift, ios/BrainBuddy/Components/TaskRow.swift, and delete ios/BrainBuddy/Screens/Settings/RustRuntimePilotRow.swift (027-FR-004, 027-SC-006; PR-86).
@@ -573,6 +573,12 @@ PR-94 T094 smoke-epoch (feature-implementer)
 - PR-09 gains the Makefile `cmp` lines and the iOS/web fixture copies, becomes feature-implementer; PR-36 follows PR-09.
 - New PR-171 wires the invite step into web email-code signup and the Rust-runtime iOS continuation path (the legacy SyncEngine path is deleted by PR-88).
 
+## Map amendment 2 2026-10-15 (owner-approved)
+
+- PR-02 budget 3 product files (Makefile and gate-integrity.json count as product files); it also pre-registers later 027 script tests in the Makefile.
+- PR-92 mounts the update-required toast in frontend/src/components/shell/AppShell.tsx (4 files).
+- PR-171 also edits frontend/src/features/auth/AuthControls.tsx (the 403 surfaces in CodeStep) and its iOS test lives in BrainBuddyWorkspaceTests (3 files); it therefore follows PR-84, which owns that test directory.
+
 ## PR-срезы
 
 The Russian heading is the required parser key; the map and prose are English. **Draft for owner approval** — not an instruction to implement. Each slice owns exactly one task.
@@ -642,7 +648,7 @@ The Russian heading is the required parser key; the map and prose are English. *
       ],
       "budget": {
         "product_loc": 300,
-        "files": 2
+        "files": 3
       },
       "implementer": "feature-implementer"
     },
@@ -3491,7 +3497,8 @@ The Russian heading is the required parser key; the map and prose are English. *
         "frontend/src/components/shell/shellToast.ts",
         "frontend/src/components/shell/UpdateRequiredToast.tsx",
         "frontend/src/api/client.ts",
-        "frontend/src/components/shell/__tests__/UpdateRequiredToast.test.tsx"
+        "frontend/src/components/shell/__tests__/UpdateRequiredToast.test.tsx",
+        "frontend/src/components/shell/AppShell.tsx"
       ],
       "depends_on": [
         "PR-56"
@@ -3504,7 +3511,7 @@ The Russian heading is the required parser key; the map and prose are English. *
       ],
       "budget": {
         "product_loc": 220,
-        "files": 3
+        "files": 4
       },
       "implementer": "feature-implementer"
     },
@@ -5993,11 +6000,13 @@ The Russian heading is the required parser key; the map and prose are English. *
         "frontend/src/features/auth/AuthEntry.tsx",
         "frontend/src/features/auth/__tests__/AuthEntryInvite.test.tsx",
         "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/APIRustAccountServer.swift",
-        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteContinuationTests.swift"
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/InviteContinuationTests.swift",
+        "frontend/src/features/auth/AuthControls.tsx"
       ],
       "depends_on": [
         "PR-57",
-        "PR-83"
+        "PR-83",
+        "PR-84"
       ],
       "tests": [
         "cd frontend && npx vitest run src/features/auth",
@@ -6008,7 +6017,7 @@ The Russian heading is the required parser key; the map and prose are English. *
       ],
       "budget": {
         "product_loc": 80,
-        "files": 2
+        "files": 3
       },
       "implementer": "feature-implementer"
     }

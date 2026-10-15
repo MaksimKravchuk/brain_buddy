@@ -6,7 +6,7 @@ import Testing
 
 /// The weekly review's wire shapes against the golden
 /// `review_wire_fixtures.json` (a byte-identical copy of
-/// `backend/tests/fixtures/review_wire_fixtures.json`; tasks.md T055).
+/// `contracts/fixtures/review_wire_fixtures.json`; tasks.md T055).
 @Suite("Review wire shapes (spec 020)")
 struct ReviewWireTests {
     struct Entry: Sendable, CustomTestStringConvertible {

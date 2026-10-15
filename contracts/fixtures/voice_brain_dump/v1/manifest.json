@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "license": "synthetic-test-fixture",
+  "source": "Created for BrainBuddy deterministic CI; no real user media.",
+  "fixtures": [
+    {
+      "id": "ML-01",
+      "language": ["ru", "en"],
+      "text": "Надо починить BrainBuddy, потом сделать production smoke и написать Наташе",
+      "expected_titles": [
+        "Починить BrainBuddy",
+        "Сделать production smoke",
+        "Написать Наташе"
+      ],
+      "spans_ms": [[0, 1800], [1800, 3600], [3600, 5200]],
+      "notes": "Code-switched product and deployment terms must be preserved.",
+      "code_switch_terms": ["BrainBuddy", "production smoke"],
+      "audio_file": "ml-01-synthetic.wav",
+      "expected_frequency_hz": 257,
+      "structural_change": "split",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-02",
+      "language": ["ru", "en"],
+      "fast_text": "починить brain body",
+      "accurate_text": "починить BrainBuddy",
+      "expected_titles": ["Починить BrainBuddy"],
+      "spans_ms": [[0, 1400]],
+      "notes": "Accurate sealed-audio STT corrects a low-confidence fast-STT hypothesis.",
+      "code_switch_terms": ["BrainBuddy"],
+      "audio_file": "ml-02-synthetic.wav",
+      "expected_frequency_hz": 294,
+      "structural_change": "supersede",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-03",
+      "language": ["ru"],
+      "text": "надо задача альфа потом задача бета потом задача гамма",
+      "expected_titles": [
+        "Задача альфа",
+        "Задача бета",
+        "Задача гамма"
+      ],
+      "spans_ms": [[0, 1200], [1200, 2600], [2600, 4000]],
+      "notes": "Run-on utterance with no punctuation; only the 'потом' conjunction marks task boundaries.",
+      "run_on": true,
+      "audio_file": "ml-03-synthetic.wav",
+      "expected_frequency_hz": 331,
+      "structural_change": "split",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-04",
+      "language": ["ru"],
+      "text": "купить хлеб и молоко",
+      "expected_titles": ["Купить хлеб и молоко"],
+      "spans_ms": [[0, 1300]],
+      "notes": "Conjunction alone is not a split oracle.",
+      "audio_file": "ml-04-synthetic.wav",
+      "expected_frequency_hz": 368,
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-05",
+      "language": ["en", "ru"],
+      "text": "please run the Synthetic release; потом проверить пример на staging",
+      "expected_titles": [
+        "Run the Synthetic release",
+        "Проверить пример на staging"
+      ],
+      "spans_ms": [[0, 2000], [2000, 4200]],
+      "notes": "In-sentence code switching within a single clause; product and deployment terms must survive untranslated.",
+      "code_switch_terms": ["Synthetic", "staging"],
+      "audio_file": "ml-05-synthetic.wav",
+      "expected_frequency_hz": 405,
+      "structural_change": "split",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-06",
+      "language": ["ru", "en"],
+      "fast_text": "починить brain body",
+      "user_title": "Починить BrainBuddy MVP",
+      "accurate_text": "починить BrainBuddy",
+      "expected_titles": ["Починить BrainBuddy"],
+      "expected_conflict_field": "title",
+      "notes": "User-locked title must surface a visible conflict instead of a silent accurate-STT overwrite.",
+      "code_switch_terms": ["BrainBuddy"],
+      "audio_file": "ml-06-synthetic.wav",
+      "expected_frequency_hz": 442,
+      "structural_change": "conflict",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-07",
+      "language": ["nl"],
+      "text": "ik moet de taak een doen. dan moet ik de taak twee doen",
+      "expected_titles": [
+        "De taak een doen",
+        "De taak twee doen"
+      ],
+      "spans_ms": [[0, 1500], [1500, 3000]],
+      "notes": "Dutch fixture; 'moet ik/moet de' filler is stripped like the RU/EN modal-verb prefixes.",
+      "audio_file": "ml-07-synthetic.wav",
+      "expected_frequency_hz": 479,
+      "structural_change": "split",
+      "expected_confidence": 1.0
+    },
+    {
+      "id": "ML-08",
+      "language": ["ru"],
+      "text": "эм ну надо наверное задача омега",
+      "expected_titles": ["Наверное задача омега"],
+      "spans_ms": [[0, 1900]],
+      "notes": "Low-confidence hesitant phrasing ('эм ну'); a retry of the same segment must be idempotent and not duplicate the proposal.",
+      "low_confidence": true,
+      "retry_of": "ML-08"
+    },
+    {
+      "id": "ML-09",
+      "language": ["ru", "en"],
+      "fast_text": "написать команде про MVP",
+      "user_title": "Написать команде про custom MVP scope",
+      "accurate_text": "написать команде про MVP",
+      "expected_conflict_field": null,
+      "notes": "Edit-then-reconcile: once the user has edited and locked the title, a matching accurate segment must not raise a conflict when it agrees with the user's wording family; only a genuinely different accurate suggestion raises ML-06-style conflict."
+    }
+  ]
+}

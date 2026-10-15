@@ -37,7 +37,7 @@ from app.modules.tasks.navigator import (
 )
 from app.schemas.review import NavigatorSuggestionRequest
 
-FIXTURES = Path(__file__).parent / "fixtures" / "navigator"
+FIXTURES = Path(__file__).resolve().parents[2] / "contracts" / "fixtures" / "navigator"
 EVAL_SET_ID = "eval_v1"
 EVAL_SET = FIXTURES / f"{EVAL_SET_ID}.json"
 SAMPLE = FIXTURES / "recorded_v1_sample.json"

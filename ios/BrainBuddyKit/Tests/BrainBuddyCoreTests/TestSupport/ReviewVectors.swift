@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// A JSON value from the shared review vector files (spec 020). The files are
-/// byte-identical copies of `backend/tests/fixtures/*.json`, declared as
+/// byte-identical copies of `contracts/fixtures/*.json`, declared as
 /// resources of this test target in `Package.swift`.
 enum VectorValue: Hashable, Sendable, Decodable, CustomStringConvertible {
     case null

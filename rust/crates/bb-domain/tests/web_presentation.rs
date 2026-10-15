@@ -19,7 +19,7 @@ use serde_json::Value;
 use support::{cases, text};
 
 const RULE_VERSION: &str = "smart-add-web/1";
-const RESOLUTIONS: &str = "specs/026-rust-core-sync/contracts/web-presentation-resolutions.json";
+const RESOLUTIONS: &str = "contracts/fixtures/web-presentation-resolutions.json";
 
 fn resolutions() -> &'static Value {
     use std::sync::OnceLock;

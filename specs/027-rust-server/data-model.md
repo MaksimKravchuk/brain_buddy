@@ -15,9 +15,15 @@ production starts empty (FR-019).
 | `sync` | Tasks (026 sync) | command receipts, change feed (per-scope commit sequence), snapshots/transfers, hints cursor, generations | `tasks.sqlite3` |
 | `jobs` | Tasks (026 durable jobs) | job ledger, leases, fencing tokens, dead letters, owner generations | `tasks.sqlite3` |
 | `control` + object store (bucket `control`) | Control (026 PR-52, cross-cutting) | `control_applied` (applied ledger sequence numbers) and maintenance state in PostgreSQL; the append-only control ledger itself (deletions, purges, revocations, credential epochs, flag changes) lives in the object store, **outside** PostgreSQL, so a point-in-time restore cannot roll it back (research R11) | `sync_control_ledger.sqlite3` |
-| `crt` | CRT | trees, nodes (`jsonb` payload), relations, versions, index, command receipts (ADR-0026), exposure | `tree.json` files + `crt_commands.sqlite3` |
+| `crt` | CRT | trees, nodes (`text` payload), relations, versions, index, command receipts (ADR-0026), exposure | `tree.json` files + `crt_commands.sqlite3` |
 | `voice` | Capture / voice workflow (ADR-0002) | voice operations, stages, object keys of stored audio (bytes in the object store, bucket `voice`, research R11), provisional items | `voice_operations.sqlite3` |
 | `agents` | Agents (spec 007/014) | agents, sealed credentials, relay exchanges, observations | `agents.sqlite3` |
+
+Tasks-specific encoding (the all-schema `text` JSON convention is stated once
+in "Payload encoding"): `tasks.projects.normalized_name` and
+`tasks.tags.normalized_name` are `bytea` (UTF-8) because they carry raw user
+characters, and the payload-derived length CHECKs are dropped; those limits
+live in `bb-domain`.
 
 Rules:
 
@@ -102,3 +108,18 @@ Rules:
   each step idempotent; `reset=done` is written last. While the marker is
   `confirmed`, the app makes no network request, shows .02/.05, and on next
   launch resumes the remaining steps without asking again (.06).
+
+## Payload encoding (all schemas, 1:1 port)
+
+No column in any schema is `jsonb`. Every document, value, metadata, result,
+snapshot or response column is `text` holding canonical JSON, because
+PostgreSQL cannot store U+0000 in `jsonb` or `text`, while the Python API
+accepts it and SQLite round-trips it: a NUL is stored as the six ASCII
+characters `\u0000` and never cast to `jsonb`. Idempotency `response_body`
+columns hold the exact stored response text, so replay is byte-identical.
+Raw-character columns that can carry user text (for example tasks
+`normalized_name`) are `bytea`. Consequently no CHECK, index or generated
+column may reach into a payload; a field a query or constraint needs is
+promoted to a real column, and length limits live in `bb-domain`.
+No merged module needed a promotion: none of 0210, 0220, 0230, 0300, 0400 or
+0500 had a CHECK, index or generated column over a JSON field.

@@ -668,7 +668,7 @@ fn substitute(value: &Value, captured: &BTreeMap<String, String>) -> Value {
 fn traces() -> &'static Value {
     static TRACES: OnceLock<Value> = OnceLock::new();
     TRACES.get_or_init(|| {
-        let path = support::repo_root().join("backend/tests/fixtures/review_traces_tasks.json");
+        let path = support::repo_root().join("contracts/fixtures/review_traces_tasks.json");
         let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
         serde_json::from_str(&raw).expect("trace file JSON")
     })

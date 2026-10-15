@@ -3,7 +3,7 @@
 //! 026-FR-018..020).
 //!
 //! The vector tests run the byte-identical files the server, Swift core and web
-//! run (`backend/tests/fixtures/navigator/`) and count what they executed, so a
+//! run (`contracts/fixtures/navigator/`) and count what they executed, so a
 //! missing or empty section fails instead of passing vacuously.
 
 mod support;
@@ -31,7 +31,7 @@ use support::{cases, text};
 
 fn navigator_file(name: &str) -> Value {
     let path: PathBuf = support::repo_root()
-        .join("backend/tests/fixtures/navigator")
+        .join("contracts/fixtures/navigator")
         .join(name);
     let body = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));

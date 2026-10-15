@@ -1,0 +1,19 @@
+[package]
+name = "bb-server"
+description = "Server binary: configuration, serve and worker roles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bb-api.workspace = true
+bb-app.workspace = true
+bb-store.workspace = true
+bb-providers.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
