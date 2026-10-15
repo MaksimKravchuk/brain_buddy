@@ -31,9 +31,10 @@ to do takes the Linux no-op runner. Only `.github/` widens a pull request to eve
 an edit under `scripts/` or to the `Makefile` widens just the lanes that read
 the file (`scripts/classify_changed_scripts.py`, which falls back to every lane
 when it cannot tell); `compose.yaml` is exercised by
-`e2e` alone. Landing pushes run everything, except that a push to `main` of a SHA that
-already passed CI as a `trunk-candidate/**` run skips the iOS app, Mac app and
-CLI lanes (the macOS and Windows runners) instead of verifying the same tree twice. `ios.yml` only uploads to TestFlight, after
+`e2e` alone. Landing pushes run every Linux lane in full. The macOS and
+Windows lanes (iOS app, Mac app, CLI) follow the same filter on a
+`trunk-candidate/**` push, stay idle on a `main` push of a SHA that already
+passed as a candidate, and run nightly on `main` regardless (ADR-0034). `ios.yml` only uploads to TestFlight, after
 CI has passed on `main`.
 
 An edge earns its place for one of three reasons only:

@@ -18,6 +18,13 @@ on:
     # write permission and cannot promote — landing stays owned by the
     # default-branch deploy workflow, exactly as for `main`.
     branches: ["main", "stack/**"]
+  # Nightly, on main: the macOS and Windows lanes a landing skipped because
+  # nothing they read changed still meet a new Xcode or runner image within a
+  # day. Consumers of this workflow's completion (the landing/deploy workflow
+  # and the TestFlight upload) act on push runs only, so this never lands or
+  # ships anything.
+  schedule:
+    - cron: "41 2 * * *"
 
 permissions:
   contents: read
@@ -121,10 +128,11 @@ jobs:
   # strength of a check that did not happen. A job that runs, finds nothing to
   # do, and succeeds keeps that guarantee intact.
   #
-  # Filtering applies to pull requests only. Pushes to main and to
-  # trunk-candidate/** are the landing path, and those are verified in full,
-  # except that a main push of a SHA already verified as a trunk candidate
-  # does not re-run the macOS and Windows lanes (see the decide step).
+  # Pull requests are filtered lane by lane. Pushes to main and to
+  # trunk-candidate/** are the landing path and verify every Linux lane in
+  # full; the lanes on macOS and Windows runners follow the filter on a
+  # candidate, are not re-run on a main push of a SHA already verified as a
+  # candidate, and run nightly on main regardless (see the decide step).
   # This job holds no `needs`. It is the only real data dependency the stack
   # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
   # it would delay every test in the run without changing any of their results.
@@ -182,12 +190,28 @@ jobs:
           rust=true
           cli=true
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base='${{ github.event.pull_request.base.sha }}'
+          candidate=false
+          case "${{ github.event_name }}:${{ github.ref }}" in
+            push:refs/heads/trunk-candidate/*) candidate=true ;;
+          esac
+
+          if [ "${{ github.event_name }}" = "pull_request" ] ||
+             [ "${candidate}" = true ]; then
+            if [ "${candidate}" = true ]; then
+              # A candidate is judged by what it changes on top of main.
+              # An unknown fork point leaves base empty, and the empty diff
+              # below then fails toward exercising every stack.
+              base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
+            else
+              base='${{ github.event.pull_request.base.sha }}'
+            fi
             # --no-renames lists a moved file's old path too: a lane that
             # still reads the old name is affected even though only the new
             # name would otherwise show.
-            if git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null &&
+            # A candidate's fork point is already in the full-history checkout.
+            if [ -n "${base}" ] &&
+               { [ "${candidate}" = true ] ||
+                 git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null; } &&
                changed=$(git diff --name-only --no-renames "${base}" HEAD 2>/dev/null); then
               printf '%s\n' "${changed}" | sed 's/^/  /'
 
@@ -271,7 +295,26 @@ jobs:
             else
               echo "could not read the diff against ${base}; exercising every stack"
             fi
-          elif [ "${{ github.ref }}" = refs/heads/main ] &&
+            if [ "${candidate}" = true ]; then
+              # The landing path still verifies every Linux lane in full. Only
+              # the lanes on scarce macOS and Windows runners (the iOS app, the
+              # Mac app, the CLI targets) follow the filter above, so a landing
+              # that touches nothing they read leaves them idle; the nightly
+              # run covers what the filter cannot see, such as a new Xcode.
+              echo "trunk candidate; Linux lanes in full, iOS/Mac/CLI by the filter"
+              backend=true
+              frontend=true
+              ios_kit=true
+              rust=true
+            fi
+          elif [ "${{ github.event_name }}" = schedule ]; then
+            echo "nightly; exercising the iOS, Mac and CLI lanes only"
+            backend=false
+            frontend=false
+            ios_kit=false
+            rust=false
+          elif [ "${{ github.event_name }}" = push ] &&
+               [ "${{ github.ref }}" = refs/heads/main ] &&
                verified=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=${GITHUB_SHA}" \
                  --jq '[.workflow_runs[] | select(.head_branch | startswith("trunk-candidate/"))] | length') &&
                [ "${verified}" -gt 0 ]; then
@@ -343,6 +386,11 @@ jobs:
               echo "could not read the diff against ${base}; measuring the whole enforced list"
               sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
             fi
+          elif [ "${{ github.event_name }}" = schedule ]; then
+            # The nightly run is for the native lanes; mutation-quality.yml
+            # owns the nightly mutation campaign.
+            echo "nightly; no mutation scope"
+            : > /tmp/mutation-changed.txt
           else
             echo "landing path; measuring the whole enforced list"
             sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
