@@ -43,3 +43,9 @@ rather than deprecated.
   local store may need to be reset. This is accepted while there are no real users.
 - Feature 011's priority requirements (FR-006, SC-014, and the priority parts of
   FR-025, FR-028 and FR-039) are withdrawn; the feature's other requirements stand.
+- Every other spec artifact that names a task priority field, value, filter, sort
+  or control is superseded on that point by this record. That includes the
+  `"priority": "none"` default in feature 003's Smart Add contract and feature 002's
+  CO-11 default; neither field is accepted any more. Features 006, 020, 021, 024,
+  026 and 027 carry a pointer to this record. Features 002 and 003 are completed,
+  grandfathered packages, so they are superseded here rather than edited.

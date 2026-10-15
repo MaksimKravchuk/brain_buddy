@@ -1,5 +1,8 @@
 # Contract: importing the pre-021 Mac store (FR-020 – FR-023, FR-033, US4-1, US4-2, US4-4, SC-003)
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 **Files**:
 
 - `macos/Sources/BrainBuddyMac/LegacySnapshot.swift`: decoder of data-model E10;

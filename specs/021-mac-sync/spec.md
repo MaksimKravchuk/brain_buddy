@@ -1,5 +1,8 @@
 # Feature Specification: Mac ↔ backend sync
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 **Feature Branch**: `021-mac-sync`
 
 **Created**: 2026-10-06

@@ -1,5 +1,8 @@
 # Capability inventory: current Python/FastAPI server (027-FR-001)
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 Derived from code at commit `3764dfc6`. Every row cites the code that defines the
 behavior; docs were not used as a source. Paths are relative to `backend/` unless
 they start with `../`. The API prefix is `BRAIN_BUDDY_API_PREFIX`, default `/api`
