@@ -207,16 +207,9 @@ html {
 }
 
 body {
-  @apply bg-surface-base text-slate-900 min-h-screen antialiased font-sans;
-  @apply co:bg-ground co:text-ink;
-  font-feature-settings: "cv11", "ss01", "ss03";
+  @apply bg-ground text-ink min-h-screen antialiased font-sans;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-/* Inter's stylistic sets mean nothing to Instrument Sans. */
-:root[data-brand="carry-on"] body {
-  font-feature-settings: normal;
 }
 
 #root {

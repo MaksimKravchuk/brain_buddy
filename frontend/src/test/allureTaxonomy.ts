@@ -60,7 +60,6 @@ const PATH_RULES: Array<{ match: RegExp; epic: string; feature: string }> = [
   { match: /\/components\/panels\//, epic: "Reality Tree canvas", feature: "Inspector panels" },
   { match: /\/components\/modals\//, epic: "Reality Tree canvas", feature: "Tree modals" },
   { match: /\/components\/ui\//, epic: "Design system", feature: "UI primitives" },
-  { match: /\/app\/(__tests__\/)?brand\./, epic: "Design system", feature: "Carry On brand switch" },
   { match: /\/components\/layout\//, epic: "App shell", feature: "Layout & navigation" },
   { match: /\/components\/shell\//, epic: "App shell", feature: "Task shell chrome" },
   { match: /\/components\/auth\//, epic: "Authentication UI", feature: "Route guards" },
