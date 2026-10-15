@@ -1,0 +1,4 @@
+# Mirrors the ruff ratchet in backend/pyproject.toml (complexity 23, args 16, statements 92).
+cognitive-complexity-threshold = 23
+too-many-arguments-threshold = 16
+too-many-lines-threshold = 100
