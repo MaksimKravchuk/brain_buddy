@@ -55,7 +55,7 @@ async fn t005_owner_factory_uses_control_token_epoch_and_cookie() {
     assert!(seen[0].starts_with("POST /api/__test__/invites"));
     assert!(seen[1].to_lowercase().contains("x-client-epoch: 7"));
     assert!(seen[1].contains("synthetic-code"));
-    assert!(owner.email.ends_with("@conformance.invalid"));
+    assert!(owner.email.ends_with("@conformance.example.com"));
 }
 
 #[test]

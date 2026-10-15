@@ -69,7 +69,7 @@ impl TestControl {
         let code = invites["codes"][0]
             .as_str()
             .ok_or("no invite code minted")?;
-        let email = format!("owner-{}@conformance.invalid", unique());
+        let email = format!("owner-{}@conformance.example.com", unique());
         let mut client = client.fresh();
         let body = json!({
             "email": email, "password": "Conformance-pass-1!", "invite_code": code
