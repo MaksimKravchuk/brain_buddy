@@ -1,0 +1,17 @@
+[package]
+name = "bb-providers"
+description = "AI, STT, SMTP, Apple/Google and A2A egress adapters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+lettre.workspace = true
+symphonia.workspace = true
+hickory-resolver.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "bb-app"
+description = "Application services per module"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bb-domain.workspace = true
+bb-protocol.workspace = true
+bb-store.workspace = true
+bb-providers.workspace = true
+argon2.workspace = true
+jsonwebtoken.workspace = true
+p256.workspace = true
+aes-gcm.workspace = true
+zip.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "bb-conformance"
+description = "Black-box conformance suite run against a base URL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
