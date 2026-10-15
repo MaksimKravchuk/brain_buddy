@@ -29,6 +29,9 @@ services:
       BRAIN_BUDDY_ADMIN_EMAIL: ${BRAIN_BUDDY_ADMIN_EMAIL:-}
       BRAIN_BUDDY_ADMIN_PASSWORD: ${BRAIN_BUDDY_ADMIN_PASSWORD:-}
       BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS: ${BRAIN_BUDDY_ADMIN_OPERATOR_EMAILS:-}
+      # The test control API (spec 027) is mounted only with BRAIN_BUDDY_ENV=test
+      # and this secret; the Compose E2E runner supplies both.
+      BRAIN_BUDDY_TEST_CONTROL_TOKEN: ${BRAIN_BUDDY_TEST_CONTROL_TOKEN:-}
       # The relay's E2E fixtures live on this Compose network, which is a
       # private address range. The opt-in is per-deployment and governed
       # (014-FR-004); production leaves it unset and the destination check

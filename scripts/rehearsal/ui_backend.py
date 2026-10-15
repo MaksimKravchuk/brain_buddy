@@ -2,7 +2,8 @@
 
 ``python ui_backend.py <data_dir> <port>`` (run with ``backend/`` as the working
 directory, using an interpreter that has the backend's dependencies and
-``bb_core``) starts the production application in ``BRAIN_BUDDY_ENV=test`` with
+``bb_core``) starts the production application as a child process in ``BRAIN_BUDDY_ENV=test``
+(seeded only through ``/api/__test__/``, see contracts/test-control.md) with
 
 * ``rust_core_sync`` and ``weekly_review`` switched on,
 * the hermetic ``deterministic`` review navigator (no provider, no network),
@@ -29,10 +30,21 @@ import asyncio
 import json
 import os
 import re
+import secrets
+import signal
 import sys
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
+
+from rehearsal_backend import (
+    call,
+    open_account,
+    session_cookie,
+    set_flag,
+    start_server,
+    stop_server,
+)
 
 REQUEST_LINE = re.compile(rb"(GET|POST|PUT|PATCH|DELETE) \S+")
 
@@ -146,86 +158,78 @@ class FaultProxy:
 
 
 def main(data_dir: str, port: int) -> None:
-    sys.path.insert(0, os.getcwd())  # backend/ is the working directory
-    os.environ["BRAIN_BUDDY_DATA_DIR"] = data_dir
-    os.environ["BRAIN_BUDDY_ENV"] = "test"
-    os.environ["BRAIN_BUDDY_REVIEW_NAVIGATOR_PROVIDER"] = "deterministic"
-    import uvicorn
-    from fastapi.testclient import TestClient
+    token = secrets.token_urlsafe(24)
+    reuse = (
+        os.environ.get("BB_REHEARSAL_REUSE") == "1"
+    )  # a data dir from an earlier run
+    child = start_server(data_dir, port + 1, token)
+    try:
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        owners: dict[str, str] = {}
+        for key, (email, password) in ACCOUNTS.items():
+            _, owners[key] = open_account(port + 1, token, email, password, reuse=reuse)
+        for flag in ("rust_core_sync", "weekly_review"):
+            set_flag(port + 1, token, flag, "on")
+        info = {
+            "owners": owners,
+            "accounts": {
+                k: {"email": e, "password": p} for k, (e, p) in ACCOUNTS.items()
+            },
+            "proxy": f"http://localhost:{port}/api",
+            "control": f"http://localhost:{port + 2}",
+            "data_dir": data_dir,
+        }
+        print(json.dumps(info), flush=True)
 
-    from app.main import app
-    from app.schemas.auth import Invite
-    from app.utils.time import utcnow
-
-    container = app.state.container
-    reuse = os.environ.get("BB_REHEARSAL_REUSE") == "1"
-    owners: dict[str, str] = {}
-    for key, (email, password) in ACCOUNTS.items():
-        code = f"invite_rehearsal_{key}"
-        client = TestClient(app)
-        if (
-            reuse
-        ):  # BB_REHEARSAL_REUSE=1: a data dir from an earlier run (debugging a test)
-            client.post("/api/auth/login", json={"email": email, "password": password})
-        else:
-            container.invite_repo.create(Invite(code=code, created_at=utcnow()))
-            signup = client.post(
-                "/api/auth/signup",
-                json={"email": email, "password": password, "invite_code": code},
+        def seed_stalled(query: dict[str, list[str]]) -> dict[str, object]:
+            key = query.get("owner", ["a"])[0]
+            email, password = ACCOUNTS[key]
+            days = int(query.get("days", ["30"])[0])
+            title = query["title"][0]
+            upstream = port + 1
+            status, headers, _ = call(
+                upstream,
+                "POST",
+                "/api/auth/login",
+                {"email": email, "password": password},
             )
-            if signup.status_code != 201:
-                raise SystemExit(f"signup failed: {signup.status_code} {signup.text}")
-        owners[key] = client.get("/api/auth/me").json()["id"]
-        client.close()
-    for flag in ("rust_core_sync", "weekly_review"):
-        container.feature_flag_service.set_mode(flag, "on", operator_id="rehearsal")
-    info = {
-        "owners": owners,
-        "accounts": {k: {"email": e, "password": p} for k, (e, p) in ACCOUNTS.items()},
-        "proxy": f"http://localhost:{port}/api",
-        "control": f"http://localhost:{port + 2}",
-        "data_dir": str(container.task_repo.db_path.parent),
-    }
-    print(json.dumps(info), flush=True)
-
-    def seed_stalled(query: dict[str, list[str]]) -> dict[str, object]:
-        key = query.get("owner", ["a"])[0]
-        email, password = ACCOUNTS[key]
-        days = int(query.get("days", ["30"])[0])
-        title = query["title"][0]
-        service = container.task_service
-        real_clock = service.clock
-        client = TestClient(app)
-        try:
-            login = client.post(
-                "/api/auth/login", json={"email": email, "password": password}
+            if status != 200:
+                return {"error": f"login {status}"}
+            cookie = session_cookie(headers)
+            # The server clock is moved back for this one create, then reset to wall time.
+            moved = datetime.now(UTC) - timedelta(days=days)
+            call(
+                upstream,
+                "POST",
+                "/api/__test__/clock",
+                {"set": moved.isoformat()},
+                token=token,
             )
-            if login.status_code != 200:
-                return {"error": f"login {login.status_code}"}
-            service.clock = lambda: real_clock() - timedelta(days=days)
-            created = client.post(
-                "/api/tasks",
-                json={
-                    "title": title,
-                    "state": "next",
-                    "new_formulation_id": f"form_{uuid.uuid4()}",
-                },
-                headers={"Idempotency-Key": f"seed-{uuid.uuid4().hex}"},
-            )
-            return {"status": created.status_code, "body": created.text[:300]}
-        finally:
-            service.clock = real_clock
-            client.close()
+            try:
+                created = call(
+                    upstream,
+                    "POST",
+                    "/api/tasks",
+                    {
+                        "title": title,
+                        "state": "next",
+                        "new_formulation_id": f"form_{uuid.uuid4()}",
+                    },
+                    cookie=cookie,
+                    headers={"Idempotency-Key": f"seed-{uuid.uuid4().hex}"},
+                )
+            finally:
+                call(upstream, "DELETE", "/api/__test__/clock", token=token)
+            return {"status": created[0], "body": created[2][:300]}
 
-    async def serve() -> None:
-        proxy = FaultProxy(port, port + 1, port + 2, seed_stalled)
-        await proxy.start()
-        server = uvicorn.Server(
-            uvicorn.Config(app, host="127.0.0.1", port=port + 1, log_level="warning")
-        )
-        await server.serve()
+        async def serve() -> None:
+            proxy = FaultProxy(port, port + 1, port + 2, seed_stalled)
+            await proxy.start()
+            await asyncio.Event().wait()
 
-    asyncio.run(serve())
+        asyncio.run(serve())
+    finally:
+        stop_server(child)
 
 
 if __name__ == "__main__":
