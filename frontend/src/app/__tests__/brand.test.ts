@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { applyBrand, BRAND_STORAGE_KEY, resolveBrand } from "../brand";
+import { applyBrand, BRAND_STORAGE_KEY, initBrand, resolveBrand } from "../brand";
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {
   const values = new Map(Object.entries(initial));
@@ -103,5 +103,31 @@ describe("Carry On brand switch", () => {
 
     applyBrand(root, "legacy");
     expect(root.hasAttribute("data-brand")).toBe(false);
+  });
+
+  describe("on page load", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      window.localStorage.removeItem(BRAND_STORAGE_KEY);
+      window.history.replaceState(null, "", "/");
+      delete document.documentElement.dataset.brand;
+    });
+
+    it("marks the page from the URL and remembers the choice", () => {
+      window.history.replaceState(null, "", "/tasks/next?brand=carry-on");
+
+      expect(initBrand()).toBe("carry-on");
+      expect(document.documentElement.dataset.brand).toBe("carry-on");
+      expect(window.localStorage.getItem(BRAND_STORAGE_KEY)).toBe("carry-on");
+    });
+
+    it("keeps today's look when the browser refuses storage", () => {
+      vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+        throw new DOMException("blocked", "SecurityError");
+      });
+
+      expect(initBrand()).toBe("legacy");
+      expect(document.documentElement.hasAttribute("data-brand")).toBe(false);
+    });
   });
 });
