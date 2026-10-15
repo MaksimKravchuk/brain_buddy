@@ -1,7 +1,7 @@
 {
  "schema": "brainbuddy-web-presentation-resolutions/v1",
  "vectors": {
-  "path": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+  "path": "contracts/fixtures/web-presentation-vectors.json",
   "schema": "brainbuddy-web-presentation-vectors/v1",
   "rule_version": "smart-add-web/1"
  },

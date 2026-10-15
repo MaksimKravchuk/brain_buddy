@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import struct
 import time
@@ -64,7 +65,6 @@ class _EvaluationCase:
     transcript: str
     expected_titles: tuple[str, ...]
     audio_path: Path
-    audio_sha256: str
     code_switch_terms: tuple[str, ...]
     structural_change: str | None
     expected_confidence: float
@@ -113,12 +113,6 @@ def _load_cases(fixture_root: Path) -> list[_EvaluationCase]:
                 transcript=transcript,
                 expected_titles=expected_titles,
                 audio_path=audio_path,
-                # The manifest records no content hash (research R15): the
-                # digest is computed from the generated tone at load time.
-                audio_sha256=str(
-                    fixture.get("audio_sha256")
-                    or hashlib.sha256(audio_path.read_bytes()).hexdigest()
-                ),
                 code_switch_terms=tuple(
                     str(value) for value in fixture.get("code_switch_terms", [])
                 ),
@@ -138,15 +132,45 @@ def _load_cases(fixture_root: Path) -> list[_EvaluationCase]:
     return cases
 
 
+_TONE_AMPLITUDE = 9_000
+_TONE_RAMP_FRAMES = 800
+_TONE_SAMPLE_RATE = 16_000
+
+
+def _expected_tone_samples(frequency_hz: float, frames: int) -> list[int]:
+    """Regenerate the corpus tone: sine at 9000 peak with 50 ms linear ramps.
+
+    The expectation is derived from the documented generator parameters, never
+    from the file under test, so a drifted or substituted WAV cannot vouch for
+    itself (research R15: fixtures carry no content hashes).
+    """
+
+    return [
+        int(
+            _TONE_AMPLITUDE
+            * min(1.0, index / _TONE_RAMP_FRAMES, (frames - index) / _TONE_RAMP_FRAMES)
+            * math.sin(2.0 * math.pi * frequency_hz * index / _TONE_SAMPLE_RATE)
+        )
+        for index in range(frames)
+    ]
+
+
 def _validated_audio(case: _EvaluationCase) -> bytes:
     payload = case.audio_path.read_bytes()
-    if hashlib.sha256(payload).hexdigest() != case.audio_sha256:
-        raise ValueError(f"{case.id}: synthetic audio hash does not match manifest")
     with wave.open(str(case.audio_path), "rb") as fixture:
         if fixture.getnchannels() != 1 or fixture.getsampwidth() != 2:
             raise ValueError(f"{case.id}: audio must be mono 16-bit PCM")
         if fixture.getframerate() != 16_000 or fixture.getnframes() < 8_000:
             raise ValueError(f"{case.id}: audio must contain at least 500 ms at 16 kHz")
+        frames = fixture.readframes(fixture.getnframes())
+    if case.expected_frequency_hz is not None:
+        actual = [value[0] for value in struct.iter_unpack("<h", frames)]
+        expected = _expected_tone_samples(case.expected_frequency_hz, len(actual))
+        # One LSB of slack absorbs libm rounding differences across platforms.
+        if any(abs(a - e) > 1 for a, e in zip(actual, expected, strict=True)):
+            raise ValueError(
+                f"{case.id}: synthetic audio waveform drifted from generator"
+            )
     return payload
 
 
