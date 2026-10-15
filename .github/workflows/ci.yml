@@ -87,6 +87,7 @@ jobs:
           python3 -m unittest scripts/test_classify_path_risk.py -v
           python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
           python3 -m unittest scripts/test_select_backend_tests.py -v
+          python3 -m unittest scripts/test_classify_changed_scripts.py -v
           python3 scripts/validate_trunk_delivery.py trunk-ci \
             --ci .github/workflows/ci.yml
           python3 scripts/validate_trunk_delivery.py deploy \
@@ -179,8 +180,17 @@ jobs:
                changed=$(git diff --name-only "${base}" HEAD 2>/dev/null); then
               printf '%s\n' "${changed}" | sed 's/^/  /'
 
-              # Shared surfaces exercise everything: a change to CI, the
-              # delivery scripts or the Makefile can alter any stack's result.
+              # The workflow itself is a shared surface: a change to CI can
+              # alter any stack's result, so it exercises everything.
+              #
+              # The repository's tooling directory and its make targets are
+              # not, wholesale. Most of what lives there is spec and delivery
+              # tooling that only the always-running jobs execute, so treating
+              # it as shared queued macOS and Windows runners for edits none of
+              # them could observe. classify_changed_scripts.py (below) names
+              # the lanes that read each changed file, through their jobs,
+              # their source trees and the tooling that names it, and widens
+              # exactly those, or every lane when it cannot tell.
               #
               # `compose.yaml` is deliberately NOT a shared surface. Its only
               # consumer is the Compose stack that `e2e` boots, and `e2e` is
@@ -189,8 +199,12 @@ jobs:
               # the native apps, the Rust core and the CLI all run without
               # Compose), so listing it here only queued macOS and Windows
               # runners for a change none of them could observe.
-              if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$)'; then
+              tooling=$(printf '%s\n' "${changed}" |
+                python3 scripts/classify_changed_scripts.py \
+                  --workflow .github/workflows/ci.yml) ||
+                tooling=all
+              if printf '%s\n' "${changed}" | grep -Eq '^\.github/' ||
+                 [ "${tooling}" = all ]; then
                 echo "shared surface touched; exercising every stack"
               else
                 # Spec 026: the backend wheel compiles the PyO3 bridge from rust/.
@@ -226,6 +240,22 @@ jobs:
                 # test drives the real backend, which the cli-native job handles
                 # by also reading the backend output for that one target.
                 printf '%s\n' "${changed}" | grep -q '^cli/' || cli=false
+                # A tooling file a lane reads exercises that lane.
+                for lane in ${tooling}; do
+                  case "${lane}" in
+                    backend) backend=true ;;
+                    frontend) frontend=true ;;
+                    ios) ios=true ;;
+                    ios_kit) ios_kit=true ;;
+                    macos) macos=true ;;
+                    rust) rust=true ;;
+                    cli) cli=true ;;
+                    *) echo "unknown lane ${lane}; exercising every stack"
+                       backend=true frontend=true ios=true ios_kit=true
+                       macos=true rust=true cli=true ;;
+                  esac
+                done
+                [ -z "${tooling}" ] || echo "tooling read by: ${tooling//$'\n'/ }"
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"

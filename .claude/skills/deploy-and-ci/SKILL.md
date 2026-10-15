@@ -27,8 +27,10 @@ lint/type/unit/integration — the native apps' `ios-kit`, `ios-app` and
 filtered by the `changes` job), plus `workflow-lint`, `spec-kit`, the
 mutation gate, `docker` and `e2e`. A filtered lane still runs and skips its
 steps, so `full-ci` never sees "skipped"; a macOS or Windows lane with nothing
-to do takes the Linux no-op runner. Only `.github/`, `scripts/` and the
-`Makefile` widen a pull request to every lane; `compose.yaml` is exercised by
+to do takes the Linux no-op runner. Only `.github/` widens a pull request to every lane;
+an edit under `scripts/` or to the `Makefile` widens just the lanes that read
+the file (`scripts/classify_changed_scripts.py`, which falls back to every lane
+when it cannot tell); `compose.yaml` is exercised by
 `e2e` alone. Landing pushes always run everything. `ios.yml` only uploads to TestFlight, after
 CI has passed on `main`.
 
