@@ -67,7 +67,8 @@ for (const provider of ["google", "apple"] as const) {
       const completed = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/providers/complete");
       await page.getByRole("button", { name: `Sign in with ${label}`, exact: true }).click();
       await finish();
-      expect((await completed).status()).toBe(200);
+      const completion = await completed;
+      expect(completion.status(), await completion.text()).toBe(200);
       expect((await api(page, "/auth/me")).status).toBe(401);
       await expect(page.getByRole("alert")).toContainText("Connect to your existing account");
     });
@@ -288,9 +289,6 @@ async function fakeApple(page: Page, email: string | null, subject: string): Pro
     expect(authorization.searchParams.get("response_type")).toBe("code");
     expect(authorization.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/providers/apple/callback`);
     expect(authorization.searchParams.has("code_challenge")).toBe(false);
-    // Each identity call consumes one script item. A just-unlinked Apple owner's
-    // background token revocation may take the first one, so offer the same
-    // assertion twice; the exchange then still finds it.
     const assertion = { identity: {
       issuer: "https://appleid.apple.com", subject, email, audience: appleAudience,
       email_authoritative: email !== null, is_private_email: email !== null
