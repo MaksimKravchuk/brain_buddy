@@ -20,9 +20,25 @@ CREATE TABLE identity.invites (
     code_hash       text PRIMARY KEY,
     created_at      timestamptz NOT NULL,
     expires_at      timestamptz,
+    -- `used_at` is the authoritative consumed marker (Python `Invite.is_used`
+    -- stays true after purge because it scrubs the id to "deleted-user"; here
+    -- ON DELETE SET NULL only clears identity, never consumption).
+    -- Importers backfill `used_at` for any legacy row with a used_by_user_id.
     used_by_user_id text REFERENCES identity.users (id) ON DELETE SET NULL,
-    used_at         timestamptz
+    used_at         timestamptz,
+    CHECK (used_by_user_id IS NULL OR used_at IS NOT NULL)
 );
+-- A consumed invite can never become unused again (invite-gate bypass guard).
+CREATE FUNCTION identity.invites_keep_consumed() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.used_at IS NOT NULL AND NEW.used_at IS DISTINCT FROM OLD.used_at THEN
+        RAISE EXCEPTION 'invite % is already consumed', OLD.code_hash;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER invites_keep_consumed BEFORE UPDATE ON identity.invites
+    FOR EACH ROW EXECUTE FUNCTION identity.invites_keep_consumed();
 CREATE TABLE identity.auth_identity_bindings (
     id               text PRIMARY KEY,
     owner_id         text NOT NULL REFERENCES identity.users (id) ON DELETE CASCADE,
