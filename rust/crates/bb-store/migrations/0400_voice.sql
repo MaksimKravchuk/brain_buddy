@@ -65,7 +65,12 @@ CREATE TABLE voice.provisional_items (
     operation_id text        NOT NULL,
     id           text        NOT NULL,
     status       text        NOT NULL DEFAULT 'provisional'
-                 CHECK (status IN ('provisional', 'user_edited', 'confirmed', 'discarded')),
+                 -- Exactly BrainDumpProposalStatus (backend/app/workflows/
+                 -- voice_brain_dump/domain.py); `wording_changing` is read-only
+                 -- legacy but still a valid persisted value.
+                 CHECK (status IN ('provisional', 'wording_changing',
+                                   'ready_to_review', 'user_edited',
+                                   'reconciled', 'conflicted')),
     payload      jsonb       NOT NULL,
     created_at   timestamptz NOT NULL,
     updated_at   timestamptz NOT NULL,
