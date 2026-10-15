@@ -11,7 +11,7 @@ bb-domain.workspace = true
 bb-protocol.workspace = true
 # Bundled SQLite: one audited amalgamation for app, widget and Linux tests.
 # Default features are off so the wasm-only backend stays out of Cargo.lock.
-rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+rusqlite = { version = "=0.39.0", default-features = false, features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
 

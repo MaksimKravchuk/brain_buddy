@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 /**
  * The shell's transient toast. Text-only calls keep their original shape
@@ -56,4 +56,24 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 
 export function undoShortcutLabel(userAgent: string = globalThis.navigator.userAgent): string {
   return /Mac|iPhone|iPad/.test(userAgent) ? "Cmd+Z" : "Ctrl+Z";
+}
+
+/** 027 D-02.01: the web copy of the version refusal, used when the server sends none. */
+export const UPDATE_REQUIRED_MESSAGE =
+  "Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed.";
+
+/** 027 D-02.02: a spinner appears only if the request is still pending after this long. */
+export const SPINNER_ONSET_MS = 300;
+
+export function useSpinnerOnset(pending: boolean): boolean {
+  const [elapsed, setElapsed] = useState(false);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => setElapsed(true), SPINNER_ONSET_MS);
+    return () => {
+      clearTimeout(timer);
+      setElapsed(false);
+    };
+  }, [pending]);
+  return pending && elapsed;
 }
