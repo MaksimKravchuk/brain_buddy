@@ -786,6 +786,7 @@ class ModernAuthService:
             ),
             "revocation_token_type": tokens.revocation_token_type,
             "binding_id": binding["id"] if binding else None,
+            "binding_state": binding["state"] if binding else None,
             "generation": binding["generation"] if binding else None,
         }
         sealed = self._box().seal(
@@ -919,7 +920,12 @@ class ModernAuthService:
             return self._finish_provider_action(
                 connection, row, claims, binding, raw_token
             )
-        if claims["binding_id"]:
+        # An unlinked mapping holds no authority and settled Apple cleanup erases
+        # it at an unpredictable moment; erasure between callback and completion
+        # is the same outcome as erasure before the callback. Any other vanished
+        # binding still fails closed.
+        erased_unlinked = binding is None and claims.get("binding_state") == "unlinked"
+        if claims["binding_id"] and not erased_unlinked:
             if (
                 binding is None
                 or binding["id"] != claims["binding_id"]
