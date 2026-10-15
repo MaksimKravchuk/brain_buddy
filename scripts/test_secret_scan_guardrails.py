@@ -41,6 +41,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GITLEAKS_CONFIG = REPO_ROOT / ".gitleaks.toml"
@@ -89,6 +90,35 @@ def _tracked_text_files() -> list[tuple[str, str]]:
         except (UnicodeDecodeError, OSError):
             continue
     return files
+
+
+def _is_shallow() -> bool:
+    out = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return out.strip() == "true"
+
+
+def _commit_added_lines(commit: str) -> list[str] | None:
+    """Lines a commit added, or None when the commit is not in this clone."""
+
+    proc = subprocess.run(
+        ["git", "show", "--format=", "--unified=0", commit],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    return [
+        line[1:]
+        for line in proc.stdout.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    ]
 
 
 def _rotate_last_literal(line: str) -> str:
@@ -186,6 +216,41 @@ class GitleaksAllowlistTest(unittest.TestCase):
                         f"{pattern!r} is not anchored to a whole line",
                     )
 
+    def _candidate_lines(self, entry: dict[str, Any]) -> list[tuple[str, str]]:
+        """Lines an entry may legitimately exempt: tracked lines, or, for a
+        commit-scoped entry, the lines those historical commits added."""
+
+        commits = entry.get("commits")
+        if not commits:
+            return [
+                (name, line)
+                for name, text in self.tracked
+                for line in text.splitlines()
+            ]
+        lines: list[tuple[str, str]] = []
+        for commit in commits:
+            added = _commit_added_lines(commit)
+            if added is None:
+                if _is_shallow():
+                    self.skipTest(f"{commit} unavailable in a shallow clone")
+                self.fail(f"allowlisted commit {commit} does not exist")
+            lines.extend((commit, line) for line in added)
+        return lines
+
+    def test_commit_scoped_entries_need_full_shas_and_both_conditions(self) -> None:
+        for entry in self.allowlists:
+            commits = entry.get("commits")
+            if not commits:
+                continue
+            with self.subTest(entry["description"]):
+                self.assertEqual(
+                    entry.get("condition"),
+                    "AND",
+                    "commits OR regexes would exempt every line of the commit",
+                )
+                for commit in commits:
+                    self.assertRegex(commit, r"^[0-9a-f]{40}$")
+
     def test_every_allowlist_matches_a_real_fixture_line(self) -> None:
         """A pattern that matches nothing is a stale exemption nobody notices."""
 
@@ -195,8 +260,7 @@ class GitleaksAllowlistTest(unittest.TestCase):
                     compiled = re.compile(pattern)
                     hits = [
                         (name, line)
-                        for name, text in self.tracked
-                        for line in text.splitlines()
+                        for name, line in self._candidate_lines(entry)
                         if compiled.search(line)
                     ]
                     self.assertTrue(
@@ -217,22 +281,21 @@ class GitleaksAllowlistTest(unittest.TestCase):
         for entry in self.allowlists:
             for pattern in entry["regexes"]:
                 probe = re.compile(pattern)
-                for _, text in self.tracked:
-                    for line in text.splitlines():
-                        if not probe.search(line):
-                            continue
-                        rotated = _rotate_last_literal(line)
-                        self.assertNotEqual(
-                            rotated, line, f"no quoted literal to rotate in {line!r}"
+                for _, line in self._candidate_lines(entry):
+                    if not probe.search(line):
+                        continue
+                    rotated = _rotate_last_literal(line)
+                    self.assertNotEqual(
+                        rotated, line, f"no quoted literal to rotate in {line!r}"
+                    )
+                    checked += 1
+                    for other in compiled:
+                        self.assertIsNone(
+                            other.search(rotated),
+                            f"{other.pattern!r} still exempts the line after "
+                            "its value changed, so a real credential put "
+                            "here would never be reported",
                         )
-                        checked += 1
-                        for other in compiled:
-                            self.assertIsNone(
-                                other.search(rotated),
-                                f"{other.pattern!r} still exempts the line after "
-                                "its value changed, so a real credential put "
-                                "here would never be reported",
-                            )
         self.assertGreaterEqual(checked, len(self.allowlists))
 
 
