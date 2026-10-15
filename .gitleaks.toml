@@ -71,6 +71,21 @@ description = "Never-issued MCP owner-isolation test password"
 regexTarget = "line"
 regexes = ['''^\s*(email="other@example\.com", password="OtherPass12345"|json=\{"email": "other@example\.com", "password": "OtherPass12345"\},)\s*$''']
 
+# Commit-scoped entry: lines that no longer exist at any tracked path but remain
+# in history, which every trunk-candidate push rescans in full. It needs BOTH
+# its `commits` and its whole-line regex (`condition = "AND"`), so it exempts
+# nothing outside that commit and nothing but those lines; no live file can
+# match, and a line added in any other commit is still scanned.
+# `scripts/test_secret_scan_guardrails.py` checks that every listed commit
+# exists and still contains a line the regex matches.
+
+[[allowlists]]
+description = "Removed voice live-run report digests (history only, commit e621db34)"
+condition = "AND"
+commits = ["e621db34cfeeb43dd1a5070fac8469a5bc5ed246"]
+regexTarget = "line"
+regexes = ['''^\s*"run_key": "(e8cb406f16b5ff9c6c776e872d5ff3c1af9c0091c8d2a89547877a18e1fea645|bfd2defec8cd40eae754fe2eef538b77b3d29871f1cb165aaa354d00e6ac2eb8)",\s*$''']
+
 [[rules]]
 id = "generic-api-key"
 
