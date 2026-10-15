@@ -32,7 +32,7 @@
                 .carryOnFont(CarryOnTypeScale.bodyStrong)
                 .foregroundStyle(foreground)
                 .padding(.horizontal, kind == .quiet ? Metrics.quietPaddingX : Metrics.paddingX)
-                .frame(height: Metrics.height)
+                .frame(minHeight: Metrics.height)
                 .background {
                     if let background { Capsule().fill(background) }
                 }

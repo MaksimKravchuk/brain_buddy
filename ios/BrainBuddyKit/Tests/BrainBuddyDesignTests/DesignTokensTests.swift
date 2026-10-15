@@ -25,18 +25,26 @@ struct DesignTokensTests {
         }
     }
 
+    @Test("Every font family, PostScript name and Dynamic Type style in the JSON is the generated one")
+    func stringsMatchTheSource() throws {
+        let expected = try Self.source().strings
+        #expect(Set(CarryOnTokenTable.strings.keys) == Set(expected.keys))
+        for (path, value) in expected {
+            #expect(CarryOnTokenTable.strings[path] == value, "\(path)")
+        }
+    }
+
     @Test("Every face a type style names is bundled under its PostScript name")
     func typeStylesHaveBundledFaces() {
-        let bundled = Set(
-            (CarryOnResources.bundle.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? [])
-                .map { $0.deletingPathExtension().lastPathComponent })
         let styles = [
             CarryOnTypeScale.display, CarryOnTypeScale.title, CarryOnTypeScale.step,
             CarryOnTypeScale.body, CarryOnTypeScale.bodyStrong, CarryOnTypeScale.meta,
         ]
         for style in styles {
             #expect(style.face.postScriptNames[style.weight] != nil, "\(style.face.family) \(style.weight)")
-            #expect(bundled.contains(style.postScriptName), "\(style.postScriptName).ttf")
+            #expect(
+                CarryOnResources.bundle.url(forResource: style.postScriptName, withExtension: "ttf") != nil,
+                "\(style.postScriptName).ttf")
         }
     }
 
@@ -54,6 +62,7 @@ struct DesignTokensTests {
     struct Flattened {
         var colors: [String: UInt32] = [:]
         var numbers: [String: Double] = [:]
+        var strings: [String: String] = [:]
     }
 
     static func source() throws -> Flattened {
@@ -97,8 +106,21 @@ struct DesignTokensTests {
             flat.colors["project.\(name)"] = try color(value)
         }
 
+        var families: [String: String] = [:]
+        for (face, spec) in try dictionary(root["font"]) {
+            let spec = try dictionary(spec)
+            let family = try string(spec["family"])
+            families[face] = family
+            flat.strings["font.\(face).family"] = family
+            for (weight, name) in try dictionary(spec["postscript"]) {
+                flat.strings["font.\(face).postscript.\(weight)"] = try string(name)
+            }
+        }
+
         for (style, spec) in try dictionary(root["type"]) {
             let spec = try dictionary(spec)
+            flat.strings["type.\(style).font"] = try #require(families[try string(spec["font"])], "\(style)")
+            flat.strings["type.\(style).textStyle"] = try string(spec["textStyle"])
             for field in ["weight", "ios", "mac", "lineHeight", "tracking"] {
                 flat.numbers["type.\(style).\(field)"] = try number(spec[field])
             }

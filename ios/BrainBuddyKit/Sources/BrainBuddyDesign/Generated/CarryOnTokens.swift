@@ -394,4 +394,23 @@ public enum CarryOnTokenTable {
         "layout.bottom-bar.height": CarryOnLayout.BottomBar.height,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
     ]
+    public static let strings: [String: String] = [
+        "font.voice.family": CarryOnFontFace.voice.family,
+        "font.voice.postscript.400": CarryOnFontFace.voice.postScriptNames[400] ?? "",
+        "font.action.family": CarryOnFontFace.action.family,
+        "font.action.postscript.400": CarryOnFontFace.action.postScriptNames[400] ?? "",
+        "font.action.postscript.600": CarryOnFontFace.action.postScriptNames[600] ?? "",
+        "type.display.font": CarryOnTypeScale.display.face.family,
+        "type.display.textStyle": CarryOnTypeScale.display.textStyle.rawValue,
+        "type.title.font": CarryOnTypeScale.title.face.family,
+        "type.title.textStyle": CarryOnTypeScale.title.textStyle.rawValue,
+        "type.step.font": CarryOnTypeScale.step.face.family,
+        "type.step.textStyle": CarryOnTypeScale.step.textStyle.rawValue,
+        "type.body.font": CarryOnTypeScale.body.face.family,
+        "type.body.textStyle": CarryOnTypeScale.body.textStyle.rawValue,
+        "type.body-strong.font": CarryOnTypeScale.bodyStrong.face.family,
+        "type.body-strong.textStyle": CarryOnTypeScale.bodyStrong.textStyle.rawValue,
+        "type.meta.font": CarryOnTypeScale.meta.face.family,
+        "type.meta.textStyle": CarryOnTypeScale.meta.textStyle.rawValue,
+    ]
 }

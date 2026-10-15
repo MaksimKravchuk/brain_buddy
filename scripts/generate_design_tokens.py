@@ -62,6 +62,7 @@ def render_tokens(tokens: dict[str, Any]) -> str:
     lines: list[str] = [HEADER, "import Foundation", ""]
     table_colors: list[tuple[str, str]] = []
     table_numbers: list[tuple[str, str]] = []
+    table_strings: list[tuple[str, str]] = []
 
     lines.append("/// Raw palette. Only `CarryOnRole` reads these.")
     lines.append("public enum CarryOnPrimitive {")
@@ -134,6 +135,15 @@ def render_tokens(tokens: dict[str, Any]) -> str:
             f'    public static let {camel(face)} = FontFace(family: "{spec["family"]}", '
             f"postScriptNames: [{names}])"
         )
+        face_ref = f"CarryOnFontFace.{camel(face)}"
+        table_strings.append((f"font.{face}.family", f"{face_ref}.family"))
+        for weight in spec["postscript"]:
+            table_strings.append(
+                (
+                    f"font.{face}.postscript.{weight}",
+                    f'{face_ref}.postScriptNames[{weight}] ?? ""',
+                )
+            )
     lines += ["}", ""]
 
     lines.append("/// Type styles. iOS and Mac sizes differ; both follow Dynamic Type.")
@@ -149,6 +159,11 @@ def render_tokens(tokens: dict[str, Any]) -> str:
             f"iosSize: {number(spec['ios'])}, macSize: {number(spec['mac'])}, "
             f"lineHeight: {number(spec['lineHeight'])}, tracking: {number(spec['tracking'])}, "
             f".{spec['textStyle']})"
+        )
+        style_ref = f"CarryOnTypeScale.{camel(style)}"
+        table_strings.append((f"type.{style}.font", f"{style_ref}.face.family"))
+        table_strings.append(
+            (f"type.{style}.textStyle", f"{style_ref}.textStyle.rawValue")
         )
         for field, key in (
             ("weight", "weight"),
@@ -224,6 +239,9 @@ def render_tokens(tokens: dict[str, Any]) -> str:
     lines.append("    ]")
     lines.append("    public static let numbers: [String: Double] = [")
     lines += [f'        "{key}": {expr},' for key, expr in table_numbers]
+    lines.append("    ]")
+    lines.append("    public static let strings: [String: String] = [")
+    lines += [f'        "{key}": {expr},' for key, expr in table_strings]
     lines.append("    ]")
     lines.append("}")
     return "\n".join(lines) + "\n"

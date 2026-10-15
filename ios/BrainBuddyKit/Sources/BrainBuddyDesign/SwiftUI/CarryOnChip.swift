@@ -29,7 +29,7 @@
             }
             .foregroundStyle(foreground)
             .padding(.horizontal, Metrics.paddingX)
-            .frame(height: Metrics.height)
+            .frame(minHeight: Metrics.height)
             .background(.coChipBg, in: Capsule())
         }
 
