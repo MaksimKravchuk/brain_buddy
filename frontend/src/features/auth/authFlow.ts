@@ -64,3 +64,5 @@ export async function acceptSignedIn(result: Completion): Promise<void> {
   if (useAuthStore.getState().user?.id !== result.user.id) throw new Error("We couldn't confirm sign-in. Start a fresh attempt.");
   if (result.deletion_cancelled || result.user.deletion_cancelled) useAuthStore.setState({ deletionCancelledNotice: true, deletionScheduledFor: null });
 }
+/** Completes the web invite step (027 D-04): the same session proof as any sign-in, for the new account. */
+export async function acceptInvitedSignIn(result: Completion): Promise<void> { await acceptSignedIn(result); }
