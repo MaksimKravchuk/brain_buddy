@@ -1503,7 +1503,10 @@ struct WorkspaceView: View {
             saveRequest: editorSaveRequest
         ) { changes, list in
             Task {
+            let before = model.task(task.id)
             if await model.saveTask(task.id, changes: changes, moveTo: list, editorID: taskSaveEditorID) {
+                // A list change made in the editor is undoable like a row move; field edits are not.
+                registerUndo(before)
                 taskSaveEditorID = UUID().uuidString
                 editorDirty = false
                 editorCanSave = false
@@ -1942,8 +1945,9 @@ extension WorkspaceView {
                 Button("Move to Waiting for") {
                     let waitingFor = moveWaitingFor
                     performSheetSave(editorID: moveWaitingEditorID) { submittedEditorID in
+                        let before = model.task(task.id)
                         if await model.moveTask(task.id, to: .waiting, waitingFor: waitingFor, editorID: submittedEditorID) {
-                            registerUndo(task)
+                            registerUndo(before)
                             movingTask = nil
                             moveWaitingEditorID = UUID().uuidString
                         }
