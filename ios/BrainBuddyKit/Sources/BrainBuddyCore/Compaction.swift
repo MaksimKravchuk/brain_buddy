@@ -99,7 +99,7 @@ public enum OutboxCompactor {
     }
 
     /// An unsent bulk release and its Undo cancel out when no operation after
-    /// the release used one of its tasks.
+    /// the release used one of its tasks or changed a review run.
     private static func cancelBulkRelease(_ id: BulkID, in outbox: inout [PendingOperation]) -> Bool {
         guard
             let index = outbox.lastIndex(where: {
@@ -108,6 +108,15 @@ public enum OutboxCompactor {
             !outbox[index].hasBeenSent, case .bulkRelease(let release) = outbox[index].command
         else { return false }
         guard outbox[(index + 1)...].allSatisfy({ !$0.command.touchesAny(of: Set(release.taskIDs)) }) else { return false }
+        // A review run changed since read the lists the release emptied (a step
+        // finished with nothing to decide qualifies the run), so it needs the release.
+        let touchesRun = outbox[(index + 1)...].contains { operation in
+            switch operation.command {
+            case .review(.startSession), .review(.progressSession), .review(.finishSession): true
+            default: false
+            }
+        }
+        guard !touchesRun else { return false }
         outbox.remove(at: index)
         return true
     }
