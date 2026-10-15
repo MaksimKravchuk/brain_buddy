@@ -288,14 +288,13 @@ async function fakeApple(page: Page, email: string | null, subject: string): Pro
     expect(authorization.searchParams.get("response_type")).toBe("code");
     expect(authorization.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/providers/apple/callback`);
     expect(authorization.searchParams.has("code_challenge")).toBe(false);
-    // Each identity call consumes one script item. A just-unlinked Apple owner's
-    // background token revocation may take the first one, so offer the same
-    // assertion twice; the exchange then still finds it.
+    // Background token revocation never consumes a script item, so this one
+    // assertion is delivered to the code exchange and nothing else.
     const assertion = { identity: {
       issuer: "https://appleid.apple.com", subject, email, audience: appleAudience,
       email_authoritative: email !== null, is_private_email: email !== null
     }, issuing_client: appleAudience };
-    await control("PUT", "/providers/identity", { mode: "mock", script: [assertion, assertion] });
+    await control("PUT", "/providers/identity", { mode: "mock", script: [assertion] });
     const code = "synthetic-apple-code";
     await route.fulfill({
       contentType: "text/html",

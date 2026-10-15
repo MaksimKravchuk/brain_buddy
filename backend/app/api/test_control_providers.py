@@ -69,8 +69,14 @@ class ProviderControl:
             self._cond.notify_all()
             return freed
 
-    def enter(self, purpose: str) -> dict[str, Any] | None:
-        """Record a call; block while held; return the scripted item or None."""
+    def enter(self, purpose: str, *, claim: str | None = None) -> dict[str, Any] | None:
+        """Record a call; block while held; return the scripted item or None.
+
+        A ``claim`` marks a call that background workers make at times a test
+        cannot order (Apple token revocation). Such a call takes a script item
+        only when the item names it (``{claim: ...}``); otherwise it succeeds
+        without consuming, so it can never steal an item meant for a request.
+        """
 
         with self._cond:
             self.calls.append(
@@ -83,6 +89,8 @@ class ProviderControl:
             )
             if not self.armed:
                 return None
+            if claim is not None and not (self.script and claim in self.script[0]):
+                return {}
             item = self.script.pop(0) if self.script else {}
             if self.hold:
                 ticket = self._tickets
@@ -194,7 +202,8 @@ class _IdentityProxy:
             return target
 
         def call(*args: Any, **kwargs: Any) -> Any:
-            item = self._control.enter(name)
+            claim = "revoke" if name == "revoke_apple" else None
+            item = self._control.enter(name, claim=claim)
             if item is None:
                 return target(*args, **kwargs)
             if item.get("error"):

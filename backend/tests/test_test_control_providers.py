@@ -144,7 +144,7 @@ def test_027_fr_011_identity_proxy_scripts_tokens_notifications_and_errors(
         [
             {"identity": {"subject": "s1", "email": "a@example.com"}},
             {"identity": {}, "issuing_client": "ios"},
-            {},
+            {"revoke": {}},
             {"notification": {"event_type": "account-delete"}},
             {"error": "invalid_proof"},
         ],
@@ -165,6 +165,17 @@ def test_027_fr_011_identity_proxy_scripts_tokens_notifications_and_errors(
         "exchange_google",
         "exchange_apple",
     ]
+
+
+def test_027_fr_011_unaddressed_revoke_never_consumes_an_exchange_item(
+    control: TestClient,
+) -> None:
+    gateway = _container(control).modern_auth_service.provider
+    _arm(control, "identity", [{"identity": {"subject": "s1"}}])
+    assert gateway.revoke_apple("tok") is None  # background cleanup, any number
+    assert gateway.revoke_apple("tok") is None
+    apple = gateway.exchange_apple("c", redirect_uri="r", nonce="n")
+    assert apple.identity.subject == "s1"
 
 
 def test_027_fr_011_stt_proxy_scripts_text_and_failures(control: TestClient) -> None:
