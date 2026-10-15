@@ -161,6 +161,7 @@ Before freeze, the implementation writer MUST produce a typed receipt using `.sp
 - [ ] T081 [US2] Implement design M-02 (.00–.11, focus and VoiceOver rules) in ios/BrainBuddy/Screens/Settings/FreshStartScreen.swift, gated from ios/BrainBuddy/App/RootView.swift before sign-in and sync; UI test ios/BrainBuddyUITests/FreshStartUITests.swift (confirm, Not now, resume, failure Try again) (027-FR-021; PR-81).
 - [ ] T082 [US2] Implement design D-03 (.00–.11, window-modal sheet, 'Not now' default and Escape) in macos/Sources/BrainBuddyMac/FreshStartSheet.swift, gated from macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift before sign-in and sync; tests in macos/Tests/BrainBuddyMacTests/FreshStartSheetTests.swift (027-FR-021; PR-82).
 - [ ] T083 [P] [US2] Implement design M-03 (.01–.10) for `INVITE_REQUIRED` in ios/BrainBuddy/Screens/Settings/SignInSheet.swift and ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift, resubmitting through `signupComplete` in ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift; tests in ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteHandoffTests.swift (027-FR-007, 027-FR-016; PR-83).
+- [ ] T171 [P] [US2] Wire `INVITE_REQUIRED` into the remaining entry points (map amendment 2026-10-15): web email-code signup in frontend/src/features/auth/AuthEntry.tsx shows D-04 (test frontend/src/features/auth/__tests__/AuthEntryInvite.test.tsx); the Rust-runtime continuation arm in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/APIRustAccountServer.swift returns the M-03 step (the legacy SyncEngine path is deleted by PR-88) (test ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteContinuationTests.swift) (027-FR-007; PR-171).
 - [ ] T084 [US2] Collapse BrainBuddyWorkspace to the Rust runtime: remove every `isRustSelected` branch and the legacy path in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift, Workspace+ProjectDisplay.swift, Workspace+ReviewContentStamps.swift, Workspace+ReviewAI.swift and RustAccountLifecycle.swift, and delete RustRuntimeSelectionStore.swift (027-FR-004, 027-SC-006; PR-84).
 - [ ] T085 [US2] Remove the 72 `isRustSelected` branches and the legacy Review path from ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift (027-FR-004, 027-SC-006; PR-85).
 - [ ] T086 [US2] Remove runtime selection from the iPhone app: ios/BrainBuddy/Screens/Capture/CaptureSheet.swift, Detail/TaskDetailScreen.swift, Review/FormulationSection.swift, Lists/TaskListScreen.swift, Review/RestartScreen.swift, Settings/SettingsScreen.swift, Settings/SyncIssuesScreen.swift, ios/BrainBuddy/Components/TaskRow.swift, and delete ios/BrainBuddy/Screens/Settings/RustRuntimePilotRow.swift (027-FR-004, 027-SC-006; PR-86).
@@ -565,6 +566,13 @@ PR-94 T094 smoke-epoch (feature-implementer)
 - A slice's tests that target `http://localhost:8001` run against the Rust Compose stack (`docker compose --profile rust up`); `:8000` is the frozen Python server with `BRAIN_BUDDY_ENV=test`.
 - Generated tasks.md is portable planning input only. It does not bypass isolated worktrees, Principle II, independent review, CI, landing or release gates.
 
+## Map amendment 2026-10-15 (owner-approved)
+
+- PR-03 keeps one Rust workspace: `rusqlite` in bb-client goes =0.40.2 → =0.39.0 because no `sqlx` release accepts `libsqlite3-sys` 0.38 (owner: "цель была в унификации").
+- PR-02 and PR-10 own the Makefile line that runs their new script tests (the orphan-test guard) and re-record gate integrity; serialized PR-02 → PR-09 → PR-10.
+- PR-09 gains the Makefile `cmp` lines and the iOS/web fixture copies, becomes feature-implementer; PR-36 follows PR-09.
+- New PR-171 wires the invite step into web email-code signup and the Rust-runtime iOS continuation path (the legacy SyncEngine path is deleted by PR-88).
+
 ## PR-срезы
 
 The Russian heading is the required parser key; the map and prose are English. **Draft for owner approval** — not an instruction to implement. Each slice owns exactly one task.
@@ -577,2070 +585,5432 @@ The Russian heading is the required parser key; the map and prose are English. *
     {
       "id": "PR-01",
       "outcome": "Write docs/decisions/0032-server-in-rust.md (supersedes ADR-0031's \"FastAPI stays\" and 026's separate PostgreSQL stage PR-55…57",
-      "tasks": ["T001"],
-      "requirements": ["027-FR-001", "027-FR-002", "027-FR-003", "027-FR-007", "027-FR-022"],
-      "paths": ["docs/decisions/0032-server-in-rust.md", "docs/decisions/0031-shared-rust-core-and-task-sync.md", "docs/decisions/0028-modern-identity-authority.md", ".specify/memory/constitution.md", "specs/026-rust-core-sync/README.md"],
+      "tasks": [
+        "T001"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-002",
+        "027-FR-003",
+        "027-FR-007",
+        "027-FR-022"
+      ],
+      "paths": [
+        "docs/decisions/0032-server-in-rust.md",
+        "docs/decisions/0031-shared-rust-core-and-task-sync.md",
+        "docs/decisions/0028-modern-identity-authority.md",
+        ".specify/memory/constitution.md",
+        "specs/026-rust-core-sync/README.md"
+      ],
       "depends_on": [],
-      "tests": ["python3 scripts/check_spec_kit_specs.py"],
-      "acceptance": ["ADR-0032 exists with status proposed and the owner's acceptance recorded; constitution version bumped as PATCH; 026 README points to 027."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tests": [
+        "python3 scripts/check_spec_kit_specs.py"
+      ],
+      "acceptance": [
+        "ADR-0032 exists with status proposed and the owner's acceptance recorded; constitution version bumped as PATCH; 026 README points to 027."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-02",
       "outcome": "Create specs/027-rust-server/contracts/capability-dispositions.json with one entry for each of the 337 inventory ids (CAP-HTTP 153, CAP-MCP 7, CAP-JOB 26, CAP-CLI 8, CAP-MW 21,…",
-      "tasks": ["T002"],
-      "requirements": ["027-FR-001", "027-SC-003"],
-      "paths": ["specs/027-rust-server/contracts/capability-dispositions.json", "scripts/check_capability_inventory.py", "scripts/test_check_capability_inventory.py"],
+      "tasks": [
+        "T002"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-SC-003"
+      ],
+      "paths": [
+        "specs/027-rust-server/contracts/capability-dispositions.json",
+        "scripts/check_capability_inventory.py",
+        "scripts/test_check_capability_inventory.py",
+        "Makefile",
+        ".specify/gate-integrity.json"
+      ],
       "depends_on": [],
-      "tests": ["python3 -m pytest scripts/test_check_capability_inventory.py", "python3 scripts/check_capability_inventory.py"],
-      "acceptance": ["337 rows present with a final disposition; no row is pending-owner; the checker passes in default and `--final` mode on dispositions."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tests": [
+        "python3 -m pytest scripts/test_check_capability_inventory.py",
+        "python3 scripts/check_capability_inventory.py"
+      ],
+      "acceptance": [
+        "337 rows present with a final disposition; no row is pending-owner; the checker passes in default and `--final` mode on dispositions."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-03",
       "outcome": "Add the workspace members bb-server, bb-api, bb-app, bb-store, bb-providers, bb-conformance and bb-allure to rust/Cargo.toml with crate manifests and one-line lib.rs/main.rs…",
-      "tasks": ["T003"],
-      "requirements": ["027-FR-002", "027-FR-003"],
-      "paths": ["rust/Cargo.toml", "rust/Cargo.lock", "rust/crates/bb-server/Cargo.toml", "rust/crates/bb-api/Cargo.toml", "rust/crates/bb-app/Cargo.toml", "rust/crates/bb-store/Cargo.toml", "rust/crates/bb-providers/Cargo.toml", "rust/crates/bb-conformance/Cargo.toml", "rust/crates/bb-allure/Cargo.toml"],
+      "tasks": [
+        "T003"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/Cargo.toml",
+        "rust/Cargo.lock",
+        "rust/crates/bb-server/Cargo.toml",
+        "rust/crates/bb-api/Cargo.toml",
+        "rust/crates/bb-app/Cargo.toml",
+        "rust/crates/bb-store/Cargo.toml",
+        "rust/crates/bb-providers/Cargo.toml",
+        "rust/crates/bb-conformance/Cargo.toml",
+        "rust/crates/bb-allure/Cargo.toml",
+        "rust/crates/bb-client/Cargo.toml"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && cargo build --workspace && cargo clippy --workspace --all-targets -- -D warnings"],
-      "acceptance": ["Workspace builds with the new empty crates; no feature code; every new dependency is exact-pinned."],
-      "budget": {"product_loc": 4000, "files": 16},
+      "tests": [
+        "cd rust && cargo build --workspace && cargo clippy --workspace --all-targets -- -D warnings"
+      ],
+      "acceptance": [
+        "Workspace builds with the new empty crates; no feature code; every new dependency is exact-pinned."
+      ],
+      "budget": {
+        "product_loc": 4100,
+        "files": 17
+      },
       "implementer": "feature-implementer",
-      "oversize_reason": "rust/Cargo.lock is generated and counts as product lines (several thousand for axum/sqlx/reqwest/rmcp/object_store); handwritten manifests and entry points stay under 250 lines. Splitting would make parallel lanes edit the lockfile."
+      "oversize_reason": "rust/Cargo.lock is generated and counts as product lines (several thousand for axum/sqlx/reqwest/rmcp/object_store); handwritten manifests and entry points stay under 250 lines. Splitting would make parallel lanes edit the lockfile. Includes rusqlite =0.40.2 -> =0.39.0 in bb-client (owner decision 2026-10-15: one workspace; no sqlx release accepts libsqlite3-sys 0.38)."
     },
     {
       "id": "PR-04",
       "outcome": "Implement the dev-only Allure writer in rust/crates/bb-allure/src/ (writes allure-results/*-result.json with epic, feature, story, title and named steps through an…",
-      "tasks": ["T004"],
-      "requirements": ["027-FR-001", "027-SC-003"],
-      "paths": ["rust/crates/bb-allure/src"],
-      "depends_on": ["PR-03"],
-      "tests": ["cd rust && cargo test -p bb-allure", "python3 scripts/validate_allure_taxonomy.py --help"],
-      "acceptance": ["A sample Rust test emits a result the existing taxonomy validator accepts."],
-      "budget": {"product_loc": 220, "files": 3},
+      "tasks": [
+        "T004"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-allure/src"
+      ],
+      "depends_on": [
+        "PR-03"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-allure",
+        "python3 scripts/validate_allure_taxonomy.py --help"
+      ],
+      "acceptance": [
+        "A sample Rust test emits a result the existing taxonomy validator accepts."
+      ],
+      "budget": {
+        "product_loc": 220,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-05",
       "outcome": "Implement the conformance harness in rust/crates/bb-conformance/src/",
-      "tasks": ["T005"],
-      "requirements": ["027-FR-001", "027-FR-016", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/src"],
-      "depends_on": ["PR-03", "PR-04"],
-      "tests": ["cd rust && cargo test -p bb-conformance --lib"],
-      "acceptance": ["A smoke conformance test against the Python server writes a run report keyed by CAP id."],
-      "budget": {"product_loc": 380, "files": 6},
+      "tasks": [
+        "T005"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-016",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/src"
+      ],
+      "depends_on": [
+        "PR-03",
+        "PR-04"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-conformance --lib"
+      ],
+      "acceptance": [
+        "A smoke conformance test against the Python server writes a run report keyed by CAP id."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 6
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-06",
       "outcome": "Add the test control API to the frozen Python server (test environment only, the 027-FR-022 seam) in backend/app/api/test_control.py, mounted from backend/app/main.py only when…",
-      "tasks": ["T006"],
-      "requirements": ["027-FR-022", "027-FR-001"],
-      "paths": ["backend/app/api/test_control.py", "backend/app/main.py", "backend/app/core/config.py", "backend/tests/test_test_control.py"],
+      "tasks": [
+        "T006"
+      ],
+      "requirements": [
+        "027-FR-022",
+        "027-FR-001"
+      ],
+      "paths": [
+        "backend/app/api/test_control.py",
+        "backend/app/main.py",
+        "backend/app/core/config.py",
+        "backend/tests/test_test_control.py"
+      ],
       "depends_on": [],
-      "tests": ["cd backend && pytest tests/test_test_control.py"],
-      "acceptance": ["Operations behave as the contract; production configuration never routes the prefix."],
-      "budget": {"product_loc": 380, "files": 3},
+      "tests": [
+        "cd backend && pytest tests/test_test_control.py"
+      ],
+      "acceptance": [
+        "Operations behave as the contract; production configuration never routes the prefix."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-07",
       "outcome": "Extend the Python test control API with POST/DELETE /api/__test__/clock through one test clock seam in backend/app/core/test_clock.py (used by tasks, review, sync retention,…",
-      "tasks": ["T007"],
-      "requirements": ["027-FR-022", "027-FR-011"],
-      "paths": ["backend/app/api/test_control_providers.py", "backend/app/core/test_clock.py", "backend/app/container.py", "backend/app/main.py", "backend/tests/test_test_control_providers.py"],
-      "depends_on": ["PR-06"],
-      "tests": ["cd backend && pytest tests/test_test_control.py tests/test_test_control_providers.py"],
-      "acceptance": ["A held provider call can be released after consent is revoked; the call ledger carries no content."],
-      "budget": {"product_loc": 400, "files": 4},
+      "tasks": [
+        "T007"
+      ],
+      "requirements": [
+        "027-FR-022",
+        "027-FR-011"
+      ],
+      "paths": [
+        "backend/app/api/test_control_providers.py",
+        "backend/app/core/test_clock.py",
+        "backend/app/container.py",
+        "backend/app/main.py",
+        "backend/tests/test_test_control_providers.py"
+      ],
+      "depends_on": [
+        "PR-06"
+      ],
+      "tests": [
+        "cd backend && pytest tests/test_test_control.py tests/test_test_control_providers.py"
+      ],
+      "acceptance": [
+        "A held provider call can be released after consent is revoked; the call ledger carries no content."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-08",
       "outcome": "Fix inventory ambiguity #1 on the frozen Python server first (027-FR-022 defect fix)",
-      "tasks": ["T008"],
-      "requirements": ["027-FR-022", "027-FR-009"],
-      "paths": ["backend/app/api/middleware.py", "backend/tests/test_privacy_headers.py"],
+      "tasks": [
+        "T008"
+      ],
+      "requirements": [
+        "027-FR-022",
+        "027-FR-009"
+      ],
+      "paths": [
+        "backend/app/api/middleware.py",
+        "backend/tests/test_privacy_headers.py"
+      ],
       "depends_on": [],
-      "tests": ["cd backend && pytest tests/test_privacy_headers.py"],
-      "acceptance": ["The new test fails before and passes after the one-line fix; both servers will agree on CAP-MW-005."],
-      "budget": {"product_loc": 20, "files": 1},
+      "tests": [
+        "cd backend && pytest tests/test_privacy_headers.py"
+      ],
+      "acceptance": [
+        "The new test fails before and passes after the one-line fix; both servers will agree on CAP-MW-005."
+      ],
+      "budget": {
+        "product_loc": 20,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-09",
       "outcome": "Audit and move the shared JSON/audio vectors (research R15)",
-      "tasks": ["T009"],
-      "requirements": ["027-FR-003", "027-FR-006", "027-FR-016"],
-      "paths": ["contracts/fixtures", "backend/tests/fixtures", "specs/026-rust-core-sync/contracts/primitive-vectors.json", "specs/026-rust-core-sync/contracts/reference-store.json", "specs/026-rust-core-sync/contracts/web-presentation-vectors.json", "specs/026-rust-core-sync/contracts/web-presentation-resolutions.json", "rust/crates/bb-domain/tests", "rust/crates/bb-protocol/src/lib.rs", "rust/crates/bb-protocol/tests/contract/common.rs", "rust/bindings/swift/tests/workspace.rs", "rust/crates/bb-client/tests/import.rs", "backend/tests/test_review_formulation_vectors.py", "backend/tests/test_review_traces.py", "backend/tests/test_review_wire_fixtures.py", "backend/tests/test_sync_device_review.py", "backend/tests/test_sync_writer_boundary.py", "backend/tests/test_026_oracle_contracts.py", "backend/tests/test_026_primitive_vectors.py", "backend/tests/test_project_archive_traces.py", "backend/tests/test_review_flow_vectors.py", "backend/tests/test_sync_commands_api.py", "ios/BrainBuddyKit/Package.swift", "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RustLegacyReviewPrivateCodecTests.swift", "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RustWorkspaceBridgeTests.swift", "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/ReviewVectors.swift", "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift", "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift", "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ReviewWireTests.swift", "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTaskTraceReplayTests.swift", "frontend/src/features/tasks/__tests__/smartAddVectors.test.ts", "scripts/voice_evidence_report.py"],
-      "depends_on": [],
-      "tests": ["cd backend && pytest tests/test_026_oracle_contracts.py tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_project_archive_traces.py", "cd rust && cargo test -p bb-domain -p bb-protocol", "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests", "cd frontend && npm run test -- src/features/tasks/__tests__/smartAddVectors.test.ts"],
-      "acceptance": ["Every oracle test still passes from contracts/fixtures/; no transcript-like text, real WAV or content hash remains; any recomputed expectation is listed with its oracle."],
-      "budget": {"product_loc": 40, "files": 4},
-      "implementer": "mechanical-implementer"
+      "tasks": [
+        "T009"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-006",
+        "027-FR-016"
+      ],
+      "paths": [
+        "contracts/fixtures",
+        "backend/tests/fixtures",
+        "specs/026-rust-core-sync/contracts/primitive-vectors.json",
+        "specs/026-rust-core-sync/contracts/reference-store.json",
+        "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+        "specs/026-rust-core-sync/contracts/web-presentation-resolutions.json",
+        "rust/crates/bb-domain/tests",
+        "rust/crates/bb-protocol/src/lib.rs",
+        "rust/crates/bb-protocol/tests/contract/common.rs",
+        "rust/bindings/swift/tests/workspace.rs",
+        "rust/crates/bb-client/tests/import.rs",
+        "backend/tests/test_review_formulation_vectors.py",
+        "backend/tests/test_review_traces.py",
+        "backend/tests/test_review_wire_fixtures.py",
+        "backend/tests/test_sync_device_review.py",
+        "backend/tests/test_sync_writer_boundary.py",
+        "backend/tests/test_026_oracle_contracts.py",
+        "backend/tests/test_026_primitive_vectors.py",
+        "backend/tests/test_project_archive_traces.py",
+        "backend/tests/test_review_flow_vectors.py",
+        "backend/tests/test_sync_commands_api.py",
+        "ios/BrainBuddyKit/Package.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RustLegacyReviewPrivateCodecTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/RustWorkspaceBridgeTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/TestSupport/ReviewVectors.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTraceReplayTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ProjectArchiveTraceReplayTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ReviewWireTests.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/ReviewTaskTraceReplayTests.swift",
+        "frontend/src/features/tasks/__tests__/smartAddVectors.test.ts",
+        "scripts/voice_evidence_report.py",
+        "Makefile",
+        ".specify/gate-integrity.json",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/Resources",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources",
+        "frontend/src/features/review/__tests__"
+      ],
+      "depends_on": [
+        "PR-02"
+      ],
+      "tests": [
+        "cd backend && pytest tests/test_026_oracle_contracts.py tests/test_review_formulation_vectors.py tests/test_review_flow_vectors.py tests/test_project_archive_traces.py",
+        "cd rust && cargo test -p bb-domain -p bb-protocol",
+        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyCoreTests",
+        "cd frontend && npm run test -- src/features/tasks/__tests__/smartAddVectors.test.ts"
+      ],
+      "acceptance": [
+        "Every oracle test still passes from contracts/fixtures/; no transcript-like text, real WAV or content hash remains; any recomputed expectation is listed with its oracle."
+      ],
+      "budget": {
+        "product_loc": 40,
+        "files": 5
+      },
+      "implementer": "feature-implementer"
     },
     {
       "id": "PR-10",
       "outcome": "Add scripts/check_evidence_hygiene.py with scripts/test_check_evidence_hygiene.py",
-      "tasks": ["T010"],
-      "requirements": ["027-FR-016", "027-SC-004"],
-      "paths": ["scripts/check_evidence_hygiene.py", "scripts/test_check_evidence_hygiene.py"],
-      "depends_on": [],
-      "tests": ["python3 -m pytest scripts/test_check_evidence_hygiene.py"],
-      "acceptance": ["Planted violations fail; the current tree passes."],
-      "budget": {"product_loc": 140, "files": 1},
+      "tasks": [
+        "T010"
+      ],
+      "requirements": [
+        "027-FR-016",
+        "027-SC-004"
+      ],
+      "paths": [
+        "scripts/check_evidence_hygiene.py",
+        "scripts/test_check_evidence_hygiene.py",
+        "Makefile",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-09"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "Planted violations fail; the current tree passes."
+      ],
+      "budget": {
+        "product_loc": 140,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-11",
       "outcome": "Document the new server configuration in .env.example",
-      "tasks": ["T011"],
-      "requirements": ["027-FR-016", "027-FR-018"],
-      "paths": [".env.example"],
+      "tasks": [
+        "T011"
+      ],
+      "requirements": [
+        "027-FR-016",
+        "027-FR-018"
+      ],
+      "paths": [
+        ".env.example"
+      ],
       "depends_on": [],
-      "tests": ["python3 scripts/classify_path_risk.py --help"],
-      "acceptance": ["Every variable the Rust server reads at startup is documented; classified ASK and landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 30, "files": 1},
+      "tests": [
+        "python3 scripts/classify_path_risk.py --help"
+      ],
+      "acceptance": [
+        "Every variable the Rust server reads at startup is documented; classified ASK and landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 30,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-12",
       "outcome": "Replace every Python hook in the Playwright suites with the test control API",
-      "tasks": ["T012"],
-      "requirements": ["027-FR-001", "027-SC-002"],
-      "paths": ["frontend/tests/e2e/testControl.ts", "frontend/tests/e2e/gtdHelpers.ts", "frontend/tests/e2e/admin-users.spec.ts", "frontend/tests/e2e/weekly-review.spec.ts", "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts", "compose.yaml", "scripts/run_playwright_e2e.sh"],
-      "depends_on": ["PR-06", "PR-07"],
-      "tests": ["make test-e2e"],
-      "acceptance": ["No Playwright spec shells into a container or runs Python; the suite is green against the Python stack."],
-      "budget": {"product_loc": 30, "files": 2},
+      "tasks": [
+        "T012"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-SC-002"
+      ],
+      "paths": [
+        "frontend/tests/e2e/testControl.ts",
+        "frontend/tests/e2e/gtdHelpers.ts",
+        "frontend/tests/e2e/admin-users.spec.ts",
+        "frontend/tests/e2e/weekly-review.spec.ts",
+        "frontend/tests/native-tasks-voice-brain-dump.compose.spec.ts",
+        "compose.yaml",
+        "scripts/run_playwright_e2e.sh"
+      ],
+      "depends_on": [
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "make test-e2e"
+      ],
+      "acceptance": [
+        "No Playwright spec shells into a container or runs Python; the suite is green against the Python stack."
+      ],
+      "budget": {
+        "product_loc": 30,
+        "files": 2
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-13",
       "outcome": "Retarget the modern-auth E2E to the test control provider mocks",
-      "tasks": ["T013"],
-      "requirements": ["027-FR-001", "027-FR-007", "027-SC-002"],
-      "paths": ["scripts/run_modern_auth_e2e.py", "backend/tests/modern_auth_e2e_app.py", "frontend/tests/modern-auth.spec.ts"],
-      "depends_on": ["PR-06", "PR-07"],
-      "tests": ["python3 scripts/run_modern_auth_e2e.py"],
-      "acceptance": ["The modern-auth spec passes against the Python server with no monkeypatched app."],
-      "budget": {"product_loc": 200, "files": 1},
+      "tasks": [
+        "T013"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-007",
+        "027-SC-002"
+      ],
+      "paths": [
+        "scripts/run_modern_auth_e2e.py",
+        "backend/tests/modern_auth_e2e_app.py",
+        "frontend/tests/modern-auth.spec.ts"
+      ],
+      "depends_on": [
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "python3 scripts/run_modern_auth_e2e.py"
+      ],
+      "acceptance": [
+        "The modern-auth spec passes against the Python server with no monkeypatched app."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-14",
       "outcome": "Point the Rust client and CLI backend tests at a server base URL plus the test control API",
-      "tasks": ["T014"],
-      "requirements": ["027-FR-001", "027-FR-006"],
-      "paths": ["rust/crates/bb-client/tests/e2e_backend.rs", "rust/crates/bb-client/tests/hints_backend.rs", "rust/crates/bb-client/tests/support/sse_backend.py", "rust/crates/bb-client/tests/support/mod.rs", "cli/tests/backend_fixture.py", "cli/tests/task_journey.rs"],
-      "depends_on": ["PR-06", "PR-07", "PR-09"],
-      "tests": ["cd rust && BB_BACKEND_BASE_URL=http://localhost:8000 cargo test -p bb-client --test e2e_backend --test hints_backend", "cd cli && BB_BACKEND_BASE_URL=http://localhost:8000 cargo test --test task_journey"],
-      "acceptance": ["The same tests pass against the Python server via base URL; no Python is spawned."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T014"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-client/tests/e2e_backend.rs",
+        "rust/crates/bb-client/tests/hints_backend.rs",
+        "rust/crates/bb-client/tests/support/sse_backend.py",
+        "rust/crates/bb-client/tests/support/mod.rs",
+        "cli/tests/backend_fixture.py",
+        "cli/tests/task_journey.rs"
+      ],
+      "depends_on": [
+        "PR-06",
+        "PR-07",
+        "PR-09"
+      ],
+      "tests": [
+        "cd rust && BB_BACKEND_BASE_URL=http://localhost:8000 cargo test -p bb-client --test e2e_backend --test hints_backend",
+        "cd cli && BB_BACKEND_BASE_URL=http://localhost:8000 cargo test --test task_journey"
+      ],
+      "acceptance": [
+        "The same tests pass against the Python server via base URL; no Python is spawned."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-15",
       "outcome": "Retarget the 026 rehearsal harness to the test control API (seed_stalled → clock, seeding → invites/admin/flags)",
-      "tasks": ["T015"],
-      "requirements": ["027-FR-006", "027-SC-004"],
-      "paths": ["scripts/rehearsal/run.py", "scripts/rehearsal/rehearsal_backend.py", "scripts/rehearsal/ui_backend.py", "ios/scripts/rehearsal_backend.py", "ios/BrainBuddyUITests/Support/Rehearsal.swift", "macos/Tests/BrainBuddyMacTests/MacRehearsalTests.swift"],
-      "depends_on": ["PR-06", "PR-07"],
-      "tests": ["python3 scripts/rehearsal/run.py --help", "cd macos && swift test --filter MacRehearsalTests"],
-      "acceptance": ["The rehearsal drives any server by base URL; no in-process Python fixture remains in the harness path."],
-      "budget": {"product_loc": 250, "files": 4},
+      "tasks": [
+        "T015"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-SC-004"
+      ],
+      "paths": [
+        "scripts/rehearsal/run.py",
+        "scripts/rehearsal/rehearsal_backend.py",
+        "scripts/rehearsal/ui_backend.py",
+        "ios/scripts/rehearsal_backend.py",
+        "ios/BrainBuddyUITests/Support/Rehearsal.swift",
+        "macos/Tests/BrainBuddyMacTests/MacRehearsalTests.swift"
+      ],
+      "depends_on": [
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "python3 scripts/rehearsal/run.py --help",
+        "cd macos && swift test --filter MacRehearsalTests"
+      ],
+      "acceptance": [
+        "The rehearsal drives any server by base URL; no in-process Python fixture remains in the harness path."
+      ],
+      "budget": {
+        "product_loc": 250,
+        "files": 4
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-16",
       "outcome": "Write the `identity` and `flags` schema migrations rust/crates/bb-store/migrations/0100_identity.sql and rust/crates/bb-store/migrations/0150_flags.sql",
-      "tasks": ["T016"],
-      "requirements": ["027-FR-007", "027-FR-008", "027-FR-015"],
-      "paths": ["rust/crates/bb-store/migrations/0100_identity.sql", "rust/crates/bb-store/migrations/0150_flags.sql"],
+      "tasks": [
+        "T016"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-008",
+        "027-FR-015"
+      ],
+      "paths": [
+        "rust/crates/bb-store/migrations/0100_identity.sql",
+        "rust/crates/bb-store/migrations/0150_flags.sql"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"],
-      "acceptance": ["Migrations apply to an empty PostgreSQL; tables map 1:1 to CAP-STORE-005/010/014. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 260, "files": 2},
+      "tests": [
+        "cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"
+      ],
+      "acceptance": [
+        "Migrations apply to an empty PostgreSQL; tables map 1:1 to CAP-STORE-005/010/014. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-17",
       "outcome": "Write the `tasks` schema migration rust/crates/bb-store/migrations/0200_tasks.sql",
-      "tasks": ["T017"],
-      "requirements": ["027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/migrations/0200_tasks.sql"],
+      "tasks": [
+        "T017"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/migrations/0200_tasks.sql"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"],
-      "acceptance": ["Applies after 0100; every table carries owner_id. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 240, "files": 1},
+      "tests": [
+        "cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"
+      ],
+      "acceptance": [
+        "Applies after 0100; every table carries owner_id. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 240,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-18",
       "outcome": "Write the `sync`, `jobs` and `control` schema migrations rust/crates/bb-store/migrations/0210_sync.sql, rust/crates/bb-store/migrations/0220_jobs.sql and…",
-      "tasks": ["T018"],
-      "requirements": ["027-FR-006", "027-FR-017"],
-      "paths": ["rust/crates/bb-store/migrations/0210_sync.sql", "rust/crates/bb-store/migrations/0220_jobs.sql", "rust/crates/bb-store/migrations/0230_control.sql"],
+      "tasks": [
+        "T018"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-017"
+      ],
+      "paths": [
+        "rust/crates/bb-store/migrations/0210_sync.sql",
+        "rust/crates/bb-store/migrations/0220_jobs.sql",
+        "rust/crates/bb-store/migrations/0230_control.sql"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"],
-      "acceptance": ["Applies after 0200; matches CAP-STORE-003/004 and the R11 applied set. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 300, "files": 3},
+      "tests": [
+        "cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"
+      ],
+      "acceptance": [
+        "Applies after 0200; matches CAP-STORE-003/004 and the R11 applied set. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-19",
       "outcome": "Write the `crt` schema migration rust/crates/bb-store/migrations/0300_crt.sql",
-      "tasks": ["T019"],
-      "requirements": ["027-FR-013", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/migrations/0300_crt.sql"],
+      "tasks": [
+        "T019"
+      ],
+      "requirements": [
+        "027-FR-013",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/migrations/0300_crt.sql"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"],
-      "acceptance": ["Applies after 0230; replaces the JSON tree files and crt_commands.sqlite3. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 180, "files": 1},
+      "tests": [
+        "cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"
+      ],
+      "acceptance": [
+        "Applies after 0230; replaces the JSON tree files and crt_commands.sqlite3. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 180,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-20",
       "outcome": "Write the `voice` and `agents` schema migrations rust/crates/bb-store/migrations/0400_voice.sql and rust/crates/bb-store/migrations/0500_agents.sql",
-      "tasks": ["T020"],
-      "requirements": ["027-FR-012", "027-FR-014", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/migrations/0400_voice.sql", "rust/crates/bb-store/migrations/0500_agents.sql"],
+      "tasks": [
+        "T020"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-014",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/migrations/0400_voice.sql",
+        "rust/crates/bb-store/migrations/0500_agents.sql"
+      ],
       "depends_on": [],
-      "tests": ["cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"],
-      "acceptance": ["Applies after 0300; matches CAP-STORE-006/008. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 260, "files": 2},
+      "tests": [
+        "cd rust && sqlx migrate run --source crates/bb-store/migrations --database-url $DATABASE_URL"
+      ],
+      "acceptance": [
+        "Applies after 0300; matches CAP-STORE-006/008. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-21",
       "outcome": "Implement the bb-store skeleton in rust/crates/bb-store/src/",
-      "tasks": ["T021"],
-      "requirements": ["027-FR-002", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src", "rust/crates/bb-store/.sqlx", "rust/crates/bb-store/tests/schema_ownership.rs"],
-      "depends_on": ["PR-03", "PR-16"],
-      "tests": ["cd rust && cargo test -p bb-store"],
-      "acceptance": ["Migrations embed and run; the ownership test passes on the empty modules and fails on a planted cross-schema query."],
-      "budget": {"product_loc": 300, "files": 16},
+      "tasks": [
+        "T021"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src",
+        "rust/crates/bb-store/.sqlx",
+        "rust/crates/bb-store/tests/schema_ownership.rs"
+      ],
+      "depends_on": [
+        "PR-03",
+        "PR-16"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store"
+      ],
+      "acceptance": [
+        "Migrations embed and run; the ownership test passes on the empty modules and fails on a planted cross-schema query."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 16
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Fifteen one-line module stubs fix the module/file ownership map so parallel store lanes never share a file; handwritten logic stays under 300 lines."
     },
     {
       "id": "PR-22",
       "outcome": "Implement the bb-providers skeleton in rust/crates/bb-providers/src/",
-      "tasks": ["T022"],
-      "requirements": ["027-FR-011", "027-FR-012"],
-      "paths": ["rust/crates/bb-providers/src"],
-      "depends_on": ["PR-03"],
-      "tests": ["cd rust && cargo test -p bb-providers"],
-      "acceptance": ["Mocks record calls without content; a held call blocks until released; a missing bucket fails startup with a named, value-free error."],
-      "budget": {"product_loc": 380, "files": 12},
+      "tasks": [
+        "T022"
+      ],
+      "requirements": [
+        "027-FR-011",
+        "027-FR-012"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src"
+      ],
+      "depends_on": [
+        "PR-03"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers"
+      ],
+      "acceptance": [
+        "Mocks record calls without content; a held call blocks until released; a missing bucket fails startup with a named, value-free error."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 12
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-23",
       "outcome": "Implement the bb-app skeleton in rust/crates/bb-app/src/",
-      "tasks": ["T023"],
-      "requirements": ["027-FR-002", "027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src"],
-      "depends_on": ["PR-21", "PR-22"],
-      "tests": ["cd rust && cargo test -p bb-app && python3 scripts/check_crate_graph.py"],
-      "acceptance": ["All module stubs compile; no handler or SQL lives in bb-app."],
-      "budget": {"product_loc": 380, "files": 90},
+      "tasks": [
+        "T023"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src"
+      ],
+      "depends_on": [
+        "PR-21",
+        "PR-22"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app && python3 scripts/check_crate_graph.py"
+      ],
+      "acceptance": [
+        "All module stubs compile; no handler or SQL lives in bb-app."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 90
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "About ninety one-line stub files fix the module/file ownership map up front so every later lane owns disjoint files; real logic stays under 380 lines."
     },
     {
       "id": "PR-24",
       "outcome": "Implement the bb-api skeleton in rust/crates/bb-api/src/",
-      "tasks": ["T024"],
-      "requirements": ["027-FR-016", "027-FR-005"],
-      "paths": ["rust/crates/bb-api/src"],
-      "depends_on": ["PR-23"],
-      "tests": ["cd rust && cargo test -p bb-api"],
-      "acceptance": ["Health answers like Python; error mapping table is unit-tested."],
-      "budget": {"product_loc": 320, "files": 24},
+      "tasks": [
+        "T024"
+      ],
+      "requirements": [
+        "027-FR-016",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src"
+      ],
+      "depends_on": [
+        "PR-23"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-api"
+      ],
+      "acceptance": [
+        "Health answers like Python; error mapping table is unit-tested."
+      ],
+      "budget": {
+        "product_loc": 320,
+        "files": 24
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Twenty surface stub modules are one line each; they let surface lanes own disjoint directories."
     },
     {
       "id": "PR-25",
       "outcome": "Implement the bb-server binary in rust/crates/bb-server/src/",
-      "tasks": ["T027"],
-      "requirements": ["027-FR-002", "027-FR-016"],
-      "paths": ["rust/crates/bb-server/src"],
-      "depends_on": ["PR-11", "PR-21", "PR-24"],
-      "tests": ["cd rust && cargo test -p bb-server config::tests::data_dir_is_ignored_with_warning", "cd rust && cargo test -p bb-server", "cd rust && cargo run -p bb-server -- serve; test $? -ne 0"],
-      "acceptance": ["`bb-server serve` without DATABASE_URL exits non-zero naming the variable; with Compose services it serves /health."],
-      "budget": {"product_loc": 380, "files": 10},
+      "tasks": [
+        "T027"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-server/src"
+      ],
+      "depends_on": [
+        "PR-11",
+        "PR-21",
+        "PR-24"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-server config::tests::data_dir_is_ignored_with_warning",
+        "cd rust && cargo test -p bb-server",
+        "cd rust && cargo run -p bb-server -- serve; test $? -ne 0"
+      ],
+      "acceptance": [
+        "`bb-server serve` without DATABASE_URL exits non-zero naming the variable; with Compose services it serves /health."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 10
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-26",
       "outcome": "Implement the Rust test control surface in rust/crates/bb-api/src/test_control/ behind `cfg(feature = \"test-control\")` and BRAIN_BUDDY_ENV=test",
-      "tasks": ["T028"],
-      "requirements": ["027-FR-001", "027-FR-022"],
-      "paths": ["rust/crates/bb-api/src/test_control"],
-      "depends_on": ["PR-24", "PR-25"],
-      "tests": ["cd rust && cargo test -p bb-api --features test-control test_control", "cd rust && cargo build -p bb-server --release && ! strings target/release/bb-server | grep -q '/__test__/'"],
-      "acceptance": ["Without the feature the binary contains no test-control route; with it, the clock and provider operations match the contract."],
-      "budget": {"product_loc": 300, "files": 11},
+      "tasks": [
+        "T028"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-022"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/test_control"
+      ],
+      "depends_on": [
+        "PR-24",
+        "PR-25"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-api --features test-control test_control",
+        "cd rust && cargo build -p bb-server --release && ! strings target/release/bb-server | grep -q '/__test__/'"
+      ],
+      "acceptance": [
+        "Without the feature the binary contains no test-control route; with it, the clock and provider operations match the contract."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 11
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-27",
       "outcome": "Implement the restore control ledger test-first (critical invariant, research R11) in rust/crates/bb-app/src/control/ and rust/crates/bb-store/src/control/",
-      "tasks": ["T030"],
-      "requirements": ["027-FR-006", "027-FR-009", "027-FR-010"],
-      "paths": ["rust/crates/bb-app/src/control/mod.rs", "rust/crates/bb-app/src/control/ledger.rs", "rust/crates/bb-app/src/control/reconciler.rs", "rust/crates/bb-store/src/control"],
-      "depends_on": ["PR-18", "PR-23"],
-      "tests": ["cd rust && cargo test -p bb-app control", "cd rust && cargo test -p bb-store control"],
-      "acceptance": ["Concurrent writers produce a gapless sequence; a crash between entry and HEAD is repaired; a planted gap keeps the server closed."],
-      "budget": {"product_loc": 400, "files": 5},
+      "tasks": [
+        "T030"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-009",
+        "027-FR-010"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/control/mod.rs",
+        "rust/crates/bb-app/src/control/ledger.rs",
+        "rust/crates/bb-app/src/control/reconciler.rs",
+        "rust/crates/bb-store/src/control"
+      ],
+      "depends_on": [
+        "PR-18",
+        "PR-23"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app control",
+        "cd rust && cargo test -p bb-store control"
+      ],
+      "acceptance": [
+        "Concurrent writers produce a gapless sequence; a crash between entry and HEAD is repaired; a planted gap keeps the server closed."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 5
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata for the control_applied queries counts as product lines; handwritten Rust stays under 400."
     },
     {
       "id": "PR-28",
       "outcome": "Port runtime feature flags in rust/crates/bb-store/src/flags/, rust/crates/bb-app/src/flags/ and rust/crates/bb-api/src/test_control/flags.rs",
-      "tasks": ["T031"],
-      "requirements": ["027-FR-015", "027-FR-003"],
-      "paths": ["rust/crates/bb-store/src/flags", "rust/crates/bb-app/src/flags", "rust/crates/bb-api/src/test_control/flags.rs"],
-      "depends_on": ["PR-16", "PR-26", "PR-27"],
-      "tests": ["cd rust && cargo test -p bb-app flags && cargo test -p bb-store flags"],
-      "acceptance": ["Effective resolution matches Python for every mode; a store failure answers fail-closed."],
-      "budget": {"product_loc": 340, "files": 6},
+      "tasks": [
+        "T031"
+      ],
+      "requirements": [
+        "027-FR-015",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/flags",
+        "rust/crates/bb-app/src/flags",
+        "rust/crates/bb-api/src/test_control/flags.rs"
+      ],
+      "depends_on": [
+        "PR-16",
+        "PR-26",
+        "PR-27"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app flags && cargo test -p bb-store flags"
+      ],
+      "acceptance": [
+        "Effective resolution matches Python for every mode; a store failure answers fail-closed."
+      ],
+      "budget": {
+        "product_loc": 340,
+        "files": 6
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 340."
     },
     {
       "id": "PR-29",
       "outcome": "Implement Identity repositories in rust/crates/bb-store/src/identity/",
-      "tasks": ["T032"],
-      "requirements": ["027-FR-007", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/identity"],
-      "depends_on": ["PR-16", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store identity"],
-      "acceptance": ["Every query filters by owner where owner-scoped; ownership test green."],
-      "budget": {"product_loc": 320, "files": 4},
+      "tasks": [
+        "T032"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/identity"
+      ],
+      "depends_on": [
+        "PR-16",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store identity"
+      ],
+      "acceptance": [
+        "Every query filters by owner where owner-scoped; ownership test green."
+      ],
+      "budget": {
+        "product_loc": 320,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 320."
     },
     {
       "id": "PR-30",
       "outcome": "Implement the session layer test-first (session/cookie properties and owner isolation are critical invariants) in rust/crates/bb-app/src/identity/,…",
-      "tasks": ["T033"],
-      "requirements": ["027-FR-007", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/identity", "rust/crates/bb-api/src/session.rs", "rust/crates/bb-api/src/test_control/invites.rs", "rust/crates/bb-api/src/test_control/admin.rs"],
-      "depends_on": ["PR-26", "PR-27", "PR-29"],
-      "tests": ["cd rust && cargo test -p bb-app identity && cargo test -p bb-api session"],
-      "acceptance": ["Tests for each validity rule failed before implementation; cookie attributes asserted in both environments."],
-      "budget": {"product_loc": 380, "files": 7},
+      "tasks": [
+        "T033"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/identity",
+        "rust/crates/bb-api/src/session.rs",
+        "rust/crates/bb-api/src/test_control/invites.rs",
+        "rust/crates/bb-api/src/test_control/admin.rs"
+      ],
+      "depends_on": [
+        "PR-26",
+        "PR-27",
+        "PR-29"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app identity && cargo test -p bb-api session"
+      ],
+      "acceptance": [
+        "Tests for each validity rule failed before implementation; cookie attributes asserted in both environments."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 7
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-31",
       "outcome": "Implement the job ledger test-first (fencing is a critical invariant) in rust/crates/bb-store/src/tasks/jobs/",
-      "tasks": ["T035"],
-      "requirements": ["027-FR-017"],
-      "paths": ["rust/crates/bb-store/src/tasks/jobs"],
-      "depends_on": ["PR-18", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store jobs"],
-      "acceptance": ["Two concurrent claimers never run one job twice; a stale fence is rejected at commit."],
-      "budget": {"product_loc": 360, "files": 3},
+      "tasks": [
+        "T035"
+      ],
+      "requirements": [
+        "027-FR-017"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/jobs"
+      ],
+      "depends_on": [
+        "PR-18",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store jobs"
+      ],
+      "acceptance": [
+        "Two concurrent claimers never run one job twice; a stale fence is rejected at commit."
+      ],
+      "budget": {
+        "product_loc": 360,
+        "files": 3
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 360."
     },
     {
       "id": "PR-32",
       "outcome": "Implement the worker role in rust/crates/bb-app/src/jobs/ and rust/crates/bb-api/src/test_control/sweeps.rs",
-      "tasks": ["T036"],
-      "requirements": ["027-FR-017"],
-      "paths": ["rust/crates/bb-app/src/jobs/mod.rs", "rust/crates/bb-app/src/jobs/config.rs", "rust/crates/bb-app/src/jobs/runner.rs", "rust/crates/bb-app/src/jobs/registry.rs", "rust/crates/bb-api/src/test_control/sweeps.rs"],
-      "depends_on": ["PR-26", "PR-31"],
-      "tests": ["cd rust && cargo test -p bb-app jobs"],
-      "acceptance": ["Two worker processes against one database run each due job exactly once; job writes after an owner-generation bump are rejected."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T036"
+      ],
+      "requirements": [
+        "027-FR-017"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/jobs/mod.rs",
+        "rust/crates/bb-app/src/jobs/config.rs",
+        "rust/crates/bb-app/src/jobs/runner.rs",
+        "rust/crates/bb-app/src/jobs/registry.rs",
+        "rust/crates/bb-api/src/test_control/sweeps.rs"
+      ],
+      "depends_on": [
+        "PR-26",
+        "PR-31"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app jobs"
+      ],
+      "acceptance": [
+        "Two worker processes against one database run each due job exactly once; job writes after an owner-generation bump are rejected."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-33",
       "outcome": "Add PostgreSQL and MinIO services plus `server` (bb-server serve) and `worker` services under a `rust` profile to compose.yaml, and a multi-stage rust/Dockerfile whose…",
-      "tasks": ["T037"],
-      "requirements": ["027-FR-002", "027-SC-001"],
-      "paths": ["compose.yaml", "rust/Dockerfile", "rust/.dockerignore"],
-      "depends_on": ["PR-12", "PR-25"],
-      "tests": ["docker compose --profile rust up -d --build && curl -fsS localhost:8001/health"],
-      "acceptance": ["The Rust stack starts locally beside the Python one; `command -v python3` is empty in the production target."],
-      "budget": {"product_loc": 160, "files": 3},
+      "tasks": [
+        "T037"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-SC-001"
+      ],
+      "paths": [
+        "compose.yaml",
+        "rust/Dockerfile",
+        "rust/.dockerignore"
+      ],
+      "depends_on": [
+        "PR-12",
+        "PR-25"
+      ],
+      "tests": [
+        "docker compose --profile rust up -d --build && curl -fsS localhost:8001/health"
+      ],
+      "acceptance": [
+        "The Rust stack starts locally beside the Python one; `command -v python3` is empty in the production target."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-34",
       "outcome": "Add scripts/check_crate_graph.py with scripts/test_check_crate_graph.py over `cargo metadata`",
-      "tasks": ["T038"],
-      "requirements": ["027-FR-008", "027-SC-006"],
-      "paths": ["scripts/check_crate_graph.py", "scripts/test_check_crate_graph.py", "rust/clippy.toml"],
-      "depends_on": ["PR-03"],
-      "tests": ["python3 -m pytest scripts/test_check_crate_graph.py && python3 scripts/check_crate_graph.py"],
-      "acceptance": ["A planted bb-api → bb-store edge and a cross-module store import both fail."],
-      "budget": {"product_loc": 200, "files": 2},
+      "tasks": [
+        "T038"
+      ],
+      "requirements": [
+        "027-FR-008",
+        "027-SC-006"
+      ],
+      "paths": [
+        "scripts/check_crate_graph.py",
+        "scripts/test_check_crate_graph.py",
+        "rust/clippy.toml"
+      ],
+      "depends_on": [
+        "PR-03"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_check_crate_graph.py && python3 scripts/check_crate_graph.py"
+      ],
+      "acceptance": [
+        "A planted bb-api → bb-store edge and a cross-module store import both fail."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-35",
       "outcome": "Teach scripts/validate_coverage_floor.py to read cargo-llvm-cov lcov/cobertura (line and region) and add rust/coverage-floor.json at the first green measurement of each new…",
-      "tasks": ["T039"],
-      "requirements": ["027-FR-001"],
-      "paths": ["scripts/validate_coverage_floor.py", "scripts/test_validate_coverage_floor.py", "rust/coverage-floor.json"],
-      "depends_on": ["PR-23"],
-      "tests": ["python3 -m pytest scripts/test_validate_coverage_floor.py"],
-      "acceptance": ["Python floors unchanged; the Rust floor file validates against a sample lcov."],
-      "budget": {"product_loc": 120, "files": 2},
+      "tasks": [
+        "T039"
+      ],
+      "requirements": [
+        "027-FR-001"
+      ],
+      "paths": [
+        "scripts/validate_coverage_floor.py",
+        "scripts/test_validate_coverage_floor.py",
+        "rust/coverage-floor.json"
+      ],
+      "depends_on": [
+        "PR-23"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_validate_coverage_floor.py"
+      ],
+      "acceptance": [
+        "Python floors unchanged; the Rust floor file validates against a sample lcov."
+      ],
+      "budget": {
+        "product_loc": 120,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-36",
       "outcome": "Add Makefile targets `dev-server`, `test-server` (cargo test with bb-allure results + llvm-cov floor), `conformance BASE_URL=… [FILTER=…]`, and wire…",
-      "tasks": ["T040"],
-      "requirements": ["027-FR-001", "027-SC-003"],
-      "paths": ["Makefile", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-02", "PR-05", "PR-10", "PR-33", "PR-34", "PR-35"],
-      "tests": ["make check-specs validate-ci", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["Targets run locally; gate integrity re-recorded; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 60, "files": 2},
+      "tasks": [
+        "T040"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-SC-003"
+      ],
+      "paths": [
+        "Makefile",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-02",
+        "PR-05",
+        "PR-09",
+        "PR-10",
+        "PR-33",
+        "PR-34",
+        "PR-35"
+      ],
+      "tests": [
+        "make check-specs validate-ci",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "Targets run locally; gate integrity re-recorded; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 60,
+        "files": 2
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-37",
       "outcome": "Extend .github/workflows/ci.yml with a `rust-server` lane (PostgreSQL + MinIO service containers, fmt, clippy -D warnings, `make test-server`, llvm-cov floor, crate graph, sqlx…",
-      "tasks": ["T041"],
-      "requirements": ["027-FR-001", "027-SC-001", "027-SC-003"],
-      "paths": [".github/workflows/ci.yml"],
-      "depends_on": ["PR-36"],
-      "tests": ["make validate-ci"],
-      "acceptance": ["Candidate CI runs both conformance targets and the Rust gates; approval recorded for the exact SHA. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 180, "files": 1},
+      "tasks": [
+        "T041"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-SC-001",
+        "027-SC-003"
+      ],
+      "paths": [
+        ".github/workflows/ci.yml"
+      ],
+      "depends_on": [
+        "PR-36"
+      ],
+      "tests": [
+        "make validate-ci"
+      ],
+      "acceptance": [
+        "Candidate CI runs both conformance targets and the Rust gates; approval recorded for the exact SHA. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 180,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-38",
       "outcome": "Add a cargo-mutants `outcomes.json` parser to scripts/mutation_gate.py with scripts/test_mutation_gate.py cases, rust/mutation-observed-scope.txt naming the Rust…",
-      "tasks": ["T042"],
-      "requirements": ["027-FR-001", "027-FR-017"],
-      "paths": ["scripts/mutation_gate.py", "scripts/test_mutation_gate.py", "rust/mutation-observed-scope.txt", ".github/workflows/mutation-quality.yml", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-36"],
-      "tests": ["python3 -m pytest scripts/test_mutation_gate.py", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["Nightly observed runs report the Rust scope; the Python enforced scope is untouched. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 160, "files": 4},
+      "tasks": [
+        "T042"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-017"
+      ],
+      "paths": [
+        "scripts/mutation_gate.py",
+        "scripts/test_mutation_gate.py",
+        "rust/mutation-observed-scope.txt",
+        ".github/workflows/mutation-quality.yml",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-36"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_mutation_gate.py",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "Nightly observed runs report the Rust scope; the Python enforced scope is untouched. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-39",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-001..006, CAP-MW-001..008, CAP-MW-015..016 and the release-epoch contract",
-      "tasks": ["T043"],
-      "requirements": ["027-FR-001", "027-FR-016", "027-FR-018", "027-SC-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-conformance/tests/platform.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test platform"],
-      "acceptance": ["Every `port` row of CAP-HTTP-001..006, CAP-MW-001..008, CAP-MW-015..016 and the release-epoch contract has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T043"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-016",
+        "027-FR-018",
+        "027-SC-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/platform.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test platform"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-001..006, CAP-MW-001..008, CAP-MW-015..016 and the release-epoch contract has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-40",
       "outcome": "Implement the cross-cutting middleware in rust/crates/bb-api/src/middleware/",
-      "tasks": ["T025"],
-      "requirements": ["027-FR-016", "027-FR-005"],
-      "paths": ["rust/crates/bb-api/src/middleware"],
-      "depends_on": ["PR-24", "PR-39"],
-      "tests": ["cd rust && cargo test -p bb-api middleware", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform"],
-      "acceptance": ["Platform conformance rows for the middleware pass on Rust; log lines never contain request bodies."],
-      "budget": {"product_loc": 320, "files": 5},
+      "tasks": [
+        "T025"
+      ],
+      "requirements": [
+        "027-FR-016",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/middleware"
+      ],
+      "depends_on": [
+        "PR-24",
+        "PR-39"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-api middleware",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform"
+      ],
+      "acceptance": [
+        "Platform conformance rows for the middleware pass on Rust; log lines never contain request bodies."
+      ],
+      "budget": {
+        "product_loc": 320,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-41",
       "outcome": "Implement shared extractors and docs in rust/crates/bb-api/src/extract/ and rust/crates/bb-api/src/docs.rs",
-      "tasks": ["T026"],
-      "requirements": ["027-FR-001", "027-FR-005"],
-      "paths": ["rust/crates/bb-api/src/extract", "rust/crates/bb-api/src/docs.rs"],
-      "depends_on": ["PR-24", "PR-39"],
-      "tests": ["cd rust && cargo test -p bb-api extract", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform"],
-      "acceptance": ["Docs routes and extractor behaviors match the Python rows."],
-      "budget": {"product_loc": 340, "files": 6},
+      "tasks": [
+        "T026"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/extract",
+        "rust/crates/bb-api/src/docs.rs"
+      ],
+      "depends_on": [
+        "PR-24",
+        "PR-39"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-api extract",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform"
+      ],
+      "acceptance": [
+        "Docs routes and extractor behaviors match the Python rows."
+      ],
+      "budget": {
+        "product_loc": 340,
+        "files": 6
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-42",
       "outcome": "Implement the release-epoch contract test-first (the 426 no-write rule is a critical invariant) in rust/crates/bb-api/src/epoch.rs, rust/crates/bb-api/src/client_header.rs and…",
-      "tasks": ["T029"],
-      "requirements": ["027-FR-018", "027-FR-016"],
-      "paths": ["rust/crates/bb-api/src/epoch.rs", "rust/crates/bb-api/src/client_header.rs", "rust/crates/bb-api/src/meta"],
-      "depends_on": ["PR-39", "PR-40"],
-      "tests": ["cd rust && cargo test -p bb-api epoch", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform epoch"],
-      "acceptance": ["Every exempt route answers without the header; a gated write without it returns 426 and the test-control read-back shows nothing written."],
-      "budget": {"product_loc": 260, "files": 4},
+      "tasks": [
+        "T029"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/epoch.rs",
+        "rust/crates/bb-api/src/client_header.rs",
+        "rust/crates/bb-api/src/meta"
+      ],
+      "depends_on": [
+        "PR-39",
+        "PR-40"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-api epoch",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test platform epoch"
+      ],
+      "acceptance": [
+        "Every exempt route answers without the header; a gated write without it returns 426 and the test-control read-back shows nothing written."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-43",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-040..043, CAP-MW-012, CAP-MW-014 (login), CAP-MW-019",
-      "tasks": ["T044"],
-      "requirements": ["027-FR-001", "027-FR-007", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/identity.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test identity"],
-      "acceptance": ["Every `port` row of CAP-HTTP-040..043, CAP-MW-012, CAP-MW-014 (login), CAP-MW-019 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T044"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-007",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/identity.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test identity"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-040..043, CAP-MW-012, CAP-MW-014 (login), CAP-MW-019 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-44",
       "outcome": "Port password auth in rust/crates/bb-api/src/auth/",
-      "tasks": ["T034"],
-      "requirements": ["027-FR-007", "027-FR-008", "027-FR-016"],
-      "paths": ["rust/crates/bb-api/src/auth"],
-      "depends_on": ["PR-28", "PR-30", "PR-41", "PR-42", "PR-43"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test identity"],
-      "acceptance": ["Identity conformance green on both servers."],
-      "budget": {"product_loc": 260, "files": 3},
+      "tasks": [
+        "T034"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-008",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/auth"
+      ],
+      "depends_on": [
+        "PR-28",
+        "PR-30",
+        "PR-41",
+        "PR-42",
+        "PR-43"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test identity"
+      ],
+      "acceptance": [
+        "Identity conformance green on both servers."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-45",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-010..024, CAP-MW-010, CAP-MW-013",
-      "tasks": ["T045"],
-      "requirements": ["027-FR-001", "027-FR-007", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/modern_auth.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test modern_auth"],
-      "acceptance": ["Every `port` row of CAP-HTTP-010..024, CAP-MW-010, CAP-MW-013 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T045"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-007",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/modern_auth.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test modern_auth"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-010..024, CAP-MW-010, CAP-MW-013 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-46",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-121..142",
-      "tasks": ["T046"],
-      "requirements": ["027-FR-001", "027-FR-003", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/tasks.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test tasks"],
-      "acceptance": ["Every `port` row of CAP-HTTP-121..142 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T046"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-003",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/tasks.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test tasks"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-121..142 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-47",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-150..156, CAP-HTTP-161..167, CAP-MW-009",
-      "tasks": ["T047"],
-      "requirements": ["027-FR-001", "027-FR-003", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/review.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test review"],
-      "acceptance": ["Every `port` row of CAP-HTTP-150..156, CAP-HTTP-161..167, CAP-MW-009 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T047"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-003",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/review.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test review"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-150..156, CAP-HTTP-161..167, CAP-MW-009 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-48",
       "outcome": "Port the modern-auth core in rust/crates/bb-store/src/identity/modern.rs, rust/crates/bb-app/src/modern_auth/{mod.rs,config.rs,crypto.rs,origin.rs,jobs.rs}",
-      "tasks": ["T048"],
-      "requirements": ["027-FR-007"],
-      "paths": ["rust/crates/bb-store/src/identity/modern.rs", "rust/crates/bb-app/src/modern_auth/mod.rs", "rust/crates/bb-app/src/modern_auth/config.rs", "rust/crates/bb-app/src/modern_auth/crypto.rs", "rust/crates/bb-app/src/modern_auth/origin.rs", "rust/crates/bb-app/src/modern_auth/jobs.rs"],
-      "depends_on": ["PR-30", "PR-32"],
-      "tests": ["cd rust && cargo test -p bb-app modern_auth && cargo test -p bb-store identity"],
-      "acceptance": ["Crypto readiness and the origin guard match Python; the cleanup job is job-tested."],
-      "budget": {"product_loc": 400, "files": 6},
+      "tasks": [
+        "T048"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/identity/modern.rs",
+        "rust/crates/bb-app/src/modern_auth/mod.rs",
+        "rust/crates/bb-app/src/modern_auth/config.rs",
+        "rust/crates/bb-app/src/modern_auth/crypto.rs",
+        "rust/crates/bb-app/src/modern_auth/origin.rs",
+        "rust/crates/bb-app/src/modern_auth/jobs.rs"
+      ],
+      "depends_on": [
+        "PR-30",
+        "PR-32"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app modern_auth && cargo test -p bb-store identity"
+      ],
+      "acceptance": [
+        "Crypto readiness and the origin guard match Python; the cleanup job is job-tested."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 6
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata for the modern-auth repositories counts as product lines; handwritten Rust stays under 400."
     },
     {
       "id": "PR-49",
       "outcome": "Port email delivery in rust/crates/bb-providers/src/smtp/, rust/crates/bb-app/src/modern_auth/delivery.rs and rust/crates/bb-api/src/test_control/mail.rs",
-      "tasks": ["T049"],
-      "requirements": ["027-FR-007"],
-      "paths": ["rust/crates/bb-providers/src/smtp", "rust/crates/bb-app/src/modern_auth/delivery.rs", "rust/crates/bb-api/src/test_control/mail.rs"],
-      "depends_on": ["PR-48"],
-      "tests": ["cd rust && cargo test -p bb-providers smtp && cargo test -p bb-app modern_auth::delivery"],
-      "acceptance": ["A queued mail job is sent once across two workers; the test mailbox shows it."],
-      "budget": {"product_loc": 300, "files": 4},
+      "tasks": [
+        "T049"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/smtp",
+        "rust/crates/bb-app/src/modern_auth/delivery.rs",
+        "rust/crates/bb-api/src/test_control/mail.rs"
+      ],
+      "depends_on": [
+        "PR-48"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers smtp && cargo test -p bb-app modern_auth::delivery"
+      ],
+      "acceptance": [
+        "A queued mail job is sent once across two workers; the test mailbox shows it."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-50",
       "outcome": "Port email-code sign-in, recovery and re-authentication in rust/crates/bb-app/src/modern_auth/email.rs and rust/crates/bb-api/src/modern_auth/{mod.rs,email.rs}",
-      "tasks": ["T050"],
-      "requirements": ["027-FR-007", "027-FR-016"],
-      "paths": ["rust/crates/bb-app/src/modern_auth/email.rs", "rust/crates/bb-api/src/modern_auth/mod.rs", "rust/crates/bb-api/src/modern_auth/email.rs"],
-      "depends_on": ["PR-44", "PR-45", "PR-48"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth email"],
-      "acceptance": ["Email rows of the modern-auth conformance pass on both servers."],
-      "budget": {"product_loc": 380, "files": 3},
+      "tasks": [
+        "T050"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/modern_auth/email.rs",
+        "rust/crates/bb-api/src/modern_auth/mod.rs",
+        "rust/crates/bb-api/src/modern_auth/email.rs"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-45",
+        "PR-48"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth email"
+      ],
+      "acceptance": [
+        "Email rows of the modern-auth conformance pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-51",
       "outcome": "Implement provider-token verification test-first (research R14 invariant set) in rust/crates/bb-providers/src/identity/jose.rs and rust/crates/bb-providers/src/identity/jwks.rs…",
-      "tasks": ["T051"],
-      "requirements": ["027-FR-007"],
-      "paths": ["rust/crates/bb-providers/src/identity/mod.rs", "rust/crates/bb-providers/src/identity/jose.rs", "rust/crates/bb-providers/src/identity/jwks.rs", "rust/crates/bb-providers/tests/jose_invariants.rs"],
-      "depends_on": ["PR-22"],
-      "tests": ["cd rust && cargo test -p bb-providers --test jose_invariants"],
-      "acceptance": ["Every invariant test failed before the verifier existed and passes now; the module is listed in the observed mutation scope."],
-      "budget": {"product_loc": 300, "files": 3},
+      "tasks": [
+        "T051"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/identity/mod.rs",
+        "rust/crates/bb-providers/src/identity/jose.rs",
+        "rust/crates/bb-providers/src/identity/jwks.rs",
+        "rust/crates/bb-providers/tests/jose_invariants.rs"
+      ],
+      "depends_on": [
+        "PR-22"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers --test jose_invariants"
+      ],
+      "acceptance": [
+        "Every invariant test failed before the verifier existed and passes now; the module is listed in the observed mutation scope."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-52",
       "outcome": "Port Google sign-in in rust/crates/bb-providers/src/identity/google.rs, rust/crates/bb-app/src/modern_auth/providers.rs and rust/crates/bb-api/src/modern_auth/providers.rs",
-      "tasks": ["T052"],
-      "requirements": ["027-FR-007"],
-      "paths": ["rust/crates/bb-providers/src/identity/google.rs", "rust/crates/bb-app/src/modern_auth/providers.rs", "rust/crates/bb-api/src/modern_auth/providers.rs"],
-      "depends_on": ["PR-50", "PR-51"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth google"],
-      "acceptance": ["Google rows pass on both servers with the mock identity provider."],
-      "budget": {"product_loc": 380, "files": 3},
+      "tasks": [
+        "T052"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/identity/google.rs",
+        "rust/crates/bb-app/src/modern_auth/providers.rs",
+        "rust/crates/bb-api/src/modern_auth/providers.rs"
+      ],
+      "depends_on": [
+        "PR-50",
+        "PR-51"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth google"
+      ],
+      "acceptance": [
+        "Google rows pass on both servers with the mock identity provider."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-53",
       "outcome": "Port Sign in with Apple in rust/crates/bb-providers/src/identity/apple.rs, rust/crates/bb-app/src/modern_auth/apple.rs and rust/crates/bb-api/src/modern_auth/apple.rs",
-      "tasks": ["T053"],
-      "requirements": ["027-FR-007"],
-      "paths": ["rust/crates/bb-providers/src/identity/apple.rs", "rust/crates/bb-app/src/modern_auth/apple.rs", "rust/crates/bb-api/src/modern_auth/apple.rs"],
-      "depends_on": ["PR-52"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth apple"],
-      "acceptance": ["Apple rows pass on both servers."],
-      "budget": {"product_loc": 400, "files": 3},
+      "tasks": [
+        "T053"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/identity/apple.rs",
+        "rust/crates/bb-app/src/modern_auth/apple.rs",
+        "rust/crates/bb-api/src/modern_auth/apple.rs"
+      ],
+      "depends_on": [
+        "PR-52"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth apple"
+      ],
+      "acceptance": [
+        "Apple rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-54",
       "outcome": "Port auth-method discovery and account auth methods in rust/crates/bb-app/src/modern_auth/methods.rs and rust/crates/bb-api/src/modern_auth/methods.rs",
-      "tasks": ["T054"],
-      "requirements": ["027-FR-007", "027-FR-009"],
-      "paths": ["rust/crates/bb-app/src/modern_auth/methods.rs", "rust/crates/bb-api/src/modern_auth/methods.rs"],
-      "depends_on": ["PR-50"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth methods"],
-      "acceptance": ["Method rows pass on both servers."],
-      "budget": {"product_loc": 260, "files": 2},
+      "tasks": [
+        "T054"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-009"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/modern_auth/methods.rs",
+        "rust/crates/bb-api/src/modern_auth/methods.rs"
+      ],
+      "depends_on": [
+        "PR-50"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth methods"
+      ],
+      "acceptance": [
+        "Method rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-55",
       "outcome": "Implement the invite step test-first (owner-approved `change`, 027-FR-007, contracts/invite-handoff.md) in rust/crates/bb-app/src/modern_auth/handoff.rs and…",
-      "tasks": ["T055"],
-      "requirements": ["027-FR-007", "027-FR-005"],
-      "paths": ["rust/crates/bb-app/src/modern_auth/handoff.rs", "rust/crates/bb-api/src/modern_auth/handoff.rs"],
-      "depends_on": ["PR-53"],
-      "tests": ["cd rust && cargo test -p bb-app modern_auth::handoff", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth invite_handoff"],
-      "acceptance": ["Rust-only change rows pass; a failure mid-transaction leaves no account and the invite unused."],
-      "budget": {"product_loc": 320, "files": 2},
+      "tasks": [
+        "T055"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/modern_auth/handoff.rs",
+        "rust/crates/bb-api/src/modern_auth/handoff.rs"
+      ],
+      "depends_on": [
+        "PR-53"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app modern_auth::handoff",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test modern_auth invite_handoff"
+      ],
+      "acceptance": [
+        "Rust-only change rows pass; a failure mid-transaction leaves no account and the invite unused."
+      ],
+      "budget": {
+        "product_loc": 320,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-56",
       "outcome": "Send `X-Client-Epoch",
-      "tasks": ["T056"],
-      "requirements": ["027-FR-018", "027-FR-020"],
-      "paths": ["frontend/src/api/clientEpoch.ts", "frontend/src/api/client.ts", "frontend/src/api/modernAuth.ts", "frontend/src/api/auth.ts", "frontend/src/api/__tests__/clientEpoch.test.ts"],
+      "tasks": [
+        "T056"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-020"
+      ],
+      "paths": [
+        "frontend/src/api/clientEpoch.ts",
+        "frontend/src/api/client.ts",
+        "frontend/src/api/modernAuth.ts",
+        "frontend/src/api/auth.ts",
+        "frontend/src/api/__tests__/clientEpoch.test.ts"
+      ],
       "depends_on": [],
-      "tests": ["cd frontend && npm run test -- src/api/__tests__/clientEpoch.test.ts"],
-      "acceptance": ["Every request carries both headers; the Python server ignores them, so the slice can land any time."],
-      "budget": {"product_loc": 60, "files": 4},
+      "tests": [
+        "cd frontend && npm run test -- src/api/__tests__/clientEpoch.test.ts"
+      ],
+      "acceptance": [
+        "Every request carries both headers; the Python server ignores them, so the slice can land any time."
+      ],
+      "budget": {
+        "product_loc": 60,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-57",
       "outcome": "Implement design D-04 (states .01–.10, focus rules) for an `INVITE_REQUIRED` completion in frontend/src/features/auth/InviteStep.tsx, wired from…",
-      "tasks": ["T057"],
-      "requirements": ["027-FR-007", "027-FR-016", "027-FR-020"],
-      "paths": ["frontend/src/features/auth/InviteStep.tsx", "frontend/src/features/auth/ProviderCompletionPage.tsx", "frontend/src/features/auth/authFlow.ts", "frontend/src/api/invite.ts", "frontend/src/features/auth/__tests__/InviteStep.test.tsx"],
+      "tasks": [
+        "T057"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-016",
+        "027-FR-020"
+      ],
+      "paths": [
+        "frontend/src/features/auth/InviteStep.tsx",
+        "frontend/src/features/auth/ProviderCompletionPage.tsx",
+        "frontend/src/features/auth/authFlow.ts",
+        "frontend/src/api/invite.ts",
+        "frontend/src/features/auth/__tests__/InviteStep.test.tsx"
+      ],
       "depends_on": [],
-      "tests": ["cd frontend && npm run test -- src/features/auth/__tests__/InviteStep.test.tsx src/features/auth/__tests__/ProviderCompletion.test.tsx"],
-      "acceptance": ["Invalid and used codes share one message; expired handoff shows .04; 300 ms spinner onset."],
-      "budget": {"product_loc": 300, "files": 4},
+      "tests": [
+        "cd frontend && npm run test -- src/features/auth/__tests__/InviteStep.test.tsx src/features/auth/__tests__/ProviderCompletion.test.tsx"
+      ],
+      "acceptance": [
+        "Invalid and used codes share one message; expired handoff shows .04; 300 ms spinner onset."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-58",
       "outcome": "Implement command receipts and the change feed in rust/crates/bb-store/src/tasks/sync/ (026 PR-26 semantics)",
-      "tasks": ["T058"],
-      "requirements": ["027-FR-006", "027-FR-003"],
-      "paths": ["rust/crates/bb-store/src/tasks/sync"],
-      "depends_on": ["PR-18", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store tasks::sync"],
-      "acceptance": ["A rolled-back unit of work leaves no receipt and no feed row; same id with different content is a conflict."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T058"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/sync"
+      ],
+      "depends_on": [
+        "PR-18",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store tasks::sync"
+      ],
+      "acceptance": [
+        "A rolled-back unit of work leaves no receipt and no feed row; same id with different content is a conflict."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-59",
       "outcome": "Implement task repositories in rust/crates/bb-store/src/tasks/items/",
-      "tasks": ["T059"],
-      "requirements": ["027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/tasks/items"],
-      "depends_on": ["PR-17", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store tasks::items"],
-      "acceptance": ["Owner filter on every query; cursor pagination stable."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T059"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/items"
+      ],
+      "depends_on": [
+        "PR-17",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store tasks::items"
+      ],
+      "acceptance": [
+        "Owner filter on every query; cursor pagination stable."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-60",
       "outcome": "Implement organization repositories in rust/crates/bb-store/src/tasks/organize/",
-      "tasks": ["T060"],
-      "requirements": ["027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/tasks/organize"],
-      "depends_on": ["PR-17", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store tasks::organize"],
-      "acceptance": ["Owner filter on every query."],
-      "budget": {"product_loc": 260, "files": 3},
+      "tasks": [
+        "T060"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/organize"
+      ],
+      "depends_on": [
+        "PR-17",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store tasks::organize"
+      ],
+      "acceptance": [
+        "Owner filter on every query."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 3
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 260."
     },
     {
       "id": "PR-61",
       "outcome": "Implement the one Task command boundary test-first (idempotent receipts and owner serialization are critical invariants) in rust/crates/bb-app/src/tasks/commands.rs",
-      "tasks": ["T061"],
-      "requirements": ["027-FR-003", "027-FR-006", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/tasks/commands.rs"],
-      "depends_on": ["PR-23", "PR-41", "PR-58", "PR-59", "PR-60"],
-      "tests": ["cd rust && cargo test -p bb-app tasks::commands"],
-      "acceptance": ["A replayed key returns the original outcome with no second feed entry; concurrent writers for one owner serialize."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T061"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-006",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/tasks/commands.rs"
+      ],
+      "depends_on": [
+        "PR-23",
+        "PR-41",
+        "PR-58",
+        "PR-59",
+        "PR-60"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app tasks::commands"
+      ],
+      "acceptance": [
+        "A replayed key returns the original outcome with no second feed entry; concurrent writers for one owner serialize."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-62",
       "outcome": "Implement task, project and Tag queries in rust/crates/bb-app/src/tasks/queries.rs over `bb_domain` list/order/project-display decisions (detail with subtasks and comments,…",
-      "tasks": ["T062"],
-      "requirements": ["027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/tasks/queries.rs"],
-      "depends_on": ["PR-23", "PR-59", "PR-60"],
-      "tests": ["cd rust && cargo test -p bb-app tasks::queries"],
-      "acceptance": ["Results equal the bb-domain parity vectors."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tasks": [
+        "T062"
+      ],
+      "requirements": [
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/tasks/queries.rs"
+      ],
+      "depends_on": [
+        "PR-23",
+        "PR-59",
+        "PR-60"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app tasks::queries"
+      ],
+      "acceptance": [
+        "Results equal the bb-domain parity vectors."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-63",
       "outcome": "Port task routes in rust/crates/bb-api/src/tasks/ and rust/crates/bb-api/src/test_control/owner_tasks.rs",
-      "tasks": ["T063"],
-      "requirements": ["027-FR-003", "027-FR-008", "027-FR-005"],
-      "paths": ["rust/crates/bb-api/src/tasks", "rust/crates/bb-api/src/test_control/owner_tasks.rs"],
-      "depends_on": ["PR-44", "PR-46", "PR-61", "PR-62"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test tasks"],
-      "acceptance": ["Task rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T063"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/tasks",
+        "rust/crates/bb-api/src/test_control/owner_tasks.rs"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-46",
+        "PR-61",
+        "PR-62"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test tasks"
+      ],
+      "acceptance": [
+        "Task rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-64",
       "outcome": "Port project and Tag routes in rust/crates/bb-api/src/organize/",
-      "tasks": ["T064"],
-      "requirements": ["027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-api/src/organize"],
-      "depends_on": ["PR-44", "PR-46", "PR-61", "PR-62"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test tasks organize"],
-      "acceptance": ["Organize rows pass on both servers."],
-      "budget": {"product_loc": 300, "files": 3},
+      "tasks": [
+        "T064"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/organize"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-46",
+        "PR-61",
+        "PR-62"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test tasks organize"
+      ],
+      "acceptance": [
+        "Organize rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-65",
       "outcome": "Implement Review repositories in rust/crates/bb-store/src/tasks/review/",
-      "tasks": ["T065"],
-      "requirements": ["027-FR-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/tasks/review"],
-      "depends_on": ["PR-17", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store tasks::review"],
-      "acceptance": ["Owner filter on every query."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T065"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/review"
+      ],
+      "depends_on": [
+        "PR-17",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store tasks::review"
+      ],
+      "acceptance": [
+        "Owner filter on every query."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-66",
       "outcome": "Port Review decisions in rust/crates/bb-app/src/review/decisions.rs through the Task command boundary and bb-domain review rules",
-      "tasks": ["T066"],
-      "requirements": ["027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/review/decisions.rs"],
-      "depends_on": ["PR-61", "PR-65"],
-      "tests": ["cd rust && cargo test -p bb-app review::decisions"],
-      "acceptance": ["026 review vectors pass through the service."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T066"
+      ],
+      "requirements": [
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/review/decisions.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-65"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app review::decisions"
+      ],
+      "acceptance": [
+        "026 review vectors pass through the service."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-67",
       "outcome": "Port the Review flow in rust/crates/bb-app/src/review/flow.rs",
-      "tasks": ["T067"],
-      "requirements": ["027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/review/flow.rs"],
-      "depends_on": ["PR-61", "PR-65"],
-      "tests": ["cd rust && cargo test -p bb-app review::flow"],
-      "acceptance": ["review_flow_vectors pass through the service."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T067"
+      ],
+      "requirements": [
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/review/flow.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-65"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app review::flow"
+      ],
+      "acceptance": [
+        "review_flow_vectors pass through the service."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-68",
       "outcome": "Port Review routes in rust/crates/bb-api/src/review/ and rust/crates/bb-api/src/test_control/aged_task.rs with the `{message, detail:{reason}}` envelope and the…",
-      "tasks": ["T068"],
-      "requirements": ["027-FR-003", "027-FR-008", "027-FR-016"],
-      "paths": ["rust/crates/bb-api/src/review", "rust/crates/bb-api/src/test_control/aged_task.rs"],
-      "depends_on": ["PR-44", "PR-47", "PR-66", "PR-67"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test review"],
-      "acceptance": ["Review rows pass on both servers."],
-      "budget": {"product_loc": 360, "files": 4},
+      "tasks": [
+        "T068"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-008",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/review",
+        "rust/crates/bb-api/src/test_control/aged_task.rs"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-47",
+        "PR-66",
+        "PR-67"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test review"
+      ],
+      "acceptance": [
+        "Review rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 360,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-69",
       "outcome": "Port the weekly-review maintenance job in rust/crates/bb-app/src/review/jobs.rs as `tasks.review_maintenance`",
-      "tasks": ["T069"],
-      "requirements": ["027-FR-010", "027-FR-017", "027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/review/jobs.rs"],
-      "depends_on": ["PR-32", "PR-66"],
-      "tests": ["cd rust && cargo test -p bb-app review::jobs", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test review sweep"],
-      "acceptance": ["Job-test evidence for the sweep; the weekly-review E2E sweep step passes through the test control API."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tasks": [
+        "T069"
+      ],
+      "requirements": [
+        "027-FR-010",
+        "027-FR-017",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/review/jobs.rs"
+      ],
+      "depends_on": [
+        "PR-32",
+        "PR-66"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app review::jobs",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test review sweep"
+      ],
+      "acceptance": [
+        "Job-test evidence for the sweep; the weekly-review E2E sweep step passes through the test control API."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-70",
       "outcome": "Make the Playwright stack selectable with BRAIN_BUDDY_E2E_SERVER=rust in compose.yaml and scripts/run_playwright_e2e.sh (server + worker + PostgreSQL + MinIO behind the same…",
-      "tasks": ["T070"],
-      "requirements": ["027-FR-005", "027-FR-020", "027-SC-002"],
-      "paths": ["compose.yaml", "scripts/run_playwright_e2e.sh", "specs/027-rust-server/evidence/e2e-primary.md"],
-      "depends_on": ["PR-33", "PR-49", "PR-55", "PR-56", "PR-57", "PR-63", "PR-64", "PR-68", "PR-69"],
-      "tests": ["BRAIN_BUDDY_E2E_SERVER=rust make test-e2e"],
-      "acceptance": ["The primary loop passes on the Rust stack with the unchanged web UI (User Story 1 independent test)."],
-      "budget": {"product_loc": 60, "files": 2},
+      "tasks": [
+        "T070"
+      ],
+      "requirements": [
+        "027-FR-005",
+        "027-FR-020",
+        "027-SC-002"
+      ],
+      "paths": [
+        "compose.yaml",
+        "scripts/run_playwright_e2e.sh",
+        "specs/027-rust-server/evidence/e2e-primary.md"
+      ],
+      "depends_on": [
+        "PR-33",
+        "PR-49",
+        "PR-55",
+        "PR-56",
+        "PR-57",
+        "PR-63",
+        "PR-64",
+        "PR-68",
+        "PR-69"
+      ],
+      "tests": [
+        "BRAIN_BUDDY_E2E_SERVER=rust make test-e2e"
+      ],
+      "acceptance": [
+        "The primary loop passes on the Rust stack with the unchanged web UI (User Story 1 independent test)."
+      ],
+      "budget": {
+        "product_loc": 60,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-71",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-190..198, CAP-MW-011, CAP-MW-021",
-      "tasks": ["T071"],
-      "requirements": ["027-FR-001", "027-FR-006", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/sync.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test sync"],
-      "acceptance": ["Every `port` row of CAP-HTTP-190..198, CAP-MW-011, CAP-MW-021 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T071"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-006",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/sync.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test sync"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-190..198, CAP-MW-011, CAP-MW-021 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-72",
       "outcome": "Port sync admission in rust/crates/bb-store/src/tasks/devices/, rust/crates/bb-app/src/sync/admission.rs and rust/crates/bb-api/src/sync/{mod.rs,devices.rs} (declaring…",
-      "tasks": ["T072"],
-      "requirements": ["027-FR-006", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/tasks/devices", "rust/crates/bb-app/src/sync/admission.rs", "rust/crates/bb-api/src/sync/mod.rs", "rust/crates/bb-api/src/sync/devices.rs"],
-      "depends_on": ["PR-44", "PR-58", "PR-71"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync devices"],
-      "acceptance": ["Device and capability rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 6},
+      "tasks": [
+        "T072"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/devices",
+        "rust/crates/bb-app/src/sync/admission.rs",
+        "rust/crates/bb-api/src/sync/mod.rs",
+        "rust/crates/bb-api/src/sync/devices.rs"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-58",
+        "PR-71"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync devices"
+      ],
+      "acceptance": [
+        "Device and capability rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 6
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-73",
       "outcome": "Port sync command submission and receipt lookup in rust/crates/bb-app/src/sync/commands.rs and rust/crates/bb-api/src/sync/commands.rs",
-      "tasks": ["T073"],
-      "requirements": ["027-FR-006", "027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/sync/commands.rs", "rust/crates/bb-api/src/sync/commands.rs"],
-      "depends_on": ["PR-61", "PR-72"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync commands", "cd rust && BB_BACKEND_BASE_URL=http://localhost:8001 cargo test -p bb-client --test e2e_backend"],
-      "acceptance": ["026 Q03 semantics: retries after a lost response apply nothing twice."],
-      "budget": {"product_loc": 360, "files": 2},
+      "tasks": [
+        "T073"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/sync/commands.rs",
+        "rust/crates/bb-api/src/sync/commands.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-72"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync commands",
+        "cd rust && BB_BACKEND_BASE_URL=http://localhost:8001 cargo test -p bb-client --test e2e_backend"
+      ],
+      "acceptance": [
+        "026 Q03 semantics: retries after a lost response apply nothing twice."
+      ],
+      "budget": {
+        "product_loc": 360,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-74",
       "outcome": "Port the delta feed and oversized-transaction transfers in rust/crates/bb-store/src/tasks/transfers/, rust/crates/bb-app/src/sync/delta.rs and rust/crates/bb-api/src/sync/delta.rs",
-      "tasks": ["T074"],
-      "requirements": ["027-FR-006"],
-      "paths": ["rust/crates/bb-store/src/tasks/transfers", "rust/crates/bb-app/src/sync/delta.rs", "rust/crates/bb-api/src/sync/delta.rs"],
-      "depends_on": ["PR-72"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync delta"],
-      "acceptance": ["Delta and transfer rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T074"
+      ],
+      "requirements": [
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/transfers",
+        "rust/crates/bb-app/src/sync/delta.rs",
+        "rust/crates/bb-api/src/sync/delta.rs"
+      ],
+      "depends_on": [
+        "PR-72"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync delta"
+      ],
+      "acceptance": [
+        "Delta and transfer rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-75",
       "outcome": "Port snapshots in rust/crates/bb-store/src/tasks/snapshots/, rust/crates/bb-app/src/sync/snapshots.rs and rust/crates/bb-api/src/sync/snapshots.rs",
-      "tasks": ["T075"],
-      "requirements": ["027-FR-006"],
-      "paths": ["rust/crates/bb-store/src/tasks/snapshots", "rust/crates/bb-app/src/sync/snapshots.rs", "rust/crates/bb-api/src/sync/snapshots.rs"],
-      "depends_on": ["PR-74"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync snapshots"],
-      "acceptance": ["Snapshot rows pass on both servers; concurrent writes never yield a partial base."],
-      "budget": {"product_loc": 360, "files": 4},
+      "tasks": [
+        "T075"
+      ],
+      "requirements": [
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/tasks/snapshots",
+        "rust/crates/bb-app/src/sync/snapshots.rs",
+        "rust/crates/bb-api/src/sync/snapshots.rs"
+      ],
+      "depends_on": [
+        "PR-74"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync snapshots"
+      ],
+      "acceptance": [
+        "Snapshot rows pass on both servers; concurrent writes never yield a partial base."
+      ],
+      "budget": {
+        "product_loc": 360,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 360."
     },
     {
       "id": "PR-76",
       "outcome": "Port SSE hints in rust/crates/bb-app/src/sync/hints.rs and rust/crates/bb-api/src/sync/hints.rs over PostgreSQL LISTEN/NOTIFY fan-out across instances",
-      "tasks": ["T076"],
-      "requirements": ["027-FR-006"],
-      "paths": ["rust/crates/bb-app/src/sync/hints.rs", "rust/crates/bb-api/src/sync/hints.rs"],
-      "depends_on": ["PR-72"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync hints", "cd rust && BB_BACKEND_BASE_URL=http://localhost:8001 cargo test -p bb-client --test hints_backend"],
-      "acceptance": ["A commit through one server process wakes a stream held by another."],
-      "budget": {"product_loc": 260, "files": 2},
+      "tasks": [
+        "T076"
+      ],
+      "requirements": [
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/sync/hints.rs",
+        "rust/crates/bb-api/src/sync/hints.rs"
+      ],
+      "depends_on": [
+        "PR-72"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test sync hints",
+        "cd rust && BB_BACKEND_BASE_URL=http://localhost:8001 cargo test -p bb-client --test hints_backend"
+      ],
+      "acceptance": [
+        "A commit through one server process wakes a stream held by another."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-77",
       "outcome": "Implement the restore protocol (research R11) in rust/crates/bb-app/src/control/restore.rs and rust/crates/bb-server/src/commands/restore_control_plane.rs",
-      "tasks": ["T077"],
-      "requirements": ["027-FR-006", "027-FR-009"],
-      "paths": ["rust/crates/bb-app/src/control/restore.rs", "rust/crates/bb-server/src/commands/restore_control_plane.rs"],
-      "depends_on": ["PR-25", "PR-27", "PR-75"],
-      "tests": ["cd rust && cargo test -p bb-app control::restore"],
-      "acceptance": ["026 Q08 in automated form: a restore over an earlier backup replays deletions and revocations and forces re-authentication."],
-      "budget": {"product_loc": 360, "files": 2},
+      "tasks": [
+        "T077"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-009"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/control/restore.rs",
+        "rust/crates/bb-server/src/commands/restore_control_plane.rs"
+      ],
+      "depends_on": [
+        "PR-25",
+        "PR-27",
+        "PR-75"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app control::restore"
+      ],
+      "acceptance": [
+        "026 Q08 in automated form: a restore over an earlier backup replays deletions and revocations and forces re-authentication."
+      ],
+      "budget": {
+        "product_loc": 360,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-78",
       "outcome": "Implement the SC-007 reconciliation in rust/crates/bb-app/src/sync/reconcile.rs, rust/crates/bb-server/src/commands/reconcile.rs and…",
-      "tasks": ["T078"],
-      "requirements": ["027-FR-006"],
-      "paths": ["rust/crates/bb-app/src/sync/reconcile.rs", "rust/crates/bb-server/src/commands/reconcile.rs", "rust/crates/bb-api/src/test_control/reconcile.rs"],
-      "depends_on": ["PR-25", "PR-26", "PR-58"],
-      "tests": ["cd rust && cargo test -p bb-app sync::reconcile"],
-      "acceptance": ["Planted orphan and duplicate rows are counted; a clean store reports zero."],
-      "budget": {"product_loc": 220, "files": 3},
+      "tasks": [
+        "T078"
+      ],
+      "requirements": [
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/sync/reconcile.rs",
+        "rust/crates/bb-server/src/commands/reconcile.rs",
+        "rust/crates/bb-api/src/test_control/reconcile.rs"
+      ],
+      "depends_on": [
+        "PR-25",
+        "PR-26",
+        "PR-58"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app sync::reconcile"
+      ],
+      "acceptance": [
+        "Planted orphan and duplicate rows are counted; a clean store reports zero."
+      ],
+      "budget": {
+        "product_loc": 220,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-79",
       "outcome": "Send `X-Client-Epoch` on every request from ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift, ios/BrainBuddyKit/Sources/BrainBuddyAPI/HTTPTransport.swift,…",
-      "tasks": ["T079"],
-      "requirements": ["027-FR-018", "027-FR-021"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift", "ios/BrainBuddyKit/Sources/BrainBuddyAPI/HTTPTransport.swift", "ios/BrainBuddyKit/Sources/BrainBuddySync/RustSyncURLSession.swift", "macos/Sources/BrainBuddyMacCore/WorkspaceHost.swift", "ios/BrainBuddyKit/Sources/BrainBuddyAPI/ServerEpochProbe.swift", "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ServerEpochProbeTests.swift"],
+      "tasks": [
+        "T079"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-021"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/BrainBuddyAPIClient.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/HTTPTransport.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddySync/RustSyncURLSession.swift",
+        "macos/Sources/BrainBuddyMacCore/WorkspaceHost.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/ServerEpochProbe.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/ServerEpochProbeTests.swift"
+      ],
       "depends_on": [],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter ServerEpochProbeTests"],
-      "acceptance": ["Against the Python server the probe reads epoch 0 and nothing changes."],
-      "budget": {"product_loc": 180, "files": 5},
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter ServerEpochProbeTests"
+      ],
+      "acceptance": [
+        "Against the Python server the probe reads epoch 0 and nothing changes."
+      ],
+      "budget": {
+        "product_loc": 180,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-80",
       "outcome": "Implement the fresh-start reset engine test-first (durable state) in ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/LegacyArtifacts.swift and…",
-      "tasks": ["T080"],
-      "requirements": ["027-FR-021", "027-FR-004"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/LegacyArtifacts.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/FreshStartReset.swift", "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FreshStartResetTests.swift"],
-      "depends_on": ["PR-09", "PR-79"],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter FreshStartResetTests"],
-      "acceptance": ["Interruption after confirmation resumes; a disk error leaves the app blocked with no network request."],
-      "budget": {"product_loc": 380, "files": 2},
+      "tasks": [
+        "T080"
+      ],
+      "requirements": [
+        "027-FR-021",
+        "027-FR-004"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/LegacyArtifacts.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/FreshStartReset.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/FreshStartResetTests.swift"
+      ],
+      "depends_on": [
+        "PR-09",
+        "PR-79"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter FreshStartResetTests"
+      ],
+      "acceptance": [
+        "Interruption after confirmation resumes; a disk error leaves the app blocked with no network request."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-81",
       "outcome": "Implement design M-02 (.00–.11, focus and VoiceOver rules) in ios/BrainBuddy/Screens/Settings/FreshStartScreen.swift, gated from ios/BrainBuddy/App/RootView.swift before…",
-      "tasks": ["T081"],
-      "requirements": ["027-FR-021"],
-      "paths": ["ios/BrainBuddy/Screens/Settings/FreshStartScreen.swift", "ios/BrainBuddy/App/RootView.swift", "ios/BrainBuddyUITests/FreshStartUITests.swift"],
-      "depends_on": ["PR-80"],
-      "tests": ["xcodebuild test -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -only-testing:BrainBuddyUITests/FreshStartUITests"],
-      "acceptance": ["Copy and states match design.md; 'Not now' is the initial focus and deletes nothing."],
-      "budget": {"product_loc": 300, "files": 2},
+      "tasks": [
+        "T081"
+      ],
+      "requirements": [
+        "027-FR-021"
+      ],
+      "paths": [
+        "ios/BrainBuddy/Screens/Settings/FreshStartScreen.swift",
+        "ios/BrainBuddy/App/RootView.swift",
+        "ios/BrainBuddyUITests/FreshStartUITests.swift"
+      ],
+      "depends_on": [
+        "PR-80"
+      ],
+      "tests": [
+        "xcodebuild test -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy -only-testing:BrainBuddyUITests/FreshStartUITests"
+      ],
+      "acceptance": [
+        "Copy and states match design.md; 'Not now' is the initial focus and deletes nothing."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-82",
       "outcome": "Implement design D-03 (.00–.11, window-modal sheet, 'Not now' default and Escape) in macos/Sources/BrainBuddyMac/FreshStartSheet.swift, gated from…",
-      "tasks": ["T082"],
-      "requirements": ["027-FR-021"],
-      "paths": ["macos/Sources/BrainBuddyMac/FreshStartSheet.swift", "macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift", "macos/Tests/BrainBuddyMacTests/FreshStartSheetTests.swift"],
-      "depends_on": ["PR-80"],
-      "tests": ["cd macos && swift test --filter FreshStartSheetTests"],
-      "acceptance": ["Mac copy says 'on this Mac'; macOS cookie state is removed by the reset."],
-      "budget": {"product_loc": 280, "files": 2},
+      "tasks": [
+        "T082"
+      ],
+      "requirements": [
+        "027-FR-021"
+      ],
+      "paths": [
+        "macos/Sources/BrainBuddyMac/FreshStartSheet.swift",
+        "macos/Sources/BrainBuddyMac/BrainBuddyMacApp.swift",
+        "macos/Tests/BrainBuddyMacTests/FreshStartSheetTests.swift"
+      ],
+      "depends_on": [
+        "PR-80"
+      ],
+      "tests": [
+        "cd macos && swift test --filter FreshStartSheetTests"
+      ],
+      "acceptance": [
+        "Mac copy says 'on this Mac'; macOS cookie state is removed by the reset."
+      ],
+      "budget": {
+        "product_loc": 280,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-83",
       "outcome": "Implement design M-03 (.01–.10) for `INVITE_REQUIRED` in ios/BrainBuddy/Screens/Settings/SignInSheet.swift and ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift,…",
-      "tasks": ["T083"],
-      "requirements": ["027-FR-007", "027-FR-016"],
-      "paths": ["ios/BrainBuddy/Screens/Settings/SignInSheet.swift", "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift", "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift", "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteHandoffTests.swift"],
+      "tasks": [
+        "T083"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-016"
+      ],
+      "paths": [
+        "ios/BrainBuddy/Screens/Settings/SignInSheet.swift",
+        "ios/BrainBuddy/Screens/Settings/ModernAuthCoordinator.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/NativeAuthentication.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteHandoffTests.swift"
+      ],
       "depends_on": [],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter InviteHandoffTests"],
-      "acceptance": ["Invalid and used codes share one message; the field disables auto-capitalisation and auto-correction."],
-      "budget": {"product_loc": 260, "files": 3},
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter InviteHandoffTests"
+      ],
+      "acceptance": [
+        "Invalid and used codes share one message; the field disables auto-capitalisation and auto-correction."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-84",
       "outcome": "Collapse BrainBuddyWorkspace to the Rust runtime",
-      "tasks": ["T084"],
-      "requirements": ["027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ProjectDisplay.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ReviewContentStamps.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ReviewAI.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/RustAccountLifecycle.swift", "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/RustRuntimeSelectionStore.swift", "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests"],
-      "depends_on": ["PR-80"],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests"],
-      "acceptance": ["No runtime selection remains in these files; Workspace tests pass on the Rust path only."],
-      "budget": {"product_loc": 700, "files": 6},
+      "tasks": [
+        "T084"
+      ],
+      "requirements": [
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ProjectDisplay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ReviewContentStamps.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+ReviewAI.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/RustAccountLifecycle.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/RustRuntimeSelectionStore.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests"
+      ],
+      "depends_on": [
+        "PR-80"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests"
+      ],
+      "acceptance": [
+        "No runtime selection remains in these files; Workspace tests pass on the Rust path only."
+      ],
+      "budget": {
+        "product_loc": 700,
+        "files": 6
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Mostly deletion of unreachable legacy branches; added lines stay under 150."
     },
     {
       "id": "PR-85",
       "outcome": "Remove the 72 `isRustSelected` branches and the legacy Review path from ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift",
-      "tasks": ["T085"],
-      "requirements": ["027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift"],
-      "depends_on": ["PR-84"],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests"],
-      "acceptance": ["Review flows pass on the Rust path only."],
-      "budget": {"product_loc": 600, "files": 1},
+      "tasks": [
+        "T085"
+      ],
+      "requirements": [
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+Review.swift"
+      ],
+      "depends_on": [
+        "PR-84"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter BrainBuddyWorkspaceTests"
+      ],
+      "acceptance": [
+        "Review flows pass on the Rust path only."
+      ],
+      "budget": {
+        "product_loc": 600,
+        "files": 1
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Deletion of unreachable legacy Review branches; added lines stay under 80."
     },
     {
       "id": "PR-86",
       "outcome": "Remove runtime selection from the iPhone app",
-      "tasks": ["T086"],
-      "requirements": ["027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddy/Screens/Capture/CaptureSheet.swift", "ios/BrainBuddy/Screens/Detail/TaskDetailScreen.swift", "ios/BrainBuddy/Screens/Review/FormulationSection.swift", "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift", "ios/BrainBuddy/Screens/Review/RestartScreen.swift", "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift", "ios/BrainBuddy/Screens/Settings/SyncIssuesScreen.swift", "ios/BrainBuddy/Components/TaskRow.swift", "ios/BrainBuddy/Screens/Settings/RustRuntimePilotRow.swift"],
-      "depends_on": ["PR-84"],
-      "tests": ["xcodebuild build -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy"],
-      "acceptance": ["`rg isRustSelected ios/BrainBuddy` is empty; the Settings pilot row is gone."],
-      "budget": {"product_loc": 250, "files": 9},
+      "tasks": [
+        "T086"
+      ],
+      "requirements": [
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddy/Screens/Capture/CaptureSheet.swift",
+        "ios/BrainBuddy/Screens/Detail/TaskDetailScreen.swift",
+        "ios/BrainBuddy/Screens/Review/FormulationSection.swift",
+        "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift",
+        "ios/BrainBuddy/Screens/Review/RestartScreen.swift",
+        "ios/BrainBuddy/Screens/Settings/SettingsScreen.swift",
+        "ios/BrainBuddy/Screens/Settings/SyncIssuesScreen.swift",
+        "ios/BrainBuddy/Components/TaskRow.swift",
+        "ios/BrainBuddy/Screens/Settings/RustRuntimePilotRow.swift"
+      ],
+      "depends_on": [
+        "PR-84"
+      ],
+      "tests": [
+        "xcodebuild build -project ios/BrainBuddy.xcodeproj -scheme BrainBuddy"
+      ],
+      "acceptance": [
+        "`rg isRustSelected ios/BrainBuddy` is empty; the Settings pilot row is gone."
+      ],
+      "budget": {
+        "product_loc": 250,
+        "files": 9
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-87",
       "outcome": "Remove runtime selection and the legacy importers from the Mac app",
-      "tasks": ["T087"],
-      "requirements": ["027-FR-004", "027-FR-021", "027-SC-006"],
-      "paths": ["macos/Sources/BrainBuddyMacCore/BrainBuddyModel.swift", "macos/Sources/BrainBuddyMac/ProjectReviewView.swift", "macos/Sources/BrainBuddyMacCore/LegacyStoreImporter.swift", "macos/Sources/BrainBuddyMacCore/LegacySnapshot.swift", "macos/Sources/BrainBuddyMacCore/LegacyImportDecision.swift", "macos/Tests/BrainBuddyMacTests/MacRustSelectionTests.swift", "macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift", "macos/Tests/BrainBuddyMacTests/OfflineWorkspaceTests.swift"],
-      "depends_on": ["PR-15", "PR-82", "PR-84"],
-      "tests": ["cd macos && swift test"],
-      "acceptance": ["`rg 'isRustSelected|LegacyStoreImporter' macos` is empty."],
-      "budget": {"product_loc": 1600, "files": 6},
+      "tasks": [
+        "T087"
+      ],
+      "requirements": [
+        "027-FR-004",
+        "027-FR-021",
+        "027-SC-006"
+      ],
+      "paths": [
+        "macos/Sources/BrainBuddyMacCore/BrainBuddyModel.swift",
+        "macos/Sources/BrainBuddyMac/ProjectReviewView.swift",
+        "macos/Sources/BrainBuddyMacCore/LegacyStoreImporter.swift",
+        "macos/Sources/BrainBuddyMacCore/LegacySnapshot.swift",
+        "macos/Sources/BrainBuddyMacCore/LegacyImportDecision.swift",
+        "macos/Tests/BrainBuddyMacTests/MacRustSelectionTests.swift",
+        "macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift",
+        "macos/Tests/BrainBuddyMacTests/OfflineWorkspaceTests.swift"
+      ],
+      "depends_on": [
+        "PR-15",
+        "PR-82",
+        "PR-84"
+      ],
+      "tests": [
+        "cd macos && swift test"
+      ],
+      "acceptance": [
+        "`rg 'isRustSelected|LegacyStoreImporter' macos` is empty."
+      ],
+      "budget": {
+        "product_loc": 1600,
+        "files": 6
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Deletion of ~1,450 lines of legacy importer code; added lines stay under 100."
     },
     {
       "id": "PR-88",
       "outcome": "Delete the legacy BrainBuddySync engine (SyncEngine*.swift, PushPlanner.swift, StoreDocument+Merge.swift, GTDCommand+Sync.swift, SyncScheduler.swift, PeriodicSyncTicker.swift…",
-      "tasks": ["T088"],
-      "requirements": ["027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddySync", "ios/BrainBuddyKit/Package.swift", "ios/BrainBuddyKit/Tests/BrainBuddySyncTests"],
-      "depends_on": ["PR-09", "PR-79", "PR-85", "PR-86", "PR-87"],
-      "tests": ["sh ios/scripts/swift-linux.sh test", "cd macos && swift build"],
-      "acceptance": ["The kit and both apps build with only the Rust sync host."],
-      "budget": {"product_loc": 4500, "files": 12},
+      "tasks": [
+        "T088"
+      ],
+      "requirements": [
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddySync",
+        "ios/BrainBuddyKit/Package.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddySyncTests"
+      ],
+      "depends_on": [
+        "PR-09",
+        "PR-79",
+        "PR-85",
+        "PR-86",
+        "PR-87"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test",
+        "cd macos && swift build"
+      ],
+      "acceptance": [
+        "The kit and both apps build with only the Rust sync host."
+      ],
+      "budget": {
+        "product_loc": 4500,
+        "files": 12
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of ~4,400 lines of unreachable legacy engine code; added lines stay under 50."
     },
     {
       "id": "PR-89",
       "outcome": "Delete the legacy document store and the 026 importers",
-      "tasks": ["T089"],
-      "requirements": ["027-FR-021", "027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyPersistence", "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests", "rust/crates/bb-client/src/import.rs", "rust/crates/bb-client/src/legacy_outbox.rs", "rust/crates/bb-client/src/lib.rs", "rust/crates/bb-client/tests/import.rs", "rust/crates/bb-client/tests/legacy_outbox.rs", "rust/bindings/swift/src/workspace.rs"],
-      "depends_on": ["PR-88"],
-      "tests": ["cd rust && cargo test -p bb-client", "sh ios/scripts/swift-linux.sh test"],
-      "acceptance": ["No import path remains; FreshStartResetTests still pass."],
-      "budget": {"product_loc": 3000, "files": 12},
+      "tasks": [
+        "T089"
+      ],
+      "requirements": [
+        "027-FR-021",
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyPersistence",
+        "ios/BrainBuddyKit/Tests/BrainBuddyPersistenceTests",
+        "rust/crates/bb-client/src/import.rs",
+        "rust/crates/bb-client/src/legacy_outbox.rs",
+        "rust/crates/bb-client/src/lib.rs",
+        "rust/crates/bb-client/tests/import.rs",
+        "rust/crates/bb-client/tests/legacy_outbox.rs",
+        "rust/bindings/swift/src/workspace.rs"
+      ],
+      "depends_on": [
+        "PR-88"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-client",
+        "sh ios/scripts/swift-linux.sh test"
+      ],
+      "acceptance": [
+        "No import path remains; FreshStartResetTests still pass."
+      ],
+      "budget": {
+        "product_loc": 3000,
+        "files": 12
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of ~1,750 Swift and the Rust importer lines; added lines stay under 50."
     },
     {
       "id": "PR-90",
       "outcome": "Delete the legacy reducer, outbox and replay from ios/BrainBuddyKit/Sources/BrainBuddyCore/ (Reducer*.swift, Outbox.swift, Replay.swift, Compaction.swift and their callers in…",
-      "tasks": ["T090"],
-      "requirements": ["027-FR-003", "027-FR-004", "027-SC-006"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Children.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Organize.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Replay.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Review.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Validation.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Outbox.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Replay.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/Compaction.swift", "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer", "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests"],
-      "depends_on": ["PR-89"],
-      "tests": ["sh ios/scripts/swift-linux.sh test", "rg -n 'isRustSelected|RustRuntimePilot|LegacyStoreImporter' ios macos; test $? -eq 1"],
-      "acceptance": ["SC-006: exactly one runtime, zero selection sites."],
-      "budget": {"product_loc": 2600, "files": 12},
+      "tasks": [
+        "T090"
+      ],
+      "requirements": [
+        "027-FR-003",
+        "027-FR-004",
+        "027-SC-006"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Children.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Organize.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Replay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Review.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Reducer+Validation.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Outbox.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Replay.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/Compaction.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyFakeServer",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests"
+      ],
+      "depends_on": [
+        "PR-89"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test",
+        "rg -n 'isRustSelected|RustRuntimePilot|LegacyStoreImporter' ios macos; test $? -eq 1"
+      ],
+      "acceptance": [
+        "SC-006: exactly one runtime, zero selection sites."
+      ],
+      "budget": {
+        "product_loc": 2600,
+        "files": 12
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of ~2,400 lines of legacy reducer code; added lines stay under 50."
     },
     {
       "id": "PR-91",
       "outcome": "Run the automated 026 Q01–Q12 rehearsal except Q06 (scripts/rehearsal/run.py, iPhone UI rehearsal tests, MacRehearsalTests) plus the 026 SC-003/SC-004 measurements against the…",
-      "tasks": ["T091"],
-      "requirements": ["027-FR-006", "027-FR-004", "027-SC-004"],
-      "paths": ["specs/027-rust-server/evidence/rehearsal-rust.md"],
-      "depends_on": ["PR-15", "PR-33", "PR-73", "PR-75", "PR-76", "PR-77", "PR-81", "PR-82", "PR-83", "PR-90"],
-      "tests": ["python3 scripts/rehearsal/run.py --base-url http://localhost:8001", "python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["User Story 2 pre-cutover evidence: convergence, explicit conflicts and no double-apply on the Rust server."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T091"
+      ],
+      "requirements": [
+        "027-FR-006",
+        "027-FR-004",
+        "027-SC-004"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/rehearsal-rust.md"
+      ],
+      "depends_on": [
+        "PR-15",
+        "PR-33",
+        "PR-73",
+        "PR-75",
+        "PR-76",
+        "PR-77",
+        "PR-81",
+        "PR-82",
+        "PR-83",
+        "PR-90"
+      ],
+      "tests": [
+        "python3 scripts/rehearsal/run.py --base-url http://localhost:8001",
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "User Story 2 pre-cutover evidence: convergence, explicit conflicts and no double-apply on the Rust server."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-92",
       "outcome": "Implement design D-02 (.01–.07) in frontend/src/components/shell/shellToast.ts and frontend/src/components/shell/UpdateRequiredToast.tsx",
-      "tasks": ["T092"],
-      "requirements": ["027-FR-018", "027-FR-016", "027-FR-020"],
-      "paths": ["frontend/src/components/shell/shellToast.ts", "frontend/src/components/shell/UpdateRequiredToast.tsx", "frontend/src/api/client.ts", "frontend/src/components/shell/__tests__/UpdateRequiredToast.test.tsx"],
-      "depends_on": ["PR-56"],
-      "tests": ["cd frontend && npm run test -- src/components/shell/__tests__"],
-      "acceptance": ["Shown only on an explicit 426; never on offline, timeout or 5xx; one toast at a time."],
-      "budget": {"product_loc": 220, "files": 3},
+      "tasks": [
+        "T092"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-016",
+        "027-FR-020"
+      ],
+      "paths": [
+        "frontend/src/components/shell/shellToast.ts",
+        "frontend/src/components/shell/UpdateRequiredToast.tsx",
+        "frontend/src/api/client.ts",
+        "frontend/src/components/shell/__tests__/UpdateRequiredToast.test.tsx"
+      ],
+      "depends_on": [
+        "PR-56"
+      ],
+      "tests": [
+        "cd frontend && npm run test -- src/components/shell/__tests__"
+      ],
+      "acceptance": [
+        "Shown only on an explicit 426; never on offline, timeout or 5xx; one toast at a time."
+      ],
+      "budget": {
+        "product_loc": 220,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-93",
       "outcome": "Implement design M-01/D-01",
-      "tasks": ["T093"],
-      "requirements": ["027-FR-018", "027-FR-016"],
-      "paths": ["ios/BrainBuddyKit/Sources/BrainBuddyAPI/APIError.swift", "ios/BrainBuddyKit/Sources/BrainBuddyCore/RuntimeIssuePresentation.swift", "macos/Sources/BrainBuddyMacCore/SyncPopoverModel.swift", "macos/Sources/BrainBuddyMacCore/SyncStatusLineModel.swift", "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/UpdateRequiredTests.swift", "macos/Tests/BrainBuddyMacTests/SyncStatusPopoverModelTests.swift"],
-      "depends_on": ["PR-79", "PR-90"],
-      "tests": ["sh ios/scripts/swift-linux.sh test --filter UpdateRequiredTests", "cd macos && swift test --filter SyncStatusPopoverModelTests"],
-      "acceptance": ["Refusal only on 426; offline and 5xx keep their states; it clears after a later success."],
-      "budget": {"product_loc": 200, "files": 4},
+      "tasks": [
+        "T093"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-016"
+      ],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyAPI/APIError.swift",
+        "ios/BrainBuddyKit/Sources/BrainBuddyCore/RuntimeIssuePresentation.swift",
+        "macos/Sources/BrainBuddyMacCore/SyncPopoverModel.swift",
+        "macos/Sources/BrainBuddyMacCore/SyncStatusLineModel.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/UpdateRequiredTests.swift",
+        "macos/Tests/BrainBuddyMacTests/SyncStatusPopoverModelTests.swift"
+      ],
+      "depends_on": [
+        "PR-79",
+        "PR-90"
+      ],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter UpdateRequiredTests",
+        "cd macos && swift test --filter SyncStatusPopoverModelTests"
+      ],
+      "acceptance": [
+        "Refusal only on 426; offline and 5xx keep their states; it clears after a later success."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-94",
       "outcome": "Make scripts/production_smoke.sh send `X-Client-Epoch` on gated routes and mint its invite with `bb-server create-invite` when the target is the Rust app, with cases in…",
-      "tasks": ["T094"],
-      "requirements": ["027-FR-018", "027-FR-019"],
-      "paths": ["scripts/production_smoke.sh", "scripts/test_production_smoke.py"],
+      "tasks": [
+        "T094"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-019"
+      ],
+      "paths": [
+        "scripts/production_smoke.sh",
+        "scripts/test_production_smoke.py"
+      ],
       "depends_on": [],
-      "tests": ["python3 -m pytest scripts/test_production_smoke.py"],
-      "acceptance": ["Smoke passes against both servers locally."],
-      "budget": {"product_loc": 60, "files": 1},
+      "tests": [
+        "python3 -m pytest scripts/test_production_smoke.py"
+      ],
+      "acceptance": [
+        "Smoke passes against both servers locally."
+      ],
+      "budget": {
+        "product_loc": 60,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-95",
       "outcome": "Implement research R10 as scripts/fly_cutover.sh (subcommands cutover, rollback, erase",
-      "tasks": ["T095"],
-      "requirements": ["027-FR-019"],
-      "paths": ["scripts/fly_cutover.sh", "scripts/test_fly_cutover.py"],
-      "depends_on": ["PR-94"],
-      "tests": ["python3 -m pytest scripts/test_fly_cutover.py"],
-      "acceptance": ["Dry runs never show two writable apps; rollback is unavailable once erase has run."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tasks": [
+        "T095"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "scripts/fly_cutover.sh",
+        "scripts/test_fly_cutover.py"
+      ],
+      "depends_on": [
+        "PR-94"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_fly_cutover.py"
+      ],
+      "acceptance": [
+        "Dry runs never show two writable apps; rollback is unavailable once erase has run."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-96",
       "outcome": "Add fly.api.toml for app `brain-buddy-api` (ams",
-      "tasks": ["T096"],
-      "requirements": ["027-FR-019", "027-FR-002"],
-      "paths": ["fly.api.toml", "deploy/nginx/default.conf"],
-      "depends_on": ["PR-33"],
-      "tests": ["fly config validate -c fly.api.toml"],
-      "acceptance": ["Config validates; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 80, "files": 2},
+      "tasks": [
+        "T096"
+      ],
+      "requirements": [
+        "027-FR-019",
+        "027-FR-002"
+      ],
+      "paths": [
+        "fly.api.toml",
+        "deploy/nginx/default.conf"
+      ],
+      "depends_on": [
+        "PR-33"
+      ],
+      "tests": [
+        "fly config validate -c fly.api.toml"
+      ],
+      "acceptance": [
+        "Config validates; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 80,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-97",
       "outcome": "Provision the staging Fly org for the rehearsal",
-      "tasks": ["T097"],
-      "requirements": ["027-FR-019"],
-      "paths": ["specs/027-rust-server/evidence/provisioning-staging.md"],
-      "depends_on": ["PR-96"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["Owner approval recorded; no secret in evidence. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T097"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/provisioning-staging.md"
+      ],
+      "depends_on": [
+        "PR-96"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "Owner approval recorded; no secret in evidence. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-98",
       "outcome": "Provision production",
-      "tasks": ["T098"],
-      "requirements": ["027-FR-019", "027-FR-009"],
-      "paths": ["specs/027-rust-server/evidence/provisioning-production.md"],
-      "depends_on": ["PR-11", "PR-96"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["Owner approval recorded for this action. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T098"
+      ],
+      "requirements": [
+        "027-FR-019",
+        "027-FR-009"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/provisioning-production.md"
+      ],
+      "depends_on": [
+        "PR-11",
+        "PR-96"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "Owner approval recorded for this action. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-99",
       "outcome": "Add .github/workflows/cutover-rehearsal.yml bound to the `staging` environment and Fly org (never `production`) that runs scripts/fly_cutover.sh cutover → rollback → cutover →…",
-      "tasks": ["T101"],
-      "requirements": ["027-FR-019"],
-      "paths": [".github/workflows/cutover-rehearsal.yml"],
-      "depends_on": ["PR-37", "PR-95", "PR-96"],
-      "tests": ["make validate-ci"],
-      "acceptance": ["Workflow cannot request the production environment (validator-enforced). ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 90, "files": 1},
+      "tasks": [
+        "T101"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        ".github/workflows/cutover-rehearsal.yml"
+      ],
+      "depends_on": [
+        "PR-37",
+        "PR-95",
+        "PR-96"
+      ],
+      "tests": [
+        "make validate-ci"
+      ],
+      "acceptance": [
+        "Workflow cannot request the production environment (validator-enforced). ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 90,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-100",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-025, CAP-HTTP-026, CAP-HTTP-050..055, CAP-MW-017",
-      "tasks": ["T103"],
-      "requirements": ["027-FR-001", "027-FR-009", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/account.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test account"],
-      "acceptance": ["Every `port` row of CAP-HTTP-025, CAP-HTTP-026, CAP-HTTP-050..055, CAP-MW-017 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T103"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-009",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/account.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test account"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-025, CAP-HTTP-026, CAP-HTTP-050..055, CAP-MW-017 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-101",
       "outcome": "Port account management in rust/crates/bb-app/src/account/profile.rs and rust/crates/bb-api/src/account/{mod.rs,profile.rs} (never flag-gated)",
-      "tasks": ["T104"],
-      "requirements": ["027-FR-009", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/account/profile.rs", "rust/crates/bb-api/src/account/mod.rs", "rust/crates/bb-api/src/account/profile.rs"],
-      "depends_on": ["PR-30", "PR-41", "PR-44", "PR-100"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account profile"],
-      "acceptance": ["Account rows pass on both servers (after the Python #1 fix)."],
-      "budget": {"product_loc": 320, "files": 3},
+      "tasks": [
+        "T104"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/account/profile.rs",
+        "rust/crates/bb-api/src/account/mod.rs",
+        "rust/crates/bb-api/src/account/profile.rs"
+      ],
+      "depends_on": [
+        "PR-30",
+        "PR-41",
+        "PR-44",
+        "PR-100"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account profile"
+      ],
+      "acceptance": [
+        "Account rows pass on both servers (after the Python #1 fix)."
+      ],
+      "budget": {
+        "product_loc": 320,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-102",
       "outcome": "Classify the Rust GDPR and secret surfaces ASK in scripts/classify_path_risk.py (ASK_EXACT_PATHS)",
-      "tasks": ["T105"],
-      "requirements": ["027-FR-009", "027-FR-014"],
-      "paths": ["scripts/classify_path_risk.py", "scripts/test_classify_path_risk.py", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-38"],
-      "tests": ["python3 -m pytest scripts/test_classify_path_risk.py", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["Every listed Rust path classifies ASK before any of them is written. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 40, "files": 2},
+      "tasks": [
+        "T105"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-014"
+      ],
+      "paths": [
+        "scripts/classify_path_risk.py",
+        "scripts/test_classify_path_risk.py",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-38"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_classify_path_risk.py",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "Every listed Rust path classifies ASK before any of them is written. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 40,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-103",
       "outcome": "Add deploy/production-backend.toml (`target = \"python\"`, `erase_old = false`) and classify it ASK as an exact path in scripts/classify_path_risk.py with…",
-      "tasks": ["T099"],
-      "requirements": ["027-FR-019"],
-      "paths": ["deploy/production-backend.toml", "scripts/classify_path_risk.py", "scripts/test_classify_path_risk.py", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-38", "PR-102"],
-      "tests": ["python3 -m pytest scripts/test_classify_path_risk.py", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["Any change to the state file classifies ASK. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 30, "files": 3},
+      "tasks": [
+        "T099"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "deploy/production-backend.toml",
+        "scripts/classify_path_risk.py",
+        "scripts/test_classify_path_risk.py",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-38",
+        "PR-102"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_classify_path_risk.py",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "Any change to the state file classifies ASK. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 30,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-104",
       "outcome": "Teach .github/workflows/deploy-fly-production.yml to read deploy/production-backend.toml for the exact landed main SHA in the `production` environment and concurrency group,…",
-      "tasks": ["T100"],
-      "requirements": ["027-FR-019", "027-FR-018"],
-      "paths": [".github/workflows/deploy-fly-production.yml"],
-      "depends_on": ["PR-37", "PR-95", "PR-96", "PR-103"],
-      "tests": ["make validate-ci"],
-      "acceptance": ["With `target = \"python\"` the workflow behaves exactly as today. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 150, "files": 1},
+      "tasks": [
+        "T100"
+      ],
+      "requirements": [
+        "027-FR-019",
+        "027-FR-018"
+      ],
+      "paths": [
+        ".github/workflows/deploy-fly-production.yml"
+      ],
+      "depends_on": [
+        "PR-37",
+        "PR-95",
+        "PR-96",
+        "PR-103"
+      ],
+      "tests": [
+        "make validate-ci"
+      ],
+      "acceptance": [
+        "With `target = \"python\"` the workflow behaves exactly as today. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 150,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-105",
       "outcome": "Document the cutover, rollback (available only until the erase",
-      "tasks": ["T102"],
-      "requirements": ["027-FR-019"],
-      "paths": ["docs/runbooks/rust-cutover.md", "docs/fly-deployment.md"],
-      "depends_on": ["PR-99", "PR-104"],
-      "tests": ["python3 scripts/check_spec_kit_specs.py"],
-      "acceptance": ["Runbook matches research R10 and the workflow steps."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T102"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "docs/runbooks/rust-cutover.md",
+        "docs/fly-deployment.md"
+      ],
+      "depends_on": [
+        "PR-99",
+        "PR-104"
+      ],
+      "tests": [
+        "python3 scripts/check_spec_kit_specs.py"
+      ],
+      "acceptance": [
+        "Runbook matches research R10 and the workflow steps."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-106",
       "outcome": "Port the GDPR ZIP export orchestration in rust/crates/bb-app/src/account/export.rs and rust/crates/bb-api/src/account/export.rs",
-      "tasks": ["T106"],
-      "requirements": ["027-FR-009"],
-      "paths": ["rust/crates/bb-app/src/account/export.rs", "rust/crates/bb-api/src/account/export.rs"],
-      "depends_on": ["PR-48", "PR-101", "PR-102"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account export"],
-      "acceptance": ["Identity categories match the Python ZIP; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 300, "files": 2},
+      "tasks": [
+        "T106"
+      ],
+      "requirements": [
+        "027-FR-009"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/account/export.rs",
+        "rust/crates/bb-api/src/account/export.rs"
+      ],
+      "depends_on": [
+        "PR-48",
+        "PR-101",
+        "PR-102"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account export"
+      ],
+      "acceptance": [
+        "Identity categories match the Python ZIP; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-107",
       "outcome": "Port deletion and purge test-first (purge completeness and job-write stop are critical invariants) in rust/crates/bb-app/src/account/{deletion.rs,purge.rs,jobs.rs},…",
-      "tasks": ["T107"],
-      "requirements": ["027-FR-009", "027-FR-017", "027-FR-010"],
-      "paths": ["rust/crates/bb-app/src/account/deletion.rs", "rust/crates/bb-app/src/account/purge.rs", "rust/crates/bb-app/src/account/jobs.rs", "rust/crates/bb-api/src/account/deletion.rs", "rust/crates/bb-server/src/commands/purge_due_accounts.rs"],
-      "depends_on": ["PR-27", "PR-32", "PR-48", "PR-101", "PR-102"],
-      "tests": ["cd rust && cargo test -p bb-app account::purge", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account delete"],
-      "acceptance": ["A job started before deletion cannot write after it; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 400, "files": 5},
+      "tasks": [
+        "T107"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-017",
+        "027-FR-010"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/account/deletion.rs",
+        "rust/crates/bb-app/src/account/purge.rs",
+        "rust/crates/bb-app/src/account/jobs.rs",
+        "rust/crates/bb-api/src/account/deletion.rs",
+        "rust/crates/bb-server/src/commands/purge_due_accounts.rs"
+      ],
+      "depends_on": [
+        "PR-27",
+        "PR-32",
+        "PR-48",
+        "PR-101",
+        "PR-102"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app account::purge",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test account delete"
+      ],
+      "acceptance": [
+        "A job started before deletion cannot write after it; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-108",
       "outcome": "Register the Tasks-group export and purge contributor in rust/crates/bb-app/src/tasks/privacy.rs",
-      "tasks": ["T108"],
-      "requirements": ["027-FR-009", "027-FR-010"],
-      "paths": ["rust/crates/bb-app/src/tasks/privacy.rs"],
-      "depends_on": ["PR-61", "PR-67", "PR-75", "PR-102", "PR-106", "PR-107"],
-      "tests": ["cd rust && cargo test -p bb-app tasks::privacy"],
-      "acceptance": ["After purge every Tasks-group table holds zero rows for the owner. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 220, "files": 1},
+      "tasks": [
+        "T108"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-010"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/tasks/privacy.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-67",
+        "PR-75",
+        "PR-102",
+        "PR-106",
+        "PR-107"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app tasks::privacy"
+      ],
+      "acceptance": [
+        "After purge every Tasks-group table holds zero rows for the owner. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 220,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-109",
       "outcome": "Port sync retention and the control-ledger prune in rust/crates/bb-app/src/sync/jobs.rs and rust/crates/bb-app/src/control/jobs.rs",
-      "tasks": ["T109"],
-      "requirements": ["027-FR-010", "027-FR-006"],
-      "paths": ["rust/crates/bb-app/src/sync/jobs.rs", "rust/crates/bb-app/src/control/jobs.rs"],
-      "depends_on": ["PR-27", "PR-32", "PR-75"],
-      "tests": ["cd rust && cargo test -p bb-app sync::jobs control::jobs"],
-      "acceptance": ["Job tests with the test clock show each horizon; nothing kept longer than today."],
-      "budget": {"product_loc": 300, "files": 2},
+      "tasks": [
+        "T109"
+      ],
+      "requirements": [
+        "027-FR-010",
+        "027-FR-006"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/sync/jobs.rs",
+        "rust/crates/bb-app/src/control/jobs.rs"
+      ],
+      "depends_on": [
+        "PR-27",
+        "PR-32",
+        "PR-75"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app sync::jobs control::jobs"
+      ],
+      "acceptance": [
+        "Job tests with the test clock show each horizon; nothing kept longer than today."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-110",
       "outcome": "Port the privacy-maintenance job in rust/crates/bb-app/src/jobs/privacy.rs",
-      "tasks": ["T110"],
-      "requirements": ["027-FR-010", "027-FR-017"],
-      "paths": ["rust/crates/bb-app/src/jobs/privacy.rs"],
-      "depends_on": ["PR-32"],
-      "tests": ["cd rust && cargo test -p bb-app jobs::privacy"],
-      "acceptance": ["A failing step is logged by type and the next step still runs."],
-      "budget": {"product_loc": 160, "files": 1},
+      "tasks": [
+        "T110"
+      ],
+      "requirements": [
+        "027-FR-010",
+        "027-FR-017"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/jobs/privacy.rs"
+      ],
+      "depends_on": [
+        "PR-32"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app jobs::privacy"
+      ],
+      "acceptance": [
+        "A failing step is logged by type and the next step still runs."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-111",
       "outcome": "Update docs/data-retention.md (PostgreSQL and object storage, deletion pending until the last restore point expires, CRT 30-day tombstones, ledger retention, voice objects) and…",
-      "tasks": ["T112"],
-      "requirements": ["027-FR-009", "027-FR-010", "027-FR-007"],
-      "paths": ["docs/data-retention.md", "docs/auth.md"],
-      "depends_on": ["PR-55", "PR-107"],
-      "tests": ["python3 scripts/check_spec_kit_specs.py"],
-      "acceptance": ["Docs match the implemented retention and invite rules."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T112"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-010",
+        "027-FR-007"
+      ],
+      "paths": [
+        "docs/data-retention.md",
+        "docs/auth.md"
+      ],
+      "depends_on": [
+        "PR-55",
+        "PR-107"
+      ],
+      "tests": [
+        "python3 scripts/check_spec_kit_specs.py"
+      ],
+      "acceptance": [
+        "Docs match the implemented retention and invite rules."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-112",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-080..087, CAP-HTTP-090..109, CAP-MW-016 (CRT UUID), CAP-MW-018",
-      "tasks": ["T113"],
-      "requirements": ["027-FR-001", "027-FR-013", "027-FR-011", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/crt.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test crt"],
-      "acceptance": ["Every `port` row of CAP-HTTP-080..087, CAP-HTTP-090..109, CAP-MW-016 (CRT UUID), CAP-MW-018 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T113"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-013",
+        "027-FR-011",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/crt.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test crt"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-080..087, CAP-HTTP-090..109, CAP-MW-016 (CRT UUID), CAP-MW-018 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-113",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-113..120",
-      "tasks": ["T114"],
-      "requirements": ["027-FR-001", "027-FR-012", "027-FR-011", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/voice.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test voice"],
-      "acceptance": ["Every `port` row of CAP-HTTP-113..120 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T114"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-012",
+        "027-FR-011",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/voice.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test voice"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-113..120 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-114",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-110..112, CAP-HTTP-157..160",
-      "tasks": ["T115"],
-      "requirements": ["027-FR-001", "027-FR-011", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/ai.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test ai"],
-      "acceptance": ["Every `port` row of CAP-HTTP-110..112, CAP-HTTP-157..160 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T115"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-011",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/ai.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test ai"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-110..112, CAP-HTTP-157..160 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-115",
       "outcome": "Implement CRT repositories in rust/crates/bb-store/src/crt/",
-      "tasks": ["T116"],
-      "requirements": ["027-FR-013", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/crt"],
-      "depends_on": ["PR-19", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store crt"],
-      "acceptance": ["Owner filter on every query."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T116"
+      ],
+      "requirements": [
+        "027-FR-013",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/crt"
+      ],
+      "depends_on": [
+        "PR-19",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store crt"
+      ],
+      "acceptance": [
+        "Owner filter on every query."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-116",
       "outcome": "Port the tree service in rust/crates/bb-app/src/crt/trees.rs",
-      "tasks": ["T117"],
-      "requirements": ["027-FR-013", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/crt/trees.rs"],
-      "depends_on": ["PR-23", "PR-115"],
-      "tests": ["cd rust && cargo test -p bb-app crt::trees"],
-      "acceptance": ["Revision conflicts match ADR-0026."],
-      "budget": {"product_loc": 400, "files": 1},
+      "tasks": [
+        "T117"
+      ],
+      "requirements": [
+        "027-FR-013",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/crt/trees.rs"
+      ],
+      "depends_on": [
+        "PR-23",
+        "PR-115"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app crt::trees"
+      ],
+      "acceptance": [
+        "Revision conflicts match ADR-0026."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-117",
       "outcome": "Port the CRT command path in rust/crates/bb-app/src/crt/{commands.rs,jobs.rs}",
-      "tasks": ["T118"],
-      "requirements": ["027-FR-013"],
-      "paths": ["rust/crates/bb-app/src/crt/commands.rs", "rust/crates/bb-app/src/crt/jobs.rs"],
-      "depends_on": ["PR-32", "PR-116"],
-      "tests": ["cd rust && cargo test -p bb-app crt::commands"],
-      "acceptance": ["Replays return the stored response; the one-transaction test is the removal evidence for CAP-JOB-008."],
-      "budget": {"product_loc": 300, "files": 2},
+      "tasks": [
+        "T118"
+      ],
+      "requirements": [
+        "027-FR-013"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/crt/commands.rs",
+        "rust/crates/bb-app/src/crt/jobs.rs"
+      ],
+      "depends_on": [
+        "PR-32",
+        "PR-116"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app crt::commands"
+      ],
+      "acceptance": [
+        "Replays return the stored response; the one-transaction test is the removal evidence for CAP-JOB-008."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-118",
       "outcome": "Port /api/crt routes in rust/crates/bb-api/src/crt/",
-      "tasks": ["T119"],
-      "requirements": ["027-FR-013", "027-FR-016"],
-      "paths": ["rust/crates/bb-api/src/crt"],
-      "depends_on": ["PR-44", "PR-112", "PR-117"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt command"],
-      "acceptance": ["CRT command rows pass on both servers."],
-      "budget": {"product_loc": 300, "files": 3},
+      "tasks": [
+        "T119"
+      ],
+      "requirements": [
+        "027-FR-013",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/crt"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-112",
+        "PR-117"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt command"
+      ],
+      "acceptance": [
+        "CRT command rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-119",
       "outcome": "Port the legacy tree routes in rust/crates/bb-api/src/trees/",
-      "tasks": ["T120"],
-      "requirements": ["027-FR-013", "027-FR-008"],
-      "paths": ["rust/crates/bb-api/src/trees"],
-      "depends_on": ["PR-44", "PR-112", "PR-116"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt trees"],
-      "acceptance": ["Legacy tree rows and the 200-node latency check pass on Rust."],
-      "budget": {"product_loc": 400, "files": 4},
+      "tasks": [
+        "T120"
+      ],
+      "requirements": [
+        "027-FR-013",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/trees"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-112",
+        "PR-116"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt trees"
+      ],
+      "acceptance": [
+        "Legacy tree rows and the 200-node latency check pass on Rust."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-120",
       "outcome": "Port title completion in rust/crates/bb-providers/src/openai/{mod.rs,chat.rs,title.rs}, rust/crates/bb-app/src/ai/ and rust/crates/bb-api/src/title/",
-      "tasks": ["T121"],
-      "requirements": ["027-FR-011", "027-FR-005"],
-      "paths": ["rust/crates/bb-providers/src/openai/mod.rs", "rust/crates/bb-providers/src/openai/chat.rs", "rust/crates/bb-providers/src/openai/title.rs", "rust/crates/bb-app/src/ai", "rust/crates/bb-api/src/title"],
-      "depends_on": ["PR-22", "PR-28", "PR-41", "PR-44", "PR-114"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test ai title"],
-      "acceptance": ["Title rows pass on both servers; consent refusal shows zero calls."],
-      "budget": {"product_loc": 380, "files": 6},
+      "tasks": [
+        "T121"
+      ],
+      "requirements": [
+        "027-FR-011",
+        "027-FR-005"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/openai/mod.rs",
+        "rust/crates/bb-providers/src/openai/chat.rs",
+        "rust/crates/bb-providers/src/openai/title.rs",
+        "rust/crates/bb-app/src/ai",
+        "rust/crates/bb-api/src/title"
+      ],
+      "depends_on": [
+        "PR-22",
+        "PR-28",
+        "PR-41",
+        "PR-44",
+        "PR-114"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test ai title"
+      ],
+      "acceptance": [
+        "Title rows pass on both servers; consent refusal shows zero calls."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 6
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-121",
       "outcome": "Port CRT node validation in rust/crates/bb-providers/src/openai/crt_validation.rs, rust/crates/bb-app/src/crt/validation.rs and rust/crates/bb-api/src/trees/validation.rs with…",
-      "tasks": ["T122"],
-      "requirements": ["027-FR-011", "027-FR-013"],
-      "paths": ["rust/crates/bb-providers/src/openai/crt_validation.rs", "rust/crates/bb-app/src/crt/validation.rs", "rust/crates/bb-api/src/trees/validation.rs"],
-      "depends_on": ["PR-119", "PR-120"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt validation"],
-      "acceptance": ["Rust-only change rows pass; history rows pass on both servers."],
-      "budget": {"product_loc": 280, "files": 3},
+      "tasks": [
+        "T122"
+      ],
+      "requirements": [
+        "027-FR-011",
+        "027-FR-013"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/openai/crt_validation.rs",
+        "rust/crates/bb-app/src/crt/validation.rs",
+        "rust/crates/bb-api/src/trees/validation.rs"
+      ],
+      "depends_on": [
+        "PR-119",
+        "PR-120"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test crt validation"
+      ],
+      "acceptance": [
+        "Rust-only change rows pass; history rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 280,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-122",
       "outcome": "Port CRT receipt retention in rust/crates/bb-app/src/crt/retention.rs",
-      "tasks": ["T123"],
-      "requirements": ["027-FR-010", "027-FR-013"],
-      "paths": ["rust/crates/bb-app/src/crt/retention.rs"],
-      "depends_on": ["PR-117"],
-      "tests": ["cd rust && cargo test -p bb-app crt::retention"],
-      "acceptance": ["Job test with the test clock."],
-      "budget": {"product_loc": 120, "files": 1},
+      "tasks": [
+        "T123"
+      ],
+      "requirements": [
+        "027-FR-010",
+        "027-FR-013"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/crt/retention.rs"
+      ],
+      "depends_on": [
+        "PR-117"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app crt::retention"
+      ],
+      "acceptance": [
+        "Job test with the test clock."
+      ],
+      "budget": {
+        "product_loc": 120,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-123",
       "outcome": "Register the CRT export and purge contributor in rust/crates/bb-app/src/crt/privacy.rs (trees, nodes, relations, versions, validation history, receipts and tombstones)",
-      "tasks": ["T124"],
-      "requirements": ["027-FR-009"],
-      "paths": ["rust/crates/bb-app/src/crt/privacy.rs"],
-      "depends_on": ["PR-102", "PR-106", "PR-107", "PR-117"],
-      "tests": ["cd rust && cargo test -p bb-app crt::privacy"],
-      "acceptance": ["After purge the crt schema holds zero owner rows. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 160, "files": 1},
+      "tasks": [
+        "T124"
+      ],
+      "requirements": [
+        "027-FR-009"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/crt/privacy.rs"
+      ],
+      "depends_on": [
+        "PR-102",
+        "PR-106",
+        "PR-107",
+        "PR-117"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app crt::privacy"
+      ],
+      "acceptance": [
+        "After purge the crt schema holds zero owner rows. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-124",
       "outcome": "Implement voice storage in rust/crates/bb-store/src/voice/ and the audio object contract in rust/crates/bb-app/src/voice/audio_store.rs (research R11)",
-      "tasks": ["T125"],
-      "requirements": ["027-FR-012", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/voice", "rust/crates/bb-app/src/voice/audio_store.rs", "rust/crates/bb-app/tests/voice_audio_durability.rs"],
-      "depends_on": ["PR-20", "PR-21", "PR-23"],
-      "tests": ["cd rust && cargo test -p bb-app --test voice_audio_durability"],
-      "acceptance": ["Audio survives a restart and is reachable from the worker process."],
-      "budget": {"product_loc": 400, "files": 4},
+      "tasks": [
+        "T125"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/voice",
+        "rust/crates/bb-app/src/voice/audio_store.rs",
+        "rust/crates/bb-app/tests/voice_audio_durability.rs"
+      ],
+      "depends_on": [
+        "PR-20",
+        "PR-21",
+        "PR-23"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app --test voice_audio_durability"
+      ],
+      "acceptance": [
+        "Audio survives a restart and is reachable from the worker process."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 4
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 400."
     },
     {
       "id": "PR-125",
       "outcome": "Validate early the research R8 risk",
-      "tasks": ["T126"],
-      "requirements": ["027-FR-012"],
-      "paths": ["rust/crates/bb-app/src/voice/probe.rs"],
-      "depends_on": ["PR-09", "PR-23"],
-      "tests": ["cd rust && cargo test -p bb-app voice::probe"],
-      "acceptance": ["Durations within the tolerance the Python PyAV path accepts; unknown containers rejected."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tasks": [
+        "T126"
+      ],
+      "requirements": [
+        "027-FR-012"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/voice/probe.rs"
+      ],
+      "depends_on": [
+        "PR-09",
+        "PR-23"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app voice::probe"
+      ],
+      "acceptance": [
+        "Durations within the tolerance the Python PyAV path accepts; unknown containers rejected."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-126",
       "outcome": "Port speech-to-text adapters in rust/crates/bb-providers/src/stt/",
-      "tasks": ["T127"],
-      "requirements": ["027-FR-012", "027-FR-011"],
-      "paths": ["rust/crates/bb-providers/src/stt"],
-      "depends_on": ["PR-22"],
-      "tests": ["cd rust && cargo test -p bb-providers stt"],
-      "acceptance": ["Request shapes match the Python adapters against recorded synthetic exchanges."],
-      "budget": {"product_loc": 340, "files": 3},
+      "tasks": [
+        "T127"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-011"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/stt"
+      ],
+      "depends_on": [
+        "PR-22"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers stt"
+      ],
+      "acceptance": [
+        "Request shapes match the Python adapters against recorded synthetic exchanges."
+      ],
+      "budget": {
+        "product_loc": 340,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-127",
       "outcome": "Port the voice text reconciler adapter in rust/crates/bb-providers/src/reconciler/ (disabled|deterministic|openai",
-      "tasks": ["T128"],
-      "requirements": ["027-FR-012", "027-FR-011"],
-      "paths": ["rust/crates/bb-providers/src/reconciler"],
-      "depends_on": ["PR-22"],
-      "tests": ["cd rust && cargo test -p bb-providers reconciler"],
-      "acceptance": ["Matches the Python adapter's request and parsing."],
-      "budget": {"product_loc": 280, "files": 2},
+      "tasks": [
+        "T128"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-011"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/reconciler"
+      ],
+      "depends_on": [
+        "PR-22"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers reconciler"
+      ],
+      "acceptance": [
+        "Matches the Python adapter's request and parsing."
+      ],
+      "budget": {
+        "product_loc": 280,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-128",
       "outcome": "Port voice operations in rust/crates/bb-app/src/voice/operations.rs (ADR-0002)",
-      "tasks": ["T129"],
-      "requirements": ["027-FR-012", "027-FR-011"],
-      "paths": ["rust/crates/bb-app/src/voice/operations.rs"],
-      "depends_on": ["PR-61", "PR-124"],
-      "tests": ["cd rust && cargo test -p bb-app voice::operations"],
-      "acceptance": ["Provisional output stays in the operation workspace until confirmation."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T129"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-011"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/voice/operations.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-124"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app voice::operations"
+      ],
+      "acceptance": [
+        "Provisional output stays in the operation workspace until confirmation."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-129",
       "outcome": "Port operation actions in rust/crates/bb-app/src/voice/actions.rs",
-      "tasks": ["T130"],
-      "requirements": ["027-FR-012", "027-FR-011"],
-      "paths": ["rust/crates/bb-app/src/voice/actions.rs"],
-      "depends_on": ["PR-128"],
-      "tests": ["cd rust && cargo test -p bb-app voice::actions"],
-      "acceptance": ["Withdrawn consent discards any in-flight provider result."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T130"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-011"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/voice/actions.rs"
+      ],
+      "depends_on": [
+        "PR-128"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app voice::actions"
+      ],
+      "acceptance": [
+        "Withdrawn consent discards any in-flight provider result."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-130",
       "outcome": "Port the voice sweep job in rust/crates/bb-app/src/voice/{jobs.rs,config.rs}",
-      "tasks": ["T131"],
-      "requirements": ["027-FR-012", "027-FR-011", "027-FR-017", "027-FR-010"],
-      "paths": ["rust/crates/bb-app/src/voice/jobs.rs", "rust/crates/bb-app/src/voice/config.rs"],
-      "depends_on": ["PR-32", "PR-126", "PR-127", "PR-129"],
-      "tests": ["cd rust && cargo test -p bb-app voice::jobs"],
-      "acceptance": ["Job tests for every step with the held-provider seam."],
-      "budget": {"product_loc": 380, "files": 2},
+      "tasks": [
+        "T131"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-011",
+        "027-FR-017",
+        "027-FR-010"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/voice/jobs.rs",
+        "rust/crates/bb-app/src/voice/config.rs"
+      ],
+      "depends_on": [
+        "PR-32",
+        "PR-126",
+        "PR-127",
+        "PR-129"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app voice::jobs"
+      ],
+      "acceptance": [
+        "Job tests for every step with the held-provider seam."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-131",
       "outcome": "Port voice routes in rust/crates/bb-api/src/voice/",
-      "tasks": ["T132"],
-      "requirements": ["027-FR-012", "027-FR-008"],
-      "paths": ["rust/crates/bb-api/src/voice"],
-      "depends_on": ["PR-44", "PR-113", "PR-125", "PR-129", "PR-130"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test voice"],
-      "acceptance": ["Voice rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 4},
+      "tasks": [
+        "T132"
+      ],
+      "requirements": [
+        "027-FR-012",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/voice"
+      ],
+      "depends_on": [
+        "PR-44",
+        "PR-113",
+        "PR-125",
+        "PR-129",
+        "PR-130"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test voice"
+      ],
+      "acceptance": [
+        "Voice rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-132",
       "outcome": "Register the voice export and purge contributor in rust/crates/bb-app/src/voice/privacy.rs",
-      "tasks": ["T133"],
-      "requirements": ["027-FR-009", "027-FR-012"],
-      "paths": ["rust/crates/bb-app/src/voice/privacy.rs"],
-      "depends_on": ["PR-102", "PR-106", "PR-107", "PR-128"],
-      "tests": ["cd rust && cargo test -p bb-app voice::privacy"],
-      "acceptance": ["Zero owner rows and zero owner objects after purge. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 160, "files": 1},
+      "tasks": [
+        "T133"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-012"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/voice/privacy.rs"
+      ],
+      "depends_on": [
+        "PR-102",
+        "PR-106",
+        "PR-107",
+        "PR-128"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app voice::privacy"
+      ],
+      "acceptance": [
+        "Zero owner rows and zero owner objects after purge. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-133",
       "outcome": "Port the Review navigator in rust/crates/bb-providers/src/openai/navigator.rs, rust/crates/bb-app/src/navigator/ and rust/crates/bb-api/src/navigator/",
-      "tasks": ["T134"],
-      "requirements": ["027-FR-011", "027-FR-003"],
-      "paths": ["rust/crates/bb-providers/src/openai/navigator.rs", "rust/crates/bb-app/src/navigator", "rust/crates/bb-api/src/navigator"],
-      "depends_on": ["PR-41", "PR-61", "PR-65", "PR-120"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test ai navigator"],
-      "acceptance": ["Navigator rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T134"
+      ],
+      "requirements": [
+        "027-FR-011",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/openai/navigator.rs",
+        "rust/crates/bb-app/src/navigator",
+        "rust/crates/bb-api/src/navigator"
+      ],
+      "depends_on": [
+        "PR-41",
+        "PR-61",
+        "PR-65",
+        "PR-120"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test ai navigator"
+      ],
+      "acceptance": [
+        "Navigator rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-134",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-170..185",
-      "tasks": ["T135"],
-      "requirements": ["027-FR-001", "027-FR-014", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/agents.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test agents"],
-      "acceptance": ["Every `port` row of CAP-HTTP-170..185 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T135"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-014",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/agents.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test agents"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-170..185 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-135",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-007, CAP-MCP-001..007",
-      "tasks": ["T136"],
-      "requirements": ["027-FR-001", "027-FR-018", "027-FR-008", "027-SC-003"],
-      "paths": ["rust/crates/bb-conformance/tests/mcp.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test mcp"],
-      "acceptance": ["Every `port` row of CAP-HTTP-007, CAP-MCP-001..007 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T136"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-018",
+        "027-FR-008",
+        "027-SC-003"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/mcp.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test mcp"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-007, CAP-MCP-001..007 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-136",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-030..033",
-      "tasks": ["T137"],
-      "requirements": ["027-FR-001", "027-FR-007", "027-SC-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-conformance/tests/cli_auth.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test cli_auth"],
-      "acceptance": ["Every `port` row of CAP-HTTP-030..033 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T137"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-007",
+        "027-SC-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/cli_auth.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test cli_auth"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-030..033 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-137",
       "outcome": "Implement agent repositories in rust/crates/bb-store/src/agents/",
-      "tasks": ["T138"],
-      "requirements": ["027-FR-014", "027-FR-008"],
-      "paths": ["rust/crates/bb-store/src/agents"],
-      "depends_on": ["PR-20", "PR-21"],
-      "tests": ["cd rust && cargo test -p bb-store agents"],
-      "acceptance": ["Owner filter on every query."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T138"
+      ],
+      "requirements": [
+        "027-FR-014",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-store/src/agents"
+      ],
+      "depends_on": [
+        "PR-20",
+        "PR-21"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-store agents"
+      ],
+      "acceptance": [
+        "Owner filter on every query."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer",
       "oversize_reason": "Generated sqlx offline metadata counts as product lines; handwritten Rust stays under 380."
     },
     {
       "id": "PR-138",
       "outcome": "Port the sealed agent-credential box in rust/crates/bb-app/src/agents/credentials.rs (secret handling)",
-      "tasks": ["T139"],
-      "requirements": ["027-FR-014"],
-      "paths": ["rust/crates/bb-app/src/agents/credentials.rs"],
-      "depends_on": ["PR-23", "PR-27", "PR-102"],
-      "tests": ["cd rust && cargo test -p bb-app agents::credentials"],
-      "acceptance": ["Round-trip and wrong-key failure tested; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 200, "files": 1},
+      "tasks": [
+        "T139"
+      ],
+      "requirements": [
+        "027-FR-014"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/credentials.rs"
+      ],
+      "depends_on": [
+        "PR-23",
+        "PR-27",
+        "PR-102"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app agents::credentials"
+      ],
+      "acceptance": [
+        "Round-trip and wrong-key failure tested; landed with recorded approval. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-139",
       "outcome": "Port A2A egress and agent-card fetch in rust/crates/bb-providers/src/a2a/{mod.rs,egress.rs,card.rs}",
-      "tasks": ["T140"],
-      "requirements": ["027-FR-014"],
-      "paths": ["rust/crates/bb-providers/src/a2a/mod.rs", "rust/crates/bb-providers/src/a2a/egress.rs", "rust/crates/bb-providers/src/a2a/card.rs"],
-      "depends_on": ["PR-22"],
-      "tests": ["cd rust && cargo test -p bb-providers a2a"],
-      "acceptance": ["Redirects, private IPs and oversize bodies are refused."],
-      "budget": {"product_loc": 340, "files": 3},
+      "tasks": [
+        "T140"
+      ],
+      "requirements": [
+        "027-FR-014"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/a2a/mod.rs",
+        "rust/crates/bb-providers/src/a2a/egress.rs",
+        "rust/crates/bb-providers/src/a2a/card.rs"
+      ],
+      "depends_on": [
+        "PR-22"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers a2a"
+      ],
+      "acceptance": [
+        "Redirects, private IPs and oversize bodies are refused."
+      ],
+      "budget": {
+        "product_loc": 340,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-140",
       "outcome": "Port the A2A JSON-RPC client in rust/crates/bb-providers/src/a2a/client.rs",
-      "tasks": ["T141"],
-      "requirements": ["027-FR-014"],
-      "paths": ["rust/crates/bb-providers/src/a2a/client.rs"],
-      "depends_on": ["PR-139"],
-      "tests": ["cd rust && cargo test -p bb-providers a2a::client"],
-      "acceptance": ["Wire bodies match spec 014 fixtures."],
-      "budget": {"product_loc": 380, "files": 1},
+      "tasks": [
+        "T141"
+      ],
+      "requirements": [
+        "027-FR-014"
+      ],
+      "paths": [
+        "rust/crates/bb-providers/src/a2a/client.rs"
+      ],
+      "depends_on": [
+        "PR-139"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-providers a2a::client"
+      ],
+      "acceptance": [
+        "Wire bodies match spec 014 fixtures."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-141",
       "outcome": "Port agent connections in rust/crates/bb-app/src/agents/connections.rs and rust/crates/bb-api/src/agents/{mod.rs,connections.rs}",
-      "tasks": ["T142"],
-      "requirements": ["027-FR-014", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/agents/connections.rs", "rust/crates/bb-api/src/agents/mod.rs", "rust/crates/bb-api/src/agents/connections.rs"],
-      "depends_on": ["PR-28", "PR-44", "PR-134", "PR-137", "PR-138", "PR-140"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents connections"],
-      "acceptance": ["Connection rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 3},
+      "tasks": [
+        "T142"
+      ],
+      "requirements": [
+        "027-FR-014",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/connections.rs",
+        "rust/crates/bb-api/src/agents/mod.rs",
+        "rust/crates/bb-api/src/agents/connections.rs"
+      ],
+      "depends_on": [
+        "PR-28",
+        "PR-44",
+        "PR-134",
+        "PR-137",
+        "PR-138",
+        "PR-140"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents connections"
+      ],
+      "acceptance": [
+        "Connection rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-142",
       "outcome": "Port agent runs in rust/crates/bb-app/src/agents/runs.rs and rust/crates/bb-api/src/agents/runs.rs",
-      "tasks": ["T143"],
-      "requirements": ["027-FR-014", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/agents/runs.rs", "rust/crates/bb-api/src/agents/runs.rs"],
-      "depends_on": ["PR-61", "PR-141"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents runs"],
-      "acceptance": ["Run rows pass on both servers."],
-      "budget": {"product_loc": 400, "files": 2},
+      "tasks": [
+        "T143"
+      ],
+      "requirements": [
+        "027-FR-014",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/runs.rs",
+        "rust/crates/bb-api/src/agents/runs.rs"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-141"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents runs"
+      ],
+      "acceptance": [
+        "Run rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-143",
       "outcome": "Port A2A push and the observer in rust/crates/bb-app/src/agents/{observer.rs,jobs.rs} and rust/crates/bb-api/src/a2a_push/",
-      "tasks": ["T144"],
-      "requirements": ["027-FR-014", "027-FR-017"],
-      "paths": ["rust/crates/bb-app/src/agents/observer.rs", "rust/crates/bb-app/src/agents/jobs.rs", "rust/crates/bb-api/src/a2a_push"],
-      "depends_on": ["PR-32", "PR-142"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents push"],
-      "acceptance": ["Push rows pass on both servers; observer job-tested."],
-      "budget": {"product_loc": 400, "files": 4},
+      "tasks": [
+        "T144"
+      ],
+      "requirements": [
+        "027-FR-014",
+        "027-FR-017"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/observer.rs",
+        "rust/crates/bb-app/src/agents/jobs.rs",
+        "rust/crates/bb-api/src/a2a_push"
+      ],
+      "depends_on": [
+        "PR-32",
+        "PR-142"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test agents push"
+      ],
+      "acceptance": [
+        "Push rows pass on both servers; observer job-tested."
+      ],
+      "budget": {
+        "product_loc": 400,
+        "files": 4
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-144",
       "outcome": "Port relay retention in rust/crates/bb-app/src/agents/retention.rs",
-      "tasks": ["T145"],
-      "requirements": ["027-FR-010", "027-FR-014"],
-      "paths": ["rust/crates/bb-app/src/agents/retention.rs"],
-      "depends_on": ["PR-142"],
-      "tests": ["cd rust && cargo test -p bb-app agents::retention"],
-      "acceptance": ["Job test with the test clock."],
-      "budget": {"product_loc": 160, "files": 1},
+      "tasks": [
+        "T145"
+      ],
+      "requirements": [
+        "027-FR-010",
+        "027-FR-014"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/retention.rs"
+      ],
+      "depends_on": [
+        "PR-142"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app agents::retention"
+      ],
+      "acceptance": [
+        "Job test with the test clock."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-145",
       "outcome": "Register the agents export and purge contributor in rust/crates/bb-app/src/agents/privacy.rs (connections, sealed credentials, runs, events, commands, audit)",
-      "tasks": ["T146"],
-      "requirements": ["027-FR-009", "027-FR-014"],
-      "paths": ["rust/crates/bb-app/src/agents/privacy.rs"],
-      "depends_on": ["PR-102", "PR-106", "PR-107", "PR-142"],
-      "tests": ["cd rust && cargo test -p bb-app agents::privacy"],
-      "acceptance": ["Zero owner rows after purge. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 160, "files": 1},
+      "tasks": [
+        "T146"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-014"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/agents/privacy.rs"
+      ],
+      "depends_on": [
+        "PR-102",
+        "PR-106",
+        "PR-107",
+        "PR-142"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-app agents::privacy"
+      ],
+      "acceptance": [
+        "Zero owner rows after purge. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 160,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-146",
       "outcome": "Add the end-to-end export/purge acceptance (User Story 4) in rust/crates/bb-conformance/tests/privacy_e2e.rs",
-      "tasks": ["T111"],
-      "requirements": ["027-FR-009", "027-FR-010", "027-FR-011", "027-FR-012"],
-      "paths": ["rust/crates/bb-conformance/tests/privacy_e2e.rs"],
-      "depends_on": ["PR-108", "PR-109", "PR-110", "PR-120", "PR-122", "PR-123", "PR-132", "PR-133", "PR-144", "PR-145"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test privacy_e2e", "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test privacy_e2e export_categories"],
-      "acceptance": ["User Story 4 independent test passes on Rust; export categories equal Python's."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T111"
+      ],
+      "requirements": [
+        "027-FR-009",
+        "027-FR-010",
+        "027-FR-011",
+        "027-FR-012"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/privacy_e2e.rs"
+      ],
+      "depends_on": [
+        "PR-108",
+        "PR-109",
+        "PR-110",
+        "PR-120",
+        "PR-122",
+        "PR-123",
+        "PR-132",
+        "PR-133",
+        "PR-144",
+        "PR-145"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test privacy_e2e",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test privacy_e2e export_categories"
+      ],
+      "acceptance": [
+        "User Story 4 independent test passes on Rust; export categories equal Python's."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-147",
       "outcome": "Port the MCP server with rmcp (stateless streamable HTTP, JSON responses) in rust/crates/bb-app/src/mcp/ and rust/crates/bb-api/src/mcp/ at the new path /api/mcp/v2/…",
-      "tasks": ["T147"],
-      "requirements": ["027-FR-008", "027-FR-018", "027-FR-001"],
-      "paths": ["rust/crates/bb-app/src/mcp", "rust/crates/bb-api/src/mcp"],
-      "depends_on": ["PR-28", "PR-44", "PR-62", "PR-135"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test mcp read"],
-      "acceptance": ["Read tools and server-level rows pass (path change Rust-only)."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T147"
+      ],
+      "requirements": [
+        "027-FR-008",
+        "027-FR-018",
+        "027-FR-001"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/mcp",
+        "rust/crates/bb-api/src/mcp"
+      ],
+      "depends_on": [
+        "PR-28",
+        "PR-44",
+        "PR-62",
+        "PR-135"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test mcp read"
+      ],
+      "acceptance": [
+        "Read tools and server-level rows pass (path change Rust-only)."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-148",
       "outcome": "Add MCP write tools and the old-path refusal in rust/crates/bb-app/src/mcp/tools_write.rs and rust/crates/bb-api/src/mcp/legacy_path.rs",
-      "tasks": ["T148"],
-      "requirements": ["027-FR-008", "027-FR-018", "027-FR-003"],
-      "paths": ["rust/crates/bb-app/src/mcp/tools_write.rs", "rust/crates/bb-api/src/mcp/legacy_path.rs", "docs/mcp.md"],
-      "depends_on": ["PR-61", "PR-147"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test mcp"],
-      "acceptance": ["All MCP rows pass; the old path runs no tool."],
-      "budget": {"product_loc": 220, "files": 2},
+      "tasks": [
+        "T148"
+      ],
+      "requirements": [
+        "027-FR-008",
+        "027-FR-018",
+        "027-FR-003"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/mcp/tools_write.rs",
+        "rust/crates/bb-api/src/mcp/legacy_path.rs",
+        "docs/mcp.md"
+      ],
+      "depends_on": [
+        "PR-61",
+        "PR-147"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test mcp"
+      ],
+      "acceptance": [
+        "All MCP rows pass; the old path runs no tool."
+      ],
+      "budget": {
+        "product_loc": 220,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-149",
       "outcome": "Port CLI device authorization in rust/crates/bb-app/src/cli_auth/ and rust/crates/bb-api/src/cli_auth/",
-      "tasks": ["T149"],
-      "requirements": ["027-FR-007", "027-FR-008"],
-      "paths": ["rust/crates/bb-app/src/cli_auth", "rust/crates/bb-api/src/cli_auth"],
-      "depends_on": ["PR-28", "PR-30", "PR-32", "PR-44", "PR-136"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test cli_auth"],
-      "acceptance": ["CLI auth rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 6},
+      "tasks": [
+        "T149"
+      ],
+      "requirements": [
+        "027-FR-007",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/cli_auth",
+        "rust/crates/bb-api/src/cli_auth"
+      ],
+      "depends_on": [
+        "PR-28",
+        "PR-30",
+        "PR-32",
+        "PR-44",
+        "PR-136"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test cli_auth"
+      ],
+      "acceptance": [
+        "CLI auth rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 6
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-150",
       "outcome": "Make the bb CLI send `X-Client-Epoch",
-      "tasks": ["T150"],
-      "requirements": ["027-FR-018", "027-FR-005"],
-      "paths": ["cli/src/request.rs", "cli/src/error.rs", "cli/README.md", "specs/024-agent-cli/contracts/cli.md", "cli/tests/contract.rs"],
-      "depends_on": ["PR-14"],
-      "tests": ["cd cli && cargo test"],
-      "acceptance": ["Exit 12 with the exact wording and reference_id; other exits unchanged."],
-      "budget": {"product_loc": 80, "files": 2},
+      "tasks": [
+        "T150"
+      ],
+      "requirements": [
+        "027-FR-018",
+        "027-FR-005"
+      ],
+      "paths": [
+        "cli/src/request.rs",
+        "cli/src/error.rs",
+        "cli/README.md",
+        "specs/024-agent-cli/contracts/cli.md",
+        "cli/tests/contract.rs"
+      ],
+      "depends_on": [
+        "PR-14"
+      ],
+      "tests": [
+        "cd cli && cargo test"
+      ],
+      "acceptance": [
+        "Exit 12 with the exact wording and reference_id; other exits unchanged."
+      ],
+      "budget": {
+        "product_loc": 80,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-151",
       "outcome": "Conformance tests encode today's behavior for CAP-HTTP-060..070, CAP-MW-020",
-      "tasks": ["T151"],
-      "requirements": ["027-FR-001", "027-FR-015", "027-SC-003", "027-FR-008"],
-      "paths": ["rust/crates/bb-conformance/tests/admin.rs"],
-      "depends_on": ["PR-05", "PR-06", "PR-07"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test admin"],
-      "acceptance": ["Every `port` row of CAP-HTTP-060..070, CAP-MW-020 has a test that passes against the Python server; the run report lists each CAP id."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T151"
+      ],
+      "requirements": [
+        "027-FR-001",
+        "027-FR-015",
+        "027-SC-003",
+        "027-FR-008"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/tests/admin.rs"
+      ],
+      "depends_on": [
+        "PR-05",
+        "PR-06",
+        "PR-07"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test admin"
+      ],
+      "acceptance": [
+        "Every `port` row of CAP-HTTP-060..070, CAP-MW-020 has a test that passes against the Python server; the run report lists each CAP id."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-152",
       "outcome": "Port operator administration in rust/crates/bb-app/src/admin/{mod.rs,config.rs,accounts.rs} and rust/crates/bb-api/src/admin/{mod.rs,accounts.rs}",
-      "tasks": ["T152"],
-      "requirements": ["027-FR-015", "027-FR-016"],
-      "paths": ["rust/crates/bb-app/src/admin/mod.rs", "rust/crates/bb-app/src/admin/config.rs", "rust/crates/bb-app/src/admin/accounts.rs", "rust/crates/bb-api/src/admin/mod.rs", "rust/crates/bb-api/src/admin/accounts.rs"],
-      "depends_on": ["PR-27", "PR-30", "PR-44", "PR-151"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test admin accounts"],
-      "acceptance": ["Admin account rows pass on both servers."],
-      "budget": {"product_loc": 380, "files": 5},
+      "tasks": [
+        "T152"
+      ],
+      "requirements": [
+        "027-FR-015",
+        "027-FR-016"
+      ],
+      "paths": [
+        "rust/crates/bb-app/src/admin/mod.rs",
+        "rust/crates/bb-app/src/admin/config.rs",
+        "rust/crates/bb-app/src/admin/accounts.rs",
+        "rust/crates/bb-api/src/admin/mod.rs",
+        "rust/crates/bb-api/src/admin/accounts.rs"
+      ],
+      "depends_on": [
+        "PR-27",
+        "PR-30",
+        "PR-44",
+        "PR-151"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test admin accounts"
+      ],
+      "acceptance": [
+        "Admin account rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 380,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-153",
       "outcome": "Port operator flag routes in rust/crates/bb-api/src/admin/flags.rs",
-      "tasks": ["T153"],
-      "requirements": ["027-FR-015"],
-      "paths": ["rust/crates/bb-api/src/admin/flags.rs"],
-      "depends_on": ["PR-28", "PR-152"],
-      "tests": ["cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test admin flags"],
-      "acceptance": ["User Story 7 scenario 2 passes; flag rows pass on both servers."],
-      "budget": {"product_loc": 180, "files": 1},
+      "tasks": [
+        "T153"
+      ],
+      "requirements": [
+        "027-FR-015"
+      ],
+      "paths": [
+        "rust/crates/bb-api/src/admin/flags.rs"
+      ],
+      "depends_on": [
+        "PR-28",
+        "PR-152"
+      ],
+      "tests": [
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8001 cargo test -p bb-conformance --test admin flags"
+      ],
+      "acceptance": [
+        "User Story 7 scenario 2 passes; flag rows pass on both servers."
+      ],
+      "budget": {
+        "product_loc": 180,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-154",
       "outcome": "Port operator commands in rust/crates/bb-server/src/commands/create_invite.rs, rust/crates/bb-server/src/commands/review_metrics.rs and rust/crates/bb-app/src/admin/seed.rs",
-      "tasks": ["T154"],
-      "requirements": ["027-FR-015"],
-      "paths": ["rust/crates/bb-server/src/commands/create_invite.rs", "rust/crates/bb-server/src/commands/review_metrics.rs", "rust/crates/bb-app/src/admin/seed.rs"],
-      "depends_on": ["PR-25", "PR-65", "PR-152"],
-      "tests": ["cd rust && cargo test -p bb-server commands", "cd rust && cargo test -p bb-app admin::seed"],
-      "acceptance": ["An invite minted from the command line works for exactly one signup (User Story 7 scenario 1)."],
-      "budget": {"product_loc": 260, "files": 3},
+      "tasks": [
+        "T154"
+      ],
+      "requirements": [
+        "027-FR-015"
+      ],
+      "paths": [
+        "rust/crates/bb-server/src/commands/create_invite.rs",
+        "rust/crates/bb-server/src/commands/review_metrics.rs",
+        "rust/crates/bb-app/src/admin/seed.rs"
+      ],
+      "depends_on": [
+        "PR-25",
+        "PR-65",
+        "PR-152"
+      ],
+      "tests": [
+        "cd rust && cargo test -p bb-server commands",
+        "cd rust && cargo test -p bb-app admin::seed"
+      ],
+      "acceptance": [
+        "An invite minted from the command line works for exactly one signup (User Story 7 scenario 1)."
+      ],
+      "budget": {
+        "product_loc": 260,
+        "files": 3
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-155",
       "outcome": "Implement `bb-server openapi` in rust/crates/bb-server/src/commands/openapi.rs and commit the generated specs/027-rust-server/contracts/openapi.yaml",
-      "tasks": ["T155"],
-      "requirements": ["027-FR-005", "027-FR-001"],
-      "paths": ["rust/crates/bb-server/src/commands/openapi.rs", "specs/027-rust-server/contracts/openapi.yaml"],
-      "depends_on": ["PR-55", "PR-63", "PR-64", "PR-68", "PR-107", "PR-121", "PR-131", "PR-133", "PR-143", "PR-148", "PR-149", "PR-153", "PR-154"],
-      "tests": ["cd rust && cargo run -p bb-server -- openapi > /tmp/openapi.yaml && diff /tmp/openapi.yaml specs/027-rust-server/contracts/openapi.yaml"],
-      "acceptance": ["The committed document equals the generated one."],
-      "budget": {"product_loc": 60, "files": 1},
+      "tasks": [
+        "T155"
+      ],
+      "requirements": [
+        "027-FR-005",
+        "027-FR-001"
+      ],
+      "paths": [
+        "rust/crates/bb-server/src/commands/openapi.rs",
+        "specs/027-rust-server/contracts/openapi.yaml"
+      ],
+      "depends_on": [
+        "PR-55",
+        "PR-63",
+        "PR-64",
+        "PR-68",
+        "PR-107",
+        "PR-121",
+        "PR-131",
+        "PR-133",
+        "PR-143",
+        "PR-148",
+        "PR-149",
+        "PR-153",
+        "PR-154"
+      ],
+      "tests": [
+        "cd rust && cargo run -p bb-server -- openapi > /tmp/openapi.yaml && diff /tmp/openapi.yaml specs/027-rust-server/contracts/openapi.yaml"
+      ],
+      "acceptance": [
+        "The committed document equals the generated one."
+      ],
+      "budget": {
+        "product_loc": 60,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-156",
       "outcome": "Run all 19 Playwright specs (including crt, agent-relay.compose, admin-users, admin-ux-affordances, cli-auth, account, modern-auth and native voice) against the Rust Compose stack",
-      "tasks": ["T156"],
-      "requirements": ["027-SC-002", "027-FR-005", "027-FR-020"],
-      "paths": ["specs/027-rust-server/evidence/e2e-full.md"],
-      "depends_on": ["PR-13", "PR-41", "PR-49", "PR-54", "PR-55", "PR-63", "PR-64", "PR-68", "PR-69", "PR-70", "PR-73", "PR-75", "PR-76", "PR-77", "PR-78", "PR-91", "PR-92", "PR-93", "PR-101", "PR-106", "PR-107", "PR-111", "PR-118", "PR-121", "PR-131", "PR-133", "PR-143", "PR-146", "PR-148", "PR-149", "PR-150", "PR-153", "PR-154"],
-      "tests": ["BRAIN_BUDDY_E2E_SERVER=rust make test-e2e", "python3 scripts/run_modern_auth_e2e.py --base-url http://localhost:8001"],
-      "acceptance": ["SC-002: 100% of the existing web E2E scenarios pass against the new server."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T156"
+      ],
+      "requirements": [
+        "027-SC-002",
+        "027-FR-005",
+        "027-FR-020"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/e2e-full.md"
+      ],
+      "depends_on": [
+        "PR-13",
+        "PR-41",
+        "PR-49",
+        "PR-54",
+        "PR-55",
+        "PR-63",
+        "PR-64",
+        "PR-68",
+        "PR-69",
+        "PR-70",
+        "PR-73",
+        "PR-75",
+        "PR-76",
+        "PR-77",
+        "PR-78",
+        "PR-91",
+        "PR-92",
+        "PR-93",
+        "PR-101",
+        "PR-106",
+        "PR-107",
+        "PR-111",
+        "PR-118",
+        "PR-121",
+        "PR-131",
+        "PR-133",
+        "PR-143",
+        "PR-146",
+        "PR-148",
+        "PR-149",
+        "PR-150",
+        "PR-153",
+        "PR-154"
+      ],
+      "tests": [
+        "BRAIN_BUDDY_E2E_SERVER=rust make test-e2e",
+        "python3 scripts/run_modern_auth_e2e.py --base-url http://localhost:8001"
+      ],
+      "acceptance": [
+        "SC-002: 100% of the existing web E2E scenarios pass against the new server."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-157",
       "outcome": "Implement the SC-005 bench in rust/crates/bb-conformance/src/bin/bench_web_flows.rs per quickstart V7 (10,000 tasks, 200 projects, 50 Tags, a 200-node tree",
-      "tasks": ["T157"],
-      "requirements": ["027-SC-005", "027-FR-013"],
-      "paths": ["rust/crates/bb-conformance/src/bin/bench_web_flows.rs", "specs/027-rust-server/evidence/bench.md"],
-      "depends_on": ["PR-156"],
-      "tests": ["cd rust && cargo run --release -p bb-conformance --bin bench_web_flows -- --base-url http://localhost:8001"],
-      "acceptance": ["Every flow's Rust p95 ≤ 110% of Python's."],
-      "budget": {"product_loc": 300, "files": 1},
+      "tasks": [
+        "T157"
+      ],
+      "requirements": [
+        "027-SC-005",
+        "027-FR-013"
+      ],
+      "paths": [
+        "rust/crates/bb-conformance/src/bin/bench_web_flows.rs",
+        "specs/027-rust-server/evidence/bench.md"
+      ],
+      "depends_on": [
+        "PR-156"
+      ],
+      "tests": [
+        "cd rust && cargo run --release -p bb-conformance --bin bench_web_flows -- --base-url http://localhost:8001"
+      ],
+      "acceptance": [
+        "Every flow's Rust p95 ≤ 110% of Python's."
+      ],
+      "budget": {
+        "product_loc": 300,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-158",
       "outcome": "Run scripts/check_capability_inventory.py --final against the Python and Rust conformance reports and the job/config/integration evidence",
-      "tasks": ["T158"],
-      "requirements": ["027-SC-003", "027-FR-001", "027-FR-019"],
-      "paths": ["specs/027-rust-server/evidence/dispositions.md"],
-      "depends_on": ["PR-02", "PR-155", "PR-156"],
-      "tests": ["python3 scripts/check_capability_inventory.py --final --python-report target/conformance/python.json --rust-report target/conformance/rust.json"],
-      "acceptance": ["SC-003: 100% of 337 rows carry a disposition with green evidence."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T158"
+      ],
+      "requirements": [
+        "027-SC-003",
+        "027-FR-001",
+        "027-FR-019"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/dispositions.md"
+      ],
+      "depends_on": [
+        "PR-02",
+        "PR-155",
+        "PR-156"
+      ],
+      "tests": [
+        "python3 scripts/check_capability_inventory.py --final --python-report target/conformance/python.json --rust-report target/conformance/rust.json"
+      ],
+      "acceptance": [
+        "SC-003: 100% of 337 rows carry a disposition with green evidence."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-159",
       "outcome": "Run quickstart V8 on staging through .github/workflows/cutover-rehearsal.yml",
-      "tasks": ["T159"],
-      "requirements": ["027-FR-019"],
-      "paths": ["specs/027-rust-server/evidence/cutover-rehearsal.md"],
-      "depends_on": ["PR-97", "PR-99", "PR-105", "PR-158"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["No overlap of writable machines in any step."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T159"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/cutover-rehearsal.md"
+      ],
+      "depends_on": [
+        "PR-97",
+        "PR-99",
+        "PR-105",
+        "PR-158"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "No overlap of writable machines in any step."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-160",
       "outcome": "Production cutover",
-      "tasks": ["T160"],
-      "requirements": ["027-FR-019", "027-FR-018"],
-      "paths": ["deploy/production-backend.toml", "specs/027-rust-server/evidence/cutover.md"],
-      "depends_on": ["PR-98", "PR-104", "PR-157", "PR-159"],
-      "tests": ["scripts/production_smoke.sh", "python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["User Story 3 independent test: only the new server serves /api; old app stopped; smoke passes. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 2, "files": 1},
+      "tasks": [
+        "T160"
+      ],
+      "requirements": [
+        "027-FR-019",
+        "027-FR-018"
+      ],
+      "paths": [
+        "deploy/production-backend.toml",
+        "specs/027-rust-server/evidence/cutover.md"
+      ],
+      "depends_on": [
+        "PR-98",
+        "PR-104",
+        "PR-157",
+        "PR-159"
+      ],
+      "tests": [
+        "scripts/production_smoke.sh",
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "User Story 3 independent test: only the new server serves /api; old app stopped; smoke passes. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 2,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-161",
       "outcome": "Erase",
-      "tasks": ["T161"],
-      "requirements": ["027-FR-019"],
-      "paths": ["deploy/production-backend.toml", "specs/027-rust-server/evidence/cutover.md"],
-      "depends_on": ["PR-160"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["Final listing shows none remain; recovery is fix-forward from here. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 2, "files": 1},
+      "tasks": [
+        "T161"
+      ],
+      "requirements": [
+        "027-FR-019"
+      ],
+      "paths": [
+        "deploy/production-backend.toml",
+        "specs/027-rust-server/evidence/cutover.md"
+      ],
+      "depends_on": [
+        "PR-160"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "Final listing shows none remain; recovery is fix-forward from here. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 2,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-162",
       "outcome": "After two consecutive scheduled cargo-mutants runs ≥95% on an unchanged Rust scope (ADR-0016), promote it to rust/mutation-enforced-scope.txt, replace the six-module Python…",
-      "tasks": ["T162"],
-      "requirements": ["027-FR-002", "027-FR-001"],
-      "paths": ["rust/mutation-enforced-scope.txt", "rust/mutation-observed-scope.txt", "scripts/check_gate_integrity.py", "scripts/test_check_gate_integrity.py", ".github/workflows/mutation-quality.yml", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-01", "PR-103", "PR-161"],
-      "tests": ["python3 -m pytest scripts/test_check_gate_integrity.py", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["The enforced scope covers the Rust critical invariants before the Python scope is retired. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 80, "files": 5},
+      "tasks": [
+        "T162"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-001"
+      ],
+      "paths": [
+        "rust/mutation-enforced-scope.txt",
+        "rust/mutation-observed-scope.txt",
+        "scripts/check_gate_integrity.py",
+        "scripts/test_check_gate_integrity.py",
+        ".github/workflows/mutation-quality.yml",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-01",
+        "PR-103",
+        "PR-161"
+      ],
+      "tests": [
+        "python3 -m pytest scripts/test_check_gate_integrity.py",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "The enforced scope covers the Rust critical invariants before the Python scope is retired. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 80,
+        "files": 5
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-163",
       "outcome": "Remove the Python lanes and conformance-python job from .github/workflows/ci.yml, add the R12 `migration-compat` job (head migrations + previous release image conformance…",
-      "tasks": ["T163"],
-      "requirements": ["027-FR-002", "027-SC-001"],
-      "paths": [".github/workflows/ci.yml", "Makefile", ".specify/gate-integrity.json"],
-      "depends_on": ["PR-155", "PR-162"],
-      "tests": ["make validate-ci", "python3 scripts/check_gate_integrity.py"],
-      "acceptance": ["CI no longer needs Python for the server; migration-compat active. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 200, "files": 2},
+      "tasks": [
+        "T163"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-SC-001"
+      ],
+      "paths": [
+        ".github/workflows/ci.yml",
+        "Makefile",
+        ".specify/gate-integrity.json"
+      ],
+      "depends_on": [
+        "PR-155",
+        "PR-162"
+      ],
+      "tests": [
+        "make validate-ci",
+        "python3 scripts/check_gate_integrity.py"
+      ],
+      "acceptance": [
+        "CI no longer needs Python for the server; migration-compat active. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 2
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-164",
       "outcome": "Delete the Python server",
-      "tasks": ["T164"],
-      "requirements": ["027-FR-002", "027-SC-001"],
-      "paths": ["backend", "fly.backend.toml", "compose.yaml"],
-      "depends_on": ["PR-01", "PR-08", "PR-13", "PR-162", "PR-163"],
-      "tests": ["git ls-files backend | wc -l", "docker compose --profile rust config"],
-      "acceptance": ["SC-001: the server source contains 0 Python files. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 80000, "files": 400},
+      "tasks": [
+        "T164"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-SC-001"
+      ],
+      "paths": [
+        "backend",
+        "fly.backend.toml",
+        "compose.yaml"
+      ],
+      "depends_on": [
+        "PR-01",
+        "PR-08",
+        "PR-13",
+        "PR-162",
+        "PR-163"
+      ],
+      "tests": [
+        "git ls-files backend | wc -l",
+        "docker compose --profile rust config"
+      ],
+      "acceptance": [
+        "SC-001: the server source contains 0 Python files. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 80000,
+        "files": 400
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of the ~76,000-line Python server and its packaging; no line is added except compose service removal."
     },
     {
       "id": "PR-165",
       "outcome": "Delete the PyO3 bridge and the runtime switch",
-      "tasks": ["T165"],
-      "requirements": ["027-FR-002", "027-FR-003", "027-SC-006"],
-      "paths": ["rust/bindings/python", "rust/Cargo.toml", "rust/Cargo.lock", "rust/crates/bb-client/tests/protocol_faults.rs"],
-      "depends_on": ["PR-164"],
-      "tests": ["cd rust && cargo metadata --format-version 1 | grep -c pyo3; test $? -eq 1", "rg -n 'bb_core|rust_core_sync' rust cli frontend/src ios macos; test $? -eq 1"],
-      "acceptance": ["SC-006 and quickstart V4 pass."],
-      "budget": {"product_loc": 1500, "files": 12},
+      "tasks": [
+        "T165"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-003",
+        "027-SC-006"
+      ],
+      "paths": [
+        "rust/bindings/python",
+        "rust/Cargo.toml",
+        "rust/Cargo.lock",
+        "rust/crates/bb-client/tests/protocol_faults.rs"
+      ],
+      "depends_on": [
+        "PR-164"
+      ],
+      "tests": [
+        "cd rust && cargo metadata --format-version 1 | grep -c pyo3; test $? -eq 1",
+        "rg -n 'bb_core|rust_core_sync' rust cli frontend/src ios macos; test $? -eq 1"
+      ],
+      "acceptance": [
+        "SC-006 and quickstart V4 pass."
+      ],
+      "budget": {
+        "product_loc": 1500,
+        "files": 12
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of the ~1,200-line bridge and its lockfile entries."
     },
     {
       "id": "PR-166",
       "outcome": "Delete Python tooling that only served the old server",
-      "tasks": ["T166"],
-      "requirements": ["027-FR-002"],
-      "paths": ["scripts/select_backend_tests.py", "scripts/test_select_backend_tests.py", "scripts/rehearsal/rehearsal_backend.py", "scripts/rehearsal/ui_backend.py", "ios/scripts/rehearsal_backend.py", "scripts/rehearsal/run_ios_ui.sh"],
-      "depends_on": ["PR-163"],
-      "tests": ["python3 scripts/rehearsal/run.py --help", "make validate-ci"],
-      "acceptance": ["No script imports backend/."],
-      "budget": {"product_loc": 1200, "files": 5},
+      "tasks": [
+        "T166"
+      ],
+      "requirements": [
+        "027-FR-002"
+      ],
+      "paths": [
+        "scripts/select_backend_tests.py",
+        "scripts/test_select_backend_tests.py",
+        "scripts/rehearsal/rehearsal_backend.py",
+        "scripts/rehearsal/ui_backend.py",
+        "ios/scripts/rehearsal_backend.py",
+        "scripts/rehearsal/run_ios_ui.sh"
+      ],
+      "depends_on": [
+        "PR-163"
+      ],
+      "tests": [
+        "python3 scripts/rehearsal/run.py --help",
+        "make validate-ci"
+      ],
+      "acceptance": [
+        "No script imports backend/."
+      ],
+      "budget": {
+        "product_loc": 1200,
+        "files": 5
+      },
       "implementer": "mechanical-implementer",
       "oversize_reason": "Pure deletion of obsolete scripts."
     },
     {
       "id": "PR-167",
       "outcome": "Delete scripts/auth_migration_guard.py and scripts/test_auth_migration_guard.py (legacy auth-migration guard",
-      "tasks": ["T167"],
-      "requirements": ["027-FR-002"],
-      "paths": ["scripts/auth_migration_guard.py", "scripts/test_auth_migration_guard.py"],
-      "depends_on": ["PR-163"],
-      "tests": ["make validate-ci"],
-      "acceptance": ["No script references the legacy auth migration. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 200, "files": 1},
+      "tasks": [
+        "T167"
+      ],
+      "requirements": [
+        "027-FR-002"
+      ],
+      "paths": [
+        "scripts/auth_migration_guard.py",
+        "scripts/test_auth_migration_guard.py"
+      ],
+      "depends_on": [
+        "PR-163"
+      ],
+      "tests": [
+        "make validate-ci"
+      ],
+      "acceptance": [
+        "No script references the legacy auth migration. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 200,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-168",
       "outcome": "Update CLAUDE.md and AGENTS.md (architecture, commands",
-      "tasks": ["T168"],
-      "requirements": ["027-FR-002", "027-FR-004"],
-      "paths": ["CLAUDE.md", "AGENTS.md", "README.md", "deploy/FLY_DEPLOYMENT.md", "docs/native-ios-app.md", "docs/native-macos-app.md", "ios/AGENTS.md"],
-      "depends_on": ["PR-105", "PR-111", "PR-165", "PR-166", "PR-167"],
-      "tests": ["python3 scripts/check_spec_kit_specs.py"],
-      "acceptance": ["No doc instructs running the Python server."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T168"
+      ],
+      "requirements": [
+        "027-FR-002",
+        "027-FR-004"
+      ],
+      "paths": [
+        "CLAUDE.md",
+        "AGENTS.md",
+        "README.md",
+        "deploy/FLY_DEPLOYMENT.md",
+        "docs/native-ios-app.md",
+        "docs/native-macos-app.md",
+        "ios/AGENTS.md"
+      ],
+      "depends_on": [
+        "PR-105",
+        "PR-111",
+        "PR-165",
+        "PR-166",
+        "PR-167"
+      ],
+      "tests": [
+        "python3 scripts/check_spec_kit_specs.py"
+      ],
+      "acceptance": [
+        "No doc instructs running the Python server."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-169",
       "outcome": "Run the production pilot (quickstart V9)",
-      "tasks": ["T169"],
-      "requirements": ["027-SC-004", "027-FR-004", "027-FR-006", "027-FR-021"],
-      "paths": ["specs/027-rust-server/evidence/apple-pilot.md"],
-      "depends_on": ["PR-161"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["SC-004 met on both reference devices against production. ASK-class: lands only with recorded owner approval for the exact SHA."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T169"
+      ],
+      "requirements": [
+        "027-SC-004",
+        "027-FR-004",
+        "027-FR-006",
+        "027-FR-021"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/apple-pilot.md"
+      ],
+      "depends_on": [
+        "PR-161"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "SC-004 met on both reference devices against production. ASK-class: lands only with recorded owner approval for the exact SHA."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-170",
       "outcome": "Run the seven-day production watch",
-      "tasks": ["T170"],
-      "requirements": ["027-SC-007", "027-FR-019"],
-      "paths": ["specs/027-rust-server/evidence/production-watch.md"],
-      "depends_on": ["PR-168", "PR-169"],
-      "tests": ["python3 scripts/check_evidence_hygiene.py"],
-      "acceptance": ["SC-007: seven consecutive clean days served only by brain-buddy-api."],
-      "budget": {"product_loc": 1, "files": 1},
+      "tasks": [
+        "T170"
+      ],
+      "requirements": [
+        "027-SC-007",
+        "027-FR-019"
+      ],
+      "paths": [
+        "specs/027-rust-server/evidence/production-watch.md"
+      ],
+      "depends_on": [
+        "PR-168",
+        "PR-169"
+      ],
+      "tests": [
+        "python3 scripts/check_evidence_hygiene.py"
+      ],
+      "acceptance": [
+        "SC-007: seven consecutive clean days served only by brain-buddy-api."
+      ],
+      "budget": {
+        "product_loc": 1,
+        "files": 1
+      },
       "implementer": "mechanical-implementer"
+    },
+    {
+      "id": "PR-171",
+      "outcome": "Wire INVITE_REQUIRED into the remaining entry points: web email-code signup in frontend/src/features/auth/AuthEntry.tsx shows design D-04; the Rust-runtime continuation in APIRustAccountServer.swift returns the M-03 step (the legacy SyncEngine path is deleted by PR-88).",
+      "tasks": [
+        "T171"
+      ],
+      "requirements": [
+        "027-FR-007"
+      ],
+      "paths": [
+        "frontend/src/features/auth/AuthEntry.tsx",
+        "frontend/src/features/auth/__tests__/AuthEntryInvite.test.tsx",
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/APIRustAccountServer.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/InviteContinuationTests.swift"
+      ],
+      "depends_on": [
+        "PR-57",
+        "PR-83"
+      ],
+      "tests": [
+        "cd frontend && npx vitest run src/features/auth",
+        "sh ios/scripts/swift-linux.sh test --filter InviteContinuationTests"
+      ],
+      "acceptance": [
+        "Email-code signup for a new identity shows the invite step on web; both iOS continuation paths surface .inviteRequired; dormant against the current server."
+      ],
+      "budget": {
+        "product_loc": 80,
+        "files": 2
+      },
+      "implementer": "feature-implementer"
     }
   ]
 }
