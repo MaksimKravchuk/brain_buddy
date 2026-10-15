@@ -39,6 +39,7 @@ public enum RustSyncURLSession {
     static func headers(_ request: inout URLRequest, accept: String, identity: ClientIdentity) {
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("\(identity.name)/\(identity.version)", forHTTPHeaderField: "X-Client")
+        request.setValue(String(ClientEpoch.current), forHTTPHeaderField: ClientEpoch.header)
         request.setValue(UUID().uuidString.lowercased(), forHTTPHeaderField: "X-Correlation-ID")
     }
 

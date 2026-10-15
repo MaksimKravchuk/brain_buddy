@@ -326,6 +326,7 @@ extension BrainBuddyAPIClient {
         var headers = [
             "Accept": "application/json",
             "X-Client": "\(identity.name)/\(identity.version)",
+            ClientEpoch.header: String(ClientEpoch.current),
             "X-Correlation-ID": correlationID,
         ]
         if endpoint.body != nil { headers["Content-Type"] = "application/json" }
