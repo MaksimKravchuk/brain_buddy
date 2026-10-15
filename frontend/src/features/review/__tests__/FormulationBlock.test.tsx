@@ -35,7 +35,6 @@ function task(overrides: Partial<TaskResponse> = {}, formulation: Partial<NonNul
     project_id: "project-home",
     tag_ids: [],
     due_date: null,
-    priority: "none",
     waiting_for: null,
     waiting_since: null,
     order_key: 1,
@@ -112,7 +111,7 @@ describe("020-FR-010 D-06 This wording block", () => {
 
     expect(within(block()).getByText("Asks for a decision")).toBeInTheDocument();
     expect(within(block()).getByText("15 days in Next")).toBeInTheDocument();
-    expect(within(block()).getByText("The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock.")).toBeInTheDocument();
+    expect(within(block()).getByText("The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags or project doesn't restart the clock.")).toBeInTheDocument();
     const decideButton = within(block()).getByRole("button", { name: "Decide" });
     expect(decideButton).toHaveClass("min-h-11", "max-sm:w-full");
   });

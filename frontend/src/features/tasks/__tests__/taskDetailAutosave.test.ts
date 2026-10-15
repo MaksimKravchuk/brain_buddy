@@ -6,7 +6,7 @@ import { createTaskDetailAutosaveController, loadTaskAutosaveRecovery, taskAutos
 
 const task = (overrides: Partial<TaskResponse> = {}): TaskResponse => ({
   id: "task-1", title: "Task", details: "notes", state: "next", project_id: null,
-  tag_ids: [], due_date: null, priority: "none", waiting_for: null, waiting_since: null,
+  tag_ids: [], due_date: null, waiting_for: null, waiting_since: null,
   order_key: 1, source_capture_ids: [], created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z", completed_at: null, cancelled_at: null, revision: 1,
   subtasks: [], comments: [],
@@ -20,7 +20,7 @@ const recovery = (overrides: Record<string, unknown> = {}) => ({
   version: 1,
   identity: { accountId: "account-a", apiOrigin: window.location.origin, taskId: "task-1" },
   baseline: task(),
-  draft: { title: "Task", details: "recovered", state: "next", project_id: null, priority: "none", tag_ids: [], waiting_for: null, due_date: null },
+  draft: { title: "Task", details: "recovered", state: "next", project_id: null, tag_ids: [], waiting_for: null, due_date: null },
   dirty: { details: { baseValue: "notes", generation: 1, value: "recovered" } },
   inFlight: { kind: "patch", body: { details: "recovered", expected_revision: 1 }, generations: { details: 1 }, idempotencyKey: "stable-key", attempt: 1 },
   barriers: [], status: "saving", conflict: null, error: null, retrying: false,

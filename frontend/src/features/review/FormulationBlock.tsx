@@ -99,7 +99,7 @@ export function FormulationBlock({
       lines = [`The clock starts on ${formatReviewDate(instants.paused_until as string)}. Until then this task won't ask for a decision or move to Someday.`];
     } else if (formulationClass === "asks") {
       chip = <><Chip tone="asks" icon={<CircleHelp className={iconClass} aria-hidden />}>Asks for a decision</Chip> {days}</>;
-      lines = ["The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock."];
+      lines = ["The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags or project doesn't restart the clock."];
       decide = true;
     } else if (formulationClass === "moves_tomorrow" || formulationClass === "park_due") {
       chip = <><Chip tone="tomorrow" icon={<Archive className={iconClass} aria-hidden />}>Moves to Someday tomorrow</Chip> {days}</>;

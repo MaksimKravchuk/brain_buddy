@@ -15,7 +15,7 @@ import {
 
 const task = (overrides: Partial<TaskResponse> = {}): TaskResponse => ({
   id: "task-1", title: "Task", details: "notes", state: "next", project_id: null,
-  tag_ids: [], due_date: null, priority: "none", waiting_for: null, waiting_since: null,
+  tag_ids: [], due_date: null, waiting_for: null, waiting_since: null,
   order_key: 1, source_capture_ids: [], created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z", completed_at: null, cancelled_at: null, revision: 1,
   subtasks: [], comments: [], ...overrides
@@ -23,7 +23,7 @@ const task = (overrides: Partial<TaskResponse> = {}): TaskResponse => ({
 
 const draft = (overrides: Partial<Record<string, unknown>> = {}) => ({
   title: "Task", details: "notes", state: "next", project_id: null,
-  priority: "none", tag_ids: [], waiting_for: null, due_date: null, ...overrides
+  tag_ids: [], waiting_for: null, due_date: null, ...overrides
 });
 
 function deferred<T>() {
@@ -137,7 +137,7 @@ describe("contract-complete task detail autosave controller", () => {
     controller.change("title", "First", 0);
     await settle();
     controller.change("details", "Later details", 0);
-    controller.change("priority", "high", 0);
+    controller.change("project_id", "project-1", 0);
     controller.change("due_date", "2026-09-03", 0);
     await settle();
 
@@ -147,15 +147,15 @@ describe("contract-complete task detail autosave controller", () => {
     await settle();
     expect(update).toHaveBeenCalledTimes(2);
     expect(update.mock.calls[1]?.[1]).toEqual({
-      details: "Later details", priority: "high", due_date: "2026-09-03", expected_revision: 2
+      details: "Later details", project_id: "project-1", due_date: "2026-09-03", expected_revision: 2
     });
     expect(seen.some((snapshot) => snapshot.status === "saved" && snapshot.dirtyFields.length > 0)).toBe(false);
-    second.resolve(task({ revision: 3, title: "First", details: "Later details", priority: "high", due_date: "2026-09-03" }));
+    second.resolve(task({ revision: 3, title: "First", details: "Later details", project_id: "project-1", due_date: "2026-09-03" }));
     await controller.whenIdle();
     expect(controller.getSnapshot()).toMatchObject({ status: "saved", dirtyFields: [], queuedCount: 0 });
   });
 
-  it("persists the full baseline, eight-field draft, dirty generations, in-flight command, and successor state", async () => {
+  it("persists the full baseline, seven-field draft, dirty generations, in-flight command, and successor state", async () => {
     const first = deferred<TaskResponse>();
     vi.spyOn(apiClient, "updateTask").mockReturnValue(first.promise);
     const origin = "https://api.example.test/api";
@@ -171,7 +171,7 @@ describe("contract-complete task detail autosave controller", () => {
       version: 1,
       identity: { accountId: "account-a", apiOrigin: origin, taskId: "task-1" },
       baseline: { id: "task-1", revision: 1, title: "Task" },
-      draft: { title: "In flight", details: "Successor", state: "next", project_id: null, priority: "none", tag_ids: [], waiting_for: null, due_date: null },
+      draft: { title: "In flight", details: "Successor", state: "next", project_id: null, tag_ids: [], waiting_for: null, due_date: null },
       dirty: { title: { baseValue: "Task", generation: 1, value: "In flight" }, details: { baseValue: "notes", generation: 1, value: "Successor" } },
       inFlight: { body: { title: "In flight", expected_revision: 1 }, generations: { title: 1 }, attempt: 1 },
       status: "queued"
@@ -185,7 +185,7 @@ describe("contract-complete task detail autosave controller", () => {
       version: 1,
       identity: { accountId: "account-a", apiOrigin: origin, taskId: "task-1" },
       baseline: task(),
-      draft: { title: "Sent", details: "Later", state: "next", project_id: null, priority: "none", tag_ids: [], waiting_for: null, due_date: null },
+      draft: { title: "Sent", details: "Later", state: "next", project_id: null, tag_ids: [], waiting_for: null, due_date: null },
       dirty: {
         title: { baseValue: "Task", generation: 1, value: "Sent" },
         details: { baseValue: "notes", generation: 1, value: "Later" }
@@ -273,11 +273,11 @@ describe("contract-complete task detail autosave controller", () => {
 
   it("stays saved when a parent acknowledgement is followed by the full detail projection", async () => {
     const child = { id: "subtask-1", title: "Check navigation", state: "open" as const, order_key: 1, revision: 1 };
-    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 2, priority: "high" }));
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 2, project_id: "project-1" }));
     const controller = createTaskDetailAutosaveController("account-a", "https://api.example.test/api", task({ subtasks: [child] }), () => {
-      controller.sync(task({ revision: 2, priority: "high", subtasks: [child] }));
+      controller.sync(task({ revision: 2, project_id: "project-1", subtasks: [child] }));
     });
-    controller.change("priority", "high");
+    controller.change("project_id", "project-1");
     await controller.whenIdle();
 
     expect(update).toHaveBeenCalledOnce();
@@ -290,14 +290,14 @@ describe("contract-complete task detail autosave controller", () => {
     const key = taskAutosaveStorageKey("account-a", origin, "task-1");
     sessionStorage.setItem(key, JSON.stringify({
       version: 1, identity: { accountId: "account-a", apiOrigin: origin, taskId: "task-1" },
-      baseline: task({ revision: 2, priority: "high" }),
-      draft: draft({ priority: "high", details: hasLaterEdit ? "Later edit" : "notes" }),
+      baseline: task({ revision: 2, project_id: "project-1" }),
+      draft: draft({ project_id: "project-1", details: hasLaterEdit ? "Later edit" : "notes" }),
       dirty: hasLaterEdit ? { details: { baseValue: "notes", generation: 2, value: "Later edit" } } : {},
       inFlight: null, barriers: [], status: "failed", conflict: null, retrying: false,
       error: { kind: "protocol", message: "Server returned contradictory canonical task data", retryAllowed: false, offline: false }
     }));
-    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 3, priority: "high", details: "Later edit" }));
-    const controller = createTaskDetailAutosaveController("account-a", origin, task({ revision: 2, priority: "high", subtasks: [{ id: "subtask-1", title: "Check navigation", state: "open", order_key: 1, revision: 1 }] }));
+    const update = vi.spyOn(apiClient, "updateTask").mockResolvedValue(task({ revision: 3, project_id: "project-1", details: "Later edit" }));
+    const controller = createTaskDetailAutosaveController("account-a", origin, task({ revision: 2, project_id: "project-1", subtasks: [{ id: "subtask-1", title: "Check navigation", state: "open", order_key: 1, revision: 1 }] }));
 
     expect(controller.getSnapshot().error).toBeNull();
     expect(update).not.toHaveBeenCalled();
@@ -484,7 +484,6 @@ describe("contract-complete task detail autosave controller", () => {
       { ...valid, project_id: 7 },
       { ...valid, tag_ids: [7] },
       { ...valid, due_date: 7 },
-      { ...valid, priority: "urgent" },
       { ...valid, waiting_for: 7 },
       { ...valid, revision: 2.5 },
       { ...valid, source_capture_ids: null },

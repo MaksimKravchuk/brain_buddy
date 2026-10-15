@@ -1,7 +1,7 @@
 import { ApiError, apiClient } from "../../api/client";
 import type { OpenTaskState, TaskResponse, TaskTransitionRequest, TaskUpdateRequest } from "../../api/taskTypes";
 
-export type EditableField = "title" | "details" | "state" | "project_id" | "priority" | "tag_ids" | "waiting_for" | "due_date";
+export type EditableField = "title" | "details" | "state" | "project_id" | "tag_ids" | "waiting_for" | "due_date";
 export type TaskDraft = Pick<TaskResponse, EditableField>;
 export type DirtyValue = { baseValue: TaskDraft[EditableField]; generation: number; value: TaskDraft[EditableField] };
 export type AutosaveStatus = "clean" | "queued" | "saving" | "retrying" | "saved" | "conflicted" | "failed";
@@ -40,7 +40,7 @@ export type AutosaveCommand =
   | { kind: "transition"; payload: Omit<TaskTransitionRequest, "expected_revision"> };
 
 const STORAGE_PREFIX = "bb.taskDetailDraft.v1";
-const fields: EditableField[] = ["title", "details", "state", "project_id", "priority", "tag_ids", "waiting_for", "due_date"];
+const fields: EditableField[] = ["title", "details", "state", "project_id", "tag_ids", "waiting_for", "due_date"];
 const openStates: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 class TaskProtocolError extends Error {}
 
@@ -54,7 +54,6 @@ const draftFrom = (task: TaskResponse): TaskDraft => ({
   details: task.details,
   state: task.state,
   project_id: task.project_id,
-  priority: task.priority,
   tag_ids: sortedTags(task.tag_ids),
   waiting_for: task.waiting_for,
   due_date: task.due_date
@@ -87,7 +86,6 @@ function validTask(value: unknown): value is TaskResponse {
     (value.project_id === null || typeof value.project_id === "string") &&
     Array.isArray(value.tag_ids) && value.tag_ids.every((id) => typeof id === "string") &&
     (value.due_date === null || typeof value.due_date === "string") &&
-    ["none", "low", "medium", "high"].includes(String(value.priority)) &&
     (value.waiting_for === null || typeof value.waiting_for === "string") &&
     typeof value.revision === "number" && Number.isInteger(value.revision) &&
     Array.isArray(value.source_capture_ids) && Array.isArray(value.subtasks) && Array.isArray(value.comments);
@@ -148,7 +146,7 @@ function validInFlight(value: unknown): value is InFlight {
     typeof value.idempotencyKey !== "string" || value.idempotencyKey.length === 0 || !Number.isInteger(value.attempt) || Number(value.attempt) < 1 || Number(value.attempt) > 3 ||
     !Number.isInteger(value.body.expected_revision) || Number(value.body.expected_revision) < 0) return false;
   if (value.kind === "patch") {
-    const allowed = new Set(["expected_revision", "title", "details", "project_id", "priority", "tag_ids", "waiting_for", "due_date"]);
+    const allowed = new Set(["expected_revision", "title", "details", "project_id", "tag_ids", "waiting_for", "due_date"]);
     return Object.keys(value.body).every((key) => allowed.has(key)) && Object.keys(value.body).length > 1;
   }
   const action = value.body.action;
