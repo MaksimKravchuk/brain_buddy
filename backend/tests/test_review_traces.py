@@ -1,6 +1,6 @@
 """Spec 020: the golden decision and park traces run against the real API.
 
-``tests/fixtures/review_traces_tasks.json`` records request sequences and the
+``contracts/fixtures/review_traces_tasks.json`` records request sequences and the
 expected statuses and responses (format in its ``conventions``). The same file
 is copied byte-identically into the Swift sync tests, where the trace replay
 against ``BrainBuddyFakeServer`` keeps the fake server from drifting from the
@@ -24,11 +24,21 @@ from app.utils.time import from_isoformat
 from .conftest import FrozenClock
 from .test_review_auto_park import sweep
 
-TRACES_PATH = Path(__file__).parent / "fixtures" / "review_traces_tasks.json"
+TRACES_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "fixtures"
+    / "review_traces_tasks.json"
+)
 TRACES: dict[str, Any] = json.loads(TRACES_PATH.read_text(encoding="utf-8"))
 # Slice PR-11 (tasks.md T131): the run traces in the same format. Loaded only
 # when present so a missing file fails the schema test below, not collection.
-RUNS_PATH = Path(__file__).parent / "fixtures" / "review_traces_runs.json"
+RUNS_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "fixtures"
+    / "review_traces_runs.json"
+)
 RUNS: dict[str, Any] = (
     json.loads(RUNS_PATH.read_text(encoding="utf-8"))
     if RUNS_PATH.is_file()

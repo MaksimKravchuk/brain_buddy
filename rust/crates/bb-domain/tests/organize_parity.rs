@@ -29,7 +29,7 @@ use types::{
 fn project_archive_traces() -> &'static Value {
     static CELL: OnceLock<Value> = OnceLock::new();
     CELL.get_or_init(|| {
-        let path = support::repo_root().join("backend/tests/fixtures/project_archive_traces.json");
+        let path = support::repo_root().join("contracts/fixtures/project_archive_traces.json");
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         serde_json::from_str(&text)

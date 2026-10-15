@@ -96,7 +96,7 @@ let package = Package(
         // Foundation-only and test on Linux; the SwiftUI layer compiles on Apple only.
         .target(name: "BrainBuddyDesign", resources: [.process("Resources")]),
         // The shared review vectors and golden wire fixtures (spec 020) are
-        // byte-identical copies of `backend/tests/fixtures/*.json`; `.copy`
+        // byte-identical copies of `contracts/fixtures/*.json`; `.copy`
         // keeps their bytes as they are.
         .testTarget(
             name: "BrainBuddyCoreTests", dependencies: ["BrainBuddyCore"], resources: [.copy("Resources")]
