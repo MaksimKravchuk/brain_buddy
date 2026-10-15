@@ -25,6 +25,12 @@ on:
   # ships anything.
   schedule:
     - cron: "41 2 * * *"
+  # The merge queue tests each queued pull request on top of the current main
+  # (and the entries ahead of it) before merging, so a PR does not have to be
+  # re-run by hand every time main moves. A queue run carries no write
+  # permission and cannot promote; its required checks are the same jobs.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -193,6 +199,10 @@ jobs:
           candidate=false
           case "${{ github.event_name }}:${{ github.ref }}" in
             push:refs/heads/trunk-candidate/*) candidate=true ;;
+            # A merge-queue run is the landing path for pull requests: the
+            # same rules as a trunk candidate, judged against its fork point
+            # on main (the queue's base).
+            merge_group:*) candidate=true ;;
           esac
 
           if [ "${{ github.event_name }}" = "pull_request" ] ||
@@ -315,17 +325,19 @@ jobs:
             rust=false
           elif [ "${{ github.event_name }}" = push ] &&
                [ "${{ github.ref }}" = refs/heads/main ] &&
-               verified=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=${GITHUB_SHA}" \
-                 --jq '[.workflow_runs[] | select(.head_branch | startswith("trunk-candidate/"))] | length') &&
+               verified=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?status=success&head_sha=${GITHUB_SHA}" \
+                 --jq '[.workflow_runs[] | select((.event == "push" and (.head_branch | startswith("trunk-candidate/"))) or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/"))))] | length') &&
                [ "${verified}" -gt 0 ]; then
             # A trunk landing fast-forwards main to the exact SHA whose
-            # candidate run already passed full CI, so this push re-verifies
-            # an identical tree. The macOS and Windows lanes are the scarce
-            # runners and have no consumer of a second result; the Linux
-            # lanes still run (the backend one builds the test-selection map
-            # on main). A merged pull request has no candidate run and is
-            # verified in full, as is any push the query cannot vouch for.
-            echo "main at ${GITHUB_SHA} passed full CI as a trunk candidate; not re-running the iOS, Mac and CLI lanes"
+            # candidate run already passed full CI, and the merge queue does
+            # the same with the SHA its queue run tested, so this push
+            # re-verifies an identical tree. The macOS and Windows lanes are
+            # the scarce runners and have no consumer of a second result; the
+            # Linux lanes still run (the backend one builds the test-selection
+            # map on main). A pull request merged outside the queue has no such
+            # run and is verified in full, as is any push the query cannot
+            # vouch for.
+            echo "main at ${GITHUB_SHA} passed full CI as a trunk candidate or queue run; not re-running the iOS, Mac and CLI lanes"
             ios=false
             macos=false
             cli=false
