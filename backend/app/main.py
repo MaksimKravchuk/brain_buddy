@@ -23,6 +23,7 @@ from app.api.sync_delta import router as sync_delta_router
 from app.api.sync_hints import router as sync_hints_router
 from app.api.sync_snapshots import router as sync_snapshots_router
 from app.api.test_control import install_test_control
+from app.api.test_control_providers import install_test_control_providers
 from app.container import Container, build_container
 from app.core import configure_logging, get_config
 from app.core.config import AppEnvironment
@@ -609,7 +610,8 @@ def create_app() -> FastAPI:
     app.include_router(sync_delta_router, prefix=config.api_prefix)
     app.include_router(sync_snapshots_router, prefix=config.api_prefix)
     app.include_router(sync_hints_router, prefix=config.api_prefix)
-    install_test_control(app, config)
+    if install_test_control(app, config):
+        install_test_control_providers(app, config)
 
     @app.on_event("shutdown")
     async def close_sync_hints() -> None:
