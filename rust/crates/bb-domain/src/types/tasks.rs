@@ -14,7 +14,7 @@ use super::primitives::{
 };
 use super::review_state::{ClockBefore, Park};
 use super::vocabulary::{
-    ChildAction, ChildState, OpenList, Priority, ProjectState, TagState, TaskAction, TaskState,
+    ChildAction, ChildState, OpenList, ProjectState, TagState, TaskAction, TaskState,
 };
 use crate::calendar::UtcInstant;
 use bb_protocol::wire::{Counter, Instant};
@@ -35,7 +35,6 @@ pub struct Task {
     pub project_id: Option<ProjectId>,
     pub tag_ids: Vec<TagId>,
     pub due_date: Option<DueDay>,
-    pub priority: Priority,
     pub waiting_for: Option<WaitingFor>,
     pub waiting_since: Option<Instant>,
     pub order_key: Counter,
@@ -168,10 +167,6 @@ fn inbox() -> OpenList {
     OpenList::Inbox
 }
 
-fn no_priority() -> Priority {
-    Priority::None
-}
-
 // `Default` for these would demand `P: Default`; an absent reference is empty.
 fn no_ref<R>() -> Option<R> {
     None
@@ -223,8 +218,8 @@ pub struct TagUpdate {
     pub name: Option<Name>,
 }
 
-/// `task.create`: the task ID is the envelope's `entity_id`. State and
-/// priority default as the canonical request does (`inbox`, `none`).
+/// `task.create`: the task ID is the envelope's `entity_id`. State defaults
+/// as the canonical request does (`inbox`).
 ///
 /// `P` and `T` are the project and tag reference types: direct IDs once
 /// resolved (the default, what `decide` reads), [`ProjectRef`] and [`TagRef`]
@@ -243,8 +238,6 @@ pub struct TaskCreate<P = ProjectId, T = TagId> {
     pub tag_ids: Vec<T>,
     #[serde(default)]
     pub due_date: Option<DueDay>,
-    #[serde(default = "no_priority")]
-    pub priority: Priority,
     #[serde(default)]
     pub waiting_for: Option<WaitingFor>,
     #[serde(default)]
@@ -297,8 +290,6 @@ pub struct SmartAdd {
     pub waiting_for: Option<WaitingFor>,
     #[serde(default)]
     pub due_date: Option<DueDay>,
-    #[serde(default = "no_priority")]
-    pub priority: Priority,
     #[serde(default)]
     pub project: Option<ClassificationRef<ProjectId>>,
     #[serde(default)]
@@ -336,8 +327,7 @@ impl<T: Eq + std::hash::Hash> TagChanges<T> {
     }
 }
 
-/// `task.update`: lifecycle is not a patch. `title` and `priority` cannot be
-/// cleared; `details`, `project_id`, `due_date` and `waiting_for` can.
+/// `task.update`: lifecycle is not a patch. `title` cannot be cleared; `details`, `project_id`, `due_date` and `waiting_for` can.
 /// `P` and `T` are the project and tag reference types (see [`TaskCreate`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -354,8 +344,6 @@ pub struct TaskUpdate<P = ProjectId, T = TagId> {
     pub project_id: Patch<P>,
     #[serde(skip_serializing_if = "Patch::is_unchanged")]
     pub due_date: Patch<DueDay>,
-    #[serde(deserialize_with = "non_null", skip_serializing_if = "Option::is_none")]
-    pub priority: Option<Priority>,
     #[serde(skip_serializing_if = "Patch::is_unchanged")]
     pub waiting_for: Patch<WaitingFor>,
     /// One gesture, one command: tag edits ride in the same payload.
@@ -372,7 +360,6 @@ impl<P, T> Default for TaskUpdate<P, T> {
             details: Patch::Unchanged,
             project_id: Patch::Unchanged,
             due_date: Patch::Unchanged,
-            priority: None,
             waiting_for: Patch::Unchanged,
             tag_changes: None,
             new_formulation_id: None,

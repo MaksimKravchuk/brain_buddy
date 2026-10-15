@@ -40,7 +40,6 @@ pub fn task_bytes(
     field(Some(task.state.as_str()), &mut out)?;
     field(task.waiting_for.as_ref().map(|v| v.as_str()), &mut out)?;
     field(task.due_date.as_ref().map(|v| v.as_str()), &mut out)?;
-    field(Some(task.priority.as_str()), &mut out)?;
     let project = task
         .project_id
         .as_ref()

@@ -141,7 +141,7 @@ pub fn auto_park_read_set(vector: &Value, task_id: &str) -> Value {
         "tasks": { task_id: {
             "id": task_id, "title": before["title"], "details": null,
             "state": before["state"], "project_id": null, "tag_ids": [],
-            "due_date": before["due_date"], "priority": "none", "waiting_for": null,
+            "due_date": before["due_date"], "waiting_for": null,
             "waiting_since": null, "order_key": "3", "source_capture_ids": [],
             "created_at": "2026-09-01T09:00:00Z", "updated_at": "2026-09-02T09:00:00Z",
             "completed_at": null, "cancelled_at": null,

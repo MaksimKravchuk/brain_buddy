@@ -104,7 +104,7 @@ fn document(outbox: Vec<Value>, issues: Vec<Value>) -> Value {
 
 fn create_task(task: &str, title: &str) -> Value {
     json!({"createTask": {"_0": {"taskID": task, "title": title, "list": "next",
-        "priority": "none", "tagIDs": []}}})
+        "tagIDs": []}}})
 }
 
 /// A pending send that never left the device.
@@ -842,7 +842,7 @@ fn legacy_outbox_026_fr_013_the_old_sync_issues_become_open_issues_with_their_te
     let lane = lane("issues");
     let issue = json!({"id": uuid(500), "message": "Not found", "occurredAt": LONG_AGO,
         "referenceID": "ref-1", "command": {"createTask": {"_0": {"taskID": "task-3",
-        "title": SENTINEL, "list": "inbox", "priority": "none", "tagIDs": []}}}});
+        "title": SENTINEL, "list": "inbox", "tagIDs": []}}}});
     let mut store = lane.imported(&document(vec![], vec![issue.clone()]));
 
     let status = resolve(&mut store, NOW, nothing);

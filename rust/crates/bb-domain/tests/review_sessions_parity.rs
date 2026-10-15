@@ -163,7 +163,7 @@ const CREATED: &str = "2026-09-02T09:00:00Z";
 fn task(id: &str, state: &str, order_key: u64) -> Value {
     json!({
         "id": id, "title": format!("Title of {id}"), "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": if state == "waiting" { json!("Ann") } else { Value::Null },
         "waiting_since": null,
         "order_key": order_key.to_string(), "source_capture_ids": [],

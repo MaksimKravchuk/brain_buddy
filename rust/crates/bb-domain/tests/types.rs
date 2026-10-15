@@ -406,7 +406,6 @@ fn types_026_fr_013_task_view_carries_a_stored_task_without_private_state() {
         project_id: view.project_id.clone(),
         tag_ids: view.tag_ids.clone(),
         due_date: None,
-        priority: view.priority,
         waiting_for: None,
         waiting_since: None,
         order_key: view.order_key.clone(),

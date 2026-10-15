@@ -56,7 +56,7 @@ fn envelope(kind: &str, entity: &str, payload: &Value, preconditions: &Value) ->
 fn task(id: &str, state: &str, revision: &str, order_key: &str) -> Value {
     json!({
         "id": id, "title": "Buy milk", "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": null, "waiting_since": null, "order_key": order_key,
         "source_capture_ids": [], "created_at": NOW, "updated_at": NOW,
         "completed_at": null, "cancelled_at": null, "revision": revision,
@@ -309,7 +309,7 @@ fn dispatch_026_fr_002_refusals_carry_no_payload_text() {
     let secret = "SECRET-VALUE-9f2c";
     let runtime = runtime();
     let payloads = [
-        json!({"title": "ok", "priority": secret}),
+        json!({"title": "ok", "due_date": secret}),
         json!({"title": "ok", (secret): 1}),
         json!({"title": "x".repeat(501), "details": secret}),
     ];
@@ -363,7 +363,7 @@ fn dispatch_026_sc_001_answers_each_query_kind_over_an_owned_read_set() {
 
     // The shapes the Apple facade sends for the native list modes, with every option set.
     let options = json!({"sort": "manual", "group_by_project": false, "show_completed": false,
-                         "show_cancelled": false, "priorities": [], "tag_filter": null});
+                         "show_cancelled": false, "tag_filter": null});
     for mode in [
         json!({"type": "history", "kind": "completed"}),
         json!({"type": "date_view", "view": "today"}),

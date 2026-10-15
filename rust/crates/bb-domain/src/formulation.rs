@@ -532,7 +532,7 @@ pub fn change_due_date(
     bump(changed)
 }
 
-/// Notes, tags, project, priority, subtasks, comments, waiting-for (FR-003).
+/// Notes, tags, project, subtasks, comments, waiting-for (FR-003).
 #[must_use]
 pub fn edit_without_clock(clock: &TaskClock) -> TaskClock {
     bump(clock.clone())

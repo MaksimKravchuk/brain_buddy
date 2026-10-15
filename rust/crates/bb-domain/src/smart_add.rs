@@ -33,9 +33,9 @@ use crate::organize;
 use crate::task_rules;
 use crate::types::{
     Binding, ChangeOutcome, ChangeSet, ClassificationRef, Command, Counter, Details, DomainChange,
-    DomainCommand, DomainError, DueDay, EntityType, ExecutionInputs, Name, OpenList, Priority,
-    Project, ProjectId, ProjectState, ReadSet, Reason, Record, ResultRefs, SmartAdd, Tag, TagId,
-    TagState, TaskCreate, TaskId, Title, WaitingFor,
+    DomainCommand, DomainError, DueDay, EntityType, ExecutionInputs, Name, OpenList, Project,
+    ProjectId, ProjectState, ReadSet, Reason, Record, ResultRefs, SmartAdd, Tag, TagId, TagState,
+    TaskCreate, TaskId, Title, WaitingFor,
 };
 use bb_protocol::wire::Instant;
 use unicode_general_category::{GeneralCategory, get_general_category};
@@ -341,7 +341,6 @@ pub struct Draft {
     pub waiting_for: String,
     pub details: String,
     pub due_date: Option<DueDay>,
-    pub priority: Priority,
     pub context_project: Option<ProjectId>,
     pub context_tag: Option<TagId>,
 }
@@ -356,7 +355,6 @@ impl Draft {
             waiting_for: String::new(),
             details: String::new(),
             due_date: None,
-            priority: Priority::None,
             context_project: None,
             context_tag: None,
         }
@@ -676,7 +674,6 @@ pub fn propose(
         state: draft.list,
         waiting_for: resolution.waiting_for.map(WaitingFor::new).transpose()?,
         due_date: draft.due_date.clone(),
-        priority: draft.priority,
         project,
         tags,
         new_formulation_id: None,
@@ -731,7 +728,6 @@ pub fn decide(
         project_id,
         tag_ids: plan.tag_ids,
         due_date: payload.due_date.clone(),
-        priority: payload.priority,
         waiting_for: payload.waiting_for.clone(),
         source_capture_ids: Vec::new(),
         new_formulation_id: payload.new_formulation_id.clone(),

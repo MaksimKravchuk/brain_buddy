@@ -234,7 +234,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::time::Duration;
     fn task(id: &str, title: &str, project: Option<&str>, state: &str) -> Value {
-        json!({"id":id,"title":title,"details":null,"state":state,"project_id":project,"tag_ids":[],"due_date":null,"priority":"none","waiting_for":null,"waiting_since":null,"order_key":"1","source_capture_ids":[],"created_at":"2026-10-10T09:00:00Z","updated_at":"2026-10-10T09:00:00Z","completed_at":null,"cancelled_at":null,"revision":"1","consecutive_stalled_formulations":0,"formulation":null,"parked":null})
+        json!({"id":id,"title":title,"details":null,"state":state,"project_id":project,"tag_ids":[],"due_date":null,"waiting_for":null,"waiting_since":null,"order_key":"1","source_capture_ids":[],"created_at":"2026-10-10T09:00:00Z","updated_at":"2026-10-10T09:00:00Z","completed_at":null,"cancelled_at":null,"revision":"1","consecutive_stalled_formulations":0,"formulation":null,"parked":null})
     }
     fn record(store: &mut Store, kind: &str, value: &Value) {
         store.write(|tx| {
@@ -248,8 +248,8 @@ mod tests {
     #[test]
     fn content_stamps_026_mac_literal_bytes_and_standard_hmac_key_normalization() {
         // Independently authored from RecordContentForm: present A; nil notes;
-        // inbox; nil waiting/due; none priority; nil project; zero tags/children.
-        let hex = "010000000141000100000005696e626f78000001000000046e6f6e65000000000000000000";
+        // inbox; nil waiting/due; nil project; zero tags/children.
+        let hex = "010000000141000100000005696e626f780000000000000000000000";
         let bytes: Vec<u8> = hex
             .as_bytes()
             .as_chunks::<2>()
@@ -263,10 +263,10 @@ mod tests {
             content_form::task_bytes(&Default::default(), &task, &Default::default()).unwrap(),
             bytes
         );
-        // Python stdlib hmac/sha256 over the literal37bytes, key07 repeated32.
+        // Python stdlib hmac/sha256 over the literal28bytes, key07 repeated32.
         assert_eq!(
             hmac(&[7; 32], &bytes),
-            "b698c2c2118f493cfc81f7817dbb5ee900cd3463bdd30bcfd46b2de42dea0bf1"
+            "e6657fc3ecec19f96fae17b792aa0b9bad4f1899b909dd32c1476a407b3dab64"
         );
         assert_ne!(hmac(&[8; 32], &bytes), hmac(&[7; 32], &bytes));
         // RFC4231 case6: accepted keys over64bytes are hashed, not rotated.
@@ -285,7 +285,7 @@ mod tests {
         tagged.tag_ids = ["tag-j", "tag-k", "tag-j"]
             .map(|id| bb_domain::types::TagId::parse(id).unwrap())
             .to_vec();
-        let mut expected = bytes[..29].to_vec();
+        let mut expected = bytes[..20].to_vec();
         expected.extend_from_slice(&[
             0, 0, 0, 3, 1, 0, 0, 0, 1, b'k', 1, 0, 0, 0, 3, b'j', 0xcc, 0x8c, 1, 0, 0, 0, 3, b'j',
             0xcc, 0x8c, 0, 0, 0, 0,

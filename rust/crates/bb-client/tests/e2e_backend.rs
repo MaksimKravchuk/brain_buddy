@@ -801,7 +801,7 @@ fn e2e_026_fr_003_the_first_sign_in_merge_reaches_the_real_server_once() {
         &mut ids,
         CommandType::TaskCreate,
         None,
-        json!({"title": "Call the plumber", "state": "next", "project_id": project, "tag_ids": [tag], "priority": "high"}),
+        json!({"title": "Call the plumber", "state": "next", "project_id": project, "tag_ids": [tag]}),
         vec![],
     );
     let (_, done) = save(

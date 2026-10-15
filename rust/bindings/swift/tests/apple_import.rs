@@ -34,7 +34,7 @@ fn document() -> Value {
             "tags": {},
             "tasks": {"task-1": {"id": "task-1", "serverID": "task_1a2b3c4d5e6f", "serverRevision": 2,
                 "title": SENTINEL, "state": "next", "projectID": "project-1", "tagIDs": [],
-                "priority": "none", "orderKey": 0, "createdAt": T0, "updatedAt": T0,
+                "orderKey": 0, "createdAt": T0, "updatedAt": T0,
                 "subtasks": [], "comments": []}},
             "review": {}
         },

@@ -43,7 +43,7 @@ fn project_json(
 fn task_json(id: &str, state: &str, project: Option<&str>) -> Value {
     json!({
         "id": id, "title": format!("Task {id}"), "details": null, "state": state,
-        "project_id": project, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": project, "tag_ids": [], "due_date": null,
         "waiting_for": null, "waiting_since": null, "order_key": "3",
         "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
         "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,

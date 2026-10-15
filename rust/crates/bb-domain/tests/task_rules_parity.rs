@@ -141,7 +141,7 @@ fn tag_json(id: &str, name: &str, state: &str) -> Value {
 fn task_json(id: &str, state: &str, revision: u64) -> Value {
     json!({
         "id": id, "title": format!("Task {id}"), "details": null, "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": if state == "waiting" { json!("Bob") } else { Value::Null },
         "waiting_since": if state == "waiting" { json!("2026-09-02T09:00:00Z") } else { Value::Null },
         "order_key": "3",
@@ -409,7 +409,6 @@ fn task_rules_026_fr_002_a_new_task_has_the_server_defaults() {
     assert_eq!(task.title.as_str(), "  Call Bob  ");
     assert_eq!(task.id.as_str(), NEW_TASK);
     assert_eq!(task.state, TaskState::Inbox);
-    assert_eq!(task.priority, types::Priority::None);
     assert_eq!(task.details, None);
     assert_eq!(task.revision, Counter::from(1));
     assert_eq!(task.created_at.as_str(), NOW);
@@ -429,7 +428,7 @@ fn task_rules_026_fr_002_a_new_task_keeps_every_field_it_was_given() {
         json!({
             "title": "Plan", "details": "", "state": "someday",
             "project_id": "project_live", "tag_ids": ["tag_home", "tag_work"],
-            "due_date": "2026-12-01", "priority": "high"
+            "due_date": "2026-12-01"
         }),
     )));
     let task = the_task(&set);
@@ -445,7 +444,6 @@ fn task_rules_026_fr_002_a_new_task_keeps_every_field_it_was_given() {
         task.due_date.as_ref().map(types::DueDay::as_str),
         Some("2026-12-01")
     );
-    assert_eq!(task.priority, types::Priority::High);
 }
 
 #[test]
@@ -690,7 +688,7 @@ fn task_rules_026_fr_002_catalog_limits_count_unicode_scalars_not_bytes() {
         Reason::InvalidPayload
     );
     assert_eq!(
-        make(json!({"title": "X", "priority": "urgent"}))
+        make(json!({"title": "X", "priority": "high"}))
             .unwrap_err()
             .reason,
         Reason::InvalidPayload
@@ -748,7 +746,7 @@ fn task_rules_026_fr_002_omitted_null_and_value_stay_distinct() {
     let start = with(
         task_json("t_full", "inbox", 1),
         json!({"details": "notes", "project_id": "project_live", "due_date": "2026-11-01",
-               "priority": "medium", "tag_ids": ["tag_work"]}),
+               "tag_ids": ["tag_work"]}),
     );
     store.read_set.tasks.insert(
         TaskId::parse("t_full").unwrap(),
@@ -769,7 +767,6 @@ fn task_rules_026_fr_002_omitted_null_and_value_stay_distinct() {
         task.due_date.as_ref().map(types::DueDay::as_str),
         Some("2026-11-01")
     );
-    assert_eq!(task.priority, types::Priority::Medium);
     assert_eq!(tag_ids(task), ["tag_work"]);
     assert_eq!(revision(task), 2);
     assert_eq!(task.updated_at.as_str(), NOW);
@@ -781,26 +778,24 @@ fn task_rules_026_fr_002_omitted_null_and_value_stay_distinct() {
     )));
     let task = the_task(&cleared);
     assert!(task.details.is_none() && task.project_id.is_none() && task.due_date.is_none());
-    assert_eq!(task.priority, types::Priority::Medium);
+    assert_eq!(tag_ids(task), ["tag_work"]);
     // A value sets; the title is verbatim and an empty note is an empty note.
     let set = accepted(store.decide(&update(
         "t_full",
-        json!({"title": " Spaced ", "details": "", "priority": "low", "due_date": "2027-01-31"}),
+        json!({"title": " Spaced ", "details": "", "due_date": "2027-01-31"}),
         1,
     )));
     let task = the_task(&set);
     assert_eq!(task.title.as_str(), " Spaced ");
     assert_eq!(task.details.as_ref().map(types::Details::as_str), Some(""));
-    assert_eq!(task.priority, types::Priority::Low);
     assert_eq!(
         task.due_date.as_ref().map(types::DueDay::as_str),
         Some("2027-01-31")
     );
-    // Title and priority cannot be cleared, and the vocabulary is closed.
+    // The title cannot be cleared; lifecycle and priority are not fields.
     for payload in [
         json!({"title": null}),
-        json!({"priority": null}),
-        json!({"priority": "urgent"}),
+        json!({"priority": "high"}),
         json!({"state": "next"}),
         json!({"tag_ids": ["tag_work"]}),
     ] {
@@ -812,21 +807,13 @@ fn task_rules_026_fr_002_omitted_null_and_value_stay_distinct() {
         );
         assert_eq!(rejected.unwrap_err().reason, Reason::InvalidPayload);
     }
-    for priority in ["none", "low", "medium", "high"] {
-        let set = accepted(store.decide(&update("t_full", json!({"priority": priority}), 1)));
-        assert_eq!(the_task(&set).priority.as_str(), priority);
-    }
 }
 
 #[test]
 fn task_rules_026_fr_002_an_edit_with_nothing_to_change_still_bumps_the_revision() {
     let store = world();
     let same = accepted(store.decide_with(
-        &update(
-            "t_inbox",
-            json!({"title": "Task t_inbox", "priority": "none"}),
-            2,
-        ),
+        &update("t_inbox", json!({"title": "Task t_inbox"}), 2),
         LATER,
         &[],
     ));
@@ -1087,11 +1074,7 @@ fn task_rules_026_fr_046_a_due_date_change_in_next_raises_the_task_floor() {
         instant(floor.as_ref()).as_deref(),
         Some("2026-10-30T00:00:00Z")
     );
-    let set = accepted(store.decide_with(
-        &update("t_next", json!({"details": "n", "priority": "high"}), 3),
-        now,
-        &[],
-    ));
+    let set = accepted(store.decide_with(&update("t_next", json!({"details": "n"}), 3), now, &[]));
     assert_eq!(the_task(&set).formulation, store.task("t_next").formulation);
 }
 
@@ -1322,7 +1305,7 @@ fn task_rules_026_fr_009_a_transition_changes_nothing_but_the_lifecycle() {
     let rich = with(
         task_json("t_rich", "inbox", 5),
         json!({"details": "notes", "project_id": "project_old", "due_date": "2026-11-01",
-               "priority": "high", "tag_ids": ["tag_work", "tag_home"], "order_key": "9",
+               "tag_ids": ["tag_work", "tag_home"], "order_key": "9",
                "title": " Verbatim "}),
     );
     store.read_set.tasks.insert(
@@ -1348,7 +1331,7 @@ fn task_rules_026_fr_009_a_transition_changes_nothing_but_the_lifecycle() {
         )));
         assert!(same(&|t| format!(
             "{:?}",
-            (&t.due_date, t.priority, &t.order_key, &t.created_at)
+            (&t.due_date, &t.order_key, &t.created_at)
         )));
     }
 }
@@ -1653,10 +1636,10 @@ fn vector_command(event: &Value, state: &str, revision: u64) -> DomainCommand {
             update(id, payload, revision)
         }
         "update_due_date" => update(id, json!({"due_date": event["due_date"]}), revision),
-        // Notes, project, priority and tags: the FR-003 edits that leave the clock alone.
+        // Notes, project and tags: the FR-003 edits that leave the clock alone.
         "update_other" => update(
             id,
-            json!({"details": "notes", "priority": "high", "project_id": "project_live",
+            json!({"details": "notes", "project_id": "project_live",
                    "tag_changes": {"add_tag_ids": ["tag_work"], "remove_tag_ids": []}}),
             revision,
         ),
@@ -2060,7 +2043,7 @@ fn public_task(row: &Value) -> Value {
     json!({
         "id": row["id"], "title": row["title"], "details": row["details"], "state": row["state"],
         "project_id": row["project_id"], "tag_ids": row["tag_ids"], "due_date": row["due_date"],
-        "priority": row["priority"], "waiting_for": row["waiting_for"],
+        "waiting_for": row["waiting_for"],
         "waiting_since": row["waiting_since"],
         "order_key": row["order_key"].as_u64().expect("order_key").to_string(),
         "source_capture_ids": row["source_capture_ids"], "created_at": row["created_at"],
@@ -2246,8 +2229,7 @@ fn task_rules_026_fr_001_reference_next_tasks_keep_their_clock_through_non_clock
     for task in of_state(&store, TaskState::Next) {
         let id = task.id.as_str();
         let rev = revision(task);
-        let notes =
-            accepted(store.decide(&update(id, json!({"details": "n", "priority": "low"}), rev)));
+        let notes = accepted(store.decide(&update(id, json!({"details": "n"}), rev)));
         assert_eq!(the_task(&notes).formulation, task.formulation, "{id}");
         let due = accepted(store.decide_with(
             &update(id, json!({"due_date": "2026-12-24"}), rev),

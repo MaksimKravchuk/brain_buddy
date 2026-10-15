@@ -239,8 +239,10 @@ fn is_name_char(c: char) -> bool {
         )
 }
 
-/// A `#`/`@` tag or `!` priority marker the task parser would read. The sigil
-/// must start a word (string start, whitespace or an opening bracket).
+/// A `#`/`@` tag the task parser would read, or a `!` marker that navigator
+/// rule 1 (`contracts/navigator.md`, shared `validator_vectors.json`) still
+/// drops. The sigil must start a word (string start, whitespace or an opening
+/// bracket).
 fn has_smart_add_token(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
     for (index, &sigil) in chars.iter().enumerate() {

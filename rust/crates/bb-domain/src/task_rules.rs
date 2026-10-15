@@ -333,7 +333,6 @@ pub fn new_task(
         project_id: payload.project_id.clone(),
         tag_ids: payload.tag_ids.clone(),
         due_date: payload.due_date.clone(),
-        priority: payload.priority,
         waiting_since: waiting_for.as_ref().map(|_| inputs.now.clone()),
         waiting_for,
         order_key,
@@ -386,7 +385,7 @@ fn task_update(
     let id = TaskId::parse(command.entity_id.as_str())?;
     let task = existing_task(read_set, &id)?;
     check_revision(command, EntityType::Task, &task.revision)?;
-    // Title and priority cannot be cleared: the payload type refuses `null`.
+    // The title cannot be cleared: the payload type refuses `null`.
     let waiting_for = match &payload.waiting_for {
         Patch::Unchanged => task.waiting_for.clone(),
         edit => {
@@ -421,7 +420,6 @@ fn task_update(
         project_id,
         tag_ids,
         due_date: patched(&task.due_date, &payload.due_date),
-        priority: payload.priority.unwrap_or(task.priority),
         waiting_for,
         updated_at: inputs.now.clone(),
         revision: next_counter(&task.revision, "revision")?,
@@ -435,7 +433,7 @@ fn task_update(
 
 /// PATCH in Next: a substantive title restarts the formulation, a due date
 /// set, moved or removed raises the task floor to `max(existing, now + 7 d)`.
-/// Notes, tags, project, priority and waiting-for leave the clock alone.
+/// Notes, tags, project and waiting-for leave the clock alone.
 fn clock_after_edit(
     read_set: &ReadSet,
     before: &Task,
