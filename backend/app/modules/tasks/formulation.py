@@ -426,7 +426,7 @@ def change_due_date(
 
 
 def edit_without_clock(clock: TaskClock) -> TaskClock:
-    """Notes, tags, project, priority, subtasks, comments, waiting-for (FR-003)."""
+    """Notes, tags, project, subtasks, comments, waiting-for (FR-003)."""
 
     return _bump(clock)
 

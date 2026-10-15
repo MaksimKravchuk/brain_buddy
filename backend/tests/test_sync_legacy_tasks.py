@@ -1050,7 +1050,6 @@ def test_026_FR_005_task_update_receipt_distinguishes_omitted_nullable_fields(
                     project_id=None,
                     tag_ids=None,
                     due_date=None,
-                    priority=None,
                     waiting_for=None,
                     new_formulation_id=None,
                     expected_revision=task.revision,

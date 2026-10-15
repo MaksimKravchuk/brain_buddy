@@ -246,7 +246,7 @@ def test_020_FR_002_substantive_title_change_starts_a_new_formulation(
     assert _norm(patched["formulation"]["started_at"]) == _iso(frozen_clock())
 
 
-def test_020_FR_003_notes_tags_project_priority_subtask_and_comment_keep_the_clock(
+def test_020_FR_003_notes_tags_project_subtask_and_comment_keep_the_clock(
     api_client: TestClient, frozen_clock: FrozenClock, keys: _Keys
 ) -> None:
     """Edits to everything but the title and due date leave the clock alone."""
@@ -263,7 +263,6 @@ def test_020_FR_003_notes_tags_project_priority_subtask_and_comment_keep_the_clo
         details="Measure first",
         project_id=project.json()["id"],
         tag_ids=[tag.json()["id"]],
-        priority="high",
     )
     assert task["formulation"] == clock
     subtask = api_client.post(
@@ -415,7 +414,6 @@ class _LegacyTaskCreateRequest(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: str | None = None
-    priority: str = "none"
     waiting_for: str | None = None
     source_capture_ids: list[str] = Field(default_factory=list)
 

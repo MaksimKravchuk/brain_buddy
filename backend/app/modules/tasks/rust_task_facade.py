@@ -136,7 +136,6 @@ def encode_task(task: TaskDocument) -> dict[str, Any]:
         "project_id": task.project_id,
         "tag_ids": list(task.tag_ids),
         "due_date": None if task.due_date is None else task.due_date.isoformat(),
-        "priority": task.priority,
         "waiting_for": task.waiting_for,
         "waiting_since": _optional_instant(task.waiting_since),
         "order_key": str(task.order_key),
@@ -241,7 +240,6 @@ def decode_task(
             "project_id": value["project_id"],
             "tag_ids": value["tag_ids"],
             "due_date": value["due_date"],
-            "priority": value["priority"],
             "waiting_for": value["waiting_for"],
             "waiting_since": value["waiting_since"],
             "order_key": int(value["order_key"]),
@@ -441,11 +439,6 @@ class RustTaskFacade:
                 request_error = ValidationFailure("Task title cannot be null.")
             else:
                 body["title"] = payload.title
-        if "priority" in fields:
-            if payload.priority is not None:
-                body["priority"] = payload.priority
-            elif request_error is None:
-                request_error = ValidationFailure("Task priority cannot be null.")
         for name in ("details", "project_id", "waiting_for"):
             if name in fields:
                 body[name] = getattr(payload, name)
@@ -1168,7 +1161,7 @@ def _ordered_refusal(
 ) -> BrainBuddyError:
     """A ``PATCH`` refusal in the order Python reports its errors.
 
-    Revision first, then a null title or priority, then waiting-for and the
+    Revision first, then a null title, then waiting-for and the
     project, then a duplicate in the replacement list, then each tag.
     """
 

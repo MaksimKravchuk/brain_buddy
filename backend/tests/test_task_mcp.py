@@ -294,7 +294,6 @@ def test_022_FR_005_search_pagination_and_task_fields(mcp_client: TestClient) ->
             state="waiting",
             waiting_for="Supplier",
             due_date="2026-12-01",
-            priority="high",
         )
         assert result["structuredContent"]["waiting_for"] == "Supplier"
         assert result["structuredContent"]["due_date"] == "2026-12-01"

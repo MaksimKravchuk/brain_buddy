@@ -204,7 +204,6 @@ def _creations(r: Run) -> None:
             "project_id": r.alias["garden"],
             "tag_ids": [r.alias["work"], r.alias["home"]],
             "due_date": "2026-10-20",
-            "priority": "high",
         },
     )
     p(
@@ -287,20 +286,14 @@ def _updates(r: Run) -> None:
     p(
         patch,
         "/tasks/{a}",
-        "update null priority",
-        body={"priority": None, "expected_revision": 1},
-    )
-    p(
-        patch,
-        "/tasks/{a}",
         "update waiting_for off waiting",
         body={"waiting_for": "x", "expected_revision": 1},
     )
     p(
         patch,
         "/tasks/{a}",
-        "update details and priority",
-        body={"details": None, "priority": "low", "expected_revision": 1},
+        "update details",
+        body={"details": None, "expected_revision": 1},
     )
     p(
         patch,
@@ -770,16 +763,6 @@ def _edges(r: Run) -> None:
             "title": "Plan trip",
             "state": "next",
             "tag_ids": [r.alias["work"]],
-        },
-    )
-    p(
-        patch,
-        "/tasks/{t}",
-        "null title and null priority",
-        body=lambda r: {
-            "title": None,
-            "priority": None,
-            "expected_revision": r.rev("t"),
         },
     )
     p(
@@ -1273,8 +1256,6 @@ def test_026_FR_014_refusal_order_and_stored_state_edges_match_the_python_rules(
         _evidence("compared", f"{len(on.outcomes)} requests")
     with allure.step("a refusal is reported in the order Python reports it"):
         by_label = {o.label: o for o in on.outcomes}
-        assert by_label["null title and null priority"].status == 400
-        assert "title" in str(by_label["null title and null priority"].body)
         assert by_label["null title before an unknown project"].status == 400
         assert "title" in str(by_label["null title before an unknown project"].body)
         assert by_label["duplicate tags before an unknown tag"].status == 400
