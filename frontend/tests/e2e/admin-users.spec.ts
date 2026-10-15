@@ -1,45 +1,9 @@
-import { execFile } from "node:child_process";
-import * as path from "node:path";
-import { promisify } from "node:util";
-
 import { expect, test } from "../allure.fixtures";
 import { password } from "./gtdHelpers";
+import { readOwnerTasks } from "./testControl";
 
 const operatorEmail = process.env.BRAIN_BUDDY_ADMIN_EMAIL;
 const operatorPassword = process.env.BRAIN_BUDDY_ADMIN_PASSWORD ?? password;
-const execFileAsync = promisify(execFile);
-const repoRoot = path.resolve(process.cwd(), "..");
-const ownedTaskProbe = `
-from app.container import build_container
-from app.core import get_config
-from app.exceptions import NotFoundError
-import sys
-
-repository = build_container(get_config()).task_repo
-try:
-    repository.get_for_owner(sys.argv[2], owner_id=sys.argv[1])
-except NotFoundError:
-    print("absent")
-else:
-    print("present")
-`;
-
-async function readOwnedTaskPresence(ownerId: string, taskId: string): Promise<"present" | "absent"> {
-  const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT;
-  if (!composeProject) {
-    throw new Error("BRAIN_BUDDY_E2E_COMPOSE_PROJECT is required for the owner-scoped task read-back");
-  }
-  const { stdout } = await execFileAsync(
-    "docker",
-    ["compose", "-p", composeProject, "exec", "-T", "backend", "python", "-c", ownedTaskProbe, ownerId, taskId],
-    { cwd: repoRoot, timeout: 30_000 }
-  );
-  const result = stdout.trim();
-  if (result !== "present" && result !== "absent") {
-    throw new Error(`owner-scoped task read-back returned an unexpected result: ${result}`);
-  }
-  return result;
-}
 
 test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-015 013-FR-016 013-FR-017 013-SC-001 013-SC-005 013-SC-007 013-SC-008 013-SC-009 admin operator completes the Users journey and opens Feature flags", async ({ page }, testInfo) => {
   test.skip(!operatorEmail, "BRAIN_BUDDY_ADMIN_EMAIL is required for the synthetic Compose operator journey");
@@ -54,7 +18,6 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:5173"
   });
   const targetPage = await targetContext.newPage();
-  let targetOwnerId = "";
   let targetTaskId = "";
 
   await test.step("authenticate the configured synthetic operator", async () => {
@@ -95,7 +58,6 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
     await expect(targetPage).not.toHaveURL(/\/login$/);
     const targetAccount = await targetPage.request.get("/api/auth/me");
     if (targetAccount.status() !== 200) throw new Error(`target account read failed: ${targetAccount.status()}`);
-    targetOwnerId = ((await targetAccount.json()) as { id: string }).id;
     const taskResponse = await targetPage.request.post("/api/tasks", {
       data: { title: `Synthetic owned task ${suffix}`, state: "inbox" },
       headers: { "Idempotency-Key": `admin-owned-${suffix}` }
@@ -104,8 +66,8 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
     targetTaskId = ((await taskResponse.json()) as { id: string }).id;
     const ownedTask = await targetPage.request.get(`/api/tasks/${targetTaskId}`);
     if (ownedTask.status() !== 200) throw new Error(`target-owned task was not readable before delete: ${ownedTask.status()}`);
-    const storedTaskBeforeDelete = await readOwnedTaskPresence(targetOwnerId, targetTaskId);
-    if (storedTaskBeforeDelete !== "present") {
+    const ownerTasksBeforeDelete = await readOwnerTasks(memberEmail);
+    if (ownerTasksBeforeDelete === "absent" || !ownerTasksBeforeDelete.some((task) => task.id === targetTaskId)) {
       throw new Error("target-owned task was absent from the owner-scoped repository before delete");
     }
   });
@@ -132,12 +94,16 @@ test("013-FR-002 013-FR-003 013-FR-004 013-FR-009 013-FR-010 013-FR-012 013-FR-0
     await page.getByRole("dialog").getByRole("button", { name: "Delete permanently" }).click();
     await expect(page.getByText(memberEmail)).toHaveCount(0);
     // The revoked target session can only prove access containment (401). The
-    // repository's existing owner-scoped read seam distinguishes a purged row
-    // from an orphan that merely became unreachable through HTTP.
-    const storedTaskAfterDelete = await readOwnedTaskPresence(targetOwnerId, targetTaskId);
-    if (storedTaskAfterDelete !== "absent") {
-      throw new Error("target-owned task row remained after account deletion");
+    // test control owner read answers 404 once the account is gone. That proves
+    // the account is absent, not that its task row was purged, so the Users
+    // list is checked as well.
+    if ((await readOwnerTasks(memberEmail)) !== "absent") {
+      throw new Error("target account still resolves after account deletion");
     }
+    const accounts = await page.request.get("/api/admin/accounts");
+    expect(accounts.ok(), await accounts.text()).toBe(true);
+    const { accounts: listedAccounts } = (await accounts.json()) as { accounts: Array<{ email: string }> };
+    expect(listedAccounts.map((account) => account.email)).not.toContain(memberEmail);
     await targetPage.goto("/login");
     await targetPage.getByRole("button", { name: "Use your password", exact: true }).click();
     await targetPage.getByLabel("Email").fill(memberEmail);

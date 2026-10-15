@@ -4,11 +4,12 @@ import { promisify } from "node:util";
 
 import { expect, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
 
+import { mintTestInvite } from "./testControl";
+
 const execFileAsync = promisify(execFile);
 
 export const password = "E2E-safe-password-123";
 export const backendUrl = process.env.BRAIN_BUDDY_E2E_BACKEND_URL ?? "http://127.0.0.1:8000";
-const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT ?? process.env.COMPOSE_PROJECT_NAME;
 const repoRoot = path.resolve(process.cwd(), "..");
 
 export type TaskRecord = { id: string; title: string; state: string; revision: number };
@@ -45,17 +46,7 @@ export async function mintInvite(): Promise<string> {
     if (!code) throw new Error("Isolated invite command returned no code");
     return code;
   }
-  if (!composeProject) {
-    throw new Error("BRAIN_BUDDY_E2E_COMPOSE_PROJECT is required to mint invites for Compose E2E");
-  }
-  const { stdout } = await execFileAsync(
-    "docker",
-    ["compose", "-p", composeProject, "exec", "-T", "backend", "python", "-m", "app.cli", "create-invite"],
-    { cwd: repoRoot, timeout: 30_000 }
-  );
-  const code = stdout.trim().split(/\s+/).at(-1);
-  if (!code) throw new Error(`Invite command returned no code: ${stdout}`);
-  return code;
+  return mintTestInvite();
 }
 
 export async function signupThroughUi(page: Page, email: string, inviteCode: string): Promise<void> {

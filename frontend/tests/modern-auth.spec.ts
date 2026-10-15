@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { arch, cpus, platform, release } from "node:os";
 import { promisify } from "node:util";
+import { inflateRawSync } from "node:zlib";
 
 import AxeBuilder from "@axe-core/playwright";
 import type { Browser, Locator, Page, Route, TestInfo } from "@playwright/test";
@@ -10,7 +11,10 @@ import { attachment, epic, feature, story } from "allure-js-commons";
 import { expect, test } from "./allure.fixtures";
 
 const origin = process.env.BRAIN_BUDDY_MODERN_E2E_ORIGIN ?? "https://brainbuddy-e2e.example.com:9443";
-const captureFile = process.env.BRAIN_BUDDY_MODERN_E2E_CAPTURE_FILE;
+const controlUrl = process.env.BRAIN_BUDDY_MODERN_E2E_CONTROL_URL;
+const controlToken = process.env.BRAIN_BUDDY_TEST_CONTROL_TOKEN;
+const googleAudience = "modern-e2e.apps.googleusercontent.com";
+const appleAudience = "com.example.modern-e2e.web";
 const password = "E2E-modern-safe-password-123";
 const legacyEmail = "legacy-modern-e2e@gmail.com";
 const recoveryEmail = "recovery-modern-e2e@example.com";
@@ -83,6 +87,45 @@ for (const provider of ["google", "apple"] as const) {
   });
 }
 
+const forbiddenExportFields = new Set(["password_hash", "session_token", "token_hash", "code", "code_hmac", "recent_proof", "reset_grant", "client_verifier", "nonce", "sealed_payload", "key_id", "access_token", "refresh_token", "provider_credentials"]);
+
+function jsonDocuments(archive: Buffer): unknown[] {
+  // Minimal ZIP reader (central directory; stored or deflate) so no helper process is needed.
+  const end = archive.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let offset = archive.readUInt32LE(end + 16);
+  const documents: unknown[] = [];
+  for (let entries = archive.readUInt16LE(end + 10); entries > 0; entries -= 1) {
+    const method = archive.readUInt16LE(offset + 10);
+    const size = archive.readUInt32LE(offset + 20);
+    const nameLength = archive.readUInt16LE(offset + 28);
+    const extraLength = archive.readUInt16LE(offset + 30);
+    const commentLength = archive.readUInt16LE(offset + 32);
+    const local = archive.readUInt32LE(offset + 42);
+    const name = archive.toString("utf8", offset + 46, offset + 46 + nameLength);
+    offset += 46 + nameLength + extraLength + commentLength;
+    if (!name.endsWith(".json")) continue;
+    const start = local + 30 + archive.readUInt16LE(local + 26) + archive.readUInt16LE(local + 28);
+    const raw = archive.subarray(start, start + size);
+    documents.push(JSON.parse((method === 8 ? inflateRawSync(raw) : raw).toString("utf8")));
+  }
+  return documents;
+}
+
+function inspectExport(archive: Buffer): void {
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) {
+        expect(forbiddenExportFields.has(key), "An authority-bearing field reached export").toBe(false);
+        walk(child);
+      }
+    }
+  };
+  const documents = jsonDocuments(archive);
+  documents.forEach(walk);
+  expect(documents.some(document => JSON.stringify(document).includes("passwordless-rights-subject")), "Safe provider subject metadata is absent").toBe(true);
+}
+
 interface Me { id: string; email: string }
 interface AccountMethods { account_id: string; has_password: boolean; email_verified: boolean; methods: Array<{ method: string; usable: boolean }> }
 interface Challenge { challenge_id: string; expires_at: string; resend_at: string }
@@ -122,14 +165,25 @@ async function clientProof(page: Page): Promise<ClientProof> {
   });
 }
 
+// Test control API (specs/027-rust-server/contracts/test-control.md): the only
+// way this suite scripts identity providers and reads captured mail.
+async function control<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${controlUrl}/api/__test__${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", "X-Test-Control-Token": controlToken! },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  expect(response.status, `test control ${method} ${path}`).toBeLessThan(300);
+  return await response.json() as T;
+}
+
 async function readCode(email: string, purpose: string): Promise<string> {
   let code: string | undefined;
   await expect.poll(async () => {
-    const lines = (await readFile(captureFile!, "utf8")).trim().split("\n").filter(Boolean);
-    const messages = lines.map(line => JSON.parse(line) as CapturedMail);
+    const { messages } = await control<{ messages: CapturedMail[] }>("GET", "/mail");
     code = messages.filter(message => message.recipient === email && message.purpose === purpose).at(-1)?.code;
     return code;
-  }, { message: "the synthetic SMTP boundary acknowledged a fresh code", timeout: 15_000 }).toMatch(/^\d{6}$/);
+  }, { message: "the test control mail capture acknowledged a fresh code", timeout: 15_000 }).toMatch(/^\d{6}$/);
   return code!;
 }
 
@@ -172,9 +226,16 @@ async function fakeGoogle(page: Page, email: string, subject: string): Promise<v
     expect(authorization.searchParams.get("scope")).toBe("openid email");
     expect(authorization.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/providers/google/callback`);
     expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
-    const code = Buffer.from(JSON.stringify({
-      email, subject, nonce: authorization.searchParams.get("nonce"), pkce: authorization.searchParams.get("code_challenge")
-    })).toString("base64url");
+    // The next code exchange yields exactly this identity; signature and PKCE
+    // verification belong to the identity mock, not to this page.
+    await control("PUT", "/providers/identity", {
+      mode: "mock",
+      script: [{ identity: {
+        issuer: "https://accounts.google.com", subject, email, audience: googleAudience,
+        email_authoritative: /@(?:gmail|googlemail)\.com$/.test(email), is_private_email: false
+      } }]
+    });
+    const code = "synthetic-google-code";
     await route.fulfill({
       contentType: "text/html",
       body: `<html><body><h1>Synthetic Google sign-in</h1><form action="${escapeHtml(authorization.searchParams.get("redirect_uri")!)}" method="get"><input type="hidden" name="state" value="${escapeHtml(authorization.searchParams.get("state")!)}"><input type="hidden" name="code" value="${code}"><button type="submit">Continue as synthetic identity</button></form></body></html>`
@@ -227,7 +288,15 @@ async function fakeApple(page: Page, email: string | null, subject: string): Pro
     expect(authorization.searchParams.get("response_type")).toBe("code");
     expect(authorization.searchParams.get("redirect_uri")).toBe(`${origin}/api/auth/providers/apple/callback`);
     expect(authorization.searchParams.has("code_challenge")).toBe(false);
-    const code = Buffer.from(JSON.stringify({ email, subject, nonce: authorization.searchParams.get("nonce") })).toString("base64url");
+    // Each identity call consumes one script item. A just-unlinked Apple owner's
+    // background token revocation may take the first one, so offer the same
+    // assertion twice; the exchange then still finds it.
+    const assertion = { identity: {
+      issuer: "https://appleid.apple.com", subject, email, audience: appleAudience,
+      email_authoritative: email !== null, is_private_email: email !== null
+    }, issuing_client: appleAudience };
+    await control("PUT", "/providers/identity", { mode: "mock", script: [assertion, assertion] });
+    const code = "synthetic-apple-code";
     await route.fulfill({
       contentType: "text/html",
       body: `<html><body><h1>Synthetic Apple sign-in</h1><form action="${escapeHtml(authorization.searchParams.get("redirect_uri")!)}" method="post"><input type="hidden" name="state" value="${escapeHtml(authorization.searchParams.get("state")!)}"><input type="hidden" name="code" value="${code}"><button type="submit">Continue as synthetic Apple identity</button></form></body></html>`
@@ -386,8 +455,12 @@ async function pendingFeedback(page: Page, browser: Browser, testInfo: TestInfo,
   }
 }
 
-test.beforeAll(() => {
-  expect(captureFile, "an explicit task-specific /tmp SMTP capture file is required").toMatch(/^\/tmp\/modern-auth-e2e[^]*\/[^/]+$/);
+test.beforeAll(async () => {
+  expect(controlUrl, "the runner supplies the server's test control base URL").toBeTruthy();
+  expect(controlToken, "the runner supplies the test control token").toBeTruthy();
+  // Arm the identity mock so no upstream provider is ever contacted, even for
+  // the Apple token revocation that follows unlink and deletion.
+  await control("PUT", "/providers/identity", { mode: "mock", script: [] });
 });
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -718,20 +791,7 @@ test("023-FR-018 023-FR-020 023-SC-005 a passwordless account confirms export an
     expect(archive.suggestedFilename()).toMatch(/\.zip$/);
     const archivePath = await archive.path();
     expect(archivePath).toBeTruthy();
-    await execFileAsync(process.env.BRAIN_BUDDY_MODERN_E2E_PYTHON ?? "python", ["-c", `
-import json, sys, zipfile
-forbidden = {"password_hash", "session_token", "token_hash", "code", "code_hmac", "recent_proof", "reset_grant", "client_verifier", "nonce", "sealed_payload", "key_id", "access_token", "refresh_token", "provider_credentials"}
-def inspect(value):
-    if isinstance(value, dict):
-        assert not forbidden.intersection(value), "An authority-bearing field reached export"
-        for child in value.values(): inspect(child)
-    elif isinstance(value, list):
-        for child in value: inspect(child)
-with zipfile.ZipFile(sys.argv[1]) as archive:
-    documents = [json.loads(archive.read(name)) for name in archive.namelist() if name.endswith(".json")]
-    for document in documents: inspect(document)
-    assert any("passwordless-rights-subject" in json.dumps(document) for document in documents), "Safe provider subject metadata is absent"
-`, archivePath!]);
+    inspectExport(await readFile(archivePath!));
     await expect(page.getByRole("status")).toContainText("Auth secrets are excluded");
     await accessible(page);
   });
