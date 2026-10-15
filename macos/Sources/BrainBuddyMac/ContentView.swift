@@ -245,6 +245,7 @@ struct WorkspaceView: View {
 
     var body: some View {
         reviewSheets(collectionSheets(taskSheets(window)))
+            .focusedSceneValue(\.closeTaskDetails, closeTaskDetailsAction)
     }
 
     private var sheetIsBusy: Bool { model.isSaving || isSubmittingSheet }
@@ -294,7 +295,6 @@ struct WorkspaceView: View {
         .onChange(of: sync.signOutRequests) { _, _ in requestNavigation(.signOut) }
         .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
-        .focusedSceneValue(\.closeTaskDetails, selectedTaskID == nil ? nil : CloseTaskDetailsAction(close: { requestNavigation(.task(nil)) }))
         .focusedSceneValue(\.macSyncController, sync)
         .onAppear { quickCapture.start(model: model) }
         .onDisappear { quickCapture.stop() }
@@ -726,6 +726,12 @@ struct WorkspaceView: View {
         case .newTask: isDateDestination || model.destination.isHistory || model.isArchivedProjectDestination
         default: false
         }
+    }
+
+    /// View › "Close task details" (⌘\) while a task is open; the same guard as choosing another task.
+    private var closeTaskDetailsAction: CloseTaskDetailsAction? {
+        guard selectedTaskID != nil else { return nil }
+        return CloseTaskDetailsAction(close: { requestNavigation(.task(nil)) })
     }
 
     /// Puts the list change `before` → now on the window's undo stack (Edit › Undo, ⌘Z).
