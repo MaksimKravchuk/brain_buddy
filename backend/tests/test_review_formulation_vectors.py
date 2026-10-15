@@ -1,6 +1,6 @@
 """Spec 020: the shared formulation vectors, and the copy drift guard.
 
-Runs every section of ``tests/fixtures/review_formulation_vectors.json``
+Runs every section of ``contracts/fixtures/review_formulation_vectors.json``
 (contracts/formulation-clock.md §6) against ``app.modules.tasks.formulation``,
 and fails when any byte-identical copy in the Swift or web test tree is missing
 or differs from its canonical file (§6 "Drift guard"). The helpers below are
@@ -29,7 +29,7 @@ from app.utils.time import from_isoformat
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
-FIXTURES = BACKEND_DIR / "tests" / "fixtures"
+FIXTURES = REPO_ROOT / "contracts" / "fixtures"
 
 # contracts/formulation-clock.md §6 "Who lands the copies" (tasks.md T023):
 # every canonical fixture and its byte-identical copies.

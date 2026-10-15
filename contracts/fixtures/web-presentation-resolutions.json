@@ -1,12 +1,12 @@
 {
  "schema": "brainbuddy-web-presentation-resolutions/v1",
  "vectors": {
-  "path": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+  "path": "contracts/fixtures/web-presentation-vectors.json",
   "schema": "brainbuddy-web-presentation-vectors/v1",
   "rule_version": "smart-add-web/1"
  },
  "adapter_revision": "smart-add-web/1+r1",
- "format": "PR-53 (tasks.md T053) decision ledger for every web/shared disagreement that PR-02 froze in web-presentation-vectors.json. The vectors file is a hash-pinned oracle and keeps the smart-add-web/1 outcomes of the web helpers as they were measured; this file records what PR-53 did about each one. resolved: smartAdd.ts was corrected and now returns the shared value (the divergence's fields for a parse case, the server verdict for a probe). accepted: the web outcome stays and the reason names why the Rust-backed server remains the final authority anyway. Every parse case with a divergence and every probe with agrees=false appears exactly once; the web suite (smartAddVectors.test.ts) and the Rust suite (bb-domain tests/web_presentation.rs) both fail on a missing, extra or mis-decided row. Versioning here is test/build evidence only: it is not an authorization token and adds no client API (command-catalog.md, web transition).",
+ "format": "PR-53 (tasks.md T053) decision ledger for every web/shared disagreement that PR-02 froze in web-presentation-vectors.json. The vectors file is a frozen oracle and keeps the smart-add-web/1 outcomes of the web helpers as they were measured; this file records what PR-53 did about each one. resolved: smartAdd.ts was corrected and now returns the shared value (the divergence's fields for a parse case, the server verdict for a probe). accepted: the web outcome stays and the reason names why the Rust-backed server remains the final authority anyway. Every parse case with a divergence and every probe with agrees=false appears exactly once; the web suite (smartAddVectors.test.ts) and the Rust suite (bb-domain tests/web_presentation.rs) both fail on a missing, extra or mis-decided row. Versioning here is test/build evidence only: it is not an authorization token and adds no client API (command-catalog.md, web transition).",
  "parse": [
   {
    "id": "WP-P-045",

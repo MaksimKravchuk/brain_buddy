@@ -8,7 +8,7 @@ import Testing
 /// replayed against `BrainBuddyFakeServer`: lossless archive, a repeat archive,
 /// unarchive, `GET /projects?state=`, the tolerant task PATCH and the desired
 /// outcome. `project_archive_traces.json` is a byte-identical copy of
-/// `backend/tests/fixtures/project_archive_traces.json` (checked by
+/// `contracts/fixtures/project_archive_traces.json` (checked by
 /// `test_project_archive_traces.py` on every landing), which the same file
 /// passes against the real API, so the fake server cannot drift from the backend
 /// on these paths. An expected `null` also matches an absent key, because the

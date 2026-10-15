@@ -13,7 +13,7 @@ CREATE TABLE voice.operations (
     id         text        NOT NULL,
     status     text        NOT NULL,
     updated_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text       NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 CREATE INDEX idx_voice_operations_owner_status
@@ -65,8 +65,13 @@ CREATE TABLE voice.provisional_items (
     operation_id text        NOT NULL,
     id           text        NOT NULL,
     status       text        NOT NULL DEFAULT 'provisional'
-                 CHECK (status IN ('provisional', 'user_edited', 'confirmed', 'discarded')),
-    payload      jsonb       NOT NULL,
+                 -- Exactly BrainDumpProposalStatus (backend/app/workflows/
+                 -- voice_brain_dump/domain.py); `wording_changing` is read-only
+                 -- legacy but still a valid persisted value.
+                 CHECK (status IN ('provisional', 'wording_changing',
+                                   'ready_to_review', 'user_edited',
+                                   'reconciled', 'conflicted')),
+    payload      text       NOT NULL,
     created_at   timestamptz NOT NULL,
     updated_at   timestamptz NOT NULL,
     PRIMARY KEY (owner_id, operation_id, id),
@@ -81,7 +86,7 @@ CREATE TABLE voice.idempotency_records (
     command       text        NOT NULL,
     request_hash  text        NOT NULL,
     resource_id   text        NOT NULL,
-    response_body jsonb       NOT NULL,
+    response_body text       NOT NULL,
     created_at    timestamptz NOT NULL,
     PRIMARY KEY (owner_id, key_hash)
 );

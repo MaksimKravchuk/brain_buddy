@@ -1,6 +1,6 @@
 """Spec 020: the golden wire fixtures validate against the review wire schemas.
 
-``tests/fixtures/review_wire_fixtures.json`` holds one entry per request and
+``contracts/fixtures/review_wire_fixtures.json`` holds one entry per request and
 response shape of contracts/http.md §2 – §7 plus the error envelope. The Swift
 DTO tests and Vitest decode the byte-identical copies, so a wire change that is
 not made here as well fails mechanically.

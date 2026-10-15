@@ -12,7 +12,7 @@ CREATE TABLE agents.connections (
     id         text        NOT NULL,
     status     text        NOT NULL,
     created_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text       NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 
@@ -54,7 +54,7 @@ CREATE TABLE agents.runs (
             ('none', 'queued', 'open', 'closed', 'interrupted',
              'uncertain_after_restore')),
     identifiers_expire_at timestamptz,
-    payload               jsonb       NOT NULL,
+    payload               text       NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 CREATE INDEX idx_agent_runs_task ON agents.runs (owner_id, task_id, created_at);
@@ -72,7 +72,7 @@ CREATE TABLE agents.run_events (
     run_id      text        NOT NULL,
     run_version integer     NOT NULL,
     received_at timestamptz NOT NULL,
-    payload     jsonb       NOT NULL,
+    payload     text       NOT NULL,
     PRIMARY KEY (owner_id, run_id, id)
 );
 CREATE INDEX idx_agent_events_run ON agents.run_events (owner_id, run_id, run_version);
@@ -82,7 +82,7 @@ CREATE TABLE agents.run_commands (
     id         text        NOT NULL,
     run_id     text        NOT NULL,
     created_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text       NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 CREATE INDEX idx_agent_commands_run ON agents.run_commands (owner_id, run_id, created_at);
@@ -91,7 +91,7 @@ CREATE TABLE agents.audit (
     owner_id   text        NOT NULL,
     id         text        NOT NULL,
     created_at timestamptz NOT NULL,
-    payload    jsonb       NOT NULL,
+    payload    text       NOT NULL,
     PRIMARY KEY (owner_id, id)
 );
 CREATE INDEX idx_agent_audit_created ON agents.audit (created_at);
@@ -115,8 +115,11 @@ CREATE TABLE agents.idempotency (
     request_hash  text        NOT NULL,
     resource_id   text        NOT NULL,
     command_id    text,
-    completed     boolean     NOT NULL DEFAULT true,
-    response_body jsonb       NOT NULL,
+    -- Durable attempt marker written before connector I/O: a retry may resend
+    -- a never-attempted command but must reconcile an attempted one.
+    delivery_attempted boolean NOT NULL DEFAULT false,
+    completed    boolean     NOT NULL DEFAULT true,
+    response_body text       NOT NULL,
     created_at    timestamptz NOT NULL,
     PRIMARY KEY (owner_id, key_hash)
 );
