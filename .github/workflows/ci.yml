@@ -18,6 +18,19 @@ on:
     # write permission and cannot promote — landing stays owned by the
     # default-branch deploy workflow, exactly as for `main`.
     branches: ["main", "stack/**"]
+  # Nightly, on main: the macOS and Windows lanes a landing skipped because
+  # nothing they read changed still meet a new Xcode or runner image within a
+  # day. Consumers of this workflow's completion (the landing/deploy workflow
+  # and the TestFlight upload) act on push runs only, so this never lands or
+  # ships anything.
+  schedule:
+    - cron: "41 2 * * *"
+  # The merge queue tests each queued pull request on top of the current main
+  # (and the entries ahead of it) before merging, so a PR does not have to be
+  # re-run by hand every time main moves. A queue run carries no write
+  # permission and cannot promote; its required checks are the same jobs.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -88,6 +101,7 @@ jobs:
           python3 -m unittest scripts/test_check_smoke_identity_cohort.py -v
           python3 -m unittest scripts/test_select_backend_tests.py -v
           python3 -m unittest scripts/test_release_graph.py -v
+          python3 -m unittest scripts/test_classify_changed_scripts.py -v
           python3 scripts/validate_trunk_delivery.py trunk-ci \
             --ci .github/workflows/ci.yml
           python3 scripts/validate_trunk_delivery.py deploy \
@@ -121,14 +135,21 @@ jobs:
   # strength of a check that did not happen. A job that runs, finds nothing to
   # do, and succeeds keeps that guarantee intact.
   #
-  # Filtering applies to pull requests only. Pushes to main and to
-  # trunk-candidate/** are the landing path, and those are verified in full.
+  # Pull requests are filtered lane by lane. Pushes to main and to
+  # trunk-candidate/** are the landing path and verify every Linux lane in
+  # full; the lanes on macOS and Windows runners follow the filter on a
+  # candidate, are not re-run on a main push of a SHA already verified as a
+  # candidate, and run nightly on main regardless (see the decide step).
   # This job holds no `needs`. It is the only real data dependency the stack
   # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
   # it would delay every test in the run without changing any of their results.
   changes:
     name: Changed stacks
     runs-on: ubuntu-latest
+    # actions: read lets the decide step find this SHA's trunk-candidate run.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
@@ -165,6 +186,8 @@ jobs:
       # exercises every stack.
       - name: Decide which stacks to exercise
         id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           backend=true
           frontend=true
@@ -174,14 +197,46 @@ jobs:
           rust=true
           cli=true
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base='${{ github.event.pull_request.base.sha }}'
-            if git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null &&
-               changed=$(git diff --name-only "${base}" HEAD 2>/dev/null); then
+          candidate=false
+          case "${{ github.event_name }}:${{ github.ref }}" in
+            push:refs/heads/trunk-candidate/*) candidate=true ;;
+            # A merge-queue run is the landing path for pull requests: the
+            # same rules as a trunk candidate, judged against its fork point
+            # on main (the queue's base).
+            merge_group:*) candidate=true ;;
+          esac
+
+          if [ "${{ github.event_name }}" = "pull_request" ] ||
+             [ "${candidate}" = true ]; then
+            if [ "${candidate}" = true ]; then
+              # A candidate is judged by what it changes on top of main.
+              # An unknown fork point leaves base empty, and the empty diff
+              # below then fails toward exercising every stack.
+              base=$(git merge-base HEAD origin/main 2>/dev/null) || base=""
+            else
+              base='${{ github.event.pull_request.base.sha }}'
+            fi
+            # --no-renames lists a moved file's old path too: a lane that
+            # still reads the old name is affected even though only the new
+            # name would otherwise show.
+            # A candidate's fork point is already in the full-history checkout.
+            if [ -n "${base}" ] &&
+               { [ "${candidate}" = true ] ||
+                 git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null; } &&
+               changed=$(git diff --name-only --no-renames "${base}" HEAD 2>/dev/null); then
               printf '%s\n' "${changed}" | sed 's/^/  /'
 
-              # Shared surfaces exercise everything: a change to CI, the
-              # delivery scripts or the Makefile can alter any stack's result.
+              # The workflow itself is a shared surface: a change to CI can
+              # alter any stack's result, so it exercises everything.
+              #
+              # The repository's tooling directory and its make targets are
+              # not, wholesale. Most of what lives there is spec and delivery
+              # tooling that only the always-running jobs execute, so treating
+              # it as shared queued macOS and Windows runners for edits none of
+              # them could observe. classify_changed_scripts.py (below) names
+              # the lanes that read each changed file, through their jobs,
+              # their source trees and the tooling that names it, and widens
+              # exactly those, or every lane when it cannot tell.
               #
               # `compose.yaml` is deliberately NOT a shared surface. Its only
               # consumer is the Compose stack that `e2e` boots, and `e2e` is
@@ -190,8 +245,12 @@ jobs:
               # the native apps, the Rust core and the CLI all run without
               # Compose), so listing it here only queued macOS and Windows
               # runners for a change none of them could observe.
-              if printf '%s\n' "${changed}" | grep -Eq \
-                   '^(\.github/|scripts/|Makefile$)'; then
+              tooling=$(printf '%s\n' "${changed}" |
+                python3 scripts/classify_changed_scripts.py \
+                  --workflow .github/workflows/ci.yml) ||
+                tooling=all
+              if printf '%s\n' "${changed}" | grep -Eq '^\.github/' ||
+                 [ "${tooling}" = all ]; then
                 echo "shared surface touched; exercising every stack"
               else
                 # Spec 026: the backend wheel compiles the PyO3 bridge from rust/.
@@ -227,10 +286,62 @@ jobs:
                 # test drives the real backend, which the cli-native job handles
                 # by also reading the backend output for that one target.
                 printf '%s\n' "${changed}" | grep -q '^cli/' || cli=false
+                # A tooling file a lane reads exercises that lane.
+                for lane in ${tooling}; do
+                  case "${lane}" in
+                    backend) backend=true ;;
+                    frontend) frontend=true ;;
+                    ios) ios=true ;;
+                    ios_kit) ios_kit=true ;;
+                    macos) macos=true ;;
+                    rust) rust=true ;;
+                    cli) cli=true ;;
+                    *) echo "unknown lane ${lane}; exercising every stack"
+                       backend=true frontend=true ios=true ios_kit=true
+                       macos=true rust=true cli=true ;;
+                  esac
+                done
+                [ -z "${tooling}" ] || echo "tooling read by: ${tooling//$'\n'/ }"
               fi
             else
               echo "could not read the diff against ${base}; exercising every stack"
             fi
+            if [ "${candidate}" = true ]; then
+              # The landing path still verifies every Linux lane in full. Only
+              # the lanes on scarce macOS and Windows runners (the iOS app, the
+              # Mac app, the CLI targets) follow the filter above, so a landing
+              # that touches nothing they read leaves them idle; the nightly
+              # run covers what the filter cannot see, such as a new Xcode.
+              echo "trunk candidate; Linux lanes in full, iOS/Mac/CLI by the filter"
+              backend=true
+              frontend=true
+              ios_kit=true
+              rust=true
+            fi
+          elif [ "${{ github.event_name }}" = schedule ]; then
+            echo "nightly; exercising the iOS, Mac and CLI lanes only"
+            backend=false
+            frontend=false
+            ios_kit=false
+            rust=false
+          elif [ "${{ github.event_name }}" = push ] &&
+               [ "${{ github.ref }}" = refs/heads/main ] &&
+               verified=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?status=success&head_sha=${GITHUB_SHA}" \
+                 --jq '[.workflow_runs[] | select((.event == "push" and (.head_branch | startswith("trunk-candidate/"))) or (.event == "merge_group" and (.head_branch | startswith("gh-readonly-queue/"))))] | length') &&
+               [ "${verified}" -gt 0 ]; then
+            # A trunk landing fast-forwards main to the exact SHA whose
+            # candidate run already passed full CI, and the merge queue does
+            # the same with the SHA its queue run tested, so this push
+            # re-verifies an identical tree. The macOS and Windows lanes are
+            # the scarce runners and have no consumer of a second result; the
+            # Linux lanes still run (the backend one builds the test-selection
+            # map on main). A pull request merged outside the queue has no such
+            # run and is verified in full, as is any push the query cannot
+            # vouch for.
+            echo "main at ${GITHUB_SHA} passed full CI as a trunk candidate or queue run; not re-running the iOS, Mac and CLI lanes"
+            ios=false
+            macos=false
+            cli=false
           else
             echo "landing path; exercising every stack regardless of the diff"
           fi
@@ -288,6 +399,11 @@ jobs:
               echo "could not read the diff against ${base}; measuring the whole enforced list"
               sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
             fi
+          elif [ "${{ github.event_name }}" = schedule ]; then
+            # The nightly run is for the native lanes; mutation-quality.yml
+            # owns the nightly mutation campaign.
+            echo "nightly; no mutation scope"
+            : > /tmp/mutation-changed.txt
           else
             echo "landing path; measuring the whole enforced list"
             sed 's/#.*//' "${enforced}" | sed '/^[[:space:]]*$/d' > /tmp/mutation-changed.txt
