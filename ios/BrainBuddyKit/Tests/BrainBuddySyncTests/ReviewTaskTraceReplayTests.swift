@@ -14,7 +14,7 @@ import Testing
 /// 020-FR-013, 020-SC-007).
 ///
 /// `review_traces_tasks.json` is a byte-identical copy of
-/// `backend/tests/fixtures/review_traces_tasks.json` (drift guard in
+/// `contracts/fixtures/review_traces_tasks.json` (drift guard in
 /// `backend/tests/test_review_formulation_vectors.py`). Its `conventions` are
 /// followed as the backend test follows them, with two stated differences:
 /// an expected `null` also matches an absent key, because the fake server

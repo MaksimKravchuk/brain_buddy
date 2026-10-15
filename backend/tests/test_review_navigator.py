@@ -487,7 +487,9 @@ def _input(
     )
 
 
-NAVIGATOR_FIXTURES = Path(__file__).parent / "fixtures" / "navigator"
+NAVIGATOR_FIXTURES = (
+    Path(__file__).resolve().parents[2] / "contracts" / "fixtures" / "navigator"
+)
 """The shared vector files (contracts/navigator.md §1 and §2). The Swift core
 (T109) and the web (T123) run byte-identical copies of them."""
 

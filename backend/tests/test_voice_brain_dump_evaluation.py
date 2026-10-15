@@ -1,6 +1,5 @@
 """Release-gate coverage for the labelled Voice Brain Dump evaluation set."""
 
-import hashlib
 import json
 import wave
 from datetime import UTC, datetime, timedelta
@@ -47,7 +46,11 @@ from app.workflows.voice_brain_dump.operational_evidence import (
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
 _CORPUS_ROOT = (
-    Path(__file__).parent / "fixtures" / "voice_brain_dump" / "reference_corpus"
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "fixtures"
+    / "voice_brain_dump"
+    / "reference_corpus"
 )
 _CORPUS_PATH = _CORPUS_ROOT / "founder_ru_reading_script.v1.json"
 _RECORDED_ARTIFACT_PATH = _CORPUS_ROOT / "recorded_run_artifact.v2.json"
@@ -79,7 +82,13 @@ def test_labelled_multilingual_text_and_audio_release_metrics_meet_fixed_gates()
 
 
 def test_release_audio_cases_are_real_versioned_wav_fixtures() -> None:
-    fixture_root = Path(__file__).parent / "fixtures" / "voice_brain_dump" / "v1"
+    fixture_root = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "fixtures"
+        / "voice_brain_dump"
+        / "v1"
+    )
     audio_files = sorted(fixture_root.glob("*.wav"))
 
     assert len(audio_files) >= 6
@@ -109,7 +118,6 @@ def test_manifest_loader_rejects_unknown_versions_and_normalizes_legacy_fields(
                         "text": "Call dentist",
                         "expected_titles": ["Call dentist"],
                         "audio_file": "fixture.wav",
-                        "audio_sha256": "digest",
                     },
                     {"id": "ML-08"},
                 ],
@@ -127,7 +135,7 @@ def test_manifest_loader_rejects_unknown_versions_and_normalizes_legacy_fields(
     ) == ("unknown",)
 
 
-def test_audio_validation_rejects_hash_format_and_duration_mismatches(
+def test_audio_validation_rejects_waveform_format_and_duration_mismatches(
     tmp_path: Path,
 ) -> None:
     audio_path = tmp_path / "fixture.wav"
@@ -142,23 +150,22 @@ def test_audio_validation_rejects_hash_format_and_duration_mismatches(
             fixture.writeframes(b"\0\0" * channels * frames)
         return audio_path.read_bytes()
 
-    def case(payload: bytes, digest: str | None = None) -> _EvaluationCase:
+    def case(payload: bytes, frequency: float | None = None) -> _EvaluationCase:
         return _EvaluationCase(
             id="ML-test",
             languages=("en",),
             transcript="Call dentist",
             expected_titles=("Call dentist",),
             audio_path=audio_path,
-            audio_sha256=digest or hashlib.sha256(payload).hexdigest(),
             code_switch_terms=(),
             structural_change=None,
             expected_confidence=1.0,
-            expected_frequency_hz=None,
+            expected_frequency_hz=frequency,
         )
 
     payload = write_audio()
-    with pytest.raises(ValueError, match="hash"):
-        _validated_audio(case(payload, "wrong"))
+    with pytest.raises(ValueError, match="drifted"):
+        _validated_audio(case(payload, 440.0))
 
     payload = write_audio(channels=2)
     with pytest.raises(ValueError, match="mono"):
@@ -190,7 +197,13 @@ def test_evaluation_reports_provider_text_audio_and_title_mismatches(
 
 
 def test_audio_gate_rejects_wav_files_permuted_between_labels(tmp_path: Path) -> None:
-    source = Path(__file__).parent / "fixtures" / "voice_brain_dump" / "v1"
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "fixtures"
+        / "voice_brain_dump"
+        / "v1"
+    )
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     fixtures = [
         fixture for fixture in manifest["fixtures"] if fixture.get("audio_file")
@@ -203,13 +216,10 @@ def test_audio_gate_rejects_wav_files_permuted_between_labels(tmp_path: Path) ->
         fixtures, audio_payloads[1:] + audio_payloads[:1], strict=True
     ):
         (tmp_path / fixture["audio_file"]).write_bytes(payload)
-        fixture["audio_sha256"] = hashlib.sha256(payload).hexdigest()
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-    report = evaluate_release_dataset(tmp_path)
-
-    assert report.audio_signal_accuracy < 0.95
-    assert any("audio signal mismatch" in failure for failure in report.failures)
+    with pytest.raises(ValueError, match="drifted"):
+        evaluate_release_dataset(tmp_path)
 
 
 def test_deterministic_provider_tolerates_unknown_failure_plans_and_empty_cleanups(
@@ -767,3 +777,51 @@ def test_build_full_recording_run_counts_active_titles() -> None:
     assert full.committed_task_count == 16
     assert full.seal_to_awaiting_confirmation_seconds == 44.0
     assert len(full.operation_ref) == 16
+
+
+def test_audio_validation_rejects_altered_samples_with_tone_dominant(
+    tmp_path: Path,
+) -> None:
+    """Drift guard: edited samples fail with no stored hash."""
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "fixtures"
+        / "voice_brain_dump"
+        / "v1"
+        / "ml-01-synthetic.wav"
+    )
+    with wave.open(str(source), "rb") as original:
+        params = original.getparams()
+        frames = bytearray(original.readframes(original.getnframes()))
+    audio_path = tmp_path / "ml-01-synthetic.wav"
+
+    def write(data: bytes) -> None:
+        with wave.open(str(audio_path), "wb") as altered:
+            altered.setparams(params)
+            altered.writeframes(data)
+
+    def case() -> _EvaluationCase:
+        return _EvaluationCase(
+            id="ML-01",
+            languages=("ru",),
+            transcript="",
+            expected_titles=(),
+            audio_path=audio_path,
+            code_switch_terms=(),
+            structural_change=None,
+            expected_confidence=1.0,
+            expected_frequency_hz=257.0,
+        )
+
+    write(bytes(frames))
+    _validated_audio(case())
+
+    # Perturb a few mid-clip samples; the 257 Hz tone stays dominant.
+    for offset in (8_000, 8_002, 8_004):
+        frames[offset : offset + 2] = (3_000).to_bytes(2, "little", signed=True)
+    write(bytes(frames))
+    assert abs(evaluation._measured_frequency_hz(audio_path) - 257.0) <= 2.0
+    with pytest.raises(ValueError, match="drifted"):
+        _validated_audio(case())

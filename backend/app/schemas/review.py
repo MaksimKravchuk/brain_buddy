@@ -1,6 +1,6 @@
 """HTTP contracts of the weekly review (spec 020, contracts/http.md §3 – §7).
 
-Pinned by ``tests/fixtures/review_wire_fixtures.json``, whose byte-identical
+Pinned by ``contracts/fixtures/review_wire_fixtures.json``, whose byte-identical
 copies the iOS DTO tests and Vitest decode. Every model forbids unknown fields
 (``StrictBaseModel``). Client-supplied ids have one fixed shape per field
 (``<prefix>_<lowercase uuid>``, at most 64 characters), so no free text can

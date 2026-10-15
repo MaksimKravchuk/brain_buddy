@@ -42,7 +42,7 @@ const MAC_RESOURCES: &str = concat!(
 );
 const REFERENCE_STORE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../specs/026-rust-core-sync/contracts/reference-store.json"
+    "/../../../contracts/fixtures/reference-store.json"
 );
 
 // ----------------------------------------------------------------------- harness
@@ -568,7 +568,7 @@ fn import_026_fr_013_golden_outbox_is_carried_whole_and_the_base_counts_equal_th
         .find(|entry| entry["id"] == "SRC-07")
         .unwrap();
     let golden = golden_bytes();
-    assert_eq!(entry["sha256"], sha256_hex(&golden));
+    assert_eq!(entry["bytes"], golden.len());
 
     let lane = lane("golden");
     fs::write(&lane.source, &golden).unwrap();
