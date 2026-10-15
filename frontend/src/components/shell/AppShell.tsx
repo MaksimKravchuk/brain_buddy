@@ -567,7 +567,7 @@ function TaskSearch({ className, onSubmit, findShortcut = false }: {
           className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
         />
         {findShortcut ? (
-          <kbd aria-hidden className="shrink-0 font-sans text-xs text-slate-500">{findShortcutLabel()}</kbd>
+          <kbd aria-hidden className="shrink-0 font-sans text-xs text-slate-600">{findShortcutLabel()}</kbd>
         ) : null}
       </label>
       {onSubmit ? (
