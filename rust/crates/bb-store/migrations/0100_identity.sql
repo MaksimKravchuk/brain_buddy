@@ -14,7 +14,7 @@ CREATE TABLE identity.users (
     auth_version          integer NOT NULL DEFAULT 0 CHECK (auth_version >= 0),
     created_at            timestamptz NOT NULL,
     deletion_requested_at timestamptz,
-    payload               jsonb NOT NULL
+    payload               text NOT NULL
 );
 CREATE TABLE identity.invites (
     code_hash       text PRIMARY KEY,
@@ -53,7 +53,7 @@ CREATE TABLE identity.auth_identity_bindings (
     email            text,
     email_verified   boolean NOT NULL DEFAULT false,
     is_private_email boolean NOT NULL DEFAULT false,
-    payload          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    payload          text NOT NULL DEFAULT '{}',
     UNIQUE (provider, issuer, namespace, subject),
     UNIQUE (owner_id, provider),
     UNIQUE (id, owner_id)
@@ -67,7 +67,7 @@ CREATE TABLE identity.sessions (
     auth_method         text NOT NULL DEFAULT 'password',
     confirmed_at        timestamptz,
     provider_binding_id text,
-    payload             jsonb NOT NULL,
+    payload             text NOT NULL,
     UNIQUE (token_hash, owner_id),
     FOREIGN KEY (provider_binding_id, owner_id) REFERENCES identity.auth_identity_bindings (id, owner_id) ON DELETE CASCADE
 );
@@ -95,7 +95,7 @@ CREATE TABLE identity.auth_attempts (
     lease_expires_at timestamptz,
     sealed_payload   text,
     key_id           text,
-    payload          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    payload          text NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_hash, owner_id) REFERENCES identity.sessions (token_hash, owner_id) ON DELETE CASCADE
 );
 CREATE INDEX auth_attempts_owner ON identity.auth_attempts (owner_id);
@@ -126,7 +126,7 @@ CREATE TABLE identity.auth_challenges (
     resend_at        timestamptz,
     failures         integer NOT NULL DEFAULT 0 CHECK (failures >= 0),
     generation       integer NOT NULL DEFAULT 1 CHECK (generation >= 1),
-    payload          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    payload          text NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_hash, owner_id) REFERENCES identity.sessions (token_hash, owner_id) ON DELETE CASCADE
 );
 CREATE INDEX auth_challenges_owner ON identity.auth_challenges (owner_id);
@@ -142,7 +142,7 @@ CREATE TABLE identity.auth_mail_jobs (
     leased_at      timestamptz,
     sealed_payload text,
     key_id         text,
-    payload        jsonb NOT NULL DEFAULT '{}'::jsonb
+    payload        text NOT NULL DEFAULT '{}'
 );
 CREATE INDEX auth_mail_jobs_dispatch ON identity.auth_mail_jobs (status, expires_at);
 CREATE TABLE identity.auth_proofs (
@@ -158,7 +158,7 @@ CREATE TABLE identity.auth_proofs (
     created_at          timestamptz NOT NULL,
     expires_at          timestamptz NOT NULL,
     consumed_at         timestamptz,
-    payload             jsonb NOT NULL DEFAULT '{}'::jsonb,
+    payload             text NOT NULL DEFAULT '{}',
     FOREIGN KEY (session_hash, owner_id) REFERENCES identity.sessions (token_hash, owner_id) ON DELETE CASCADE,
     FOREIGN KEY (provider_binding_id, owner_id) REFERENCES identity.auth_identity_bindings (id, owner_id) ON DELETE CASCADE
 );
@@ -204,7 +204,7 @@ CREATE TABLE identity.auth_apple_cleanup_jobs (
     next_attempt_at  timestamptz,
     lease_id         text,
     lease_expires_at timestamptz,
-    payload          jsonb NOT NULL DEFAULT '{}'::jsonb,
+    payload          text NOT NULL DEFAULT '{}',
     FOREIGN KEY (binding_id, owner_id) REFERENCES identity.auth_identity_bindings (id, owner_id) ON DELETE CASCADE
 );
 CREATE INDEX auth_apple_jobs_dispatch
