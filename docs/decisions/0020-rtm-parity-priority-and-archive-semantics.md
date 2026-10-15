@@ -1,6 +1,7 @@
 # ADR-0020: Ratify RTM priority and lossless List archive semantics
 
-- **Status**: Accepted
+- **Status**: Accepted; its Public Priority contract is superseded by ADR-0033
+  (2026-10-15: tasks have no priority). The List archive decision stands.
 - **Date**: 2026-08-15
 - **Decision owner**: Max (founder)
 - **Supersedes in part**: ADR-0006, only its `Priority` vocabulary/sort mapping and

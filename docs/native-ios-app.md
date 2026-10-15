@@ -34,12 +34,12 @@ Everything in pass 1 except signing in and the sync itself:
 
 - capture (with `#tag` / `@project` Smart Add, creating new projects and tags),
 - move between lists, complete, cancel, reopen into a chosen list,
-- edit title, notes, due date, priority, project, tags, waiting-for,
+- edit title, notes, due date, project, tags, waiting-for,
 - subtasks (add, rename, complete, cancel, reopen) and comments (add, edit),
 - projects (create, rename, recolour, archive) and tags (create, rename, delete),
 - Inbox / Next / Waiting / Someday, Overdue / Today / Upcoming, project and
   tag views, completed and cancelled history, search, sort, group by project,
-  priority and tag filters, "project needs a next action",
+  tag filters, "project needs a next action",
 - widgets, Siri / Shortcuts / Control Center capture and completion.
 
 The app works with **no account at all** ("On this iPhone"). Signing in later
@@ -148,7 +148,7 @@ From ADR-0006 and `backend/app/modules/tasks`:
 - Waiting needs a trimmed, non-blank `waiting_for` (≤ 500) on entry and sets
   `waiting_since`; leaving Waiting clears both. `waiting_for` can only be
   edited while Waiting.
-- Transitions never change order, project, tags, due date, priority or notes.
+- Transitions never change order, project, tags, due date or notes.
 - Limits: title and names 1–500, notes ≤ 20 000, comments 1–20 000, colour ≤ 64.
 - Inbox shows projectless inbox tasks only; assigning a project moves the
   task out of the Inbox view (`docs/projectless-inbox-contract.md`).
@@ -290,7 +290,7 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
 | Tab | Content |
 |---|---|
 | Inbox | projectless inbox, badge count, **Process inbox** |
-| Next | Next actions, grouped by project, with tag and priority filters |
+| Next | Next actions, grouped by project, with tag filters |
 | Today | Overdue, Today, Upcoming |
 | Lists | Waiting for, Someday / maybe, Projects (with "needs a next action"), Tags, Completed, Cancelled, Settings |
 | Search | `Tab(role: .search)` across all tasks |
@@ -298,7 +298,7 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
 - **Capture is always one tap away**: a glass capture bar in the tab view's
   bottom accessory opens the capture sheet — Smart Add with highlighted
   tokens and a live preview of the project and tags that will be used or
-  created, list picker (Waiting asks who or what), due date, priority, notes.
+  created, list picker (Waiting asks who or what), due date, notes.
 - Task detail is a pushed screen. Rows swipe to complete (leading) and to
   move (trailing); a context menu offers every transition.
 - Completing animates in under 600 ms and respects Reduce Motion (spec 016);

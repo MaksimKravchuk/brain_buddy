@@ -9,12 +9,12 @@ response schemas, owner isolation, revision checks and idempotency receipts.
 | --- | --- | --- |
 | `list_tasks` | Optional `q`, `state`, `include_completed`, `include_cancelled`, `cursor`, `limit` (1–200) | Tasks, state counts, `has_more`, `next_cursor` |
 | `get_task` | `task_id` | Task with current `revision`, subtasks and comments |
-| `create_task` | `title`, `idempotency_key`; optional `details`, `state`, `due_date`, `priority`, `project_id`, `tag_ids`, `waiting_for` | Created task |
+| `create_task` | `title`, `idempotency_key`; optional `details`, `state`, `due_date`, `project_id`, `tag_ids`, `waiting_for` | Created task |
 | `delete_task` | `task_id`, `expected_revision`, `idempotency_key` | Cancelled task |
 
 New tasks default to Inbox. Supported open states are `inbox`, `next`, `waiting`
-and `someday`; Waiting requires `waiting_for`. Dates use `YYYY-MM-DD` and priorities
-are `none`, `low`, `medium`, `high`. Project/tag IDs must belong to the caller.
+and `someday`; Waiting requires `waiting_for`. Dates use `YYYY-MM-DD`. Tasks have no
+priority (ADR-0033). Project/tag IDs must belong to the caller.
 
 **Deletion is reversible cancellation**, matching BrainBuddy's existing lifecycle.
 It removes an open task from the default active lists, retains its data, and returns
