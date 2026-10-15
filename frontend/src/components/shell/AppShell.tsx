@@ -33,6 +33,8 @@ import { lastReviewText } from "../../features/review/lastReview";
 import { ReviewStartupDialogs } from "../../features/review/ReviewStartupDialogs";
 import {
   ACTION_TOAST_MS,
+  findShortcutLabel,
+  isFindShortcut,
   isTextEntryTarget,
   isUndoShortcut,
   ShellToastContext,
@@ -494,7 +496,12 @@ function AccountMenu(): React.JSX.Element {
   );
 }
 
-function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () => void }): React.JSX.Element {
+function TaskSearch({ className, onSubmit, findShortcut = false }: {
+  className: string;
+  onSubmit?: () => void;
+  /** Ctrl/Cmd+O focuses this field from anywhere outside a modal (only the top bar's copy). */
+  findShortcut?: boolean;
+}): React.JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -510,6 +517,22 @@ function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () 
       setSearchValue(searchQuery);
     }
   }, [searchQuery, navigationType]);
+
+  useEffect(() => {
+    if (!findShortcut) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const input = searchInputRef.current;
+      if (!input || !isFindShortcut(event)) return;
+      if (Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]')).some((modal) => !modal.closest('[inert], [aria-hidden="true"]'))) return;
+      input.focus();
+      // A field hidden at this width cannot take focus: the browser keeps its own Ctrl/Cmd+O.
+      if (document.activeElement !== input) return;
+      event.preventDefault();
+      input.select();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [findShortcut]);
 
   const updateSearch = (value: string) => {
     setSearchValue(value);
@@ -538,10 +561,14 @@ function TaskSearch({ className, onSubmit }: { className: string; onSubmit?: () 
           type="search"
           placeholder="Search tasks"
           aria-label="Search tasks"
+          aria-keyshortcuts={findShortcut ? "Control+O Meta+O" : undefined}
           value={searchValue}
           onChange={(event) => updateSearch(event.currentTarget.value)}
           className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-hidden placeholder:text-slate-500 focus-visible:shadow-none md:text-sm"
         />
+        {findShortcut ? (
+          <kbd aria-hidden className="shrink-0 font-sans text-xs text-slate-500">{findShortcutLabel()}</kbd>
+        ) : null}
       </label>
       {onSubmit ? (
         <button type="submit" className="h-11 shrink-0 rounded-lg bg-sky-700 px-3 text-sm font-medium text-white transition-colors duration-200 ease-smooth hover:bg-sky-800 active:scale-[0.98]">
@@ -577,7 +604,7 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
         <Sprout className="h-[22px] w-[22px] text-brand-primary max-[359px]:hidden" aria-hidden />
         <span>BrainBuddy</span>
       </Link>
-      <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" />
+      <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" findShortcut />
       <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">
         <button
           type="button"

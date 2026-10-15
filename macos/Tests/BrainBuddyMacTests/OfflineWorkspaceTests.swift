@@ -191,6 +191,37 @@ struct OfflineWorkspaceTests {
         #expect(await app.model.loadWaitingReviewTasks().isEmpty)
     }
 
+    @Test("⌘Z takes back the last Done, Cancel or move: the task returns to its list and Waiting reason")
+    func undoListChange() async throws {
+        let app = await App()
+        let done = try app.add("Call Sam about the van", .waiting, waitingFor: "Sam")
+        let before = try #require(app.workspace.task(done))
+        #expect(await app.model.completeTask(done))
+        let completed = try #require(TaskListChange(before: before, after: app.workspace.task(done)))
+        #expect(completed.actionName == "Done")
+        #expect(await app.model.undo(completed))
+        let restored = try #require(app.workspace.task(done))
+        #expect(restored.state == .waiting && restored.waitingFor == "Sam")
+
+        let moved = try app.add("Buy bin bags")
+        let next = try #require(app.workspace.task(moved))
+        #expect(await app.model.moveTask(moved, to: .someday))
+        let move = try #require(TaskListChange(before: next, after: app.workspace.task(moved)))
+        #expect(move.actionName == "Move to Someday / maybe")
+        #expect(await app.model.undo(move))
+        #expect(app.workspace.task(moved)?.state == .next)
+
+        let cancelled = try app.add("Renew parking permit")
+        let open = try #require(app.workspace.task(cancelled))
+        #expect(await app.model.cancelTask(cancelled))
+        let cancel = try #require(TaskListChange(before: open, after: app.workspace.task(cancelled)))
+        #expect(await app.model.reopenTask(cancelled, to: .inbox, waitingFor: nil))
+        #expect(await app.model.undo(cancel) == false)
+        #expect(app.model.error == "This task has changed since, so there is nothing to undo.")
+        #expect(app.workspace.task(cancelled)?.state == .inbox)
+        #expect(TaskListChange(before: open, after: open) == nil)
+    }
+
     @Test("021-FR-010 returning a Waiting item to Next and cancelling another persist across a restart")
     func waitingReturnAndCancel() async throws {
         let app = await App()

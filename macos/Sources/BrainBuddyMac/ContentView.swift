@@ -186,6 +186,8 @@ struct WorkspaceView: View {
     /// X-01 – X-04 and X-07 over this workspace; every sync surface presents through its router.
     let sync: MacSyncController
     @State private var columns: NavigationSplitViewVisibility = .all
+    /// The window's undo stack: Edit › Undo (⌘Z) takes back the last Done, Cancel or move.
+    @Environment(\.undoManager) private var undoManager
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -292,6 +294,7 @@ struct WorkspaceView: View {
         .onChange(of: sync.signOutRequests) { _, _ in requestNavigation(.signOut) }
         .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
+        .focusedSceneValue(\.closeTaskDetails, selectedTaskID == nil ? nil : CloseTaskDetailsAction(close: { requestNavigation(.task(nil)) }))
         .focusedSceneValue(\.macSyncController, sync)
         .onAppear { quickCapture.start(model: model) }
         .onDisappear { quickCapture.stop() }
@@ -725,6 +728,17 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Puts the list change `before` → now on the window's undo stack (Edit › Undo, ⌘Z).
+    private func registerUndo(_ before: TaskRecord?) {
+        guard let before, let change = TaskListChange(before: before, after: model.task(before.id)), let undoManager else {
+            return
+        }
+        undoManager.registerUndo(withTarget: model) { model in
+            Task { await model.undo(change) }
+        }
+        undoManager.setActionName(change.actionName)
+    }
+
     private func select(_ id: TaskID?) {
         taskSaveEditorID = UUID().uuidString
         selectedTaskID = id
@@ -758,8 +772,10 @@ struct WorkspaceView: View {
             select(id)
             if let id { Task { await model.loadTaskDetail(id) } }
         case .complete(let id):
+            let before = model.task(id)
             Task {
                 if await model.completeTask(id) {
+                    registerUndo(before)
                     select(nil)
                     release(id)
                 }
@@ -773,8 +789,10 @@ struct WorkspaceView: View {
                 moveWaitingFor = ""
                 movingTask = model.task(id)
             } else {
+                let before = model.task(id)
                 Task {
                     if await model.moveTask(id, to: destination) {
+                        registerUndo(before)
                         select(nil)
                         release(id)
                     }
@@ -789,8 +807,10 @@ struct WorkspaceView: View {
             reopenWaitingFor = ""
             reopeningTask = model.task(id)
         case .cancel(let id):
+            let before = model.task(id)
             Task {
                 if await model.cancelTask(id) {
+                    registerUndo(before)
                     select(nil)
                     release(id)
                 }
@@ -1923,6 +1943,7 @@ extension WorkspaceView {
                     let waitingFor = moveWaitingFor
                     performSheetSave(editorID: moveWaitingEditorID) { submittedEditorID in
                         if await model.moveTask(task.id, to: .waiting, waitingFor: waitingFor, editorID: submittedEditorID) {
+                            registerUndo(task)
                             movingTask = nil
                             moveWaitingEditorID = UUID().uuidString
                         }

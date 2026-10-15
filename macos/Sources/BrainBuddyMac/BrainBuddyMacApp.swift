@@ -49,6 +49,7 @@ struct BrainBuddyMacApp: App {
         .commands {
             SyncMenuCommands()
             ProjectMenuCommands()
+            TaskDetailsCommands()
         }
     }
 
