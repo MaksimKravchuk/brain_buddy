@@ -166,6 +166,8 @@ class Container:
     control_ledger: ControlLedger
     # Spec 026: the one replaceable Rust runtime every sync surface shares.
     rust_core: RustCoreHolder
+    # Spec 027 PR-07: test-environment hooks, installed by the test control API.
+    test_control: object | None = None
 
 
 class _UnavailableRelaySecretBox(SecretBox):

@@ -1,6 +1,19 @@
 [workspace]
 resolver = "2"
-members = ["bindings/python", "bindings/swift", "crates/bb-client", "crates/bb-domain", "crates/bb-protocol"]
+members = [
+  "bindings/python",
+  "bindings/swift",
+  "crates/bb-allure",
+  "crates/bb-api",
+  "crates/bb-app",
+  "crates/bb-client",
+  "crates/bb-conformance",
+  "crates/bb-domain",
+  "crates/bb-protocol",
+  "crates/bb-providers",
+  "crates/bb-server",
+  "crates/bb-store",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,9 +23,16 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+bb-allure = { path = "crates/bb-allure" }
+bb-api = { path = "crates/bb-api" }
+bb-app = { path = "crates/bb-app" }
 bb-client = { path = "crates/bb-client" }
+bb-conformance = { path = "crates/bb-conformance" }
 bb-domain = { path = "crates/bb-domain" }
 bb-protocol = { path = "crates/bb-protocol" }
+bb-providers = { path = "crates/bb-providers" }
+bb-server = { path = "crates/bb-server" }
+bb-store = { path = "crates/bb-store" }
 # The Unicode data version of the three crates below must equal the server's
 # `unicodedata.unidata_version` (CPython 3.14 = Unicode 16.0.0); bump them
 # together with the backend Python. caseless 0.2.2 ships CaseFolding-16.0.0,
@@ -32,6 +52,32 @@ unicode-normalization = "=0.1.24"
 # The Apple bridge (rust/bindings/swift). Pinned exactly: the generated Swift must
 # match the library's scaffolding, so the library and the generator share this version.
 uniffi = { version = "=0.32.2", default-features = false }
+
+# Server dependencies (spec 027, research R1-R11). Each is used by the crate
+# named in its comment; no later slice edits this table or rust/Cargo.lock.
+# bb-api, bb-server: HTTP framework (R1).
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "http2", "json", "query", "tokio", "tracing"] }
+tokio = { version = "=1.53.3", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
+tower-http = { version = "=0.7.1", features = ["trace", "timeout", "request-id", "compression-gzip"] }
+tracing = "=0.1.44"
+# bb-store: PostgreSQL access with committed offline metadata, object storage (R2, R11).
+sqlx = { version = "=0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "migrate", "macros", "json", "uuid", "chrono"] }
+object_store = { version = "=0.14.2", default-features = false, features = ["aws"] }
+# bb-providers: outbound providers, A2A, SMTP, audio probing, DNS (R8).
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json", "stream"] }
+lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "ring", "webpki-roots"] }
+symphonia = { version = "=0.6.1", default-features = false }
+hickory-resolver = "=0.26.3"
+# bb-api: MCP endpoint and OpenAPI generation (R8).
+rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-streamable-http-server"] }
+utoipa = "=6.0.0"
+utoipa-axum = "=0.3.0"
+# bb-app: identity, crypto and export (R6).
+argon2 = "=0.6.0"
+jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["rust_crypto"] }
+p256 = { version = "=0.14.0", default-features = false, features = ["ecdsa"] }
+aes-gcm = "=0.11.1"
+zip = { version = "=9.0.3", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

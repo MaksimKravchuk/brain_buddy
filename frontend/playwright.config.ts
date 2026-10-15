@@ -35,12 +35,23 @@ export default defineConfig({
       // Account confirmation requires the real shared-auth HTTPS origin and
       // runs in playwright.modern-auth.config.ts, after the Compose suite.
       testMatch: /(?:e2e\/(?!mobile|account\.spec).*|native-tasks-voice-brain-dump\.compose|claude-design-shell)\.spec\.ts/,
+      // The clock-moving journey runs alone in clock-moving, after this project.
+      testIgnore: /e2e\/weekly-review-clock\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] }
     },
     {
       name: "mobile-chromium",
       testMatch: /e2e\/mobile\.spec\.ts/,
       use: { ...devices["Pixel 5"] }
+    },
+    {
+      // Moves the process-wide test clock (POST /api/__test__/clock). It starts
+      // only after every other browser project has finished, and it runs its
+      // one file serially; each test resets the clock in afterEach.
+      name: "clock-moving",
+      testMatch: /e2e\/weekly-review-clock\.spec\.ts/,
+      dependencies: ["chromium", "mobile-chromium"],
+      use: { ...devices["Desktop Chrome"] }
     }
   ],
   webServer: usesExternalComposeStack
