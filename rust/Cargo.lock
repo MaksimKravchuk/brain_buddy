@@ -377,6 +377,7 @@ dependencies = [
  "lettre",
  "object_store",
  "reqwest",
+ "serde_json",
  "symphonia",
  "tokio",
 ]
