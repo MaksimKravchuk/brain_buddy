@@ -302,6 +302,33 @@ def wait_ready(url: str, process: subprocess.Popen[bytes] | None) -> None:
             time.sleep(0.2)
 
 
+def dump_diagnostics(backend: str, token: str, log_path: str) -> None:
+    """Print the server log tail and identity call ledger for a failed run."""
+    print("--- modern-auth server log (tail) ---", flush=True)
+    try:
+        lines = Path(log_path).read_text(errors="replace").splitlines()
+        # Request lines are enough to order the auth journey; keep the rest short.
+        relevant = [
+            line for line in lines if "api_request" in line and "/auth/" in line
+        ]
+        print("\n".join(relevant[-250:] + ["..."] + lines[-60:]), flush=True)
+    except OSError as error:
+        print(f"unreadable: {error}", flush=True)
+    for kind in ("identity", "smtp"):
+        request = urllib.request.Request(
+            f"{backend}/api/__test__/providers/{kind}/calls",
+            headers={"X-Test-Control-Token": token},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                print(
+                    f"--- {kind} call ledger ---\n{response.read().decode()}",
+                    flush=True,
+                )
+        except (urllib.error.URLError, OSError) as error:
+            print(f"--- {kind} call ledger unavailable: {error}", flush=True)
+
+
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     subprocess.run(["npm", "run", "build"], cwd=root / "frontend", check=True)
@@ -409,9 +436,13 @@ def main() -> None:
                     environment["BRAIN_BUDDY_MODERN_E2E_PYTHON"] = sys.executable
                 if environment.get("BRAIN_BUDDY_MODERN_E2E_HEADED") == "1":
                     arguments.append("--headed")
-                subprocess.run(
-                    arguments, cwd=root / "frontend", env=environment, check=True
-                )
+                try:
+                    subprocess.run(
+                        arguments, cwd=root / "frontend", env=environment, check=True
+                    )
+                except subprocess.CalledProcessError:
+                    dump_diagnostics(backend, token, log.name)
+                    raise
             finally:
                 if front is not None:
                     front.shutdown()
