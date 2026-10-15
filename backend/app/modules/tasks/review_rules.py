@@ -1,6 +1,6 @@
 """Pure review-flow rules (spec 020; no I/O, no clock of its own).
 
-Executed by ``tests/fixtures/review_flow_vectors.json``, which the iOS core and
+Executed by ``contracts/fixtures/review_flow_vectors.json``, which the iOS core and
 the web run as well; the guided-review service (slice PR-11) is built on these
 functions. Instants are aware UTC ``datetime`` values; "days" are exact
 86 400-second spans; calendar days are local ``date`` values.

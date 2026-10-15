@@ -2,7 +2,7 @@
 
 Normative for the backend; the iOS core (``Formulation.swift``) and the web
 (``formulation.ts``) implement the same rule and run the same vector file
-(``tests/fixtures/review_formulation_vectors.json``, §6). Everything here is a
+(``contracts/fixtures/review_formulation_vectors.json``, §6). Everything here is a
 pure function of its arguments: no I/O, no clock of its own, no storage types.
 Every instant is an aware UTC ``datetime``; "days" are exact 86 400-second
 spans, and only the start of a due day uses the owner's local calendar (§4).

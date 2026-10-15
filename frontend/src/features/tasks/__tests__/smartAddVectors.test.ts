@@ -6,7 +6,7 @@ import type { ProjectResponse, TagResponse } from "../../../api/taskTypes";
 
 // Spec 026 (tasks.md T002): the web presentation helpers against the shared,
 // versioned vectors that the Rust parity checks also consume. The file lives in
-// specs/026-rust-core-sync/contracts/web-presentation-vectors.json. The vectors
+// contracts/fixtures/web-presentation-vectors.json. The vectors
 // keep the smart-add-web/1 outcomes as PR-02 measured them; the decision made for
 // each disagreement (PR-53) is recorded in web-presentation-resolutions.json and
 // this suite holds the helpers to it.
@@ -81,7 +81,7 @@ interface Resolutions {
 
 function loadContract<T>(file: string): T {
   const runtime = globalThis as typeof globalThis & { process: RuntimeProcess };
-  const path = `${runtime.process.cwd()}/../specs/026-rust-core-sync/contracts/${file}`;
+  const path = `${runtime.process.cwd()}/../contracts/fixtures/${file}`;
   return JSON.parse(runtime.process.getBuiltinModule("fs").readFileSync(path, "utf8")) as T;
 }
 

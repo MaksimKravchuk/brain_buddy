@@ -90,7 +90,7 @@ let package = Package(
         // dependency on the rest of the kit.
         .target(name: "BrainBuddyDiagnostics"),
         // The shared review vectors and golden wire fixtures (spec 020) are
-        // byte-identical copies of `backend/tests/fixtures/*.json`; `.copy`
+        // byte-identical copies of `contracts/fixtures/*.json`; `.copy`
         // keeps their bytes as they are.
         .testTarget(
             name: "BrainBuddyCoreTests", dependencies: ["BrainBuddyCore"], resources: [.copy("Resources")]

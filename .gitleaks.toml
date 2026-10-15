@@ -29,16 +29,6 @@ useDefault = true
 # fixture by adding its own entry; never widen an existing one.
 
 [[allowlists]]
-description = "Synthetic voice-report run key (live_report.900eeb8)"
-regexTarget = "line"
-regexes = ['''^\s*"run_key": "e8cb406f16b5ff9c6c776e872d5ff3c1af9c0091c8d2a89547877a18e1fea645",\s*$''']
-
-[[allowlists]]
-description = "Synthetic voice-report run key (live_report.317aca5)"
-regexTarget = "line"
-regexes = ['''^\s*"run_key": "bfd2defec8cd40eae754fe2eef538b77b3d29871f1cb165aaa354d00e6ac2eb8",\s*$''']
-
-[[allowlists]]
 description = "Synthetic voice-report run key (example_report.redacted.v2)"
 regexTarget = "line"
 regexes = ['''^\s*"run_key": "c407ddcc582e4541f2f13f14f485820137452c4ba21833634292a1615d90415e",\s*$''']

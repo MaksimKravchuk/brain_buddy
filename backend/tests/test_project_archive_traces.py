@@ -1,6 +1,6 @@
 """Spec 021: the golden project archive traces run against the real API.
 
-``tests/fixtures/project_archive_traces.json`` records request sequences and the
+``contracts/fixtures/project_archive_traces.json`` records request sequences and the
 expected statuses and responses (format in its ``conventions``), in the format
 of the 020 review traces whose matcher it reuses.
 """
@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 
 from .test_review_traces import _capture, _matches, _substitute
 
-TRACES_PATH = Path(__file__).parent / "fixtures" / "project_archive_traces.json"
+TRACES_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "fixtures"
+    / "project_archive_traces.json"
+)
 TRACES: dict[str, Any] = json.loads(TRACES_PATH.read_text(encoding="utf-8"))
 SEEDED_AT = datetime(2026, 10, 1, 10, 0, tzinfo=UTC)
 
