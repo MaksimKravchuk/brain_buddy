@@ -1092,6 +1092,9 @@ class AppConfig(BaseModel):
     agent_relay: AgentRelaySettings = Field(default_factory=AgentRelaySettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
     admin: AdminSettings = Field(default_factory=AdminSettings)
+    # Spec 027 PR-06: the shared secret of the test control API. Meaningful only
+    # when ``environment`` is TEST; every other environment ignores it.
+    test_control_token: SecretStr | None = None
 
     model_config = ConfigDict(frozen=True)
 
@@ -1235,6 +1238,15 @@ def _read_schema_version(data_dir: Path) -> str:
     if schema_path.exists():
         return schema_path.read_text(encoding="utf-8").strip() or DEFAULT_SCHEMA_VERSION
     return DEFAULT_SCHEMA_VERSION
+
+
+def _build_test_control_token(environment: AppEnvironment) -> SecretStr | None:
+    """The test control secret; read in the test environment only (027-FR-022)."""
+
+    if environment is not AppEnvironment.TEST:
+        return None
+    raw = os.getenv("BRAIN_BUDDY_TEST_CONTROL_TOKEN", "").strip()
+    return SecretStr(raw) if raw else None
 
 
 def _build_config() -> AppConfig:
@@ -1518,6 +1530,7 @@ def _build_config() -> AppConfig:
         agent_relay=agent_relay,
         feature_flags=_build_feature_flags(),
         admin=_build_admin_settings(),
+        test_control_token=_build_test_control_token(environment),
     )
 
 

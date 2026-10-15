@@ -203,31 +203,44 @@ def review_seed_aged_task(
     if user is None:
         typer.echo("No account with that email.", err=True)
         raise typer.Exit(code=1)
+    typer.echo(seed_aged_task(container, owner_id=user.id, days=days, title=title))
+
+
+def seed_aged_task(
+    container: Container, *, owner_id: str, days: int, title: str
+) -> str:
+    """TEST only: a Next task whose formulation started ``days`` ago; its id.
+
+    Shared with the test control API (spec 027), so the one write site stays
+    here. The owner is activated first when it is not yet, so the seeded age is
+    not clamped away (FR-016).
+    """
+
     review = container.review_service
-    if review.settings_for(user.id).activated_at is None:
+    if review.settings_for(owner_id).activated_at is None:
         review.acknowledge_explainer(
             ExplainerAcknowledgeRequest(),
-            owner_id=user.id,
+            owner_id=owner_id,
             idempotency_key=f"cli-review-activate-{uuid.uuid4()}",
         )
     task = container.task_service.create_task(
         TaskCreateRequest(title=title, state="next"),
-        owner_id=user.id,
+        owner_id=owner_id,
         idempotency_key=f"cli-review-seed-{uuid.uuid4()}",
     )
     started = container.task_service.clock() - timedelta(days=days)
     # The backdate is a Tasks write: through the review service it publishes with
     # the unit when the sync boundary is wired (spec 026 PR-29), and is otherwise
     # the plain owner-locked save.
-    container.review_service.internal_write(
-        user.id,
+    review.internal_write(
+        owner_id,
         "internal.test_seed_aged_task",
         f"cli-review-seed-age-{uuid.uuid4()}",
         lambda: container.task_repo.save(
             task.model_copy(update={"formulation_started_at": started})
         ),
     )
-    typer.echo(task.id)
+    return task.id
 
 
 @app.command("review-run-sweep")
