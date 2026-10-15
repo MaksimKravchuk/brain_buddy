@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 
-REPOSITORY='MaksimKravchuk/brain_buddy'
+REPOSITORY='maxk-lab/brain_buddy'
 OWNER='MaksimKravchuk'
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()

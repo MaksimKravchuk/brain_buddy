@@ -20,7 +20,7 @@ class ReleasedInstallerTests(unittest.TestCase):
         version=os.environ["BB_RELEASE_VERSION"];sha=os.environ["BB_RELEASE_SHA"]
         self.assertRegex(version,r"^[0-9]+\.[0-9]+\.[0-9]+$");self.assertRegex(sha,r"^[0-9a-f]{40}$")
         if platform.system()=="Darwin":self.assertEqual(platform.mac_ver()[0].split('.')[0],"15","Minimum-OS evidence requires macOS15 itself")
-        origin=f"https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v{version}"
+        origin=f"https://github.com/maxk-lab/brain_buddy/releases/download/bb-v{version}"
         opener=build_opener(HttpsRedirects())
         with opener.open(origin+"/SOURCE.json",timeout=30) as response:
             source=json.loads(response.read(1048576))
