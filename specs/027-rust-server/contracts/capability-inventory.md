@@ -232,7 +232,7 @@ Rust core when `rust_core_sync` is effective for the owner (`app/container.py:48
 | CAP-HTTP-139 | PATCH | `/api/tasks/{task_id}` | `tasks.py:924` | S | owner | Idem | tasks | Stale revision gives 409 with `StaleRevisionDetail` (`errors.py:184-214`). |
 | CAP-HTTP-140 | POST | `/api/tasks/{task_id}/transitions` | `tasks.py:948` | S | owner | Idem | tasks | |
 | CAP-HTTP-141 | POST | `/api/tasks` | `tasks.py:972` | S | owner | Idem | tasks | 201. |
-| CAP-HTTP-142 | GET | `/api/tasks` | `tasks.py:995` | S | owner | none | tasks | Query parameters: `state`, `project_id`, `tag_id`, `unassigned_project`, `include_completed`, `include_cancelled`, `q`, `priority[]`, `due_before`, `due_on`, `due_after`, `sort`, `cursor`, `limit` (1-200, default 50). |
+| CAP-HTTP-142 | GET | `/api/tasks` | `tasks.py:995` | S | owner | none | tasks | Query parameters: `state`, `project_id`, `tag_id`, `unassigned_project`, `include_completed`, `include_cancelled`, `q`, `due_before`, `due_on`, `due_after`, `sort`, `cursor`, `limit` (1-200, default 50). |
 
 ### 1.10 Weekly review, navigator, flow (`app/api/review.py`, `review_navigator.py`, `review_flow.py`)
 
