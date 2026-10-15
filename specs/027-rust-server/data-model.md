@@ -19,12 +19,11 @@ production starts empty (FR-019).
 | `voice` | Capture / voice workflow (ADR-0002) | voice operations, stages, object keys of stored audio (bytes in the object store, bucket `voice`, research R11), provisional items | `voice_operations.sqlite3` |
 | `agents` | Agents (spec 007/014) | agents, sealed credentials, relay exchanges, observations | `agents.sqlite3` |
 
-Payload encoding (tasks, review, navigator; 1:1 port): the `payload` columns
-are `text` holding canonical JSON, not `jsonb`, and `normalized_name` is
-`bytea`, because PostgreSQL cannot store U+0000 in `jsonb` or `text` while the
-Python API accepts it and SQLite round-trips it. Length limits are enforced in
-`bb-domain`, not by CHECKs over the payload; a field a query needs becomes a
-column. (`crt` nodes keep `jsonb` until the same audit is done for them.)
+Tasks-specific encoding (the all-schema `text` JSON convention is stated once
+in "Payload encoding"): `tasks.projects.normalized_name` and
+`tasks.tags.normalized_name` are `bytea` (UTF-8) because they carry raw user
+characters, and the payload-derived length CHECKs are dropped; those limits
+live in `bb-domain`.
 
 Rules:
 
