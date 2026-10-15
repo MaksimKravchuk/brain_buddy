@@ -3,8 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { modernAuthApi, type Challenge } from "../../api/modernAuth";
 import { AuthLayout } from "../../pages/LoginPage";
 import { AuthEntry } from "./AuthEntry";
+import { InviteStep } from "./InviteStep";
+import { inviteRequired } from "../../api/invite";
 import { useAuthStore } from "../../stores/authStore";
-import { acceptSignedIn, assertActingOwner, ensureAnonymousSignIn, rememberConfirmation, safeAuthDestination, takeProviderCallback, type PendingProvider } from "./authFlow";
+import { acceptSignedIn, acceptInvitedSignIn, assertActingOwner, ensureAnonymousSignIn, rememberConfirmation, safeAuthDestination, takeProviderCallback, type PendingProvider } from "./authFlow";
 
 async function waitForSessionHydration(): Promise<void> {
   if (useAuthStore.getState().status !== "loading") return;
@@ -27,6 +29,7 @@ export function ProviderCompletionPage(): React.JSX.Element {
   const [failed, setFailed] = useState(false);
   const [destination, setDestination] = useState("/login");
   const [retryFrom, setRetryFrom] = useState<{ pathname: string; search: string }>();
+  const [invite, setInvite] = useState<string | null>(null);
   const [mailbox, setMailbox] = useState<{ challenge: Challenge; verifier: string } | null>(null);
   useEffect(() => {
     if (started.current) return;
@@ -60,7 +63,9 @@ export function ProviderCompletionPage(): React.JSX.Element {
       } else if (result.status === "reauthenticated" && pending.purpose === "reauth" && pending.expectedOwner && pending.action) {
         rememberConfirmation(pending.expectedOwner, pending.action, result); navigate(safeAuthDestination(pending.destination), { replace: true });
       } else throw new Error("Wrong authentication outcome");
-    })().catch(() => {
+    })().catch((error: unknown) => {
+      const handoff = pending?.purpose === "login" ? inviteRequired(error) : null;
+      if (handoff) { setDestination(safeAuthDestination(pending?.destination)); setInvite(handoff.pending); return; }
       setMessage(pending?.purpose === "link" ? "We couldn't confirm whether linking finished. Reconnect and check your sign-in methods. Start a fresh link only if needed." : "We couldn't confirm whether this finished. Sign in again with a fresh proof if needed.");
       setDestination(pending?.expectedOwner ? `/settings/account?expected_owner=${encodeURIComponent(pending.expectedOwner)}` : "/login"); setFailed(true);
     });
@@ -70,5 +75,7 @@ export function ProviderCompletionPage(): React.JSX.Element {
     catch (caught) { navigate("/login", { replace: true, state: retryFrom ? { from: retryFrom } : undefined }); throw caught; }
   };
   const linkedMailbox = new URL(safeAuthDestination(destination), window.location.origin).searchParams.has("expected_owner");
-  return <AuthLayout title={mailbox ? "Check your email" : "Complete sign-in"}>{mailbox ? <AuthEntry destination={destination} initialCode={mailbox} beforeSignIn={linkedMailbox ? beforeMailboxSignIn : undefined} /> : <><p role={failed ? "alert" : "status"}>{message}</p>{failed ? <Link className="mt-4 inline-flex min-h-11 items-center text-sky-700 underline" to={destination} state={retryFrom ? { from: retryFrom } : undefined}>{destination.startsWith("/settings/account") ? "Check your sign-in methods" : "Back to sign in"}</Link> : null}</>}</AuthLayout>;
+  const restartSignIn = () => navigate("/login", { replace: true, state: retryFrom ? { from: retryFrom } : undefined });
+  const invited = <InviteStep pending={invite ?? ""} onSignedIn={async result => { await acceptInvitedSignIn(result); navigate(safeAuthDestination(destination), { replace: true }); }} onRestart={restartSignIn} onCancel={restartSignIn} />;
+  return <AuthLayout title={invite ? "Create your account" : mailbox ? "Check your email" : "Complete sign-in"}>{invite ? invited : mailbox ? <AuthEntry destination={destination} initialCode={mailbox} beforeSignIn={linkedMailbox ? beforeMailboxSignIn : undefined} /> : <><p role={failed ? "alert" : "status"}>{message}</p>{failed ? <Link className="mt-4 inline-flex min-h-11 items-center text-sky-700 underline" to={destination} state={retryFrom ? { from: retryFrom } : undefined}>{destination.startsWith("/settings/account") ? "Check your sign-in methods" : "Back to sign in"}</Link> : null}</>}</AuthLayout>;
 }
