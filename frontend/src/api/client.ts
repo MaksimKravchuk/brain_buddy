@@ -84,6 +84,27 @@ export function notifyUnauthorized() {
   onUnauthorized?.();
 }
 
+/** 027 D-02: the explicit version refusal (426 + code UPGRADE_REQUIRED), never inferred from anything else. */
+export interface UpdateRequiredNotice {
+  message: string;
+  referenceId?: string;
+}
+
+type UpdateRequiredHandler = (notice: UpdateRequiredNotice) => void;
+let onUpdateRequired: UpdateRequiredHandler | null = null;
+
+export function setUpdateRequiredHandler(handler: UpdateRequiredHandler | null) {
+  onUpdateRequired = handler;
+}
+
+function upgradeRequiredNotice(status: number, payload: unknown, correlationId?: string): UpdateRequiredNotice | null {
+  const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const detail = (body.detail && typeof body.detail === "object" ? body.detail : {}) as Record<string, unknown>;
+  if (status !== 426 || (body.code ?? detail.code) !== "UPGRADE_REQUIRED") return null;
+  const referenceId = correlationId ?? (typeof body.reference_id === "string" ? body.reference_id : undefined);
+  return { message: typeof body.message === "string" ? body.message : "", referenceId };
+}
+
 function buildUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/$/, "")}${path}`;
 }
@@ -179,6 +200,8 @@ async function request<T>(path: string, options: JsonRequestOptions): Promise<T>
       },
       "warn"
     );
+    const refusal = upgradeRequiredNotice(response.status, data, correlationId);
+    if (refusal) onUpdateRequired?.(refusal);
     const retryAfter = response.headers.get("Retry-After");
     const retryAfterSeconds = retryAfter === null ? NaN : Number(retryAfter);
     const retryAfterDate = retryAfter === null ? NaN : Date.parse(retryAfter);

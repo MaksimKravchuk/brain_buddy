@@ -340,6 +340,12 @@ dependencies = [
 [[package]]
 name = "bb-conformance"
 version = "0.1.0"
+dependencies = [
+ "bb-allure",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "bb-domain"
@@ -367,10 +373,17 @@ dependencies = [
 name = "bb-providers"
 version = "0.1.0"
 dependencies = [
+ "bb-allure",
  "hickory-resolver",
+ "jsonwebtoken",
  "lettre",
+ "object_store",
+ "p256 0.14.0",
  "reqwest",
+ "serde",
+ "serde_json",
  "symphonia",
+ "tokio",
 ]
 
 [[package]]
