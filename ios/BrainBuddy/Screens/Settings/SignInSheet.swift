@@ -10,8 +10,8 @@ import UIKit
 /// Modern methods collect proof in memory; Workspace validates the immutable
 /// owner and durable local work before installing any candidate session.
 struct SignInSheet: View {
-    private enum Step { case choice, password, recovery, code, newPassword, collision }
-    private enum Field: Hashable { case email, password, code, newPassword, repeatPassword, server }
+    private enum Step { case choice, password, recovery, code, newPassword, collision, invite }
+    private enum Field: Hashable { case email, password, code, newPassword, repeatPassword, server, invite }
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.dismiss) private var dismiss
@@ -32,6 +32,10 @@ struct SignInSheet: View {
     @State private var attempt: NativeSignInAttempt?
     @State private var proof: ModernAuthCoordinator.Proof?
     @State private var challenge: AuthChallengeDTO?
+    @State private var invite: InviteHandoff?
+    @State private var inviteCode = ""
+    @State private var inviteExpired = false
+    @State private var inviteThrottled = false
     @State private var recovery = false
     @State private var resetGrant: String?
     @State private var resetExpiry: Date?
@@ -196,7 +200,30 @@ struct SignInSheet: View {
                 Button("Sign in to existing account") { returnToChoice() }.frame(minHeight: 44)
                 backButton
             }
+        case .invite:
+            // Design M-03: .01 default, .02 busy (disabled), .03/.07 inline errors, .04 expired.
+            Section {
+                if inviteExpired {
+                    Text(InviteStepCopy.expired).font(.headline)
+                    Button("Back to sign in") { returnToChoice() }.frame(minHeight: 44)
+                } else {
+                    Text("Enter your invite code").font(.headline).accessibilityAddTraits(.isHeader)
+                    Text("Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.")
+                        .font(BBFont.secondary)
+                    TextField("Invite code", text: $inviteCode)
+                        .font(.body.monospaced())
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.continue)
+                        .focused($focused, equals: .invite).frame(minHeight: 44)
+                        .onSubmit { if canSubmitInvite { submitInvite() } }
+                    action("Continue", enabled: canSubmitInvite) { submitInvite() }
+                }
+            }.disabled(isBusy)
         }
+    }
+
+    private var canSubmitInvite: Bool {
+        !inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !inviteThrottled && invite != nil
     }
 
     private var emailField: some View {
@@ -336,7 +363,44 @@ struct SignInSheet: View {
         case .continuation(.existingAccountRequired):
             stopAttempt()
             step = .collision
+        case .continuation(.inviteRequired(let handoff)):
+            // Nothing exists yet. Keep the attempt: the resubmission rides its candidate session.
+            invite = handoff
+            inviteCode = ""
+            inviteExpired = false
+            inviteThrottled = false
+            step = .invite
+            focused = .invite
         default: throw ModernAuthCoordinator.Failure(message: "The server returned an unexpected sign-in response.")
+        }
+    }
+    private func submitInvite() {
+        run {
+            guard let attempt, let handoff = invite else { return }
+            let code = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                try await accept(try await workspace.completeSignIn(attempt, credential: .invite(pending: handoff.pending, inviteCode: code)))
+            } catch WorkspaceError.signInFailed(let message, let reference) {
+                switch message {
+                case InviteStepCopy.invalid, InviteStepCopy.tooManyAttempts:
+                    showFailure(message, reference: reference)
+                    if message == InviteStepCopy.tooManyAttempts {
+                        inviteThrottled = true
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .seconds(60))
+                            inviteThrottled = false
+                        }
+                    }
+                    Task { @MainActor in focused = .invite } // after `run` re-enables the field
+                case InviteStepCopy.expired:
+                    inviteExpired = true
+                    invite = nil
+                    inviteCode = ""
+                    showFailure(message, reference: nil)
+                default:
+                    throw WorkspaceError.signInFailed(message: message, referenceID: reference)
+                }
+            }
         }
     }
     private func savePassword() {
@@ -370,6 +434,7 @@ struct SignInSheet: View {
     private func clearSecrets() {
         proof = nil; challenge = nil; resetGrant = nil; resetExpiry = nil
         code = ""; password = ""; repeatedPassword = ""
+        invite = nil; inviteCode = ""; inviteExpired = false; inviteThrottled = false
     }
     private func returnToChoice() {
         stopAttempt()

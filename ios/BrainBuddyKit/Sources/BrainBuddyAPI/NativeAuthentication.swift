@@ -39,6 +39,34 @@ public struct ProviderStartDTO: Decodable, Sendable, CustomStringConvertible {
     }
 }
 
+/// The opaque, single-use handoff of `403 INVITE_REQUIRED` (027 invite-handoff contract).
+/// Nothing exists on the server yet; the token only lets the invite step resubmit.
+public struct InviteHandoff: Hashable, Sendable, CustomStringConvertible {
+    public let pending: String
+    public let expiresIn: Int
+    public var description: String { "Invite handoff (redacted)" }
+    public init(pending: String, expiresIn: Int) {
+        self.pending = pending
+        self.expiresIn = expiresIn
+    }
+    /// Nil unless `error` is exactly the contract's 403 with a usable token.
+    init?(_ error: APIError) {
+        guard error.statusCode == 403, error.detail?["code"]?.stringValue == "INVITE_REQUIRED",
+            let pending = error.detail?["pending"]?.stringValue, !pending.isEmpty
+        else { return nil }
+        var seconds = 600
+        if case .number(let value)? = error.detail?["expires_in"], value > 0, value < 86_400 { seconds = Int(value) }
+        self.init(pending: pending, expiresIn: seconds)
+    }
+}
+
+/// Copy of design M-03 (.03, .04, .07). Invalid and used codes share one message.
+public enum InviteStepCopy {
+    public static let invalid = "That invite code isn't valid or has already been used. Check it and try again."
+    public static let expired = "This sign-in has expired. Start again to create your account."
+    public static let tooManyAttempts = "Too many requests. Try again in a few minutes."
+}
+
 /// Each outcome grants exactly the authority named by its discriminator.
 public enum AuthCompletionDTO: Decodable, Hashable, Sendable, CustomStringConvertible {
     case signedIn(MeDTO, deletionCancelled: Bool)
@@ -47,6 +75,8 @@ public enum AuthCompletionDTO: Decodable, Hashable, Sendable, CustomStringConver
     case reauthenticated(proof: String, expiresAt: Date)
     case verifyMailbox(AuthChallengeDTO)
     case existingAccountRequired(message: String)
+    /// A verified identity with no account: ask for an invite code (design M-03).
+    case inviteRequired(InviteHandoff)
 
     public var description: String { "Authentication completion (redacted)" }
     enum CodingKeys: String, CodingKey {
@@ -99,6 +129,8 @@ public enum NativeSignInCredential: Sendable, CustomStringConvertible {
     case emailCode(challengeID: String, code: String, verifier: String)
     case browserGrant(attemptID: String, state: String, handoffCode: String, verifier: String)
     case apple(attemptID: String, state: String, authorizationCode: String, identityToken: String, verifier: String)
+    /// Resubmits an `INVITE_REQUIRED` handoff with the person's invite code.
+    case invite(pending: String, inviteCode: String)
     public var description: String { "Native sign-in credential (redacted)" }
 }
 
@@ -163,6 +195,11 @@ public final class NativeAuthenticationSession: Sendable {
     public var candidateToken: String? { try? jar.token(for: serverURL) }
     public func forgetCandidate() { try? jar.removeToken(for: serverURL) }
 
+    /// `POST /api/auth/signup/complete`: resubmits an `INVITE_REQUIRED` handoff with the invite code.
+    public func signupComplete(pending: String, inviteCode: String) async throws(APIError) -> AuthCompletionDTO {
+        try await complete(.invite(pending: pending, inviteCode: inviteCode))
+    }
+
     public func complete(_ credential: NativeSignInCredential) async throws(APIError) -> AuthCompletionDTO {
         let path: [String]
         let body: [String: String]
@@ -184,8 +221,23 @@ public final class NativeAuthenticationSession: Sendable {
             path = ["auth", "providers", "apple", "native", "complete"]
             body = ["attempt_id": attemptID, "state": state, "authorization_code": code, "identity_token": token, "client_verifier": verifier]
             passwordResponse = false
+        case .invite(let pending, let inviteCode):
+            path = ["auth", "signup", "complete"]
+            body = ["pending": pending, "invite_code": inviteCode]
+            passwordResponse = false
         }
-        let response = try await client.nativePost(path, body, status: 200, sendsSession: false)
+        let response: BrainBuddyAPIClient.Exchange
+        do {
+            response = try await client.nativePost(path, body, status: 200, sendsSession: false)
+        } catch {
+            if case .invite = credential { throw Self.inviteStepError(error) }
+            if !passwordResponse, let handoff = InviteHandoff(error) {
+                // No account, no session: a cookie beside this answer is a contract breach.
+                guard candidateToken == nil else { throw Self.invalidSession() }
+                return .inviteRequired(handoff)
+            }
+            throw error
+        }
         let completion: AuthCompletionDTO
         if passwordResponse {
             let me: MeDTO = try client.decode(response)
@@ -197,6 +249,25 @@ public final class NativeAuthenticationSession: Sendable {
             guard response.sessionUpdate == nil, candidateToken == nil else { throw Self.invalidSession() }
         }
         return completion
+    }
+
+    /// Pins the invite resubmission's failures to the design's single wording, so
+    /// the sheet can tell them apart after the layers above keep only the text.
+    /// A 429 stops being "uncertain": nothing was created and the handoff stays usable.
+    static func inviteStepError(_ error: APIError) -> APIError {
+        var mapped = error
+        switch (error.statusCode, error.detail?["code"]?.stringValue) {
+        case (400?, "INVITE_INVALID"):
+            mapped.message = InviteStepCopy.invalid
+        case (410?, _):
+            mapped.message = InviteStepCopy.expired
+        case (429?, _):
+            mapped.kind = .rejected
+            mapped.message = InviteStepCopy.tooManyAttempts
+        default:
+            break
+        }
+        return mapped
     }
 
     private static func invalidSession() -> APIError {
