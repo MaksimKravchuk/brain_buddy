@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { allure } from "allure-playwright";
+import { mintTestInvite } from "./e2e/testControl";
 
 type JsonRecord = Record<string, unknown>;
 type Task = {
@@ -87,19 +87,6 @@ function assertStringArrayEquals(actual: string[], expected: string[], label: st
   );
 }
 
-function createInvite(): string {
-  const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT ?? process.env.COMPOSE_PROJECT_NAME;
-  const env = { ...process.env };
-  if (composeProject) {
-    env.COMPOSE_PROJECT_NAME = composeProject;
-  }
-  return execFileSync("docker", ["compose", "exec", "-T", "backend", "python", "-m", "app.cli", "create-invite"], {
-    cwd: "..",
-    env,
-    encoding: "utf8"
-  }).trim();
-}
-
 async function expectOk(response: Awaited<ReturnType<Page["request"]["post"]>>, label: string): Promise<void> {
   if (!response.ok()) {
     throw new Error(`${label} failed with ${response.status()} ${await response.text()}`);
@@ -109,7 +96,7 @@ async function expectOk(response: Awaited<ReturnType<Page["request"]["post"]>>, 
 async function signup(page: Page, label = unique("user")): Promise<{ email: string; password: string }> {
   const email = `${label}@brainbuddy.dev`;
   const response = await page.request.post("/api/auth/signup", {
-    data: { email, password, invite_code: createInvite() }
+    data: { email, password, invite_code: await mintTestInvite() }
   });
   await expectOk(response, `signup ${email}`);
   return { email, password };

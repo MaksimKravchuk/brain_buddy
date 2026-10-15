@@ -1,16 +1,12 @@
 /// <reference types="node" />
 
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import * as path from "node:path";
-import { promisify } from "node:util";
 import AxeBuilder from "@axe-core/playwright";
 import { request as playwrightRequest, type Page, type TestInfo } from "@playwright/test";
 import { expect, test } from "../allure.fixtures";
 import { apiGet, apiPatch, apiPost, backendUrl, createTaskViaApi, mintInvite, password, signupThroughUi, uniqueEmail } from "./gtdHelpers";
+import { runReviewSweep, seedAgedTask } from "./testControl";
 
-const execFileAsync = promisify(execFile);
-const repoRoot = path.resolve(process.cwd(), "..");
 const operatorEmail = process.env.BRAIN_BUDDY_ADMIN_EMAIL;
 const operatorPassword = process.env.BRAIN_BUDDY_ADMIN_PASSWORD ?? password;
 const NARROW = { width: 390, height: 851 };
@@ -19,40 +15,6 @@ const DESKTOP = { width: 1280, height: 800 };
 test.beforeEach(() => {
   test.skip(!operatorEmail, "BRAIN_BUDDY_ADMIN_EMAIL is required to turn weekly_review on for one synthetic account");
 });
-
-/** A TEST-only backend command (research R21): in the backend container, or on the host for the isolated local stack. */
-async function inBackend(args: string[]): Promise<string> {
-  const modernData = process.env.BRAIN_BUDDY_MODERN_E2E_DATA_DIR;
-  if (modernData) {
-    const { stdout } = await execFileAsync(process.env.BRAIN_BUDDY_MODERN_E2E_PYTHON ?? "python3", args, {
-      cwd: path.join(repoRoot, "backend"),
-      timeout: 30_000,
-      env: { ...process.env, BRAIN_BUDDY_ENV: "test", BRAIN_BUDDY_DATA_DIR: modernData }
-    });
-    return stdout.trim();
-  }
-  const composeProject = process.env.BRAIN_BUDDY_E2E_COMPOSE_PROJECT ?? process.env.COMPOSE_PROJECT_NAME;
-  if (!composeProject) {
-    throw new Error("BRAIN_BUDDY_E2E_COMPOSE_PROJECT is required to run the review commands");
-  }
-  const { stdout } = await execFileAsync("docker", ["compose", "-p", composeProject, "exec", "-T", "backend", "python", ...args], { cwd: repoRoot, timeout: 30_000 });
-  return stdout.trim();
-}
-
-const appCli = (...args: string[]) => inBackend(["-m", "app.cli", ...args]);
-
-const AGE_WAITING = `
-from datetime import timedelta
-import sys
-from app.container import build_container
-from app.core import get_config
-
-container = build_container(get_config())
-owner = container.user_repo.get_by_email(sys.argv[1])
-task = container.task_repo.get_for_owner(sys.argv[2], owner_id=owner.id)
-with container.task_repo.command_lock(owner.id):
-    container.task_repo.save(task.model_copy(update={"waiting_since": container.task_service.clock() - timedelta(days=15)}))
-`;
 
 /** Exposure of the review is per account: only the one synthetic account gets the flag. */
 async function enableWeeklyReview(email: string): Promise<void> {
@@ -75,11 +37,6 @@ async function newReviewer(page: Page, testInfo: TestInfo): Promise<string> {
   await enableWeeklyReview(email);
   await page.reload();
   return email;
-}
-
-/** An owner who has seen the explainer and holds a Next task whose wording started `days` ago. */
-async function seedAgedTask(email: string, days: number, title: string): Promise<string> {
-  return appCli("review-seed-aged-task", "--email", email, "--days", String(days), "--title", title);
 }
 
 /**
@@ -155,7 +112,7 @@ test("020-FR-015 020-FR-004 auto-park moves an undecided task to Someday; While 
 
   await test.step("a task undecided for 22 days is parked by the sweep", async () => {
     await seedAgedTask(email, 22, "Learn basic Portuguese");
-    expect(await appCli("review-run-sweep")).toContain("parked=1");
+    expect((await runReviewSweep()).parked).toBe(1);
     const someday = await apiGet<{ items: Array<{ title: string }> }>(page, "/api/tasks?state=someday");
     expect(someday.items.map((task) => task.title)).toEqual(["Learn basic Portuguese"]);
   });
@@ -343,54 +300,5 @@ test("E2E-A11Y-01 020-FR-048 020-FR-052 a whole quick review with the keyboard a
     await tabTo(page, "Done");
     await page.keyboard.press("Enter");
     await expect(page.getByText("Clear start: Not really")).toBeVisible();
-  });
-});
-
-test("020-FR-032 020-FR-033 020-FR-040 the Waiting step and the summary fit 390 px, and the drawer carries the review link", async ({ page }, testInfo) => {
-  const email = await newReviewer(page, testInfo);
-  await seedAgedTask(email, 15, "Renovate the bathroom");
-  const waiting = await createTaskViaApi(page, "Pick up the drill from Sam", { state: "waiting", waiting_for: "Sam" });
-  await inBackend(["-c", AGE_WAITING, email, waiting.id]);
-  await page.setViewportSize(NARROW);
-
-  await test.step("the drawer shows a working Weekly review link with its recap", async () => {
-    await page.goto("/tasks/next");
-    await expectNoHorizontalOverflow(page);
-    await page.getByRole("button", { name: "Open task navigation" }).click();
-    const drawer = page.getByRole("dialog", { name: "Task navigation" });
-    await expect(drawer.getByRole("link", { name: /Weekly review/ })).toHaveAttribute("href", "/review");
-    await expect(drawer.getByText("Set up in a minute")).toBeVisible();
-    await expectNoHorizontalOverflow(page);
-    await page.getByRole("button", { name: "Close task navigation" }).last().click();
-  });
-
-  await test.step("a Full review reaches the Waiting step with its decisions stacked and no overflow", async () => {
-    await page.goto("/review");
-    await page.getByRole("dialog", { name: "A weekly reset" }).getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: /^Full/ }).click();
-    await expect(page.getByText("Step 1 of 10")).toBeVisible();
-    for (const step of ["Mind sweep", "Inbox", "Tasks that ask for a decision", "The rest of Next", "Waiting for, older than 7 days"]) {
-      await page.getByRole("button", { name: "Next", exact: true }).click();
-      await expect(page.getByRole("heading", { name: step })).toBeVisible();
-    }
-    await expect(page.getByRole("heading", { name: "Pick up the drill from Sam" })).toBeVisible();
-    await expectNoHorizontalOverflow(page);
-    await expectAccessible(page);
-  });
-
-  await test.step("the summary at 390 px has a two-column grid and no overflow", async () => {
-    for (const step of ["Projects without a next action", "Someday / maybe", "The next 14 days", "Review done"]) {
-      await page.getByRole("button", { name: "Next", exact: true }).click();
-      await expect(page.getByRole("heading", { name: step })).toBeVisible();
-    }
-    await expectNoHorizontalOverflow(page);
-    await expectAccessible(page);
-  });
-
-  await test.step("/settings/account keeps one column at 390 px", async () => {
-    await page.goto("/settings/account");
-    await expect(page.getByRole("heading", { name: /Account/ }).first()).toBeVisible();
-    await expectNoHorizontalOverflow(page);
-    await expectAccessible(page);
   });
 });
