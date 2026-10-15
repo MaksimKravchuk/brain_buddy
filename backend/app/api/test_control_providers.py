@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from app.ai.providers.base import ProviderResult
 from app.api.test_control import TEST_CONTROL_PREFIX, require_test_control_token
@@ -172,7 +172,14 @@ def _identity_result(name: str, item: dict[str, Any]) -> Any:
         "issued_at": now,
     }
     identity = ProviderIdentity(**{**fields, **item.get("identity", {})})
-    return ProviderTokens(identity, str(item.get("issuing_client", "test-client")))
+    # Apple sign-in must hand back a revocable grant, as the real exchange does.
+    grant = SecretStr("scripted-refresh-token") if provider == "apple" else None
+    return ProviderTokens(
+        identity,
+        str(item.get("issuing_client", "test-client")),
+        grant,
+        "refresh_token" if grant else None,
+    )
 
 
 class _IdentityProxy:
