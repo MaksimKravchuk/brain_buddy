@@ -28,7 +28,17 @@ from app.modules.tasks.formulation import (
 from app.utils.time import from_isoformat
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = BACKEND_DIR.parent
+# mutmut runs the suite from backend/mutants/, one level deeper than the
+# checkout, so the repo root is the nearest ancestor that holds the shared
+# fixtures rather than a fixed ``parents[n]``.
+REPO_ROOT = next(
+    (
+        parent
+        for parent in BACKEND_DIR.parents
+        if (parent / "contracts" / "fixtures").is_dir()
+    ),
+    BACKEND_DIR.parent,
+)
 FIXTURES = REPO_ROOT / "contracts" / "fixtures"
 
 # contracts/formulation-clock.md §6 "Who lands the copies" (tasks.md T023):
