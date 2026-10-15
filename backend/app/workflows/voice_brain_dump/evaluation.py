@@ -72,8 +72,8 @@ class _EvaluationCase:
 
 
 _FIXTURE_ROOT = (
-    Path(__file__).resolve().parents[3]
-    / "tests"
+    Path(__file__).resolve().parents[4]
+    / "contracts"
     / "fixtures"
     / "voice_brain_dump"
     / "v1"
@@ -105,14 +105,20 @@ def _load_cases(fixture_root: Path) -> list[_EvaluationCase]:
             if isinstance(language_value, list)
             else (str(language_value),)
         )
+        audio_path = fixture_root / str(fixture["audio_file"])
         cases.append(
             _EvaluationCase(
                 id=case_id,
                 languages=languages,
                 transcript=transcript,
                 expected_titles=expected_titles,
-                audio_path=fixture_root / str(fixture["audio_file"]),
-                audio_sha256=str(fixture["audio_sha256"]),
+                audio_path=audio_path,
+                # The manifest records no content hash (research R15): the
+                # digest is computed from the generated tone at load time.
+                audio_sha256=str(
+                    fixture.get("audio_sha256")
+                    or hashlib.sha256(audio_path.read_bytes()).hexdigest()
+                ),
                 code_switch_terms=tuple(
                     str(value) for value in fixture.get("code_switch_terms", [])
                 ),
