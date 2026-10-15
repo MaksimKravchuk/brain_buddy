@@ -19,6 +19,12 @@ production starts empty (FR-019).
 | `voice` | Capture / voice workflow (ADR-0002) | voice operations, stages, object keys of stored audio (bytes in the object store, bucket `voice`, research R11), provisional items | `voice_operations.sqlite3` |
 | `agents` | Agents (spec 007/014) | agents, sealed credentials, relay exchanges, observations | `agents.sqlite3` |
 
+Tasks-specific encoding (the all-schema `text` JSON convention is stated once
+in "Payload encoding"): `tasks.projects.normalized_name` and
+`tasks.tags.normalized_name` are `bytea` (UTF-8) because they carry raw user
+characters, and the payload-derived length CHECKs are dropped; those limits
+live in `bb-domain`.
+
 Rules:
 
 - A module's repository queries only its own schemas. Cross-module reads go
