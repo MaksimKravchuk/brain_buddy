@@ -373,9 +373,12 @@ dependencies = [
 name = "bb-providers"
 version = "0.1.0"
 dependencies = [
+ "bb-allure",
  "hickory-resolver",
+ "jsonwebtoken",
  "lettre",
  "object_store",
+ "p256 0.14.0",
  "reqwest",
  "serde",
  "serde_json",

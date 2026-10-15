@@ -16,6 +16,11 @@ hickory-resolver.workspace = true
 object_store.workspace = true
 tokio.workspace = true
 serde.workspace = true
+jsonwebtoken.workspace = true
+
+[dev-dependencies]
+bb-allure.workspace = true
+p256.workspace = true
 
 [lints]
 workspace = true
