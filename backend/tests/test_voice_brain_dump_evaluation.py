@@ -47,7 +47,11 @@ from app.workflows.voice_brain_dump.operational_evidence import (
 from app.workflows.voice_brain_dump.service import VoiceBrainDumpService
 
 _CORPUS_ROOT = (
-    Path(__file__).parent / "fixtures" / "voice_brain_dump" / "reference_corpus"
+    Path(__file__).resolve().parents[2]
+    / "contracts"
+    / "fixtures"
+    / "voice_brain_dump"
+    / "reference_corpus"
 )
 _CORPUS_PATH = _CORPUS_ROOT / "founder_ru_reading_script.v1.json"
 _RECORDED_ARTIFACT_PATH = _CORPUS_ROOT / "recorded_run_artifact.v2.json"
@@ -79,7 +83,13 @@ def test_labelled_multilingual_text_and_audio_release_metrics_meet_fixed_gates()
 
 
 def test_release_audio_cases_are_real_versioned_wav_fixtures() -> None:
-    fixture_root = Path(__file__).parent / "fixtures" / "voice_brain_dump" / "v1"
+    fixture_root = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "fixtures"
+        / "voice_brain_dump"
+        / "v1"
+    )
     audio_files = sorted(fixture_root.glob("*.wav"))
 
     assert len(audio_files) >= 6
@@ -190,7 +200,13 @@ def test_evaluation_reports_provider_text_audio_and_title_mismatches(
 
 
 def test_audio_gate_rejects_wav_files_permuted_between_labels(tmp_path: Path) -> None:
-    source = Path(__file__).parent / "fixtures" / "voice_brain_dump" / "v1"
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "fixtures"
+        / "voice_brain_dump"
+        / "v1"
+    )
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     fixtures = [
         fixture for fixture in manifest["fixtures"] if fixture.get("audio_file")

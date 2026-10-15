@@ -1,6 +1,6 @@
 """Spec 026: the shared normalization and calendar vectors hold on the server.
 
-``specs/026-rust-core-sync/contracts/primitive-vectors.json`` is consumed by the
+``contracts/fixtures/primitive-vectors.json`` is consumed by the
 Rust parity tests (``rust/crates/bb-domain/tests/primitives_parity.rs``); this
 module proves every row against the backend functions it was generated from, so
 the Rust port is compared with the server and not with a copy of itself. The
@@ -30,9 +30,7 @@ from app.modules.tasks.service import TaskService
 from tests.allure_evidence import attach_json, check_equal
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VECTORS_PATH = (
-    REPO_ROOT / "specs" / "026-rust-core-sync" / "contracts" / "primitive-vectors.json"
-)
+VECTORS_PATH = REPO_ROOT / "contracts" / "fixtures" / "primitive-vectors.json"
 VECTORS: dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
 CALENDAR: dict[str, Any] = VECTORS["calendar"]
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)

@@ -1,6 +1,6 @@
 """Spec 020: every section of the shared review-flow vectors, run once in PR-02.
 
-``tests/fixtures/review_flow_vectors.json`` is consumed by the iOS core and the
+``contracts/fixtures/review_flow_vectors.json`` is consumed by the iOS core and the
 web as well; running every section here against the pure
 ``app.modules.tasks.review_rules`` means no lane relies on a vector that has
 never run (plan Test strategy, review c2 TE-06).

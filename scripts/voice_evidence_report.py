@@ -32,9 +32,9 @@ Example:
     BRAIN_BUDDY_VOICE_RECONCILER_MODEL=gpt-4o \\
     BRAIN_BUDDY_FEATURE_VOICE_BRAIN_DUMP=on \\
     python scripts/voice_evidence_report.py \\
-        --audio "$HOME/Downloads/Jekerstraat 35-3.m4a" \\
+        --audio "$HOME/recording.m4a" \\
         --email you@example.com --password 'secret' \\
-        --out backend/tests/fixtures/voice_brain_dump/reference_corpus/live_report.<sha>.json
+        --out "$HOME/live_report.<sha>.json"  # keep live output out of contracts/fixtures
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ from app.workflows.voice_brain_dump.providers import ReconcileTextRequest  # noq
 
 _DEFAULT_CORPUS = (
     REPO_ROOT
-    / "backend/tests/fixtures/voice_brain_dump/reference_corpus"
+    / "contracts/fixtures/voice_brain_dump/reference_corpus"
     / "founder_ru_reading_script.v1.json"
 )
 
