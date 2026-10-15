@@ -340,6 +340,12 @@ dependencies = [
 [[package]]
 name = "bb-conformance"
 version = "0.1.0"
+dependencies = [
+ "bb-allure",
+ "reqwest",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "bb-domain"
