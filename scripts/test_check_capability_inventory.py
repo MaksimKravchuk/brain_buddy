@@ -115,6 +115,31 @@ class ReportTest(unittest.TestCase):
             self.assertEqual(checker.check_reports(rows, {}, rust), [])
             self.assertTrue(checker.check_reports(rows, rust, {}))
 
+    def test_027_fr_001_differing_matched_test_names_are_rejected(self) -> None:
+        row = _row("CAP-HTTP-001")
+        python = {"cap_http_001_python_only": "passed"}
+        rust = {"cap_http_001_rust_only": "passed"}
+        errors = checker.check_reports([row], python, rust)
+        self.assertTrue(any("differ" in e for e in errors))
+
+    def test_027_fr_001_partial_report_input_is_rejected(self) -> None:
+        port = _row("CAP-HTTP-001")
+        green = {"cap_http_001": "passed"}
+        errors = checker.check_reports([port], None, green)
+        self.assertTrue(any("Python report" in e for e in errors))
+        errors = checker.check_reports([port], green, None)
+        self.assertTrue(any("Rust report" in e for e in errors))
+        change = _row("CAP-HTTP-001", "change", approval="a", reason="r")
+        self.assertEqual(checker.check_reports([change], None, green), [])
+        self.assertTrue(checker.check_reports([change], green, None))
+
+    def test_027_fr_001_cli_fails_when_only_one_report_is_given(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "r.json"
+            path.write_text(json.dumps({"results": {}}))
+            self.assertEqual(checker.main(["--python-report", str(path)]), 1)
+            self.assertEqual(checker.main(["--rust-report", str(path)]), 1)
+
     def test_evidence_name_must_match_the_id_boundary(self) -> None:
         report = {"cap_http_0010": "passed"}
         self.assertEqual(checker.evidence_status(report, "cap_http_001"), "missing")

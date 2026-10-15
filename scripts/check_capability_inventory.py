@@ -90,33 +90,43 @@ def load_report(path: Path) -> dict[str, str]:
     return {str(name): str(status) for name, status in results.items()}
 
 
+def matched_tests(report: dict[str, str], evidence_id: str) -> dict[str, str]:
+    """Test name -> status for every test that proves ``evidence_id``."""
+    prefix = evidence_id + "_"
+    return {n: s for n, s in report.items() if n == evidence_id or n.startswith(prefix)}
+
+
 def evidence_status(report: dict[str, str], evidence_id: str) -> str:
     """passed when at least one test matches and all match are green."""
-    names = [n for n in report if n == evidence_id or n.startswith(evidence_id + "_")]
-    if not names:
+    matched = matched_tests(report, evidence_id)
+    if not matched:
         return "missing"
-    return "passed" if all(report[n] == "passed" for n in names) else "failed"
+    return "passed" if all(s == "passed" for s in matched.values()) else "failed"
 
 
 def check_reports(
     rows: list[dict], python: dict[str, str] | None, rust: dict[str, str] | None
 ) -> list[str]:
     errors: list[str] = []
+    if rust is None:
+        errors.append("a Rust report is required (--rust-report): every row needs it")
+    if python is None and any(r.get("disposition") == "port" for r in rows):
+        errors.append("a Python report is required (--python-report): port rows need it")
+    if errors:
+        return errors
     for row in rows:
         cid, disposition = row["id"], row.get("disposition")
         evidence_id = (row.get("evidence") or {}).get("id", "")
         want = {"rust": rust}
         if disposition == "port":
             want["python"] = python
-        statuses = {
-            side: evidence_status(report, evidence_id)
-            for side, report in want.items()
-            if report is not None
-        }
-        for side, status in statuses.items():
+        for side, report in want.items():
+            status = evidence_status(report or {}, evidence_id)
             if status != "passed":
                 errors.append(f"{cid}: {side} evidence {evidence_id} is {status}")
-        if len(set(statuses.values())) > 1 and "python" in statuses:
+        if disposition == "port" and matched_tests(
+            python or {}, evidence_id
+        ) != matched_tests(rust or {}, evidence_id):
             errors.append(f"{cid}: Python and Rust conformance reports differ")
     return errors
 
