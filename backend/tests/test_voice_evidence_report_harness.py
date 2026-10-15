@@ -19,7 +19,8 @@ sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 import voice_evidence_report as harness  # noqa: E402
 
 _CORPUS_PATH = (
-    Path(__file__).parent
+    Path(__file__).resolve().parents[2]
+    / "contracts"
     / "fixtures"
     / "voice_brain_dump"
     / "reference_corpus"

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 /// The golden run traces of slice PR-11 (`review_traces_runs.json`, a
-/// byte-identical copy of `backend/tests/fixtures/review_traces_runs.json`)
+/// byte-identical copy of `contracts/fixtures/review_traces_runs.json`)
 /// replayed against `BrainBuddyFakeServer` with the recorded statuses and
 /// responses, so the fake cannot drift from the backend on a review started
 /// offline, replaced, moved on by two clients, retried after the 24 h

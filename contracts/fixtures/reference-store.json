@@ -1,10 +1,10 @@
 {
  "schema": "brainbuddy-reference-store/v1",
- "format": "Frozen parity oracle and bounded synthetic reference data for spec 026 (tasks.md T002). oracle_sources lists every existing normative file by repository path with its sha256, size, section counts, byte-identical copies and consumers; nothing is duplicated here. backend/tests/test_026_oracle_contracts.py fails when a source, a copy or this manifest drifts, so changing an oracle is an explicit, reviewed edit of its hash. in_source_oracles are tests whose examples live in code; folded_into names the shared file that now carries them. contradictions are disagreements found between the Python server, Swift, the web and Rust; they are findings, not silent choices. dataset is a synthetic two-owner store in the exact stored-record shapes of backend/app/modules/tasks/domain.py (ProjectDocument, TagDocument, TaskDocument, TaskSubtaskDocument, TaskCommentDocument): all four lists, completed and cancelled tasks, an active, a lossless-archived and a pre-lossless-archived project, a deleted tag, a parked task, extended clocks, subtasks, comments, NFKC and astral-plane text, and a second owner whose names collide with the first owner's. expected_counts and the relationship rules are what an import or restore must reproduce (026-SC-005); the 10 000-task load fixture of SC-003 is generated at test time from these shapes and is not stored.",
+ "format": "Frozen parity oracle and bounded synthetic reference data for spec 026 (tasks.md T002). oracle_sources lists every existing normative file by repository path with its size, section counts, byte-identical copies and consumers; nothing is duplicated here. backend/tests/test_026_oracle_contracts.py fails when a source, a copy or this manifest drifts, so changing an oracle is an explicit, reviewed edit of its hash. in_source_oracles are tests whose examples live in code; folded_into names the shared file that now carries them. contradictions are disagreements found between the Python server, Swift, the web and Rust; they are findings, not silent choices. dataset is a synthetic two-owner store in the exact stored-record shapes of backend/app/modules/tasks/domain.py (ProjectDocument, TagDocument, TaskDocument, TaskSubtaskDocument, TaskCommentDocument): all four lists, completed and cancelled tasks, an active, a lossless-archived and a pre-lossless-archived project, a deleted tag, a parked task, extended clocks, subtasks, comments, NFKC and astral-plane text, and a second owner whose names collide with the first owner's. expected_counts and the relationship rules are what an import or restore must reproduce (026-SC-005); the 10 000-task load fixture of SC-003 is generated at test time from these shapes and is not stored.",
  "oracle_sources": [
   {
    "id": "SRC-01",
-   "path": "backend/tests/fixtures/review_formulation_vectors.json",
+   "path": "contracts/fixtures/review_formulation_vectors.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_formulation_vectors.json",
     "frontend/src/features/review/__tests__/review_formulation_vectors.json"
@@ -21,7 +21,6 @@
     "026-FR-017",
     "026-SC-001"
    ],
-   "sha256": "f2c397bfa4be577db3d7897f810b16711f76ccfdc0ce6c42a8766b3ad8019376",
    "bytes": 145933,
    "schema": "brainbuddy-formulation-vectors/v1",
    "sections": {
@@ -33,7 +32,7 @@
   },
   {
    "id": "SRC-02",
-   "path": "backend/tests/fixtures/review_flow_vectors.json",
+   "path": "contracts/fixtures/review_flow_vectors.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/Resources/review_flow_vectors.json",
     "frontend/src/features/review/__tests__/review_flow_vectors.json"
@@ -47,7 +46,6 @@
     "026-FR-017",
     "026-SC-001"
    ],
-   "sha256": "d483f449c24e259e68c78743ef544ef886bf90abcb8c769e3b2a51c1aea08c58",
    "bytes": 34660,
    "schema": "brainbuddy-review-flow-vectors/v1",
    "sections": {
@@ -72,7 +70,7 @@
   },
   {
    "id": "SRC-03",
-   "path": "backend/tests/fixtures/review_wire_fixtures.json",
+   "path": "contracts/fixtures/review_wire_fixtures.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddyAPITests/Resources/review_wire_fixtures.json",
     "frontend/src/features/review/__tests__/review_wire_fixtures.json"
@@ -84,7 +82,6 @@
     "026-FR-002",
     "026-SC-001"
    ],
-   "sha256": "e7f2f335e8fbfb8657450d15a7d9c1fee110e1835cee69d42965ffbd52ef1133",
    "bytes": 52037,
    "schema": "brainbuddy-review-wire-fixtures/v1",
    "sections": {
@@ -93,7 +90,7 @@
   },
   {
    "id": "SRC-04",
-   "path": "backend/tests/fixtures/review_traces_tasks.json",
+   "path": "contracts/fixtures/review_traces_tasks.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_tasks.json"
    ],
@@ -105,7 +102,6 @@
     "026-FR-016",
     "026-SC-001"
    ],
-   "sha256": "d52bb21dca060f54f878381409c53b69e444eb39f5a0f8b6660eaac09cd3d0e9",
    "bytes": 14711,
    "schema": "brainbuddy-review-traces/v1",
    "sections": {
@@ -114,7 +110,7 @@
   },
   {
    "id": "SRC-05",
-   "path": "backend/tests/fixtures/review_traces_runs.json",
+   "path": "contracts/fixtures/review_traces_runs.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/review_traces_runs.json"
    ],
@@ -126,7 +122,6 @@
     "026-FR-016",
     "026-SC-001"
    ],
-   "sha256": "734c4589c183bd750193beabf34e9fa41a97d2971198b13009940a504c3d689a",
    "bytes": 19845,
    "schema": "brainbuddy-review-traces/v1",
    "sections": {
@@ -135,7 +130,7 @@
   },
   {
    "id": "SRC-06",
-   "path": "backend/tests/fixtures/project_archive_traces.json",
+   "path": "contracts/fixtures/project_archive_traces.json",
    "copies": [
     "ios/BrainBuddyKit/Tests/BrainBuddySyncTests/Resources/project_archive_traces.json"
    ],
@@ -147,7 +142,6 @@
     "026-FR-002",
     "026-SC-001"
    ],
-   "sha256": "b8f0cc1d1a0a460ca4bcf9a00d1715cadefad25ad54928d8e8a0cd05d72a0237",
    "bytes": 14529,
    "schema": "brainbuddy-project-archive-traces/v1",
    "sections": {
@@ -165,7 +159,6 @@
     "026-FR-013",
     "026-SC-005"
    ],
-   "sha256": "3a10e1be59faf6f93e9c20808c83345c2603930b9f6a0ab62cd6a56926f4988e",
    "bytes": 13243,
    "schema": null,
    "sections": {
@@ -175,7 +168,7 @@
   },
   {
    "id": "SRC-08",
-   "path": "specs/026-rust-core-sync/contracts/primitive-vectors.json",
+   "path": "contracts/fixtures/primitive-vectors.json",
    "copies": [],
    "consumers": [
     "backend/tests/test_026_primitive_vectors.py",
@@ -186,7 +179,6 @@
     "026-FR-017",
     "026-SC-001"
    ],
-   "sha256": "605fcf7e397267f2ff725f121c0ed51f3d47bd17bfe8b08623d8a35d39710743",
    "bytes": 44735,
    "schema": "brainbuddy-primitive-vectors/v1",
    "sections": {
@@ -199,7 +191,7 @@
   },
   {
    "id": "SRC-09",
-   "path": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json",
+   "path": "contracts/fixtures/web-presentation-vectors.json",
    "copies": [],
    "consumers": [
     "frontend/src/features/tasks/__tests__/smartAddVectors.test.ts",
@@ -209,7 +201,6 @@
     "026-FR-002",
     "026-SC-001"
    ],
-   "sha256": "abf71465bdc416046223a8e4a8a3fc1f35834ab5d6e0730cff54afa6b613af50",
    "bytes": 62881,
    "schema": "brainbuddy-web-presentation-vectors/v1",
    "sections": {
@@ -225,25 +216,25 @@
    "id": "INS-01",
    "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/NameNormalizerTests.swift",
    "role": "31 NameNormalizer vectors, produced by the server's own functions (generated on Python 3.11 / Unicode 14 and unchanged on Python 3.14 / Unicode 16.0.0)",
-   "folded_into": "specs/026-rust-core-sync/contracts/primitive-vectors.json#name_normalization"
+   "folded_into": "contracts/fixtures/primitive-vectors.json#name_normalization"
   },
   {
    "id": "INS-02",
    "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/CalendarDayTests.swift",
    "role": "CalendarDay parsing, arithmetic, zone and DST examples",
-   "folded_into": "specs/026-rust-core-sync/contracts/primitive-vectors.json#calendar"
+   "folded_into": "contracts/fixtures/primitive-vectors.json#calendar"
   },
   {
    "id": "INS-03",
    "path": "frontend/src/features/tasks/__tests__/smartAdd.test.ts",
    "role": "Normative Smart Add grammar, resolution, suggestion and serialization examples (spec 003)",
-   "folded_into": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json"
+   "folded_into": "contracts/fixtures/web-presentation-vectors.json"
   },
   {
    "id": "INS-04",
    "path": "ios/BrainBuddyKit/Tests/BrainBuddyCoreTests/SmartAddWebParityTests.swift",
    "role": "Lockstep Swift port of INS-03 (parse and chip cases only; documents the sharp-s divergence)",
-   "folded_into": "specs/026-rust-core-sync/contracts/web-presentation-vectors.json"
+   "folded_into": "contracts/fixtures/web-presentation-vectors.json"
   },
   {
    "id": "INS-05",

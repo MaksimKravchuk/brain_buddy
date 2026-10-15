@@ -9,7 +9,7 @@ use bb_protocol::receipt::Receipt;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-const WIRE: &str = include_str!("../../../../backend/tests/fixtures/review_wire_fixtures.json");
+const WIRE: &str = include_str!("../../../../contracts/fixtures/review_wire_fixtures.json");
 const SCHEMA: &str =
     include_str!("../../../../specs/026-rust-core-sync/contracts/sync-v1.schema.json");
 

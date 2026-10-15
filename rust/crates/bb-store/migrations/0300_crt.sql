@@ -23,7 +23,7 @@ CREATE TABLE crt.trees (
     last_command_id text CHECK (last_command_id ~ '^[0-9a-f]{64}$'),
     title           text NOT NULL,
     description     text,
-    metadata        jsonb,
+    metadata        text,
     created_at      timestamptz NOT NULL,
     updated_at      timestamptz NOT NULL
 );
@@ -35,7 +35,7 @@ CREATE TABLE crt.nodes (
     id         text NOT NULL,
     owner_id   text NOT NULL,
     label      text NOT NULL,
-    payload    jsonb NOT NULL,  -- position, metadata, visual, validation, extra
+    payload    text NOT NULL,  -- position, metadata, visual, validation, extra
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     PRIMARY KEY (tree_id, id)
@@ -70,9 +70,9 @@ CREATE TABLE crt.versions (
     captured_at    timestamptz NOT NULL,
     author         text,
     notes          text,
-    diff           jsonb NOT NULL,
-    conflicts      jsonb NOT NULL DEFAULT '[]'::jsonb,
-    tree_snapshot  jsonb NOT NULL,
+    diff           text NOT NULL,
+    conflicts      text NOT NULL DEFAULT '[]',
+    tree_snapshot  text NOT NULL,
     PRIMARY KEY (tree_id, id)
 );
 CREATE INDEX idx_crt_versions_owner ON crt.versions (owner_id, tree_id, captured_at);
@@ -88,7 +88,7 @@ CREATE TABLE crt.validation_history (
     provider     text NOT NULL,
     prompt_hash  text NOT NULL,
     checked_at   timestamptz NOT NULL,
-    raw_response jsonb,
+    raw_response text,
     PRIMARY KEY (tree_id, node_id, seq)
 );
 CREATE INDEX idx_crt_validation_owner ON crt.validation_history (owner_id, tree_id);
@@ -100,7 +100,7 @@ CREATE TABLE crt.validation_providers (
     provider_id text PRIMARY KEY,
     api_key_ref text,
     model       text,
-    extra       jsonb NOT NULL DEFAULT '{}'::jsonb,  -- ProviderConfig allows extras
+    extra       text NOT NULL DEFAULT '{}',  -- ProviderConfig allows extras
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
 -- At most one row; default_provider is NULL when none is chosen.

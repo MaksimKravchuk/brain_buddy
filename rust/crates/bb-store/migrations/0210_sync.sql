@@ -20,8 +20,8 @@ CREATE TABLE sync.command_receipts (
     command_id    text NOT NULL,
     writer_origin text NOT NULL,
     fingerprint   text NOT NULL,
-    metadata      jsonb NOT NULL,          -- content-free, kept until account purge
-    result        jsonb,                   -- full response, dropped after 24 h
+    metadata      text NOT NULL,          -- content-free, kept until account purge
+    result        text,                   -- full response, dropped after 24 h
     created_at    timestamptz NOT NULL,
     expires_at    timestamptz NOT NULL,
     PRIMARY KEY (owner_id, command_id)
@@ -63,7 +63,7 @@ CREATE TABLE sync.change_records (
     record_version    text NOT NULL,
     edit_revision     text,
     operation         text NOT NULL,
-    value             jsonb,
+    value             text,
     source_expires_at timestamptz,
     PRIMARY KEY (owner_id, commit_seq, entity_type, record_key),
     FOREIGN KEY (owner_id, commit_seq)

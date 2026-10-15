@@ -45,24 +45,18 @@ macro_rules! vector_file {
 // copies guarded by backend/tests/test_review_formulation_vectors.py).
 vector_file!(
     formulation,
-    "backend/tests/fixtures/review_formulation_vectors.json"
+    "contracts/fixtures/review_formulation_vectors.json"
 );
-vector_file!(flow, "backend/tests/fixtures/review_flow_vectors.json");
+vector_file!(flow, "contracts/fixtures/review_flow_vectors.json");
 // Spec 026 primitives (T002/T006), verified against the backend by
 // backend/tests/test_026_primitive_vectors.py.
-vector_file!(
-    primitives,
-    "specs/026-rust-core-sync/contracts/primitive-vectors.json"
-);
+vector_file!(primitives, "contracts/fixtures/primitive-vectors.json");
 // T002: the frozen oracle manifest with the synthetic reference dataset, and the
 // versioned web presentation cases.
-vector_file!(
-    reference_store,
-    "specs/026-rust-core-sync/contracts/reference-store.json"
-);
+vector_file!(reference_store, "contracts/fixtures/reference-store.json");
 vector_file!(
     web_presentation,
-    "specs/026-rust-core-sync/contracts/web-presentation-vectors.json"
+    "contracts/fixtures/web-presentation-vectors.json"
 );
 
 /// A non-empty array at `path` (dot separated keys) below `root`.

@@ -1987,7 +1987,7 @@ fn replay(trace: &Value, start: &str) -> usize {
 
 #[test]
 fn task_rules_026_fr_009_the_archived_membership_trace_replays_through_the_task_rules() {
-    let file = trace_file("backend/tests/fixtures/project_archive_traces.json");
+    let file = trace_file("contracts/fixtures/project_archive_traces.json");
     let trace = cases(&file, "traces")
         .iter()
         .find(|t| text(t, "id") == "TR-T01")
@@ -2002,7 +2002,7 @@ fn task_rules_026_fr_009_the_archived_membership_trace_replays_through_the_task_
 
 #[test]
 fn task_rules_026_fr_001_the_review_task_traces_replay_their_create_and_edit_steps() {
-    let file = trace_file("backend/tests/fixtures/review_traces_tasks.json");
+    let file = trace_file("contracts/fixtures/review_traces_tasks.json");
     let traces = cases(&file, "traces");
     let mut replayed = 0;
     let mut steps = 0;

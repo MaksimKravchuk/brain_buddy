@@ -2800,17 +2800,17 @@ fn load(relative: &str) -> Value {
 
 fn runs_file() -> &'static Value {
     static CELL: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    CELL.get_or_init(|| load("backend/tests/fixtures/review_traces_runs.json"))
+    CELL.get_or_init(|| load("contracts/fixtures/review_traces_runs.json"))
 }
 
 fn tasks_file() -> &'static Value {
     static CELL: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    CELL.get_or_init(|| load("backend/tests/fixtures/review_traces_tasks.json"))
+    CELL.get_or_init(|| load("contracts/fixtures/review_traces_tasks.json"))
 }
 
 fn wire_file() -> &'static Value {
     static CELL: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    CELL.get_or_init(|| load("backend/tests/fixtures/review_wire_fixtures.json"))
+    CELL.get_or_init(|| load("contracts/fixtures/review_wire_fixtures.json"))
 }
 
 #[test]
