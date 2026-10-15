@@ -176,8 +176,11 @@ jobs:
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base='${{ github.event.pull_request.base.sha }}'
+            # --no-renames lists a moved file's old path too: a lane that
+            # still reads the old name is affected even though only the new
+            # name would otherwise show.
             if git fetch --no-tags --depth=1 origin "${base}" 2>/dev/null &&
-               changed=$(git diff --name-only "${base}" HEAD 2>/dev/null); then
+               changed=$(git diff --name-only --no-renames "${base}" HEAD 2>/dev/null); then
               printf '%s\n' "${changed}" | sed 's/^/  /'
 
               # The workflow itself is a shared surface: a change to CI can
