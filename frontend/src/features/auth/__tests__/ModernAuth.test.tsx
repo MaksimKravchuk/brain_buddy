@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { modernAuthApi } from "../../../api/modernAuth";
@@ -46,6 +46,16 @@ describe("023-FR-001/003/008/009/010/022 configured choice and neutral code flow
     expect(screen.queryByRole("button", { name: "Sign in with Google" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Use your password" }));
     expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password");
+  });
+  it("023-FR-001 late method discovery keeps focus in the password field", async () => {
+    let resolveMethods: (value: Awaited<ReturnType<typeof modernAuthApi.methods>>) => void = () => undefined;
+    vi.mocked(modernAuthApi.methods).mockReturnValue(new Promise(resolve => { resolveMethods = resolve; }));
+    show();
+    fireEvent.click(screen.getByRole("button", { name: "Use your password" }));
+    const passwordInput = screen.getByLabelText("Password");
+    passwordInput.focus();
+    await act(async () => { resolveMethods({ google: true, apple: false, email: true, password: true, web_account_origin: null }); });
+    expect(passwordInput).toHaveFocus();
   });
   it("023-FR-011 returns to sign-in after reset without creating a session", async () => {
     show();
