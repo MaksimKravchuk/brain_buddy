@@ -487,6 +487,7 @@ class ScanRangeTest(unittest.TestCase):
                     "GITHUB_OUTPUT": str(output),
                     "PR_BASE": "",
                     "PUSH_BEFORE": "",
+                    "MERGE_GROUP_BASE": "",
                     "EVENT_HEAD": "",
                     **env,
                 },
@@ -618,12 +619,25 @@ class ScanRangeTest(unittest.TestCase):
         self.assertEqual(out.get("log_opts"), f"{self.base}..{self.head}")
         self.assertEqual(self._scanned_commits(out), {self.head})
 
+    def test_merge_group_derives_the_incremental_range(self) -> None:
+        code, out = self._derive(
+            EVENT_NAME="merge_group", MERGE_GROUP_BASE=self.base, EVENT_HEAD=self.head
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(out.get("mode"), "range")
+        self.assertEqual(out.get("log_opts"), f"{self.base}..{self.head}")
+        self.assertEqual(self._scanned_commits(out), {self.head})
+
     def test_unsafe_ranges_fail_closed(self) -> None:
         cases = {
             "unsupported event": {"EVENT_NAME": "schedule"},
             "malformed base": {
                 "EVENT_NAME": "push",
                 "PUSH_BEFORE": "not-a-sha",
+                "EVENT_HEAD": self.head,
+            },
+            "merge group without a base": {
+                "EVENT_NAME": "merge_group",
                 "EVENT_HEAD": self.head,
             },
             "pull request base is not an ancestor": {
