@@ -122,13 +122,19 @@ jobs:
   # do, and succeeds keeps that guarantee intact.
   #
   # Filtering applies to pull requests only. Pushes to main and to
-  # trunk-candidate/** are the landing path, and those are verified in full.
+  # trunk-candidate/** are the landing path, and those are verified in full,
+  # except that a main push of a SHA already verified as a trunk candidate
+  # does not re-run the macOS and Windows lanes (see the decide step).
   # This job holds no `needs`. It is the only real data dependency the stack
   # lanes have, so nothing may sit in front of it: a lint gate queued ahead of
   # it would delay every test in the run without changing any of their results.
   changes:
     name: Changed stacks
     runs-on: ubuntu-latest
+    # actions: read lets the decide step find this SHA's trunk-candidate run.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       backend: ${{ steps.decide.outputs.backend }}
       frontend: ${{ steps.decide.outputs.frontend }}
@@ -165,6 +171,8 @@ jobs:
       # exercises every stack.
       - name: Decide which stacks to exercise
         id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           backend=true
           frontend=true
@@ -263,6 +271,21 @@ jobs:
             else
               echo "could not read the diff against ${base}; exercising every stack"
             fi
+          elif [ "${{ github.ref }}" = refs/heads/main ] &&
+               verified=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=${GITHUB_SHA}" \
+                 --jq '[.workflow_runs[] | select(.head_branch | startswith("trunk-candidate/"))] | length') &&
+               [ "${verified}" -gt 0 ]; then
+            # A trunk landing fast-forwards main to the exact SHA whose
+            # candidate run already passed full CI, so this push re-verifies
+            # an identical tree. The macOS and Windows lanes are the scarce
+            # runners and have no consumer of a second result; the Linux
+            # lanes still run (the backend one builds the test-selection map
+            # on main). A merged pull request has no candidate run and is
+            # verified in full, as is any push the query cannot vouch for.
+            echo "main at ${GITHUB_SHA} passed full CI as a trunk candidate; not re-running the iOS, Mac and CLI lanes"
+            ios=false
+            macos=false
+            cli=false
           else
             echo "landing path; exercising every stack regardless of the diff"
           fi
