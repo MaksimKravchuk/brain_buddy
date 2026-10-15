@@ -42,6 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-fly-production.yml"
 DEPLOY_CLASSIFIER = REPO_ROOT / "scripts" / "classify_deploy_paths.sh"
+RELEASE_GRAPH = REPO_ROOT / "scripts" / "release_graph.py"
 RISK_CLASSIFIER = REPO_ROOT / "scripts" / "classify_path_risk.py"
 
 OLD_17_PATHS = (
@@ -299,34 +300,48 @@ class DeployContractTest(unittest.TestCase):
                     "any ASK path must block automatic promotion",
                 )
 
-    def test_deploy_classifier_mutant_marks_only_successor_validator_as_needed(
-        self,
-    ) -> None:
-        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
-        deploy_arm = "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)"
-        self.assertIn(deploy_arm, text)
-        mutant = _temp_workflow(
-            text.replace(
-                deploy_arm,
-                deploy_arm.replace(".env)", ".env|scripts/validate_trunk_delivery.py)"),
-                1,
-            )
+    # The deploy gate's rules live in scripts/release_graph.py; the shell
+    # classifier the workflow pipes into only delegates to it. Mutants are
+    # written next to the real module so it still finds rust/ at parents[1].
+    def _graph_mutant(self, old: str, new: str) -> Path:
+        text = RELEASE_GRAPH.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        handle = tempfile.NamedTemporaryFile(
+            "w", dir=RELEASE_GRAPH.parent, prefix="_mutant_", suffix=".py",
+            delete=False, encoding="utf-8",
         )
-        try:
-            self.assertNotEqual(
-                self._classify(SUCCESSOR_2_PATHS, mutant), "needed=false"
-            )
-        finally:
-            mutant.unlink()
+        handle.write(text.replace(old, new, 1))
+        handle.close()
+        return Path(handle.name)
 
-    def _classify(self, paths: tuple[str, ...], classifier: Path = DEPLOY_CLASSIFIER) -> str:
+    def _classify_all(self, paths: tuple[str, ...], graph: Path | None = None) -> dict[str, str]:
+        command = ["bash", str(DEPLOY_CLASSIFIER)] if graph is None else [sys.executable, str(graph), "fly"]
         result = subprocess.run(
-            ["bash", str(classifier)],
+            command,
             input="".join(f"{path}\0" for path in paths).encode(),
             capture_output=True,
             check=True,
         )
-        return result.stdout.decode().strip()
+        lines = result.stdout.decode().strip().splitlines()
+        self.assertEqual([line.split("=", 1)[0] for line in lines], ["backend", "frontend", "needed"])
+        return dict(line.split("=", 1) for line in lines)
+
+    def _classify(self, paths: tuple[str, ...], graph: Path | None = None) -> str:
+        return f"needed={self._classify_all(paths, graph)['needed']}"
+
+    def _apps(self, paths: tuple[str, ...]) -> tuple[str, str]:
+        result = self._classify_all(paths)
+        return result["backend"], result["frontend"]
+
+    def test_deploy_classifier_mutant_marks_only_successor_validator_as_needed(
+        self,
+    ) -> None:
+        shared = 'FLY_SHARED = (".dockerignore",'
+        mutant = self._graph_mutant(shared, 'FLY_SHARED = ("scripts/validate_trunk_delivery.py", ".dockerignore",')
+        try:
+            self.assertNotEqual(self._classify(SUCCESSOR_2_PATHS, mutant), "needed=false")
+        finally:
+            mutant.unlink()
 
     def test_deploy_classifier_covers_policy_and_fail_open_paths(self) -> None:
         rejected_parent_listing = (
@@ -350,6 +365,7 @@ class DeployContractTest(unittest.TestCase):
         )
         current_cumulative_listing = rejected_parent_listing + (
             "scripts/classify_deploy_paths.sh",
+            "scripts/release_graph.py",
         )
         correction_listing = SUCCESSOR_2_PATHS
         self.assertEqual(self._classify(rejected_parent_listing), "needed=false")
@@ -375,11 +391,39 @@ class DeployContractTest(unittest.TestCase):
         )
         self.assertEqual(self._classify(()), "needed=true")
 
+    def test_deploy_classifier_releases_each_app_for_its_own_inputs(self) -> None:
+        cases = {
+            # Each image's own sources release only that app.
+            ("backend/app/main.py",): ("true", "false"),
+            ("fly.backend.toml",): ("true", "false"),
+            ("frontend/src/App.tsx",): ("false", "true"),
+            ("deploy/nginx/default.conf",): ("false", "true"),
+            ("fly.frontend.toml",): ("false", "true"),
+            # The backend wheel links bb-python and what it depends on.
+            ("rust/bindings/python/src/lib.rs",): ("true", "false"),
+            ("rust/crates/bb-domain/src/lib.rs",): ("true", "false"),
+            ("rust/crates/bb-protocol/src/lib.rs",): ("true", "false"),
+            ("rust/Cargo.lock",): ("true", "false"),
+            # Crates outside that closure, and crate tests, ship nowhere on Fly.
+            ("rust/crates/bb-server/src/main.rs",): ("false", "false"),
+            ("rust/crates/bb-conformance/tests/identity.rs",): ("false", "false"),
+            ("rust/bindings/swift/src/lib.rs",): ("false", "false"),
+            ("rust/crates/bb-domain/tests/normalize.rs",): ("false", "false"),
+            # Native apps and CLI ship through their own channels.
+            ("macos/Sources/App.swift", "cli/src/main.rs", "contracts/fixtures/a.json"): ("false", "false"),
+            # Shared or unknown inputs release both.
+            ("fly.toml",): ("true", "true"),
+            (".dockerignore",): ("true", "true"),
+            ("unknown.bin",): ("true", "true"),
+            ("backend/app/main.py", "frontend/src/App.tsx"): ("true", "true"),
+            (): ("true", "true"),
+        }
+        for paths, expected in cases.items():
+            with self.subTest(paths=paths):
+                self.assertEqual(self._apps(paths), expected)
+
     def test_deploy_classifier_mutant_fails_policy_only_assertion(self) -> None:
-        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
-        inert_arm = ".github/*|.specify/*|.claude/*|.design-sync/*|docs/*|specs/*|ios/*|scripts/*|*.md|Makefile|.gitignore|LICENSE|.env.example)"
-        self.assertIn(inert_arm, text)
-        mutant = _temp_workflow(text.replace(inert_arm, inert_arm + "\n                needed=true", 1))
+        mutant = self._graph_mutant('    "ios/*",\n', "")
         try:
             policy_only = ("ios/BrainBuddy/App/RootView.swift", "docs/deploy.md")
             self.assertNotEqual(self._classify(policy_only, mutant), "needed=false")
@@ -387,19 +431,9 @@ class DeployContractTest(unittest.TestCase):
             mutant.unlink()
 
     def test_deploy_classifier_mutant_fails_scripts_correction_listing(self) -> None:
-        text = DEPLOY_CLASSIFIER.read_text(encoding="utf-8")
-        deploy_arm = "backend/*|frontend/*|fly.*|docker-compose*|Dockerfile*|compose.y*ml|.dockerignore|.env)"
-        self.assertIn(deploy_arm, text)
-        mutant = _temp_workflow(text.replace(
-            deploy_arm,
-            deploy_arm.replace(".env)", ".env|scripts/*)"),
-            1,
-        ))
+        mutant = self._graph_mutant('FLY_SHARED = (".dockerignore",', 'FLY_SHARED = ("scripts/*", ".dockerignore",')
         try:
-            correction_listing = SUCCESSOR_2_PATHS
-            self.assertNotEqual(
-                self._classify(correction_listing, mutant), "needed=false"
-            )
+            self.assertNotEqual(self._classify(SUCCESSOR_2_PATHS, mutant), "needed=false")
         finally:
             mutant.unlink()
 
@@ -1414,6 +1448,36 @@ class TestFlightChangesTests(unittest.TestCase):
             with self.subTest(path=path):
                 head = self.commit(f"feat(ios): touch {path}", {path: "app\n"})
                 self.assertEqual(self.decide(f"{head}^", head), "true")
+
+    def test_rust_core_the_app_links_uploads_and_the_rest_of_rust_does_not(self) -> None:
+        """The app links bb-swift; its crate closure comes from the Cargo manifests."""
+        base = self.git("rev-parse", "HEAD")
+        not_app = (
+            "rust/crates/bb-server/src/main.rs",
+            "rust/crates/bb-conformance/tests/identity.rs",
+            "rust/bindings/python/src/lib.rs",
+            "rust/crates/bb-domain/tests/normalize.rs",
+            "rust/crates/bb-domain/README.md",
+        )
+        for path in not_app:
+            with self.subTest(path=path):
+                head = self.commit(f"chore: touch {path}", {path: "x\n"})
+                self.assertEqual(self.decide(f"{head}^", head), "false")
+        app = (
+            "rust/bindings/swift/src/lib.rs",
+            "rust/crates/bb-client/src/lib.rs",
+            "rust/crates/bb-domain/src/lib.rs",
+            "rust/crates/bb-protocol/src/lib.rs",
+            "rust/Cargo.lock",
+            "ios/scripts/build-rust-bridge.sh",
+        )
+        for path in app:
+            with self.subTest(path=path):
+                head = self.commit(f"feat(core): touch {path}", {path: "core\n"})
+                self.assertEqual(self.decide(f"{head}^", head), "true")
+        notes = self.run_script("notes", "--base", base, "--head", head, "--branch", "main")
+        self.assertIn("feat(core): touch rust/crates/bb-domain/src/lib.rs", notes)
+        self.assertNotIn("bb-server", notes)
 
     def test_moving_a_source_out_of_the_app_still_uploads(self) -> None:
         self.commit("feat(ios): add a helper", {"ios/BrainBuddy/Helper.swift": "struct Helper {}\n" * 20})

@@ -238,9 +238,11 @@ jobs:
 
       # The Fly apps serve only the backend and frontend; landings that touch
       # nothing they are built from (the native apps, docs, specs, agent
-      # config, root markdown) do not need a production release. The gate is
-      # fail-open: an unreadable parent, an empty listing, or ANY path
-      # outside the known-inert set falls through to a normal deploy.
+      # config, root markdown, Rust crates outside the backend wheel) do not
+      # need a production release, and each app is released only for its own
+      # inputs (scripts/release_graph.py: backend=, frontend=, needed=). The
+      # gate is fail-open: an unreadable parent, an empty listing, or ANY
+      # path outside the known-inert set deploys both apps.
       # Deploy-relevant paths are matched first so they always win.
       - name: Classify whether this landing needs a production deploy
         id: classify
@@ -251,12 +253,12 @@ jobs:
           set -euo pipefail
           if ! git fetch --quiet --deepen=1 origin; then
             echo "Could not deepen history; deploying (fail-open)."
-            echo "needed=true" >> "${GITHUB_OUTPUT}"
+            printf 'backend=true\nfrontend=true\nneeded=true\n' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           if ! git cat-file -e "${TESTED_SHA}^" 2>/dev/null; then
             echo "Parent of ${TESTED_SHA} unavailable; deploying (fail-open)."
-            echo "needed=true" >> "${GITHUB_OUTPUT}"
+            printf 'backend=true\nfrontend=true\nneeded=true\n' >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           git diff --no-renames --name-only -z "${TESTED_SHA}^" "${TESTED_SHA}" \
@@ -464,6 +466,14 @@ jobs:
             echo "Staging the smoke identity secrets failed (exit ${status})." >&2
             exit "${status}"
           fi
+          # A staged secret only takes effect when the backend is released,
+          # and the authenticated smoke below logs in with these values. So
+          # unless flyctl said nothing changed (a rotated GitHub secret, say),
+          # the backend deploys even when the classifier left it out.
+          if ! printf '%s\n' "${output}" | grep -qi "no change"; then
+            echo "BACKEND_SECRETS_STAGED=true" >> "${GITHUB_ENV}"
+            echo "Backend secrets changed; the backend deploys with this release."
+          fi
           # Exported so the first-transition cleanup step below can restage
           # this exact literal by reference instead of repeating it — another
           # literal BRAIN_BUDDY_FEATURE_FLAGS assignment here would give
@@ -557,12 +567,20 @@ jobs:
           fi
           echo "Staged the first-transition feature-flag seed for ${BACKEND_APP} (value not printed)."
 
+      # Each app is released only when the classifier found a change in what
+      # its image is built from (scripts/release_graph.py). The checks around
+      # these two steps (identity, staging, smoke, rollback) still run for
+      # either, because both apps serve one product.
       - name: Deploy backend
-        if: steps.classify.outputs.needed == 'true'
+        if: >-
+          steps.classify.outputs.needed == 'true' &&
+          (steps.classify.outputs.backend == 'true' ||
+          env.BACKEND_SECRETS_STAGED == 'true' ||
+          env.FIRST_TRANSITION == 'true')
         run: flyctl deploy --config fly.backend.toml --remote-only
 
       - name: Deploy frontend
-        if: steps.classify.outputs.needed == 'true'
+        if: steps.classify.outputs.needed == 'true' && steps.classify.outputs.frontend == 'true'
         run: flyctl deploy --config fly.frontend.toml --remote-only
 
       - name: Reachability smoke test
