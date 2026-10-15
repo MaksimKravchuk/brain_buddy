@@ -6,10 +6,15 @@ import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
+import "@fontsource-variable/instrument-sans";
+import "@fontsource/instrument-serif/400.css";
 
 import App from "./App";
+import { initBrand } from "./app/brand";
 import { queryClient } from "./queryClient";
 import "./styles.css";
+
+initBrand();
 
 const rootElement = document.getElementById("root");
 
