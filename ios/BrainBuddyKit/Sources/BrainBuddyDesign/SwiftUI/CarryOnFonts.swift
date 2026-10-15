@@ -68,11 +68,12 @@
     /// so text takes the same height it takes on the design boards.
     struct CarryOnTextModifier: ViewModifier {
         let style: TypeStyle
+        let lineHeight: Double
         @Environment(\.carryOnPlatform) private var platform
 
         func body(content: Content) -> some View {
             let size = style.size(for: platform)
-            let extra = max(0, size * style.lineHeight - CarryOnFonts.naturalLineHeight(style, size: size))
+            let extra = max(0, size * lineHeight - CarryOnFonts.naturalLineHeight(style, size: size))
             return content
                 .font(.carryOn(style, on: platform))
                 .tracking(size * style.tracking)
@@ -87,9 +88,10 @@
             modifier(CarryOnFontModifier(style: style))
         }
 
-        /// The style's font, tracking and line height.
-        public func carryOnText(_ style: TypeStyle) -> some View {
-            modifier(CarryOnTextModifier(style: style))
+        /// The style's font, tracking and line height. A component whose board sets its
+        /// own line height (a row, the card's project line) passes that layout token.
+        public func carryOnText(_ style: TypeStyle, lineHeight: Double? = nil) -> some View {
+            modifier(CarryOnTextModifier(style: style, lineHeight: lineHeight ?? style.lineHeight))
         }
     }
 #endif

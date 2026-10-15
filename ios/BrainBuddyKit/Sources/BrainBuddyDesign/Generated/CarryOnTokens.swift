@@ -171,12 +171,14 @@ public enum CarryOnLayout {
         public static let mark: Double = 24
         public static let markStroke: Double = 2
         public static let metaGap: Double = 2
+        public static let lineHeight: Double = 1.3
     }
     public enum NextStepCard {
         public static let paddingY: Double = 20
         public static let paddingX: Double = 22
         public static let radius: Double = 14
         public static let projectGap: Double = 6
+        public static let projectLineHeight: Double = 1.22
         public static let pressedScale: Double = 0.98
     }
     public enum Strike {
@@ -381,10 +383,12 @@ public enum CarryOnTokenTable {
         "layout.row.mark": CarryOnLayout.Row.mark,
         "layout.row.mark-stroke": CarryOnLayout.Row.markStroke,
         "layout.row.meta-gap": CarryOnLayout.Row.metaGap,
+        "layout.row.line-height": CarryOnLayout.Row.lineHeight,
         "layout.next-step-card.padding-y": CarryOnLayout.NextStepCard.paddingY,
         "layout.next-step-card.padding-x": CarryOnLayout.NextStepCard.paddingX,
         "layout.next-step-card.radius": CarryOnLayout.NextStepCard.radius,
         "layout.next-step-card.project-gap": CarryOnLayout.NextStepCard.projectGap,
+        "layout.next-step-card.project-line-height": CarryOnLayout.NextStepCard.projectLineHeight,
         "layout.next-step-card.pressed-scale": CarryOnLayout.NextStepCard.pressedScale,
         "layout.strike.thickness": CarryOnLayout.Strike.thickness,
         "layout.focus-ring.width": CarryOnLayout.FocusRing.width,

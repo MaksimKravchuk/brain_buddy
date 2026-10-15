@@ -29,7 +29,7 @@
         public var body: some View {
             VStack(alignment: .leading, spacing: Metrics.projectGap) {
                 Text(project)
-                    .carryOnText(CarryOnTypeScale.meta)
+                    .carryOnText(CarryOnTypeScale.meta, lineHeight: Metrics.projectLineHeight)
                     .foregroundStyle(.coNextStepProject)
                 Text(step)
                     .strikethrough(status == .taken, color: CarryOnColorStyle.coStepTextDone.color(in: colorScheme))

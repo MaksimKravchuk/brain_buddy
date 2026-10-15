@@ -30,7 +30,7 @@
                     titleText
                     if let detail {
                         Text(detail)
-                            .carryOnText(CarryOnTypeScale.meta)
+                            .carryOnText(CarryOnTypeScale.meta, lineHeight: Metrics.lineHeight)
                             .foregroundStyle(.coTextSecondary)
                     }
                 }
@@ -49,7 +49,7 @@
             let done = CarryOnColorStyle.coStepTextDone.color(in: colorScheme)
             return Text(title)
                 .strikethrough(status == .done, color: done)
-                .carryOnText(style)
+                .carryOnText(style, lineHeight: Metrics.lineHeight)
                 .foregroundStyle(titleColor)
         }
 
