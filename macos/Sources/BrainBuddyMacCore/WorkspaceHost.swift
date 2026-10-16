@@ -173,7 +173,7 @@ package final class WorkspaceHost {
     }
 
     /// The login-keychain store of the Mac (data-model E9).
-    nonisolated static func systemTokenStore() -> any SessionTokenStore {
+    package nonisolated static func systemTokenStore() -> any SessionTokenStore {
         #if canImport(Security)
             KeychainSessionTokenStore(service: MacHostConfiguration.keychainService)
         #else
