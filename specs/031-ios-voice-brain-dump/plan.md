@@ -135,7 +135,7 @@ the open sequence, a final result closes it, sequences start after the server's 
 the phase mapping is the web's order (completed, processing, failure, review, recording).
 Copy lives in `VoiceBrainDumpCopy` (the strings in design.md).
 
-### App (`ios/BrainBuddy/Screens/Capture/Voice/`) — PR-03
+### App (`ios/BrainBuddy/Screens/Capture/Voice/`) — PR-03 recorder, PR-04 sheet
 
 - `AppleVoiceRecorder`: `VoiceRecording` over `AVAudioSession` (`.record`, `.measurement`),
   `AVAudioEngine`, `AVAudioFile` (AAC settings above, temporary directory, deleted after
@@ -153,7 +153,7 @@ Copy lives in `VoiceBrainDumpCopy` (the strings in design.md).
 
 ## Delivery phases
 
-PR-01 (spec and API) → PR-02 (model) → PR-03 (app). PR-04 closes the feature (acceptance,
+PR-01 (spec and API) → PR-02 (model) → PR-03 (recorder) → PR-04 (sheet). PR-05 closes the feature (acceptance,
 traceability, report) after Max's device check.
 
 ## Project Structure
