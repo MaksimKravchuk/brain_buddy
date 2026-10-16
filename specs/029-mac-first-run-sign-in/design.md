@@ -1,7 +1,8 @@
 # Design: Mac first run and sign-in
 
 **Feature**: `specs/029-mac-first-run-sign-in/`
-**Spec**: [spec.md](spec.md) (thread decisions 2026-10-16; pending (a), (b), (c))
+**Spec**: [spec.md](spec.md) (thread decisions 2026-10-16; (c) answered 2026-10-16:
+Rust only; pending (a), (b))
 **Screen source**: the "Carry On · first run" board page, version `1792138611-15e1`
 (`DSOnboard.dc.html`), Mac cells **M01** Welcome, **M02** First capture, **M03** First
 step, **M04** Landing, **M05** Sign in, **M06** Invite. No separate HTML mockup is
@@ -134,6 +135,7 @@ alert.
 | A-01.05 | Google cancelled | Back to A-01.02, nothing changed | 029-FR-021 |
 | A-01.06 | Offline | Offline words of 029-FR-025; Cancel available | 029-FR-025 |
 | A-01.07 | Sign in again | Title "Sign in again", existing subtitle and footer, same methods | 029-FR-024 |
+| A-01.08 | Password only (server does not know `macos`, i.e. the Python server until the Rust cutover) | Title, kept-tasks line, the password form of A-03 directly, "Cancel" and "Advanced"; no Google button, no email field, no "or", no "Use another method", no load-failure message | 029-FR-018, 029-FR-019 |
 
 ### A-02 — Check your email
 
@@ -198,8 +200,9 @@ alert.
 | M04 card label "Garage · now" | "Now" | No project is created (thread T3); matches the iPhone cell |
 | M05 "Continue with Apple" | hidden | Pending (a); recommended later (029-FR-026) |
 | M06 six code cells in two groups | one field | Pending (b); codes are 43 characters |
-| M05 caption "Target, not today …" | built now for Google, email, password | Thread T5 |
+| M05 caption "Target, not today …" | built now for Google, email, password; Google and email shown only when `methods` reports them for `macos` (Rust server); password only against the Python server (A-01.08) | Thread T5; Max's answer to (c), Rust only |
 | Code step, outcomes, loading and error states | not drawn | A-02, A-04, A-01.01/.03/.06 with the iPhone's and 021's words |
+| Password-only sheet | not drawn | A-01.08: M05's title and kept-tasks line over the 021 X-03 form, for a server that does not know `macos` ((c)) |
 | "Not yet" landing, Esc on M01 | not drawn | F-02.06, F-01.07 |
 | Dark appearance for M02–M06 | not drawn | Tokens' dark values |
 

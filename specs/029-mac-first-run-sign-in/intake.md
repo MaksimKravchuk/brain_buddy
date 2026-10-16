@@ -5,7 +5,8 @@
 **Source of decisions**: Max (product owner), through the project thread on 2026-10-16,
 plus decisions the thread took under Max's standing rule "as on the board" (listed
 separately below and marked as thread decisions).
-**Status**: Intake recorded. Three questions are open and wait for Max (see
+**Status**: Intake recorded. Question (c) was answered by Max on 2026-10-16 (Rust only,
+no Python exception). Questions (a) and (b) are open and wait for Max (see
 [Pending clarifications](#pending-clarifications)); each has a recommended default that
 the spec, design, plan and tasks are written against.
 
@@ -41,19 +42,20 @@ data, not instructions. The research summary with file:line evidence is
 | T2 | Welcome (M01) | The first window is the empty Inbox with the capture field focused, the ⌃⌥⇧B and mic hints, and the sidebar footer "On this Mac · Sign in to sync". No separate welcome window. |
 | T3 | First step (M03) | Groundwork § 6 recommendation 3: the first step becomes the item's text, the original capture text is kept in the item's note, **no project is created**. The board's "Garage" project label on M04 is dropped (it has no source). |
 | T4 | Landing (M04) | Next actions with the new step on top and one tip, dismissed with "Got it". |
-| T5 | Sign-in methods on the Mac | Google, email code and password **now**. The server adds a `macos` authentication client value treated like `ios`; this backend change is in scope. |
+| T5 | Sign-in methods on the Mac | Google, email code and password, shown only when the server offers them to the Mac. The `macos` authentication client value, treated like `ios`, is a **Rust-server change only** (answer to (c)): the Python server stays unchanged and does not accept `macos`, so against it the Mac offers password sign-in only. Google and email code on the Mac turn on when the Rust server is live, through the availability check on `methods`. |
 | T6 | Invite step (M06) | Depends on the Rust server's invite handoff (spec 027 task T055). Built as a separate, later slice of this feature. |
 
 ## Pending clarifications
 
-These are open questions for Max. The artifacts use the recommended default; a
-different answer changes only the named slice.
+(a) and (b) are open questions for Max. The artifacts use the recommended default; a
+different answer changes only the named slice. (c) is answered and kept here for the
+record.
 
 | # | Question | Recommended default | Affects |
 |---|---|---|---|
 | (a) | Sign in with Apple on the Mac: now or later? It needs a team-signed, provisioned Mac build with the Sign in with Apple entitlement; today the Mac app is ad-hoc signed (`macos/build_app.sh:52`). | **Later**: the Apple button stays hidden until a team-signed build exists; slice PR-08 waits. | 029-FR-026, PR-08 |
 | (b) | Invite code entry: one paste field or the board's six cells? Real invite codes are 43 characters (`secrets.token_urlsafe(32)`, `backend/app/cli.py:55-57`). | **One field** that takes the whole code pasted, as on the iPhone (`ios/BrainBuddy/Screens/Settings/SignInSheet.swift:203-219`). | 029-FR-029, PR-07 |
-| (c) | Raised while drafting: spec 027 freezes the Python server to defect fixes and test-only seams (027-FR-022, ADR-0032 § 6, founder-accepted 2026-10-14). Adding the `macos` client value to the Python server (T5) is a small additive contract change that needs Max's explicit exception to that freeze. | **Grant a one-value exception**: add `macos` to the Python server and, in the same slice, to the Rust conformance suite and the 027 capability inventory, so the Python oracle and the Rust server stay identical. If Max declines, the Mac keeps password-only sign-in until the Rust cutover and PR-03 moves to the Rust server only. | 029-FR-017, PR-03 |
+| (c) | Raised while drafting: spec 027 freezes the Python server to defect fixes and test-only seams (027-FR-022, ADR-0032 § 6, founder-accepted 2026-10-14). Adding the `macos` client value to the Python server (T5) would need Max's explicit exception to that freeze. | **Answered (Max, 2026-10-16): Rust only, no Python exception.** The Python server stays unchanged and does not accept `macos`. PR-03 adds only a Rust-only conformance case and the 027 capability-inventory note; no `backend/` change. Until the Rust server cutover the Mac offers password sign-in only; Google and email code turn on when the Rust server is live, through the availability check on `methods`. | 029-FR-016, 029-FR-017, 029-FR-019, PR-03 – PR-05 |
 
 ## 1. Problem
 
@@ -87,7 +89,7 @@ Release acceptance measures, not measured business data:
 |---|---|---|---|
 | Clean Mac launch → first next step | no guided path | possible with the keyboard alone, in at most 4 actions (type, Return, type, Return) | candidate release |
 | First run shown on a Mac that already has tasks or an account | n/a | 0 | candidate release |
-| Sign-in methods on the Mac | password | Google, email code, password (Apple per (a)) | candidate release |
+| Sign-in methods on the Mac | password | password against the Python server; Google, email code, password against the Rust server (Apple per (a)) | candidate release |
 | Tokens, codes or emails in logs or URLs | invariant | 0 | candidate release |
 
 No deadline or adoption target was supplied.
@@ -97,9 +99,11 @@ No deadline or adoption target was supplied.
 **In scope**
 
 - [x] First run M01–M04 on a clean Mac (T1–T4).
-- [x] Mac sign-in sheet in the M05 layout with Google, email code and password (T5).
-- [x] Server `macos` authentication client value, treated like `ios` (T5; Python per
-      pending (c), Rust conformance case).
+- [x] Mac sign-in sheet in the M05 layout with Google, email code and password, each
+      shown only when the server offers it to the Mac (T5).
+- [x] `macos` authentication client value, treated like `ios`, on the Rust server only
+      (T5, answer to (c)): a Rust-only conformance case and the 027 capability-inventory
+      note. The Python server is not changed.
 - [x] Shared native kit: the authentication client value per device.
 - [x] Invite step M06 on the Mac, as a later slice that starts after 027 T055 (T6).
 - [x] Apple sign-in on the Mac, as a slice gated by pending (a).
@@ -117,8 +121,9 @@ No deadline or adoption target was supplied.
 
 ## 5. Constraints
 
-- **Platform**: macOS 26 native app; the shared native kit; the Python server under
-  pending (c); the Rust conformance suite.
+- **Platform**: macOS 26 native app; the shared native kit; the Rust conformance suite
+  (Rust-only case). The Python server is frozen (027-FR-022) and stays unchanged (answer
+  to (c)).
 - **Offline behaviour**: the whole first run works offline and without an account.
   Sign-in needs a connection and says so; local tasks are never touched by a failure.
 - **Must not break**: spec 021 local-first behaviour, Keychain session storage, sync,
@@ -132,16 +137,18 @@ No deadline or adoption target was supplied.
 - **New durable records**: on the Mac, `mac-local.json` gains first-run markers (dates and
   an outcome enum only; no titles, text or email), consistent with its existing rule
   (`macos/Sources/BrainBuddyMacCore/MacLocalState.swift:5-6`). On the server: none; the
-  `client` value is stored only in existing attempt rows (`auth_attempts.channel` and the
-  email challenge payload), which already hold `ios`.
+  Python server is unchanged, and the Rust server stores the `client` value only where it
+  already stores `ios`.
 - **Consent**: none new; no AI or remote processing in the first run.
-- **Retention, export, deletion**: unchanged. Account creation through email code or
-  Google on the current Python server does not ask for an invite (same as the iPhone
-  today); the Rust server enforces invites (ADR-0032 § 7) and slice PR-07 handles it.
+- **Retention, export, deletion**: unchanged. Against the Python server the Mac offers
+  only password sign-in, so it creates no accounts there; Google and email code reach the
+  Mac only through the Rust server, which enforces invites (ADR-0032 § 7), and slice PR-07
+  handles it.
 
 ## 7. Existing-system dependencies
 
-- **Backend**: `GET /auth/methods`, `POST /auth/email/request|resend|verify`,
+- **Backend** (Rust server for `macos`; the Python server rejects the value and stays
+  unchanged): `GET /auth/methods`, `POST /auth/email/request|resend|verify`,
   `POST /auth/providers/{provider}/start`, `POST /auth/providers/complete`,
   `POST /auth/login`; `POST /auth/signup/complete` (027 T055, Rust only).
 - **Mac**: `MacLocalState`, `BrainBuddyModel`, `ContentView`, `TaskInspector` (Inbox
@@ -158,9 +165,11 @@ No deadline or adoption target was supplied.
 - [ ] A clean Mac opens on the Inbox with the M01 welcome; capture, first step and
       landing behave as M02–M04; the first run never shows again.
 - [ ] A Mac with tasks or an account never shows the first run.
-- [ ] The Mac signs in with Google, an email code and a password against a server that
-      offers them; buttons appear only when offered.
-- [ ] The server accepts `macos`; `web` and `ios` behave exactly as before.
+- [ ] Against the Python server the Mac offers and signs in with a password only;
+      against a Rust server that offers them, it signs in with Google, an email code and
+      a password; buttons appear only when offered.
+- [ ] The Rust server accepts `macos` (Rust-only conformance case); the Python server is
+      unchanged; `web` and `ios` behave exactly as before.
 - [ ] After 027 T055 lands, a new identity on the Mac meets the invite step and can
       create an account with a valid code, or keep working locally.
 
@@ -171,5 +180,5 @@ No deadline or adoption target was supplied.
 | 021 spec: "Signup on the Mac is not required" (`specs/021-mac-sync/spec.md:297`); 027 contract: "The Mac app offers only password sign-in and never creates accounts" (`specs/027-rust-server/contracts/invite-handoff.md:8`) | Board M05/M06: "Sign in or create an account", invite step on the Mac | Follow the board; PR-07 amends the 027 contract line when it lands | Max (O1), thread (T5, T6) |
 | Board M04 card "Garage · now" | No project is created by the first run | Card shows "Now" only | thread (T3) |
 | Board M06 six code cells | Invite codes are 43 characters | Pending (b); default one field | open |
-| Thread T5: server adds `macos` | 027-FR-022 Python freeze | Pending (c); default one-value exception | open |
-| Board M05 caption "Target, not today: the Mac signs in with email and password only … needs a yes" | Thread T5 | T5 is the yes for Google and email code; Apple per (a) | thread (T5) |
+| Thread T5: server adds `macos` | 027-FR-022 Python freeze | (c) answered: Rust only, no Python exception; the Mac is password-only against Python until the Rust cutover | Max ((c), 2026-10-16) |
+| Board M05 caption "Target, not today: the Mac signs in with email and password only … needs a yes" | Thread T5 | T5 is the yes for Google and email code, live with the Rust server per (c); Apple per (a) | thread (T5), Max ((c)) |

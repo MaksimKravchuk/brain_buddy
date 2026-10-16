@@ -4,8 +4,9 @@
 
 **Created**: 2026-10-16
 
-**Status**: Clarified, with three pending clarifications for Max ((a), (b), (c)); every
-artifact is written against their recommended defaults. Design: [design.md](design.md).
+**Status**: Clarified. Max answered (c) on 2026-10-16 (Rust only, no Python exception);
+two clarifications are pending for Max ((a), (b)), and every artifact is written against
+their recommended defaults. Design: [design.md](design.md).
 Plan: [plan.md](plan.md). Tasks: [tasks.md](tasks.md).
 
 **Input**: User description: "Mac first run and sign-in". Design input: the "Carry On ·
@@ -24,8 +25,10 @@ but nothing teaches them. The Inbox inspector already asks for a first step
 
 Mac sign-in is email and password only (`SignInFlow.swift:47-312`). The iPhone and web
 already sign in with Google and an email code (spec 023), through kit calls that
-hard-code the `ios` client (`NativeAuthentication.swift:139,149,163`); the server accepts
-only `web` and `ios` (`backend/app/schemas/modern_auth.py:13`).
+hard-code the `ios` client (`NativeAuthentication.swift:139,149,163`); the Python server
+accepts only `web` and `ios` (`backend/app/schemas/modern_auth.py:13`) and, frozen by
+027-FR-022, keeps it that way (answer to (c)). The `macos` value is added on the Rust
+server only.
 
 The board draws a first run in four steps — Welcome (M01), First capture (M02), First
 step (M03), Landing (M04) — and a sign-in sheet (M05) and invite step (M06) for the Mac.
@@ -51,9 +54,17 @@ rule are recorded in [intake.md](intake.md#thread-decisions-under-maxs-as-on-the
   029-FR-011.
 - Q4: Where does the first run end? → A (thread, T4): on Next actions with the new step
   on top and one tip with "Got it". Affects 029-FR-011.
-- Q5: Which sign-in methods does the Mac get now? → A (thread, T5): Google, email code and
-  password; the server adds a `macos` client value treated like `ios`. Affects
+- Q5: Which sign-in methods does the Mac get now? → A (thread, T5, narrowed by Max's
+  answer to (c)): Google, email code and password, each shown only when `methods` reports
+  it for the Mac. The `macos` client value, treated like `ios`, is a Rust-server change
+  only; against the Python server the Mac offers password sign-in only. Affects
   029-FR-016 – 029-FR-025.
+- Q7 ((c)): May the Python server take a one-value exception to the 027 freeze for
+  `macos`? → A (Max, 2026-10-16): **No. Rust only.** The Python server stays unchanged and
+  does not accept `macos`. Until the Rust server cutover the Mac offers password sign-in
+  only; Google and email code turn on when the Rust server is live, through the
+  availability check on `methods` (029-FR-019). Affects 029-FR-016, 029-FR-017,
+  029-FR-019, 029-SC-005, 029-SC-006.
 - Q6: Invite step? → A (thread, T6): depends on the Rust server's invite handoff (027
   T055); a separate, later slice. Affects 029-FR-028 – 029-FR-030.
 
@@ -65,11 +76,8 @@ rule are recorded in [intake.md](intake.md#thread-decisions-under-maxs-as-on-the
   start.
 - **(b)** Invite code entry. Real codes are 43 characters; the board draws six cells.
   **Recommended: one field that takes the whole code pasted** (029-FR-029).
-- **(c)** Raised while drafting: the Python server is frozen to defect fixes by 027-FR-022
-  (ADR-0032 § 6). **Recommended: a one-value exception** for `macos`, added to the Python
-  server, the Rust conformance suite and the 027 capability inventory together
-  (029-FR-017). If declined, Google and email code on the Mac wait for the Rust cutover,
-  and the Mac keeps password sign-in until then.
+- **(c)** Answered on 2026-10-16 (see Q7 above): Rust only, no exception to the 027
+  Python freeze.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -147,17 +155,20 @@ From the sidebar footer "On this Mac · Sign in to sync" (or the menu), the pers
 the sign-in sheet: "Sign in or create an account", "The tasks on this Mac are kept.
 Signing in adds them to your account.", "Continue with Google", "or", an email field with
 "Send me a code", "Cancel", "Use a password instead" and "Advanced". Buttons appear only
-for the methods the server offers to the Mac.
+for the methods the server offers to the Mac. The Python server does not know the `macos`
+client (answer to (c)), so against it the sheet offers the password path only; Google and
+the email code appear once the Rust server is live and offers them.
 
-**Independent Test**: against a server offering Google and email, sign in once with each
-of Google, an email code and a password on a clean Mac with local tasks; each ends signed
-in to the expected account with the local tasks added.
+**Independent Test**: against a Rust server offering Google and email, sign in once with
+each of Google, an email code and a password on a clean Mac with local tasks; each ends
+signed in to the expected account with the local tasks added. Against the Python server,
+the sheet offers only the password path and a password sign-in succeeds.
 
 **Acceptance Scenarios**:
 
-1. **Given** the server offers Google and email, **When** the sheet opens, **Then** it
-   shows the M05 layout without an Apple button (029-FR-026) and with the email field
-   focused.
+1. **Given** the server offers Google and email for `macos` (Rust server), **When** the
+   sheet opens, **Then** it shows the M05 layout without an Apple button (029-FR-026) and
+   with the email field focused.
 2. **Given** an email entered, **When** the person chooses "Send me a code", **Then** the
    sheet asks for the 6-digit code with Verify, a resend countdown and the expiry time;
    a correct code signs in.
@@ -172,6 +183,9 @@ in to the expected account with the local tasks added.
 6. **Given** a sign-in completes, **Then** the existing spec 021 behaviour follows: local
    tasks are added to the account, sync starts, and a cancelled account deletion is
    announced as today.
+7. **Given** the Python server, which rejects the `macos` client on `methods`, **When**
+   the sheet opens, **Then** it shows the title, the kept-tasks line and the password path
+   only, with no Google button, no email field and no load-failure message.
 
 ---
 
@@ -234,9 +248,9 @@ local tasks are untouched.
   and the password path remain.
 - A Google identity whose email belongs to another account: the iPhone's collision words
   ("Connect to your existing account" …); nothing is linked.
-- Before 027 T055 (or on the Python server), a new identity simply gets an account (the
-  server's current behaviour); on a Rust server before PR-07, `INVITE_REQUIRED` shows the
-  interim message of 029-FR-023.
+- On the Python server the Mac offers only the password path, so no new identity reaches
+  the Mac's Google or email-code flow there; on a Rust server before PR-07,
+  `INVITE_REQUIRED` shows the interim message of 029-FR-023.
 - Reduce Motion, increased contrast, dark appearance: tokens in both appearances, no
   motion when reduced.
 
@@ -313,22 +327,27 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
 
 - **FR-016**: (`029-FR-016`) The shared native kit MUST send the authentication client
   value of the device it runs on — `ios` on the iPhone (unchanged) and `macos` on the Mac —
-  on the methods, email-code request and resend, and provider start calls.
-- **FR-017**: (`029-FR-017`) The server MUST accept `macos` as an authentication client
-  value and treat it like `ios` (native session, no browser binder, the `brainbuddy://`
-  return, the native channel), except that it MUST report Apple as not offered and refuse
-  an Apple start for `macos` until a Mac Apple audience is configured (PR-08). Behaviour
-  for `web` and `ios` MUST NOT change. (Python server per pending (c); the Rust server
-  through the conformance suite.)
+  on the methods, email-code request and resend, and provider start calls. The Mac MUST
+  NOT send `ios` in place of `macos` to reach a server that does not know `macos`.
+- **FR-017**: (`029-FR-017`) The Rust server MUST accept `macos` as an authentication
+  client value and treat it like `ios` (native session, no browser binder, the
+  `brainbuddy://` return, the native channel), except that it MUST report Apple as not
+  offered and refuse an Apple start for `macos` until a Mac Apple audience is configured
+  (PR-08). This is a Rust-server change only, verified by a Rust-only conformance case
+  (answer to (c)): the Python server MUST stay unchanged and keeps rejecting `macos`.
+  Behaviour for `web` and `ios` MUST NOT change on either server.
 - **FR-018**: (`029-FR-018`) The Mac sign-in sheet MUST follow M05: "Sign in or create an
   account", "The tasks on this Mac are kept. Signing in adds them to your account.", the
-  provider buttons the server offers, "or", the email field and "Send me a code" when
-  email is offered, "Cancel", "Use a password instead" and "Advanced" (server address,
-  existing behaviour).
+  provider buttons `methods` reports for `macos`, "or", the email field and "Send me a
+  code" when `methods` reports email, "Cancel", "Use a password instead" and "Advanced"
+  (server address, existing behaviour). It MUST NOT show a method `methods` does not
+  report.
 - **FR-019**: (`029-FR-019`) The sheet MUST read the offered methods from the chosen
-  server with the `macos` client, show "Loading sign-in methods…" meanwhile, and on failure
-  show "Couldn't load sign-in methods. Try again or use your password." with Try again,
-  keeping the password path available.
+  server with the `macos` client and show "Loading sign-in methods…" meanwhile. When the
+  server rejects the `macos` client value as unknown (the Python server's validation
+  error), the sheet MUST treat it as "no modern methods for the Mac" and show the password
+  path only, without an error. Any other failure MUST show "Couldn't load sign-in methods.
+  Try again or use your password." with Try again, keeping the password path available.
 - **FR-020**: (`029-FR-020`) "Send me a code" MUST request an email code and show the code
   step: "Check your email", "If this address can be used, you will receive a code. Use
   another email or method if it doesn't arrive.", a 6-digit field (digits only), "Verify
@@ -401,7 +420,7 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
 - **First capture**: an ordinary Inbox task; after the first step its title is the step
   and its note (details) the original text.
 - **Authentication client value**: `web`, `ios` or `macos`, sent by each client on the
-  modern authentication calls.
+  modern authentication calls. `macos` is known only to the Rust server.
 - **Sign-in attempt**: the kit's native attempt (challenge and verifier), which the Mac
   completes with a password, an email code or a provider result.
 - **Invite handoff**: the server's opaque, single-use pending token of `INVITE_REQUIRED`.
@@ -419,12 +438,13 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
   prompts occur unless the person presses the mic or opens sign-in.
 - **SC-004**: (`029-SC-004`) After "Make it my next step", 100% of first captures keep their
   original text in the note, and 0 projects are created.
-- **SC-005**: (`029-SC-005`) Against a server offering Google and email, the Mac signs in
-  with each of Google, an email code and a password, landing in the same account the
-  iPhone reaches for the same identity.
+- **SC-005**: (`029-SC-005`) Against a Rust server offering Google and email for `macos`,
+  the Mac signs in with each of Google, an email code and a password, landing in the same
+  account the iPhone reaches for the same identity. Against the Python server, the Mac
+  shows only the password path and signs in with a password.
 - **SC-006**: (`029-SC-006`) Server: every existing modern-authentication test for `web`
-  and `ios` passes unchanged, and the `macos` cases pass on the Python server and in the
-  Rust conformance suite.
+  and `ios` passes unchanged, the Python server has 0 changed lines under `backend/`, and
+  the Rust-only `macos` conformance case passes against the Rust server.
 - **SC-007**: (`029-SC-007`) In every failure case (offline, cancel, wrong code, collision,
   invite required, another account on sign-in again, failed first-step save), 0 local
   tasks or unsent changes are lost or altered.
@@ -437,16 +457,18 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
 
 | Need | Existing contract | Change |
 |---|---|---|
-| Offered methods | `GET /auth/methods?client=` | accepts `macos` (029-FR-017) |
-| Email code | `POST /auth/email/request`, `/resend`, `/verify` | accepts `macos` |
-| Google | `POST /auth/providers/{provider}/start`, `/providers/complete` | accepts `macos`; Apple refused for `macos` until PR-08 |
+| Offered methods | `GET /auth/methods?client=` | Rust server accepts `macos` (029-FR-017); Python unchanged, rejects it, and the Mac falls back to password (029-FR-019) |
+| Email code | `POST /auth/email/request`, `/resend`, `/verify` | Rust server accepts `macos`; Python unchanged |
+| Google | `POST /auth/providers/{provider}/start`, `/providers/complete` | Rust server accepts `macos`, Apple refused for `macos` until PR-08; Python unchanged |
 | Password | `POST /auth/login` through the native attempt | none |
 | Invite step | `403 INVITE_REQUIRED` + `POST /auth/signup/complete` | none here; 027 T055 (Rust) |
 | Local capture, move, notes | kit `GTDCommand` `createTask`, `updateTask` (title, details), `transitionTask` | none |
 | Global shortcut, voice | `QuickCaptureView`, `VoiceCapture` | read their availability |
 
-- Spec 027 (Rust server) must carry the `macos` value; this feature adds the conformance
-  case and the capability-inventory row (PR-03). PR-07 amends
+- Spec 027 (Rust server) must carry the `macos` value; this feature adds a Rust-only
+  conformance case and the capability-inventory note (PR-03), and changes nothing under
+  `backend/` (answer to (c)). Google and email code on the Mac depend on the Rust server
+  serving modern authentication in production. PR-07 amends
   `specs/027-rust-server/contracts/invite-handoff.md:8`, which says the Mac never creates
   accounts.
 
@@ -454,9 +476,11 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
 
 - The Google OAuth client that serves the web and the iPhone serves the Mac (one web
   client, `brainbuddy://` return through the system authentication session).
-- On the Python server, a new identity by Google or email code creates an account without
-  an invite, as it does for the iPhone today; the Rust server's invite rule (ADR-0032 § 7)
-  is handled by PR-07.
+- On the Python server the Mac offers only password sign-in, so it creates no accounts
+  there; the Rust server's invite rule (ADR-0032 § 7) is handled by PR-07.
+- The Python server answers an unknown `client` value on `GET /auth/methods` with its
+  validation error (422, `Client = Literal["web", "ios"]`), which the Mac reads as "no
+  modern methods for the Mac" (029-FR-019).
 - Primary loop impact: the first run guides one item through capture → Inbox → clarify →
   Next actions with existing commands; Weekly Review, CRT and evidence are unchanged. No AI
   and no new consent.
