@@ -45,7 +45,7 @@ struct BrainBuddyMacApp: App {
     var body: some Scene {
         Window("Brain Buddy", id: "main") {
             ContentView(launch: launch)
-                .tint(.coTextPrimary)
+                .tint(CarryOnColorStyle.coTextPrimary)
                 .frame(minWidth: 720, minHeight: 480)
         }
         .defaultSize(width: 960, height: 640)
