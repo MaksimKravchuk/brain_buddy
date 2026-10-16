@@ -132,7 +132,7 @@ struct AccountExportAPITests {
         let client = Fixture.client(transport, store: Fixture.signedInStore())
         let task = Task { () -> APIError? in
             withUnsafeCurrentTask { $0?.cancel() }
-            do { _ = try await client.exportAccount() } catch { return error }
+            do throws(APIError) { _ = try await client.exportAccount() } catch { return error }
             return nil
         }
         let error = await task.value
