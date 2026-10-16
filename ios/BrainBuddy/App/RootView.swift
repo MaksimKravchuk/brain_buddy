@@ -32,7 +32,7 @@ enum ReviewExposure {
 /// (boards 01 to 03), and otherwise the tab view.
 struct RootView: View {
     @Environment(Workspace.self) private var workspace
-    @Environment(FirstRunFlow.self) private var firstRun
+    @Environment(PhoneFirstRunFlow.self) private var firstRun
     @Environment(AppRouter.self) private var router
 
     var body: some View {
@@ -70,7 +70,7 @@ struct RootView: View {
         if FirstRunLaunch.isSuppressed {
             firstRun.suppress()
         } else {
-            firstRun.decide(FirstRunLaunchFacts(workspace))
+            firstRun.decide(PhoneFirstRunLaunchFacts(workspace))
         }
     }
 }

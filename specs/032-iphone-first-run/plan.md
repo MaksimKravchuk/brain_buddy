@@ -4,7 +4,7 @@
 
 ## Summary
 
-A `FirstRunFlow` model in `BrainBuddyWorkspace` decides once per device whether the first
+A `PhoneFirstRunFlow` model in `BrainBuddyWorkspace` decides once per device whether the first
 run shows, walks it with the existing workspace commands, and records only dates and an
 outcome in the app's own `UserDefaults`. The app shows boards 01–03 in place of the tabs
 while the flow covers the app, and the board 04 tip on Next actions. Same decision rules as
@@ -19,7 +19,7 @@ Foundation-only and tested on Linux and macOS with Swift Testing; the views comp
 ## Constitution Check
 
 - Principle II (tested delivery): the decision rules, the writes and the record are
-  covered by `FirstRunFlowTests` in the package; the SwiftUI screens hold no rule.
+  covered by `PhoneFirstRunFlowTests` in the package; the SwiftUI screens hold no rule.
 - Rules stay in Core: the flow dispatches existing `GTDCommand`s through `Workspace.apply`
   and never re-checks a transition.
 - Design tokens: sizes off the type scale are tokens, regenerated with
@@ -27,9 +27,11 @@ Foundation-only and tested on Linux and macOS with Swift Testing; the views comp
 
 ## Architecture
 
-- `BrainBuddyWorkspace/FirstRunFlow.swift`: `FirstRunPhase`, `FirstRunRecord`,
-  `FirstRunRecordStore` (+ `UserDefaultsFirstRunRecordStore`, key `BBFirstRunRecord`),
-  `FirstRunLaunchFacts` (from a loaded `Workspace`), `FirstRunFlow`.
+- `BrainBuddyWorkspace/PhoneFirstRunFlow.swift`: `PhoneFirstRunPhase`, `PhoneFirstRunRecord`,
+  `PhoneFirstRunRecordStore` (+ `UserDefaultsPhoneFirstRunRecordStore`, key `BBFirstRunRecord`),
+  `PhoneFirstRunLaunchFacts` (from a loaded `Workspace`), `PhoneFirstRunFlow`. The `Phone`
+  prefix keeps them apart from the Mac's `FirstRunPhase` / `FirstRunRecord` /
+  `FirstRunLaunchFacts` in `BrainBuddyMacCore`, which imports the same kit.
 - Writes: capture = one `createTask` in the Inbox; first step = `updateTask` (title, note)
   plus `transitionTask` move to Next in one `apply`.
 - App: `App/BrainBuddyApp.swift` owns the flow and puts it in the environment;
@@ -41,7 +43,7 @@ Foundation-only and tested on Linux and macOS with Swift Testing; the views comp
 
 ## Verification
 
-- `sh ios/scripts/swift-linux.sh test --filter FirstRunFlowTests` (or `swift test` on macOS).
+- `sh ios/scripts/swift-linux.sh test --filter PhoneFirstRunFlowTests` (or `swift test` on macOS).
 - `DesignTokensTests` (generated file matches the JSON).
 - `ios-app` lane builds the app.
 - Host check on a simulator or device (fresh install walk-through, VoiceOver) by the owner.

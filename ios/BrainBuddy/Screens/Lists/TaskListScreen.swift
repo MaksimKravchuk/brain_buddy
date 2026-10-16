@@ -16,7 +16,7 @@ struct TaskListScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
     /// Nil only in previews; the app always provides it.
-    @Environment(FirstRunFlow.self) private var firstRun: FirstRunFlow?
+    @Environment(PhoneFirstRunFlow.self) private var firstRun: PhoneFirstRunFlow?
     @Environment(\.appTab) private var tab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Read so date views and due chips redraw on a new day.

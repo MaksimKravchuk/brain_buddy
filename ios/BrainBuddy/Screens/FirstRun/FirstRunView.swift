@@ -7,7 +7,7 @@ import SwiftUI
 /// in. No account wall, no tour, no permission prompt and no AI; every screen does real work and
 /// can be left. Toasts (a save that failed) show over it, since the tabs are not there yet.
 struct FirstRunView: View {
-    @Environment(FirstRunFlow.self) private var flow
+    @Environment(PhoneFirstRunFlow.self) private var flow
 
     var body: some View {
         Group {
@@ -31,7 +31,7 @@ struct FirstRunView: View {
 private struct FirstRunWelcome: View {
     private typealias Layout = CarryOnLayout.FirstRun
 
-    @Environment(FirstRunFlow.self) private var flow
+    @Environment(PhoneFirstRunFlow.self) private var flow
     @State private var signsIn = false
 
     var body: some View {

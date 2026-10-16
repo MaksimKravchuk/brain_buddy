@@ -4,7 +4,7 @@ import Observation
 
 /// Where the iPhone's one-time first run (boards 01–04, the iPhone side of spec 029) stands.
 /// `undecided` until the workspace has loaded; `done` shows the app as it always was.
-public enum FirstRunPhase: Hashable, Sendable {
+public enum PhoneFirstRunPhase: Hashable, Sendable {
     /// Board 01: the logo, "Start" and "I have an account".
     case welcome
     /// Board 02: "What feels heaviest?" with the field focused.
@@ -18,7 +18,7 @@ public enum FirstRunPhase: Hashable, Sendable {
 
 /// When the first run was decided, how it ended and when its tip was dismissed. Only dates and
 /// an outcome: never the text the person wrote.
-public struct FirstRunRecord: Codable, Hashable, Sendable {
+public struct PhoneFirstRunRecord: Codable, Hashable, Sendable {
     public enum Outcome: String, Codable, Sendable {
         case notNeeded, inProgress, skipped, notYet, firstStep, signedIn
     }
@@ -34,17 +34,17 @@ public struct FirstRunRecord: Codable, Hashable, Sendable {
     }
 }
 
-/// Keeps the one `FirstRunRecord` of this device.
+/// Keeps the one `PhoneFirstRunRecord` of this device.
 @MainActor
-public protocol FirstRunRecordStore: AnyObject {
-    func load() -> FirstRunRecord?
-    func save(_ record: FirstRunRecord) throws
+public protocol PhoneFirstRunRecordStore: AnyObject {
+    func load() -> PhoneFirstRunRecord?
+    func save(_ record: PhoneFirstRunRecord) throws
 }
 
 /// The record as JSON under one `UserDefaults` key: the app's own defaults, never the App
 /// Group, so the widget and App Intents never see or decide it.
 @MainActor
-public final class UserDefaultsFirstRunRecordStore: FirstRunRecordStore {
+public final class UserDefaultsPhoneFirstRunRecordStore: PhoneFirstRunRecordStore {
     public static let key = "BBFirstRunRecord"
     private let defaults: UserDefaults
 
@@ -52,19 +52,19 @@ public final class UserDefaultsFirstRunRecordStore: FirstRunRecordStore {
         self.defaults = defaults
     }
 
-    public func load() -> FirstRunRecord? {
+    public func load() -> PhoneFirstRunRecord? {
         guard let data = defaults.data(forKey: Self.key) else { return nil }
-        return try? JSONDecoder().decode(FirstRunRecord.self, from: data)
+        return try? JSONDecoder().decode(PhoneFirstRunRecord.self, from: data)
     }
 
-    public func save(_ record: FirstRunRecord) throws {
+    public func save(_ record: PhoneFirstRunRecord) throws {
         defaults.set(try JSONEncoder().encode(record), forKey: Self.key)
     }
 }
 
 /// What the device already holds at launch, read from the loaded workspace without any network
 /// call.
-public struct FirstRunLaunchFacts: Hashable, Sendable {
+public struct PhoneFirstRunLaunchFacts: Hashable, Sendable {
     public var hasAccount: Bool
     /// A Rust-selected workspace was imported from an earlier store: never a fresh install.
     public var isRustSelected: Bool
@@ -89,7 +89,7 @@ public struct FirstRunLaunchFacts: Hashable, Sendable {
     var isClean: Bool { !hasAccount && !isRustSelected && taskCount == 0 && projectCount == 0 && tagCount == 0 }
 }
 
-extension FirstRunLaunchFacts {
+extension PhoneFirstRunLaunchFacts {
     /// The facts of a loaded workspace. Completed and cancelled tasks count: a device that was
     /// ever used is not new.
     @MainActor
@@ -109,15 +109,15 @@ extension FirstRunLaunchFacts {
 /// Inbox, then an `updateTask` and a move to Next actions.
 @MainActor
 @Observable
-public final class FirstRunFlow {
-    public private(set) var phase: FirstRunPhase = .undecided
-    public private(set) var record: FirstRunRecord?
+public final class PhoneFirstRunFlow {
+    public private(set) var phase: PhoneFirstRunPhase = .undecided
+    public private(set) var record: PhoneFirstRunRecord?
     /// In memory only: the words the person captured, shown above the first-step question.
     public private(set) var capturedText: String?
-    @ObservationIgnored private let store: any FirstRunRecordStore
+    @ObservationIgnored private let store: any PhoneFirstRunRecordStore
     @ObservationIgnored private let now: () -> Date
 
-    public init(store: any FirstRunRecordStore, now: @escaping () -> Date = { Date() }) {
+    public init(store: any PhoneFirstRunRecordStore, now: @escaping () -> Date = { Date() }) {
         self.store = store
         self.now = now
         record = store.load()
@@ -137,7 +137,7 @@ public final class FirstRunFlow {
 
     /// Decides once, after the workspace has loaded. A record that cannot be written would show
     /// the welcome on every launch, so a clean device whose record fails to save skips it.
-    public func decide(_ facts: FirstRunLaunchFacts) {
+    public func decide(_ facts: PhoneFirstRunLaunchFacts) {
         guard phase == .undecided else { return }
         if let known = record {
             decideKnown(known, facts)
@@ -145,11 +145,11 @@ public final class FirstRunFlow {
         }
         let decidedAt = now()
         guard facts.isClean else {
-            _ = write(FirstRunRecord(decidedAt: decidedAt, outcome: .notNeeded))
+            _ = write(PhoneFirstRunRecord(decidedAt: decidedAt, outcome: .notNeeded))
             phase = .done
             return
         }
-        phase = write(FirstRunRecord(decidedAt: decidedAt, outcome: .inProgress)) ? .welcome : .done
+        phase = write(PhoneFirstRunRecord(decidedAt: decidedAt, outcome: .inProgress)) ? .welcome : .done
     }
 
     /// Sample data and UI test launches: the app opens as usual and nothing is recorded.
@@ -161,7 +161,7 @@ public final class FirstRunFlow {
     /// The first run never resumes after the capture: an item already in the Inbox stays there
     /// and the app opens as usual. A device that is still clean (the app was closed on the
     /// welcome or before adding) starts at the welcome again.
-    private func decideKnown(_ known: FirstRunRecord, _ facts: FirstRunLaunchFacts) {
+    private func decideKnown(_ known: PhoneFirstRunRecord, _ facts: PhoneFirstRunLaunchFacts) {
         switch known.outcome {
         case .inProgress:
             if facts.hasAccount {
@@ -275,8 +275,8 @@ public final class FirstRunFlow {
 
     // MARK: Record
 
-    private func finish(_ outcome: FirstRunRecord.Outcome) {
-        var known = record ?? FirstRunRecord(decidedAt: now(), outcome: outcome)
+    private func finish(_ outcome: PhoneFirstRunRecord.Outcome) {
+        var known = record ?? PhoneFirstRunRecord(decidedAt: now(), outcome: outcome)
         known.outcome = outcome
         _ = write(known)
         capturedText = nil
@@ -284,7 +284,7 @@ public final class FirstRunFlow {
     }
 
     /// False (nothing changed) when the record cannot be saved.
-    private func write(_ next: FirstRunRecord) -> Bool {
+    private func write(_ next: PhoneFirstRunRecord) -> Bool {
         do {
             try store.save(next)
             record = next

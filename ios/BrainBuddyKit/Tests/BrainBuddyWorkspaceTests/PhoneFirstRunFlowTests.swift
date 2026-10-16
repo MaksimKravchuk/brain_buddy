@@ -7,30 +7,30 @@ import Testing
 /// The iPhone first run (boards 01–04): decided once per device from what it holds, walked with
 /// the existing task commands, and remembered as dates and an outcome only.
 @MainActor
-@Suite struct FirstRunFlowTests {
+@Suite struct PhoneFirstRunFlowTests {
     // MARK: Decision
 
     @Test("032-FR-001 a clean device shows the welcome and remembers it") func aCleanDeviceShowsTheWelcomeAndRemembersIt() {
         let store = MemoryFirstRunStore()
-        let flow = FirstRunFlow(store: store, now: { Fixture.epoch })
+        let flow = PhoneFirstRunFlow(store: store, now: { Fixture.epoch })
 
-        flow.decide(FirstRunLaunchFacts())
+        flow.decide(PhoneFirstRunLaunchFacts())
 
         #expect(flow.phase == .welcome)
         #expect(flow.coversApp)
-        #expect(store.saved == FirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress))
+        #expect(store.saved == PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress))
     }
 
     @Test("032-FR-001 032-SC-002 a device that holds anything never shows it", arguments: [
-        FirstRunLaunchFacts(hasAccount: true),
-        FirstRunLaunchFacts(isRustSelected: true),
-        FirstRunLaunchFacts(taskCount: 1),
-        FirstRunLaunchFacts(projectCount: 1),
-        FirstRunLaunchFacts(tagCount: 1),
+        PhoneFirstRunLaunchFacts(hasAccount: true),
+        PhoneFirstRunLaunchFacts(isRustSelected: true),
+        PhoneFirstRunLaunchFacts(taskCount: 1),
+        PhoneFirstRunLaunchFacts(projectCount: 1),
+        PhoneFirstRunLaunchFacts(tagCount: 1),
     ])
-    func aDeviceThatHoldsAnythingNeverShowsIt(_ facts: FirstRunLaunchFacts) {
+    func aDeviceThatHoldsAnythingNeverShowsIt(_ facts: PhoneFirstRunLaunchFacts) {
         let store = MemoryFirstRunStore()
-        let flow = FirstRunFlow(store: store, now: { Fixture.epoch })
+        let flow = PhoneFirstRunFlow(store: store, now: { Fixture.epoch })
 
         flow.decide(facts)
 
@@ -41,45 +41,45 @@ import Testing
     @Test("032-FR-012 a record that cannot be saved skips the welcome") func aRecordThatCannotBeSavedSkipsTheWelcome() {
         let store = MemoryFirstRunStore()
         store.failsToSave = true
-        let flow = FirstRunFlow(store: store)
+        let flow = PhoneFirstRunFlow(store: store)
 
-        flow.decide(FirstRunLaunchFacts())
+        flow.decide(PhoneFirstRunLaunchFacts())
 
         #expect(flow.phase == .done)
     }
 
     @Test("032-FR-001 a finished run never returns") func aFinishedRunNeverReturns() {
-        for outcome in [FirstRunRecord.Outcome.notNeeded, .skipped, .notYet, .signedIn] {
-            let store = MemoryFirstRunStore(FirstRunRecord(decidedAt: Fixture.epoch, outcome: outcome))
-            let flow = FirstRunFlow(store: store)
-            flow.decide(FirstRunLaunchFacts())
+        for outcome in [PhoneFirstRunRecord.Outcome.notNeeded, .skipped, .notYet, .signedIn] {
+            let store = MemoryFirstRunStore(PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: outcome))
+            let flow = PhoneFirstRunFlow(store: store)
+            flow.decide(PhoneFirstRunLaunchFacts())
             #expect(flow.phase == .done, "\(outcome)")
         }
     }
 
     @Test("032-FR-011 a run left before the capture starts again at the welcome") func aRunLeftBeforeTheCaptureStartsAgainAtTheWelcome() {
-        let flow = FirstRunFlow(store: MemoryFirstRunStore(FirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress)))
+        let flow = PhoneFirstRunFlow(store: MemoryFirstRunStore(PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress)))
 
-        flow.decide(FirstRunLaunchFacts())
+        flow.decide(PhoneFirstRunLaunchFacts())
 
         #expect(flow.phase == .welcome)
     }
 
     @Test("032-FR-011 a run left after the capture does not resume") func aRunLeftAfterTheCaptureDoesNotResume() {
-        let store = MemoryFirstRunStore(FirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress))
-        let flow = FirstRunFlow(store: store)
+        let store = MemoryFirstRunStore(PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: .inProgress))
+        let flow = PhoneFirstRunFlow(store: store)
 
-        flow.decide(FirstRunLaunchFacts(taskCount: 1, hasInboxItem: true))
+        flow.decide(PhoneFirstRunLaunchFacts(taskCount: 1, hasInboxItem: true))
 
         #expect(flow.phase == .done)
         #expect(store.saved?.outcome == .notYet)
     }
 
     @Test("032-FR-010 the landing tip shows until it is dismissed") func theLandingTipShowsUntilItIsDismissed() {
-        let store = MemoryFirstRunStore(FirstRunRecord(decidedAt: Fixture.epoch, outcome: .firstStep))
-        let flow = FirstRunFlow(store: store)
+        let store = MemoryFirstRunStore(PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: .firstStep))
+        let flow = PhoneFirstRunFlow(store: store)
 
-        flow.decide(FirstRunLaunchFacts(taskCount: 1))
+        flow.decide(PhoneFirstRunLaunchFacts(taskCount: 1))
 
         #expect(flow.phase == .landing)
         #expect(flow.showsLandingTip)
@@ -87,9 +87,9 @@ import Testing
     }
 
     @Test("032-FR-001 deciding twice keeps the first answer") func decidingTwiceKeepsTheFirstAnswer() {
-        let flow = FirstRunFlow(store: MemoryFirstRunStore())
-        flow.decide(FirstRunLaunchFacts())
-        flow.decide(FirstRunLaunchFacts(taskCount: 3))
+        let flow = PhoneFirstRunFlow(store: MemoryFirstRunStore())
+        flow.decide(PhoneFirstRunLaunchFacts())
+        flow.decide(PhoneFirstRunLaunchFacts(taskCount: 3))
         #expect(flow.phase == .welcome)
     }
 
@@ -100,8 +100,8 @@ import Testing
         let store = MemoryFirstRunStore()
         let tipDate = Fixture.epoch.addingTimeInterval(60)
         var clock = Fixture.epoch
-        let flow = FirstRunFlow(store: store, now: { clock })
-        flow.decide(FirstRunLaunchFacts(workspace))
+        let flow = PhoneFirstRunFlow(store: store, now: { clock })
+        flow.decide(PhoneFirstRunLaunchFacts(workspace))
         flow.start()
         #expect(flow.phase == .capture)
 
@@ -157,8 +157,8 @@ import Testing
 
     @Test("032-FR-006 Skip leaves an empty Inbox") func skipLeavesAnEmptyInbox() {
         let store = MemoryFirstRunStore()
-        let flow = FirstRunFlow(store: store)
-        flow.decide(FirstRunLaunchFacts())
+        let flow = PhoneFirstRunFlow(store: store)
+        flow.decide(PhoneFirstRunLaunchFacts())
         flow.start()
 
         flow.skip()
@@ -170,8 +170,8 @@ import Testing
     @Test("032-FR-009 Not yet keeps the item in the Inbox unchanged") func notYetKeepsTheItemInTheInboxUnchanged() async throws {
         let workspace = await loadedWorkspace()
         let store = MemoryFirstRunStore()
-        let flow = FirstRunFlow(store: store)
-        flow.decide(FirstRunLaunchFacts())
+        let flow = PhoneFirstRunFlow(store: store)
+        flow.decide(PhoneFirstRunLaunchFacts())
         flow.start()
         try await flow.capture("Sort the garage", in: workspace)
         let before = workspace.state
@@ -210,8 +210,8 @@ import Testing
 
     @Test("032-FR-003 linking an account ends the run at any step") func linkingAnAccountEndsTheRunAtAnyStep() {
         let store = MemoryFirstRunStore()
-        let flow = FirstRunFlow(store: store)
-        flow.decide(FirstRunLaunchFacts())
+        let flow = PhoneFirstRunFlow(store: store)
+        flow.decide(PhoneFirstRunLaunchFacts())
 
         flow.accountLinked()
 
@@ -222,7 +222,7 @@ import Testing
     // MARK: Composition
 
     @Test("032-FR-008 the step change keeps an existing note after the captured words") func theStepChangeKeepsAnExistingNoteAfterTheOriginalWords() {
-        let changes = FirstRunFlow.stepChanges(step: "Call Sam", original: "garage mess", existingDetails: " keys in the drawer ")
+        let changes = PhoneFirstRunFlow.stepChanges(step: "Call Sam", original: "garage mess", existingDetails: " keys in the drawer ")
         #expect(changes.title == .set("Call Sam"))
         #expect(changes.details == .set("garage mess\n\nkeys in the drawer"))
         #expect(changes.projectID == .unchanged)
@@ -232,9 +232,9 @@ import Testing
 
     // MARK: Helpers
 
-    private func startedFlow() -> FirstRunFlow {
-        let flow = FirstRunFlow(store: MemoryFirstRunStore())
-        flow.decide(FirstRunLaunchFacts())
+    private func startedFlow() -> PhoneFirstRunFlow {
+        let flow = PhoneFirstRunFlow(store: MemoryFirstRunStore())
+        flow.decide(PhoneFirstRunLaunchFacts())
         flow.start()
         return flow
     }
@@ -246,29 +246,29 @@ import Testing
         let suite = "FirstRunTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let store = UserDefaultsFirstRunRecordStore(defaults: defaults)
+        let store = UserDefaultsPhoneFirstRunRecordStore(defaults: defaults)
         #expect(store.load() == nil)
 
-        let record = FirstRunRecord(decidedAt: Fixture.epoch, outcome: .firstStep, tipDismissedAt: Fixture.epoch)
+        let record = PhoneFirstRunRecord(decidedAt: Fixture.epoch, outcome: .firstStep, tipDismissedAt: Fixture.epoch)
         try store.save(record)
 
-        #expect(UserDefaultsFirstRunRecordStore(defaults: defaults).load() == record)
-        #expect(defaults.data(forKey: UserDefaultsFirstRunRecordStore.key) != nil)
+        #expect(UserDefaultsPhoneFirstRunRecordStore(defaults: defaults).load() == record)
+        #expect(defaults.data(forKey: UserDefaultsPhoneFirstRunRecordStore.key) != nil)
     }
 }
 
 @MainActor
-private final class MemoryFirstRunStore: FirstRunRecordStore {
-    private(set) var saved: FirstRunRecord?
+private final class MemoryFirstRunStore: PhoneFirstRunRecordStore {
+    private(set) var saved: PhoneFirstRunRecord?
     var failsToSave = false
 
-    init(_ record: FirstRunRecord? = nil) {
+    init(_ record: PhoneFirstRunRecord? = nil) {
         saved = record
     }
 
-    func load() -> FirstRunRecord? { saved }
+    func load() -> PhoneFirstRunRecord? { saved }
 
-    func save(_ record: FirstRunRecord) throws {
+    func save(_ record: PhoneFirstRunRecord) throws {
         if failsToSave { throw CocoaError(.fileWriteUnknown) }
         saved = record
     }

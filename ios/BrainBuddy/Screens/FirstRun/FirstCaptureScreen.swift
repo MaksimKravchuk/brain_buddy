@@ -8,7 +8,7 @@ import SwiftUI
 struct FirstCaptureScreen: View {
     private typealias Layout = CarryOnLayout.FirstRun
 
-    @Environment(FirstRunFlow.self) private var flow
+    @Environment(PhoneFirstRunFlow.self) private var flow
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @State private var text = ""

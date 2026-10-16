@@ -13,12 +13,12 @@ UI-only requirements (032-FR-002, 032-FR-004, 032-FR-007, 032-FR-013, 032-FR-014
 
 ## Phase 1 — Model
 
-- [x] T001 [US1] Test-first: `FirstRunFlowTests` for the decision (clean device, anything
+- [x] T001 [US1] Test-first: `PhoneFirstRunFlowTests` for the decision (clean device, anything
   held, unsaved record, finished outcomes, leaving before and after the capture, landing).
   032-FR-001, 032-FR-011, 032-FR-012, 032-SC-002.
-- [x] T002 [US1][US2] Implement `FirstRunFlow`, `FirstRunRecord`,
-  `UserDefaultsFirstRunRecordStore` and `FirstRunLaunchFacts` in
-  `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/FirstRunFlow.swift`; tests for the capture,
+- [x] T002 [US1][US2] Implement `PhoneFirstRunFlow`, `PhoneFirstRunRecord`,
+  `UserDefaultsPhoneFirstRunRecordStore` and `PhoneFirstRunLaunchFacts` in
+  `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/PhoneFirstRunFlow.swift`; tests for the capture,
   Skip, Not yet, the first step, Got it and a linked account. 032-FR-003, 032-FR-005,
   032-FR-006, 032-FR-008 – 032-FR-010.
 

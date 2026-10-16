@@ -11,7 +11,7 @@ struct FirstStepScreen: View {
 
     let taskID: TaskID
 
-    @Environment(FirstRunFlow.self) private var flow
+    @Environment(PhoneFirstRunFlow.self) private var flow
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @State private var step = ""
