@@ -270,14 +270,6 @@ impl Scheduler {
         }
     }
 
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-
-    pub fn is_online(&self) -> bool {
-        self.online
-    }
-
     pub fn is_paused(&self) -> bool {
         self.paused
     }
