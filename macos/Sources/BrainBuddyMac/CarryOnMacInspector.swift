@@ -76,10 +76,10 @@ extension MacInspectorPanel where Bar == EmptyView {
 /// "Garage · Next actions": the project's dot, its name, a middle dot and the list.
 struct MacInspectorEyebrow: View {
     let projectName: String?
-    let projectColor: RGBColor?
+    let projectColor: BrainBuddyDesign.RGBColor?
     let listName: String
 
-    init(projectName: String?, projectColor: RGBColor?, listName: String) {
+    init(projectName: String?, projectColor: BrainBuddyDesign.RGBColor?, listName: String) {
         self.projectName = projectName
         self.projectColor = projectColor
         self.listName = listName
@@ -320,7 +320,7 @@ struct MacInspectorFlow: Layout {
 struct MacInspectorChip: View {
     let text: String
     var tone: CarryOnChip.Tone = .plain
-    var dot: RGBColor?
+    var dot: BrainBuddyDesign.RGBColor?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -347,7 +347,7 @@ struct MacInspectorChip: View {
 /// The chip row: project (with its dot), due day, then tags; 6 apart, wrapping.
 struct MacInspectorChips: View {
     var projectName: String?
-    var projectColor: RGBColor?
+    var projectColor: BrainBuddyDesign.RGBColor?
     var dueText: String?
     var dueTone: CarryOnChip.Tone = .plain
     var tags: [String] = []

@@ -30,11 +30,11 @@ enum TaskInspectorCommand {
 }
 
 /// A project's dot on the inspector: its own colour, else the palette's neutral dot.
-func inspectorProjectDot(_ hex: String?) -> RGBColor {
+func inspectorProjectDot(_ hex: String?) -> BrainBuddyDesign.RGBColor {
     guard let hex, hex.hasPrefix("#"), hex.count == 7, let value = UInt32(hex.dropFirst(), radix: 16) else {
         return CarryOnProjectColor.dust
     }
-    return RGBColor(value)
+    return BrainBuddyDesign.RGBColor(value)
 }
 
 /// A text field or editor on the inspector card: 14 pt on `field-bg`, radius 8.
@@ -151,7 +151,9 @@ struct TaskInspector: View {
     }
 
     private var projectName: String? { projectID.map { model.projectLabel($0) } }
-    private var projectDot: RGBColor? { projectID.map { inspectorProjectDot(model.project($0)?.color) } }
+    private var projectDot: BrainBuddyDesign.RGBColor? {
+        projectID.map { inspectorProjectDot(model.project($0)?.color) }
+    }
 
     private func eyebrow(_ listName: String) -> MacInspectorEyebrow {
         MacInspectorEyebrow(projectName: projectName, projectColor: projectDot, listName: listName)
