@@ -11,6 +11,7 @@ import Testing
 @MainActor
 @Suite("030 Agents scene")
 struct AgentsSceneTests {
+    @MainActor
     struct Rig {
         let model: BrainBuddyModel
         let remote = FakeRunsRemote()
