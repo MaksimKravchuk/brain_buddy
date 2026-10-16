@@ -101,7 +101,7 @@ against; a different answer changes only the named requirement and slice.
 - **(b) Remove with the flag off.** D6 keeps disconnect available while the Settings tab
   falls back to the web link. **Recommended**: with the flag off the Mac shows no
   agent list and no − button; disconnect stays reachable through the fallback's web
-  page, which the server still allows. Affects 030-FR-037, PR-09.
+  page, which the server still allows. Affects 030-FR-037, PR-10.
 - **(c) Which steps feed All runs.** **Recommended**: open steps only (not completed or
   cancelled). Marking a step done removes its run from All runs and Waiting for; the run
   stays readable in that step's inspector. Affects 030-FR-005, PR-04.
@@ -296,7 +296,7 @@ same account.
 - Two Macs reply to the same run: the stale revision is reported in words and the run
   is re-read; nothing is sent twice.
 - An agent's card changed (`agent_changed`): the status reads "Agent changed" and Test
-  again asks for the password, as the server requires.
+  again runs without a password; the next hand-off may ask for it, as the server requires.
 - Session ended or account changed while an agent sheet is open: the sheet closes, the
   typed secret and password are dropped, and no data of the previous account remains.
 - Reduce Motion, increased contrast and dark appearance: follows the Carry On tokens in
