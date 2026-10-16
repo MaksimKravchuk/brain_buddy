@@ -28,6 +28,15 @@ title), add an optional desired outcome, and the item becomes the required first
 next action, keeping its notes, tags and due date; undo puts it back in the
 Inbox and archives the project.
 
+On the iPhone Process inbox is a large sheet with a grabber over the Inbox (board
+16, "Inbox item"), not a full-screen cover. It shows "Inbox · 1 of 4", the item,
+and "What is it?" with four answer cards: "A step I can take" (Next actions),
+"Bigger than one step" (Make it a project), "Waiting on someone" (asks who, then
+Waiting for) and "Someday". A floating glass bar offers "Done already" (complete)
+and "Not needed" (cancel); Skip stays in the toolbar. The project, tags and due
+day are optional chips under the answers. There is no AI step in Process inbox
+(board 17 is not built).
+
 ## What works offline
 
 Everything in pass 1 except signing in and the sync itself:

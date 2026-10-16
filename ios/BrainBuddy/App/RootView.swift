@@ -159,10 +159,13 @@ private struct MainTabView: View {
             if phase == .active { presentStartupSheetIfDue() }
         }
         // A capture asked for while Process inbox was open (⌘N, a deep link)
-        // shows once the cover has gone.
-        .fullScreenCover(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPending() }) {
+        // shows once the sheet has gone. Board 16: a large sheet with a grabber
+        // over the Inbox; a swipe down resets the router through the binding.
+        .sheet(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPending() }) {
             ProcessInboxScreen()
                 .diagnosticsScreen("process inbox")
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         // Changes stay on screen and are retried with the next save; say so
         // when a save fails instead of pretending it worked.
