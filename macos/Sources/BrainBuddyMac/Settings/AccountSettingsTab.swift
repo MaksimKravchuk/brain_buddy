@@ -74,7 +74,7 @@ struct AccountSettingsContent: View {
             } trailing: {
                 if controls.contains(.signOut) {
                     Button(AccountSettingsCopy.signOut) { onSignOut() }
-                        .buttonStyle(.macSecondaryPill).disabled(signInBusy)
+                        .buttonStyle(.carryOnSecondary).disabled(signInBusy)
                 }
             }
         }
@@ -115,7 +115,7 @@ struct AccountSettingsContent: View {
             ForEach([AccountTabControl.tryAgain, .signIn, .signInAgain], id: \.self) { control in
                 if controls.contains(control) {
                     Button(control.title) { if control == .tryAgain { onTryAgain() } else { onSignIn() } }
-                        .buttonStyle(.macSecondaryPill)
+                        .buttonStyle(.carryOnSecondary)
                         .disabled(control != .tryAgain && (signInBusy || signOutBusy))
                 }
             }
@@ -141,9 +141,9 @@ struct AccountSettingsContent: View {
 
     @ViewBuilder private func exportButton(_ controls: [AccountTabControl]) -> some View {
         if controls.contains(.cancelExport) {
-            Button(AccountSettingsCopy.cancel) { onCancelExport() }.buttonStyle(.macSecondaryPill)
+            Button(AccountSettingsCopy.cancel) { onCancelExport() }.buttonStyle(.carryOnSecondary)
         } else if let again = controls.first(where: { $0 == .exportTryAgain || $0 == .export }) {
-            Button(again.title) { onExport() }.buttonStyle(.macSecondaryPill).disabled(phase == .loading)
+            Button(again.title) { onExport() }.buttonStyle(.carryOnSecondary).disabled(phase == .loading)
         }
     }
 

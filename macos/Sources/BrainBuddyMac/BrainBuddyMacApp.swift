@@ -59,6 +59,7 @@ struct BrainBuddyMacApp: App {
         }
         Settings {
             MacSettingsView(launch: launch, selection: $settingsTab)
+                .environment(\.carryOnPlatform, .mac)
         }
     }
 

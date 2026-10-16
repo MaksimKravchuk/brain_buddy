@@ -35,7 +35,7 @@ struct AgentsSettingsContent: View {
         VStack(spacing: 14) {
             Text(AccountSettingsCopy.agentsText).font(MacSheetFont.body).foregroundStyle(CarryOnColorStyle.coTextPrimary)
             Button(AccountSettingsCopy.agentsAction) { if let ready { onOpen(ready) } }
-                .buttonStyle(.macSecondaryPill).disabled(ready == nil)
+                .buttonStyle(.carryOnSecondary).disabled(ready == nil)
             if state == .unavailable {
                 MacSheetStatus(text: AccountSettingsCopy.agentsUnavailable, tone: .danger, font: MacSheetFont.note)
                 Button(AccountSettingsCopy.tryAgain) { onTryAgain() }.buttonStyle(.macText)

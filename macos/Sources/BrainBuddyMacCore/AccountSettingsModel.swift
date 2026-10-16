@@ -22,6 +22,19 @@ package struct AccountRows: Equatable, Sendable {
     package var password: String
     /// S-02.03: the methods read failed, so the "couldn't be loaded" line and Try again show.
     package var methodsUnavailable: Bool
+
+    package init(
+        name: String, steps: String, email: String, apple: String, google: String, password: String,
+        methodsUnavailable: Bool
+    ) {
+        self.name = name
+        self.steps = steps
+        self.email = email
+        self.apple = apple
+        self.google = google
+        self.password = password
+        self.methodsUnavailable = methodsUnavailable
+    }
 }
 
 package enum AccountSettingsPhase: Equatable, Sendable {
