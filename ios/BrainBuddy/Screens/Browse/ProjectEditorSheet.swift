@@ -226,9 +226,8 @@ struct ProjectColorIndicator: View {
 
     private var resolvedColor: Color? {
         guard let hex, !hex.isEmpty else { return nil }
-        // Typed as optional so this reads the same whether `Color(hex:)` is failable or not.
-        let color: Color? = Color(hex: hex)
-        return color
+        // Through the theme so a colour saved before Carry On shows as its Carry On colour.
+        return BBColor.project(hex)
     }
 }
 

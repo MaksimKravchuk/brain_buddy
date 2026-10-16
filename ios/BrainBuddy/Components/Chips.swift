@@ -201,9 +201,9 @@ struct ReviewMarkerChip: View {
     }
 }
 
-/// Marker colours from the design (indigo-50/200/700, amber-50/200/800,
-/// slate-100/600). Indigo is not a general app token, so it lives here, with
-/// dark values derived from the same scale (indigo-950/800/300).
+/// Marker colours for review age classes. Carry On has no indigo, so the
+/// decision marker uses the selected-surface and primary-text tokens; caution
+/// uses the warning tokens and neutral uses the tag tokens.
 enum ReviewMarkerColors {
     struct Colors {
         let background: Color
@@ -226,27 +226,15 @@ enum ReviewMarkerColors {
         }
     }
 
-    static let indigoBackground = dynamic(light: 0xEEF2FF, dark: 0x1E1B4B)
-    static let indigoBorder = dynamic(light: 0xC7D2FE, dark: 0x3730A3)
-    static let indigoText = dynamic(light: 0x4338CA, dark: 0xA5B4FC)
-
-    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(
-            uiColor: UIColor { traits in
-                let rgb = traits.userInterfaceStyle == .dark ? dark : light
-                return UIColor(
-                    red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
-                    blue: CGFloat(rgb & 0xFF) / 255, alpha: 1
-                )
-            }
-        )
-    }
+    static let indigoBackground = BBColor.brandSoft
+    static let indigoBorder = BBColor.hairlineStrong
+    static let indigoText = BBColor.textPrimary
 }
 
 // MARK: - Count badge
 
-/// A list count. `prominent` is the Inbox's sky pill (sky-700, so the white
-/// numerals meet contrast); other counts are plain slate-500 numerals.
+/// A list count. `prominent` is the Inbox's filled pill (`brandFill` with
+/// `onBrand` numerals); other counts are plain secondary numerals.
 /// Nothing is shown for zero.
 struct CountBadge: View {
     let count: Int

@@ -70,6 +70,7 @@ targets:
         products:
           - BrainBuddyWorkspace
           - BrainBuddyCore
+          - BrainBuddyDesign
           - BrainBuddyDiagnostics
       - target: BrainBuddyWidgets
         embed: true

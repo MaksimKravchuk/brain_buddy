@@ -1,5 +1,6 @@
 import BackgroundTasks
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import Combine
 import CoreFoundation
@@ -22,6 +23,8 @@ struct BrainBuddyApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        // Registers the bundled Instrument faces before the first view asks for one.
+        CarryOnFonts.register()
         let usesPreviewData = ProcessInfo.processInfo.arguments.contains(AppConstants.previewDataLaunchArgument)
         let location = RustRuntimeLocation.appGroup(AppConstants.appGroupID)
         // An unreadable selection counts: the install must not fall back to the retired file.

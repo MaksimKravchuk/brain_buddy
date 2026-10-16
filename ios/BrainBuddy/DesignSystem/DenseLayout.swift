@@ -86,9 +86,7 @@ struct BBSectionHeader: View {
             }
         }
         .font(BBFont.label)
-        .textCase(.uppercase)
-        .tracking(0.6)
-        .foregroundStyle(tint ?? BBColor.textTertiary)
+        .foregroundStyle(tint ?? BBColor.textSecondary)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(.isHeader)

@@ -1,160 +1,185 @@
+import BrainBuddyDesign
 import SwiftUI
 import UIKit
 
 // MARK: - Colour
 
-/// Brand colour tokens.
+/// Brand colour tokens, mapped onto the Carry On design system.
 ///
-/// Light values are copied verbatim from the design system source of truth,
-/// `.claude/skills/brain-buddy-design/colors_and_type.css` (mirrored for the
-/// Expo app in `mobile/src/theme/tokens.ts`).
+/// Every value is read from the generated tokens in `BrainBuddyDesign`
+/// (`CarryOnRole`, `CarryOnComponentColor`, `CarryOnProjectColor`); nothing here
+/// types a hex. Carry On swaps roles between light and dark rather than
+/// inventing colours, so each `BBColor` resolves its role's light or dark value
+/// through UIKit traits and follows the system appearance.
 ///
-/// DARK VALUES ARE DERIVED, NEEDS SIGN-OFF: the design system defines light
-/// tokens only (docs/native-ios-app.md, deviation 2). Dark counterparts come
-/// from the same Tailwind slate / sky / indigo / emerald / amber / rose scales:
-/// surfaces step up in lightness with elevation (sunken `#0B1120` < base
-/// `#0F172A` < raised `#1E293B`), text uses slate-100/300/400, hairlines
-/// slate-700, the sky brand stays `#0EA5E9` for large accents (text and fills
-/// use `brandText` / `brandFill`), and semantic backgrounds are the dim 950
-/// shades with 300-level text.
+/// Carry On reserves terracotta for the one next step, so the app tint, brand
+/// text and filled controls are basalt (limestone in dark mode), not an accent.
+/// Carry On defines no Increase Contrast variants, so every `highContrast:`
+/// parameter below is nil.
 ///
-/// With Increase Contrast on, tertiary text, placeholders and hairlines step
-/// one shade stronger so metadata stays legible.
+/// Grey text (`textSecondary`, `textTertiary`, `success`) is 3.98:1 on stone
+/// (`surfaceSunken`, `brandSoft`, `hairline`, `tagBackground`, `dueBackground`).
+/// That is the board's colour and is kept on purpose (`ios/AGENTS.md`).
 enum BBColor {
     // MARK: Brand
 
-    /// sky-500. Large, non-text accents only: sky-500 is 2.8:1 on white, too
-    /// low for text, small symbols or fills that carry white text. Use
-    /// `brandText` or `brandFill` for those.
-    static let brand = color(Tone(0x0EA5E9, 0x0EA5E9))
-    /// sky-500 at 10% (18% in dark mode). Selected rows, soft brand fills.
-    static let brandSoft = color(Tone(0x0EA5E9, 0x0EA5E9, lightAlpha: 0.10, darkAlpha: 0.18))
-    /// Brand-coloured text and symbols that meet contrast on the base surfaces
-    /// (sky-700 in light mode, sky-400 in dark mode). The app's tint.
+    /// text-primary: basalt in light mode, limestone in dark mode. The app tint.
+    static let brand = color(Tone(CarryOnRole.textPrimary))
+    /// surface-selected. Selected rows, soft brand fills.
+    static let brandSoft = color(Tone(CarryOnRole.surfaceSelected))
+    /// Brand-coloured text and symbols (text-primary). The app's tint.
     static let brandText = color(brandTextTone)
     /// `brandText` for UIKit views (the Smart Add highlight).
     static var brandTextUIColor: UIColor { uiColor(brandTextTone) }
-    /// sky-700 in both modes. Fills that carry white text or a white glyph:
-    /// prominent buttons, the Inbox count pill, the completed check.
-    static let brandFill = color(Tone(0x0369A1, 0x0369A1))
-    private static let brandTextTone = Tone(0x0369A1, 0x38BDF8)
-    /// indigo-500. Sparing secondary accents.
-    static let secondary = color(Tone(0x6366F1, 0x818CF8))
-    /// Text and symbols placed on a `brand` fill.
-    static let onBrand = Color.white
+    /// text-primary. Fills that carry `onBrand` text or a glyph: prominent
+    /// buttons, the Inbox count pill, the completed check.
+    static let brandFill = color(brandTextTone)
+    private static let brandTextTone = Tone(CarryOnRole.textPrimary)
+    /// text-secondary. Sparing secondary accents.
+    static let secondary = color(Tone(CarryOnRole.textSecondary))
+    /// bg-ground. Text and symbols placed on a `brandFill`; the inverse of the
+    /// fill in both modes.
+    static let onBrand = color(Tone(CarryOnRole.bgGround))
 
     // MARK: Surfaces
 
-    /// slate-50. The page background; always flat.
-    static let surfaceBase = color(Tone(0xF8FAFC, 0x0F172A))
-    /// slate-100. Panels and grouped backgrounds.
-    static let surfaceSunken = color(Tone(0xF1F5F9, 0x0B1120))
-    /// White. Rows, cards and dialogs.
-    static let surfaceRaised = color(Tone(0xFFFFFF, 0x1E293B))
+    /// bg-ground. The page background; always flat.
+    static let surfaceBase = color(Tone(CarryOnRole.bgGround))
+    /// bg-sunken. Panels and grouped backgrounds.
+    static let surfaceSunken = color(Tone(CarryOnRole.bgSunken))
+    /// surface-card. Rows, cards and dialogs.
+    static let surfaceRaised = color(Tone(CarryOnRole.surfaceCard))
 
     // MARK: Text
 
-    /// slate-900. Primary body text and titles.
-    static let textPrimary = color(Tone(0x0F172A, 0xF1F5F9))
-    /// slate-700. Secondary copy.
-    static let textSecondary = color(Tone(0x334155, 0xCBD5E1))
-    /// slate-500. Captions and row metadata.
-    static let textTertiary = color(Tone(0x64748B, 0x94A3B8), highContrast: Tone(0x475569, 0xCBD5E1))
-    /// slate-400. Placeholders and plain counts.
-    static let textPlaceholder = color(Tone(0x94A3B8, 0x64748B), highContrast: Tone(0x64748B, 0x94A3B8))
+    /// text-primary. Primary body text and titles.
+    static let textPrimary = color(Tone(CarryOnRole.textPrimary))
+    /// text-secondary. Secondary copy.
+    static let textSecondary = color(Tone(CarryOnRole.textSecondary))
+    /// text-secondary. Captions and row metadata.
+    static let textTertiary = color(Tone(CarryOnRole.textSecondary), highContrast: nil)
+    /// mark-open. Placeholders and plain counts.
+    static let textPlaceholder = color(Tone(CarryOnRole.markOpen), highContrast: nil)
 
     // MARK: Lines
 
-    /// slate-200. The universal hairline.
-    static let hairline = color(Tone(0xE2E8F0, 0x334155), highContrast: Tone(0xCBD5E1, 0x475569))
-    /// slate-300. Hover / pressed hairline.
-    static let hairlineStrong = color(Tone(0xCBD5E1, 0x475569), highContrast: Tone(0x94A3B8, 0x64748B))
-    /// slate-500 (slate-600 with Increase Contrast), 4.8:1 on white. The outline of a control
-    /// that is drawn as a shape only, such as the open completion circle.
-    static let controlStroke = color(Tone(0x64748B, 0x64748B), highContrast: Tone(0x475569, 0x94A3B8))
+    /// control-quiet. The universal hairline, and the fill of quiet controls.
+    static let hairline = color(Tone(CarryOnRole.controlQuiet), highContrast: nil)
+    /// control-quiet-pressed. Pressed hairline.
+    static let hairlineStrong = color(Tone(CarryOnRole.controlQuietPressed), highContrast: nil)
+    /// mark-open. The outline of a control that is drawn as a shape only, such
+    /// as the open completion circle.
+    static let controlStroke = color(Tone(CarryOnRole.markOpen), highContrast: nil)
 
     // MARK: Semantics
 
-    static let success = color(Tone(0x10B981, 0x34D399))
-    static let successBackground = color(Tone(0xECFDF5, 0x022C22))
-    static let successBorder = color(Tone(0xA7F3D0, 0x065F46))
-    static let successText = color(Tone(0x065F46, 0x6EE7B7))
+    /// text-done.
+    static let success = color(Tone(CarryOnRole.textDone))
+    static let successBackground = color(Tone(CarryOnRole.surfaceSelected))
+    static let successBorder = color(Tone(CarryOnRole.controlQuiet))
+    static let successText = color(Tone(CarryOnRole.textPrimary))
 
-    static let warning = color(Tone(0xD97706, 0xFBBF24))
-    static let warningBackground = color(Tone(0xFFFBEB, 0x451A03))
-    static let warningBorder = color(Tone(0xFDE68A, 0x92400E))
-    static let warningText = color(Tone(0x92400E, 0xFCD34D))
+    /// status-warning.
+    static let warning = color(Tone(CarryOnRole.statusWarning))
+    static let warningBackground = color(Tone(CarryOnRole.bgSunken))
+    static let warningBorder = color(Tone(CarryOnRole.controlQuiet))
+    static let warningText = color(Tone(CarryOnRole.statusWarning))
 
-    static let danger = color(Tone(0xE11D48, 0xFB7185))
-    static let dangerBackground = color(Tone(0xFFF1F2, 0x4C0519))
-    static let dangerBorder = color(Tone(0xFECDD3, 0x9F1239))
-    static let dangerText = color(Tone(0x9F1239, 0xFDA4AF))
+    /// status-danger.
+    static let danger = color(Tone(CarryOnRole.statusDanger))
+    static let dangerBackground = color(Tone(CarryOnRole.bgSunken))
+    static let dangerBorder = color(Tone(CarryOnRole.controlQuiet))
+    static let dangerText = color(Tone(CarryOnRole.statusDanger))
 
-    static let info = color(Tone(0x0EA5E9, 0x38BDF8))
-    static let infoBackground = color(Tone(0xF0F9FF, 0x082F49))
-    static let infoBorder = color(Tone(0xBAE6FD, 0x075985))
-    static let infoText = color(Tone(0x0369A1, 0x7DD3FC))
+    /// text-secondary.
+    static let info = color(Tone(CarryOnRole.textSecondary))
+    static let infoBackground = color(Tone(CarryOnRole.bgSunken))
+    static let infoBorder = color(Tone(CarryOnRole.controlQuiet))
+    static let infoText = color(Tone(CarryOnRole.textPrimary))
 
     // MARK: Chips
 
-    /// Due-date chip (rose family). Only for real deadlines.
-    static let dueBackground = color(Tone(0xFFF1F2, 0x4C0519))
-    static let dueBorder = color(Tone(0xFECDD3, 0x881337))
-    static let dueText = color(Tone(0xBE123C, 0xFDA4AF))
+    /// Due-date chip. Only for real deadlines; the foreground is the Carry On
+    /// due colour (chip-due-fg), not red.
+    static let dueBackground = color(Tone(CarryOnComponentColor.chipBg))
+    static let dueBorder = color(Tone(CarryOnComponentColor.chipBg))
+    static let dueText = color(Tone(CarryOnComponentColor.chipDueFg))
 
     /// Tag pill inside task rows.
-    static let tagBackground = color(Tone(0xF1F5F9, 0x334155))
-    static let tagText = color(Tone(0x475569, 0xCBD5E1))
+    static let tagBackground = color(Tone(CarryOnComponentColor.chipBg))
+    static let tagText = color(Tone(CarryOnComponentColor.chipFg))
 
     // MARK: Projects
 
-    /// A project's colour token, or the neutral slate-300 dot the web uses for
-    /// projects without a colour (or with a value that is not `#RRGGBB`).
+    /// A project's colour. Carry On project colours are shown as stored; a colour
+    /// saved before Carry On (the old ten-colour palette) is shown as the Carry On
+    /// colour at the same index (`legacyProjectPalette`). Projects without a
+    /// colour, or with a value that is not `#RRGGBB`, get the neutral `projectFallback`.
     static func project(_ hex: String?) -> Color {
-        guard let hex, let parsed = Color(validatingHex: hex) else { return projectFallback }
+        guard let hex else { return projectFallback }
+        let shown = displayedProjectColor(forStored: hex)?.hex ?? hex
+        guard let parsed = Color(validatingHex: shown) else { return projectFallback }
         return parsed
     }
 
-    static let projectFallback = color(Tone(0xCBD5E1, 0x64748B))
+    /// mark-open, the neutral dot for a project without a colour.
+    static let projectFallback = color(Tone(CarryOnRole.markOpen))
 
     /// Colours offered when creating or recolouring a project, as `#RRGGBB`.
     static let projectColorPalette: [String] = projectColorOptions.map(\.hex)
 
-    /// The palette with spoken names, for pickers and VoiceOver.
-    static let projectColorOptions: [BBProjectColor] = [
-        BBProjectColor(hex: "#0EA5E9", name: "Sky"),
-        BBProjectColor(hex: "#6366F1", name: "Indigo"),
-        BBProjectColor(hex: "#10B981", name: "Emerald"),
-        BBProjectColor(hex: "#F59E0B", name: "Amber"),
-        BBProjectColor(hex: "#E11D48", name: "Rose"),
-        BBProjectColor(hex: "#8B5CF6", name: "Violet"),
-        BBProjectColor(hex: "#14B8A6", name: "Teal"),
-        BBProjectColor(hex: "#F97316", name: "Orange"),
-        BBProjectColor(hex: "#EC4899", name: "Pink"),
-        BBProjectColor(hex: "#64748B", name: "Slate"),
+    /// The ten Carry On project colours with spoken names, for pickers and VoiceOver.
+    static let projectColorOptions: [BBProjectColor] = CarryOnProjectColor.all.map { entry in
+        BBProjectColor(hex: BBColor.hexString(entry.color), name: BBColor.spokenName(entry.name))
+    }
+
+    /// The project palette before Carry On, in order. Stored colours are never
+    /// rewritten: a value in this table is only displayed as the Carry On colour
+    /// at the same index in `projectColorOptions` (Sky → Lake, Indigo → Slate,
+    /// Emerald → Moss, Amber → Ochre, Rose → Plum, Violet → Heather, Teal → Sage,
+    /// Orange → Sand, Pink → Rosewood, Slate → Dust).
+    static let legacyProjectPalette: [String] = [
+        "#0EA5E9", "#6366F1", "#10B981", "#F59E0B", "#E11D48",
+        "#8B5CF6", "#14B8A6", "#F97316", "#EC4899", "#64748B",
     ]
 
-    /// The spoken name of a palette colour, or nil for a custom value.
-    static func projectColorName(for hex: String?) -> String? {
+    /// The Carry On colour a stored value is shown as: itself when it is already
+    /// a Carry On colour, the colour at the same index when it is an old-palette
+    /// value, and nil for any other (custom) value. Pure; reads and writes nothing.
+    static func displayedProjectColor(forStored hex: String?) -> BBProjectColor? {
         guard let hex else { return nil }
         var wanted = hex.trimmingCharacters(in: .whitespaces).uppercased()
         if !wanted.hasPrefix("#") { wanted = "#" + wanted }
-        return projectColorOptions.first { $0.hex == wanted }?.name
+        if let current = projectColorOptions.first(where: { $0.hex == wanted }) { return current }
+        guard let index = legacyProjectPalette.firstIndex(of: wanted), index < projectColorOptions.count
+        else { return nil }
+        return projectColorOptions[index]
+    }
+
+    /// The spoken name of a palette colour (old-palette values included, under
+    /// their Carry On name), or nil for a custom value.
+    static func projectColorName(for hex: String?) -> String? {
+        displayedProjectColor(forStored: hex)?.name
+    }
+
+    private static func hexString(_ rgb: RGBColor) -> String {
+        String(format: "#%06X", rgb.hex)
+    }
+
+    private static func spokenName(_ token: String) -> String {
+        token.prefix(1).uppercased() + token.dropFirst()
     }
 
     // MARK: Construction
 
+    /// A role's light and dark values as `0xRRGGBB`.
     fileprivate struct Tone {
         let light: UInt32
         let dark: UInt32
-        let lightAlpha: CGFloat
-        let darkAlpha: CGFloat
 
-        init(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) {
-            self.light = light
-            self.dark = dark
-            self.lightAlpha = lightAlpha
-            self.darkAlpha = darkAlpha
+        init(_ themed: ThemedColor) {
+            self.light = themed.light.hex
+            self.dark = themed.dark.hex
         }
     }
 
@@ -166,9 +191,9 @@ enum BBColor {
         UIColor { traits in
             let tone = traits.accessibilityContrast == .high ? (highContrast ?? normal) : normal
             if traits.userInterfaceStyle == .dark {
-                return UIColor(bbRGB: tone.dark, alpha: tone.darkAlpha)
+                return UIColor(bbRGB: tone.dark, alpha: 1)
             }
-            return UIColor(bbRGB: tone.light, alpha: tone.lightAlpha)
+            return UIColor(bbRGB: tone.light, alpha: 1)
         }
     }
 }
@@ -177,7 +202,7 @@ enum BBColor {
 struct BBProjectColor: Hashable, Sendable, Identifiable {
     /// `#RRGGBB`, uppercase.
     let hex: String
-    /// Spoken name, for example "Sky".
+    /// Spoken name, for example "Lake".
     let name: String
     var id: String { hex }
     var color: Color { BBColor.project(hex) }
@@ -185,10 +210,10 @@ struct BBProjectColor: Hashable, Sendable, Identifiable {
 
 extension Color {
     /// A colour from `#RGB`, `#RRGGBB` or `#RRGGBBAA` (the `#` is optional).
-    /// Invalid input yields neutral slate-400 rather than crashing, because
+    /// Invalid input yields the neutral dust project colour rather than crashing, because
     /// project colours are free-form user data.
     init(hex: String) {
-        self = Color(validatingHex: hex) ?? Color(uiColor: UIColor(bbRGB: 0x94A3B8, alpha: 1))
+        self = Color(validatingHex: hex) ?? Color(CarryOnProjectColor.dust)
     }
 
     /// A colour from `#RGB`, `#RRGGBB` or `#RRGGBBAA`, or nil when `hex` is
@@ -269,9 +294,9 @@ enum BBRadius {
     /// Buttons and chips-as-buttons.
     static let chip: CGFloat = 8
     /// Task rows.
-    static let row: CGFloat = 12
+    static let row = CGFloat(CarryOnLayout.Row.radius)
     /// Mobile task cards.
-    static let card: CGFloat = 14
+    static let card = CGFloat(CarryOnRadius.md)
     /// Shells and auth cards.
     static let shell: CGFloat = 16
     /// Dialogs, panels and toasts.
@@ -345,58 +370,47 @@ private struct BBAnimationModifier<Value: Equatable>: ViewModifier {
 
 // MARK: - Typography
 
-/// The brand type scale on the system font (docs deviation 3: SF Pro instead
-/// of Inter), expressed as Dynamic Type text styles so every size scales.
-///
-/// Brand → iOS: display 28 → `.title`, title 20 → `.title3`, subtitle 15 →
-/// `.subheadline`, body 14 → `.body` (iOS reading size), metadata 11–13 →
-/// `.footnote` / `.caption`, micro 11 → `.caption2`, label 10 uppercase →
-/// `.caption2` semibold with tracking (see `bbSectionLabel()`).
+/// The brand type scale on the Carry On styles: Instrument Serif for the voice
+/// (display, title), Instrument Sans for everything else. Each is a
+/// `Font.carryOn` style that scales with Dynamic Type. Carry On has six styles,
+/// so several names share one: subtitle and bodyMedium are `bodyStrong`; body and
+/// rowTitle are `body`; secondary, meta, caption, micro and label are `meta`.
 enum BBFont {
     /// Empty-state headlines.
-    static let display = Font.title.weight(.semibold)
+    static let display = Font.carryOn(CarryOnTypeScale.display)
     /// Pane and dialog titles.
-    static let title = Font.title3.weight(.semibold)
-    static let subtitle = Font.subheadline.weight(.medium)
-    static let body = Font.body
-    static let bodyMedium = Font.body.weight(.medium)
+    static let title = Font.carryOn(CarryOnTypeScale.title)
+    static let subtitle = Font.carryOn(CarryOnTypeScale.bodyStrong)
+    static let body = Font.carryOn(CarryOnTypeScale.body)
+    static let bodyMedium = Font.carryOn(CarryOnTypeScale.bodyStrong)
     /// Task titles in rows.
-    static let rowTitle = Font.body
+    static let rowTitle = Font.carryOn(CarryOnTypeScale.body)
     /// Secondary lines under a title.
-    static let secondary = Font.subheadline
+    static let secondary = Font.carryOn(CarryOnTypeScale.meta)
     /// Row metadata (project, list, waiting note).
-    static let meta = Font.footnote
+    static let meta = Font.carryOn(CarryOnTypeScale.meta)
     /// Chips and pills.
-    static let caption = Font.caption
-    static let micro = Font.caption2
-    /// Uppercase section labels; pair with `.textCase(.uppercase)` and tracking,
-    /// or use `bbSectionLabel()`.
-    static let label = Font.caption2.weight(.semibold)
+    static let caption = Font.carryOn(CarryOnTypeScale.meta)
+    static let micro = Font.carryOn(CarryOnTypeScale.meta)
+    /// Section labels, in sentence case; see `bbSectionLabel()`.
+    static let label = Font.carryOn(CarryOnTypeScale.meta)
 }
 
 // MARK: - View helpers
 
 extension View {
-    /// The only uppercase text in the product: 10-pt-style section labels
-    /// ("PROJECTS", "TAGS") with wide tracking in tertiary slate.
+    /// Section labels ("Projects", "Tags"): sentence case in text-secondary.
     func bbSectionLabel() -> some View {
         font(BBFont.label)
-            .textCase(.uppercase)
-            .tracking(0.6)
-            .foregroundStyle(BBColor.textTertiary)
+            .foregroundStyle(BBColor.textSecondary)
     }
 
-    /// A flat brand card: raised surface, slate hairline, soft shadow. Content
+    /// A Carry On card: surface-card fill, no shadow and no stroke. Content
     /// only; chrome uses Liquid Glass instead.
     func bbCard(cornerRadius: CGFloat = BBRadius.row) -> some View {
         background {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(BBColor.surfaceRaised)
-                .shadow(color: Color.black.opacity(0.04), radius: 1, x: 0, y: 1)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(BBColor.hairline, lineWidth: 1)
         }
     }
 
