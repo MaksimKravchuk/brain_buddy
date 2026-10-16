@@ -11,7 +11,7 @@ import Testing
 struct WorkspaceOpenStepsTests {
     @Test("030_FR_005 030_FR_013: the legacy workspace lists open steps with their server ids and skips finished ones")
     func legacyOpenSteps() async throws {
-        let document = StoreDocument(base: Fixture.base([
+        let document = StoreDocument(generation: 1, base: Fixture.base([
             Fixture.serverTask("one", "Open next", state: .next),
             Fixture.serverTask("two", "Done", state: .completed),
             Fixture.serverTask("three", "Maybe later", state: .someday),
@@ -78,6 +78,8 @@ struct WorkspaceOpenStepsTests {
         await workspace.load()
         _ = try await workspace.capture(CaptureDraft(text: "Keep open"), editorID: "scene:open-steps:keep")
         let done = try await workspace.capture(CaptureDraft(text: "Finish me"), editorID: "scene:open-steps:done")
+        await workspace.prepareList(.list(.inbox))
+        await workspace.refreshTaskDetails(done)
         try await workspace.completeTask(done, editorID: "scene:open-steps:complete")
         await workspace.settleRustWork()
 
