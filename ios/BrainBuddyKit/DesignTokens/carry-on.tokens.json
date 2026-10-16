@@ -1,0 +1,103 @@
+{
+  "$description": "Carry On design tokens: the single source for the iPhone, Mac and web. Copied from the design canvas board 'Carry On design system · foundations' and 'components'. Edit here, then run `python3 scripts/generate_design_tokens.py`; never edit the generated files.",
+  "primitive": {
+    "limestone": { "0": "#FFFFFF", "100": "#E9E5DD", "200": "#DCD7CD", "300": "#CBC5B9" },
+    "dust": { "300": "#A8A196", "400": "#8A8478", "600": "#6B665C" },
+    "basalt": { "700": "#34322E", "800": "#2A2926", "900": "#1C1B19", "950": "#141412" },
+    "terracotta": { "400": "#E07055", "500": "#C4472A", "600": "#A8432A" },
+    "ochre": { "400": "#C9A04A", "700": "#74591A" },
+    "oxblood": { "300": "#E8A091", "700": "#8E2A20" }
+  },
+  "role": {
+    "bg-ground": { "light": "limestone.100", "dark": "basalt.900" },
+    "bg-sunken": { "light": "limestone.200", "dark": "basalt.950" },
+    "surface-card": { "light": "limestone.0", "dark": "basalt.800" },
+    "surface-selected": { "light": "limestone.200", "dark": "basalt.700" },
+    "surface-token": { "light": "limestone.0", "dark": "basalt.700" },
+    "text-primary": { "light": "basalt.900", "dark": "limestone.100" },
+    "text-secondary": { "light": "dust.600", "dark": "dust.300" },
+    "text-done": { "light": "dust.600", "dark": "dust.300" },
+    "text-accent": { "light": "terracotta.600", "dark": "terracotta.400" },
+    "accent-fill": { "light": "terracotta.500", "dark": "terracotta.500" },
+    "accent-pressed": { "light": "terracotta.600", "dark": "terracotta.600" },
+    "on-accent": { "light": "limestone.0", "dark": "limestone.0" },
+    "control-quiet": { "light": "limestone.200", "dark": "basalt.800" },
+    "control-quiet-pressed": { "light": "limestone.300", "dark": "basalt.700" },
+    "mark-open": { "light": "dust.400", "dark": "dust.400" },
+    "focus-ring": { "light": "basalt.900", "dark": "limestone.100" },
+    "status-warning": { "light": "ochre.700", "dark": "ochre.400" },
+    "status-danger": { "light": "oxblood.700", "dark": "oxblood.300" }
+  },
+  "component": {
+    "button-primary-bg": "accent-fill",
+    "button-primary-bg-pressed": "accent-pressed",
+    "button-primary-fg": "on-accent",
+    "button-secondary-bg": "control-quiet",
+    "button-secondary-bg-pressed": "control-quiet-pressed",
+    "button-secondary-fg": "text-primary",
+    "next-step-bg": "surface-card",
+    "next-step-project": "text-secondary",
+    "next-step-text": "text-primary",
+    "step-dot-current": "accent-fill",
+    "step-dot-open": "mark-open",
+    "step-text-done": "text-done",
+    "row-bg": "surface-card",
+    "row-bg-selected": "surface-selected",
+    "chip-bg": "control-quiet",
+    "chip-fg": "text-primary",
+    "chip-due-fg": "status-warning",
+    "chip-overdue-fg": "status-danger",
+    "field-bg": "control-quiet",
+    "field-token-bg": "surface-token",
+    "voice-bg": "text-primary",
+    "voice-fg": "bg-ground",
+    "voice-live-ring": "accent-fill",
+    "sidebar-bg": "bg-sunken",
+    "sidebar-row-selected": "surface-card"
+  },
+  "project": {
+    "lake": "#3E6A7A",
+    "slate": "#5B6478",
+    "moss": "#5E7343",
+    "ochre": "#B8862B",
+    "plum": "#7A4E6B",
+    "heather": "#8C7BA0",
+    "sage": "#8FA07C",
+    "sand": "#C2A878",
+    "rosewood": "#A86C6C",
+    "dust": "#8A8478"
+  },
+  "font": {
+    "voice": { "family": "Instrument Serif", "postscript": { "400": "InstrumentSerif-Regular" } },
+    "action": {
+      "family": "Instrument Sans",
+      "postscript": { "400": "InstrumentSans-Regular", "600": "InstrumentSans-SemiBold" }
+    }
+  },
+  "type": {
+    "display": { "font": "voice", "weight": 400, "ios": 34, "mac": 30, "lineHeight": 1.05, "tracking": -0.015, "textStyle": "largeTitle" },
+    "title": { "font": "voice", "weight": 400, "ios": 28, "mac": 22, "lineHeight": 1.1, "tracking": -0.015, "textStyle": "title" },
+    "step": { "font": "action", "weight": 600, "ios": 24, "mac": 20, "lineHeight": 1.2, "tracking": 0, "textStyle": "title2" },
+    "body": { "font": "action", "weight": 400, "ios": 17, "mac": 14, "lineHeight": 1.4, "tracking": 0, "textStyle": "body" },
+    "body-strong": { "font": "action", "weight": 600, "ios": 17, "mac": 14, "lineHeight": 1.4, "tracking": 0, "textStyle": "body" },
+    "meta": { "font": "action", "weight": 400, "ios": 15, "mac": 12, "lineHeight": 1.35, "tracking": 0, "textStyle": "subheadline" }
+  },
+  "space": { "xxs": 4, "xs": 8, "sm": 12, "md": 16, "lg": 24, "xl": 32, "xxl": 48, "xxxl": 64 },
+  "radius": { "sm": 8, "md": 14, "lg": 22, "pill": 999 },
+  "motion": {
+    "quick": 0.12,
+    "base": 0.2,
+    "settle": 0.32,
+    "ease": [0.22, 1, 0.36, 1]
+  },
+  "layout": {
+    "button": { "height": 50, "padding-x": 24, "quiet-padding-x": 12, "gap": 8, "pressed-scale": 0.97, "disabled-opacity": 0.4 },
+    "chip": { "height": 30, "padding-x": 12, "gap": 6, "dot": 10 },
+    "row": { "padding-y": 14, "padding-x": 16, "radius": 12, "gap": 14, "mark": 24, "mark-stroke": 2, "meta-gap": 2, "line-height": 1.3 },
+    "next-step-card": { "padding-y": 20, "padding-x": 22, "radius": 14, "project-gap": 6, "project-line-height": 1.22, "pressed-scale": 0.98 },
+    "strike": { "thickness": 1.5 },
+    "focus-ring": { "width": 2, "offset": 2 },
+    "bottom-bar": { "side": 16, "bottom": 28, "height": 62 },
+    "mac-sidebar-row": { "height": 34 }
+  }
+}

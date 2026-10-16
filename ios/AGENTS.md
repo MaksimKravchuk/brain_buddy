@@ -127,6 +127,7 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 | `BrainBuddyKit/Sources/BrainBuddyCore` | Models, `GTDCommand`, `GTDReducer`, replay, queries, Smart Add | Import SwiftUI, UIKit, WidgetKit or anything Apple-only |
 | `BrainBuddyKit/Sources/BrainBuddy{Persistence,API,Sync}` | Store file, REST client, sync engine | Hold GTD rules |
 | `BrainBuddyKit/Sources/BrainBuddyWorkspace` | The `@Observable` model the UI binds to | Hold GTD rules |
+| `BrainBuddyKit/Sources/BrainBuddyDesign` | The Carry On design system for the iPhone and Mac: generated tokens, the bundled Instrument faces, SwiftUI components and their catalog | Hold GTD rules, or hand-edit `Generated/` |
 | `BrainBuddyKit/Sources/BrainBuddyDiagnostics` | Beta performance diagnostics: the bounded log, CPU arithmetic, summary, export (`README.md`, "Performance diagnostics") | Depend on the rest of the kit, or record user content |
 | `BrainBuddy/` | App: `App/`, `DesignSystem/`, `Components/`, `Screens/`, `Intents/`, `Resources/` | Hold GTD rules |
 | `BrainBuddyWidgets/` | Widgets and Control Center controls | Sync, or hold GTD rules |
@@ -180,6 +181,22 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   CI; a SwiftUI view is not the place to test a rule.
 
 ## Design and copy
+
+### Carry On design system (the redesign)
+
+- One source: `BrainBuddyKit/DesignTokens/carry-on.tokens.json`, copied from the
+  design canvas boards. `python3 scripts/generate_design_tokens.py` writes
+  `BrainBuddyDesign/Generated/`; `DesignTokensTests` fails when the two disagree.
+  Never type a hex, size or radius into a screen: add a token, regenerate, use it.
+- Screens are built from the `BrainBuddyDesign` components (`CarryOnButtonStyle`,
+  `CarryOnNextStepCard`, `CarryOnStepRow`, `CarryOnChip`, …). A component that is
+  missing is added there, with its states in `CarryOnCatalog`, not drawn in a screen.
+- `CarryOnCatalogSnapshotTests` (macOS) renders every catalog section at iPhone and
+  Mac sizes, light and dark, against `Tests/BrainBuddyDesignTests/__Snapshots__/`.
+  A snapshot is committed only after it was compared with the design board and
+  approved; any later pixel change fails the `ios-app` lane.
+
+### Current system (until the redesign lands)
 
 - Tokens come from `.claude/skills/brain-buddy-design/` (the
   `/brain-buddy-design` skill): sky `#0EA5E9` accent (`AccentColor`), slate

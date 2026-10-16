@@ -58,6 +58,7 @@ let package = Package(
         .library(name: "BrainBuddySync", targets: ["BrainBuddySync"]),
         .library(name: "BrainBuddyWorkspace", targets: ["BrainBuddyWorkspace"]),
         .library(name: "BrainBuddyDiagnostics", targets: ["BrainBuddyDiagnostics"]),
+        .library(name: "BrainBuddyDesign", targets: ["BrainBuddyDesign"]),
     ],
     targets: [
         rustFFI,
@@ -89,6 +90,11 @@ let package = Package(
         // the bounded log, CPU arithmetic, summary and export. No GTD rules, no
         // dependency on the rest of the kit.
         .target(name: "BrainBuddyDiagnostics"),
+        // The Carry On design system shared by the iPhone and Mac apps: tokens generated
+        // from `DesignTokens/carry-on.tokens.json` (`scripts/generate_design_tokens.py`),
+        // the bundled Instrument faces, and the SwiftUI components. The tokens are
+        // Foundation-only and test on Linux; the SwiftUI layer compiles on Apple only.
+        .target(name: "BrainBuddyDesign", resources: [.process("Resources")]),
         // The shared review vectors and golden wire fixtures (spec 020) are
         // byte-identical copies of `contracts/fixtures/*.json`; `.copy`
         // keeps their bytes as they are.
@@ -109,5 +115,11 @@ let package = Package(
             resources: [.copy("Resources")]
         ),
         .testTarget(name: "BrainBuddyDiagnosticsTests", dependencies: ["BrainBuddyDiagnostics"]),
+        // The token test reads `DesignTokens/carry-on.tokens.json` from the checkout; the
+        // component snapshots (macOS only) compare against `__Snapshots__/*.png`, which are
+        // read by path and so are excluded from the bundle.
+        .testTarget(
+            name: "BrainBuddyDesignTests", dependencies: ["BrainBuddyDesign"], exclude: ["__Snapshots__"]
+        ),
     ]
 )
