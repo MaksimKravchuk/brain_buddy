@@ -53,6 +53,9 @@ Type: `font-voice` (Instrument Serif) for titles and empty states;
 - Show only behaviour the web has. If a board shows something the code lacks,
   leave it out and list it in the PR.
 - There are no task priorities.
+- Design-system colours are followed exactly; no invented colours. Text colour
+  contrast is not gated by tests (axe `color-contrast` is disabled in Playwright
+  specs). Decision: Max, 2026-10-16.
 - Resolve every review thread you address; the ruleset blocks merge otherwise.
 
 ## Dark mode

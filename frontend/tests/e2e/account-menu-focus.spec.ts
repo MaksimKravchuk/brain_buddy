@@ -48,7 +48,7 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
     return { outlineStyle: style.outlineStyle, boxShadow: style.boxShadow };
   });
   assert.notEqual(pointerSnapshot.outlineStyle, "solid", "pointer focus must not render the keyboard outline");
-  assert(!pointerSnapshot.boxShadow.includes("#075985"), "pointer focus must not render the keyboard focus color");
+  assert(!pointerSnapshot.boxShadow.includes("#1c1b19"), "pointer focus must not render the keyboard focus color");
 
   await page.getByRole("button", { name: "Brain dump" }).focus();
   const unfocusedClip = await trigger.boundingBox();
@@ -90,7 +90,7 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
   );
   if (forcedColors) {
     assert.notEqual(snapshot.outlineColor, "transparent", "forced-colors outline must be visible");
-    assert.notEqual(snapshot.outlineColor, "rgb(7, 89, 133)", "forced-colors outline must use the system color");
+    assert.notEqual(snapshot.outlineColor, "rgb(28, 27, 25)", "forced-colors outline must use the system color");
     assert.equal(snapshot.forcedColorAdjust, "auto", "forced-colors rendering must remain under browser control");
 
     const forcedFocusRule = await page.evaluate(() => {
@@ -123,10 +123,10 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
     assert.equal(forcedFocusRule.outlineStyle, "solid", "forced-colors stylesheet must define a solid focus outline");
     assert.equal(forcedFocusRule.outlineWidth, "2px", "forced-colors stylesheet must define a 2px focus outline");
     assert.notEqual(forcedFocusRule.outlineColor, "", "forced-colors stylesheet must define a focus color");
-    assert.notEqual(forcedFocusRule.outlineColor, "#075985", "forced-colors stylesheet must not use the normal focus color");
+    assert.notEqual(forcedFocusRule.outlineColor, "#1c1b19", "forced-colors stylesheet must not use the normal focus color");
   } else {
-    assert.equal(snapshot.outlineColor, "rgb(7, 89, 133)", "normal focus must render the design-token outline color");
-    assert(!snapshot.boxShadow.includes("7, 89, 133"), "normal focus evidence must come from the outline, not a shadow");
+    assert.equal(snapshot.outlineColor, "rgb(28, 27, 25)", "normal focus must render the design-token outline color");
+    assert(!snapshot.boxShadow.includes("28, 27, 25"), "normal focus evidence must come from the outline, not a shadow");
   }
 
   const focusedClip = await trigger.boundingBox();
@@ -175,7 +175,7 @@ async function assertRenderedFocus(page: import("@playwright/test").Page, forced
       right: readBackground(Math.min(window.innerWidth - 1, Math.round(rect.x + rect.width + 4)), Math.round(rect.y + rect.height / 2)),
     };
   });
-  const ringColor = forcedColors ? rgb(snapshot.outlineColor) : ([7, 89, 133] as [number, number, number]);
+  const ringColor = forcedColors ? rgb(snapshot.outlineColor) : ([28, 27, 25] as [number, number, number]);
   for (const adjacent of [pixelEvidence.above, pixelEvidence.below, pixelEvidence.left, pixelEvidence.right]) {
     assert(contrastRatio(ringColor, rgb(adjacent)) >= 3, `focus outline must have at least 3:1 contrast against ${adjacent}`);
   }

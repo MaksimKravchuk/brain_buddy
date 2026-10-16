@@ -89,7 +89,7 @@ const fallbackProjectColor = "var(--role-mark-open)";
 const popoverClass =
   "z-50 w-56 rounded-card bg-card p-2 motion-safe:animate-scale-fade-in";
 const popoverInputClass =
-  "min-w-0 rounded-control bg-ground px-3 py-1.5 text-base text-ink outline-hidden transition-colors duration-200 ease-smooth placeholder:text-ink-muted focus-visible:shadow-ring-focus lg:text-co-meta";
+  "min-w-0 rounded-control bg-quiet px-3 py-1.5 text-base text-ink outline-hidden transition-colors duration-200 ease-smooth placeholder:text-ink-muted focus-visible:shadow-ring-focus lg:text-co-meta";
 const popoverPrimaryClass =
   "rounded-control bg-ink px-3 py-1.5 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 disabled:opacity-50";
 const popoverDangerClass =
@@ -97,7 +97,7 @@ const popoverDangerClass =
 
 const navRowClass = (active: boolean, tall = false): string =>
   `flex ${tall ? "min-h-[34px] py-1" : "h-[34px]"} w-full items-center gap-2.5 rounded-card px-2.5 text-left text-co-meta transition-colors duration-200 ease-smooth ${
-    active ? "bg-selected font-semibold text-ink [&_span]:text-ink [&_svg]:text-ink" : "font-normal text-ink hover:bg-quiet-pressed/40"
+    active ? "bg-card font-semibold text-ink" : "font-normal text-ink hover:bg-quiet-pressed/40"
   }`;
 
 function SectionLabel({ children }: { children: ReactNode }): React.JSX.Element {
@@ -176,7 +176,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
           <DeletionCancelledBanner />
           <div className="flex h-[calc(100vh-56px)] min-h-0 overflow-hidden">
             <aside className="hidden w-[248px] shrink-0 pb-3 pl-3 lg:block">
-              <div className="h-full overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4">
+              <div className="h-full overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4">
                 <Sidebar {...props} />
               </div>
             </aside>
@@ -445,7 +445,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/account");
             }}
           >
-            <Settings className="h-4 w-4 text-ink-muted" aria-hidden /> Account settings
+            <Settings className="h-4 w-4 text-mark-open" aria-hidden /> Account settings
           </button>
           <button
             type="button"
@@ -456,7 +456,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/settings/agents");
             }}
           >
-            <Bot className="h-4 w-4 text-ink-muted" aria-hidden /> Connected agents
+            <Bot className="h-4 w-4 text-mark-open" aria-hidden /> Connected agents
           </button>
           <button
             type="button"
@@ -467,7 +467,7 @@ function AccountMenu(): React.JSX.Element {
               navigate("/privacy");
             }}
           >
-            <FileText className="h-4 w-4 text-ink-muted" aria-hidden /> Privacy policy
+            <FileText className="h-4 w-4 text-mark-open" aria-hidden /> Privacy policy
           </button>
           {/* No admin entry here, deliberately (spec 009 PD-1, 009-FR-010/011):
               `/admin` is reached by typing the URL. A menu item would mean every
@@ -481,7 +481,7 @@ function AccountMenu(): React.JSX.Element {
             className={itemClass}
             onClick={() => void requestSignOut()}
           >
-            <LogOut className="h-4 w-4 text-ink-muted" aria-hidden /> Sign out
+            <LogOut className="h-4 w-4 text-mark-open" aria-hidden /> Sign out
           </button>
         </div>
       ) : null}
@@ -668,7 +668,7 @@ function NavigationDrawer({ open, onClose, ...props }: NavigationDrawerProps): R
         </div>
         <TaskSearch className="mb-3 flex gap-2 px-2 md:hidden" onSubmit={onClose} />
         <div
-          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-card px-3 pb-6 pt-4"
+          className="min-h-0 flex-1 overflow-y-auto rounded-card bg-sunken px-3 pb-6 pt-4"
           onClick={(event) => {
             const target = event.target as HTMLElement;
             if (target.closest("a")) {
@@ -799,7 +799,7 @@ function Sidebar({
                     to={`/projects/${project.id}`}
                     className={`flex min-h-[34px] w-full items-start gap-2.5 rounded-card px-2.5 py-[7px] pr-7 text-co-meta transition-colors duration-200 ease-smooth ${
                       activeProjectId === project.id
-                        ? "bg-selected font-semibold text-ink"
+                        ? "bg-card font-semibold text-ink"
                         : "text-ink hover:bg-quiet-pressed/40"
                     }`}
                   >
@@ -957,7 +957,7 @@ function Sidebar({
                         type="button"
                         aria-label={`Tag options ${tag.name}`}
                         aria-expanded={openPopover === popoverId}
-                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full bg-quiet text-ink transition-colors duration-200 ease-smooth group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:bg-transparent"
+                        className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full bg-quiet text-ink-muted transition-colors duration-200 ease-smooth hover:text-ink group-focus-within:inline-flex group-hover:inline-flex max-lg:right-1 max-lg:top-1/2 max-lg:inline-flex max-lg:h-5 max-lg:w-5 max-lg:-translate-y-1/2 max-lg:bg-transparent"
                         onClick={() => setOpenPopover(openPopover === popoverId ? null : popoverId)}
                       >
                         <MoreHorizontal className="h-2.5 w-2.5 max-lg:h-3.5 max-lg:w-3.5" aria-hidden />

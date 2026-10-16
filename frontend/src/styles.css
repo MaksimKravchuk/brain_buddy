@@ -239,7 +239,7 @@ body {
 }
 
 .account-menu-trigger:focus-visible {
-  outline: 3px solid #075985;
+  outline: 3px solid var(--color-focus);
   outline-offset: 3px;
   box-shadow: none;
 }

@@ -77,7 +77,8 @@ test.describe("024-FR-013 CLI browser approval", () => {
       await testInfo.attach("cli-desktop-approval", { body: await page.screenshot(), contentType: "image/png" });
     });
     await test.step("verify keyboard approval, accessibility and the announced result", async () => {
-      const violations = (await new AxeBuilder({ page }).analyze()).violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""));
+      // Colours come from the Carry On design system by product decision, so text colour contrast is not gated by tests.
+      const violations = (await new AxeBuilder({ page }).disableRules(["color-contrast"]).analyze()).violations.filter(item => ["serious", "critical"].includes(item.impact ?? ""));
       expect(violations).toEqual([]);
       await page.keyboard.press("Tab");
       await expect(page.getByRole("button", { name: "Approve access" })).toBeFocused();
