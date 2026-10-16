@@ -6,6 +6,10 @@ import Speech
 /// The microphone for the voice sheet: an `AVAudioEngine` tap feeds an on-device
 /// `SFSpeechRecognizer`, and every partial result delivers the whole text heard so far.
 ///
+/// On-device recognition starts its transcription over after a pause, so the results go through a
+/// `SpeechTranscript`, which keeps every utterance; the recogniser adds punctuation, so each
+/// sentence said can become a step.
+///
 /// Recognition never leaves the device (`requiresOnDeviceRecognition`; a language the device
 /// cannot recognise offline is `.recognitionUnavailable`). Nothing is written to a file and
 /// nothing heard is logged.
@@ -18,6 +22,7 @@ final class AppleSpeechCapture: SpeechCapturing {
     private var task: SFSpeechRecognitionTask?
     private var audio: AudioSink?
     private var onHeard: (@MainActor (String) -> Void)?
+    private var transcript = SpeechTranscript()
     private var waiter: CheckedContinuation<Void, Never>?
     /// Bumped on every start and cancel, so a late callback of an earlier session is ignored.
     private var generation = 0
@@ -53,13 +58,17 @@ final class AppleSpeechCapture: SpeechCapturing {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = true
+        request.addsPunctuation = true
         let sink = AudioSink(request)
         generation += 1
         let current = generation
         self.onHeard = onHeard
+        transcript = SpeechTranscript()
         audio = sink
-        task = Self.recognize(recognizer, request: request) { [weak self] text, isFinal in
-            Task { @MainActor in self?.heard(text, isFinal: isFinal, generation: current) }
+        task = Self.recognize(recognizer, request: request) { [weak self] text, isFinal, endsUtterance in
+            Task { @MainActor in
+                self?.heard(text, isFinal: isFinal, endsUtterance: endsUtterance, generation: current)
+            }
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tapBlock(for: sink))
         isTapping = true
@@ -99,9 +108,9 @@ final class AppleSpeechCapture: SpeechCapturing {
     // MARK: Private
 
     /// `text` is nil when the recogniser errored: the session ends, and what was heard stays.
-    private func heard(_ text: String?, isFinal: Bool, generation current: Int) {
+    private func heard(_ text: String?, isFinal: Bool, endsUtterance: Bool, generation current: Int) {
         guard current == generation else { return }
-        if let text { onHeard?(text) }
+        if let text { onHeard?(transcript.receive(text, endsUtterance: endsUtterance || isFinal)) }
         if isFinal { resumeWaiter() }
     }
 
@@ -145,17 +154,20 @@ final class AppleSpeechCapture: SpeechCapturing {
     }
 
     /// An error ends the session like a final result, with no text, so the transcript heard so far
-    /// is kept (the recogniser also errors on silence).
+    /// is kept (the recogniser also errors on silence). A result carrying speech metadata ends an
+    /// utterance (a pause), after which the recogniser starts over.
     private nonisolated static func recognize(
         _ recognizer: SFSpeechRecognizer,
         request: SFSpeechAudioBufferRecognitionRequest,
-        deliver: @escaping @Sendable (String?, Bool) -> Void
+        deliver: @escaping @Sendable (String?, Bool, Bool) -> Void
     ) -> SFSpeechRecognitionTask {
         recognizer.recognitionTask(with: request) { result, error in
             if let result {
-                deliver(result.bestTranscription.formattedString, result.isFinal)
+                deliver(
+                    result.bestTranscription.formattedString, result.isFinal,
+                    result.speechRecognitionMetadata != nil)
             } else if error != nil {
-                deliver(nil, true)
+                deliver(nil, true, true)
             }
         }
     }
