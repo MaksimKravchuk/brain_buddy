@@ -107,7 +107,7 @@ iOS thread; no slice edits it.
   50, in order, repeated `task_id` query items), merges the sparse maps and surfaces the
   first failing batch's error; then implement the batching. 030-FR-005, 030-SC-007. PR-02.
 
-## Phase 4 — Mac core: Settings agents model and editors (PR-06)
+## Phase 4 — Mac core: Settings agents model (PR-06) and editors (PR-14)
 
 - [ ] T018 [US5] Implement `AgentSettingsModel` in
   `macos/Sources/BrainBuddyMacCore/AgentSettingsModel.swift` (list without disconnected
@@ -120,12 +120,12 @@ iOS thread; no slice edits it.
   select; Replace credential; Edit with the password only when address or scheme changes;
   Delete; one Idempotency-Key per action reused on Try again; `expectedRevision`;
   wrong password, stale revision, 429 and relay-unavailable mapping; secrets cleared after
-  each request and on dismiss). 030-FR-031 – 030-FR-035. PR-06.
+  each request and on dismiss). 030-FR-031 – 030-FR-035. PR-14 (split out of PR-06 for budget).
 - [ ] T020 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift`:
   each action's request and outcome over a fake remote; name-only Edit sends no password;
   wrong password keeps the other fields and clears the password; a stale revision
   re-reads; a 429 is not retried; secrets are empty after success, failure and dismiss.
-  030-FR-031 – 030-FR-035, 030-FR-038. PR-06.
+  030-FR-031 – 030-FR-035, 030-FR-038. PR-14.
 
 ## Phase 5 — Mac core: grouping and All runs store (PR-04)
 
@@ -277,7 +277,7 @@ iOS thread; no slice edits it.
 - PR-04 depends on PR-02, PR-03 and PR-13. PR-05 depends on PR-04.
 - PR-07 depends on PR-04 and, outside this map, on 028 PR-03.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
-- PR-10 depends on PR-06 and PR-07 and, outside this map, on 028 PR-03; it runs in
+- PR-14 depends on PR-06. PR-10 depends on PR-06, PR-14 and PR-07 and, outside this map, on 028 PR-03; it runs in
   parallel with PR-08 and PR-09. PR-11 depends on PR-10.
 - PR-12 depends on PR-07, PR-09 and PR-11.
 - Manual acceptance after PR-12: SC-001, SC-004 – SC-006, SC-008 against a test agent.
@@ -385,28 +385,43 @@ iOS thread; no slice edits it.
     },
     {
       "id": "PR-06",
-      "outcome": "Mac core lists agents with their M29 details and runs Test again, Add, Replace credential, Edit and Delete with the password exactly where the server needs it",
-      "tasks": ["T018", "T019", "T020"],
-      "requirements": [
-        "030-FR-029", "030-FR-030", "030-FR-031", "030-FR-032", "030-FR-033",
-        "030-FR-034", "030-FR-035", "030-FR-036", "030-FR-038"
-      ],
+      "outcome": "Mac core lists agents with their M29 details and runs Test again, with the shared remote protocol and failure notices",
+      "tasks": ["T018"],
+      "requirements": ["030-FR-029", "030-FR-030", "030-FR-036", "030-FR-038"],
       "paths": [
         "macos/Sources/BrainBuddyMacCore/AgentSettingsModel.swift",
-        "macos/Sources/BrainBuddyMacCore/AgentConnectionEditor.swift",
-        "macos/Tests/BrainBuddyMacTests/AgentSettingsModelTests.swift",
-        "macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift"
+        "macos/Tests/BrainBuddyMacTests/AgentSettingsModelTests.swift"
       ],
       "depends_on": ["PR-01", "PR-03", "PR-13"],
       "tests": [
-        "cd macos && swift test --filter AgentSettingsModelTests",
+        "cd macos && swift test --filter AgentSettingsModelTests"
+      ],
+      "acceptance": [
+        "Detail rows match the connection fields and the web's status words; Test again sends no password"
+      ],
+      "budget": {"product_loc": 320, "files": 1},
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-14",
+      "outcome": "Mac core runs Add, Replace credential, Edit and Delete with the password exactly where the server needs it",
+      "tasks": ["T019", "T020"],
+      "requirements": [
+        "030-FR-031", "030-FR-032", "030-FR-033", "030-FR-034", "030-FR-035", "030-FR-038"
+      ],
+      "paths": [
+        "macos/Sources/BrainBuddyMacCore/AgentConnectionEditor.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift"
+      ],
+      "depends_on": ["PR-06"],
+      "tests": [
         "cd macos && swift test --filter AgentConnectionEditorTests"
       ],
       "acceptance": [
-        "Detail rows match the connection fields and the web's status words; name-only Edit sends no password",
+        "Name-only Edit sends no password; Add, Replace, Delete and a destination Edit do",
         "Wrong password, stale revision and 429 are handled in words without automatic retry, and secrets are empty after every outcome"
       ],
-      "budget": {"product_loc": 380, "files": 2},
+      "budget": {"product_loc": 240, "files": 1},
       "implementer": "feature-implementer"
     },
     {
@@ -508,7 +523,7 @@ iOS thread; no slice edits it.
         "macos/Sources/BrainBuddyMac/Settings/AgentDetailsView.swift",
         "macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift"
       ],
-      "depends_on": ["PR-06", "PR-07"],
+      "depends_on": ["PR-06", "PR-14", "PR-07"],
       "tests": [
         "cd macos && swift build",
         "cd macos && swift test --filter AgentsSettingsTabTests",
