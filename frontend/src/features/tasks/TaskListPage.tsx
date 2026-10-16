@@ -668,7 +668,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
 
   const isSavedNotice = mutationError === "Saved";
   const mutationNotice = mutationError ? (
-    <div role={isSavedNotice ? "status" : "alert"} className={`relative mb-3 flex flex-wrap items-center gap-2 rounded-card px-3 py-2 text-co-meta ${isSavedNotice ? "bg-quiet text-ink" : "bg-quiet text-danger"}`}>
+    <div role={isSavedNotice ? "status" : "alert"} className={`relative mb-3 flex flex-wrap items-center gap-2 rounded-card px-3 py-2 text-co-meta ${isSavedNotice ? "bg-quiet text-ink-muted" : "bg-quiet text-danger"}`}>
       <span>{mutationError}</span>
       {autosaveConflict ? <Button size="sm" variant="secondary" onClick={() => void autosaveConflict.retry().then(handleAutosaveResult).catch((caught: unknown) => setMutationError(getErrorMessage(caught)))}>Retry</Button> : recoveryAvailable ? <Button size="sm" variant="secondary" onClick={recoverAutosave}>Retry</Button> : null}
       {(autosaveConflict || recoveryAvailable) ? <Button size="sm" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={discardAutosave}>Discard</Button> : null}
@@ -827,7 +827,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
   ]);
 
   const selectionRecoveryNotice = taskId && !selectedTaskVisible && selectionRecoveryMessage ? (
-    <div role={detailQuery.isError ? "alert" : "status"} className="mb-3 flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink">
+    <div role={detailQuery.isError ? "alert" : "status"} className="mb-3 flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
       <span>{selectionRecoveryMessage}</span>
       {!detailQuery.isError ? (
         <Button
@@ -848,7 +848,7 @@ export function TaskListPage({ mode }: { mode?: "state" | "project" | "tag" }): 
     </div>
   ) : null;
   const agentSummaryNotice = agentRunSummariesQuery.isError && agentRunSummariesQuery.data ? (
-    <div role="status" className="mb-3 flex items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink">
+    <div role="status" className="mb-3 flex items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
       <span>Agent statuses may be out of date.</span>
       <Button size="sm" variant="ghost" onClick={() => void agentRunSummariesQuery.refetch()}>Retry</Button>
     </div>
@@ -1380,7 +1380,7 @@ function TaskRow({
     >
       <div
         data-testid="task-row-header"
-        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth rounded-card ${isSelected ? "bg-selected [&_.text-ink-done]:text-ink [&_.text-ink-muted]:text-ink" : "hover:bg-selected/60 hover:[&_.text-ink-muted]:text-ink"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
+        className={`flex h-11 min-w-0 cursor-pointer items-center gap-2 pl-1.5 pr-3 transition-colors duration-150 ease-smooth rounded-card ${isSelected ? "bg-selected" : "hover:bg-selected/60"} ${marker ? "max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-0 max-sm:pb-1.5" : ""}`}
         onClick={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest("a, button, input, textarea, select, label")) return;
@@ -1768,7 +1768,7 @@ function TaskCreator({
 
 function DateViewCaptureHint(): React.JSX.Element {
   return (
-    <div className="mt-6 rounded-card bg-quiet px-4 py-3 text-co-meta text-ink">
+    <div className="mt-6 rounded-card bg-quiet px-4 py-3 text-co-meta text-ink-muted">
       Date views are filters over existing tasks. Add a task from Inbox, Next, Waiting, Someday, a Project, or a Tag, then set its due date in task detail.
     </div>
   );
@@ -1794,7 +1794,7 @@ function LoadingState({ label }: { label: string }): React.JSX.Element {
 function EmptyState({ state, onClearSearch }: { state?: OpenTaskState; onClearSearch?: () => void }): React.JSX.Element {
   const label = state ? stateLabels[state] : "This view";
   return (
-    <div className="rounded-card bg-sunken px-5 py-8 text-center text-co-body text-ink">
+    <div className="rounded-card bg-sunken px-5 py-8 text-center text-co-body text-ink-muted">
       <p className="font-voice text-co-title text-ink">{onClearSearch ? "No tasks match your search" : `${label} is clear`}</p>
       {onClearSearch ? (
         <Button variant="secondary" className="mt-3" onClick={onClearSearch}>Clear search</Button>

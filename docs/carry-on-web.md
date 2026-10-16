@@ -49,10 +49,15 @@ Type: `font-voice` (Instrument Serif) for titles and empty states;
 - Done is `ink-done` with a strikethrough. An AI suggestion is a quiet card until
   it is accepted.
 - No shadows, gradients or glass on content; no hairline borders (separate with
-  space or a change of field); no tiny uppercase labels.
+  space or a change of field); no tiny uppercase labels. Glass (`co-glass`, the
+  canvas Liquid Glass material) is only for what floats, such as the sidebar
+  panel on the Web boards.
 - Show only behaviour the web has. If a board shows something the code lacks,
   leave it out and list it in the PR.
 - There are no task priorities.
+- Design-system colours are followed exactly; no invented colours. Text colour
+  contrast is not gated by tests (axe `color-contrast` is disabled in Playwright
+  specs). Decision: Max, 2026-10-16.
 - Resolve every review thread you address; the ruleset blocks merge otherwise.
 
 ## Dark mode

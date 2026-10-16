@@ -341,7 +341,8 @@ async function prepareProviderPassword(page: Page, provider: "google" | "apple",
 }
 
 async function accessible(page: Page, surface = "Authentication"): Promise<void> {
-  const result = await new AxeBuilder({ page }).analyze();
+  // Colours come from the Carry On design system by product decision, so text colour contrast is not gated by tests.
+  const result = await new AxeBuilder({ page }).disableRules(["color-contrast"]).analyze();
   await attachment("Accessibility scan summary", JSON.stringify({
     pathname: new URL(page.url()).pathname,
     surface,
