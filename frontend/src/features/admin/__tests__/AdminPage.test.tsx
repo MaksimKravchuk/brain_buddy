@@ -101,17 +101,17 @@ describe("AdminPage capability and exclusive tabs", () => {
     const users = await screen.findByRole("tab", { name: "Users" });
     const flags = screen.getByRole("tab", { name: "Feature flags" });
     expect(users).toHaveAttribute("aria-selected", "true");
-    expect(users).toHaveClass("border-sky-700", "text-sky-800", "focus-visible:ring-2");
-    expect(flags).toHaveClass("border-transparent");
+    expect(users).toHaveClass("bg-selected", "text-ink", "focus-visible:ring-2");
+    expect(flags).toHaveClass("text-ink-muted");
     users.focus();
     await user.keyboard("{ArrowRight}");
     expect(flags).toHaveFocus();
     expect(flags).toHaveAttribute("aria-selected", "true");
-    expect(flags).toHaveClass("border-sky-700", "text-sky-800");
-    expect(users).toHaveClass("border-transparent");
+    expect(flags).toHaveClass("bg-selected", "text-ink");
+    expect(users).toHaveClass("text-ink-muted");
     await user.keyboard("{ArrowLeft}");
     expect(users).toHaveFocus();
-    expect(users).toHaveClass("border-sky-700");
+    expect(users).toHaveClass("bg-selected");
   });
 
   it("keeps the selected tab unchanged for unrelated keys", async () => {

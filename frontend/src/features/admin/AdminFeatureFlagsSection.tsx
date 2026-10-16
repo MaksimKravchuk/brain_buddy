@@ -83,7 +83,7 @@ export function AdminFeatureFlagsSection(): React.JSX.Element {
         title="Feature flags"
         description="Runtime rollout control for the flags that can be managed here."
       >
-        <p role="status" className="text-sm text-slate-500">
+        <p role="status" className="text-co-meta text-ink-muted">
           Loading feature flags…
         </p>
       </SectionCard>
@@ -101,7 +101,7 @@ export function AdminFeatureFlagsSection(): React.JSX.Element {
         description="Runtime rollout control for the flags that can be managed here."
       >
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-slate-600">Couldn&apos;t load feature flags.</p>
+          <p className="text-co-meta text-ink-muted">Couldn&apos;t load feature flags.</p>
           <Feedback error={referenceId ? `${message} (ref: ${referenceId})` : message} success={null} />
           <div>
             <Button
@@ -133,7 +133,7 @@ export function AdminFeatureFlagsSection(): React.JSX.Element {
           // subsystem is deliberately out of scope.
           <p
             role="alert"
-            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            className="rounded-md bg-sunken px-3 py-2 text-co-meta text-warning"
           >
             Runtime flag state could not be read. Every flag is resolving as
             ineffective, and changes are disabled until this is repaired.
@@ -312,20 +312,20 @@ function FlagRow({
   };
 
   return (
-    <article aria-labelledby={headingId} className="flex flex-col gap-3 border-t border-slate-100 pt-4 first:border-0 first:pt-0">
-      <h3 id={headingId} className="text-sm font-semibold text-slate-900">
+    <article aria-labelledby={headingId} className="flex flex-col gap-3 pt-4 first:pt-0">
+      <h3 id={headingId} className="text-co-meta font-semibold text-ink">
         {flag.name}
       </h3>
 
       <fieldset
-        className="flex flex-col flex-wrap gap-2 border-0 p-0 sm:flex-row sm:items-center"
+        className="flex flex-col flex-wrap gap-2 p-0 sm:flex-row sm:items-center"
         disabled={locked}
       >
-        <legend className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        <legend className="text-co-meta font-medium text-ink-muted">
           {flag.name} mode
         </legend>
         {MODE_LABELS.map(({ mode, label }) => (
-          <label key={mode} className={`inline-flex items-center gap-2 text-sm text-slate-700 ${TAP_TARGET}`}>
+          <label key={mode} className={`inline-flex items-center gap-2 text-co-meta text-ink ${TAP_TARGET}`}>
             <input
               type="radio"
               name={`mode-${flag.name}`}
@@ -346,7 +346,7 @@ function FlagRow({
         ref={countRef}
         tabIndex={-1}
         data-testid={`cohort-count-${flag.name}`}
-        className="text-sm text-slate-600"
+        className="text-co-meta text-ink-muted"
       >
         {flag.selected_users.length} selected
       </p>
@@ -354,7 +354,7 @@ function FlagRow({
       {isCohortMode ? (
         <>
           {flag.selected_users.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-co-meta text-ink-muted">
               No users selected — this flag is off for everyone.
             </p>
           ) : (
@@ -363,11 +363,11 @@ function FlagRow({
                 <li
                   key={member.account_id}
                   data-testid={`cohort-row-${member.account_id}`}
-                  className="flex flex-col gap-1 rounded-md border border-slate-200 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-1 rounded-card bg-sunken px-3 py-2 text-co-meta sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <span className="font-mono text-xs text-slate-500">{member.account_id}</span>
+                  <span className="font-mono text-co-meta text-ink-muted">{member.account_id}</span>
                   <span className="flex items-center justify-between gap-3">
-                    <span className="text-slate-700">{member.email ?? "Account not found"}</span>
+                    <span className="text-ink">{member.email ?? "Account not found"}</span>
                     <Button
                       type="button"
                       variant="secondary"
@@ -393,8 +393,8 @@ function FlagRow({
             className="flex flex-col gap-2 sm:flex-row sm:items-end"
             onSubmit={onSubmitAdd}
           >
-            <label className="flex flex-1 flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Account ID or email</span>
+            <label className="flex flex-1 flex-col gap-1 text-co-meta">
+              <span className="font-medium text-ink">Account ID or email</span>
               <input
                 type="text"
                 name={`add-user-${flag.name}`}
@@ -402,7 +402,7 @@ function FlagRow({
                 ref={addInputRef}
                 disabled={locked}
                 onChange={(event) => setQuery(event.target.value)}
-                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-slate-900 shadow-soft"
+                className="rounded-card bg-quiet px-3 py-2 text-ink"
               />
             </label>
             <Button
@@ -420,7 +420,7 @@ function FlagRow({
       ) : null}
 
       {notFound ? (
-        <p role="status" className="rounded-md border border-slate-200 bg-surface-sunken px-3 py-2 text-sm text-slate-600">
+        <p role="status" className="rounded-md bg-sunken px-3 py-2 text-co-meta text-ink-muted">
           No account found.
         </p>
       ) : null}
@@ -469,7 +469,7 @@ function ConfirmStep({
         onClose={onCancel}
       />
       <div className="flex flex-col gap-4 px-5 py-5 sm:px-6">
-        <p className="text-sm text-slate-600">{body}</p>
+        <p className="text-co-meta text-ink-muted">{body}</p>
         <div
           data-testid="confirm-actions"
           className="flex flex-col gap-2 sm:flex-row sm:justify-end"

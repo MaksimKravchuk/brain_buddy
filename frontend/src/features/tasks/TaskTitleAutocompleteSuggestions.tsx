@@ -18,7 +18,7 @@ export function TaskTitleAutocompleteSuggestions({
       id={listboxId}
       role="listbox"
       aria-label="Task title suggestions"
-      className="grid gap-1 rounded-xl border border-sky-100 bg-white p-2 shadow-soft"
+      className="grid gap-1 rounded-card bg-card p-2"
     >
       {candidates.map((candidate, index) => (
         <button
@@ -27,8 +27,8 @@ export function TaskTitleAutocompleteSuggestions({
           type="button"
           role="option"
           aria-selected={index === activeIndex}
-          className={`rounded-lg px-3 py-2 text-left text-sm ${
-            index === activeIndex ? "bg-sky-50 text-sky-900" : "text-slate-700 hover:bg-slate-50"
+          className={`rounded-lg px-3 py-2 text-left text-co-meta ${
+            index === activeIndex ? "bg-quiet text-ink" : "text-ink hover:bg-sunken"
           }`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => onSelect(candidate, index + 1)}
