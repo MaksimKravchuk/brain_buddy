@@ -80,7 +80,7 @@ struct RecordedSend: Equatable {
 }
 
 /// A scripted relay that records every call. Replies, stops and checks are in `AgentRunActionsTests`.
-final class FakeAgentRemote: HandoffRemote, AgentRunActionsRemote {
+final class FakeHandoffRemote: HandoffRemote, AgentRunActionsRemote {
     private struct State {
         var connections: [AgentConnectionDTO] = []
         var manifests: [AgentManifestDTO] = []
@@ -164,7 +164,7 @@ final class SentLog {
 struct HandoffFlowTests {
     private struct Rig {
         let flow: HandoffFlow
-        let remote: FakeAgentRemote
+        let remote: FakeHandoffRemote
         let availability: AgentAvailability
         let sent: SentLog
     }
@@ -172,7 +172,7 @@ struct HandoffFlowTests {
     private func make(
         project: String? = "Admin", connections: [AgentConnectionDTO]? = nil, manifests: [AgentManifestDTO]? = nil
     ) -> Rig {
-        let remote = FakeAgentRemote()
+        let remote = FakeHandoffRemote()
         remote.script(
             connections: connections ?? [
                 HandoffFixture.connection(id: "conn_a", name: "Hermes", tier: "guaranteed", skills: ["Web research", "Email drafts"]),
@@ -349,7 +349,7 @@ struct HandoffFlowTests {
         let flag = FakeAvailabilityRemote(flag: true)
         let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag })
         await availability.refresh()
-        let remote = FakeAgentRemote()
+        let remote = FakeHandoffRemote()
         remote.script(connections: [HandoffFixture.connection(id: "conn_a", name: "Hermes")], manifests: [HandoffFixture.manifest()], sends: [.failure(HandoffFixture.relayOff)])
         let flow = HandoffFlow(taskServerID: "task_1", projectName: nil, remote: remote, availability: availability)
         await flow.start()
@@ -364,7 +364,7 @@ struct HandoffFlowTests {
         let flag = FakeAvailabilityRemote(me: .failure(HandoffFixture.offline))
         let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag })
         await availability.refresh()
-        let remote = FakeAgentRemote()
+        let remote = FakeHandoffRemote()
         remote.script(connections: [HandoffFixture.connection(id: "conn_a", name: "Hermes")], manifests: [HandoffFixture.manifest()])
         let flow = HandoffFlow(taskServerID: "task_1", projectName: nil, remote: remote, availability: availability)
         await flow.start()
