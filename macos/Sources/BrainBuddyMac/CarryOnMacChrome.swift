@@ -163,7 +163,7 @@ struct MacSidebarRowLabel: View {
 
     private var titleStyle: CarryOnColorStyle { muted ? .coTextSecondary : .coTextPrimary }
 
-    private var symbolStyle: CarryOnColorStyle { selected && !muted ? .coTextPrimary : .coTextSecondary }
+    private var symbolStyle: CarryOnColorStyle { muted ? .coTextSecondary : .coTextPrimary }
 
     @ViewBuilder
     private var leadingView: some View {
