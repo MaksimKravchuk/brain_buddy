@@ -17,7 +17,7 @@ export interface SignOutSummary {
 }
 
 export const SIGN_OUT_BASE =
-  "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account.";
+  "You'll be signed out of Carry On on this browser. Your tasks stay in your account.";
 export const SIGN_OUT_LOSS = "Unsaved changes in this browser will be lost: they have not been saved to your account.";
 
 export async function loadSignOutSummary(accountId: string): Promise<SignOutSummary> {

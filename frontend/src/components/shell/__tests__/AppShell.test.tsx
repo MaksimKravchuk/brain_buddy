@@ -148,7 +148,7 @@ describe("AppShell canonical sidebar", () => {
   it("keeps the mobile header labels from wrapping inside the fixed-height chrome", () => {
     renderShell();
 
-    expect(screen.getByRole("link", { name: "BrainBuddy" })).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(screen.getByRole("link", { name: "Carry On" })).toHaveClass("shrink-0", "whitespace-nowrap");
     expect(screen.getByRole("button", { name: "Brain dump" })).toHaveClass("shrink-0", "whitespace-nowrap", "px-3", "sm:px-4");
   });
 
@@ -703,7 +703,7 @@ describe("AppShell account menu", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Sign out?" });
     expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
     expect(dialog).toHaveAccessibleDescription(
-      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account."
+      "You'll be signed out of Carry On on this browser. Your tasks stay in your account."
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     expect(logout).not.toHaveBeenCalled();
@@ -927,7 +927,7 @@ describe("AppShell account menu", () => {
     expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
 
     await user.click(trigger);
-    await user.click(screen.getByRole("link", { name: "BrainBuddy" }));
+    await user.click(screen.getByRole("link", { name: "Carry On" }));
     expect(screen.queryByRole("menu", { name: "Account" })).not.toBeInTheDocument();
 
     await user.click(trigger);

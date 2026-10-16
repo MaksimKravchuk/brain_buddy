@@ -185,7 +185,7 @@ test.describe("desktop task shell at the canonical 1240x800 viewport", () => {
     await page.goto("/tasks/next");
 
     await expect(page.getByRole("heading", { name: "Next actions" })).toBeVisible();
-    await expect(page.getByText("BrainBuddy")).toBeVisible();
+    await expect(page.getByText("Carry On")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Task navigation" })).toBeVisible();
     await expect(page.getByText("Tags", { exact: true })).toBeVisible();
     await expect(page.getByText("Contexts", { exact: true })).toHaveCount(0);

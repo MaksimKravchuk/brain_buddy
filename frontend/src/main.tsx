@@ -8,6 +8,9 @@ import "@fontsource/instrument-serif/400.css";
 import App from "./App";
 import { queryClient } from "./queryClient";
 import "./styles.css";
+import { applySystemTheme } from "./theme";
+
+applySystemTheme();
 
 const rootElement = document.getElementById("root");
 
