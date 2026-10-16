@@ -44,6 +44,9 @@ final class QuickCaptureController: ObservableObject {
     private var panel: NSPanel?
     private var previousApplication: NSRunningApplication?
 
+    /// 029-FR-004: whether ⌃⌥⇧B is registered, for the first run's hint and tip.
+    var hotkeyRegistered: Bool { hotKey != nil && registrationError == nil }
+
     func start(model: BrainBuddyModel) {
         self.model = model
         guard eventHandler == nil, hotKey == nil else { return }
