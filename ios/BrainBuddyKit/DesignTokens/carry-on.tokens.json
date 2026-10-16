@@ -106,6 +106,8 @@
     "strike": { "thickness": 1.5 },
     "focus-ring": { "width": 2, "offset": 2 },
     "bottom-bar": { "side": 16, "bottom": 28, "height": 62 },
-    "mac-sidebar-row": { "height": 34 }
+    "mac-sidebar-row": { "height": 34 },
+    "first-run": { "mark": 132, "brand-size": 56, "brand-gap": 28, "large-text-size": 19, "large-text-line-height": 1.4, "lede-gap": 12, "note-gap": 38, "top": 36, "side": 24, "subtitle-gap": 10, "field-gap": 28, "field-padding": 16, "field-radius": 14, "field-min-height": 96, "hint-gap": 12, "source-gap": 6, "question-size": 30, "question-gap": 26, "step-field-gap": 20, "step-size": 22, "step-line-height": 1.25 },
+    "landing-tip": { "padding-y": 16, "padding-x": 18, "radius": 14, "action-gap": 10 }
   }
 }

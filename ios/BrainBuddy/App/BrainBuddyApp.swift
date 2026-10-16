@@ -16,6 +16,8 @@ struct BrainBuddyApp: App {
     @State private var workspace: Workspace
     /// Beta performance diagnostics; nil when the build turns them off.
     @State private var diagnostics: PerformanceDiagnostics?
+    /// The one-time first run (boards 01 to 04), decided by `RootView` once the store is read.
+    @State private var firstRun: FirstRunFlow
     /// Whether this launch resolves the runtime (spec 026, T044): the install has a persisted
     /// selection, or the local pilot switch is on. Otherwise nothing below runs and the app is
     /// exactly the legacy app.
@@ -50,6 +52,7 @@ struct BrainBuddyApp: App {
         workspace.didPersist = { WidgetCenter.shared.reloadAllTimelines() }
         _workspace = State(initialValue: workspace)
         _diagnostics = State(initialValue: PerformanceDiagnostics.live())
+        _firstRun = State(initialValue: FirstRunFlow(store: UserDefaultsFirstRunRecordStore()))
     }
 
     var body: some Scene {
@@ -58,6 +61,7 @@ struct BrainBuddyApp: App {
                 .modifier(WidgetReloadAfterSync())
                 .environment(workspace)
                 .environment(diagnostics)
+                .environment(firstRun)
                 .task { await diagnostics?.start() }
                 .task { await start() }
                 .task { await observeExternalWrites() }
