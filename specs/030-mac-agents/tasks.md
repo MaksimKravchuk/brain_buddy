@@ -215,7 +215,7 @@ iOS thread; no slice edits it.
 
 ## Phase 8 — Mac: run section in the inspector (PR-08)
 
-- [ ] T025 [US3] Build G-05 in `macos/Sources/BrainBuddyMac/Agents/AgentRunSection.swift`
+- [x] T025 [US3] Build G-05 in `macos/Sources/BrainBuddyMac/Agents/AgentRunSection.swift`
   (timeline, Needs you with Reply / Stop run, running, queued, result with Mark step done /
   Make the next step / Hand off again, failed, stopped reporting, other labels, expired,
   delivery unconfirmed with Check again, offline, earlier runs, succession line; agent
@@ -223,7 +223,7 @@ iOS thread; no slice edits it.
   `macos/Sources/BrainBuddyMac/TaskInspector.swift` through
   `macos/Sources/BrainBuddyMac/ContentView.swift`. 030-FR-019 – 030-FR-023, 030-FR-025,
   030-FR-027, 030-FR-028, 030-FR-041. PR-08.
-- [ ] T026 [US4] Tests in `macos/Tests/BrainBuddyMacTests/AgentRunSectionTests.swift`: each
+- [x] T026 [US4] Tests in `macos/Tests/BrainBuddyMacTests/AgentRunSectionTests.swift`: each
   label shows its block; withdrawn controls are absent; a result link is not a link;
   Markdown and HTML in agent text show literally; expired content never renders; keyboard
   order and accessible names. 030-FR-020, 030-FR-021, 030-FR-027, 030-FR-028, 030-FR-040.

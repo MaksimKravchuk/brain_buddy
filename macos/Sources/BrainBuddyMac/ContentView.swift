@@ -1321,7 +1321,8 @@ struct WorkspaceView: View {
                 nextInboxID: nextInboxID(after: task),
                 onCommand: { inspectorCommand($0, task: task) },
                 onFocusChange: { inspectorFocus = $0 },
-                onExtrasDirtyChange: { extrasDirty = $0 }
+                onExtrasDirtyChange: { extrasDirty = $0 },
+                runSection: agentRunSection(for: task)
             )
             .id(task.id)
         } else {
@@ -1329,6 +1330,12 @@ struct WorkspaceView: View {
                 MacInspectorEmpty(text: "Select something to sort it.")
             }
         }
+    }
+
+    /// G-05 under the fields of a step that has a listed run (030-FR-019); nil otherwise.
+    private func agentRunSection(for task: TaskRecord) -> AnyView? {
+        guard let server = task.serverID, model.listedRuns.contains(where: { $0.taskServerID == server }) else { return nil }
+        return AgentRunSectionView(model: model, task: task).map { AnyView($0.id(task.id)) }
     }
 
     /// The Inbox items on screen, in order.

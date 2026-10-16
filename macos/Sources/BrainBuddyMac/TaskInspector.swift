@@ -76,6 +76,8 @@ struct TaskInspector: View {
     let onCommand: (TaskInspectorCommand) -> Void
     let onFocusChange: (TaskInspectorField?) -> Void
     let onExtrasDirtyChange: (Bool) -> Void
+    /// The step's agent run (030 G-05), under its fields; nil when it has none.
+    var runSection: AnyView?
 
     @FocusState private var fieldFocus: TaskInspectorField?
     @State private var showingNotNow = false
@@ -211,6 +213,7 @@ struct TaskInspector: View {
         notes(label: "Why")
         TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
         properties
+        if let runSection { runSection }
         cancelTask
     }
 
@@ -228,6 +231,7 @@ struct TaskInspector: View {
         chips
         TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
         properties
+        if let runSection { runSection }
         cancelTask
     }
 
