@@ -215,6 +215,10 @@ struct ReviewSuggestionTests {
         #expect(MacPresentationGuardTests.violations(file: sheet.name, text: sheet.text).isEmpty)
         let content = try #require(sources.first { $0.name == "BrainBuddyMac/ContentView.swift" })
         #expect(MacPresentationGuardTests.violations(file: content.name, text: content.text).isEmpty)
+        // The entry and its sheet live in the task inspector beside the list.
+        let inspector = try #require(sources.first { $0.name == "BrainBuddyMac/TaskInspector.swift" })
+        #expect(inspector.text.contains("ReviewSuggestionSheetLoader("))
+        #expect(MacPresentationGuardTests.violations(file: inspector.name, text: inspector.text).isEmpty)
         // VoiceCapture is transcription and stays out of it.
         let voice = try #require(sources.first { $0.name == "BrainBuddyMac/VoiceCapture.swift" })
         #expect(!voice.text.contains("ReviewSuggestion"))

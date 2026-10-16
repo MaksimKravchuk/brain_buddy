@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// View › "Close task details" ⌘\: closes the task open beside the list, as ⌘\ does on the web.
-/// An unsaved edit asks first, the same as choosing another task. Disabled with no task open.
+/// Pending edits save first, the same as choosing another task. Disabled with no task open.
 struct TaskDetailsCommands: Commands {
     @FocusedValue(\.closeTaskDetails) private var closeTaskDetails
 

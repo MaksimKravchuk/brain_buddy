@@ -46,6 +46,10 @@ struct MacPresentationGuardTests {
             "clarify confirmations",
             "cancel task confirmations",
         ],
+        "BrainBuddyMac/TaskInspector.swift": [
+            "task inspector popover and sheets",
+            "task inspector focus",
+        ],
     ]
 
     struct Violation: CustomStringConvertible, Equatable {
@@ -185,6 +189,7 @@ struct MacPresentationGuardTests {
         let content = try #require(sources.first { $0.name == "BrainBuddyMac/ContentView.swift" })
         let line = try #require(sources.first { $0.name == "BrainBuddyMac/SyncStatusLine.swift" })
         let core = try #require(sources.first { $0.name == "BrainBuddyMacCore/MacSyncController.swift" })
+        let inspector = try #require(sources.first { $0.name == "BrainBuddyMac/TaskInspector.swift" })
         let seeds: [(file: String, text: String)] = [
             // A sync state that presents an alert.
             (line.name, line.text + "\nlet seeded = Text(\"x\").alert(\"Sync failed\", isPresented: .constant(true)) {}\n"),
@@ -205,6 +210,10 @@ struct MacPresentationGuardTests {
                     with: "// presentation-region: project creator sheet\n        let seeded = model.syncLine"
                 )
             ),
+            // A popover in the task inspector outside its regions.
+            (inspector.name, inspector.text + "\nlet seeded = Text(\"x\").popover(isPresented: .constant(true)) { Text(\"y\") }\n"),
+            // The inspector's focus moved outside its region.
+            (inspector.name, inspector.text + "\nextension TaskInspector { func seeded() { fieldFocus = .title } }\n"),
             // An allowed file that reads the sync state.
             ("BrainBuddyMac/SignInSheet.swift", "let seeded = workspace.syncSnapshot\n"),
             // A new file is not allowed by default.
@@ -220,5 +229,6 @@ struct MacPresentationGuardTests {
         #expect(Self.violations(file: line.name, text: line.text).isEmpty)
         #expect(Self.violations(file: content.name, text: content.text).isEmpty)
         #expect(Self.violations(file: core.name, text: core.text).isEmpty)
+        #expect(Self.violations(file: inspector.name, text: inspector.text).isEmpty)
     }
 }

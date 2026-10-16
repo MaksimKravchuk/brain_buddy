@@ -143,6 +143,31 @@ struct MacInspectorTitle: View {
     }
 }
 
+/// The title as the person edits it ("Saved as you type"): `MacInspectorTitle`'s faces, sizes and
+/// spacing in a plain field, or with `item` the Inbox item's 15 (`MacInspectorItemText`).
+struct MacInspectorTitleField: View {
+    @Binding var text: String
+    var serif = false
+    var size: CGFloat?
+    var item = false
+
+    var body: some View {
+        TextField("Task title", text: $text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(font)
+            .tracking(serif && !item ? -0.015 * (size ?? 26) : 0)
+            .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, item || serif ? 8 : 6)
+            .accessibilityLabel("Task title")
+    }
+
+    private var font: Font {
+        if item { return MacInspectorFont.item }
+        return serif ? MacInspectorFont.serif(size: size ?? 26) : MacInspectorFont.sans(size: size ?? 20, weight: 600)
+    }
+}
+
 /// The Inbox item as typed: 15, under the eyebrow. `muted` is the clarify step's secondary ink.
 struct MacInspectorItemText: View {
     let text: String
@@ -216,7 +241,7 @@ struct MacInspectorStepLine: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            mark
+            MacInspectorStepMark(done: done)
             Text(title)
                 .font(MacInspectorFont.body)
                 .strikethrough(done, color: CarryOnColorStyle.coStepTextDone.color(in: scheme))
@@ -224,9 +249,13 @@ struct MacInspectorStepLine: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    @ViewBuilder
-    private var mark: some View {
+/// The 16 pt mark of a "Steps inside" line: a done check or an open circle.
+struct MacInspectorStepMark: View {
+    let done: Bool
+
+    var body: some View {
         if done {
             Image(systemName: "checkmark.circle.fill")
                 .symbolRenderingMode(.palette)
@@ -514,10 +543,13 @@ struct MacInspectorAction {
 struct MacInspectorActionBar: View {
     let actions: [MacInspectorAction]
     var trailingNote: String?
+    /// Makes the note a text button ("Skip").
+    var onTrailingNote: (() -> Void)?
 
-    init(actions: [MacInspectorAction], trailingNote: String? = nil) {
+    init(actions: [MacInspectorAction], trailingNote: String? = nil, onTrailingNote: (() -> Void)? = nil) {
         self.actions = actions
         self.trailingNote = trailingNote
+        self.onTrailingNote = onTrailingNote
     }
 
     init(primary: MacInspectorAction?, secondary: MacInspectorAction? = nil, trailingNote: String? = nil) {
@@ -532,9 +564,18 @@ struct MacInspectorActionBar: View {
             }
             Spacer(minLength: 0)
             if let trailingNote {
-                Text(trailingNote)
-                    .font(MacInspectorFont.detail)
-                    .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                if let onTrailingNote {
+                    Button(action: onTrailingNote) {
+                        Text(trailingNote)
+                            .font(MacInspectorFont.detail)
+                            .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(trailingNote)
+                        .font(MacInspectorFont.detail)
+                        .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                }
             }
         }
     }
