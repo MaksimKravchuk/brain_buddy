@@ -24,7 +24,10 @@ export function AuthEntry({ destination, initialCode, beforeSignIn, intent = "si
   const [reset, setReset] = useState<{ grant: string; expires: string } | null>(null);
   const op = useAuthOperation();
   const fields = useRef<HTMLDivElement>(null);
-  useEffect(() => { fields.current?.querySelector("input")?.focus(); }, [mode, methods?.email]);
+  // Late method discovery only adds the choice screen's email field; refocusing
+  // in any other mode would move typing out of the field the user is in.
+  const focusKey = mode === "choice" ? `choice:${String(methods?.email)}` : mode;
+  useEffect(() => { fields.current?.querySelector("input")?.focus(); }, [focusKey]);
   const loadMethods = () => { setAvailabilityError(false); void modernAuthApi.methods().then(setMethods).catch(() => { setMethods(null); setAvailabilityError(true); }); };
   useEffect(() => { let active = true; void modernAuthApi.methods().then(result => { if (active) setMethods(result); }).catch(() => { if (active) setAvailabilityError(true); }); return () => { active = false; }; }, []);
   const back = () => { setMode("choice"); setPassword(""); setRepeat(""); setProof(null); setChallenge(null); setReset(null); op.setError(null); };

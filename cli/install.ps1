@@ -43,7 +43,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     function Download-ReleaseFile([string]$Name, [long]$Limit) {
-        $uri = [Uri]("https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v$Version/$Name")
+        $uri = [Uri]("https://github.com/maxk-lab/brain_buddy/releases/download/bb-v$Version/$Name")
         $handler = New-Object Net.Http.HttpClientHandler
         $handler.AllowAutoRedirect = $false
         $handler.UseDefaultCredentials = $false

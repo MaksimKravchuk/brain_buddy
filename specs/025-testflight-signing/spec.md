@@ -80,7 +80,7 @@ run must exercise automatic `workflow_run` upload from the landed main SHA.
 
 ### Session 2026-10-07
 - Owner authorized a reusable Apple Development identity and saving its `.p12`
-  plus password only in `MaksimKravchuk/brain_buddy` environment `testflight`.
+  plus password only in `maxk-lab/brain_buddy` environment `testflight`.
 - Existing distribution export and branch-upload access policy stay unchanged.
 - No product UI, persisted customer data, feature flag, or product metric changes.
   Product signal is successful signed upload; guardrail is unchanged certificate count.

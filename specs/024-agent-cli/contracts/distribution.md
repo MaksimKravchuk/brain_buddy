@@ -20,9 +20,9 @@ SHA256SUMS has exactly one line per five archive filenames. SOURCE.json binds ve
 
 Proposed links, usable only after release:
 
-Unix: curl -fsSL https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v0.1.0/install.sh | sh -s -- --version 0.1.0
+Unix: curl -fsSL https://github.com/maxk-lab/brain_buddy/releases/download/bb-v0.1.0/install.sh | sh -s -- --version 0.1.0
 
-PowerShell: & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v0.1.0/install.ps1').Content)) -Version '0.1.0'
+PowerShell: & ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://github.com/maxk-lab/brain_buddy/releases/download/bb-v0.1.0/install.ps1').Content)) -Version '0.1.0'
 
 Unix --version VERSION/--dir DIRECTORY; PowerShell -Version/-InstallDir. Defaults user-owned $HOME/.local/bin and LocalAppData/BrainBuddy/bin. No admin/compiler/silent profile or PATH edits. Explicit version never changes silently. If latest convenience exposed, resolve one bb-v tag once and pin downloads; repository-wide unrelated latest is not a CLI version.
 
