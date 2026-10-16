@@ -243,11 +243,12 @@ struct MacTaskRow: View {
     }
 }
 
-/// The board's pill: primary (terracotta), secondary, quiet or ink; 32 high, 14 semibold, padding 0 14.
-/// `quiet` is text only; `ink` is text-primary with `bg-ground` text (the capture boards' Add).
+/// The board's pill: primary (terracotta), secondary, quiet or strong; 32 high, 14 semibold, padding
+/// 0 14. `quiet` is text only; `strong` is the shared `button-strong` colours (basalt/limestone, the
+/// capture boards' Add and a sheet's one decisive action), the Mac size of `CarryOnButtonStyle.strong`.
 struct MacPillButtonStyle: ButtonStyle {
     enum Kind: Sendable {
-        case primary, secondary, quiet, ink
+        case primary, secondary, quiet, strong
     }
 
     let kind: Kind
@@ -282,7 +283,7 @@ private struct MacPillButtonBody<Label: View>: View {
         case .primary: CarryOnColorStyle.coButtonPrimaryFg
         case .secondary: CarryOnColorStyle.coButtonSecondaryFg
         case .quiet: CarryOnColorStyle.coTextPrimary
-        case .ink: CarryOnColorStyle.coBgGround
+        case .strong: CarryOnColorStyle.coButtonStrongFg
         }
     }
 
@@ -291,7 +292,7 @@ private struct MacPillButtonBody<Label: View>: View {
         case .primary: isPressed ? CarryOnColorStyle.coButtonPrimaryBgPressed : CarryOnColorStyle.coButtonPrimaryBg
         case .secondary: isPressed ? CarryOnColorStyle.coButtonSecondaryBgPressed : CarryOnColorStyle.coButtonSecondaryBg
         case .quiet: nil
-        case .ink: CarryOnColorStyle.coTextPrimary
+        case .strong: CarryOnColorStyle.coButtonStrongBg
         }
     }
 }
@@ -300,7 +301,7 @@ extension ButtonStyle where Self == MacPillButtonStyle {
     static var macPrimaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .primary) }
     static var macSecondaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .secondary) }
     static var macQuietPill: MacPillButtonStyle { MacPillButtonStyle(kind: .quiet) }
-    static var macInkPill: MacPillButtonStyle { MacPillButtonStyle(kind: .ink) }
+    static var macStrongPill: MacPillButtonStyle { MacPillButtonStyle(kind: .strong) }
 }
 
 /// A section header inside the list: Instrument Sans 12, secondary, in line with the rows' text.

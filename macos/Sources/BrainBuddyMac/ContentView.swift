@@ -147,7 +147,7 @@ extension WorkspaceView {
     static func plural(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
 }
 
-@ViewBuilder
+@MainActor @ViewBuilder
 private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: String, retry: @escaping () -> Void) -> some View {
     switch readiness {
     case .ready:
@@ -155,11 +155,10 @@ private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: Strin
     case .notRequested, .loading:
         ProgressView(loading)
     case .failed:
-        ContentUnavailableView {
-            Label("Tasks couldn’t load", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text("Try loading this list again.")
-        } actions: {
+        MacSheetEmptyState(
+            title: "Tasks couldn’t load", systemImage: "exclamationmark.triangle",
+            description: "Try loading this list again."
+        ) {
             Button("Retry", action: retry)
         }
     }
@@ -170,8 +169,7 @@ private func reviewPageUnavailable(
     _ title: String, systemImage: String, description: String, list: TaskList,
     model: BrainBuddyModel, reload: @escaping () -> Void
 ) -> some View {
-    VStack(spacing: 12) {
-        ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+    MacSheetEmptyState(title: title, systemImage: systemImage, description: description) {
         if model.reviewListPageState(list).hasNext {
             Button("Next page") {
                 Task {
@@ -2657,17 +2655,10 @@ private struct WaitingReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Review Waiting for").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close review") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
+            MacReviewHeader(
+                title: "Review Waiting for",
+                caption: loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time",
+                onClose: { dismiss() })
             if !loaded {
                 ProgressView("Loading Waiting…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2689,13 +2680,14 @@ private struct WaitingReviewView: View {
                     choices(item)
                 }
                 if let error = model.error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    Text(error).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coStatusDanger)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(24)
         .frame(width: 640, height: 480)
+        .macSheetSurface()
         .disabled(isBusy)
         .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
@@ -2716,58 +2708,37 @@ private struct WaitingReviewView: View {
     }
 
     private func card(_ item: TaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(item.title).font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let details = item.details, !details.isEmpty {
-                Text(details)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(4)
-            }
-            Label("Waiting for \(item.waitingFor ?? "an unspecified response")", systemImage: "hourglass")
-                .font(.subheadline.weight(.medium))
-            if let date = item.waitingSince {
-                Text("Since \(date.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let projectID = item.projectID {
-                Text("Project · \(model.projectLabel(projectID))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        MacWaitingReviewCard(
+            title: item.title, details: item.details,
+            waitingFor: item.waitingFor,
+            since: item.waitingSince.map { "Since \($0.formatted(date: .abbreviated, time: .omitted))" },
+            project: item.projectID.map { "Project · \(model.projectLabel($0))" })
     }
 
     private func decisionForm(_ item: TaskRecord, decision: WaitingReviewDecision) -> some View {
         let archived = model.isArchived(item.projectID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text(decision == .followUp ? "What will you do to follow up?" : "What is the next action now?")
-                .font(.headline)
+            MacReviewQuestion(text: decision == .followUp ? "What will you do to follow up?" : "What is the next action now?")
             TextField("Concrete next action", text: $actionTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .macSheetField()
                 .accessibilityLabel("Concrete next action")
                 .onSubmit { submit(item, decision: decision) }
-            Text(
-                decision == .followUp
+            MacReviewLine(
+                text: decision == .followUp
                     ? (archived
                         ? "Unarchive this project before creating a follow-up in it."
                         : "Creates a separate Next action in the same project. This item stays in Waiting and returns to review after seven days or a change.")
-                    : "Moves this item to Next actions and clears its active waiting details."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack {
+                    : "Moves this item to Next actions and clears its active waiting details.",
+                small: true)
+            HStack(spacing: 8) {
                 Button("Back") { self.decision = nil }
+                    .buttonStyle(.macQuietPill)
                 Spacer()
                 Button(decision == .followUp ? "Create follow-up" : "Move to Next actions") {
                     submit(item, decision: decision)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.macStrongPill)
                 .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || (decision == .followUp && archived))
             }
         }
@@ -2776,9 +2747,8 @@ private struct WaitingReviewView: View {
     @ViewBuilder
     private func choices(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
-        Text("What should happen next?")
-            .font(.headline)
-        HStack(spacing: 10) {
+        MacReviewQuestion(text: "What should happen next?")
+        HStack(spacing: 8) {
             Button("Keep waiting") {
                 performSave(editorID: editorID) { _ in
                     if await model.keepWaiting(item) { advance() }
@@ -2796,10 +2766,9 @@ private struct WaitingReviewView: View {
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
+        .buttonStyle(.macSecondaryPill)
         if archived {
-            Text("Unarchive the project to add a follow-up there.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: "Unarchive the project to add a follow-up there.", small: true)
         }
     }
 
@@ -2868,17 +2837,10 @@ private struct SomedayReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Review Someday").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close review") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
+            MacReviewHeader(
+                title: "Review Someday",
+                caption: loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time",
+                onClose: { dismiss() })
             if !loaded {
                 ProgressView("Loading Someday…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2904,12 +2866,13 @@ private struct SomedayReviewView: View {
                     choices(item)
                 }
                 if let error = model.error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    Text(error).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coStatusDanger)
                 }
             }
         }
         .padding(24)
         .frame(width: 640, height: 440)
+        .macSheetSurface()
         .disabled(isBusy)
         .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
@@ -2930,43 +2893,31 @@ private struct SomedayReviewView: View {
     }
 
     private func card(_ item: TaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(item.title).font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let details = item.details, !details.isEmpty {
-                Text(details).foregroundStyle(.secondary)
-            }
-            if let projectID = item.projectID {
-                Text("Project · \(model.projectLabel(projectID))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        MacSomedayReviewCard(
+            title: item.title, details: item.details,
+            project: item.projectID.map { "Project · \(model.projectLabel($0))" })
     }
 
     private func nextForm(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text("What is the concrete next action?").font(.headline)
+            MacReviewQuestion(text: "What is the concrete next action?")
             TextField("Concrete next action", text: $actionTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .macSheetField()
                 .accessibilityLabel("Concrete next action")
                 .onSubmit { activate(item) }
-            Text(
-                archived
+            MacReviewLine(
+                text: archived
                     ? "Unarchive this project before moving its task to Next actions."
-                    : "The title and GTD list change together. Project, tags, notes, and due date remain attached."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack {
+                    : "The title and GTD list change together. Project, tags, notes, and due date remain attached.",
+                small: true)
+            HStack(spacing: 8) {
                 Button("Back") { enteringNext = false }
+                    .buttonStyle(.macQuietPill)
                 Spacer()
                 Button("Move to Next actions") { activate(item) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.macStrongPill)
                     .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || archived)
             }
         }
@@ -2975,8 +2926,8 @@ private struct SomedayReviewView: View {
     @ViewBuilder
     private func choices(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
-        Text("Is this relevant now?").font(.headline)
-        HStack(spacing: 10) {
+        MacReviewQuestion(text: "Is this relevant now?")
+        HStack(spacing: 8) {
             Button("Keep in Someday") {
                 performSave(editorID: editorID) { _ in
                     if await model.keepSomeday(item) { advance() }
@@ -2990,10 +2941,9 @@ private struct SomedayReviewView: View {
             .disabled(archived)
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
+        .buttonStyle(.macSecondaryPill)
         if archived {
-            Text("Unarchive the project to activate this task.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: "Unarchive the project to activate this task.", small: true)
         }
     }
 
