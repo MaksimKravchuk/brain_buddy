@@ -14,17 +14,21 @@ final class FakeFirstRunWriter: FirstRunTaskWriting {
     var steps: [(id: TaskID, step: String, original: String)] = []
     var failCapture = false
     var failStep = false
+    /// Runs while a save is in flight, standing in for a person acting during the await.
+    var duringSave: (() -> Void)?
     let itemID: TaskID = "first-item"
 
     func captureFirstItem(_ text: String) async -> TaskID? {
         guard !failCapture else { return nil }
         captured.append(text)
+        duringSave?()
         return itemID
     }
 
     func saveFirstStep(_ id: TaskID, step: String, original: String) async -> Bool {
         guard !failStep else { return false }
         steps.append((id, step, original))
+        duringSave?()
         return true
     }
 }
@@ -192,6 +196,45 @@ struct FirstRunModelTests {
         model.accountLinked()
         #expect(model.phase == .done)
         #expect(recorded(folder)?.outcome == .signedIn)
+    }
+
+    @Test("029-FR-007 029-FR-013 a skip or sign-in during the capture save is not undone when the save returns")
+    func endDuringCaptureStays() async throws {
+        let ends: [(end: (FirstRunModel) -> Void, outcome: FirstRunRecord.Outcome)] = [
+            ({ $0.skip() }, .skipped),
+            ({ $0.accountLinked() }, .signedIn),
+        ]
+        for (end, outcome) in ends {
+            let folder = TemporaryFolder()
+            let model = try make(in: folder)
+            model.decide(FirstRunLaunchFacts())
+            let writer = FakeFirstRunWriter()
+            writer.duringSave = { end(model) }
+            let saved = await model.capture("something", using: writer)
+            #expect(saved, "the item was saved, so the field clears")
+            #expect(model.phase == .done)
+            #expect(recorded(folder)?.outcome == outcome)
+        }
+    }
+
+    @Test("029-FR-010 029-FR-013 Not yet or a sign-in during the step save keeps that outcome")
+    func endDuringStepStays() async throws {
+        let ends: [(end: (FirstRunModel) -> Void, outcome: FirstRunRecord.Outcome)] = [
+            ({ $0.notYet() }, .notYet),
+            ({ $0.accountLinked() }, .signedIn),
+        ]
+        for (end, outcome) in ends {
+            let folder = TemporaryFolder()
+            let model = try make(in: folder)
+            model.decide(FirstRunLaunchFacts())
+            let writer = FakeFirstRunWriter()
+            await model.capture("something", using: writer)
+            writer.duringSave = { end(model) }
+            let saved = await model.makeNextStep("A step", using: writer)
+            #expect(saved)
+            #expect(model.phase == .done)
+            #expect(recorded(folder)?.outcome == outcome)
+        }
     }
 
     // MARK: First step (T004)
