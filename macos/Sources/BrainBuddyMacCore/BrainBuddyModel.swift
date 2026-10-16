@@ -1402,18 +1402,14 @@ package final class BrainBuddyModel {
 
     // MARK: Agents (030)
 
-    /// G-01: signed in, and a run is listed or the flag is on (030-FR-001, 030-FR-004).
     package var showsAgentsSection: Bool {
         agentAvailability.ownerID != nil && (agentAvailability.relayEnabled || !agentRuns.items.isEmpty)
     }
 
-    /// "Add new agent" shows with the flag on and a password on the account (030-FR-002, 030-FR-036).
     package var canAddAgent: Bool { agentAvailability.relayEnabled && agentAvailability.passwordState != .none }
 
-    /// The runs Waiting for and All runs list; none while signed out.
     package var listedRuns: [AgentRunItem] { agentAvailability.ownerID == nil ? [] : agentRuns.items }
 
-    /// Follows the workspace's account; another account (or none) drops every run and cached value (030-FR-026).
     package func syncAgentAccount() {
         let before = agentAvailability.ownerID
         agentAvailability.update(account: workspace.account)
@@ -1435,8 +1431,9 @@ package final class BrainBuddyModel {
         let unshown = ids.filter { workspace.task($0.taskID) == nil }.map(\.taskID)
         var titles: [TaskID: String] = [:]
         for start in stride(from: 0, to: unshown.count, by: 200) {
-            let page = Array(unshown[start..<min(start + 200, unshown.count)])
-            for task in (try? await workspace.prepareTaskViews(page)) ?? [] { titles[task.id] = task.title }
+            for task in (try? await workspace.prepareTaskViews(Array(unshown[start..<min(start + 200, unshown.count)]))) ?? [] {
+                titles[task.id] = task.title
+            }
         }
         agentSteps.steps = ids.compactMap { step in
             guard let server = step.serverID, let title = workspace.task(step.taskID)?.title ?? titles[step.taskID] else { return nil }
@@ -1446,7 +1443,6 @@ package final class BrainBuddyModel {
         agentRuns.stepsChanged()
     }
 
-    /// The step a run row selects, by the id the server knows it by.
     package func stepID(forServerID id: String) -> TaskID? { agentSteps.taskIDs[id] }
 
     private func dropAgentRuns() {

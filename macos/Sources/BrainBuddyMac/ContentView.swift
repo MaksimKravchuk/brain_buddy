@@ -325,7 +325,6 @@ struct WorkspaceView: View {
         .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
-        // 030: availability and runs follow the account; polling pauses while the window is hidden.
         .task(id: model.workspace.account?.id) { await model.refreshAgents() }
         .task { await model.agentRuns.run() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -341,7 +340,6 @@ struct WorkspaceView: View {
         }
     }
 
-    /// All runs (G-02) replaces the task canvas for the Agents destinations; a run row selects its step.
     @ViewBuilder
     private var detailCanvas: some View {
         if case .agentRuns(let filter) = model.destination {
@@ -364,6 +362,16 @@ struct WorkspaceView: View {
         // about sync in the toolbar otherwise.
         ToolbarItem(placement: .navigation) {
             SyncToolbarStatusItem(controller: sync, sidebarHidden: columns == .detailOnly)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            if model.destination.isAgentRuns, model.canAddAgent {
+                Button {
+                    model.agentAvailability.requestAddAgent()
+                    openSettings()
+                } label: {
+                    Label { Text(AgentsCopy.addNewAgent) } icon: { MacBoardIconView(icon: .plus, size: 15) }
+                }
+            }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -414,7 +422,7 @@ struct WorkspaceView: View {
         .safeAreaInset(edge: .bottom) { footer }
     }
 
-    /// G-01, between Lists and Dates: the rows are the listed runs' agents; "Add new agent" needs the flag and a password.
+    /// G-01, between Lists and Dates: All runs and the agents of the listed runs (board M22, DSAgents).
     @ViewBuilder
     private var agentsSection: some View {
         if model.showsAgentsSection {
@@ -425,16 +433,6 @@ struct WorkspaceView: View {
                     AgentsCopy.allRuns, symbol: "", destination: .agentRuns(.all), trailing: runs.isEmpty ? nil : "\(runs.count)")
                 ForEach(agents.sorted { $0.value < $1.value }, id: \.key) { id, name in
                     sidebarButton(name, symbol: "", destination: .agentRuns(.agent(id)), trailing: "\(model.agentRuns.perAgentCounts[id] ?? 0)")
-                }
-                if model.canAddAgent {
-                    Button {
-                        model.agentAvailability.requestAddAgent()
-                        openSettings()
-                    } label: {
-                        MacSidebarRowLabel(title: AgentsCopy.addNewAgent, leading: .icon(.agents), selected: false, muted: true)
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Color.clear)
                 }
             } header: {
                 MacSidebarSectionHeader(title: AgentsCopy.sidebar)
@@ -1316,7 +1314,7 @@ struct WorkspaceView: View {
                     selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
                     onSelect: { selectRun(run) })
             }
-            sectionHeader(AgentsCopy.waitingPeople, top: 8)
+            sectionHeader(AgentsCopy.waitingPeople, top: 14)
         }
         if let pinned = quickOpenedTaskID, selectedTaskID == pinned, !onScreen.contains(pinned), let task = model.task(pinned) {
             sectionHeader("Opened from Quick Open", top: 0)

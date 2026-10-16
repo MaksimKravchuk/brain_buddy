@@ -41,18 +41,24 @@ struct AgentRunsCanvas: View {
             }
             .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 20)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                // Board M22: one column per group, side by side.
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(shown, id: \.group) { entry in
-                        MacListSectionHeader(title: "\(entry.group.title) · \(entry.items.count)", top: 8)
-                        ForEach(entry.items) { run in
-                            AgentRunRow(
-                                item: run, style: .canvas, now: Date(),
-                                selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
-                                onSelect: { onSelect(run) })
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(entry.group.title) · \(entry.items.count)")
+                                .font(MacRowFont.sectionHeader).foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                                .padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+                            ForEach(entry.items) { run in
+                                AgentRunRow(
+                                    item: run, style: .canvas, now: Date(),
+                                    selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
+                                    onSelect: { onSelect(run) })
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                 }
-                .frame(maxWidth: 860).frame(maxWidth: .infinity).padding(.horizontal, 28).padding(.bottom, 28)
+                .padding(.horizontal, 28).padding(.bottom, 28)
             }
             .overlay { placeholder(isEmpty: shown.isEmpty) }
         }
