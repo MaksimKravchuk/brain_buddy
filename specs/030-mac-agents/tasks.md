@@ -215,7 +215,7 @@ iOS thread; no slice edits it.
 
 ## Phase 8 — Mac: run section in the inspector (PR-08)
 
-- [ ] T025 [US3] Build G-05 in `macos/Sources/BrainBuddyMac/Agents/AgentRunSection.swift`
+- [x] T025 [US3] Build G-05 in `macos/Sources/BrainBuddyMac/Agents/AgentRunSection.swift`
   (timeline, Needs you with Reply / Stop run, running, queued, result with Mark step done /
   Make the next step / Hand off again, failed, stopped reporting, other labels, expired,
   delivery unconfirmed with Check again, offline, earlier runs, succession line; agent
@@ -223,7 +223,7 @@ iOS thread; no slice edits it.
   `macos/Sources/BrainBuddyMac/TaskInspector.swift` through
   `macos/Sources/BrainBuddyMac/ContentView.swift`. 030-FR-019 – 030-FR-023, 030-FR-025,
   030-FR-027, 030-FR-028, 030-FR-041. PR-08.
-- [ ] T026 [US4] Tests in `macos/Tests/BrainBuddyMacTests/AgentRunSectionTests.swift`: each
+- [x] T026 [US4] Tests in `macos/Tests/BrainBuddyMacTests/AgentRunSectionTests.swift`: each
   label shows its block; withdrawn controls are absent; a result link is not a link;
   Markdown and HTML in agent text show literally; expired content never renders; keyboard
   order and accessible names. 030-FR-020, 030-FR-021, 030-FR-027, 030-FR-028, 030-FR-040.
@@ -231,7 +231,7 @@ iOS thread; no slice edits it.
 
 ## Phase 9 — Mac: hand-off sheet (PR-09)
 
-- [ ] T027 [US1] Build G-04 in `macos/Sources/BrainBuddyMac/Agents/HandoffSheet.swift`
+- [x] T027 [US1] Build G-04 in `macos/Sources/BrainBuddyMac/Agents/HandoffSheet.swift`
   (agent rows, What it will get, disclosures, conditional password and acknowledgement,
   Send to <agent> / Cancel, sending, wrong password, failed, no ready agent, offline) and
   enable Hand off… and Hand off again in `macos/Sources/BrainBuddyMac/TaskInspector.swift`
@@ -239,7 +239,7 @@ iOS thread; no slice edits it.
   with the flag off), presenting the sheet from
   `macos/Sources/BrainBuddyMac/ContentView.swift`. 030-FR-013 – 030-FR-018, 030-FR-040,
   030-FR-041. PR-09.
-- [ ] T028 [US1] Tests in `macos/Tests/BrainBuddyMacTests/HandoffSheetTests.swift`: three
+- [x] T028 [US1] Tests in `macos/Tests/BrainBuddyMacTests/HandoffSheetTests.swift`: three
   interactions from a selected step to Send without a password; the password field and
   acknowledgement appear only when required; Return sends and Esc cancels; the flag
   turning off closes the sheet. 030-FR-013, 030-FR-016, 030-FR-040, 030-SC-001. PR-09.
@@ -260,7 +260,7 @@ iOS thread; no slice edits it.
 
 ## Phase 10b — Mac: sidebar agent rows as DSAgents (PR-16)
 
-- [ ] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
+- [x] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
   Needs-you run shows the accent dot before its count ("● 1"), and an agent with no listed
   runs that is not "Tested ready" shows its status word ("Home server Stale") from the
   connection list (PR-06). Add both to `MacSidebarRowLabel` in

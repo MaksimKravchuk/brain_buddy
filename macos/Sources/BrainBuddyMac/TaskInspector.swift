@@ -76,6 +76,11 @@ struct TaskInspector: View {
     let onCommand: (TaskInspectorCommand) -> Void
     let onFocusChange: (TaskInspectorField?) -> Void
     let onExtrasDirtyChange: (Bool) -> Void
+    /// The step's agent run (030 G-05), under its fields; nil when it has none.
+    var runSection: AnyView?
+    /// Hand off… (030 G-04): hidden with the relay off, disabled with its reason for an unsynced step.
+    var handOff = HandOffControl.hidden
+    var onHandOff: () -> Void = {}
 
     @FocusState private var fieldFocus: TaskInspectorField?
     @State private var showingNotNow = false
@@ -211,6 +216,7 @@ struct TaskInspector: View {
         notes(label: "Why")
         TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
         properties
+        if let runSection { runSection } else { handOffRow }
         cancelTask
     }
 
@@ -228,6 +234,7 @@ struct TaskInspector: View {
         chips
         TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
         properties
+        if let runSection { runSection } else { handOffRow }
         cancelTask
     }
 
@@ -434,6 +441,19 @@ struct TaskInspector: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var handOffRow: some View {
+        switch handOff {
+        case .hidden:
+            EmptyView()
+        case .enabled:
+            Button(AgentsCopy.handOff, action: onHandOff).buttonStyle(.carryOnSecondary).padding(.top, 14)
+        case .disabled(let reason):
+            Button(AgentsCopy.handOff, action: onHandOff).buttonStyle(.carryOnSecondary).padding(.top, 14).disabled(true)
+            MacInspectorMetaText(text: reason)
         }
     }
 
