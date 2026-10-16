@@ -4,7 +4,17 @@
 
 Retest S-13, S-14, A-17, A-26, A-35, actual VoiceOver Settings tab names (#494), and main-window foregrounding after menu sign-out from Settings (#498). The owner additionally authorized fixing the repeated Keychain prompts that blocked sign-in.
 
-The correction must make routine session reads and cleanup noninteractive, preserve the existing rebuild/re-sign-in generation behavior, and allow manual QA to continue. It does not change storage format, credentials, access lists, account ownership, iOS behavior, or agent readiness semantics. All accounts, tasks and agents used here are synthetic and local; production accounts were not used.
+The correction must make routine session reads and cleanup noninteractive, preserve the existing rebuild/re-sign-in generation behavior, and allow manual QA to continue. It does not change storage format, credentials, access lists, account ownership, iOS behavior, or agent readiness semantics. The original matrix used synthetic local accounts, tasks and agents. A subsequent owner-operated sign-in to the production server is recorded separately below.
+
+## Owner-operated sign-in follow-up — 2026-10-17
+
+The owner reported another blocked system Keychain prompt. At inspection no BrainBuddyMac process was running, so that report could not be attributed to the fixed binary. The owner cancelled the remaining system dialogs manually; the UI tool cannot access SecurityAgent.
+
+Launched the verified app at `macos/.build/BrainBuddyMac.app` with its normal local workspace. The running executable path matched this artifact, with SHA-256 `9f6b3d8d925e439be6ee0f1b0cd00d4ffbb89f7d594fc320b1df94be14dcb1fb`. Startup reached the main window without a Keychain prompt. The sign-in form pointed to `https://brain-buddy-frontend.fly.dev/api`. The owner entered their own credentials directly in the app and confirmed that sign-in completed; credentials were not requested in chat or entered by the agent.
+
+Post-login accessibility observations independently confirmed **Synced just now** in the main window and Account settings, with Sign out available and Account/Agents/Sync controls exposed. The session was left signed in. No further sign-out or agent mutation was performed on this account. A later UI-tool timeout while returning from Settings limits the window-close check; a process sample showed an idle main event loop rather than the earlier Keychain wait. Sample: `/tmp/bb-retest-20261016/owner-login-after-settings-sample.txt`.
+
+This verifies owner sign-in and synchronization on the local fixed client. It does not resolve the separate delivery blocker or establish that the client fix has landed in main.
 
 ## Exact build and checks
 
