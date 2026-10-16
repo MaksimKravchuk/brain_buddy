@@ -28,7 +28,7 @@ struct MacSettingsView: View {
             if let sync = launch.sync {
                 switch selection {
                 case .account: AccountSettingsTab(sync: sync, openMainWindow: openMainWindow)
-                case .agents: AgentsSettingsTab(sync: sync)
+                case .agents: AgentsSettingsTab(sync: sync, availability: launch.model?.agentAvailability)
                 case .sync: SyncSettingsTab(controller: sync)
                 }
             }
@@ -36,11 +36,23 @@ struct MacSettingsView: View {
         .frame(minWidth: 820, maxWidth: 820, minHeight: 240)
         .background(CarryOnColorStyle.coBgGround)
         .navigationTitle(selection.title)
+        .onChange(of: launch.model?.agentAvailability.addAgentRequested ?? false) { _, requested in
+            selection = Self.selection(current: selection, addAgentRequested: requested)
+        }
+        .onAppear {
+            selection = Self.selection(
+                current: selection, addAgentRequested: launch.model?.agentAvailability.addAgentRequested ?? false)
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 4) { ForEach(MacSettingsTab.allCases) { tabButton($0) } }
             }
         }
+    }
+
+    /// The canvas's "Add new agent" request brings the Agents tab forward; the tab opens the sheet once.
+    static func selection(current: MacSettingsTab, addAgentRequested: Bool) -> MacSettingsTab {
+        addAgentRequested ? .agents : current
     }
 
     private func tabButton(_ tab: MacSettingsTab) -> some View {

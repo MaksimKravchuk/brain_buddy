@@ -246,14 +246,14 @@ iOS thread; no slice edits it.
 
 ## Phase 10 — Mac: Settings › Agents tab (PR-10)
 
-- [ ] T029 [US5] Replace the content of
+- [x] T029 [US5] Replace the content of
   `macos/Sources/BrainBuddyMac/Settings/AgentsSettingsTab.swift` (028) with G-06 when the
   flag is on and the account is signed in — list with + and −, details in
   `macos/Sources/BrainBuddyMac/Settings/AgentDetailsView.swift`, Test again, the
   password-less line with "Open account on the web…", offline and failed states — and
   keep 028's content unchanged with the flag off or signed out. 030-FR-025, 030-FR-029,
   030-FR-030, 030-FR-036, 030-FR-037, 030-FR-038. PR-10.
-- [ ] T030 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift`:
+- [x] T030 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift`:
   flag off shows 028's text and link; password-less shows the line and no +; the web
   account URL carries no credential; the canvas's "Add new agent" request selects the Agents tab and opens
   the Add sheet once. 030-FR-036, 030-FR-037, 030-SC-006. PR-10.
