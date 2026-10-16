@@ -91,7 +91,7 @@ make dev-frontend       # web app on http://localhost:5173 (second terminal)
   `docs/runbooks/manual-device-tests-020-021.md` § 1.3 ("separate seeded operator").
   Keep the flag OFF for Account B.
 - **Mac sign-in.** In the Mac app choose Sign in… (sidebar footer or app menu), open
-  Advanced, set the server address to `http://localhost:8000`, then sign in with Account A.
+  Advanced, set the server address to `http://localhost:8000/api` (the `/api` suffix is required; sign-out resets this field, so re-check it before every sign-in), then sign in with Account A.
 
 ### 1.4 Local test agents (needed for 030)
 
@@ -197,7 +197,7 @@ Signed in as Account A (flag ON), both test agents running, steps from 1.5 synce
 | A-11 | Choose Helloworld. | "What it will get" shows the title and the agent's cancellation disclosure; the button reads "Send to Helloworld". Because Helloworld is best-effort, "I understand that a duplicate task is possible with this agent" must be ticked before Send is enabled (first hand-off only). If the server asks for re-authentication, a Current password field appears and Send waits for it. |
 | A-12 | Send. | The sheet closes; the step's card shows the run; soon "Agent reported complete". The step is still in Next actions with the same status. |
 | A-13 | Hand off "Book the plumber" to Hermes. | "What it will get" shows the title, "Note: Kitchen sink leaks" and "Project: Flat". After Send the run shows "Sent" or "Queued", then Running (the stub waits 90 s). |
-| A-14 | Hand off "Compare quotes, ask me which one" to Hermes. | Within about a minute the run is "Needs you". |
+| A-14 | Hand off "Compare quotes, ask me which one" to Hermes. | Within about 90 seconds (the stub delay) the run is "Needs you". |
 | A-15 | Make a new step while the backend is stopped, then choose Hand off… on it. | Hand off… is disabled with "This step hasn't reached your account yet." Restart the backend. |
 | A-16 | Stop the backend and choose Hand off… on a synced step. | "Handing off needs a connection." Nothing is sent. Restart the backend. |
 | A-17 | Stop both agents, then open Hand off…. | The sheet says no agent is ready and offers Open Settings…, which opens Settings › Agents. Start both agents again and Test again each. |
