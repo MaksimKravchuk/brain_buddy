@@ -197,7 +197,7 @@ serve the same relay routes).
 - `AgentSettingsModel.swift` (new, PR-06, `@MainActor @Observable`): connection list
   (disconnected omitted), selection, detail rows (design G-06.01), Test again, phases
   for loading, offline, failed and password-less.
-- `AgentConnectionEditor.swift` (new, PR-06): Add (create then test, then select), Replace
+- `AgentConnectionEditor.swift` (new, PR-14, split out of PR-06 for budget): Add (create then test, then select), Replace
   credential, Edit (password shown only when address or scheme differs), Delete; one
   Idempotency-Key per action; `expectedRevision`; error mapping (030-FR-034); secrets held
   only for the request and zeroed after it.
@@ -284,7 +284,7 @@ macos/Sources/BrainBuddyMacCore/
 ├── HandoffFlow.swift             # PR-05 (new)
 ├── AgentRunActions.swift         # PR-05 (new)
 ├── AgentSettingsModel.swift      # PR-06 (new)
-├── AgentConnectionEditor.swift   # PR-06 (new)
+├── AgentConnectionEditor.swift   # PR-14 (new)
 ├── SidebarEntries.swift          # PR-07
 └── BrainBuddyModel.swift         # PR-07
 macos/Sources/BrainBuddyMac/
