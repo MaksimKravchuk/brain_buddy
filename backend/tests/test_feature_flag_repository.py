@@ -99,7 +99,7 @@ def test_010_FR_001_rows_round_trip_modes_and_cohorts(tmp_path: Path) -> None:
     _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
     _add_user(repo, "voice_brain_dump", "user_alpha")
     _add_user(repo, "voice_brain_dump", "user_beta")
-    _set_mode(repo, "mobile_task_classification", FlagMode.ON)
+    _set_mode(repo, "weekly_review", FlagMode.ON)
 
     overlay = FeatureFlagOverrideRepository(tmp_path / "data").read()
 
@@ -109,7 +109,7 @@ def test_010_FR_001_rows_round_trip_modes_and_cohorts(tmp_path: Path) -> None:
         "user_alpha",
         "user_beta",
     )
-    assert overlay.flags["mobile_task_classification"].mode is FlagMode.ON
+    assert overlay.flags["weekly_review"].mode is FlagMode.ON
     assert overlay.flags["external_agent_relay"].mode is FlagMode.OFF
 
 
@@ -315,6 +315,130 @@ def test_020_FR_042_existing_store_upgrade_adds_weekly_review_off(
     )
 
 
+# ---------------------------------------------------------------------------
+# A retired flag's leftover row (mobile_task_classification, retired 2026-10-16)
+# ---------------------------------------------------------------------------
+
+RETIRED_ROW = "mobile_task_classification"
+
+
+def _plant_retired_row(tmp_path: Path, selected_users: str = '["acct_kept"]') -> None:
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO feature_flags (flag, mode, selected_users) "
+            "VALUES (?, 'selected_users', ?)",
+            (RETIRED_ROW, selected_users),
+        )
+        conn.commit()
+
+
+def _retired_row_cohort(tmp_path: Path) -> str:
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        row = conn.execute(
+            "SELECT selected_users FROM feature_flags WHERE flag = ?", (RETIRED_ROW,)
+        ).fetchone()
+    return str(row[0])
+
+
+def test_010_FR_004_a_retired_flag_row_is_ignored_and_does_not_degrade_the_store(
+    tmp_path: Path,
+) -> None:
+    """An existing database that still holds the retired row reads healthy and
+    every managed flag keeps its stored value; the retired name is not exposed."""
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.SELECTED_USERS)
+    _add_user(repo, "voice_brain_dump", "user_retained")
+    _set_mode(repo, "weekly_review", FlagMode.ON)
+    _plant_retired_row(tmp_path)
+
+    for overlay in (
+        repo.read(),
+        FeatureFlagOverrideRepository(tmp_path / "data").read(),
+    ):
+        assert overlay.degraded is False
+        assert set(overlay.flags) == set(MANAGED_FLAGS)
+        assert RETIRED_ROW not in overlay.flags
+        assert overlay.flags["voice_brain_dump"] == FlagOverride(
+            mode=FlagMode.SELECTED_USERS, selected_users=("user_retained",)
+        )
+        assert overlay.flags["weekly_review"].mode is FlagMode.ON
+
+
+def test_010_FR_004_a_retired_flag_cannot_be_written_but_its_row_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    """The retired name is refused like any unknown name, and an ordinary write
+    neither fails because of the leftover row nor touches it."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path)
+
+    with pytest.raises(DegradedRuntimeFlagsError):
+        _set_mode(repo, RETIRED_ROW, FlagMode.ON)
+
+    _set_mode(repo, "weekly_review", FlagMode.ON)
+
+    assert repo.read().flags["weekly_review"].mode is FlagMode.ON
+    assert _retired_row_cohort(tmp_path) == '["acct_kept"]'
+
+
+def test_010_FR_004_an_older_store_with_the_retired_row_still_upgrades(
+    tmp_path: Path,
+) -> None:
+    """The upgrade path recognizes an old store whether or not the retired row
+    is still in it, and adds the later default-OFF rows."""
+
+    repo = _repo(tmp_path)
+    _set_mode(repo, "voice_brain_dump", FlagMode.ON)
+    _plant_retired_row(tmp_path)
+    with sqlite3.connect(_sqlite_db_path(tmp_path)) as conn:
+        conn.execute(
+            "DELETE FROM feature_flags WHERE flag IN (?, ?)",
+            ("crt_canvas", "weekly_review"),
+        )
+        conn.commit()
+
+    upgraded = FeatureFlagOverrideRepository(tmp_path / "data").read()
+
+    assert upgraded.degraded is False
+    assert upgraded.flags["crt_canvas"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["weekly_review"] == FlagOverride(mode=FlagMode.OFF)
+    assert upgraded.flags["voice_brain_dump"].mode is FlagMode.ON
+
+
+def test_010_FR_007_erasure_reaches_a_retired_flag_rows_cohort(
+    tmp_path: Path,
+) -> None:
+    """A retired row is ignored on read but may still name an account, so
+    scrubbing a purged account removes it there too without being counted as a
+    managed-flag change."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path, '["acct_kept", "acct_purged"]')
+
+    removed = repo.scrub_user("acct_purged")
+
+    assert removed == 0
+    assert json.loads(_retired_row_cohort(tmp_path)) == ["acct_kept"]
+    assert repo.read().degraded is False
+
+
+def test_010_FR_007_erasure_clears_an_unreadable_retired_flag_row_cohort(
+    tmp_path: Path,
+) -> None:
+    """A retired row whose cohort cannot be parsed is cleared rather than left
+    holding data erasure cannot inspect."""
+
+    repo = _repo(tmp_path)
+    _plant_retired_row(tmp_path, "not json")
+
+    repo.scrub_user("acct_purged")
+
+    assert json.loads(_retired_row_cohort(tmp_path)) == []
+    assert repo.read().degraded is False
+
+
 @pytest.mark.parametrize(
     "existing_store", [False, True], ids=["fresh", "five-row-upgrade"]
 )
@@ -363,7 +487,6 @@ def test_012_FR_009_fresh_store_forces_autocomplete_off_despite_environment(
     assert overlay.degraded is False
     assert set(overlay.flags) == {
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -589,7 +712,7 @@ def test_010_SC_008_warning_repeats_only_after_a_healthy_read_resets_it(
         with sqlite3.connect(db_path) as conn:
             conn.execute(
                 "DELETE FROM feature_flags WHERE flag = ?",
-                ("mobile_task_classification",),
+                ("external_agent_relay",),
             )
             conn.commit()
         repo.read()
@@ -747,10 +870,10 @@ def test_010_FR_001_migration_seeds_from_the_environment_baseline(
 
     repo = _sqlite_repo(
         tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.ON},
+        legacy_states={"external_agent_relay": FeatureFlagState.ON},
     )
 
-    assert repo.read().flags["mobile_task_classification"].mode is FlagMode.ON
+    assert repo.read().flags["external_agent_relay"].mode is FlagMode.ON
 
 
 def test_010_FR_001_migration_resolves_internal_stage_and_skips_unresolved_emails(
@@ -763,14 +886,14 @@ def test_010_FR_001_migration_resolves_internal_stage_and_skips_unresolved_email
 
     repo = _sqlite_repo(
         tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.INTERNAL},
+        legacy_states={"external_agent_relay": FeatureFlagState.INTERNAL},
         legacy_internal_users=frozenset(
             {"resolvable@example.com", "ghost@example.com"}
         ),
         resolve_account_id=lambda email: resolved.get(email),
     )
 
-    entry = repo.read().flags["mobile_task_classification"]
+    entry = repo.read().flags["external_agent_relay"]
     assert entry.mode is FlagMode.SELECTED_USERS
     assert entry.selected_users == ("acct_resolvable",)
 
@@ -789,7 +912,6 @@ def test_010_DD_15_migration_seeds_exactly_the_managed_flags_plus_a_ledger_row(
 
     assert set(MANAGED_FLAGS) == {
         "voice_brain_dump",
-        "mobile_task_classification",
         "external_agent_relay",
         "task_title_autocomplete",
         "crt_canvas",
@@ -943,7 +1065,7 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
                 tmp_path / "data",
                 legacy_states={
                     "voice_brain_dump": FeatureFlagState.ON,
-                    "mobile_task_classification": FeatureFlagState.ON,
+                    "external_agent_relay": FeatureFlagState.ON,
                 },
             )
         except BaseException as exc:  # noqa: BLE001 - captured for the assertion below
@@ -975,8 +1097,8 @@ def test_010_DD_15_concurrent_first_start_construction_does_not_duplicate_the_le
     overlay = next(iter(results.values())).read()
     assert overlay.degraded is False
     assert overlay.flags["voice_brain_dump"].mode is FlagMode.ON
-    assert overlay.flags["mobile_task_classification"].mode is FlagMode.ON
-    assert overlay.flags["external_agent_relay"].mode is FlagMode.OFF
+    assert overlay.flags["external_agent_relay"].mode is FlagMode.ON
+    assert overlay.flags["crt_canvas"].mode is FlagMode.OFF
 
 
 # ---------------------------------------------------------------------------
@@ -1018,7 +1140,7 @@ def test_010_FR_004_a_missing_managed_flag_row_reads_degraded_not_healthy_absenc
     overlay = repo.read()
     assert overlay.degraded is True
     with pytest.raises(DegradedRuntimeFlagsError):
-        _set_mode(repo, "mobile_task_classification", FlagMode.ON)
+        _set_mode(repo, "external_agent_relay", FlagMode.ON)
 
 
 def test_010_FR_004_an_out_of_vocabulary_stored_mode_reads_degraded(
@@ -1259,7 +1381,7 @@ def test_010_SC_007_the_migration_marker_carries_no_account_ids_or_emails(
 
     _sqlite_repo(
         tmp_path,
-        legacy_states={"mobile_task_classification": FeatureFlagState.INTERNAL},
+        legacy_states={"external_agent_relay": FeatureFlagState.INTERNAL},
         legacy_internal_users=frozenset({EMAIL_SENTINEL}),
         resolve_account_id=lambda email: "acct_internal",
     )
