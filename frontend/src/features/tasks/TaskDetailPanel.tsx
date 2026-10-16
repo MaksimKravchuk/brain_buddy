@@ -37,22 +37,22 @@ const stateLabels: Record<OpenTaskState, string> = {
 const openStateOptions: OpenTaskState[] = ["inbox", "next", "waiting", "someday"];
 
 const activePanelClass =
-  "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-l border-slate-200 bg-white";
+  "flex h-full w-full min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain bg-card text-ink";
 const inlinePanelClass =
-  "flex w-full min-w-0 flex-col overflow-x-hidden bg-white";
+  "flex w-full min-w-0 flex-col overflow-x-hidden bg-card text-ink";
 
 const iconButtonClass =
-  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-800 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent";
+  "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink disabled:cursor-default disabled:text-mark-open disabled:hover:bg-transparent";
 
-const propLabelClass = "text-slate-600";
+const propLabelClass = "text-ink-muted";
 
-const sectionLabelClass = "m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500";
+const sectionLabelClass = "m-0 text-co-meta font-semibold text-ink";
 
 const propFieldClass =
-  "w-full min-w-0 appearance-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[12.5px] text-slate-800 outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary";
+  "w-full min-w-0 appearance-none rounded-control bg-transparent px-3 py-1.5 text-co-meta text-ink outline-hidden transition-colors duration-200 ease-smooth hover:bg-quiet focus:bg-quiet";
 
 const dashedInputClass =
-  "w-full rounded-lg border-[1.5px] border-dashed border-slate-300 bg-transparent px-2.5 py-1.5 text-[13px] text-slate-900 outline-hidden transition-colors duration-200 ease-smooth placeholder:text-slate-500 focus:border-solid focus:border-brand-primary";
+  "w-full rounded-card bg-quiet px-3 py-2 text-co-body text-ink outline-hidden placeholder:text-ink-muted";
 
 export function TaskDetailPanel({
   active = true,
@@ -125,12 +125,12 @@ export function TaskDetailPanel({
       <h2 id="task-detail-title" ref={headingRef} tabIndex={-1} className="sr-only">
         Task detail
       </h2>
-      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+      <div className="sticky top-0 z-10 bg-card">
         <div className="flex items-center gap-1 px-2 py-1">
           {navigation ? <>
             <button type="button" aria-label="Previous task" data-task-navigation className={iconButtonClass} disabled={!navigation.onPrevious} onClick={navigation.onPrevious}><ChevronLeft className="h-4 w-4" aria-hidden /></button>
             <button type="button" aria-label="Next task" data-task-navigation className={iconButtonClass} disabled={!navigation.onNext} onClick={navigation.onNext}><ChevronRight className="h-4 w-4" aria-hidden /></button>
-            <span className="ml-1 min-w-0 text-xs tabular-nums text-slate-600" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
+            <span className="ml-1 min-w-0 text-co-meta tabular-nums text-ink-muted" aria-live="polite" aria-atomic="true">{navigation.position > 0 ? `${navigation.position} of ${navigation.total}` : "Outside this list"}</span>
           </> : null}
           <span className="relative ml-auto flex min-w-0 items-center gap-1">
             {task && !isTerminal ? (
@@ -146,10 +146,10 @@ export function TaskDetailPanel({
                   <MoreHorizontal className="h-[15px] w-[15px]" aria-hidden />
                 </button>
                 {menuOpen ? (
-                  <div className="absolute right-0 top-12 z-50 w-40 origin-top-right rounded-xl border border-slate-200 bg-white p-1.5 shadow-floating motion-safe:animate-scale-fade-in">
+                  <div className="absolute right-0 top-12 z-50 w-44 origin-top-right rounded-card bg-quiet p-1.5 motion-safe:animate-scale-fade-in">
                     <button
                       type="button"
-                      className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-rose-600 transition-colors duration-200 ease-smooth hover:bg-rose-50"
+                      className="w-full rounded-control px-3 py-2 text-left text-co-meta font-medium text-danger transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
                       onClick={() => {
                         setMenuOpen(false);
                         if (autosave) autosave.barrier("cancel");
@@ -165,13 +165,13 @@ export function TaskDetailPanel({
           </span>
           <button type="button" aria-label="Close task" className={iconButtonClass} onClick={onClose}><X className="h-4 w-4" aria-hidden /></button>
         </div>
-        {autosaveSnapshot && autosaveSnapshot.status !== "clean" ? <div className="px-4 pb-2"><AutosaveStatus snapshot={autosaveSnapshot} /></div> : null}
+        {autosaveSnapshot && autosaveSnapshot.status !== "clean" ? <div className="px-6 pb-2"><AutosaveStatus snapshot={autosaveSnapshot} /></div> : null}
       </div>
 
-      {notice ? <div className="px-4 pt-3">{notice}</div> : null}
-      {isLoading ? <p className="px-4 py-4 text-sm text-slate-600">Loading task detail…</p> : null}
+      {notice ? <div className="px-6 pt-3">{notice}</div> : null}
+      {isLoading ? <p className="px-6 py-4 text-co-meta text-ink-muted">Loading task detail…</p> : null}
       {error ? (
-        <p role="alert" className="px-4 py-4 text-sm text-rose-700">
+        <p role="alert" className="px-6 py-4 text-co-meta text-danger">
           {getErrorMessage(error)}
         </p>
       ) : null}
@@ -221,7 +221,7 @@ function AutosaveStatus({ snapshot }: { snapshot?: AutosaveSnapshot }): React.JS
     : snapshot.status === "saved" ? Check : CircleAlert;
   return (
     <>
-      <span className={`flex min-w-0 items-center gap-1 whitespace-nowrap text-xs ${snapshot.status === "saved" ? "text-[#065f46]" : "text-[#92400e]"}`}>
+      <span className={`flex min-w-0 items-center gap-1 whitespace-nowrap text-co-meta ${snapshot.status === "saved" ? "text-ink-muted" : "text-warning"}`}>
         <Icon className={`h-3.5 w-3.5 shrink-0 ${snapshot.status === "saving" || snapshot.status === "retrying" ? "motion-safe:animate-spin motion-reduce:animate-none" : ""}`} aria-hidden />
         <span>{labels[snapshot.status]}</span>
       </span>
@@ -256,22 +256,22 @@ function AutosaveRecovery({ snapshot, controller }: { snapshot?: AutosaveSnapsho
     || Boolean(!conflict && !protocol && snapshot.error && !snapshot.error.retryAllowed)
     || Boolean(conflict && !snapshot.conflict?.latestServerTask && !snapshot.conflict?.refetchFailed);
   return (
-    <section role="alert" className="mx-4 mb-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] p-3 text-[#92400e]">
-      <h3 ref={headingRef} tabIndex={-1} className="m-0 text-sm font-semibold">{heading}</h3>
-      {errorDetail ? <details className="mt-1 text-xs leading-relaxed"><summary className="cursor-pointer focus-visible:shadow-ring-focus">Error details</summary><p className="mb-0 mt-1">{errorDetail}</p></details> : null}
-      <p className="mb-3 mt-1 text-xs leading-relaxed">{snapshot.status === "retrying" ? "Applying your edits to the latest task…" : body}</p>
+    <section role="alert" className="mx-6 mb-3 rounded-card bg-quiet p-3 text-ink">
+      <h3 ref={headingRef} tabIndex={-1} className="m-0 text-co-body font-semibold text-warning">{heading}</h3>
+      {errorDetail ? <details className="mt-1 text-co-meta leading-relaxed"><summary className="cursor-pointer focus-visible:shadow-ring-focus">Error details</summary><p className="mb-0 mt-1">{errorDetail}</p></details> : null}
+      <p className="mb-3 mt-1 text-co-meta leading-relaxed">{snapshot.status === "retrying" ? "Applying your edits to the latest task…" : body}</p>
       {confirmDiscard ? (
         <div>
-          <p className="mb-2 text-sm font-semibold">Discard unsaved edits?</p>
+          <p className="mb-2 text-co-body font-semibold">Discard unsaved edits?</p>
           <div className="flex gap-2 max-[339px]:flex-col">
-            <button type="button" className="min-h-11 flex-1 rounded-lg border border-[#fde68a] px-3 text-sm font-medium focus-visible:shadow-ring-focus" onClick={() => setConfirmDiscard(false)}>Keep editing</button>
-            <button type="button" className="min-h-11 flex-1 rounded-lg bg-rose-700 px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => { controller.discard(); setConfirmDiscard(false); queueMicrotask(() => headingRef.current?.focus()); }}>Discard</button>
+            <button type="button" className="min-h-11 flex-1 rounded-control bg-quiet-pressed px-3 text-co-meta font-medium text-ink focus-visible:shadow-ring-focus" onClick={() => setConfirmDiscard(false)}>Keep editing</button>
+            <button type="button" className="min-h-11 flex-1 rounded-control bg-danger px-3 text-co-meta font-semibold text-card focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => { controller.discard(); setConfirmDiscard(false); queueMicrotask(() => headingRef.current?.focus()); }}>Discard</button>
           </div>
         </div>
       ) : (
         <div className="flex gap-2 max-[339px]:flex-col">
-          <button type="button" disabled={retryDisabled} aria-disabled={retryDisabled} className="min-h-11 flex-1 rounded-lg bg-[#92400e] px-3 text-sm font-semibold text-white focus-visible:shadow-ring-focus disabled:opacity-60" onClick={() => checkSavedVersion || snapshot.conflict?.refetchFailed ? void controller.retryRefetch() : controller.retry()}>{checkSavedVersion ? "Check saved version" : protocol ? "Retry verification" : conflict ? "Retry my edits" : "Retry"}</button>
-          {conflict ? <button type="button" className="min-h-11 flex-1 rounded-lg border border-[#fde68a] px-3 text-sm font-medium focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => setConfirmDiscard(true)}>Discard my edits</button> : null}
+          <button type="button" disabled={retryDisabled} aria-disabled={retryDisabled} className="min-h-11 flex-1 rounded-control bg-ink px-3 text-co-meta font-semibold text-card focus-visible:shadow-ring-focus disabled:opacity-60" onClick={() => checkSavedVersion || snapshot.conflict?.refetchFailed ? void controller.retryRefetch() : controller.retry()}>{checkSavedVersion ? "Check saved version" : protocol ? "Retry verification" : conflict ? "Retry my edits" : "Retry"}</button>
+          {conflict ? <button type="button" className="min-h-11 flex-1 rounded-control bg-quiet-pressed px-3 text-co-meta font-medium text-ink focus-visible:shadow-ring-focus" onMouseDown={(event) => event.preventDefault()} onClick={() => setConfirmDiscard(true)}>Discard my edits</button> : null}
         </div>
       )}
     </section>
@@ -356,20 +356,26 @@ function TaskDetailBody({
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The circle and title sit on the same vertical lines as the list row
           above them (22px circle centre, 52px text start). */}
-      <div className="flex items-start gap-1 px-4 pb-3 pt-3">
+      <div className="px-6 pt-1">
+        <p data-testid="task-breadcrumb" className="m-0 flex items-center gap-2 text-co-meta text-ink-muted">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${project?.color ? "" : "bg-mark-open"}`} style={project?.color ? { backgroundColor: project.color } : undefined} aria-hidden />
+          <span className="min-w-0 truncate">{[project?.name, task.state === "completed" ? "Done" : task.state === "cancelled" ? "Cancelled" : stateLabels[task.state]].filter(Boolean).join(" · ")}</span>
+        </p>
+      </div>
+      <div className="flex items-start gap-1 px-6 pb-4 pt-1">
         <button
           type="button"
           aria-label={isTerminal ? "Reopen task" : "Complete task"}
           disabled={Boolean(autosaveSnapshot?.barriers.some((barrier) => barrier.action === "complete") || (autosaveSnapshot?.inFlight?.kind === "transition" && "action" in autosaveSnapshot.inFlight.body && autosaveSnapshot.inFlight.body.action === "complete"))}
-          className="group/check -ml-4 -mt-2.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+          className="group/check -ml-[13px] -mt-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
           onClick={() => autosave ? autosave.barrier(isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined) : onTransition(task, isTerminal ? "reopen" : "complete", isTerminal ? "inbox" : undefined)}
         >
           <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
             task.state === "completed"
-              ? "border-brand-primary bg-brand-primary text-white"
+              ? "border-ink-done bg-ink-done text-card"
               : task.state === "cancelled"
-                ? "border-slate-300 bg-slate-200 text-slate-500"
-                : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
+                ? "border-mark-open bg-quiet text-ink-muted"
+                : "border-mark-open bg-card text-transparent group-hover/check:border-ink group-hover/check:text-ink/50"
           }`}>
             {task.state === "cancelled" ? <X className="h-2.5 w-2.5" aria-hidden /> : <Check className="h-[11px] w-[11px]" aria-hidden />}
           </span>
@@ -381,8 +387,8 @@ function TaskDetailBody({
           value={draft?.title ?? title}
           rows={1}
           ref={autosizeTitle}
-          className={`w-full min-w-0 resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold leading-[1.35] outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary ${
-            isTerminal ? "text-slate-500 line-through" : "text-slate-900"
+          className={`w-full min-w-0 resize-none overflow-hidden rounded-card bg-transparent px-2 py-1 font-sans text-xl font-semibold leading-[1.25] outline-hidden transition-colors duration-200 ease-smooth hover:bg-quiet focus:bg-quiet ${
+            isTerminal ? "text-ink-done line-through" : "text-ink"
           }`}
           onChange={(event) => { setTitle(event.currentTarget.value); change("title", event.currentTarget.value as never, 500); }}
           onInput={(event) => autosizeTitle(event.currentTarget)}
@@ -408,12 +414,12 @@ function TaskDetailBody({
       <AutosaveRecovery snapshot={autosaveSnapshot} controller={autosave} />
       <span className="pointer-events-none absolute">
         {autosaveSnapshot?.dirtyFields.map((field) => (
-          <i key={field} aria-label={`${field === "project_id" ? "Project" : field === "tag_ids" ? "Tags" : field === "due_date" ? "Due date" : field === "waiting_for" ? "Waiting for" : field[0]?.toUpperCase() + field.slice(1)}, unsaved`} className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+          <i key={field} aria-label={`${field === "project_id" ? "Project" : field === "tag_ids" ? "Tags" : field === "due_date" ? "Due date" : field === "waiting_for" ? "Waiting for" : field[0]?.toUpperCase() + field.slice(1)}, unsaved`} className="inline-block h-1.5 w-1.5 rounded-full bg-warning" />
         ))}
       </span>
 
-      <div className="flex flex-col gap-2 px-4 pb-3 pt-1">
-        <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2 px-6 pb-6">
+        <div className="flex flex-col gap-2">
           <h3 className={sectionLabelClass}>Details</h3>
           <textarea
             aria-label={fieldLabel("Details", "details")}
@@ -434,11 +440,11 @@ function TaskDetailBody({
       </div>
 
       {!isTerminal && (draft?.state ?? draftState) === "inbox" ? (
-        <div className="px-4 pb-4">
-          <p className="mb-2 mt-0 text-xs leading-relaxed text-slate-600">What is the next concrete action?</p>
+        <div className="px-6 pb-6">
+          <p className="mb-2 mt-0 text-co-meta text-ink-muted">What is the next concrete action?</p>
           <Button
             type="button"
-            variant="primary"
+            variant="accent"
             size="sm"
             leftIcon={<ArrowRight aria-hidden />}
             onClick={() => {
@@ -452,14 +458,14 @@ function TaskDetailBody({
         </div>
       ) : null}
 
-      <section aria-label="Task properties" className="grid grid-cols-[76px_1fr] items-center gap-x-2.5 gap-y-2 border-t border-slate-200 px-4 pb-3.5 pt-3 text-[12.5px]">
-        <h3 className={`col-span-2 mb-0.5 ${sectionLabelClass}`}>Organize</h3>
+      <section aria-label="Task properties" className="grid grid-cols-[96px_1fr] items-center gap-x-2.5 gap-y-2 px-6 pb-6 text-co-meta">
+        <h3 className={`col-span-2 ${sectionLabelClass}`}>Organize</h3>
         <span className={propLabelClass}>Due date</span>
         <input
           aria-label={fieldLabel("Due date", "due_date")}
           type="date"
           value={draft?.due_date ?? dueDate}
-          className={`${propFieldClass} scroll-mb-[88px]`}
+          className={`${propFieldClass} scroll-mb-[88px] ${dueTone(draft?.due_date ?? dueDate, isTerminal)}`}
           onChange={(event) => {
             const value = event.currentTarget.value;
             setDueDate(value);
@@ -500,8 +506,8 @@ function TaskDetailBody({
             the same line as every other property value. */}
         <span className="relative flex min-w-0 items-center">
           <span
-            className="absolute -left-[9px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
-            style={{ backgroundColor: project?.color ?? "#cbd5e1" }}
+            className={`absolute -left-[9px] top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${project?.color ? "" : "bg-mark-open"}`}
+            style={project?.color ? { backgroundColor: project.color } : undefined}
             aria-hidden
           />
           <select
@@ -540,7 +546,7 @@ function TaskDetailBody({
                     if (autosave) change("tag_ids", nextTagIds as never, 0); else save({ tag_ids: nextTagIds });
                   }}
                 />
-                <span className="rounded-full border border-slate-200 bg-white px-2 py-[2px] text-[11px] font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 peer-checked:border-brand-primary peer-checked:bg-info-bg peer-checked:text-info-fg peer-focus-visible:shadow-ring-focus">
+                <span className="rounded-control bg-quiet px-3 py-1 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed peer-checked:bg-ink peer-checked:text-card peer-focus-visible:shadow-ring-focus">
                   #{tag.name.replace(/^[#@]/, "")}
                 </span>
               </label>
@@ -563,24 +569,24 @@ function TaskDetailBody({
             }
           }}
         />
-        {waitingRequired ? <span className="col-start-2 text-xs text-[#92400e]">Add who or what you’re waiting for</span> : null}
+        {waitingRequired ? <span className="col-start-2 text-co-meta text-warning">Add who or what you’re waiting for</span> : null}
       </section>
 
       <AgentTaskRelay task={task} isTerminal={isTerminal} active={active} onDispatched={onAgentDispatched} />
 
-      <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
+      <div className="flex flex-col gap-2 px-6 pb-6">
         <div className="flex items-center gap-2">
-          <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+          <h3 className={`flex-1 ${sectionLabelClass}`}>
             {subtasks.length ? `Subtasks · ${doneSubtasks} / ${subtasks.length}` : "Subtasks"}
           </h3>
           {subtasks.length ? (
-            <span className="text-[11px] tabular-nums text-slate-500">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
+            <span className="text-co-meta tabular-nums text-ink-muted">{Math.round((doneSubtasks / subtasks.length) * 100)}%</span>
           ) : null}
         </div>
         {subtasks.length ? (
-          <div className="h-[3px] overflow-hidden rounded-full bg-surface-sunken">
+          <div className="h-[3px] overflow-hidden rounded-full bg-quiet">
             <i
-              className="block h-full bg-brand-primary transition-[width] duration-200 ease-smooth"
+              className="block h-full bg-ink-done transition-[width] duration-200 ease-smooth"
               style={{ width: `${(doneSubtasks / subtasks.length) * 100}%` }}
             />
           </div>
@@ -593,7 +599,7 @@ function TaskDetailBody({
             {subtasks.map((subtask) => {
               const done = subtask.state !== "open";
               return (
-                <div key={subtask.id} className="flex min-h-11 items-center gap-1 text-[13px] text-slate-700">
+                <div key={subtask.id} className="flex min-h-11 items-center gap-1 text-co-body text-ink">
                   <button
                     type="button"
                     className="group/check -ml-[13px] flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
@@ -602,13 +608,13 @@ function TaskDetailBody({
                   >
                     <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] transition-colors duration-200 ease-smooth ${
                       done
-                        ? "border-brand-primary bg-brand-primary text-white"
-                        : "border-slate-300 bg-white text-transparent group-hover/check:border-sky-700 group-hover/check:text-sky-700/50"
+                        ? "border-ink-done bg-ink-done text-card"
+                        : "border-mark-open bg-card text-transparent group-hover/check:border-ink group-hover/check:text-ink/50"
                     }`}>
                       <Check className="h-[11px] w-[11px]" aria-hidden />
                     </span>
                   </button>
-                  <span className={`min-w-0 break-words ${done ? "text-slate-500 line-through" : ""}`}>{subtask.title}</span>
+                  <span className={`min-w-0 break-words ${done ? "text-ink-done line-through" : ""}`}>{subtask.title}</span>
                 </div>
               );
             })}
@@ -616,13 +622,13 @@ function TaskDetailBody({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
-        <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Comments</h3>
+      <div className="flex flex-col gap-2 px-6 pb-8">
+        <h3 className={sectionLabelClass}>Comments</h3>
         <CreateTaskItemForm key={`${task.id}-comment`} name="comment_body" keyAction="comment-create" label="New comment" placeholder="Add a comment" onCreate={(body, key) => onCreateComment(task, body, key)} />
         {comments.map((comment) => (
-          <div key={comment.id} className="whitespace-pre-line break-words text-[12.5px] leading-normal text-slate-700">
+          <div key={comment.id} className="whitespace-pre-line break-words text-co-body text-ink">
             {comment.body}
-            <span className="mt-0.5 block text-[11px] text-slate-500">
+            <span className="mt-0.5 block text-co-meta text-ink-muted">
               {comment.actor_id.slice(0, 2).toUpperCase()} · {formatCommentTime(comment.created_at)}
             </span>
           </div>
@@ -676,8 +682,8 @@ function CreateTaskItemForm({ name, keyAction, label, placeholder, onCreate }: {
         if (attemptRef.current && event.currentTarget.value.trim() !== attemptRef.current.value) attemptRef.current = null;
         setError(null);
       }} />
-      {pending ? <span role="status" className="mt-1 block text-xs text-slate-600">Adding…</span> : null}
-      {error ? <span role="alert" className="mt-1 block text-xs text-rose-700">{error}. Your draft is still here; press Enter to retry.</span> : null}
+      {pending ? <span role="status" className="mt-1 block text-co-meta text-ink-muted">Adding…</span> : null}
+      {error ? <span role="alert" className="mt-1 block text-co-meta text-danger">{error}. Your draft is still here; press Enter to retry.</span> : null}
     </form>
   );
 }
@@ -737,9 +743,9 @@ function AgentTaskRelay({
   return (
     <>
       {runs.length || canStartHandoff ? (
-        <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
+        <div className="flex flex-col gap-2 px-6 pb-6">
           <div className="flex items-center gap-2">
-            <h3 className="m-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+            <h3 className={`flex-1 ${sectionLabelClass}`}>
               External agent
             </h3>
             {canStartHandoff ? (
@@ -756,7 +762,7 @@ function AgentTaskRelay({
             ) : null}
           </div>
           {!runs.length && canStartHandoff ? (
-            <p className="m-0 text-[12px] text-slate-500">
+            <p className="m-0 text-co-meta text-ink-muted">
               Review exactly what would be sent before anything leaves BrainBuddy.
             </p>
           ) : null}
@@ -764,7 +770,7 @@ function AgentTaskRelay({
             // The same compact line the Task list shows (D-03-S21), so the two
             // surfaces cannot disagree about the tier or about a control the
             // agent has already withdrawn.
-            <p className="m-0 text-[11.5px] text-slate-500" data-testid="agent-run-summary-line">
+            <p className="m-0 text-co-meta text-ink-muted" data-testid="agent-run-summary-line">
               {compactRunLabel({
                 primary_state_label: latestRun.primary_state_label,
                 guarantee_tier: latestRun.guarantee_tier,
@@ -802,6 +808,15 @@ function autosizeTitle(el: HTMLTextAreaElement | null): void {
     el.style.height = "0";
     el.style.height = `${el.scrollHeight + borders}px`;
   }
+}
+
+/** Due-date tone: overdue reads danger, due today reads warning. */
+function dueTone(value: string, isTerminal: boolean): string {
+  if (!value || isTerminal) return "";
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  if (value < today) return "text-danger!";
+  return value === today ? "text-warning!" : "";
 }
 
 function formatCommentTime(value: string): string {
