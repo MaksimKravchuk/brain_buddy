@@ -335,23 +335,22 @@ struct WorkspaceView: View {
         .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
-        .task(id: model.workspace.account?.id) { await model.refreshAgents() }
-        .task { await model.agentRuns.run() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            Task { await model.refreshAgents() }
-        }
-        .onChange(of: scenePhase) { _, phase in model.agentRuns.isWindowVisible = phase != .background }
-        .onChange(of: model.agentAvailability.isOnline) { _, online in model.agentRuns.isOnline = online }
-        .onChange(of: model.sidebarCounts) { _, _ in
-            if model.showsAgentsSection { Task { await model.refreshAgentSteps() } }
-        }
-        .onChange(of: model.showsAgentsSection) { _, shown in
-            if !shown, model.destination.isAgentRuns { requestNavigation(.destination(.list(.waiting))) }
-        }
+    }
+
+    /// The agent-run hooks, kept off `window` so its modifier chain stays within the type checker's budget.
+    private var agentAwareCanvas: some View {
+        firstRunCanvas
+            .task(id: model.workspace.account?.id) { await model.refreshAgents() }
+            .task { await model.agentRuns.run() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await model.refreshAgents() } }
+            .onChange(of: scenePhase) { _, phase in model.agentRuns.isWindowVisible = phase != .background }
+            .onChange(of: model.agentAvailability.isOnline) { _, online in model.agentRuns.isOnline = online }
+            .onChange(of: model.sidebarCounts) { _, _ in if model.showsAgentsSection { Task { await model.refreshAgentSteps() } } }
+            .onChange(of: model.showsAgentsSection) { _, shown in if !shown, model.destination.isAgentRuns { requestNavigation(.destination(.list(.waiting))) } }
     }
 
     @ViewBuilder
-    private var detailCanvas: some View {
+    private var routedCanvas: some View {
         if case .agentRuns(let filter) = model.destination {
             AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun)
                 .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
@@ -1157,7 +1156,7 @@ struct WorkspaceView: View {
     /// The detail column with the first-run hooks; they live here, not on `window`, so that
     /// modifier chain stays within the type checker's budget.
     private var detailCanvas: some View {
-        firstRunCanvas
+        agentAwareCanvas
             // 029-FR-013: an account linked at any step ends the first run.
             .onChange(of: model.workspace.account != nil) { _, linked in
                 if linked { firstRun.accountLinked() }
@@ -1177,7 +1176,7 @@ struct WorkspaceView: View {
             .frame(minWidth: 560, minHeight: 480)
             .background(.coBgGround)
         } else {
-            taskCanvas
+            routedCanvas
         }
     }
 
