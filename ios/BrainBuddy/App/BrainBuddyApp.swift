@@ -178,12 +178,14 @@ struct BrainBuddyApp: App {
 private struct SceneRoot: View {
     @State private var router = AppRouter()
     @State private var toasts = ToastCenter()
+    @State private var accounts = AccountModels()
 
     var body: some View {
         let router = router
         RootView()
             .environment(router)
             .environment(toasts)
+            .environment(accounts)
             .tint(BBColor.brandText)
             .modifier(DayChangeObserver())
             .focusedSceneValue(
