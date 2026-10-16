@@ -19,86 +19,64 @@ capture sheet. No Mac or web change.
 
 ## Layout (from the canvas)
 
-- Sheet: large detent, grabber (`control-quiet-pressed`, 40 × 5), background `bg-ground`
-  (the canvas draws the sheet as glass over the list; the app's sheets use the system
-  sheet material, as the capture sheet does).
-- Title: Instrument Serif 28, `text-primary`, "What feels heaviest?".
-- Heard text: Instrument Sans 15, `text-secondary`, in “quotes”, with a 2 pt caret in
+- Sheet: large detent, grabber, the app's sheet background (as the capture sheet).
+- Header: Close on the leading edge; the language ("Russian" / "English") as a quiet menu
+  on the trailing edge.
+- Title: Instrument Serif 28 (`CarryOnTypeScale.title`), `text-primary`, "What feels
+  heaviest?".
+- Heard text: Instrument Sans 15, `text-secondary`, in “quotes”, with a 2 × 16 pt caret in
   `text-primary` while listening.
 - "Steps I heard" (15 semibold, `text-primary`) and, trailing, "Not saved yet" (15,
   `text-secondary`).
 - Step row: `control-quiet` fill, radius 14, padding 12 × 14, open circle 22 pt with a
-  2 pt `step-dot-open` ring, title Instrument Sans 17 `text-primary`, × in
-  `text-secondary` (44 pt hit target). Rows 8 pt apart.
+  2 pt `step-dot-open` ring, title 17 `text-primary`, meta line 15 `text-secondary`
+  ("Garage · by Friday", "Taxes"), × in `text-secondary` (44 pt hit target). Rows 8 pt
+  apart. The newest row fades in.
 - Footer: 15, `text-secondary`, centred: "Tap a step to edit it. Nothing reaches your
   lists until you add it."
-- Glass bar: the shared `BBGlassActionBar` geometry (16 pt sides, 28 pt bottom, 62 pt
-  tall). Leading: the voice button, 50 pt circle `voice-bg` with the mic in `voice-fg`;
-  while listening a 3 pt `voice-live-ring` inset by 2 pt and six bars (heights 8, 18, 26,
-  14, 22, 10; 4 pt wide; radius 2) instead of the mic. Then the status word (15,
-  `text-secondary`). Trailing: the action button, `surface-card` fill, `text-primary`
-  label, 50 tall, pill.
+- Glass bar: `BBGlassActionBar` (16 pt sides, 28 pt bottom, 62 pt tall). Leading: the voice
+  button, 50 pt circle `voice-bg` with the mic in `voice-fg`; while listening a 3 pt
+  `voice-live-ring` inset 2 pt and six bars (8, 18, 26, 14, 22, 10 pt tall, 4 pt wide,
+  radius 2) instead of the mic. Then the status word (15, `text-secondary`). Trailing: "Add
+  {n} to Inbox", `surface-card` fill, `text-primary` label, 50 tall, pill.
 
 ## State inventory
 
-| State | Body | Bar: status word | Bar: trailing |
+| State | Body | Status word | Add button |
 | --- | --- | --- | --- |
-| V-02.1 Loading providers | "Checking configured providers…" | — | — |
-| V-02.2 Providers failed | Web's message and "Try again" | — | — |
-| V-02.3 Ready | Title, consent switch with the providers sentence, language choice | "Tap to record" | — |
-| V-02.4 Starting | Title | "Starting…" | — |
-| V-02.5 Recording | Title, heard text (or none when on-device recognition is unavailable), caret | "Listening" | "Stop & review" |
-| V-02.6 Uploading / processing | Title, heard text, "Steps I heard" with the status label instead of "Not saved yet" | the status label | "Add to Inbox", disabled |
-| V-02.7 Review | Title, heard text, steps, banners, footer | — | "Add {n} to Inbox" |
-| V-02.8 Empty review | "No steps were proposed from this. Here is what was heard; discard it to record again.", the heard text, "Discard and record again" | — | — |
-| V-02.9 Failure | "{stage} paused/failed", the server's error, one button per recovery action | — | — |
-| V-02.10 Saving | Review, dimmed | "Saving…" | "Add {n} to Inbox", disabled |
-| V-02.11 Permission denied | "Allow the microphone and speech recognition for Brain Buddy in Settings." and "Open Settings" | — | — |
+| V-02.1 Starting | Title | "Starting…" | disabled |
+| V-02.2 Listening | Title, heard text with caret, steps as they appear | "Listening" | enabled when n > 0 (stops, then adds) |
+| V-02.3 Finishing | As V-02.2, no caret | "Finishing…" | disabled |
+| V-02.4 Review | Title, heard text, steps, footer | "Tap to talk again" | enabled when n > 0 |
+| V-02.5 Nothing heard | Title, "Nothing to add yet." | "Tap to talk again" | disabled |
+| V-02.6 Saving | Review, dimmed | "Adding…" | disabled |
+| V-02.7 Permission denied | "Allow the microphone and speech recognition for Brain Buddy in Settings." and "Open Settings" | — | hidden |
+| V-02.8 Unavailable | "Speech recognition for {language} isn't available on this iPhone." and "Try {other language}" | — | hidden |
+| V-02.9 Save failed | Review with the error above the steps | "Tap to talk again" | enabled |
 
-The sheet's header has Close on the leading edge, as the capture sheet does.
+Tapping the voice button in V-02.4/5/9 listens again; new words add to the heard text and
+the steps are read from all of it.
 
 ## Copy
 
-All English, as the app. Web strings are reused word for word where the web has them
-(`frontend/src/features/brain-dump/BrainDumpRoute.tsx`), with "tasks" kept where the web
-says it and "steps" where the canvas says it.
+English, as the app. Sentence case.
 
 | Key | Text |
 | --- | --- |
-| Consent | Allow secure cloud processing: speech-to-text by {stt}, task extraction by {reconciler}. Audio is not sent without this consent. (the reconciler clause is left out when none is named) |
-| Consent required | Secure cloud transcription consent is required before recording. |
-| Providers failed | Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed. |
-| Languages | Russian + English · Russian · English |
-| Provisional | These tasks were extracted from the live transcript, not from accurate audio. Review them carefully before saving. |
-| Not saveable | These are not yet reconciled drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation. |
-| Conflicts | Resolve {n} conflict(s) before adding. · Keep mine · Use suggestion |
-| Recovery | Retry task reconciliation · Retry accurate transcription · Review provisional tasks · Extract tasks from the live transcript · Delete recording |
+| Title | What feels heaviest? |
+| Steps header | Steps I heard · Not saved yet |
+| Footer | Tap a step to edit it. Nothing reaches your lists until you add it. |
+| Add | Add {n} to Inbox |
+| Empty | Nothing to add yet. |
 | Toast | Added {n} to Inbox |
-
-Confirmations (platform dialog; safe choice is the cancel role):
-
-| Trigger | Title | Destructive | Safe |
-| --- | --- | --- | --- |
-| Close with an unsaved recording | Discard this recording? | Discard recording | Keep recording |
-| Discard while recording | Discard this recording? | Discard recording | Keep recording |
-| Close while processing | Cancel processing? | Cancel processing | Keep processing |
-| Discard in review | Discard all tasks? | Discard all tasks | Keep reviewing |
-| Delete after failure | Delete this recording? | Delete recording permanently | Keep recording |
-
-Each dialog's message is the web's sentence (for example "The audio and transcript are
-deleted and nothing is saved.").
+| Close confirmation | Discard what you said? · Discard · Keep talking; message "Nothing has been added to your lists." |
+| Remove | Remove {title} (VoiceOver) |
 
 ## Deviations from the canvas
 
-1. **Steps after Stop, not while talking.** The canvas caption says "Steps appear while
-   you talk"; the code proposes steps once, from the accurate transcript, after Stop
-   (015-FR-001, 015-FR-003). While talking the sheet shows the words heard.
-2. **No project or date under a step.** The canvas shows "Garage · by Friday"; the server
-   proposes title-only Inbox tasks.
-3. **"Add {n} to Inbox" is not shown while listening.** There are no steps yet; the
-   trailing button is "Stop & review" (the web's label) until processing ends.
-4. **Consent and language before the first recording.** The canvas starts mid-recording;
-   the protocol needs consent first (015, ADR-0002).
+1. **A language menu in the header.** The canvas has none; recognition needs to know the
+   language, and the Mac's voice sheet offers the same choice.
+2. **Fallback steps carry no project or day** when the on-device model is unavailable (D4).
 
 ## Affordance → requirement map
 
@@ -106,25 +84,20 @@ deleted and nothing is saved.").
 | --- | --- |
 | Voice button in the capture bar | 031-FR-001 |
 | Sheet layout | 031-FR-002 |
-| Consent switch, languages | 031-FR-003, 031-FR-004 |
-| Recording, upload, seal | 031-FR-005 |
-| Heard text | 031-FR-006 |
-| Status while processing | 031-FR-007 |
-| Step rows, edit, ×, conflicts | 031-FR-008 |
-| Add button | 031-FR-009, 031-FR-014 |
-| Banners | 031-FR-010 |
-| Empty review | 031-FR-011 |
-| Recovery | 031-FR-012 |
-| Confirmations | 031-FR-013 |
-| Errors | 031-FR-015 |
+| Language menu | 031-FR-003 |
+| Steps while talking | 031-FR-004, 031-FR-005 |
+| Project and day line | 031-FR-006 |
+| Edit, × | 031-FR-007 |
+| Add button | 031-FR-008, 031-FR-009, 031-FR-010 |
+| Live voice button (stop) | 031-FR-011 |
+| Close confirmation | 031-FR-012 |
 
 ## Accessibility
 
-- The voice button is one element: "Record" / "Stop and review", with the hint naming
-  what happens next; the bars are decorative.
-- Each step row: label is the title, actions "Edit" and "Remove"; × is labelled
-  "Remove {title}".
-- Status changes (processing stage, steps ready, saved) are announced.
+- The voice button is one element: "Talk" / "Stop listening"; the bars are decorative.
+- Each step row: label is the title and its meta line; actions "Edit" and "Remove"; × is
+  labelled "Remove {title}".
+- New steps and the saved result are announced; Reduce Motion drops the fade.
 - Dynamic Type: the body scrolls; the bar stays.
 
 ## Primary loop impact

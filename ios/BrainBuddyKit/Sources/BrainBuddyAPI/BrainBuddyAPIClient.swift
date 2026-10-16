@@ -276,15 +276,10 @@ extension BrainBuddyAPIClient {
         var idempotencyKey: UUID?
         /// False for login and signup, which must not carry an old session.
         var sendsSession: Bool
-        /// The body's media type; JSON unless an upload names its own (brain dump audio).
-        var contentType: String
-        /// Extra request headers, such as an upload's `X-Content-SHA256`.
-        var headers: [String: String]
 
         init(
             _ method: HTTPMethod, _ path: [String], query: [(name: String, value: String)] = [], body: Data? = nil,
-            idempotencyKey: UUID? = nil, sendsSession: Bool = true, contentType: String = "application/json",
-            headers: [String: String] = [:]
+            idempotencyKey: UUID? = nil, sendsSession: Bool = true
         ) {
             self.method = method
             self.path = path
@@ -292,8 +287,6 @@ extension BrainBuddyAPIClient {
             self.body = body
             self.idempotencyKey = idempotencyKey
             self.sendsSession = sendsSession
-            self.contentType = contentType
-            self.headers = headers
         }
     }
 
@@ -336,8 +329,7 @@ extension BrainBuddyAPIClient {
             ClientEpoch.header: String(ClientEpoch.current),
             "X-Correlation-ID": correlationID,
         ]
-        headers.merge(endpoint.headers) { current, _ in current }
-        if endpoint.body != nil { headers["Content-Type"] = endpoint.contentType }
+        if endpoint.body != nil { headers["Content-Type"] = "application/json" }
         if let key = endpoint.idempotencyKey { headers["Idempotency-Key"] = key.uuidString.lowercased() }
         var sentToken: String?
         if endpoint.sendsSession {

@@ -4,203 +4,167 @@
 
 **Created**: 2026-10-16
 
-**Status**: Clarified on the recommended answer to D2 (see [intake.md](intake.md)); updated
-when Max answers the decision card. Design: [design.md](design.md). Plan:
+**Status**: Clarified by Max on 2026-10-16 (D2: the brain dump runs on the iPhone, on local
+models; cloud processing is a later opt-in, not built now). One question is open on the
+thread's decision card (D4, step extraction for languages Apple's model does not support);
+the spec follows its recommended answer. Design: [design.md](design.md). Plan:
 [plan.md](plan.md). Tasks: [tasks.md](tasks.md).
 
-**Input**: "Build iPhone voice capture per Carry On board 11 (today voice exists only on
-Mac; reuse its logic where it fits)." Design input: canvas cell M11 iPhone, "11 Voice
-capture" (design data).
+**Input**: "Build iPhone voice capture per Carry On board 11." Max, 2026-10-16: «мы делаем
+брейндамп, как на холсте, но работает он локально, на локальных моделях. Если у
+пользователя есть желание, он может включить облако … Но облако мы пока не добавляем.»
+Design input: canvas cell M11 iPhone, "11 Voice capture" (design data).
 
 ## Context
 
-The web already has a voice brain dump (specs 002, 005, 015). The person consents to cloud
-processing, speaks, and stops. The server transcribes the audio accurately and turns it
-into GTD next actions ("proposals"): verb first, in the language spoken, fillers and
-duplicates dropped. The person keeps, edits or drops each one, then saves them; each
-becomes a native Inbox task. Nothing reaches the lists before that save.
+Screen 11 draws a brain dump on iPhone as a sheet over the current list: "What feels
+heaviest?", the words being heard, "Steps I heard · Not saved yet" with one row per step
+(its project and day underneath, tap to edit, × to drop), "Tap a step to edit it. Nothing
+reaches your lists until you add it.", and the floating glass bar with the live voice
+button, "Listening" and "Add 3 to Inbox". Its caption: "Steps appear while you talk; you
+keep, edit or drop each one."
 
-Screen 11 on the canvas draws the same flow on iPhone as a sheet over the current list:
-"What feels heaviest?", the words being heard, "Steps I heard · Not saved yet" with one row
-per step (tap to edit, × to drop), "Tap a step to edit it. Nothing reaches your lists until
-you add it.", and the floating glass bar with the live voice button, "Listening" and
-"Add 3 to Inbox".
-
-This feature builds that sheet on iPhone against the existing protocol, with no backend
-change. The Mac keeps its own on-device draft (spec 021).
+The iPhone builds this entirely on the device: Apple's on-device speech recognition turns
+speech into text, and Apple's on-device language model (Foundation Models) turns the text
+into steps. Nothing is sent anywhere and no account is needed. The steps become ordinary
+captured tasks through the same path as the capture sheet, so they work offline and sync
+like any other task. The web's server brain dump and a cloud option are not part of this
+feature.
 
 ## Clarifications
 
 ### Session 2026-10-16
 
-- Q: Which voice behaviour on iPhone? → A: **The server brain dump**, as screen 11 draws
-  and the web does (recommended answer on the decision card, D2; pending Max).
-- Q: Steps while talking, and a project and date under each step, as the canvas draws? →
-  A: **No.** The code proposes title-only Inbox tasks once, after Stop (015-FR-001,
-  015-FR-003). While talking the sheet shows the words heard. *Agent, from Max's rule
-  "don't invent behaviour" (D1, D3).*
-- Q: Where does the live text come from? → A: **On-device speech recognition only**, the
-  native counterpart of the web's browser preview. It is a readout and a recovery source,
-  never a task source; it is never sent to Apple's servers. *Agent.*
-- Q: Is consent remembered between recordings? → A: **No.** As on the web, the consent
-  switch starts off every time the sheet opens, and the start request carries it.
-  *Agent.*
-- Q: What happens to an unsaved recording when the sheet closes? → A: **It is discarded
-  after a confirmation**, because the iPhone has no screen that lists recordings to return
-  to (as 015 decided for the web's processing screen). *Agent.*
+- Q: Which voice behaviour on iPhone? → A: **The brain dump on the canvas, on local models;
+  no cloud for now.** *Max (D2).*
+- Q: Steps while talking, and a project and day under each step? → A: **Yes, as the
+  canvas.** The steps are re-read from the words heard while the person talks; a project is
+  shown only when it names an existing project, a day only when one was said. *Agent, from
+  D2 ("как на холсте").*
+- Q: What if the on-device model is unavailable (older iPhone, Apple Intelligence off) or
+  the language is not one it supports? → A: **Pending (D4).** Recommended and built: give
+  the text to the model anyway when it is available; when it is not, each sentence becomes
+  a step without a project or day, for the person to edit.
+- Q: Where do added steps go? → A: **The Inbox**, through ordinary capture. A step with a
+  project lands in that project, as a capture with a project does today.
+- Q: Is any audio kept? → A: **No.** Recognition streams from the microphone; no recording
+  is written.
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Dump what is on my mind and keep the steps (Priority: P1)
 
-Signed in, with voice brain dump on for the account, the person opens capture, taps the
-voice button, allows cloud processing, says «the garage is a mess, Sam needs the van back
-by Friday, and I still haven't found the tax letter», and taps the voice button again.
+The person opens capture, taps the voice button, says «the garage is a mess, Sam needs the
+van back by Friday, and I still haven't found the tax letter», and taps "Add 3 to Inbox".
 
-- **Given** the capture sheet is open and the account has voice brain dump, **Then** the
-  glass bar shows the voice button on its leading side.
-- **Given** the voice sheet is open, **When** cloud processing is not allowed, **Then**
-  recording cannot start and the sheet says why.
-- **Given** recording, **Then** the words heard appear under the title and the bar says
-  "Listening"; no step exists yet.
-- **Given** the person stops, **When** processing finishes, **Then** "Steps I heard"
-  lists each proposed step, "Not saved yet" shows, and "Add 3 to Inbox" is enabled when
-  the server says the steps can be saved.
-- **When** the person taps "Add 3 to Inbox", **Then** the steps become Inbox tasks, the
-  sheet closes and a toast says "Added 3 to Inbox".
+- **Given** the capture sheet is open, **Then** the glass bar shows the voice button on its
+  leading side, and tapping it opens the voice sheet already listening.
+- **Given** the person is talking, **Then** the words heard appear under the title, the bar
+  says "Listening", and steps appear and update under "Steps I heard · Not saved yet".
+- **When** the person taps "Add 3 to Inbox", **Then** listening stops, each kept step is
+  captured, the sheet closes and a toast says "Added 3 to Inbox".
 
 ### User Story 2 - Fix the steps before they land (Priority: P2)
 
-- **When** the person taps a step and changes its words, **Then** the new title is saved
-  to the recording when editing ends, and the row shows it.
-- **When** the person taps × on a step, **Then** it disappears and the count on the add
-  button drops.
-- **Given** a step has a conflict, **Then** it shows the person's text and the suggestion
-  with "Keep mine" and "Use suggestion", and adding waits until every conflict is settled.
+- **When** the person taps a step and changes its words, **Then** the row keeps the new
+  words, and later updates from speech never overwrite it.
+- **When** the person taps × on a step, **Then** it disappears, does not come back as the
+  person keeps talking, and the count on the add button drops.
 
-### User Story 3 - Nothing useful was said, or processing failed (Priority: P3)
+### User Story 3 - Stop and look before adding (Priority: P3)
 
-- **Given** no step survived, **Then** the sheet says nothing was proposed, shows what
-  was heard, offers no add button, and discarding returns to a fresh recording.
-- **Given** processing failed, **Then** the sheet names the stage and offers exactly the
-  recovery actions the server allows (retry, review provisional steps, extract steps from
-  the live transcript, delete the recording).
+- **When** the person taps the live voice button, **Then** listening stops, the steps are
+  read once more from everything heard, and the sheet stays open for review.
+- **Given** nothing actionable was heard, **Then** the sheet says so and the add button is
+  disabled.
 
 ### User Story 4 - Leave safely (Priority: P4)
 
-- **Given** a recording exists that is not saved, **When** the person closes the sheet or
-  chooses a discard action, **Then** a confirmation asks first; its safe choice keeps
-  everything as it was, and its destructive choice discards the recording on the server.
+- **Given** words were heard and not added, **When** the person closes the sheet, **Then**
+  a confirmation asks first; its safe choice keeps everything.
 
 ### Edge Cases
 
-- On-device recognition is unavailable for the language: recording works, the sheet shows
-  "Listening" without live text, and no live-transcript recovery is offered.
-- The microphone or speech permission is denied: nothing is sent; the sheet says how to
-  allow it in Settings.
-- Network fails during upload or a command: the sheet shows the error with its reference
-  id; retrying sends the same bytes or the same command again.
-- A newer operation revision exists (409): the sheet reloads the operation and shows the
-  server's message.
-- The recording reaches 30 minutes: recording stops on its own and processing starts.
-- The account signs out while the sheet is open: the next request fails as unauthorized
-  and the sheet says so; nothing is kept on the device.
+- Microphone or speech permission denied: nothing is recorded; the sheet says how to allow
+  it in Settings.
+- On-device recognition unavailable for the chosen language: the sheet says so and offers
+  the other language.
+- The model fails or is unavailable: the steps come from sentences (D4) and the sheet keeps
+  working.
+- A step names a project that does not exist: the step has no project (capture never
+  creates one from speech).
+- A save fails part way: the saved steps leave the list, the rest stay with the error.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: The capture sheet MUST show the voice button only when an account is signed
-  in and its `/auth/me` answer has `feature_flags.voice_brain_dump` true. Otherwise the
-  bar looks as it does today; there is no account wall.
-- **FR-002**: The voice sheet MUST follow canvas cell M11 iPhone: a large sheet with a
-  grabber over the current list, the serif title "What feels heaviest?", the heard text,
-  "Steps I heard" with "Not saved yet", step rows on `control-quiet` with an open circle
-  and ×, the footer "Tap a step to edit it. Nothing reaches your lists until you add it.",
-  and the floating glass bar (voice button, status word, trailing action). Colours are the
-  Carry On tokens only.
-- **FR-003**: Before recording, the sheet MUST load the configured providers; recording
-  is possible only when an accurate speech-to-text provider is named. A switch "Allow
-  secure cloud processing: speech-to-text by {stt}, task extraction by {reconciler}.
-  Audio is not sent without this consent." starts off each time the sheet opens, and a
-  language choice offers "Russian + English" (default), "Russian" and "English".
-- **FR-004**: Starting MUST send the consent (microphone, external processing, the
-  provider and the providers, the language hints) with an Idempotency-Key and receive an
-  operation in `recording`.
-- **FR-005**: The device MUST record mono AAC audio for at most 30 minutes and, after
-  Stop, upload it as numbered chunks starting at 0, each with its SHA-256 in
-  `X-Content-SHA256`, then seal with `expected_chunks` and the manifest hash computed from
-  the server's chunk list (sorted by number; compact JSON objects `chunk_number`,
-  `sha256`, `size_bytes` in that order; SHA-256 of the UTF-8 bytes, lowercase hex).
-- **FR-006**: While recording, the heard text MUST come from on-device recognition only.
-  Each result is appended to the operation as a transcript segment: interim results reuse
-  the open sequence number, a final result closes it. No step exists before Stop.
-- **FR-007**: While the server processes, the sheet MUST show the status in words
-  (Sealing audio, Processing audio, Improving transcript, Reconciling tasks, Saving tasks)
-  and poll the operation after 1.5 s, doubling the delay up to 8 s, until the status
-  leaves processing.
-- **FR-008**: The review MUST list the operation's non-deleted proposals in server order.
-  Editing a title sends it when editing ends, trimmed, only if it changed and is not
-  empty; × sends `deleted`; a conflict offers "Keep mine" and "Use suggestion". Proposal
-  edits are sent one at a time, each with the latest revision.
-- **FR-009**: The add button MUST read "Add {n} to Inbox" for the {n} listed steps and be
-  enabled only when the operation is `committable` and no listed step has a conflict;
-  with conflicts the sheet says "Resolve {n} conflict(s) before adding."
-- **FR-010**: When steps are provisional or not yet saveable, the sheet MUST say so in
-  the web's words (015-FR-010).
-- **FR-011**: A review with no step MUST say "No steps were proposed from this. Here is
-  what was heard; discard it to record again.", show the heard text and offer no add
-  button; discarding returns to a fresh recording.
-- **FR-012**: After a failure the sheet MUST name the stage ("Accurate transcription" or
-  "Task reconciliation", "paused" when retry is allowed, otherwise "failed"), show the
-  server's error, and offer only the actions in `available_recovery_actions`.
-- **FR-013**: Every destructive exit (closing with an unsaved recording, discard while
-  recording, cancel processing, discard all steps, delete the recording) MUST ask first
-  with the platform dialog; the safe choice keeps everything; the destructive choice
-  sends `cancel`.
-- **FR-014**: Adding MUST send `commit`; on success the sheet closes, a toast says "Added
-  {n} to Inbox" and the workspace syncs so the new Inbox tasks appear.
-- **FR-015**: Errors MUST show the server's message and its reference id. A stale
-  revision (409) reloads the operation before the message shows. A response older than
-  the operation already held is ignored.
-- **FR-016**: The recorded audio MUST exist only as a temporary file that is deleted after
-  upload, discard or close; no audio, transcript or step text is logged. The app declares
-  microphone and speech-recognition usage descriptions.
+- **FR-001**: The capture sheet's glass bar MUST show the voice button on its leading side;
+  tapping it opens the voice sheet, which starts listening at once.
+- **FR-002**: The voice sheet MUST follow canvas cell M11 iPhone: a large sheet over the
+  current list, the serif title "What feels heaviest?", the heard text with a caret while
+  listening, "Steps I heard" with "Not saved yet", step rows on `control-quiet` with an
+  open circle, the title, a meta line "{project} · {day}" when either exists, and ×, the
+  footer "Tap a step to edit it. Nothing reaches your lists until you add it.", and the
+  floating glass bar (voice button, status word, "Add {n} to Inbox"). Colours are the Carry
+  On tokens only.
+- **FR-003**: Speech MUST be recognised on the device only; the sheet offers Russian and
+  English, starting with the device language when it is one of them, else English.
+- **FR-004**: While listening, the steps MUST be read again from the whole heard text after
+  each pause in new words (debounced), replacing the steps the person has not edited, and
+  keeping the order said.
+- **FR-005**: Steps MUST come from the on-device language model when it is available, and
+  from one step per sentence otherwise or when the model fails (D4).
+- **FR-006**: A step's project MUST be shown and used only when it matches an existing
+  active project's name (case-insensitive); a step's day only when the model gives one.
+- **FR-007**: An edited step MUST keep its words; a removed step MUST not reappear while the
+  person keeps talking (matched by its normalised words).
+- **FR-008**: The add button MUST read "Add {n} to Inbox" for the {n} listed steps and be
+  enabled when {n} > 0 and nothing is being saved; while listening it stops listening first.
+- **FR-009**: Adding MUST capture each step as its own task (Inbox, its project, its day),
+  in order, with a stable editor id per step so a retry never adds a step twice; on success
+  the sheet closes and a toast says "Added {n} to Inbox".
+- **FR-010**: If a capture fails, the steps already captured MUST leave the list and the
+  rest stay with the error shown.
+- **FR-011**: Tapping the live voice button MUST stop listening and read the steps once
+  more from the whole text; with no step the sheet says "Nothing to add yet." and the add
+  button is disabled.
+- **FR-012**: Closing with heard words or steps not added MUST ask "Discard what you said?"
+  first; the safe choice keeps everything.
+- **FR-013**: No audio file is written and no heard text or step is logged or sent off the
+  device. The app declares microphone and speech-recognition usage descriptions.
 
 ### Key Entities
 
-- **Recording** (server operation): status, consent, transcript segments, proposals,
-  audio chunks, revision, `committable`, `available_recovery_actions`.
-- **Step** (proposal): ordinal, title, status, conflicts, deleted.
+- **Heard step**: words, an optional project (an existing project), an optional day, and
+  whether the person edited it.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
-- **SC-001**: A dump of three distinct actions becomes three Inbox tasks with one tap
-  after processing and no edit.
-- **SC-002**: No request leaves the device before consent is on and Record is tapped,
-  apart from reading the flag and the providers.
-- **SC-003**: Every state of the sheet (consent, recording, processing, review, empty,
-  failure) is reachable in the model's tests with a fake server.
-- **SC-004**: Closing the sheet never leaves an unsaved recording on the server without
-  the person confirming its discard.
+- **SC-001**: A dump of three distinct actions becomes three Inbox tasks with one tap and no
+  edit, offline and signed out.
+- **SC-002**: No network request is made by the voice sheet.
+- **SC-003**: Every state of the sheet (listening, review, empty, saving, saved, permission
+  denied, unavailable) is reached in the model's tests with fakes.
+- **SC-004**: An edited or removed step is never overwritten or revived by later speech.
 
 ## Dependencies
 
-- Backend voice brain dump routes (`backend/app/api/tasks.py`), unchanged.
-- iOS sign-in (spec 021 sync, `Workspace.account`) and the session token in the Keychain.
-- The capture sheet (board 10, PR #439) and the shared glass bar `BBGlassActionBar`.
+- Apple Speech (on-device recognition) and Foundation Models (iOS 26, Apple Intelligence).
+- The capture path (`Workspace.capture(_:editorID:)`), the capture sheet (board 10, PR
+  #439) and the shared glass bar.
 
 ## Follow-ups (not in scope)
 
-- Pause and resume, the privacy-controls screen, resuming a recording after closing.
-- Voice without an account (D2 option "both"), if Max chooses it.
-- Steps while talking, and a project or date per step, if the backend ever proposes them.
+- Cloud processing as an opt-in (the server brain dump the web uses), when Max asks.
+- Other languages, and a downloaded model for languages Apple's model lacks (D4).
+- Routing the model call through the shared AI policy (spec 026) if it must cover
+  on-device-only uses too.
 
 ## Assumptions
 
-- The backend accepts `audio/mp4` (AAC in MP4) chunks; a whole recording of at most 30
-  minutes at 32 kbit/s fits the 10 MiB chunk limit, so it uploads as chunk 0.
-- The flag answer of `/auth/me` is read when the capture sheet opens; a change during the
-  sheet's life applies the next time.
+- Apple's on-device recognition supports Russian and English on current iPhones.
+- iOS 26 is the deployment target, so Foundation Models is always linkable; availability
+  is checked at run time.

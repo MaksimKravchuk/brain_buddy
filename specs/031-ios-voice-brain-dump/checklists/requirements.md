@@ -7,9 +7,8 @@
 ## Content Quality
 
 - [x] No implementation details (languages, frameworks, APIs) — requirements are
-      behavioural; 031-FR-001, 031-FR-005 and 031-FR-006 name existing protocol fields on
-      purpose, because the feature may only show behaviour the existing brain dump
-      protocol has (D1)
+      behavioural; 031-FR-003 and 031-FR-005 say "on the device" because Max made that
+      the product decision (D2)
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
@@ -17,8 +16,9 @@
 ## Requirement Completeness
 
 - [x] No [NEEDS CLARIFICATION] markers remain
-- [ ] Owner answered every question — D2 (which voice behaviour) is open on the thread's
-      decision card; the spec follows the recommended answer
+- [ ] Owner answered every question — D2 answered by Max; D4 (steps for languages
+      Apple's model lacks) is open on the thread's decision card; the spec follows the
+      recommended answer
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
