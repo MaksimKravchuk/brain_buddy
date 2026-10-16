@@ -41,7 +41,7 @@ export function BrainDumpGate(): React.JSX.Element {
         title="Voice brain dump is off"
         onClose={closeOverlay}
       />
-      <p className="px-5 py-4 text-sm text-slate-600 sm:px-6">
+      <p className="px-5 py-4 text-co-meta text-ink-muted sm:px-6">
         This workspace does not have voice brain dump enabled yet. It will appear here once it is turned on for your account.
       </p>
     </BrainDumpOverlay>

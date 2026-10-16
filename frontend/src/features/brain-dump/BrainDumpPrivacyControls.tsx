@@ -79,52 +79,52 @@ export function BrainDumpPrivacyControls(): React.JSX.Element {
 
   return (
     <BrainDumpOverlay labelledBy="brain-dump-privacy-title" onClose={closeOverlay} size="narrow">
-      <header className="flex shrink-0 items-start gap-3 border-b border-slate-100 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
+      <header className="flex shrink-0 items-start gap-3 px-5 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
         <div className="min-w-0 flex-1">
-          <p className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-primary">
+          <p className="inline-flex items-center gap-1.5 text-co-meta font-semibold text-ink">
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
             Voice brain dump · privacy controls
           </p>
-          <h1 id="brain-dump-privacy-title" className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">
+          <h1 id="brain-dump-privacy-title" className="font-voice text-co-title text-ink">
             You stay in control of this recording
           </h1>
         </div>
         <button
           type="button"
           aria-label="Close brain dump"
-          className="-mr-1.5 -mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
+          className="-mr-1.5 -mt-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink"
           onClick={closeOverlay}
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
-        <p className="text-sm text-slate-600">
+        <p className="text-co-meta text-ink-muted">
           New voice recordings are turned off for this workspace, but you can still manage the recording you already
           started.
         </p>
 
-        {error ? <p role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+        {error ? <p role="alert" className="mt-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-danger">{error}</p> : null}
 
         {isLoading ? (
-          <p role="status" className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+          <p role="status" className="mt-4 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
             Loading this recording…
           </p>
         ) : !operationId ? (
-          <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+          <p className="mt-4 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
             There is no recording to manage here.
           </p>
         ) : operation ? (
           <>
-            <dl className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</dt>
-              <dd className="mt-0.5 font-medium text-slate-900">{operationStatusLabels[operation.status] ?? operation.status}</dd>
+            <dl className="mt-4 rounded-card bg-quiet px-3 py-2 text-co-meta">
+              <dt className="text-co-meta font-semibold text-ink-muted">Status</dt>
+              <dd className="mt-0.5 font-medium text-ink">{operationStatusLabels[operation.status] ?? operation.status}</dd>
             </dl>
             <div className="mt-4 flex flex-col gap-2">
               {canWithdrawConsent ? (
                 <button
                   type="button"
-                  className="h-11 rounded-xl border border-amber-200 bg-white px-4 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                  className="h-11 rounded-control bg-quiet px-4 text-co-meta font-semibold text-warning disabled:opacity-50 hover:bg-quiet-pressed"
                   disabled={busyAction !== null}
                   onClick={() => void runCommand("withdraw_consent", operation)}
                 >
@@ -134,7 +134,7 @@ export function BrainDumpPrivacyControls(): React.JSX.Element {
               {canDeleteRawAudio ? (
                 <button
                   type="button"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 disabled:opacity-50"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-control bg-quiet px-4 text-co-meta font-semibold text-danger disabled:opacity-50 hover:bg-quiet-pressed"
                   disabled={busyAction !== null}
                   onClick={() => void runCommand("delete_raw_audio", operation)}
                 >
@@ -145,7 +145,7 @@ export function BrainDumpPrivacyControls(): React.JSX.Element {
               {canDiscard ? (
                 <button
                   type="button"
-                  className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 disabled:opacity-50"
+                  className="h-11 rounded-control bg-quiet px-4 text-co-meta font-medium text-ink disabled:opacity-50 hover:bg-quiet-pressed"
                   disabled={busyAction !== null}
                   onClick={() => void runCommand("cancel", operation)}
                 >
@@ -153,7 +153,7 @@ export function BrainDumpPrivacyControls(): React.JSX.Element {
                 </button>
               ) : null}
               {!canWithdrawConsent && !canDeleteRawAudio && !canDiscard ? (
-                <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                <p className="rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
                   Nothing is retained for this recording — there is no audio or transcript left to remove.
                 </p>
               ) : null}
