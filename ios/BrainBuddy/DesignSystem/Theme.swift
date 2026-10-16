@@ -31,6 +31,10 @@ enum BBColor {
     static let brandText = color(brandTextTone)
     /// `brandText` for UIKit views (the Smart Add highlight).
     static var brandTextUIColor: UIColor { uiColor(brandTextTone) }
+    /// text-secondary for UIKit views (an `#tag` in the Smart Add field).
+    static var textSecondaryUIColor: UIColor { uiColor(Tone(CarryOnRole.textSecondary)) }
+    /// field-token-bg for UIKit views (the `@project` and `#tag` highlight in the Smart Add field).
+    static var fieldTokenUIColor: UIColor { uiColor(Tone(CarryOnComponentColor.fieldTokenBg)) }
     /// text-primary. Fills that carry `onBrand` text or a glyph: prominent
     /// buttons, the Inbox count pill, the completed check.
     static let brandFill = color(brandTextTone)
