@@ -170,7 +170,7 @@ grouping table, and no step has moved.
    under Lost contact.
 3. **Given** two agents with runs and a third with none and stale, **When** the sidebar
    shows, **Then** it lists "All runs 5", one row per agent with its run count, the third
-   with "Stale", and "Add new agent".
+   with "Stale"; the All runs canvas shows "Add new agent" at its top right.
 4. **Given** the person chooses an agent row, **When** the canvas shows, **Then** it lists
    only that agent's runs under the same groups, titled with the agent's name.
 5. **Given** runs exist, **When** the person opens Waiting for, **Then** an **Agents**
@@ -262,7 +262,7 @@ same account.
    its M29 details.
 2. **Given** the person chooses Test again, **When** the test finishes, **Then** the status
    and details update; no password is asked.
-3. **Given** the person chooses + (or "Add new agent" in the sidebar), **When** the sheet
+3. **Given** the person chooses + (or "Add new agent" on the All runs canvas), **When** the sheet
    "Add new agent" opens, **Then** it asks for Name, Address, Credential (Bearer token |
    API key) with the secret, and Current password; Add and test creates the agent, tests
    it and selects it.
@@ -332,8 +332,10 @@ repository's checkers parse (`- **FR-001**`) followed by its feature-qualified i
   before Dates, when the account has at least one agent or one listed run, or the flag is
   on. It holds "All runs" with the number of listed runs, one row per agent (not
   disconnected) showing its listed-run count, or its status word when it has none and is
-  not "Tested ready", and, with the flag on, "Add new agent", which opens Settings ›
-  Agents with the Add new agent sheet. Glyphs come from `CarryOnMacIcons`.
+  not "Tested ready". With the flag on, the All runs and per-agent canvases show "Add new
+  agent" as a glass pill with + at the top right (DSAgents), which opens Settings ›
+  Agents with the Add new agent sheet; the sidebar has no Add new agent row. Glyphs come
+  from `CarryOnMacIcons`, drawn from the board's own SVG.
 - **FR-005**: (`030-FR-005`) The listed runs MUST be the latest run of every open step
   (pending (c)) of the signed-in account that has a server id, read with `GET
   /agent-run-summaries` in batches of at most 200 task ids, plus `GET /agent-runs/{id}`

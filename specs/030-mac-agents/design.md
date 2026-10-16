@@ -29,7 +29,7 @@ example `G-05.03`.
 
 | id | surface | screen | purpose | FR refs |
 |---|---|---|---|---|
-| G-01 | Main window › sidebar | Agents section | "All runs N", one row per agent, "Add new agent" | 030-FR-001, 030-FR-004 |
+| G-01 | Main window › sidebar | Agents section | "All runs N", one row per agent; "Add new agent" on the canvas | 030-FR-001, 030-FR-004 |
 | G-02 | Main window › canvas (from G-01) | All runs canvas | Every listed run grouped by what it needs (M22); per-agent filter | 030-FR-005 – 030-FR-008, 030-FR-011 |
 | G-03 | Main window › Waiting for | Agents group | Runs above People (M23, M24) | 030-FR-009 – 030-FR-011 |
 | G-04 | Main window › inspector › sheet | Hand to an agent | Choose agent, see what it gets, send (M21) | 030-FR-013 – 030-FR-018 |
@@ -42,9 +42,10 @@ example `G-05.03`.
 
 - **Sidebar** (G-01, M22 and DSAgents): a section headed "Agents" between Lists and
   Dates, in the existing sidebar row style. Rows: "All runs" with the trailing count;
-  each agent with its trailing count or status word ("Stale"); "Add new agent" in
-  `text-secondary`. Glyphs from `CarryOnMacIcons` (the 028 agents glyph for the section's
-  rows; a new "all runs" glyph drawn from the board's SVG in the same stroke rules).
+  each agent with its trailing count or status word ("Stale"). "Add new agent" is not in
+  the sidebar: DSAgents draws it as a glass pill with + at the top right of the All runs
+  canvas. Glyphs from `CarryOnMacIcons`, copied from the board's SVG: the agent-run glyph
+  (rounded rect, two dots, antenna) for All runs and every agent row, and +.
 - **All runs canvas** (G-02, M22): the canvas header pattern of the task lists — title
   "All runs", meta "5 runs", and the line "Every step you handed off, by what it needs
   from you." in `text-secondary`. Groups use the list's section header style ("Needs you ·
@@ -87,11 +88,11 @@ example `G-05.03`.
 | key | state | what shows | FR |
 |---|---|---|---|
 | G-01.01 | Signed out or local-only | No Agents section | 030-FR-001 |
-| G-01.02 | Signed in, flag on, no agents, no runs | "Agents" with "All runs" (no count) and "Add new agent" | 030-FR-004 |
-| G-01.03 | Runs listed (M22) | "All runs 5"; one row per agent: "Hermes 1", "Claude 1", "Home server Stale"; "Add new agent" | 030-FR-004 |
-| G-01.04 | Flag off, agents or runs exist | As G-01.03 without "Add new agent" | 030-FR-002, 030-FR-004 |
+| G-01.02 | Signed in, flag on, no agents, no runs | "Agents" with "All runs" (no count); canvas shows "Add new agent" | 030-FR-004 |
+| G-01.03 | Runs listed (M22) | "All runs 5"; one row per agent: "Hermes 1", "Claude 1", "Home server Stale"; canvas shows "Add new agent" | 030-FR-004 |
+| G-01.04 | Flag off, agents or runs exist | As G-01.03, canvas without "Add new agent" | 030-FR-002, 030-FR-004 |
 | G-01.05 | Flag off, no agents, no runs | No Agents section | 030-FR-004 |
-| G-01.06 | Account has no password | As G-01.03 without "Add new agent" | 030-FR-036 |
+| G-01.06 | Account has no password | As G-01.03, canvas without "Add new agent" | 030-FR-036 |
 | G-01.07 | Loading the first time | "All runs" with a small progress indicator in place of the count (static under Reduce Motion) | 030-FR-005 |
 
 ### G-02 — All runs canvas
@@ -192,7 +193,8 @@ Compact states: "Needs you" (accent), "Running · 4 min", "Queued", "Reported ·
 
 | key | text |
 |---|---|
-| Sidebar | Agents · All runs · Add new agent |
+| Sidebar | Agents · All runs |
+| All runs canvas | Add new agent |
 | All runs | All runs · `<n>` runs / 1 run · Every step you handed off, by what it needs from you. · Nothing handed off yet. Choose Hand off… on a step's card. · Loading runs… · Runs couldn't be loaded. |
 | Groups | Needs you · Running · Queued · To review · Lost contact |
 | Waiting for | Agents · People · `<n>` people / 1 person, `<m>` agents / 1 agent |

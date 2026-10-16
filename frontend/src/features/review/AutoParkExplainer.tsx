@@ -161,14 +161,14 @@ export function AutoParkExplainer({
   const floor = formatReviewDate(new Date(now.getTime() + 7 * DAY_MS).toISOString());
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ground/80 backdrop-blur-xs sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[150] flex items-stretch justify-center bg-ink/30 sm:items-center sm:p-6 motion-safe:animate-fade-in">
       <section
         ref={sectionRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={onKeyDown}
-        className="relative flex h-full w-full flex-col overflow-y-auto bg-card shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[480px] sm:rounded-sheet"
+        className="relative flex h-full w-full flex-col overflow-y-auto co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[480px] sm:rounded-sheet"
       >
         <div className="flex items-start gap-3 px-5 pb-2 pt-5">
           <h2 id={headingId} ref={headingRef} tabIndex={-1} className="m-0 flex-1 font-voice text-co-step text-ink outline-hidden focus-visible:shadow-ring-focus">

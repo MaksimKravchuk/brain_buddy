@@ -107,7 +107,7 @@ iOS thread; no slice edits it.
   50, in order, repeated `task_id` query items), merges the sparse maps and surfaces the
   first failing batch's error; then implement the batching. 030-FR-005, 030-SC-007. PR-02.
 
-## Phase 4 — Mac core: Settings agents model and editors (PR-06)
+## Phase 4 — Mac core: Settings agents model (PR-06) and editors (PR-14)
 
 - [ ] T018 [US5] Implement `AgentSettingsModel` in
   `macos/Sources/BrainBuddyMacCore/AgentSettingsModel.swift` (list without disconnected
@@ -120,12 +120,12 @@ iOS thread; no slice edits it.
   select; Replace credential; Edit with the password only when address or scheme changes;
   Delete; one Idempotency-Key per action reused on Try again; `expectedRevision`;
   wrong password, stale revision, 429 and relay-unavailable mapping; secrets cleared after
-  each request and on dismiss). 030-FR-031 – 030-FR-035. PR-06.
+  each request and on dismiss). 030-FR-031 – 030-FR-035. PR-14 (split out of PR-06 for budget).
 - [ ] T020 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift`:
   each action's request and outcome over a fake remote; name-only Edit sends no password;
   wrong password keeps the other fields and clears the password; a stale revision
   re-reads; a 429 is not retried; secrets are empty after success, failure and dismiss.
-  030-FR-031 – 030-FR-035, 030-FR-038. PR-06.
+  030-FR-031 – 030-FR-035, 030-FR-038. PR-14.
 
 ## Phase 5 — Mac core: grouping and All runs store (PR-04)
 
@@ -152,6 +152,17 @@ iOS thread; no slice edits it.
   in `macos/Tests/BrainBuddyMacTests/AgentRunsStoreTests.swift`, including 450 open steps
   → 3 summary requests and a stale notice when a batch fails. 030-FR-024, 030-FR-025,
   030-SC-004, 030-SC-007. PR-04.
+
+## Phase 5b — Kit: open steps with server ids on the Rust workspace (PR-15)
+
+- [ ] T035 [US2] PR-04 found that on a Rust-selected workspace `TaskRecord.serverID` is
+  never set and `state.tasks` holds only the rendered query window. Test-first in
+  `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceOpenStepsTests.swift`, add a
+  read-only `Workspace.openStepServerIDs()` in
+  `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+OpenSteps.swift` that returns
+  every open step's local id and server id on both the legacy and the Rust-selected
+  workspace (the Rust path reads the identity bindings and an existing query; no write
+  path, reducer or Rust change). 030-FR-005, 030-FR-013. PR-15.
 
 ## Phase 6 — Mac core: hand-off flow and run actions (PR-05)
 
@@ -244,8 +255,21 @@ iOS thread; no slice edits it.
   030-FR-030, 030-FR-036, 030-FR-037, 030-FR-038. PR-10.
 - [ ] T030 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift`:
   flag off shows 028's text and link; password-less shows the line and no +; the web
-  account URL carries no credential; the sidebar's "Add new agent" request opens the Add
-  sheet once. 030-FR-036, 030-FR-037, 030-SC-006. PR-10.
+  account URL carries no credential; the canvas's "Add new agent" request selects the Agents tab and opens
+  the Add sheet once. 030-FR-036, 030-FR-037, 030-SC-006. PR-10.
+
+## Phase 10b — Mac: sidebar agent rows as DSAgents (PR-16)
+
+- [ ] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
+  Needs-you run shows the accent dot before its count ("● 1"), and an agent with no listed
+  runs that is not "Tested ready" shows its status word ("Home server Stale") from the
+  connection list (PR-06). Add both to `MacSidebarRowLabel` in
+  `macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift` and the Agents section in
+  `ContentView.swift`, with tests in
+  `macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift`. Use only existing
+  BrainBuddyDesign tokens; where the board uses a size with no token (M22 card title 13,
+  meta 11), ask the iOS design thread for the token rather than typing a value.
+  030-FR-004. PR-16.
 
 ## Phase 11 — Mac: Add, Replace, Edit, Delete sheets (PR-11)
 
@@ -275,11 +299,12 @@ iOS thread; no slice edits it.
 - PR-02 depends on PR-01. PR-06 depends on PR-01, PR-03 and PR-13; it runs in parallel with
   PR-02, PR-04 and PR-05.
 - PR-04 depends on PR-02, PR-03 and PR-13. PR-05 depends on PR-04.
-- PR-07 depends on PR-04 and, outside this map, on 028 PR-03.
+- PR-15 has no dependencies. PR-07 depends on PR-04 and PR-15 and, outside this map, on 028 PR-03.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
-- PR-10 depends on PR-06 and PR-07 and, outside this map, on 028 PR-03; it runs in
+- PR-14 depends on PR-06. PR-10 depends on PR-06, PR-14 and PR-07 and, outside this map, on 028 PR-03; it runs in
   parallel with PR-08 and PR-09. PR-11 depends on PR-10.
-- PR-12 depends on PR-07, PR-09 and PR-11.
+- PR-16 depends on PR-06, PR-07 and PR-09 (PR-08 and PR-09 also change ContentView.swift).
+- PR-12 depends on PR-07, PR-09, PR-11 and PR-16.
 - Manual acceptance after PR-12: SC-001, SC-004 – SC-006, SC-008 against a test agent.
 
 ## PR-срезы
@@ -385,28 +410,43 @@ iOS thread; no slice edits it.
     },
     {
       "id": "PR-06",
-      "outcome": "Mac core lists agents with their M29 details and runs Test again, Add, Replace credential, Edit and Delete with the password exactly where the server needs it",
-      "tasks": ["T018", "T019", "T020"],
-      "requirements": [
-        "030-FR-029", "030-FR-030", "030-FR-031", "030-FR-032", "030-FR-033",
-        "030-FR-034", "030-FR-035", "030-FR-036", "030-FR-038"
-      ],
+      "outcome": "Mac core lists agents with their M29 details and runs Test again, with the shared remote protocol and failure notices",
+      "tasks": ["T018"],
+      "requirements": ["030-FR-029", "030-FR-030", "030-FR-036", "030-FR-038"],
       "paths": [
         "macos/Sources/BrainBuddyMacCore/AgentSettingsModel.swift",
-        "macos/Sources/BrainBuddyMacCore/AgentConnectionEditor.swift",
-        "macos/Tests/BrainBuddyMacTests/AgentSettingsModelTests.swift",
-        "macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift"
+        "macos/Tests/BrainBuddyMacTests/AgentSettingsModelTests.swift"
       ],
       "depends_on": ["PR-01", "PR-03", "PR-13"],
       "tests": [
-        "cd macos && swift test --filter AgentSettingsModelTests",
+        "cd macos && swift test --filter AgentSettingsModelTests"
+      ],
+      "acceptance": [
+        "Detail rows match the connection fields and the web's status words; Test again sends no password"
+      ],
+      "budget": {"product_loc": 320, "files": 1},
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-14",
+      "outcome": "Mac core runs Add, Replace credential, Edit and Delete with the password exactly where the server needs it",
+      "tasks": ["T019", "T020"],
+      "requirements": [
+        "030-FR-031", "030-FR-032", "030-FR-033", "030-FR-034", "030-FR-035", "030-FR-038"
+      ],
+      "paths": [
+        "macos/Sources/BrainBuddyMacCore/AgentConnectionEditor.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentConnectionEditorTests.swift"
+      ],
+      "depends_on": ["PR-06"],
+      "tests": [
         "cd macos && swift test --filter AgentConnectionEditorTests"
       ],
       "acceptance": [
-        "Detail rows match the connection fields and the web's status words; name-only Edit sends no password",
+        "Name-only Edit sends no password; Add, Replace, Delete and a destination Edit do",
         "Wrong password, stale revision and 429 are handled in words without automatic retry, and secrets are empty after every outcome"
       ],
-      "budget": {"product_loc": 380, "files": 2},
+      "budget": {"product_loc": 240, "files": 1},
       "implementer": "feature-implementer"
     },
     {
@@ -434,6 +474,26 @@ iOS thread; no slice edits it.
         "Polling follows each run's interval with a test clock, pauses hidden or offline, and 450 open steps cost three summary requests"
       ],
       "budget": {"product_loc": 380, "files": 2},
+      "implementer": "feature-implementer"
+    },
+    {
+      "id": "PR-15",
+      "outcome": "The shared kit lists every open step with its server id on both the legacy and the Rust-selected workspace, read-only",
+      "tasks": ["T035"],
+      "requirements": ["030-FR-005", "030-FR-013"],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+OpenSteps.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceOpenStepsTests.swift"
+      ],
+      "depends_on": [],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter WorkspaceOpenStepsTests"
+      ],
+      "acceptance": [
+        "A synced open step's server id is returned on the Rust-selected workspace, not only on the legacy one",
+        "No write path, reducer or Rust interface changes"
+      ],
+      "budget": {"product_loc": 160, "files": 1},
       "implementer": "feature-implementer"
     },
     {
@@ -481,7 +541,7 @@ iOS thread; no slice edits it.
         "macos/Sources/BrainBuddyMac/Agents/AgentRunRow.swift",
         "macos/Tests/BrainBuddyMacTests/AgentsSceneTests.swift"
       ],
-      "depends_on": ["PR-04"],
+      "depends_on": ["PR-04", "PR-15"],
       "tests": [
         "cd macos && swift build",
         "cd macos && swift test --filter AgentsSceneTests",
@@ -508,7 +568,7 @@ iOS thread; no slice edits it.
         "macos/Sources/BrainBuddyMac/Settings/AgentDetailsView.swift",
         "macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift"
       ],
-      "depends_on": ["PR-06", "PR-07"],
+      "depends_on": ["PR-06", "PR-14", "PR-07"],
       "tests": [
         "cd macos && swift build",
         "cd macos && swift test --filter AgentsSettingsTabTests",
@@ -600,6 +660,26 @@ iOS thread; no slice edits it.
       "implementer": "feature-implementer"
     },
     {
+      "id": "PR-16",
+      "outcome": "Mac sidebar agent rows match DSAgents: accent dot for a Needs-you run and the status word for an agent with no listed runs",
+      "tasks": ["T036"],
+      "requirements": ["030-FR-004"],
+      "paths": [
+        "macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift",
+        "macos/Sources/BrainBuddyMac/ContentView.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift"
+      ],
+      "depends_on": ["PR-06", "PR-07", "PR-09"],
+      "tests": [
+        "cd macos && swift test --filter AgentsSidebarRowsTests"
+      ],
+      "acceptance": [
+        "An agent with a Needs-you run shows the accent dot and count; an agent with no listed runs shows its status word"
+      ],
+      "budget": {"product_loc": 120, "files": 2},
+      "implementer": "feature-implementer"
+    },
+    {
       "id": "PR-12",
       "outcome": "Agent renders are approved against M21 – M24, M29 and M30 in light and dark and the macOS host run is recorded",
       "tasks": ["T033", "T034"],
@@ -609,7 +689,7 @@ iOS thread; no slice edits it.
         "macos/Tests/BrainBuddyMacTests/__Snapshots__",
         "specs/030-mac-agents/evidence/macos-host-run.md"
       ],
-      "depends_on": ["PR-07", "PR-09", "PR-11"],
+      "depends_on": ["PR-07", "PR-09", "PR-11", "PR-16"],
       "tests": [
         "cd macos && swift test --filter AgentsSnapshotTests"
       ],

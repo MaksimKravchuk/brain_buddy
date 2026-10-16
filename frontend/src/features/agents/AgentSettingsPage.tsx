@@ -53,7 +53,6 @@ export function AgentSettingsPage({ rolloutEnabled }: { rolloutEnabled: boolean 
       counts={countsQuery.data?.counts_by_state ?? emptyCounts}
       projects={projectsQuery.data ?? []}
       tags={tagsQuery.data ?? []}
-      ground
     >
       <div className="mx-auto flex max-w-[1120px] flex-col gap-5 pb-12">
         <SettingsTabs />
