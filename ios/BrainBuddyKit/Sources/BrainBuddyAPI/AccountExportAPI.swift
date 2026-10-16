@@ -34,7 +34,7 @@ public struct AccountExport: Equatable, Sendable, CustomStringConvertible, Custo
         return [extended, plain].lazy.compactMap(bareName).first ?? fallbackFileName
     }
 
-    /// Splits on `;` outside quotes, removing the quotes and resolving `\x` escapes inside them.
+    /// Splits on `;` outside quotes, removing the quotes and resolving `\"` and `\\` inside them.
     private static func segments(of header: String) -> [String] {
         var result: [String] = []
         var current = ""
@@ -42,6 +42,9 @@ public struct AccountExport: Equatable, Sendable, CustomStringConvertible, Custo
         var escaped = false
         for character in header {
             if escaped {
+                // Only `\"` and `\\` are escapes; any other backslash is kept so `bareName` still
+                // sees a Windows path separator such as `..\evil.zip`.
+                if character != "\"" && character != "\\" { current.append("\\") }
                 current.append(character)
                 escaped = false
             } else if quoted && character == "\\" {
