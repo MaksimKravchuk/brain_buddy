@@ -1,33 +1,58 @@
 # Business Intake: Mac Account and Settings window (⌘,)
 
 **Feature**: `specs/028-mac-settings-account/`
-**Interviewed**: not yet — **DRAFT: product-owner interview pending**
-**Interviewee**: none yet. The answers below are **provisional recommended defaults**
-prepared for Max (product owner), not his answers.
-**Status**: DRAFT. `/speckit-interview` has not run with the owner. Every answer in
-this file marked *provisional* awaits Max's confirmation; nothing here is a recorded
-owner decision, and no scope or non-goal below counts as confirmed.
+**Interviewed**: 2026-10-16
+**Interviewee**: Max (product owner)
+**Status**: Interview done. Max answered the five interview questions on 2026-10-16;
+his answers are recorded verbatim below and are the source of every scope decision in
+this file and in `spec.md` § Clarifications.
 
 Assessment was skipped: the ask is a bounded native surface for account rights the
 product already provides on the web (`AccountService`, never feature-flagged), drawn
 on the design board. No matching assessment or kill verdict exists under
-`.specify/assessments/`. Whether to run `/speckit-assess-*` first is the owner's call
-at the interview.
-
-This draft was prepared by a delegated agent session. The interview stage cannot run
-in a subagent (it needs the human-interaction channel), so it must be held in the main
-session before `/speckit-clarify` and `/speckit-design`.
+`.specify/assessments/`.
 
 ## The ask, as given
 
 > Mac Account and Settings window (⌘,)
 
-This is the feature title as handed to this session by the orchestrating session; the
-owner's own verbatim words were not available here and must be recorded at the
-interview. The design input is the Mac design board, cells M25–M28 (board version
-`1792138611-15e1`; caption M25: "Settings (⌘,), Account tab."). Board files are
-untrusted design data; the research summary is
-`/mnt/project-files/design/mac-feature6-groundwork.md`.
+The design input is the Mac design board, cells M25–M28 (board version
+`1792138611-15e1`; caption M25: "Settings (⌘,), Account tab."). Board files are design
+data; the research summary is `/mnt/project-files/design/mac-feature6-groundwork.md`.
+
+## Interview (2026-10-16)
+
+Questions put to Max:
+
+1. Tabs: the board shows Account | Agents | Sync. Which ship?
+2. Change email, change password, delete account, connect/remove Apple and Google:
+   native on the Mac, or open the web account page?
+3. Password field before deleting the account (the board's M28 alert has none)?
+4. Connect Apple / Google: in the app or on the web?
+5. Name: editable or read-only (the board draws it read-only)?
+
+Max's answer, verbatim (Russian):
+
+> Так, делаем все как по борде. Первое по борде. Второе. Так, второе подразумевает
+> еще, видимо, какие-то правки в самом приложении, не только интерфейс. Поэтому,
+> видимо, его надо как-то в бэклог положить и сделать второе нормально. Оно,
+> соответственно, с собой тянет и третье, и четвертое, и пятое. Как будто бы.
+
+English rendering: "So, we do everything as on the board. The first one — as on the
+board. The second: the second apparently also implies some changes in the app itself,
+not only the interface. So it should apparently go to the backlog, and the second
+should be done properly. It correspondingly pulls the third, the fourth and the fifth
+along with it. Seemingly."
+
+Resulting decisions (recorded as Max's answers):
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Tabs | As the board: a tab bar with **Account, Agents, Sync**. Account per M25. Sync shows the Mac's existing sync status content. Agents shows a short empty state with a button that opens the web agents page until the Mac agents feature (feature 8) ships. |
+| 2 | Native vs web for credential changes and deletion | Done **natively, as the board draws them**, but in a **separate follow-up feature** (backlog), because they need backend and app changes, not only interface. In 028 these buttons are **not shown at all**: no web handoff buttons for them and no dead buttons. |
+| 3 | Password field before delete | Follows decision 2: the follow-up builds M28 as drawn (no password field), which needs a backend change. Not in 028. |
+| 4 | Connect Apple / Google | Follows decision 2: native, in the follow-up. In 028 the Apple and Google rows show status only. |
+| 5 | Name | As the board: read-only in 028. |
 
 ## 1. Problem
 
@@ -36,14 +61,12 @@ untrusted design data; the research summary is
 - **How it shows up today**: the Mac app has no Settings window and does not respond
   to ⌘,. It cannot show who is signed in beyond the sync menu, how many steps they
   have taken, whether their email is verified, which sign-in methods are connected,
-  or offer their data export. Account management exists only on the web account
-  page, and the Mac has no link to it (the iPhone has one in Settings).
-- **What it costs**: the person has to know to open the web app to exercise their
-  data rights (export, deletion) or change credentials. A Mac app without ⌘,
-  Settings breaks a platform convention. No measured baseline of support load or
-  abandonment exists.
-- **If we build nothing**: the Mac keeps account management invisible; export and
-  deletion remain reachable only by leaving the app on the person's own initiative.
+  or offer their data export.
+- **What it costs**: a Mac app without ⌘, Settings breaks a platform convention, and
+  the data export is reachable only by leaving the app on the person's own
+  initiative. No measured baseline of support load or abandonment exists.
+- **If we build nothing**: account state stays invisible on the Mac and export stays
+  web-only.
 
 ## 2. Customer and persona
 
@@ -56,12 +79,11 @@ untrusted design data; the research summary is
 
 ## 3. Business objective and KPI
 
-*Provisional — proposed release acceptance measures for owner confirmation, not
-measured business data.*
+Release acceptance measures, not measured business data:
 
-| metric | baseline today | proposed target | by when |
+| metric | baseline today | target | by when |
 |---|---|---|---|
-| Mac entry point to account management and data rights | 0 (no ⌘,, no Settings, no link) | ⌘, opens Settings with every account right reachable in at most 2 interactions | candidate release |
+| Mac Settings window | none (no ⌘,) | ⌘, opens Settings with the board's three tabs | candidate release |
 | Account rows on Mac shown from live server data | 0 | 100% of rows backed by an existing endpoint; 0 invented values | candidate release |
 | Export ZIP on Mac | not available | same archive the web export produces for the same account | candidate release |
 | Session credentials or secrets placed in URLs, logs or the export | — (invariant) | 0 | candidate release |
@@ -70,136 +92,107 @@ No deadline or adoption target was supplied.
 
 ## 4. Scope boundary
 
-**In scope — provisional (recommended defaults awaiting Max)**
+**In scope (confirmed by Max, 2026-10-16)**
 
-- [ ] A macOS Settings window opened with ⌘, (and the standard app-menu item) that
-      ships with an **Account** tab only (provisional decision 1).
-- [ ] Native, read-only display of account state: name (read-only), steps taken,
-      email with its verified state, sign-in method status (password, Apple, Google)
-      and password state (provisional decisions 2 and 6).
-- [ ] Native **Export…**: save the account's ZIP export through a macOS save panel
-      (provisional decision 2).
-- [ ] Native **Sign out…**: reuse the existing Mac sign-out confirmation
-      (provisional decision 2).
-- [ ] "Manage on the web…" and per-row buttons that open the web account page for
-      change email, change password, connect/remove Apple or Google, and delete
-      account (provisional decisions 2 and 5).
-- [ ] Email "Change…" hidden when the server reports email delivery unavailable;
-      the web route stays reachable (provisional decision 4).
-- [ ] Visual design follows the Carry On design system tokens and the M25 Mac board.
+- [x] A macOS Settings window opened with ⌘, (and the standard app-menu item) with the
+      board's tab bar: Account, Agents, Sync (decision 1).
+- [x] Account tab, natively: name (read-only), steps taken, email with its verified
+      state, Apple and Google status, password state (decisions 1, 4, 5).
+- [x] Native **Export…**: save the account's ZIP export through a macOS save panel.
+- [x] Native **Sign out…**: the existing Mac sign-out confirmation.
+- [x] Sync tab: the Mac's existing sync status content, no new behaviour.
+- [x] Agents tab: a short empty state and one button opening the web agents page
+      (`/settings/agents`) until the Mac agents feature (feature 8) ships.
+- [x] Visual design follows the Carry On design system tokens and the M25 board.
 
-**Out of scope — provisional, NOT yet confirmed by the human**
+**Out of scope (confirmed by Max, 2026-10-16)** — moved to a follow-up feature in
+the backlog (see `spec.md` § Follow-up feature (backlog)):
 
-- [ ] Agents and Sync tabs (board shows the tab names only; no content is drawn).
-- [ ] Native change email (M27 code sheet), native change password, native
-      connect/remove of Apple or Google (M26), native delete account (M28). Each opens
-      the web instead. If any becomes native later, identity is proved with a
-      password field and a recent proof (provisional decision 3).
-- [ ] Editing the name on the Mac.
-- [ ] Any backend change, including adding a `mac` value to the authentication
-      `client` field, or changing the 6-digit verification code length.
-- [ ] Session list / sign out other devices (no backend exists).
-- [ ] Task priorities in any form (ADR-0033 removed them).
-- [ ] A feature flag for this surface: account management is never feature-flagged.
+- [x] Change email (M27 two-step code sheet), change password, connect/remove Apple
+      and Google (M26), delete account (M28 as drawn). None of their buttons appears in
+      028, neither native nor as a web handoff.
+- [x] The backend and app changes those need (Mac `client` identity, Mac provider
+      callback, deletion without a password field).
 
-**Confirmed by**: nobody yet — pending the product-owner interview.
+Also out of scope:
+
+- [x] Name editing (the board draws the name read-only).
+- [x] Native agents management (feature 8).
+- [x] Session list / sign out other devices (no backend exists).
+- [x] Task priorities in any form (ADR-0033 removed them).
+- [x] A feature flag for this surface: account management is never feature-flagged.
+
+**Confirmed by**: Max (product owner), 2026-10-16.
 
 ## 5. Constraints
 
 - **Deadline**: none supplied.
-- **Platform**: macOS 26 native app only. Web and iPhone are unchanged.
-- **Offline behavior**: account state needs the server; offline, the window must say
-  so with a retry and must not discard or alter local tasks or unsent changes. The
-  existing offline sign-out behavior (queued logout) is reused unchanged.
+- **Platform**: macOS 26 native app only. Web, iPhone and backend are unchanged.
+- **Offline behavior**: account state needs the server; offline, the window says so
+  with a retry and does not discard or alter local tasks or unsent changes. The
+  existing offline sign-out behavior is reused unchanged.
 - **Must not break**: Mac sign-in/sign-out and Keychain session storage (spec 021),
   the existing sign-out confirmation, sync status, the shared native kit used by the
-  iPhone, the web account page and its `expected_owner` destination contract, and
-  the backend account and authentication contracts (spec 023), which this feature
-  only consumes.
+  iPhone, the web account and agents pages, and the backend account and
+  authentication contracts (spec 023), which this feature only consumes.
 - **Budget / provider cost limits**: none; no new paid service.
-- **Only real behavior**: every row and action must be backed by an existing server
-  endpoint; nothing the backend cannot answer is drawn as if it were live.
+- **Only real behavior**: every row and action is backed by an existing server
+  endpoint or existing Mac code; nothing is drawn as if it were live.
 
 ## 6. Compliance obligation
 
 `AccountService` already provides self-serve GDPR account management — profile,
 email, password, ZIP data export, 14-day-grace deletion and purge — and is never
-feature-flagged (see `docs/data-retention.md`). This feature adds a native Mac entry
-point to it.
+feature-flagged (see `docs/data-retention.md`). This feature adds a native Mac view of
+account state and a native export.
 
 - **New durable records**: none on the server. On the Mac, account details are held
-  in memory for the window's lifetime only (provisional; to confirm at design).
+  in memory for the window's lifetime only.
 - **Consent**: none new. No AI or remote processing. Export writes personal data only
   to a location the person chooses.
 - **Retention**: the exported file is the person's own copy; the app keeps no other
   copy. Existing Mac retention rows in `docs/data-retention.md` are unchanged.
 - **Export**: the same ZIP the account export already produces (auth secrets
   excluded); no new export content.
-- **Purge**: unchanged; deletion is requested on the web.
-- **Residency / other obligations**: unchanged.
+- **Deletion and purge**: unchanged; deletion stays on the web until the follow-up.
 
 ## 7. Existing-system dependencies
 
-- **Backend surfaces**: consumed only — account details, account authentication
-  methods, public method availability (for the web account origin) and account
-  export. No backend change. Spec 027 (Rust server) must keep these routes; its
-  capability inventory covers them (027 US4, FR-001).
-- **Frontend surfaces**: the web account page `/settings/account` and
-  `/settings/account/delete` as handoff destinations; unchanged.
+- **Backend surfaces**: consumed only — `GET /account`, `GET /account/auth-methods`,
+  `GET /auth/methods` (web origin for the Agents button) and `GET /account/export`.
+  No backend change. Spec 027 (Rust server) keeps these routes (027 US4, FR-001).
+- **Frontend surfaces**: the web agents page `/settings/agents` as the Agents tab's
+  destination; unchanged.
 - **Mobile**: iPhone app unchanged. The shared native kit (`ios/BrainBuddyKit`) gains
-  read and export calls the Mac uses; iPhone behavior must not change.
+  additive account-summary, export and agents-destination calls.
 - **AI providers**: not used.
-- **Primary loop impact**: no impact on capture → atomic items → clarify/approve →
-  route or CRT candidate → Weekly Review → evidence.
+- **Primary loop impact**: none on capture → atomic items → clarify/approve → route
+  or CRT candidate → Weekly Review → evidence.
 
 ## 8. Definition of done
 
-*Provisional — to be confirmed at the interview.*
-
-- [ ] Pressing ⌘, in the Mac app opens Settings on the Account tab; pressing it again
-      focuses the same window.
+- [ ] Pressing ⌘, in the Mac app opens Settings with the Account, Agents and Sync tabs;
+      pressing it again focuses the same window.
 - [ ] A signed-in person sees their own name, steps taken, email and verified state,
-      Apple/Google/password status and password state, matching the web account page
-      for the same account.
+      Apple/Google status and password state, matching the web account page for the
+      same account.
+- [ ] No Change…, Connect…, Remove… or Delete account… control appears anywhere in
+      Settings.
 - [ ] Export… saves a ZIP the person can open, through a save panel, with progress and
       cancel.
 - [ ] Sign out… shows the existing confirmation and behaves exactly as the menu's
       Sign out….
-- [ ] Each "Manage on the web…" / per-row button opens the web account page for this
-      account in the default browser, with no session credential in the URL.
+- [ ] The Sync tab shows the same status, words and actions as the sync popover.
+- [ ] The Agents tab's button opens the web agents page in the default browser, with
+      no session credential in the URL.
 - [ ] Offline, expired session and server errors leave local work untouched and show a
       clear retry or sign-in-again path.
 
-## Deferred to /speckit-clarify
-
-All questions below are open; each carries a provisional recommended default.
-
-- [ ] Q1 Tabs: Account only, no tab bar? (provisional: yes)
-- [ ] Q2 Native vs web split (provisional: read-only + Export + Sign out native; the
-      rest on the web)
-- [ ] Q3 Identity proof if a sensitive action later goes native (provisional: password
-      field → recent proof)
-- [ ] Q4 Email change when email delivery is unavailable (provisional: hide Change…,
-      point to the web)
-- [ ] Q5 Apple/Google rows (provisional: status only; Connect/Remove open the web)
-- [ ] Q6 Name (provisional: read-only)
-- [ ] Q7 Export proof (provisional: no extra confirmation, as the web export today)
-- [ ] Q8 Settings while signed out (provisional: Account tab shows "Not signed in" and
-      Sign in…)
-- [ ] Q9 Backend `client` field accepts only `web | ios` — dependency for any future
-      native email-code or provider flow on Mac
-- [ ] Q10 Board corrections: verification code is 6 digits, not the 4 drawn on M27;
-      M28 delete alert has no identity proof
-- [ ] Q11 Password row for an account with no password
-
-See `spec.md` § Clarifications for the full wording and implications.
-
-## Contradictions surfaced during preparation
+## Contradictions surfaced
 
 | earlier answer | later answer | resolution | decided by |
 |---|---|---|---|
-| Board M25/M27: email "Change…" opens a native two-step code sheet | Provisional decision 2: change email opens the web | Provisional: web; the M27 sheet is not built | pending Max |
-| Board M27 draws 4 code digit cells | Backend requires exactly 6 digits | Not built in this feature; any future native sheet uses 6; board to be corrected | technical fact; pending Max for the board |
-| Board M28 delete alert has no identity proof | Backend deletion requires a password or recent proof | Not built in this feature (web); provisional decision 3 covers a future native version | pending Max |
-| Provisional decision 4 hides email "Change…" when delivery is unavailable | Provisional decision 2 sends email change to the web anyway, where the legacy password route still works | Provisional: hide the per-row button, keep "Manage on the web…" | pending Max (Q4) |
-| Board shows Agents and Sync tabs | Provisional decision 1: Account only | Provisional: no tab bar | pending Max (Q1) |
+| Draft: Account tab only, no tab bar | Max: tabs as on the board | Tab bar with Account, Agents, Sync | Max, 2026-10-16 |
+| Draft: credential changes and deletion open the web account page | Max: native as on the board, in a backlog follow-up | 028 shows none of those buttons; follow-up builds them natively | Max, 2026-10-16 |
+| Board M27 draws 4 code digit cells | Backend requires exactly 6 digits | The follow-up's code sheet uses 6 digits | technical fact; recorded for the follow-up |
+| Board M28 delete alert has no identity proof | Backend deletion requires a password or recent proof | The follow-up builds M28 as drawn and needs a backend change | Max, 2026-10-16 (decision 3) |
