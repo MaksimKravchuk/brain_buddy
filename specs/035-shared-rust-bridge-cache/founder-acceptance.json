@@ -1,0 +1,25 @@
+{
+  "status": "founder-accepted",
+  "accepted_by": "Max (current chat)",
+  "accepted_on": "2026-10-16",
+  "expires_on": "2026-10-18",
+  "scope": "Only spec 035 implementation PR and its serial iOS documentation verification PR; no protection changes or test reductions.",
+  "rationale": "The owner explicitly selected the one-task exception after being told that the normative exact-merge-SHA approval hold is absent from the live merge queue. The bounded cache correction may use independent PR review before queue entry, unchanged full required CI, the existing queue and verification of the final SHA; this does not amend the repository-wide landing policy.",
+  "compensating_measures": [
+    "Independently review the frozen PR head before entering the existing protected merge queue.",
+    "Preserve Full CI, Docker Images, all product tests and the effective main ruleset unchanged.",
+    "Verify final landed SHA, main-scoped cache entries and an actual merge-group cache hit and full iOS checks.",
+    "Do not change unrelated PRs, secrets, retention settings or protection rules."
+  ],
+  "campaign_history": [
+    {
+      "run_id": "035-shared-cache-20261016",
+      "status": "product-decision-required"
+    },
+    {
+      "run_id": "035-shared-cache-20261016-r2",
+      "status": "technical-changes-required"
+    }
+  ],
+  "human_reply": "Разрешить исключение для этой задачи"
+}
