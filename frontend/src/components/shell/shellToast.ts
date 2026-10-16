@@ -73,7 +73,7 @@ export function findShortcutLabel(userAgent: string = globalThis.navigator.userA
 
 /** 027 D-02.01: the web copy of the version refusal, used when the server sends none. */
 export const UPDATE_REQUIRED_MESSAGE =
-  "Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed.";
+  "Carry On has been updated. Reload this page to continue. Nothing in your account was changed.";
 
 /** 027 D-02.02: a spinner appears only if the request is still pending after this long. */
 export const SPINNER_ONSET_MS = 300;

@@ -26,7 +26,7 @@ describe("027-FR-007 invite step states (D-04 .01-.08)", () => {
   it("027-FR-007 .01 shows the heading, explanation and field, with focus on the field", () => {
     render(<InviteStep {...props()} />);
     expect(screen.getByRole("heading", { name: "Enter your invite code" })).toBeInTheDocument();
-    expect(screen.getByText("Brain Buddy is invite-only. No account uses this sign-in yet. Enter your invite code to create one.")).toBeInTheDocument();
+    expect(screen.getByText("Carry On is invite-only. No account uses this sign-in yet. Enter your invite code to create one.")).toBeInTheDocument();
     expect(field()).toHaveFocus();
     expect(field()).toHaveAttribute("autocomplete", "off");
     expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("027-FR-007 invite step states (D-04 .01-.08)", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("offline")).mockResolvedValueOnce(reply(410, {}));
     render(<InviteStep {...props()} />);
     submitCode("BB-1");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Brain Buddy");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Carry On");
     expect(field()).toHaveValue("BB-1");
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -116,10 +116,10 @@ describe("027-FR-007 invite step states (D-04 .01-.08)", () => {
   });
 
   it("027-FR-007 .08 a 426 shows the server update message with its reference and keeps the code", async () => {
-    fetchMock.mockResolvedValue(reply(426, { message: "Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed.", detail: { code: "UPGRADE_REQUIRED" } }));
+    fetchMock.mockResolvedValue(reply(426, { message: "Carry On has been updated. Reload this page to continue. Nothing in your account was changed.", detail: { code: "UPGRADE_REQUIRED" } }));
     render(<InviteStep {...props()} />);
     submitCode("BB-1");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed. Reference: ref-1");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Carry On has been updated. Reload this page to continue. Nothing in your account was changed. Reference: ref-1");
     expect(field()).toHaveValue("BB-1");
   });
 });
@@ -142,7 +142,7 @@ describe("027-FR-007 invite handoff edge cases", () => {
     fetchMock.mockResolvedValueOnce(reply(200, { status: "linked" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Brain Buddy");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Carry On");
     expect(p.onSignedIn).not.toHaveBeenCalled();
   });
 
@@ -162,7 +162,7 @@ describe("027-FR-007 invite handoff edge cases", () => {
     fireEvent.submit(field().closest("form") as HTMLFormElement);
     expect(fetchMock).not.toHaveBeenCalled();
     submitCode("BB-1");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Brain Buddy has been updated. Reload this page to continue. Nothing in your account was changed.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Carry On has been updated. Reload this page to continue. Nothing in your account was changed.");
   });
 });
 

@@ -31,7 +31,7 @@ describe("Sign-out confirmation copy and behaviour", () => {
 
     const dialog = screen.getByRole("alertdialog", { name: "Sign out?" });
     expect(dialog).toHaveAccessibleDescription(
-      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account."
+      "You'll be signed out of Carry On on this browser. Your tasks stay in your account."
     );
     expect(dialog).not.toHaveTextContent("will be lost");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -41,7 +41,7 @@ describe("Sign-out confirmation copy and behaviour", () => {
     renderDialog({ summary: { unsavedWork: true } });
 
     expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription(
-      "You'll be signed out of Brain Buddy on this browser. Your tasks stay in your account. " +
+      "You'll be signed out of Carry On on this browser. Your tasks stay in your account. " +
         "Unsaved changes in this browser will be lost: they have not been saved to your account."
     );
     expect(signOutSentences({ unsavedWork: true })).toHaveLength(2);

@@ -1,6 +1,6 @@
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { useState } from "react";
-import { Sprout } from "lucide-react";
+import { CarryOnMark } from "../components/brand/CarryOnMark";
 import { useAuthStore } from "../stores/authStore";
 import { AuthEntry } from "../features/auth/AuthEntry";
 import { ensureAnonymousSignIn, safeAuthDestination } from "../features/auth/authFlow";
@@ -51,7 +51,7 @@ export default function LoginPage(): React.JSX.Element {
 }
 export function AuthLayout({ title, lede, children }: { title: string; lede?: string; children: React.ReactNode }): React.JSX.Element {
   return <main className="min-h-screen bg-ground px-6 py-8 text-ink">
-    <div className="flex items-center gap-2 font-voice text-xl text-ink"><Sprout className="h-[22px] w-[22px] text-ink" aria-hidden="true" /><span>Brain Buddy</span></div>
+    <div className="flex items-center gap-2 font-voice text-xl text-ink"><CarryOnMark className="h-[26px] w-[26px] text-ink" /><span>Carry On</span></div>
     <div className="mx-auto mt-12 w-full max-w-[420px] rounded-card co-glass-dense p-6 sm:mt-16">
       <h1 className="font-voice text-2xl text-ink">{title}</h1>
       {lede ? <p className="mt-1 mb-4 text-co-meta text-ink-muted">{lede}</p> : <div className="mb-4" />}

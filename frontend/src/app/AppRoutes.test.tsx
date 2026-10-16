@@ -186,7 +186,7 @@ describe("AppRoutes", () => {
 
     expect(await screen.findByRole("heading", { name: "Next actions" })).toBeInTheDocument();
     expect(screen.getByRole("banner")).toHaveStyle({ height: "56px" });
-    expect(screen.getByText("BrainBuddy")).toBeInTheDocument();
+    expect(screen.getByText("Carry On")).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Brain dump" })).toBeEnabled();
     expect(await screen.findByText("Fix onboarding drop-off")).toBeInTheDocument();
