@@ -32,6 +32,7 @@ struct ListsHubScreen: View {
         .listStyle(.insetGrouped)
         .labelStyle(.bbRow)
         .bbDenseList()
+        .bbListBackground()
         .bbScreenTitle("Lists")
         }
         .task { await prepareHub() }
@@ -69,6 +70,7 @@ struct ListsHubScreen: View {
         } header: {
             BBSectionHeader("Lists")
         }
+        .bbGroupedRows()
     }
 
     /// Overdue, Today and Upcoming as three tiles in one row. Each tile is its
@@ -89,6 +91,7 @@ struct ListsHubScreen: View {
         } header: {
             BBSectionHeader("Dates")
         }
+        .bbGroupedRows()
     }
 
     private func count(for view: DateView, in counts: ListCounts) -> Int {
@@ -122,6 +125,7 @@ struct ListsHubScreen: View {
         } header: {
             BBSectionHeader("Projects")
         }
+        .bbGroupedRows()
     }
 
     @ViewBuilder private var tagsSection: some View {
@@ -140,6 +144,7 @@ struct ListsHubScreen: View {
         } header: {
             BBSectionHeader("Tags")
         }
+        .bbGroupedRows()
     }
 
     private var historySection: some View {
@@ -152,6 +157,7 @@ struct ListsHubScreen: View {
         } header: {
             BBSectionHeader("History")
         }
+        .bbGroupedRows()
     }
 
     /// Weekly review and Settings, in one section without a header. Weekly
@@ -184,6 +190,7 @@ struct ListsHubScreen: View {
                 }
             }
         }
+        .bbGroupedRows()
     }
 
 }

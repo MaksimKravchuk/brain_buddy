@@ -1,16 +1,21 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
-/// One task in a list: completion circle, title, and the metadata (list,
-/// project, waiting note, subtasks, due date, tags). The metadata
-/// sits trailing on the title's own line when both fit, which makes a one-line
-/// task a 44 pt row; otherwise (a long title, large Dynamic Type) it wraps
-/// under the title.
+/// One task in a list, as a Carry On step row: the mark (which is also the
+/// completion control), the title and, under it, one metadata line of
+/// text-secondary words joined with " · " (project, list, waiting note,
+/// subtasks, due date, tags). A task due today shows that in the due colour and
+/// an overdue one in the overdue colour; the words say it too. The line wraps
+/// under large Dynamic Type.
 ///
-/// The row is flat content on the brand raised surface; it sets its own
-/// `listRowBackground`, so inside a `List` it needs nothing else. Outside a
-/// `List`, wrap it with `.padding().bbCard()` for the brand card look.
+/// The row is content only. Inside a `List`, apply `bbCardRow()` to it (outside
+/// the `NavigationLink`) for the card: surface, radius, padding and no divider.
+/// Outside a `List`, wrap it with `.padding().bbCard()`.
+///
+/// `showsMark: false` is the Inbox, whose rows are the raw text alone;
+/// `isCurrent` marks the project's one current next action.
 ///
 /// For VoiceOver the whole row is one element whose label carries every piece
 /// of metadata. Its actions (Complete, Move, Cancel task, Reopen into…) come
@@ -27,24 +32,24 @@ struct TaskRow: View {
     var showsProject: Bool = true
     var showsList: Bool = false
     var preparedFormulation: RustWorkspaceFormulation? = nil
+    var showsMark: Bool = true
+    var isCurrent: Bool = false
 
     @Environment(Workspace.self) private var workspace
     @Environment(\.openDecisionCard) private var openDecisionCard
-    /// Read so due chips and "since" dates redraw on a new day.
+    /// Read so due dates and "since" dates redraw on a new day.
     @Environment(\.dayChangeCount) private var dayChangeCount
-    /// How far the circle's centre sits above the title's first baseline
-    /// (about half the x-height), scaled with Dynamic Type.
-    @ScaledMetric(relativeTo: .body) private var circleLift: CGFloat = 6
 
-    /// Space above and below the text; the 44 pt completion target sets the
-    /// height of a one-line row.
-    private static let verticalPadding: CGFloat = 6
-
-    init(task: TaskRecord, showsProject: Bool = true, showsList: Bool = false, preparedFormulation: RustWorkspaceFormulation? = nil) {
+    init(
+        task: TaskRecord, showsProject: Bool = true, showsList: Bool = false,
+        preparedFormulation: RustWorkspaceFormulation? = nil, showsMark: Bool = true, isCurrent: Bool = false
+    ) {
         self.task = task
         self.showsProject = showsProject
         self.showsList = showsList
         self.preparedFormulation = preparedFormulation
+        self.showsMark = showsMark
+        self.isCurrent = isCurrent
     }
 
     var body: some View {
@@ -60,35 +65,17 @@ struct TaskRow: View {
             }
         }
         .contentShape(.rect)
-        .listRowBackground(BBColor.surfaceRaised)
     }
 
-    /// Title and metadata: side by side when they fit on one line, otherwise
-    /// the metadata wraps under the title.
-    @ViewBuilder
-    private func content(
-        details: TaskRowDetails, openDecisionCard: OpenDecisionCardAction?, lift: CGFloat
-    ) -> some View {
-        if details.hasMetadata {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s2) {
-                    TaskRowTitle(task: task, lineLimit: 2)
-                    Spacer(minLength: BBSpacing.s2)
-                    TaskRowMetadata(details: details, openDecisionCard: openDecisionCard)
-                        .fixedSize()
-                        // Chips have no text baseline: centre them on the
-                        // title's x-height, as the completion circle is.
-                        .alignmentGuide(.firstTextBaseline) { dimensions in
-                            dimensions[VerticalAlignment.center] + lift
-                        }
-                }
-                VStack(alignment: .leading, spacing: BBSpacing.s1) {
-                    TaskRowTitle(task: task)
-                    TaskRowMetadata(details: details, openDecisionCard: openDecisionCard)
-                }
-            }
-        } else {
-            TaskRowTitle(task: task)
+    /// The mark: waiting for tasks in Waiting for, done for completed ones, the
+    /// current step when the screen says so, otherwise an open ring. A cancelled
+    /// task keeps the open ring (it is not a step taken); its title is struck.
+    private var markStatus: CarryOnStepRow.Status {
+        switch task.state {
+        case .completed: .done
+        case .waiting: .waiting
+        case .cancelled: .open
+        case .inbox, .next, .someday: isCurrent ? .current : .open
         }
     }
 
@@ -97,15 +84,17 @@ struct TaskRow: View {
         let details = TaskRowDetails(
             task: task, workspace: workspace, showsProject: showsProject, showsList: showsList, marker: marker
         )
-        let lift = circleLift
         let opensCard = marker?.opensCard == true ? openDecisionCard : nil
-        return HStack(alignment: .firstTextBaseline, spacing: BBSpacing.s2) {
-            CompletionControl(task: task)
-                .alignmentGuide(.firstTextBaseline) { dimensions in
-                    dimensions[VerticalAlignment.center] + lift
+        return HStack(alignment: .center, spacing: CGFloat(CarryOnLayout.Row.gap)) {
+            if showsMark {
+                CompletionControl(task: task, status: markStatus)
+            }
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnLayout.Row.metaGap)) {
+                TaskRowTitle(task: task, isCurrent: isCurrent)
+                if details.hasMetadata {
+                    TaskRowMetadata(details: details, openDecisionCard: opensCard)
                 }
-            content(details: details, openDecisionCard: opensCard, lift: lift)
-                .padding(.vertical, Self.verticalPadding)
+            }
             Spacer(minLength: 0)
         }
         .contentShape(.rect)
@@ -178,23 +167,26 @@ private struct ReviewMarkerButton: View {
 
 // MARK: - Title
 
+/// The title in the step-row type: 17 pt, semibold for the current step, struck
+/// through in step-text-done once finished, text-secondary while waiting.
 private struct TaskRowTitle: View {
     let task: TaskRecord
+    var isCurrent: Bool = false
     var lineLimit: Int = 3
 
     var body: some View {
         Text(task.title)
-            .font(BBFont.rowTitle)
-            .foregroundStyle(titleColor)
             .strikethrough(task.state.isTerminal, color: titleColor)
+            .carryOnText(isCurrent ? CarryOnTypeScale.bodyStrong : CarryOnTypeScale.body, lineHeight: CarryOnLayout.Row.lineHeight)
+            .foregroundStyle(titleColor)
             .lineLimit(lineLimit)
             .multilineTextAlignment(.leading)
     }
 
     private var titleColor: Color {
         switch task.state {
-        case .completed: BBColor.textTertiary
-        case .cancelled: BBColor.textPlaceholder
+        case .completed, .cancelled: BBColor.stepTextDone
+        case .waiting: BBColor.textSecondary
         default: BBColor.textPrimary
         }
     }
@@ -207,32 +199,33 @@ private struct TaskRowMetadata: View {
     let openDecisionCard: OpenDecisionCardAction?
 
     var body: some View {
-        BBFlowLayout(spacing: 6, lineSpacing: BBSpacing.s1) {
+        VStack(alignment: .leading, spacing: BBSpacing.s1) {
             if let marker = details.marker {
                 ReviewMarkerButton(style: marker, taskID: details.task.id, openDecisionCard: openDecisionCard)
             }
-            if let project = details.project {
-                ProjectLabel(name: project.name, color: project.color)
-            }
-            if !details.textParts.isEmpty {
-                Text(details.joinedText)
-                    .font(BBFont.meta)
-                    .foregroundStyle(BBColor.textTertiary)
-                    .lineLimit(2)
-            }
-            if let progress = details.subtaskProgress {
-                Label(progress, systemImage: BBSymbol.subtasks)
-                    .labelStyle(.titleAndIcon)
-                    .font(BBFont.meta)
-                    .foregroundStyle(BBColor.textTertiary)
-            }
-            if let due = details.task.dueDate {
-                DueChip(day: due, today: details.today, isDeadlineActive: details.task.isOpen)
-            }
-            ForEach(details.tagNames, id: \.self) { name in
-                TagPill(name: name)
+            if let line = details.metaLine {
+                Text(line)
+                    .carryOnText(CarryOnTypeScale.meta, lineHeight: CarryOnLayout.Row.lineHeight)
+                    .foregroundStyle(BBColor.textSecondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
             }
         }
+    }
+}
+
+/// The metadata line being built: words joined with " · ", each in the row's
+/// metadata colour unless it carries its own.
+private struct MetaLine {
+    private(set) var text = AttributedString()
+
+    var isEmpty: Bool { text.characters.isEmpty }
+
+    mutating func append(_ string: String, color: Color? = nil) {
+        if !isEmpty { text.append(AttributedString(" · ")) }
+        var part = AttributedString(string)
+        if let color { part.foregroundColor = color }
+        text.append(part)
     }
 }
 
@@ -243,10 +236,9 @@ private struct TaskRowDetails {
     let today: CalendarDay
     let project: ProjectRecord?
     let tagNames: [String]
-    /// List name and waiting note, joined with " · ".
-    let textParts: [String]
-    /// "2/5" when the task has subtasks.
-    let subtaskProgress: String?
+    /// Project, list, waiting note, subtasks, due date and tags, joined with
+    /// " · "; the due date is coloured when it is today or overdue.
+    let metaLine: AttributedString?
     /// The weekly review's list marker (M-01), if any.
     let marker: MarkerStyle?
     private let spokenParts: [String]
@@ -260,12 +252,21 @@ private struct TaskRowDetails {
         let counted = task.subtasks.filter { $0.state != .cancelled }
         let done = counted.filter { $0.state == .completed }.count
 
+        var line = MetaLine()
+        if let project { line.append(project.name) }
+        if let listName { line.append(listName) }
+        for part in waiting.visible { line.append(part) }
+        if !counted.isEmpty { line.append("\(done)/\(counted.count) subtasks") }
+        if let due = task.dueDate {
+            line.append(Self.dueText(due, today: today, isOpen: task.isOpen), color: Self.dueColor(due, today: today, isOpen: task.isOpen))
+        }
+        for name in tagNames { line.append(name) }
+
         self.task = task
         self.today = today
         self.project = project
         self.tagNames = tagNames
-        self.textParts = [listName].compactMap { $0 } + waiting.visible
-        self.subtaskProgress = counted.isEmpty ? nil : "\(done)/\(counted.count)"
+        self.metaLine = line.isEmpty ? nil : line.text
         self.marker = marker
 
         var spoken: [String] = [task.title]
@@ -284,18 +285,24 @@ private struct TaskRowDetails {
         spokenParts = spoken
     }
 
-    /// The text metadata, continuing the " · " chain after the project label.
-    var joinedText: String {
-        let text = textParts.joined(separator: " · ")
-        return project == nil ? text : "· " + text
-    }
-
-    var hasMetadata: Bool {
-        marker != nil || project != nil || !textParts.isEmpty || subtaskProgress != nil || task.dueDate != nil
-            || !tagNames.isEmpty
-    }
+    var hasMetadata: Bool { marker != nil || metaLine != nil }
 
     var accessibilityLabel: String { spokenParts.joined(separator: ", ") }
+
+    /// "Today", the date, or "Overdue (Sep 22)": the words carry the state, the
+    /// colour only repeats it.
+    static func dueText(_ day: CalendarDay, today: CalendarDay, isOpen: Bool) -> String {
+        let label = DueChip.label(for: day, today: today)
+        return isOpen && day < today ? "Overdue (\(label))" : label
+    }
+
+    /// chip-due-fg for a task due today, chip-overdue-fg for an overdue one, and
+    /// nil (the line's own colour) for every other date and for finished tasks.
+    static func dueColor(_ day: CalendarDay, today: CalendarDay, isOpen: Bool) -> Color? {
+        guard isOpen else { return nil }
+        if day < today { return BBColor.overdueText }
+        return BBDayMath.offset(from: today, to: day) == 0 ? BBColor.dueText : nil
+    }
 
     static func listName(for state: TaskState) -> String {
         if let list = state.openList { return list.title }
@@ -329,12 +336,17 @@ private struct TaskRowDetails {
 
 // MARK: - Completion control
 
-/// The completion target, at least 44 pt. Open tasks complete on tap: the circle fills
-/// on the brand curve, then the task completes (under 600 ms in total; with
-/// Reduce Motion the fill is instant and the row does not slide). Finished
-/// tasks show a static filled check or cross.
+/// The completion target, 44 pt around the 24 pt mark (the hit area reaches into
+/// the card's padding, so the row stays as tall as the board draws it). Open
+/// tasks complete on tap: the mark turns to done, then the task completes
+/// (under 600 ms in total; with Reduce Motion the change is instant and the row
+/// does not slide). Finished tasks show their static mark.
 private struct CompletionControl: View {
     let task: TaskRecord
+    let status: CarryOnStepRow.Status
+
+    /// How far the hit area reaches past the mark on each side.
+    private static let hitOutset = (BBMetrics.hitTarget - CGFloat(CarryOnLayout.Row.mark)) / 2
 
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
@@ -346,16 +358,14 @@ private struct CompletionControl: View {
     var body: some View {
         if task.isOpen {
             Button(action: complete) {
-                CompletionCircle(style: isCompleting ? .completed : .open)
-                    .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
-                    .contentShape(.rect)
+                CarryOnStepMark(isCompleting ? .done : status)
+                    .contentShape(.interaction, Rectangle().inset(by: -Self.hitOutset))
             }
             .buttonStyle(.borderless)
             .disabled(isCompleting)
             .accessibilityLabel("Complete")
         } else {
-            CompletionCircle(style: task.state == .completed ? .completed : .cancelled)
-                .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget)
+            CarryOnStepMark(status)
                 .accessibilityHidden(true)
         }
     }
@@ -374,58 +384,6 @@ private struct CompletionControl: View {
                 withAnimation(BBMotion.animation(.base, reduceMotion: reduceMotion)) { isCompleting = true }
             }
             isSavingCompletion = false
-        }
-    }
-}
-
-private struct CompletionCircle: View {
-    enum Style {
-        case open, completed, cancelled
-    }
-
-    let style: Style
-    @ScaledMetric(relativeTo: .body) private var scaledDiameter: CGFloat = BBMetrics.completionCircle
-
-    /// Grows with Dynamic Type up to a cap, so it stays inside its 44 pt target.
-    private var diameter: CGFloat { min(scaledDiameter, BBMetrics.completionCircleMax) }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(fill)
-            Circle()
-                .strokeBorder(stroke, lineWidth: 1.5)
-            if let symbol {
-                Image(systemName: symbol)
-                    .font(.system(size: diameter * 0.45, weight: .bold))
-                    .foregroundStyle(style == .completed ? BBColor.onBrand : BBColor.textTertiary)
-                    .transition(.opacity)
-            }
-        }
-        .frame(width: diameter, height: diameter)
-    }
-
-    private var fill: Color {
-        switch style {
-        case .open: BBColor.surfaceRaised
-        case .completed: BBColor.brandFill
-        case .cancelled: BBColor.surfaceSunken
-        }
-    }
-
-    private var stroke: Color {
-        switch style {
-        case .open: BBColor.controlStroke
-        case .completed: BBColor.brandFill
-        case .cancelled: BBColor.hairline
-        }
-    }
-
-    private var symbol: String? {
-        switch style {
-        case .open: nil
-        case .completed: "checkmark"
-        case .cancelled: "xmark"
         }
     }
 }

@@ -57,6 +57,7 @@ private struct ActiveProjectsList: View {
                 } footer: {
                     Text("A project needs a next action when none of its tasks is in Next actions.")
                 }
+                .bbGroupedRows()
             }
             if hasArchived {
                 Section {
@@ -65,9 +66,11 @@ private struct ActiveProjectsList: View {
                             .labelStyle(.bbRow)
                     }
                 }
+                .bbGroupedRows()
             }
         }
         .bbDenseList()
+        .bbListBackground()
         .overlay {
             if readiness != .ready {
                 WorkspaceQueryContent(readiness: readiness, retry: { Task { await workspace.prepareProjects(); await workspace.prepareProjects(archived: true) } }) { EmptyView() }
@@ -258,8 +261,10 @@ private struct ArchivedProjectsList: View {
                 } footer: {
                     Text("Archived projects are read-only and can't be restored. Their tasks stayed in their lists.")
                 }
+                .bbGroupedRows()
             }
             .bbDenseList()
+            .bbListBackground()
         }
         }
         .safeAreaInset(edge: .bottom) {
