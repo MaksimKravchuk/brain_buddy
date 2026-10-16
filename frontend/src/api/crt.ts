@@ -1,4 +1,4 @@
-import { ApiError, notifyUnauthorized } from "./client";
+import { ApiError, currentSessionEpoch, notifyUnauthorized } from "./client";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 export const CRT_READ_TIMEOUT_MS = 15_000;
@@ -144,6 +144,7 @@ async function request<T>(path: string, options: CrtRequestOptions = {}): Promis
     headers.set("Content-Type", "application/json");
   }
 
+  const sentUnder = currentSessionEpoch();
   try {
     const response = await fetch(buildUrl(path), {
       method: options.method ?? "GET",
@@ -154,7 +155,7 @@ async function request<T>(path: string, options: CrtRequestOptions = {}): Promis
     });
 
     if (response.status === 401) {
-      notifyUnauthorized();
+      notifyUnauthorized(sentUnder);
     }
 
     if (response.status === 204) {

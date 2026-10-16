@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { authApi, type AuthUser, type LoginPayload, type SignupPayload } from "../api/auth";
+import { advanceSessionEpoch, currentSessionEpoch } from "../api/client";
 import { cleanupCrtOwnerScope } from "../features/crt/crtDraftCoordinator";
 
 export type AuthStatus = "loading" | "authed" | "anon";
@@ -38,8 +39,12 @@ interface AuthStoreState {
    * native prompt, as for every other transition.
    */
   logout: (options?: { requireServerConfirmation?: boolean; lossConfirmed?: boolean }) => Promise<boolean>;
-  /** Immediate local boundary used by 401 handlers; cleanup is started for the captured owner. */
-  clearSession: () => boolean;
+  /**
+   * Immediate local boundary used by 401 handlers; cleanup is started for the captured owner.
+   * `sentUnder` is the session epoch the rejected request was sent under: a 401
+   * from a session that already ended, or while signed out, clears nothing.
+   */
+  clearSession: (sentUnder?: number) => boolean;
   /** Fail-closed boundary for destructive transitions such as account deletion. */
   clearSessionAfterCleanup: () => Promise<boolean>;
   dismissDeletionNotice: () => void;
@@ -206,7 +211,11 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     return true;
   },
 
-  clearSession() {
+  clearSession(sentUnder) {
+    // A late 401 from the session before a sign-out must not cancel the sign-in
+    // that follows it (bumping the generation would make `login` drop its
+    // result) nor end the session that sign-in creates.
+    if (sentUnder !== undefined && (sentUnder !== currentSessionEpoch() || get().status === "anon")) return false;
     const departing = get().user;
     sessionGeneration += 1;
     set({ user: null, status: "anon" });
@@ -234,6 +243,12 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
     set({ deletionScheduledFor: purgeAt });
   }
 }));
+
+// A new epoch for every session boundary: signing in or out, or a different
+// account. A refresh of the same signed-in account keeps it.
+useAuthStore.subscribe((state, previous) => {
+  if (state.status !== previous.status || state.user?.id !== previous.user?.id) advanceSessionEpoch();
+});
 
 /**
  * How often an already-open session re-reads its identity and flags.

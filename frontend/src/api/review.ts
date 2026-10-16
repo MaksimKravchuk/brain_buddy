@@ -8,7 +8,7 @@
  * to show (FR-045), and telemetry names only the route template, the status
  * and the timing — never a body, a title or a reason (FR-044).
  */
-import { ApiError, notifyUnauthorized } from "./client";
+import { ApiError, currentSessionEpoch, notifyUnauthorized } from "./client";
 import type { TaskResponse } from "./taskTypes";
 import type { StallReason } from "../features/review/stallRecommendation";
 import { nowMs, recordTelemetry } from "../utils/telemetry";
@@ -613,6 +613,7 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
   }
   const composed = composeSignal(options.signal, options.timeoutMs);
   const startMs = nowMs();
+  const sentUnder = currentSessionEpoch();
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL.replace(/\/$/, "")}${options.path}`, {
@@ -631,7 +632,7 @@ async function request<T>(options: RequestOptions<T>): Promise<T> {
   }
 
   if (response.status === 401) {
-    notifyUnauthorized();
+    notifyUnauthorized(sentUnder);
   }
   const isJson = response.headers.get("Content-Type")?.includes("application/json") === true;
   let data: unknown;

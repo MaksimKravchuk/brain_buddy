@@ -302,15 +302,27 @@ def wait_ready(url: str, process: subprocess.Popen[bytes] | None) -> None:
             time.sleep(0.2)
 
 
-def dump_diagnostics(backend: str, token: str, log_path: str) -> None:
-    """Print the server log tail and identity call ledger for a failed run."""
+def dump_diagnostics(
+    backend: str, token: str, log_path: str, results: Path | None = None
+) -> None:
+    """Print what a failed run needs to be diagnosed from the job log alone.
+
+    CI artifacts are not always reachable, so the failing page's ARIA snapshot
+    (Playwright's ``error-context.md``) and every non-2xx request line are
+    printed here rather than only the tail, which covers just the last tests.
+    """
+    if results is not None:
+        for context in sorted(results.glob("*/error-context.md")):
+            print(f"--- {context.parent.name}/error-context.md ---", flush=True)
+            print(context.read_text(errors="replace")[:6000], flush=True)
     print("--- modern-auth server log (tail) ---", flush=True)
     try:
         lines = Path(log_path).read_text(errors="replace").splitlines()
+        requests = [line for line in lines if "api_request" in line]
+        rejected = [line for line in requests if " status=2" not in line]
+        print("--- non-2xx requests ---\n" + "\n".join(rejected[-300:]), flush=True)
         # Request lines are enough to order the auth journey; keep the rest short.
-        relevant = [
-            line for line in lines if "api_request" in line and "/auth/" in line
-        ]
+        relevant = [line for line in requests if "/auth/" in line]
         print("\n".join(relevant[-250:] + ["..."] + lines[-60:]), flush=True)
     except OSError as error:
         print(f"unreadable: {error}", flush=True)
@@ -441,7 +453,7 @@ def main() -> None:
                         arguments, cwd=root / "frontend", env=environment, check=True
                     )
                 except subprocess.CalledProcessError:
-                    dump_diagnostics(backend, token, log.name)
+                    dump_diagnostics(backend, token, log.name, output)
                     raise
             finally:
                 if front is not None:
