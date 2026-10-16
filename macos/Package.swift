@@ -41,7 +41,11 @@ let package = Package(
         // file, so it is excluded rather than bundled.
         .testTarget(
             name: "BrainBuddyMacTests",
-            dependencies: ["BrainBuddyMac", "BrainBuddyMacCore", .product(name: "BrainBuddyDesign", package: "BrainBuddyKit")] + kit,
+            dependencies: [
+                "BrainBuddyMac", "BrainBuddyMacCore",
+                .product(name: "BrainBuddyDesign", package: "BrainBuddyKit"),
+                .product(name: "BrainBuddyDesignTestSupport", package: "BrainBuddyKit"),
+            ] + kit,
             exclude: ["__Snapshots__"],
             resources: [.copy("Resources")]
         ),
