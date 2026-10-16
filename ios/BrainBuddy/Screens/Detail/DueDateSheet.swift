@@ -63,7 +63,7 @@ struct DueDateSheet: View {
                     Text(primaryTitle)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.carryOnSecondary)
+                .buttonStyle(.carryOnStrong)
                 .disabled(selection == nil)
                 Button("No date") { pick(nil) }
                     .buttonStyle(.carryOnQuiet)
@@ -91,8 +91,8 @@ struct DueDateSheet: View {
         ]
     }
 
-    /// The presets as chips; the chosen one is outlined and announced as
-    /// selected, so the choice never rests on colour.
+    /// The presets as chips; the chosen one is the inverted, semibold chip and
+    /// is announced as selected, so the choice never rests on colour.
     private var quickDays: some View {
         BBFlowLayout(spacing: CGFloat(CarryOnSpace.xs), lineSpacing: CGFloat(CarryOnSpace.xs)) {
             ForEach(presets, id: \.self) { preset in
@@ -100,13 +100,7 @@ struct DueDateSheet: View {
                 Button {
                     selection = preset.day
                 } label: {
-                    CarryOnChip(preset.title)
-                        .overlay {
-                            if isChosen {
-                                Capsule()
-                                    .strokeBorder(.coFocusRing, lineWidth: CGFloat(CarryOnLayout.FocusRing.width))
-                            }
-                        }
+                    CarryOnChip(preset.title, size: .quick, isSelected: isChosen)
                         .frame(minHeight: BBMetrics.hitTarget)
                         .contentShape(Rectangle())
                 }
