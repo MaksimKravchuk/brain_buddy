@@ -199,6 +199,9 @@ struct AccountSettingsTab: View {
             refresh()
         }
         .onChange(of: ended) { _, _ in refresh() }
+        .onChange(of: sync.isSignInOpen) { _, open in
+            if !open { Task { await model.sessionMayHaveRenewed() } }
+        }
         .onChange(of: scenePhase) { _, phase in if phase == .active { reload() } }
         .onChange(of: model.phase) { _, phase in
             switch phase {

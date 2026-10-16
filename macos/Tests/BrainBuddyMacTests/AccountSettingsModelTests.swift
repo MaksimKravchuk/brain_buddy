@@ -155,6 +155,36 @@ struct AccountSettingsModelTests {
         #expect(loadedRows(model)?.password == "Unavailable")
     }
 
+    @Test("028_FR_016 the open Account tab reloads when the session is valid again after Sign in again")
+    func reloadsWhenSessionRenews() async {
+        let ended = FakeAccountRemote(summary: .failure(AccountFixtures.failure(.unauthorized)))
+        let renewed = FakeAccountRemote()
+        var calls = 0
+        let model = AccountSettingsModel(
+            account: AccountFixtures.account(),
+            remote: { _ in
+                calls += 1
+                return calls == 1 ? ended : renewed
+            }, log: CapturingMacLog())
+        await model.reload()
+        #expect(model.phase == .sessionEnded)
+        await model.sessionMayHaveRenewed()
+        #expect(loadedRows(model) != nil, "the stale session notice gives way to the rows without leaving the tab")
+        #expect(renewed.summaryCalls == 1)
+    }
+
+    @Test("028_FR_016 sessionMayHaveRenewed leaves loaded rows and a still-ended session alone")
+    func renewalIgnoredWhenNotEnded() async {
+        let remote = FakeAccountRemote()
+        let model = makeModel(remote)
+        await model.reload()
+        await model.sessionMayHaveRenewed()
+        #expect(remote.summaryCalls == 1, "loaded rows are not re-read")
+        model.update(account: AccountFixtures.account(), sessionEnded: true)
+        await model.sessionMayHaveRenewed()
+        #expect(model.phase == .sessionEnded && remote.summaryCalls == 1)
+    }
+
     @Test("028_FR_005 clear() on sign-out drops the rows and ignores a request still in flight")
     func signOutClearsAndDropsLateResponse() async {
         let gate = AccountReadGate()

@@ -374,6 +374,40 @@ struct HandoffFlowTests {
         #expect(remote.sends.isEmpty)
     }
 
+    @Test("030_FR_018 Try again after an offline failure reads availability past the throttle and recovers")
+    func tryAgainRecoversAfterOffline() async {
+        let flag = FakeAvailabilityRemote(me: .failure(HandoffFixture.offline))
+        let clock = AgentTestClock()
+        let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag }, now: { clock.date })
+        await availability.refresh()
+        let remote = FakeHandoffRemote()
+        remote.script(connections: [HandoffFixture.connection(id: "conn_a", name: "Hermes")], manifests: [HandoffFixture.manifest()])
+        let flow = HandoffFlow(taskServerID: "task_1", projectName: nil, remote: remote, availability: availability)
+        await flow.start()
+        #expect(flow.phase == .failed(.offline))
+        flag.setMe(.success(MeDTO(id: "user_max", email: "max@example.com", featureFlags: ["external_agent_relay": true])))
+        clock.advance(1)
+        await flow.tryAgain()
+        #expect(flag.meCalls == 3, "start and Try again each read past the five-minute throttle")
+        #expect(availability.isOnline)
+        #expect(flow.phase == .ready)
+        #expect(remote.previews.count == 1)
+    }
+
+    @Test("030_FR_018 a passive activation inside the throttle still does not read")
+    func passiveActivationKeepsThrottle() async {
+        let flag = FakeAvailabilityRemote(me: .failure(HandoffFixture.offline))
+        let clock = AgentTestClock()
+        let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag }, now: { clock.date })
+        await availability.refresh()
+        clock.advance(1)
+        await availability.activate()
+        #expect(flag.meCalls == 1)
+        let reachable = await availability.confirmOnline()
+        #expect(!reachable)
+        #expect(flag.meCalls == 2)
+    }
+
     @Test("030_FR_015 choosing another agent previews it again and drops the earlier token, key and fields")
     func changingAgentPreviewsAgain() async {
         let rig = make(manifests: [HandoffFixture.manifest(token: "a", password: true), HandoffFixture.manifest(token: "b")])

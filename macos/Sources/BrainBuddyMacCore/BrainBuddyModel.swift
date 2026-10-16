@@ -1427,6 +1427,15 @@ package final class BrainBuddyModel {
         await agentRuns.refresh()
     }
 
+    /// A successful "Sync now": availability is read again past the five-minute throttle, then steps and runs.
+    package func refreshAgentsAfterSync() async {
+        syncAgentAccount()
+        guard agentAvailability.ownerID != nil else { return }
+        await agentAvailability.refresh()
+        await refreshAgentSteps()
+        await agentRuns.refresh()
+    }
+
     /// The open steps with a server id and a title, read through the kit (it is async on a Rust workspace).
     package func refreshAgentSteps() async {
         guard agentAvailability.ownerID != nil, let ids = try? await workspace.openStepServerIDs() else { return }

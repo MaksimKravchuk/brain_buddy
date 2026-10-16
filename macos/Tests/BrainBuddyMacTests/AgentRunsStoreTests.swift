@@ -191,6 +191,19 @@ struct AgentRunsStoreTests {
         #expect(rig.store.lastUpdated == read, "Last updated keeps the time of the last good read")
     }
 
+    @Test("030_FR_025 the last-read run stays available to a reopened inspector while reads fail")
+    func cachedRunSurvivesFailedReads() async {
+        let rig = Rig()
+        rig.seed(["Needs you"])
+        #expect(rig.store.cachedRun(taskServerID: "task_0") == nil)
+        await rig.store.refresh()
+        rig.remote.failSummaries(AccountFixtures.failure(.network("offline"), reference: "ref_1"))
+        rig.remote.failRuns(AccountFixtures.failure(.network("offline"), reference: "ref_1"))
+        await rig.store.refresh()
+        #expect(rig.store.cachedRun(taskServerID: "task_0")?.id == "run_task_0")
+        #expect(rig.store.cachedRun(taskServerID: "task_other") == nil)
+    }
+
     @Test("030_FR_025 a first read that fails shows the reference and no runs")
     func firstReadFails() async {
         let rig = Rig()
