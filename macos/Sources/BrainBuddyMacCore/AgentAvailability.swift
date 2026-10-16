@@ -94,6 +94,13 @@ package final class AgentAvailability {
         await refresh()
     }
 
+    /// A person's action (Try again, Retry, opening the hand-off sheet) needs the answer now: a cached offline
+    /// state never blocks it. Online callers pay nothing; offline ones bypass the throttle and read again.
+    package func confirmOnline() async -> Bool {
+        if !isOnline { await refresh() }
+        return isOnline
+    }
+
     /// A flagged route answered "External agent relay is not available.": hide, then read again.
     package func relayUnavailable() async {
         relayEnabled = false

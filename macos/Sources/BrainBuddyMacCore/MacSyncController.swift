@@ -43,6 +43,8 @@ package final class MacSyncController {
     /// `presentSignOut()`.
     package private(set) var signOutRequests = 0
     @ObservationIgnored package var triggers: SyncTriggerSource?
+    /// Runs after a person's "Sync now" ends online, so the agent surfaces read again past their throttle.
+    @ObservationIgnored package var didSync: (@MainActor () async -> Void)?
     /// Where an unsent conflict decision waits between launches (D-02): choices only, never text.
     @ObservationIgnored package let conflictDrafts: any ConflictDraftStore
 
@@ -311,5 +313,7 @@ package final class MacSyncController {
     package func syncNow() async {
         guard syncNowEnabled else { return }
         if let triggers { await triggers.syncNowRequested() } else { await workspace.syncNow() }
+        let snapshot = workspace.syncSnapshot
+        if snapshot.isOnline, !snapshot.sessionEnded { await didSync?() }
     }
 }
