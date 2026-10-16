@@ -158,13 +158,19 @@ struct HandoffSheet: View {
                 .keyboardShortcut(.cancelAction).disabled(busy)
             if flow.phase != .noReadyAgent && flow.phase != .loadingAgents {
                 Button(sendTitle) { Task { await flow.tryAgain() } }
-                    .buttonStyle(.carryOnPrimary).keyboardShortcut(.defaultAction).disabled(!flow.canSend)
+                    .buttonStyle(.carryOnPrimary).keyboardShortcut(.defaultAction).disabled(!(flow.canSend || failedBeforePreview))
             }
         }
     }
 
+    /// Failed before a preview arrived (offline, agent list or preview error): Try again reloads instead of sending.
+    private var failedBeforePreview: Bool {
+        if case .failed = flow.phase { return flow.manifest == nil }
+        return false
+    }
+
     private var sendTitle: String {
-        if case .failed = flow.phase, flow.canSend, flow.manifest != nil { return AgentsCopy.tryAgain }
+        if case .failed = flow.phase, flow.canSend || flow.manifest == nil { return AgentsCopy.tryAgain }
         return "Send to \(flow.agents.first { $0.id == flow.selectedID }?.name ?? "agent")"
     }
 }
