@@ -98,6 +98,8 @@ package final class BrainBuddyModel {
     package private(set) var localState: MacLocalState
     package private(set) var isSaving = false
     package private(set) var captureEditorID = UUID().uuidString
+    /// 029: the one-time first run, decided once at launch from facts on this Mac.
+    package let firstRun: FirstRunModel
 
     package var destination: WorkspaceDestination = .list(.next)
     /// The list a capture from this screen goes to.
@@ -137,6 +139,31 @@ package final class BrainBuddyModel {
         self.localStateStore = localStateStore
         self.now = now
         localState = localStateStore.load() ?? (try? localStateStore.update { _ in }) ?? .fresh()
+        firstRun = FirstRunModel(store: localStateStore, now: now)
+    }
+
+    /// 029-FR-001, 029-FR-002: decides the first run once, at launch and before the first window
+    /// renders; opens the Inbox when it shows. Not called by `init`, so a model that is only a
+    /// workspace view (tests, previews) never starts or records a first run.
+    package func decideFirstRun() {
+        firstRun.decide(launchFacts())
+        if let destination = firstRun.launchDestination { choose(destination) }
+        localState = localStateStore.load() ?? localState
+    }
+
+    /// What this Mac already holds. Counts are the kit's own state; a Rust-selected workspace
+    /// answers asynchronously, so the synchronous signals decide alone there.
+    private func launchFacts() -> FirstRunLaunchFacts {
+        let tasks = workspace.state.tasks.values
+        let counted = !workspace.isRustSelected
+        return FirstRunLaunchFacts(
+            hasAccount: workspace.account != nil,
+            workspaceWrittenBefore: localState.workspaceFirstWrittenAt != nil,
+            legacyImportBroughtTasks: localState.legacyImport?.state == .completed,
+            openTaskCount: counted ? tasks.filter(\.isOpen).count : nil,
+            projectCount: counted ? workspace.state.projects.count : nil,
+            hasInboxItem: tasks.contains { $0.state == .inbox }
+        )
     }
 
     package convenience init(host: WorkspaceHost) {
@@ -1365,5 +1392,22 @@ package final class BrainBuddyModel {
         taskEditInProgress = false
         unarchiveRefusal = nil
         choose(.list(.inbox))
+    }
+}
+
+// MARK: - First run writes (029)
+
+extension BrainBuddyModel: FirstRunTaskWriting {
+    /// F-01.03: the text exactly as written, in the Inbox: a plain `createTask`, no Smart Add parse.
+    package func captureFirstItem(_ text: String) async -> TaskID? {
+        let id = TaskID.random()
+        let created = await run { try await workspace.apply([.createTask(.init(taskID: id, title: text, list: .inbox))], editorID: $0) }
+        return created ? id : nil
+    }
+
+    /// F-02.04: title and note in one `updateTask`, then the move to Next actions, as one change.
+    package func saveFirstStep(_ id: TaskID, step: String, original: String) async -> Bool {
+        let changes = FirstRunModel.stepChanges(step: step, original: original, existingDetails: workspace.task(id)?.details)
+        return await saveTask(id, changes: changes, moveTo: .next)
     }
 }
