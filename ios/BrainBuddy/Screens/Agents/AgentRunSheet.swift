@@ -451,3 +451,15 @@ private struct AgentRunSheetContent: View {
         .accessibilityLabel(name)
     }
 }
+
+private extension AgentRunBlock {
+    /// The label's colour by tone, as the Mac's run section draws it.
+    var color: CarryOnColorStyle {
+        switch tone {
+        case .plain: .coTextPrimary
+        case .accent: .coTextAccent
+        case .warning: .coStatusWarning
+        case .danger: .coStatusDanger
+        }
+    }
+}
