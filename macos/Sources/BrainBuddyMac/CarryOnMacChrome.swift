@@ -168,6 +168,14 @@ struct MacSidebarRowLabel: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(Self.accessibilityValue(trailing: trailing, attention: attention))
+    }
+
+    /// The count (or status word) the row shows, with the Needs-you dot spoken, so VoiceOver hears what is drawn (030-FR-004).
+    static func accessibilityValue(trailing: String?, attention: Bool) -> String {
+        [attention ? "Needs you" : nil, trailing].compactMap { $0 }.joined(separator: ", ")
     }
 
     private var titleStyle: CarryOnColorStyle { muted ? .coTextSecondary : .coTextPrimary }
