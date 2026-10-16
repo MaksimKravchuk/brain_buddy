@@ -59,7 +59,7 @@ struct VoiceStepRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(meta.map { "\(step.title), \($0)" } ?? step.title)
-                .accessibilityAction(named: "Edit", beginEditing)
+                .accessibilityAction(named: VoiceBrainDumpCopy.edit, beginEditing)
                 .accessibilityAction(named: "Remove", remove)
             }
             Button(action: remove) {
@@ -69,7 +69,7 @@ struct VoiceStepRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.coTextSecondary)
-            .accessibilityLabel("Remove \(step.title)")
+            .accessibilityLabel(VoiceBrainDumpCopy.remove(step.title))
         }
         .padding(.vertical, CGFloat(CarryOnSpace.xs) / 2)
         .padding(.leading, CGFloat(CarryOnSpace.sm) + 2)

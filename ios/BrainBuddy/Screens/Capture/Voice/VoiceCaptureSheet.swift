@@ -56,11 +56,11 @@ struct VoiceCaptureSheet: View {
         .onChange(of: model.steps.last?.id) { _, id in
             if id != nil, let title = model.steps.last?.title { AccessibilityNotification.Announcement(title).post() }
         }
-        .confirmationDialog("Discard what you said?", isPresented: $isConfirmingClose, titleVisibility: .visible) {
-            Button("Discard", role: .destructive) { closeSheet() }
-            Button("Keep talking", role: .cancel) {}
+        .confirmationDialog(VoiceBrainDumpCopy.discardTitle, isPresented: $isConfirmingClose, titleVisibility: .visible) {
+            Button(VoiceBrainDumpCopy.discard, role: .destructive) { closeSheet() }
+            Button(VoiceBrainDumpCopy.keepTalking, role: .cancel) {}
         } message: {
-            Text("Nothing has been added to your lists.")
+            Text(VoiceBrainDumpCopy.discardMessage)
         }
     }
 
@@ -99,24 +99,22 @@ struct VoiceCaptureSheet: View {
         VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.sm)) {
             switch model.phase {
             case .permissionDenied:
-                Text("Allow the microphone and speech recognition for Brain Buddy in Settings.")
+                Text(VoiceBrainDumpCopy.permissionDenied)
                     .carryOnFont(CarryOnTypeScale.body)
                     .foregroundStyle(.coTextPrimary)
-                Button("Open Settings") {
+                Button(VoiceBrainDumpCopy.openSettings) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                 }
                 .buttonStyle(.carryOnStrong)
             case .unavailable:
-                Text("Speech recognition for \(model.language.title) isn't available on this iPhone.")
+                Text(VoiceBrainDumpCopy.unavailable(model.language))
                     .carryOnFont(CarryOnTypeScale.body)
                     .foregroundStyle(.coTextPrimary)
-                if let other = VoiceLanguage.allCases.first(where: { $0 != model.language }) {
-                    Button("Try \(other.title)") {
-                        model.language = other
-                        Task { await model.start() }
-                    }
-                    .buttonStyle(.carryOnStrong)
+                Button(VoiceBrainDumpCopy.tryLanguage(model.language.other)) {
+                    model.language = model.language.other
+                    Task { await model.start() }
                 }
+                .buttonStyle(.carryOnStrong)
             default:
                 title
                 if !model.heardText.isEmpty {
@@ -125,7 +123,7 @@ struct VoiceCaptureSheet: View {
                 if let message = model.errorMessage { InlineProblemText(message: message) }
                 if model.steps.isEmpty {
                     if model.phase == .review {
-                        Text("Nothing to add yet.")
+                        Text(VoiceBrainDumpCopy.empty)
                             .carryOnFont(CarryOnTypeScale.body)
                             .foregroundStyle(.coTextSecondary)
                     }
@@ -139,7 +137,7 @@ struct VoiceCaptureSheet: View {
     }
 
     private var title: some View {
-        Text("What feels heaviest?")
+        Text(VoiceBrainDumpCopy.title)
             .carryOnFont(CarryOnTypeScale.title)
             .foregroundStyle(.coTextPrimary)
             .accessibilityAddTraits(.isHeader)
@@ -148,10 +146,10 @@ struct VoiceCaptureSheet: View {
     private var steps: some View {
         VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.xs)) {
             HStack {
-                Text("Steps I heard").carryOnFont(CarryOnTypeScale.metaStrong).foregroundStyle(.coTextPrimary)
+                Text(VoiceBrainDumpCopy.stepsHeading).carryOnFont(CarryOnTypeScale.metaStrong).foregroundStyle(.coTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: CGFloat(CarryOnSpace.xs))
-                Text("Not saved yet").carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
+                Text(VoiceBrainDumpCopy.notSavedYet).carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
             }
             ForEach(model.steps) { step in
                 VoiceStepRow(
@@ -161,7 +159,7 @@ struct VoiceCaptureSheet: View {
                     .transition(reduceMotion ? .identity : .opacity)
             }
             if model.phase == .review {
-                Text("Tap a step to edit it. Nothing reaches your lists until you add it.")
+                Text(VoiceBrainDumpCopy.footer)
                     .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                     .frame(maxWidth: .infinity, alignment: .center).multilineTextAlignment(.center)
             }
@@ -180,11 +178,11 @@ struct VoiceCaptureSheet: View {
 
     private var statusWord: String {
         switch model.phase {
-        case .starting: "Starting\u{2026}"
-        case .listening: "Listening"
-        case .finishing: "Finishing\u{2026}"
-        case .saving: "Adding\u{2026}"
-        default: "Tap to talk again"
+        case .starting: VoiceBrainDumpCopy.starting
+        case .listening: VoiceBrainDumpCopy.listening
+        case .finishing: VoiceBrainDumpCopy.finishing
+        case .saving: VoiceBrainDumpCopy.adding
+        default: VoiceBrainDumpCopy.talkAgain
         }
     }
 
@@ -198,7 +196,7 @@ struct VoiceCaptureSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(!isListening && model.phase != .review)
-            .accessibilityLabel(isListening ? "Stop listening" : "Talk")
+            .accessibilityLabel(isListening ? VoiceBrainDumpCopy.stopListening : VoiceBrainDumpCopy.talk)
             Text(statusWord)
                 .carryOnFont(CarryOnTypeScale.meta).foregroundStyle(.coTextSecondary)
                 .lineLimit(1).minimumScaleFactor(0.7)
@@ -219,13 +217,13 @@ struct VoiceCaptureSheet: View {
     private func phaseChanged(_ phase: VoiceBrainDumpModel.Phase) {
         switch phase {
         case .saved(let count):
-            let message = "Added \(count) to Inbox"
+            let message = VoiceBrainDumpCopy.toast(count)
             toasts.show(message)
             AccessibilityNotification.Announcement(message).post()
             Task { await workspace.syncNow() }
             dismiss()
             onSaved()
-        case .listening: AccessibilityNotification.Announcement("Listening").post()
+        case .listening: AccessibilityNotification.Announcement(VoiceBrainDumpCopy.listening).post()
         default: break
         }
     }

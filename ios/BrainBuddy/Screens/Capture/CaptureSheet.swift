@@ -328,7 +328,7 @@ struct CaptureSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(isClosing || isSaving)
-            .accessibilityLabel("Talk")
+            .accessibilityLabel(VoiceBrainDumpCopy.talk)
             .accessibilityHint("Opens voice capture. What you say becomes steps for your Inbox.")
             Spacer(minLength: 0)
             Button {
