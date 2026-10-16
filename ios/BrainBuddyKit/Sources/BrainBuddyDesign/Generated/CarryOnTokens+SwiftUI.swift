@@ -32,6 +32,10 @@ extension ShapeStyle where Self == CarryOnColorStyle {
     public static var coButtonSecondaryBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonSecondaryBg) }
     public static var coButtonSecondaryBgPressed: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonSecondaryBgPressed) }
     public static var coButtonSecondaryFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonSecondaryFg) }
+    public static var coButtonStrongBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonStrongBg) }
+    public static var coButtonStrongFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonStrongFg) }
+    public static var coButtonGlassTint: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonGlassTint) }
+    public static var coButtonGlassFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonGlassFg) }
     public static var coNextStepBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepBg) }
     public static var coNextStepProject: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepProject) }
     public static var coNextStepText: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepText) }
@@ -44,6 +48,8 @@ extension ShapeStyle where Self == CarryOnColorStyle {
     public static var coChipFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipFg) }
     public static var coChipDueFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipDueFg) }
     public static var coChipOverdueFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipOverdueFg) }
+    public static var coChipSelectedBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipSelectedBg) }
+    public static var coChipSelectedFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipSelectedFg) }
     public static var coFieldBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.fieldBg) }
     public static var coFieldTokenBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.fieldTokenBg) }
     public static var coVoiceBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.voiceBg) }

@@ -60,7 +60,7 @@ extension View {
 
 /// The floating glass bar at the bottom of a sheet (boards 13 to 20): one
 /// capsule of chrome holding the sheet's actions, at most one of them the
-/// tinted `.carryOnPrimary`, the others `.carryOnQuiet`. It is as tall as the
+/// tinted `.carryOnGlassPrimary`, the others `.carryOnQuiet`. It is as tall as the
 /// board's bottom bar, the buttons inset by what is left of it. Put it in the
 /// sheet's bottom safe-area inset so content scrolls under it.
 struct BBGlassActionBar<Content: View>: View {

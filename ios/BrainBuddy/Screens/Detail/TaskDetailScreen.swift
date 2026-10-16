@@ -347,7 +347,7 @@ private struct TaskDetailForm: View {
         switch task.state {
         case .next:
             BBGlassActionBar {
-                barButton("Done", .primary, action: complete)
+                barButton("Done", .glassPrimary, action: complete)
                 barButton("Not now", .quiet) {
                     focus = nil
                     isChoosingNotNow = true
@@ -355,11 +355,11 @@ private struct TaskDetailForm: View {
             }
         case .waiting:
             BBGlassActionBar {
-                barButton("Got it", .primary) { requestMove(.next) }
+                barButton("Got it", .glassPrimary) { requestMove(.next) }
             }
         case .someday:
             BBGlassActionBar {
-                barButton("Start it", .primary) { requestMove(.next) }
+                barButton("Start it", .glassPrimary) { requestMove(.next) }
                 barButton("Not needed", .quiet, action: cancel)
             }
         case .completed, .cancelled:
