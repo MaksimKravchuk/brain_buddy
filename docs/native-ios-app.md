@@ -299,8 +299,12 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
   bottom accessory opens the capture sheet — Smart Add with highlighted
   tokens and a live preview of the project and tags that will be used or
   created, list picker (Waiting asks who or what), due date, notes.
-- Task detail is a pushed screen. Rows swipe to complete (leading) and to
-  move (trailing); a context menu offers every transition.
+- Task detail is a half sheet over the list (Carry On boards 13 to 20),
+  presented by the router for every row, the Next actions card and the
+  `brainbuddy://task/<id>` link; it pulls up to full height for properties
+  and comments, and a floating glass bar carries the list's actions (Done and
+  Not now, Got it, Start it and Not needed, Reopen…). Rows swipe to complete
+  (leading) and to move (trailing); a context menu offers every transition.
 - Completing animates in under 600 ms and respects Reduce Motion (spec 016);
   an undo toast reopens into the previous list.
 - Sync state is always words ("Synced 2 minutes ago", "Offline · 3 changes

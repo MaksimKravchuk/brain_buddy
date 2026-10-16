@@ -129,6 +129,18 @@ enum BBColor {
     /// mark-open, the neutral dot for a project without a colour.
     static let projectFallback = color(Tone(CarryOnRole.markOpen))
 
+    /// `project(_:)` as the design kit's `RGBColor`, for `CarryOnChip` and
+    /// `CarryOnProjectDot`: the same colour, the alpha of a `#RRGGBBAA` value
+    /// dropped. mark-open (the same in both modes) when there is none.
+    static func projectRGB(_ hex: String?) -> RGBColor {
+        let fallback = CarryOnRole.markOpen.light
+        guard let hex else { return fallback }
+        let shown = displayedProjectColor(forStored: hex)?.hex ?? hex
+        guard let rgba = BBHex.rgba(shown) else { return fallback }
+        func channel(_ value: Double) -> UInt32 { UInt32((value * 255).rounded()) }
+        return RGBColor(channel(rgba.red) << 16 | channel(rgba.green) << 8 | channel(rgba.blue))
+    }
+
     /// Colours offered when creating or recolouring a project, as `#RRGGBB`.
     static let projectColorPalette: [String] = projectColorOptions.map(\.hex)
 

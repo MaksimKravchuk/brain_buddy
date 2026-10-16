@@ -47,7 +47,8 @@ struct BBCardRowBackground: View {
 
 extension View {
     /// A list row as a Carry On card: row-bg surface, radius 12, padding 14 × 16,
-    /// no divider. Apply it to the row, outside any `NavigationLink`.
+    /// no divider. Apply it to the row, outside any `NavigationLink` or
+    /// `TaskOpenButton`.
     func bbCardRow() -> some View {
         listRowInsets(BBCardRow.contentInsets)
             .listRowSeparator(.hidden)

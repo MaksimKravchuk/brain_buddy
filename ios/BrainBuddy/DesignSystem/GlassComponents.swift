@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
@@ -54,6 +55,34 @@ extension View {
         GlassEffectContainer(spacing: spacing) {
             self
         }
+    }
+}
+
+/// The floating glass bar at the bottom of a sheet (boards 13 to 20): one
+/// capsule of chrome holding the sheet's actions, at most one of them the
+/// tinted `.carryOnPrimary`, the others `.carryOnQuiet`. It is as tall as the
+/// board's bottom bar, the buttons inset by what is left of it. Put it in the
+/// sheet's bottom safe-area inset so content scrolls under it.
+struct BBGlassActionBar<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    /// The bar's height less the button's, halved: the board's 6 pt.
+    private static var inset: CGFloat {
+        CGFloat((CarryOnLayout.BottomBar.height - CarryOnLayout.Button.height) / 2)
+    }
+
+    var body: some View {
+        HStack(spacing: Self.inset) {
+            content
+        }
+        .padding(Self.inset)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, CGFloat(CarryOnSpace.xs))
+        .padding(.bottom, CGFloat(CarryOnSpace.xs))
     }
 }
 

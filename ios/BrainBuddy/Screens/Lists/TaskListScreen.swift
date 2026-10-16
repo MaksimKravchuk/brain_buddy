@@ -195,14 +195,11 @@ struct TaskListScreen: View {
         if !(tasks.isEmpty && !section.tasks.isEmpty) {
             Section {
                 ForEach(tasks) { task in
-                    NavigationLink(value: AppRoute.task(task.id)) {
+                    TaskOpenButton(task.id) {
                         TaskRow(task: task, showsProject: showsProject, showsList: showsList,
                             preparedFormulation: workspace.listFormulation(task.id, destination: destination, options: options),
                             showsMark: showsMark, isCurrent: task.id == currentTaskID)
                     }
-                    // The row carries its own affordance; the chevron would only
-                    // take width from the title and its metadata.
-                    .navigationLinkIndicatorVisibility(.hidden)
                     .bbCardRow()
                     .taskActions(task)
                 }
@@ -377,10 +374,10 @@ struct TaskListScreen: View {
 }
 
 /// The Next actions hero: the first step as a `CarryOnNextStepCard` that opens
-/// the task like a row does, and under it Done, which completes the task with
-/// the same command the row's completion mark runs. Two list rows, so the
-/// card's swipe actions and context menu are the row's too. "Not now" is a
-/// later wave.
+/// the task in the task sheet like a row does (where "Not now" lives), and
+/// under it Done, which completes the task with the same command the row's
+/// completion mark runs. Two list rows, so the card's swipe actions and
+/// context menu are the row's too.
 private struct NextStepRows: View {
     let task: TaskRecord
 
@@ -390,10 +387,9 @@ private struct NextStepRows: View {
     @State private var completionEditorID = UUID().uuidString
 
     var body: some View {
-        NavigationLink(value: AppRoute.task(task.id)) {
+        TaskOpenButton(task.id) {
             CarryOnNextStepCard(project: projectName, step: task.title)
         }
-        .navigationLinkIndicatorVisibility(.hidden)
         .bbBareRow()
         .taskActions(task)
         Button(action: complete) {
