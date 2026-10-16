@@ -7,6 +7,7 @@
   --co-limestone: #e9e5dd; /* ground */
   --co-basalt: #1c1b19; /* ink */
   --co-basalt-raised: #2a2926; /* dark surface one step up */
+  --co-basalt-high: #34322e; /* dark secondary button, chip, field */
   --co-dust: #8a8478; /* what is not in your control: done, later, other people */
   --co-dust-text: #6b665c; /* dust for small text on limestone (4.5:1) */
   --co-terracotta: #c4472a; /* you, the next step; one per screen */
@@ -44,7 +45,7 @@
     --co-surface: var(--co-basalt-raised);
     --co-fg: var(--co-limestone);
     --co-fg-muted: var(--co-dust);
-    --co-secondary: var(--co-basalt-raised);
+    --co-secondary: var(--co-basalt-high);
   }
 }
 
@@ -53,5 +54,5 @@
   --co-surface: var(--co-basalt-raised);
   --co-fg: var(--co-limestone);
   --co-fg-muted: var(--co-dust);
-  --co-secondary: var(--co-basalt-raised);
+  --co-secondary: var(--co-basalt-high);
 }
