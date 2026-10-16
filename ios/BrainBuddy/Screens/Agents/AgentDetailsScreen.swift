@@ -177,17 +177,20 @@ struct AgentDetailsScreen: View {
                     .disabled(!model.controlsEnabled)
                 }
             }
-            Button {
-                open(.delete(connection))
-            } label: {
-                Text(verbatim: "Delete \(connection.name)…")
-                    .carryOnFont(CarryOnTypeScale.body)
-                    .foregroundStyle(.coStatusDanger)
-                    .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
-                    .contentShape(Rectangle())
+            // Deleting needs the current password, so a passwordless account is not offered it (030-FR-036).
+            if !model.isPasswordless {
+                Button {
+                    open(.delete(connection))
+                } label: {
+                    Text(verbatim: "Delete \(connection.name)…")
+                        .carryOnFont(CarryOnTypeScale.body)
+                        .foregroundStyle(.coStatusDanger)
+                        .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.controlsEnabled)
             }
-            .buttonStyle(.plain)
-            .disabled(!model.controlsEnabled)
         }
         .padding(.horizontal, CGFloat(CarryOnSpace.md))
         .padding(.top, CGFloat(CarryOnSpace.md))
