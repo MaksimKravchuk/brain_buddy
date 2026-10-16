@@ -296,7 +296,7 @@ same account.
 - Two Macs reply to the same run: the stale revision is reported in words and the run
   is re-read; nothing is sent twice.
 - An agent's card changed (`agent_changed`): the status reads "Agent changed" and Test
-  again asks for the password, as the server requires.
+  again runs without a password; the next hand-off may ask for it, as the server requires.
 - Session ended or account changed while an agent sheet is open: the sheet closes, the
   typed secret and password are dropped, and no data of the previous account remains.
 - Reduce Motion, increased contrast and dark appearance: follows the Carry On tokens in
