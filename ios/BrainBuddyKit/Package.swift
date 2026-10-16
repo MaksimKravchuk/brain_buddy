@@ -59,6 +59,7 @@ let package = Package(
         .library(name: "BrainBuddyWorkspace", targets: ["BrainBuddyWorkspace"]),
         .library(name: "BrainBuddyDiagnostics", targets: ["BrainBuddyDiagnostics"]),
         .library(name: "BrainBuddyDesign", targets: ["BrainBuddyDesign"]),
+        .library(name: "BrainBuddyDesignTestSupport", targets: ["BrainBuddyDesignTestSupport"]),
     ],
     targets: [
         rustFFI,
@@ -95,6 +96,9 @@ let package = Package(
         // the bundled Instrument faces, and the SwiftUI components. The tokens are
         // Foundation-only and test on Linux; the SwiftUI layer compiles on Apple only.
         .target(name: "BrainBuddyDesign", resources: [.process("Resources")]),
+        // `assertSnapshot` for test targets only: the kit's catalog snapshots and the Mac
+        // app's screen snapshots compare renders the same way. macOS only (empty on Linux).
+        .target(name: "BrainBuddyDesignTestSupport", dependencies: ["BrainBuddyDesign"]),
         // The shared review vectors and golden wire fixtures (spec 020) are
         // byte-identical copies of `contracts/fixtures/*.json`; `.copy`
         // keeps their bytes as they are.
@@ -119,7 +123,8 @@ let package = Package(
         // component snapshots (macOS only) compare against `__Snapshots__/*.png`, which are
         // read by path and so are excluded from the bundle.
         .testTarget(
-            name: "BrainBuddyDesignTests", dependencies: ["BrainBuddyDesign"], exclude: ["__Snapshots__"]
+            name: "BrainBuddyDesignTests", dependencies: ["BrainBuddyDesign", "BrainBuddyDesignTestSupport"],
+            exclude: ["__Snapshots__"]
         ),
     ]
 )

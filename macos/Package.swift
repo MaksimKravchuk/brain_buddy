@@ -30,13 +30,19 @@ let package = Package(
         .target(name: "BrainBuddyMacCore", dependencies: kit),
         .executableTarget(
             name: "BrainBuddyMac",
-            dependencies: ["BrainBuddyMacCore", .product(name: "WhisperKit", package: "argmax-oss-swift")] + kit
+            dependencies: [
+                "BrainBuddyMacCore",
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "BrainBuddyDesign", package: "BrainBuddyKit"),
+            ] + kit
         ),
         // `Resources/` holds the synthetic legacy stores the importer is tested on; `.copy` keeps
-        // their bytes as they are.
+        // their bytes as they are. Snapshot tests read `__Snapshots__/*.png` beside their source
+        // file, so it is excluded rather than bundled.
         .testTarget(
             name: "BrainBuddyMacTests",
-            dependencies: ["BrainBuddyMac", "BrainBuddyMacCore"] + kit,
+            dependencies: ["BrainBuddyMac", "BrainBuddyMacCore", .product(name: "BrainBuddyDesign", package: "BrainBuddyKit")] + kit,
+            exclude: ["__Snapshots__"],
             resources: [.copy("Resources")]
         ),
     ]

@@ -1,3 +1,4 @@
+// Mirrors ios/BrainBuddyKit/Tests/BrainBuddyDesignTests/SnapshotAssertion.swift until a shared test-support target exists.
 #if canImport(SwiftUI) && os(macOS)
     import CoreGraphics
     import Foundation
