@@ -255,8 +255,21 @@ iOS thread; no slice edits it.
   030-FR-030, 030-FR-036, 030-FR-037, 030-FR-038. PR-10.
 - [ ] T030 [US5] Tests in `macos/Tests/BrainBuddyMacTests/AgentsSettingsTabTests.swift`:
   flag off shows 028's text and link; password-less shows the line and no +; the web
-  account URL carries no credential; the sidebar's "Add new agent" request opens the Add
-  sheet once. 030-FR-036, 030-FR-037, 030-SC-006. PR-10.
+  account URL carries no credential; the canvas's "Add new agent" request selects the Agents tab and opens
+  the Add sheet once. 030-FR-036, 030-FR-037, 030-SC-006. PR-10.
+
+## Phase 10b — Mac: sidebar agent rows as DSAgents (PR-16)
+
+- [ ] T036 [US2] PR-07 found two DSAgents details outside its paths: an agent row with a
+  Needs-you run shows the accent dot before its count ("● 1"), and an agent with no listed
+  runs that is not "Tested ready" shows its status word ("Home server Stale") from the
+  connection list (PR-06). Add both to `MacSidebarRowLabel` in
+  `macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift` and the Agents section in
+  `ContentView.swift`, with tests in
+  `macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift`. Use only existing
+  BrainBuddyDesign tokens; where the board uses a size with no token (M22 card title 13,
+  meta 11), ask the iOS design thread for the token rather than typing a value.
+  030-FR-004. PR-16.
 
 ## Phase 11 — Mac: Add, Replace, Edit, Delete sheets (PR-11)
 
@@ -290,7 +303,8 @@ iOS thread; no slice edits it.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
 - PR-14 depends on PR-06. PR-10 depends on PR-06, PR-14 and PR-07 and, outside this map, on 028 PR-03; it runs in
   parallel with PR-08 and PR-09. PR-11 depends on PR-10.
-- PR-12 depends on PR-07, PR-09 and PR-11.
+- PR-16 depends on PR-06 and PR-07.
+- PR-12 depends on PR-07, PR-09, PR-11 and PR-16.
 - Manual acceptance after PR-12: SC-001, SC-004 – SC-006, SC-008 against a test agent.
 
 ## PR-срезы
@@ -595,6 +609,26 @@ iOS thread; no slice edits it.
       "implementer": "feature-implementer"
     },
     {
+      "id": "PR-16",
+      "outcome": "Mac sidebar agent rows match DSAgents: accent dot for a Needs-you run and the status word for an agent with no listed runs",
+      "tasks": ["T036"],
+      "requirements": ["030-FR-004"],
+      "paths": [
+        "macos/Sources/BrainBuddyMac/CarryOnMacChrome.swift",
+        "macos/Sources/BrainBuddyMac/ContentView.swift",
+        "macos/Tests/BrainBuddyMacTests/AgentsSidebarRowsTests.swift"
+      ],
+      "depends_on": ["PR-06", "PR-07"],
+      "tests": [
+        "cd macos && swift test --filter AgentsSidebarRowsTests"
+      ],
+      "acceptance": [
+        "An agent with a Needs-you run shows the accent dot and count; an agent with no listed runs shows its status word"
+      ],
+      "budget": {"product_loc": 120, "files": 2},
+      "implementer": "feature-implementer"
+    },
+    {
       "id": "PR-11",
       "outcome": "Add new agent, Replace credential, Edit and Delete sheets work from Settings › Agents with secure fields and the password where required",
       "tasks": ["T031", "T032"],
@@ -655,7 +689,7 @@ iOS thread; no slice edits it.
         "macos/Tests/BrainBuddyMacTests/__Snapshots__",
         "specs/030-mac-agents/evidence/macos-host-run.md"
       ],
-      "depends_on": ["PR-07", "PR-09", "PR-11"],
+      "depends_on": ["PR-07", "PR-09", "PR-11", "PR-16"],
       "tests": [
         "cd macos && swift test --filter AgentsSnapshotTests"
       ],
