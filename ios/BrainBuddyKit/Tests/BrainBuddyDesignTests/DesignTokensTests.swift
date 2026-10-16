@@ -57,58 +57,6 @@ struct DesignTokensTests {
         }
     }
 
-    @Test("Every text and surface pair the JSON lists reaches WCAG AA, light and dark")
-    func listedPairsMeetContrast() throws {
-        let pairs = try Self.contrastPairs()
-        #expect(!pairs.isEmpty)
-        for (text, surface) in pairs {
-            for mode in ["light", "dark"] {
-                let foreground = try #require(CarryOnTokenTable.colors["role.\(text).\(mode)"], "\(text)")
-                let background = try #require(CarryOnTokenTable.colors["role.\(surface).\(mode)"], "\(surface)")
-                let ratio = Self.contrast(foreground, background)
-                #expect(ratio >= 4.5, "\(text) on \(surface), \(mode): \(ratio)")
-            }
-        }
-    }
-
-    @Test("Grey text on stone is not a listed pair, because it is 3.98:1")
-    func greyTextOnStoneStaysUnlisted() throws {
-        let pairs = Set(try Self.contrastPairs().map { "\($0.0) on \($0.1)" })
-        for surface in ["bg-sunken", "surface-selected", "control-quiet"] {
-            #expect(!pairs.contains("text-secondary on \(surface)"))
-            #expect(!pairs.contains("text-done on \(surface)"))
-        }
-    }
-
-    static func contrastPairs() throws -> [(String, String)] {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("DesignTokens/carry-on.tokens.json")
-        let root = try dictionary(try JSONSerialization.jsonObject(with: Data(contentsOf: url)))
-        let list = try #require(try dictionary(root["contrast"])["pairs"] as? [Any])
-        return try list.map { entry in
-            guard let pair = entry as? [Any], pair.count == 2 else {
-                throw Malformed(description: "a pair is [text, surface]")
-            }
-            return (try string(pair[0]), try string(pair[1]))
-        }
-    }
-
-    /// WCAG 2 contrast ratio of two `0xRRGGBB` colours.
-    static func contrast(_ first: UInt32, _ second: UInt32) -> Double {
-        func luminance(_ rgb: UInt32) -> Double {
-            func channel(_ shift: UInt32) -> Double {
-                let value = Double((rgb >> shift) & 0xFF) / 255
-                return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-            }
-            return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
-        }
-        let (lighter, darker) = (max(luminance(first), luminance(second)), min(luminance(first), luminance(second)))
-        return (lighter + 0.05) / (darker + 0.05)
-    }
-
     // MARK: - The JSON, flattened the way the generator flattens it
 
     struct Flattened {

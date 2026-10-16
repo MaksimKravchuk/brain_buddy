@@ -31,7 +31,7 @@
                     if let detail {
                         Text(detail)
                             .carryOnText(CarryOnTypeScale.meta, lineHeight: Metrics.lineHeight)
-                            .foregroundStyle(secondaryColor)
+                            .foregroundStyle(.coTextSecondary)
                     }
                 }
                 Spacer(minLength: 0)
@@ -46,7 +46,7 @@
 
         private var titleText: some View {
             let style = status == .current ? CarryOnTypeScale.bodyStrong : CarryOnTypeScale.body
-            let done = secondaryColor.color(in: colorScheme)
+            let done = CarryOnColorStyle.coStepTextDone.color(in: colorScheme)
             return Text(title)
                 .strikethrough(status == .done, color: done)
                 .carryOnText(style, lineHeight: Metrics.lineHeight)
@@ -56,15 +56,9 @@
         private var titleColor: CarryOnColorStyle {
             switch status {
             case .open, .current: .coTextPrimary
-            case .done, .waiting: secondaryColor
+            case .done: .coStepTextDone
+            case .waiting: .coTextSecondary
             }
-        }
-
-        /// Dust on paper; on the stone of a selected row, the darker dust that keeps
-        /// 4.5:1 (dust-600 on stone is 3.98:1).
-        private var secondaryColor: CarryOnColorStyle {
-            if isSelected { return .coRowTextSecondarySelected }
-            return status == .done ? .coStepTextDone : .coTextSecondary
         }
 
         @ViewBuilder private var mark: some View {

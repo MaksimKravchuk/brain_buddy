@@ -30,8 +30,7 @@
             VStack(alignment: .leading, spacing: Metrics.projectGap) {
                 Text(project)
                     .carryOnText(CarryOnTypeScale.meta, lineHeight: Metrics.projectLineHeight)
-                    // Pressed puts the card on stone, where dust-600 is only 3.98:1.
-                    .foregroundStyle(status == .pressed ? CarryOnColorStyle.coNextStepProjectPressed : .coNextStepProject)
+                    .foregroundStyle(.coNextStepProject)
                 Text(step)
                     .strikethrough(status == .taken, color: CarryOnColorStyle.coStepTextDone.color(in: colorScheme))
                     .carryOnText(CarryOnTypeScale.step)

@@ -196,10 +196,9 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   A snapshot is committed only after it was compared with the design board and
   approved; any later pixel change fails the `ios-app` lane. App and Mac snapshot
   tests use the same `assertSnapshot` from the `BrainBuddyDesignTestSupport` product.
-- Text contrast is checked, not eyeballed: every text-on-surface role pair in use is
-  listed under `contrast.pairs` in the JSON and `DesignTokensTests` holds it to 4.5:1.
-  Grey text (`text-secondary`, `text-done`) on stone is 3.98:1, so on stone surfaces
-  (selected rows, pressed cards, sidebars, chips) use `text-secondary-on-quiet`.
+- Colours follow the design board exactly, including grey text on stone (3.98:1).
+  Change a colour for contrast only when App Review or an accessibility audit asks
+  for it (Max, 2026-10-16).
 
 ### Current system (until the redesign lands)
 

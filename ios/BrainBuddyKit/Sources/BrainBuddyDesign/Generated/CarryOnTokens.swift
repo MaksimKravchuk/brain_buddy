@@ -13,7 +13,6 @@ public enum CarryOnPrimitive {
     public static let dust300 = RGBColor(0xA8A196)
     public static let dust400 = RGBColor(0x8A8478)
     public static let dust600 = RGBColor(0x6B665C)
-    public static let dust700 = RGBColor(0x5E5A51)
     public static let basalt700 = RGBColor(0x34322E)
     public static let basalt800 = RGBColor(0x2A2926)
     public static let basalt900 = RGBColor(0x1C1B19)
@@ -37,7 +36,6 @@ public enum CarryOnRole {
     public static let textPrimary = ThemedColor(light: CarryOnPrimitive.basalt900, dark: CarryOnPrimitive.limestone100)
     public static let textSecondary = ThemedColor(light: CarryOnPrimitive.dust600, dark: CarryOnPrimitive.dust300)
     public static let textDone = ThemedColor(light: CarryOnPrimitive.dust600, dark: CarryOnPrimitive.dust300)
-    public static let textSecondaryOnQuiet = ThemedColor(light: CarryOnPrimitive.dust700, dark: CarryOnPrimitive.dust300)
     public static let textAccent = ThemedColor(light: CarryOnPrimitive.terracotta600, dark: CarryOnPrimitive.terracotta400)
     public static let accentFill = ThemedColor(light: CarryOnPrimitive.terracotta500, dark: CarryOnPrimitive.terracotta500)
     public static let accentPressed = ThemedColor(light: CarryOnPrimitive.terracotta600, dark: CarryOnPrimitive.terracotta600)
@@ -60,14 +58,12 @@ public enum CarryOnComponentColor {
     public static let buttonSecondaryFg = CarryOnRole.textPrimary
     public static let nextStepBg = CarryOnRole.surfaceCard
     public static let nextStepProject = CarryOnRole.textSecondary
-    public static let nextStepProjectPressed = CarryOnRole.textSecondaryOnQuiet
     public static let nextStepText = CarryOnRole.textPrimary
     public static let stepDotCurrent = CarryOnRole.accentFill
     public static let stepDotOpen = CarryOnRole.markOpen
     public static let stepTextDone = CarryOnRole.textDone
     public static let rowBg = CarryOnRole.surfaceCard
     public static let rowBgSelected = CarryOnRole.surfaceSelected
-    public static let rowTextSecondarySelected = CarryOnRole.textSecondaryOnQuiet
     public static let chipBg = CarryOnRole.controlQuiet
     public static let chipFg = CarryOnRole.textPrimary
     public static let chipDueFg = CarryOnRole.statusWarning
@@ -212,7 +208,6 @@ public enum CarryOnTokenTable {
         "primitive.dust.300": CarryOnPrimitive.dust300.hex,
         "primitive.dust.400": CarryOnPrimitive.dust400.hex,
         "primitive.dust.600": CarryOnPrimitive.dust600.hex,
-        "primitive.dust.700": CarryOnPrimitive.dust700.hex,
         "primitive.basalt.700": CarryOnPrimitive.basalt700.hex,
         "primitive.basalt.800": CarryOnPrimitive.basalt800.hex,
         "primitive.basalt.900": CarryOnPrimitive.basalt900.hex,
@@ -240,8 +235,6 @@ public enum CarryOnTokenTable {
         "role.text-secondary.dark": CarryOnRole.textSecondary.dark.hex,
         "role.text-done.light": CarryOnRole.textDone.light.hex,
         "role.text-done.dark": CarryOnRole.textDone.dark.hex,
-        "role.text-secondary-on-quiet.light": CarryOnRole.textSecondaryOnQuiet.light.hex,
-        "role.text-secondary-on-quiet.dark": CarryOnRole.textSecondaryOnQuiet.dark.hex,
         "role.text-accent.light": CarryOnRole.textAccent.light.hex,
         "role.text-accent.dark": CarryOnRole.textAccent.dark.hex,
         "role.accent-fill.light": CarryOnRole.accentFill.light.hex,
@@ -278,8 +271,6 @@ public enum CarryOnTokenTable {
         "component.next-step-bg.dark": CarryOnComponentColor.nextStepBg.dark.hex,
         "component.next-step-project.light": CarryOnComponentColor.nextStepProject.light.hex,
         "component.next-step-project.dark": CarryOnComponentColor.nextStepProject.dark.hex,
-        "component.next-step-project-pressed.light": CarryOnComponentColor.nextStepProjectPressed.light.hex,
-        "component.next-step-project-pressed.dark": CarryOnComponentColor.nextStepProjectPressed.dark.hex,
         "component.next-step-text.light": CarryOnComponentColor.nextStepText.light.hex,
         "component.next-step-text.dark": CarryOnComponentColor.nextStepText.dark.hex,
         "component.step-dot-current.light": CarryOnComponentColor.stepDotCurrent.light.hex,
@@ -292,8 +283,6 @@ public enum CarryOnTokenTable {
         "component.row-bg.dark": CarryOnComponentColor.rowBg.dark.hex,
         "component.row-bg-selected.light": CarryOnComponentColor.rowBgSelected.light.hex,
         "component.row-bg-selected.dark": CarryOnComponentColor.rowBgSelected.dark.hex,
-        "component.row-text-secondary-selected.light": CarryOnComponentColor.rowTextSecondarySelected.light.hex,
-        "component.row-text-secondary-selected.dark": CarryOnComponentColor.rowTextSecondarySelected.dark.hex,
         "component.chip-bg.light": CarryOnComponentColor.chipBg.light.hex,
         "component.chip-bg.dark": CarryOnComponentColor.chipBg.dark.hex,
         "component.chip-fg.light": CarryOnComponentColor.chipFg.light.hex,
