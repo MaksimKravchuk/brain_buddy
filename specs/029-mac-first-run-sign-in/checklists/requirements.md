@@ -16,11 +16,11 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — the three open questions are recorded as
-      pending clarifications (a), (b), (c) with recommended defaults, and each names the
-      requirement and slice it changes
-- [ ] Owner answered every question — pending (a) Apple timing, (b) invite field,
-      (c) exception to the 027 Python freeze
+- [x] No [NEEDS CLARIFICATION] markers remain — the two open questions are recorded as
+      pending clarifications (a), (b) with recommended defaults, and each names the
+      requirement and slice it changes; (c) is answered
+- [ ] Owner answered every question — (c) answered by Max on 2026-10-16 (Rust only, no
+      exception to the 027 Python freeze); pending (a) Apple timing, (b) invite field
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -28,7 +28,8 @@
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded — out-of-scope list in intake.md § 4; Apple and the invite
       step are separate slices with explicit gates
-- [x] Dependencies and assumptions identified (027 T055, 027-FR-022, team-signed build)
+- [x] Dependencies and assumptions identified (027 T055, 027-FR-022 kept intact, the Rust
+      server cutover for Google and email code on the Mac, team-signed build)
 
 ## Feature Readiness
 
@@ -39,5 +40,6 @@
 
 ## Notes
 
-- design.md, plan.md and tasks.md exist. Pending human gates: Max's answers to (a), (b),
-  (c); design sign-off (design.md); the `/speckit-review` gate before implementation.
+- design.md, plan.md and tasks.md exist. Pending human gates: Max's answers to (a) and
+  (b); design sign-off (design.md); the `/speckit-review` gate before implementation.
+  (c) was answered on 2026-10-16: Rust only; the artifacts follow it.
