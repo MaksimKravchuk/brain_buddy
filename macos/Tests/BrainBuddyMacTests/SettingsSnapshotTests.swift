@@ -54,7 +54,7 @@
         }
 
         private func secondaryButton(_ title: String) -> some View {
-            Button(title) {}.buttonStyle(.macSecondaryPill)
+            Button(title) {}.buttonStyle(.carryOnSecondary)
         }
 
         private func textButton(_ title: String) -> some View {
@@ -87,14 +87,14 @@
             "028_FR_006 028_FR_022 028_SC_007 the Account tab's loaded state renders as approved",
             arguments: Appearance.allCases)
         func accountLoadedRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.loaded(Self.loadedRows)), named: "mac-settings-account-loaded-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_004 028_FR_022 028_SC_007 the Account tab's loading state renders as approved", arguments: Appearance.allCases)
         func accountLoadingRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.loading), named: "mac-settings-account-loading-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
@@ -103,14 +103,14 @@
             "028_FR_008 028_FR_010 028_FR_017 028_FR_022 028_SC_007 the methods-unavailable state renders as approved",
             arguments: Appearance.allCases)
         func accountMethodsUnavailableRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.loaded(Self.methodsUnavailableRows)), named: "mac-settings-account-methods-unavailable-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_016 028_FR_022 028_SC_007 the offline state renders as approved", arguments: Appearance.allCases)
         func accountOfflineRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.offline), named: "mac-settings-account-offline-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
@@ -119,21 +119,21 @@
             "028_FR_005 028_FR_016 028_FR_022 028_SC_007 the session-ended state renders as approved",
             arguments: Appearance.allCases)
         func accountSessionEndedRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.sessionEnded), named: "mac-settings-account-session-ended-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_015 028_FR_022 028_SC_007 the signed-out state renders as approved", arguments: Appearance.allCases)
         func accountSignedOutRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.notSignedIn), named: "mac-settings-account-signed-out-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_012 028_FR_022 028_SC_007 the exporting state renders as approved", arguments: Appearance.allCases)
         func accountExportingRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.loaded(Self.loadedRows), export: .exporting), named: "mac-settings-account-exporting-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
@@ -142,14 +142,14 @@
             "028_FR_013 028_FR_017 028_FR_022 028_SC_007 the export-failed state renders as approved",
             arguments: Appearance.allCases)
         func accountExportFailedRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 accountTab(.loaded(Self.loadedRows), export: .failed(kind: .offline, reference: "7f3a9c2e")), named: "mac-settings-account-export-failed-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_019 028_FR_022 028_SC_007 the Agents tab renders as approved", arguments: Appearance.allCases)
         func agentsReadyRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 agentsTab(.ready(Self.agentsURL)), named: "mac-settings-agents-ready-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
@@ -158,14 +158,14 @@
             "028_FR_019 028_FR_022 028_SC_007 the Agents tab with the origin unavailable renders as approved",
             arguments: Appearance.allCases)
         func agentsUnavailableRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 agentsTab(.unavailable), named: "mac-settings-agents-unavailable-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 820)
         }
 
         @Test("028_FR_020 028_FR_022 028_SC_007 the Sync tab renders as approved", arguments: Appearance.allCases)
         func syncTabRenders(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 syncTab(), named: "mac-settings-sync-\(appearance.rawValue)", scheme: appearance.scheme, width: 820)
         }
     }
