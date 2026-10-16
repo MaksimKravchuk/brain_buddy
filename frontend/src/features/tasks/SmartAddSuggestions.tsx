@@ -34,10 +34,10 @@ export function SmartAddSuggestions({
             type="button"
             role="option"
             aria-selected={isActive}
-            className={`rounded-full border px-2.5 py-1 text-xs shadow-soft ${
+            className={`rounded-control px-2.5 py-1 text-co-meta ${
               isActive
-                ? "border-sky-300 bg-sky-50 text-sky-800"
-                : "border-sky-100 bg-white text-sky-700 hover:border-sky-200 hover:bg-sky-50"
+                ? "bg-ink text-ground"
+                : "bg-quiet text-ink hover:bg-quiet-pressed"
             }`}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(suggestion)}

@@ -116,3 +116,10 @@
       0 10px 30px rgba(0, 0, 0, 0.35);
   }
 }
+
+/* The same glass, denser, for a floating panel that holds reading content
+ * (the voice capture popover on board M11 sets this background on `.glass`). */
+@utility co-glass-dense {
+  @apply co-glass;
+  background-color: rgba(244, 241, 235, 0.95);
+}
