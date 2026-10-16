@@ -98,9 +98,10 @@ final class AppleSpeechCapture: SpeechCapturing {
 
     // MARK: Private
 
-    private func heard(_ text: String, isFinal: Bool, generation current: Int) {
+    /// `text` is nil when the recogniser errored: the session ends, and what was heard stays.
+    private func heard(_ text: String?, isFinal: Bool, generation current: Int) {
         guard current == generation else { return }
-        onHeard?(text)
+        if let text { onHeard?(text) }
         if isFinal { resumeWaiter() }
     }
 
@@ -143,17 +144,18 @@ final class AppleSpeechCapture: SpeechCapturing {
         }
     }
 
-    /// An error ends the session like a final result (the recogniser also errors on silence).
+    /// An error ends the session like a final result, with no text, so the transcript heard so far
+    /// is kept (the recogniser also errors on silence).
     private nonisolated static func recognize(
         _ recognizer: SFSpeechRecognizer,
         request: SFSpeechAudioBufferRecognitionRequest,
-        deliver: @escaping @Sendable (String, Bool) -> Void
+        deliver: @escaping @Sendable (String?, Bool) -> Void
     ) -> SFSpeechRecognitionTask {
         recognizer.recognitionTask(with: request) { result, error in
             if let result {
                 deliver(result.bestTranscription.formattedString, result.isFinal)
             } else if error != nil {
-                deliver("", true)
+                deliver(nil, true)
             }
         }
     }
