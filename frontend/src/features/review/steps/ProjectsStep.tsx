@@ -100,19 +100,19 @@ export function ProjectsStep(): React.JSX.Element {
         const stuck = stuckProjects(queue.data as ReviewQueue, projects.data as ProjectResponse[], added);
         return (
           <>
-            <p className="m-0 text-sm text-slate-600">A project moves only when it has something you can do next.</p>
+            <p className="m-0 text-co-meta text-ink-muted">A project moves only when it has something you can do next.</p>
             {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
             {added.map((entry) => (
-              <p key={entry.id} role="status" className="m-0 text-sm text-slate-700">{entry.note}</p>
+              <p key={entry.id} role="status" className="m-0 text-co-meta text-ink-muted">{entry.note}</p>
             ))}
             {stuck.length === 0 ? (
-              <p className="m-0 text-sm text-slate-600">Every active project has a next action.</p>
+              <p className="m-0 text-co-meta text-ink-muted">Every active project has a next action.</p>
             ) : (
-              <ul aria-label="Projects without a next action" className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-0">
+              <ul aria-label="Projects without a next action" className="m-0 flex list-none flex-col gap-2 p-0">
                 {stuck.map((project) => (
-                  <li key={project.id} className="flex flex-col gap-2 px-3 py-2.5">
+                  <li key={project.id} className="flex flex-col gap-2 rounded-card bg-card px-3 py-2.5">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="m-0 min-w-0 break-words text-sm font-medium text-slate-900">{project.name}</p>
+                      <p className="m-0 min-w-0 break-words text-co-meta font-medium text-ink">{project.name}</p>
                       {open?.id === project.id ? null : (
                         <button type="button" aria-label={`Add next action to ${project.name}`} disabled={action.disabled} className={buttonClass} onClick={() => openField(project)}>
                           Add next action
