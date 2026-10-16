@@ -175,7 +175,7 @@ struct HandoffFlowTests {
         let remote = FakeAgentRemote()
         remote.script(
             connections: connections ?? [
-                HandoffFixture.connection(id: "conn_a", name: "Hermes", skills: ["Web research", "Email drafts"], tier: "guaranteed"),
+                HandoffFixture.connection(id: "conn_a", name: "Hermes", tier: "guaranteed", skills: ["Web research", "Email drafts"]),
                 HandoffFixture.connection(id: "conn_b", name: "Claude"),
             ],
             manifests: manifests ?? [HandoffFixture.manifest()])
@@ -191,7 +191,7 @@ struct HandoffFlowTests {
     func listsReadyAgentsAndPreviews() async {
         let rig = make(connections: [
             HandoffFixture.connection(id: "conn_x", name: "Offline", ready: false),
-            HandoffFixture.connection(id: "conn_a", name: "Hermes", skills: ["Web research", "Email drafts"], tier: "guaranteed"),
+            HandoffFixture.connection(id: "conn_a", name: "Hermes", tier: "guaranteed", skills: ["Web research", "Email drafts"]),
             HandoffFixture.connection(id: "conn_b", name: "Claude"),
         ])
         await rig.flow.start()
