@@ -34,6 +34,11 @@
                         Button("Not now") {}.buttonStyle(.carryOnSecondary)
                     }
                 }
+                CatalogCell { Button("Due Friday 16") {}.buttonStyle(.carryOnStrong) }
+                CatalogCell { CarryOnButtonStyle.Preview(kind: .strong, title: "Due Friday 16", pressed: true) }
+                CatalogCell { Button("Due Friday 16") {}.buttonStyle(.carryOnStrong).disabled(true) }
+                CatalogCell { Button("Done") {}.buttonStyle(.carryOnGlassPrimary) }
+                CatalogCell { Button("Done") {}.buttonStyle(.carryOnGlassPrimary).disabled(true) }
             }
         }
 
@@ -67,6 +72,13 @@
                     HStack(spacing: CarryOnSpace.xs) {
                         CarryOnChip("Tomorrow", tone: .dueSoon)
                         CarryOnChip("Overdue · 2 days", tone: .overdue)
+                    }
+                }
+                CatalogCell {
+                    HStack(spacing: 6) {
+                        CarryOnChip("Today", size: .quick)
+                        CarryOnChip("Tomorrow", size: .quick, isSelected: true)
+                        CarryOnChip("Saturday", size: .quick)
                     }
                 }
                 CatalogCell {
