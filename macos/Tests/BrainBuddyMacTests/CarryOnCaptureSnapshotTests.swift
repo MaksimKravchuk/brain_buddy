@@ -46,7 +46,7 @@
                         tags: [ClassificationPreview(name: "calls", isNew: false)])
                     MacNewTaskFooter(addEnabled: true, hint: "⌘N · Return adds", onAdd: {})
                 })
-            assertSnapshot(view, named: "mac-capture-newtask-\(appearance.rawValue)", scheme: appearance.scheme, width: 560)
+            assertMacSnapshot(view, named: "mac-capture-newtask-\(appearance.rawValue)", scheme: appearance.scheme, width: 560)
         }
 
         @Test("The new-task card without a project or tags renders as approved", arguments: Appearance.allCases)
@@ -58,7 +58,7 @@
                     MacNewTaskClassification(project: nil, tags: [])
                     MacNewTaskFooter(addEnabled: true, hint: "⌘N · Return adds", onAdd: {})
                 })
-            assertSnapshot(
+            assertMacSnapshot(
                 view, named: "mac-capture-newtask-unfiled-\(appearance.rawValue)", scheme: appearance.scheme, width: 560)
         }
 
@@ -66,7 +66,7 @@
         func putItIn(appearance: Appearance) {
             let view = MacPutItInContent(selection: .constant(OpenList.next), onContinue: {}, onCancel: {})
                 .background(CarryOnColorStyle.coSurfaceCard)
-            assertSnapshot(view, named: "mac-capture-putitin-\(appearance.rawValue)", scheme: appearance.scheme, width: 440)
+            assertMacSnapshot(view, named: "mac-capture-putitin-\(appearance.rawValue)", scheme: appearance.scheme, width: 440)
         }
 
         @Test("The voice sheet while listening renders as approved", arguments: Appearance.allCases)
@@ -81,7 +81,7 @@
                 } more: {
                     EmptyView()
                 })
-            assertSnapshot(
+            assertMacSnapshot(
                 view, named: "mac-capture-voice-listening-\(appearance.rawValue)", scheme: appearance.scheme, width: 460)
         }
 
@@ -103,7 +103,7 @@
                         .font(MacRowFont.pill)
                         .foregroundStyle(CarryOnColorStyle.coTextPrimary)
                 })
-            assertSnapshot(
+            assertMacSnapshot(
                 view, named: "mac-capture-voice-transcript-\(appearance.rawValue)", scheme: appearance.scheme, width: 460)
         }
 
@@ -116,7 +116,7 @@
                 ) {
                     Text("Call Sam #calls").macQuickCaptureField()
                 })
-            assertSnapshot(view, named: "mac-capture-quick-\(appearance.rawValue)", scheme: appearance.scheme, width: 560)
+            assertMacSnapshot(view, named: "mac-capture-quick-\(appearance.rawValue)", scheme: appearance.scheme, width: 560)
         }
 
         @Test("The quick-capture footer shows each recognised token once, in text order")

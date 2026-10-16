@@ -132,12 +132,12 @@ export function CrtTreeMenu({
         aria-expanded={open}
         aria-controls="crt-tree-menu"
         disabled={busy}
-        className="flex h-9 max-w-[min(420px,50vw)] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm font-semibold text-slate-900 shadow-soft transition-[border-color,box-shadow] duration-200 ease-smooth hover:border-slate-300 hover:shadow-raised aria-expanded:border-sky-300 disabled:cursor-wait disabled:opacity-70"
+        className="flex h-9 max-w-[min(420px,50vw)] items-center gap-2 rounded-lg bg-quiet px-3 text-left text-co-meta font-semibold text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed aria-expanded:bg-quiet-pressed disabled:cursor-wait disabled:opacity-70"
         onClick={() => setOpen((value) => !value)}
       >
-        <Network className="h-4 w-4 shrink-0 text-brand-primary" aria-hidden="true" />
+        <Network className="h-4 w-4 shrink-0 text-ink" aria-hidden="true" />
         <span className="min-w-0 truncate">{triggerLabel}</span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ease-smooth ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+        <ChevronDown className={`h-4 w-4 shrink-0 text-ink-muted transition-transform duration-200 ease-smooth ${open ? "rotate-180" : ""}`} aria-hidden="true" />
       </button>
       <input
         ref={fileInputRef}
@@ -148,7 +148,7 @@ export function CrtTreeMenu({
         onChange={onFileChange}
       />
       {/* Floats under the trigger so an error never makes the canvas toolbar taller. */}
-      {!open && error ? <p role="alert" className="absolute left-0 top-[calc(100%+0.4rem)] z-40 w-max max-w-xs rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-left text-xs text-rose-800 shadow-floating">{error}</p> : null}
+      {!open && error ? <p role="alert" className="absolute left-0 top-[calc(100%+0.4rem)] z-40 w-max max-w-xs rounded-lg bg-sunken px-2.5 py-2 text-left text-co-meta text-danger">{error}</p> : null}
       {open ? (
         <nav
           ref={menuRef}
@@ -156,9 +156,9 @@ export function CrtTreeMenu({
           role="menu"
           aria-label="Tree menu"
           aria-busy={busy}
-          className="absolute left-0 top-[calc(100%+0.4rem)] z-50 min-w-64 origin-top-left rounded-xl border border-slate-200 bg-white p-1.5 text-left shadow-floating motion-safe:animate-scale-fade-in"
+          className="absolute left-0 top-[calc(100%+0.4rem)] z-50 min-w-64 origin-top-left co-glass-dense rounded-card p-1.5 text-left motion-safe:animate-scale-fade-in"
         >
-          {error ? <p role="alert" className="m-2 rounded-md bg-rose-50 p-2 text-xs text-rose-800">{error}</p> : null}
+          {error ? <p role="alert" className="m-2 rounded-md bg-sunken p-2 text-co-meta text-danger">{error}</p> : null}
           {(["create", "rename", "import", "export", "delete"] as const).map((action) => {
             const disabled = action === "create" || action === "import" ? busy : treeActionDisabled;
             const danger = action === "delete";
@@ -170,17 +170,17 @@ export function CrtTreeMenu({
                 role="menuitem"
                 disabled={disabled}
                 title={disabled && action !== "create" && action !== "import" ? "Create or choose a tree first" : undefined}
-                className={`flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors duration-200 ease-smooth disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent ${danger ? "text-rose-700 hover:bg-rose-50" : "text-slate-700 hover:bg-surface-sunken hover:text-slate-900"}`}
+                className={`flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-co-meta font-medium transition-colors duration-200 ease-smooth disabled:cursor-not-allowed disabled:text-ink-muted disabled:hover:bg-transparent ${danger ? "text-danger hover:bg-sunken" : "text-ink hover:bg-sunken hover:text-ink"}`}
                 onClick={() => runAction(action)}
               >
                 {actionLabel(action)}
               </button>
             );
           })}
-          <div className="my-1 border-t border-slate-100" />
-          <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Switch tree</p>
+          <div className="my-1" />
+          <p className="px-3 py-1 text-co-meta font-semibold text-ink-muted">Switch tree</p>
           {trees.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-slate-500">No other trees yet</p>
+            <p className="px-3 py-2 text-co-meta text-ink-muted">No other trees yet</p>
           ) : (
             trees.map((tree) => {
               const isCurrent = tree.id === currentTree?.id;
@@ -191,7 +191,7 @@ export function CrtTreeMenu({
                   role="menuitem"
                   aria-current={isCurrent ? "true" : undefined}
                   disabled={busy || isCurrent}
-                  className="flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900 disabled:cursor-default disabled:text-slate-500 disabled:hover:bg-transparent"
+                  className="flex min-h-10 w-full items-center rounded-lg px-3 py-2 text-left text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-sunken hover:text-ink disabled:cursor-default disabled:text-ink-muted disabled:hover:bg-transparent"
                   onClick={() => { closeMenu(); void onSelectTree(tree.id); }}
                 >
                   {isCurrent ? `Current tree: ${tree.name}` : `Switch to ${tree.name}`}
@@ -199,7 +199,7 @@ export function CrtTreeMenu({
               );
             })
           )}
-          {busy ? <p className="px-3 py-2 text-xs text-slate-500" role="status">Working…</p> : null}
+          {busy ? <p className="px-3 py-2 text-co-meta text-ink-muted" role="status">Working…</p> : null}
         </nav>
       ) : null}
     </div>

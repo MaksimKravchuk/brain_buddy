@@ -56,7 +56,7 @@ type UnsupportedWidthBoundaryProps = Readonly<{
 function UnsupportedWidthBoundary({ headingRef, onBack }: UnsupportedWidthBoundaryProps): React.JSX.Element {
   return (
     <main className={`${stateScreenClass} w-full max-w-full overflow-x-hidden`}>
-      <section className={`${stateCardClass} border-slate-200`}>
+      <section className={`${stateCardClass} `}>
         <p className={stateEyebrowClass}>Thinking Mode</p>
         <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
           Thinking Mode needs a wider window
@@ -71,7 +71,7 @@ function UnsupportedWidthBoundary({ headingRef, onBack }: UnsupportedWidthBounda
         >
           Back to Tasks
         </button>
-        <p className="mt-3 text-xs text-slate-500">The canvas is not loaded at this width.</p>
+        <p className="mt-3 text-co-meta text-ink-muted">The canvas is not loaded at this width.</p>
       </section>
     </main>
   );
@@ -146,8 +146,8 @@ export function CrtGate(): React.JSX.Element {
   if (exposure.kind === "checking") {
     return (
       <main className={stateScreenClass}>
-        <section aria-live="polite" className={`${stateCardClass} border-slate-200`}>
-          <h1 ref={headingRef} tabIndex={-1} className="text-balance text-title font-semibold text-slate-900">
+        <section aria-live="polite" className={`${stateCardClass} `}>
+          <h1 ref={headingRef} tabIndex={-1} className="text-balance font-voice text-co-title font-semibold text-ink">
             Checking Thinking Mode access…
           </h1>
           <p className={stateBodyClass} role="status">
@@ -161,7 +161,7 @@ export function CrtGate(): React.JSX.Element {
   if (exposure.kind === "disabled") {
     return (
       <main className={stateScreenClass}>
-        <section className={`${stateCardClass} border-slate-200`}>
+        <section className={`${stateCardClass} `}>
           <p className={stateEyebrowClass}>Thinking Mode</p>
           <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
             Thinking Mode isn't available for this account
@@ -184,18 +184,18 @@ export function CrtGate(): React.JSX.Element {
   if (exposure.kind === "degraded") {
     return (
       <main className={stateScreenClass}>
-        <section aria-live="polite" className={`${stateCardClass} border-amber-200`}>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Thinking Mode</p>
+        <section aria-live="polite" className={`${stateCardClass} `}>
+          <p className="text-co-meta font-semibold text-warning">Thinking Mode</p>
           <h1 ref={headingRef} tabIndex={-1} className={stateTitleClass}>
             Thinking Mode is temporarily unavailable
           </h1>
           <p className={stateBodyClass}>We couldn't check access safely.</p>
           {exposure.referenceId ? (
-            <label className="mt-4 block text-left text-xs font-semibold text-slate-600">
+            <label className="mt-4 block text-left text-co-meta font-semibold text-ink-muted">
               Support reference
               <input
                 aria-label="Support reference"
-                className="mt-1 block w-full rounded-md border border-slate-200 bg-surface-base px-2 py-1.5 font-mono text-xs text-slate-700"
+                className="mt-1 block w-full rounded-md bg-ground px-2 py-1.5 font-mono text-co-meta text-ink"
                 readOnly
                 value={exposure.referenceId}
                 onFocus={(event) => event.currentTarget.select()}

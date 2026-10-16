@@ -65,13 +65,13 @@ export function ReviewFrame({
   children: ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="flex min-h-screen flex-col bg-surface-base text-slate-900">
-      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 border-b border-slate-200 bg-white/95 px-5 py-1">
-        <span className="flex items-center gap-2 text-sm font-semibold">
-          <RotateCcw className="h-4 w-4 text-sky-700" aria-hidden />
+    <div className="flex min-h-screen flex-col bg-ground text-ink">
+      <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 bg-ground px-5 py-1">
+        <span className="flex items-center gap-2 text-co-meta font-semibold">
+          <RotateCcw className="h-4 w-4 text-ink" aria-hidden />
           {title}
         </span>
-        {recap ? <span className="text-xs text-slate-500">{recap}</span> : null}
+        {recap ? <span className="text-co-meta text-ink-muted">{recap}</span> : null}
         <span className="flex-1" />
         {actions}
       </header>
@@ -266,7 +266,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
       actions={
         <>
           {ended || current === "summary" ? null : (
-            <button type="button" disabled={held} className={`${buttonClass} border-transparent bg-transparent text-sky-700`} onClick={skip}>
+            <button type="button" disabled={held} className="min-h-11 rounded-control px-3 text-co-meta font-medium text-ink-muted hover:bg-quiet disabled:opacity-60" onClick={skip}>
               Skip step
             </button>
           )}
@@ -277,7 +277,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
       }
     >
       <div className="grid min-h-0 flex-1 md:grid-cols-[240px_1fr]">
-        <nav aria-label="Review steps" className="hidden w-[240px] flex-col gap-0.5 border-r border-slate-200 bg-white px-3 py-4 md:flex">
+        <nav aria-label="Review steps" className="hidden w-[240px] flex-col gap-0.5 bg-sunken px-3 py-4 md:flex">
           <ol className="m-0 flex list-none flex-col gap-0.5 p-0">
             {steps.map((code) => {
               const status = session.steps[code];
@@ -285,14 +285,14 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
                 <li
                   key={code}
                   aria-current={code === current ? "step" : undefined}
-                  className={`flex min-h-[34px] items-center gap-2.5 rounded-lg px-2.5 text-[13px] ${code === current ? "bg-sky-50 font-semibold text-sky-700" : status === "skipped" ? "text-slate-500" : "text-slate-600"}`}
+                  className={`flex min-h-[34px] items-center gap-2.5 rounded-card px-2.5 text-co-meta ${code === current ? "bg-card font-semibold text-ink" : status === "skipped" ? "text-ink-done" : "text-ink-muted"}`}
                 >
-                  <span className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border-[1.5px] ${status === "finished" ? "border-sky-500 bg-sky-500 text-white" : status === "skipped" ? "border-dashed border-slate-300" : "border-slate-300"}`} aria-hidden>
+                  <span className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full ${status === "finished" ? "bg-ink text-ground" : status === "skipped" ? "bg-quiet-pressed" : "bg-mark-open"}`} aria-hidden>
                     {status === "finished" ? <Check className="h-3 w-3" /> : null}
                   </span>
                   {STEPS[code].rail}
-                  {status === "finished" ? <small className="ml-auto text-[11px] font-normal text-slate-500">done</small> : null}
-                  {status === "skipped" ? <small className="ml-auto text-[11px] font-normal text-slate-500">skipped</small> : null}
+                  {status === "finished" ? <small className="ml-auto text-co-meta font-normal text-ink-muted">done</small> : null}
+                  {status === "skipped" ? <small className="ml-auto text-co-meta font-normal text-ink-muted">skipped</small> : null}
                 </li>
               );
             })}
@@ -301,16 +301,16 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
         <main className="flex justify-center px-5 py-6 md:px-10">
           <div className="flex w-full max-w-[600px] flex-col gap-3.5">
             {online ? null : (
-              <p role="status" aria-label="Offline" className="m-0 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+              <p role="status" aria-label="Offline" className="m-0 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
                 <b>You&apos;re offline.</b> Decisions made so far are saved. Retry when you&apos;re back online, here or on another device.
               </p>
             )}
             {ended ? (
               <>
-                <h1 ref={headingRef} tabIndex={-1} className="m-0 text-2xl font-semibold text-slate-900 outline-hidden">
+                <h1 ref={headingRef} tabIndex={-1} className="m-0 font-voice text-co-title text-ink outline-hidden focus-visible:shadow-ring-focus">
                   {idleClosed ? "This review was closed" : "This review has ended"}
                 </h1>
-                <p className="m-0 text-sm text-slate-600">
+                <p className="m-0 text-co-meta text-ink-muted">
                   {idleClosed
                     ? `This review was closed after a week without activity. Its ${decisionCount(session.counts)} decisions are kept.`
                     : `This review was finished or replaced on another device. Its ${decisionCount(session.counts)} decisions are kept.`}
@@ -323,11 +323,11 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
               </>
             ) : (
               <>
-                <p className="m-0 text-xs text-slate-500 md:hidden">{`Step ${position} of ${steps.length}`}</p>
-                <h1 ref={headingRef} tabIndex={-1} className="m-0 text-2xl font-semibold text-slate-900 outline-hidden">
+                <p className="m-0 text-co-meta text-ink-muted md:hidden">{`Step ${position} of ${steps.length}`}</p>
+                <h1 ref={headingRef} tabIndex={-1} className="m-0 font-voice text-co-title text-ink outline-hidden focus-visible:shadow-ring-focus">
                   {STEPS[current].title}
                 </h1>
-                {note ? <p role="status" className="m-0 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">{note}</p> : null}
+                {note ? <p role="status" className="m-0 rounded-card bg-quiet px-3 py-2 text-co-meta text-ink">{note}</p> : null}
                 {bar.failure ? <FailureBanner failure={bar.failure} online={bar.online} /> : null}
                 <ReviewRunContext.Provider value={run}>
                   <ShellToastContext.Provider value={stepNotify}>
@@ -341,7 +341,7 @@ export function ReviewShell({ initial, state, onExit }: { initial: ReviewSession
                     <button
                       type="button"
                       disabled={nextHeld}
-                      className="min-h-11 rounded-lg bg-sky-700 px-5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-60"
+                      className="min-h-11 rounded-control bg-accent px-5 text-co-meta font-semibold text-on-accent hover:bg-accent-pressed disabled:opacity-60"
                       onClick={() => request(() => advance("finished"))}
                     >
                       {bar.pending === "finished" ? "Saving…" : "Next"}

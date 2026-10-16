@@ -51,7 +51,7 @@
                             actions: [.primary("Done") {}, .secondary("Not now") {}],
                             trailingNote: "Saved as you type")
                     }))
-            assertSnapshot(view, named: "mac-inspector-next-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-next-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
 
         @Test("The Inbox inspector renders as approved", arguments: Appearance.allCases)
@@ -83,7 +83,7 @@
                             actions: [.secondary("Done already") {}, .quiet("Not needed") {}],
                             trailingNote: "Skip")
                     }))
-            assertSnapshot(view, named: "mac-inspector-inbox-\(appearance.rawValue)", scheme: appearance.scheme, width: 380)
+            assertMacSnapshot(view, named: "mac-inspector-inbox-\(appearance.rawValue)", scheme: appearance.scheme, width: 380)
         }
 
         @Test("The Waiting for inspector renders as approved", arguments: Appearance.allCases)
@@ -102,7 +102,7 @@
                     actionBar: {
                         MacInspectorActionBar(actions: [.primary("Got it") {}, .quiet("Follow up") {}])
                     }))
-            assertSnapshot(view, named: "mac-inspector-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
 
         @Test("The Someday inspector renders as approved", arguments: Appearance.allCases)
@@ -123,7 +123,7 @@
                     actionBar: {
                         MacInspectorActionBar(actions: [.primary("Start it") {}, .quiet("Not needed") {}])
                     }))
-            assertSnapshot(view, named: "mac-inspector-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
 
         @Test("The Done inspector renders as approved", arguments: Appearance.allCases)
@@ -141,7 +141,7 @@
                     actionBar: {
                         MacInspectorActionBar(actions: [.secondary("Reopen…") {}])
                     }))
-            assertSnapshot(view, named: "mac-inspector-done-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-done-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
 
         @Test("The Not now popover renders as approved", arguments: Appearance.allCases)
@@ -149,7 +149,7 @@
             let view = onGround(
                 MacNotNowPopoverContent(onPickDay: {}, onWaiting: {}, onSomeday: {}, onChangeStep: {})
                     .padding(20))
-            assertSnapshot(view, named: "mac-inspector-notnow-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-notnow-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
 
         @Test("The empty inspector renders as approved", arguments: Appearance.allCases)
@@ -158,7 +158,7 @@
                 MacInspectorPanel(height: 520) {
                     MacInspectorEmpty(text: "Select something to sort it.\nOr press Sort them one by one.")
                 })
-            assertSnapshot(view, named: "mac-inspector-empty-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
+            assertMacSnapshot(view, named: "mac-inspector-empty-\(appearance.rawValue)", scheme: appearance.scheme, width: 340)
         }
     }
 #endif

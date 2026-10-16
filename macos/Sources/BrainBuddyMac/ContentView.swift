@@ -1102,7 +1102,7 @@ struct WorkspaceView: View {
                             model.refreshQueryPresentation()
                         }
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .disabled(!model.listPageState.hasPrevious)
                     Text("More results").macRowMeta()
                     Button("Next page") {
@@ -1111,7 +1111,7 @@ struct WorkspaceView: View {
                             model.refreshQueryPresentation()
                         }
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .disabled(!model.listPageState.hasNext)
                 }
                 .frame(maxWidth: .infinity)
@@ -1370,15 +1370,15 @@ struct WorkspaceView: View {
         HStack(spacing: 16) {
             if model.destination == .list(.inbox) {
                 Button("Clarify Inbox") { requestNavigation(.clarifyInbox) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.waiting) {
                 Button("Review Waiting for") { requestNavigation(.reviewWaiting) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.someday) {
                 Button("Review Someday") { requestNavigation(.reviewSomeday) }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
             }
             if model.destination == .list(.next) {
                 Toggle(
@@ -1740,7 +1740,7 @@ struct WorkspaceView: View {
                 ) {
                     if case .failed = model.capturePreviewReadiness {
                         Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
-                            .buttonStyle(.macQuietPill)
+                            .buttonStyle(.carryOnQuiet)
                     }
                 }
             }
@@ -1748,7 +1748,7 @@ struct WorkspaceView: View {
                 MacCaptureNote(text: notice, topPadding: 12)
                 if model.hasAppliedTaskFilter {
                     Button("Clear search") { requestNavigation(.clearTaskFilters) }
-                        .buttonStyle(.macQuietPill)
+                        .buttonStyle(.carryOnQuiet)
                         .padding(.top, 4)
                 }
             }
@@ -2733,12 +2733,12 @@ private struct WaitingReviewView: View {
                 small: true)
             HStack(spacing: 8) {
                 Button("Back") { self.decision = nil }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                 Spacer()
                 Button(decision == .followUp ? "Create follow-up" : "Move to Next actions") {
                     submit(item, decision: decision)
                 }
-                .buttonStyle(.macStrongPill)
+                .buttonStyle(.carryOnStrong)
                 .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || (decision == .followUp && archived))
             }
         }
@@ -2766,7 +2766,7 @@ private struct WaitingReviewView: View {
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
-        .buttonStyle(.macSecondaryPill)
+        .buttonStyle(.carryOnSecondary)
         if archived {
             MacReviewLine(text: "Unarchive the project to add a follow-up there.", small: true)
         }
@@ -2914,10 +2914,10 @@ private struct SomedayReviewView: View {
                 small: true)
             HStack(spacing: 8) {
                 Button("Back") { enteringNext = false }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                 Spacer()
                 Button("Move to Next actions") { activate(item) }
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || archived)
             }
         }
@@ -2941,7 +2941,7 @@ private struct SomedayReviewView: View {
             .disabled(archived)
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
-        .buttonStyle(.macSecondaryPill)
+        .buttonStyle(.carryOnSecondary)
         if archived {
             MacReviewLine(text: "Unarchive the project to activate this task.", small: true)
         }

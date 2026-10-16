@@ -60,7 +60,7 @@ export function SignOutDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/30 p-4 motion-safe:animate-fade-in">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-ink/30 p-4 motion-safe:animate-fade-in">
       <section
         ref={panelRef}
         role="alertdialog"
@@ -70,12 +70,12 @@ export function SignOutDialog({
         aria-busy={pending}
         tabIndex={-1}
         onKeyDown={onPanelKeyDown}
-        className="w-full max-w-md outline-hidden rounded-[20px] border border-slate-200 bg-white p-5 shadow-floating motion-safe:animate-scale-fade-in"
+        className="w-full max-w-md outline-hidden co-glass-dense rounded-card p-5 motion-safe:animate-scale-fade-in"
       >
-        <h2 id={titleId} className="m-0 text-[20px] font-semibold leading-[1.3] text-slate-900">
+        <h2 id={titleId} className="m-0 text-[20px] font-semibold leading-[1.3] text-ink">
           Sign out?
         </h2>
-        <div id={descriptionId} className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-slate-700">
+        <div id={descriptionId} className="mt-3 flex flex-col gap-2 text-co-meta leading-relaxed text-ink">
           {signOutSentences(summary).map((sentence) => (
             <p key={sentence} className="m-0">
               {sentence}
@@ -83,7 +83,7 @@ export function SignOutDialog({
           ))}
         </div>
         {notice ? (
-          <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p role="alert" className="mt-3 rounded-lg bg-sunken px-3 py-2 text-co-meta text-warning">
             {notice === "changed"
               ? "Something changed since this opened. Check and confirm again."
               : "Sign-out didn't finish. You're still signed in. Try again."}
@@ -94,7 +94,7 @@ export function SignOutDialog({
             ref={cancelRef}
             type="button"
             disabled={pending}
-            className="min-h-11 rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:border-slate-300 disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-quiet hover:bg-quiet-pressed px-4 text-co-meta font-medium text-ink disabled:opacity-50"
             onClick={onCancel}
           >
             Cancel
@@ -102,7 +102,7 @@ export function SignOutDialog({
           <button
             type="button"
             disabled={pending}
-            className="min-h-11 rounded-lg bg-sky-700 px-5 text-sm font-semibold text-white hover:bg-sky-800 disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-ink px-5 text-co-meta font-semibold text-card hover:bg-ink/90 disabled:opacity-50"
             onClick={onConfirm}
           >
             {pending ? "Signing out…" : "Sign out"}

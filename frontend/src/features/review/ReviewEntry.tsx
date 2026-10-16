@@ -20,7 +20,7 @@ import { decisionCount, lastReviewText } from "./lastReview";
 import { OnboardingDialog } from "./OnboardingDialog";
 import { ReviewFrame } from "./ReviewShell";
 import { RestartStep } from "./steps/RestartStep";
-import { buttonClass, CountsGrid, FailureBanner, primaryButtonClass } from "./steps/stepParts";
+import { CountsGrid, FailureBanner, primaryButtonClass } from "./steps/stepParts";
 import { useStepAction } from "./steps/useStepAction";
 import { useLeaveGuard } from "./useLeaveGuard";
 import { WhileYouWereAway } from "./WhileYouWereAway";
@@ -118,7 +118,7 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
           ref={closeRef}
           type="button"
           disabled={restartHolds}
-          className={`${buttonClass} border-transparent bg-transparent text-sky-700`}
+          className="min-h-11 rounded-control px-3 text-co-meta font-medium text-ink-muted hover:bg-quiet disabled:opacity-60"
           onClick={() => navigate("/tasks/next")}
         >
           Close
@@ -131,23 +131,23 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
             <RestartStep state={state} onContinue={() => setRestartDone(true)} onSettlingChange={setRestartSettling} />
           ) : (
             <>
-              <h1 className="m-0 text-2xl font-semibold text-slate-900">{open ? "Pick up where you left off?" : "How much time do you have?"}</h1>
+              <h1 className="m-0 font-voice text-co-title text-ink">{open ? "Pick up where you left off?" : "How much time do you have?"}</h1>
               {closedAfterAWeek ? (
-                <p className="m-0 text-sm text-slate-600">{`Your review from ${formatReviewDate((closed as ReviewSession).started_at)} was closed after a week without activity. Its ${decisionCount((closed as ReviewSession).counts)} decisions are kept.`}</p>
+                <p className="m-0 text-co-meta text-ink-muted">{`Your review from ${formatReviewDate((closed as ReviewSession).started_at)} was closed after a week without activity. Its ${decisionCount((closed as ReviewSession).counts)} decisions are kept.`}</p>
               ) : null}
               {open ? (
                 <>
-                  <div className="flex items-center gap-4 rounded-[14px] border-[1.5px] border-sky-500 bg-sky-50 p-4">
+                  <div className="flex items-center gap-4 rounded-card bg-selected p-4">
                     <div className="flex flex-1 flex-col">
-                      <b className="text-[15px] text-slate-900">{`${open.mode === "quick" ? "Quick" : "Full"} review · step ${stepCodes.indexOf(open.current_step as string) + 1} of ${stepCodes.length}`}</b>
-                      <span className="text-sm text-slate-700">{`Started ${startedText(open)} on ${ORIGINS[open.origin]}. ${decisionCount(open.counts)} decisions made so far.`}</span>
+                      <b className="text-[15px] text-ink">{`${open.mode === "quick" ? "Quick" : "Full"} review · step ${stepCodes.indexOf(open.current_step as string) + 1} of ${stepCodes.length}`}</b>
+                      <span className="text-co-meta text-ink-muted">{`Started ${startedText(open)} on ${ORIGINS[open.origin]}. ${decisionCount(open.counts)} decisions made so far.`}</span>
                     </div>
                     {/* A replacement on its way would end this run: Continue waits for its answer. */}
                     <button type="button" disabled={action.pending !== null} className={primaryButtonClass} onClick={() => onStart(open)}>
                       Continue
                     </button>
                   </div>
-                  <p className="m-0 mt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Or start a new one</p>
+                  <p className="m-0 mt-2 text-co-meta font-semibold text-ink-muted">Or start a new one</p>
                 </>
               ) : null}
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
@@ -156,22 +156,22 @@ export function ReviewEntry({ state, onStart }: { state: ReviewState; onStart: (
                   key={mode}
                   type="button"
                   disabled={action.disabled}
-                  className="flex w-full flex-col gap-1.5 rounded-[14px] border border-slate-200 bg-white p-4 text-left hover:border-slate-300 hover:shadow-raised disabled:opacity-60"
+                  className="flex w-full flex-col gap-1.5 rounded-card bg-card p-4 text-left disabled:opacity-60"
                   onClick={() => start(mode)}
                 >
-                  <span className="flex items-baseline justify-between text-[17px] font-semibold text-slate-900">
+                  <span className="flex items-baseline justify-between text-co-body font-semibold text-ink">
                     {action.pending === mode ? "Starting…" : label}
-                    <span className="text-[13px] font-medium text-slate-500">{time}</span>
+                    <span className="text-co-meta font-medium text-ink-muted">{time}</span>
                   </span>
-                  <span className="text-[13px] leading-relaxed text-slate-600">{about}</span>
+                  <span className="text-co-meta leading-relaxed text-ink-muted">{about}</span>
                 </button>
               ))}
-              <p className="m-0 text-xs text-slate-500">Skip any step. Stop any time; what you&apos;ve done is kept and you can continue on any device.</p>
+              <p className="m-0 text-co-meta text-ink-muted">Skip any step. Stop any time; what you&apos;ve done is kept and you can continue on any device.</p>
               {last && open === null ? (
-                <section aria-label="Last review" className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4">
-                  <p className="m-0 text-xs font-semibold text-slate-600">{`Last review${last.ended_at ? ` · ${formatReviewDate(last.ended_at)}` : ""} · on ${ORIGINS[last.origin]}`}</p>
+                <section aria-label="Last review" className="flex flex-col gap-2">
+                  <p className="m-0 text-co-meta font-semibold text-ink-muted">{`Last review${last.ended_at ? ` · ${formatReviewDate(last.ended_at)}` : ""} · on ${ORIGINS[last.origin]}`}</p>
                   <CountsGrid counts={last.counts} label="Last review counts" />
-                  {last.clear_start ? <p className="m-0 text-xs text-slate-600">{`Clear start: ${last.clear_start === "yes" ? "Yes" : "Not really"}`}</p> : null}
+                  {last.clear_start ? <p className="m-0 text-co-meta text-ink-muted">{`Clear start: ${last.clear_start === "yes" ? "Yes" : "Not really"}`}</p> : null}
                 </section>
               ) : null}
             </>
