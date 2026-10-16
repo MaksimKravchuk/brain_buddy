@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import BrainBuddyWorkspace
 import SwiftUI
@@ -19,35 +20,25 @@ struct ProjectReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Review projects").font(.title2.bold())
-                    Text(loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") on this page · revisit after seven days" : "One project at a time")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close review") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
+            MacReviewHeader(
+                title: "Review projects",
+                caption: loaded ? "\(items.count) project\(items.count == 1 ? "" : "s") on this page · revisit after seven days" : "One project at a time",
+                onClose: { dismiss() })
 
             if !loaded {
                 ProgressView("Loading projects…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.projectReviewReadiness != .ready {
                 if case .failed = model.projectReviewReadiness, model.workspace.isRustSelected {
-                    ContentUnavailableView {
-                        Label("Project review couldn’t load", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text("The complete project signature is unavailable. Retry to check the current canonical review query.")
-                    } actions: {
+                    MacSheetEmptyState(
+                        title: "Project review couldn’t load", systemImage: "exclamationmark.triangle",
+                        description: "The complete project signature is unavailable. Retry to check the current canonical review query."
+                    ) {
                         Button("Retry", action: load)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if case .failed = model.projectReviewReadiness {
-                    ContentUnavailableView {
-                        Label("Projects couldn’t load", systemImage: "exclamationmark.triangle")
-                    } actions: {
+                    MacSheetEmptyState(title: "Projects couldn’t load", systemImage: "exclamationmark.triangle") {
                         Button("Retry", action: load)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,11 +47,10 @@ struct ProjectReviewView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else if items.isEmpty {
-                VStack(spacing: 12) {
-                ContentUnavailableView(
-                    "Projects reviewed", systemImage: "checkmark.circle",
-                    description: Text("Your decisions are saved on this Mac. Projects return after seven days.")
-                )
+                MacSheetEmptyState(
+                    title: "Projects reviewed", systemImage: "checkmark.circle",
+                    description: "Your decisions are saved on this Mac. Projects return after seven days."
+                ) {
                     if model.projectsPageState.hasNext {
                         Button("Next projects") {
                             Task {
@@ -74,15 +64,16 @@ struct ProjectReviewView: View {
             } else {
                 let item = items[index]
                 let taskPageState = model.projectReviewTaskPageState(item)
-                HStack {
+                HStack(spacing: 8) {
                     Button("Previous") {
                         index -= 1
                         decision = nil
                     }
+                    .buttonStyle(.macQuietPill)
                     .disabled(index == 0)
                     Text("\(index + 1) of \(items.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(MacSheetFont.meta)
+                        .foregroundStyle(CarryOnColorStyle.coTextSecondary)
                     Button(index >= items.count - 1 && model.projectsPageState.hasNext ? "Next projects" : "Next") {
                         if index < items.count - 1 {
                             index += 1
@@ -94,25 +85,28 @@ struct ProjectReviewView: View {
                             }
                         }
                     }
+                    .buttonStyle(.macQuietPill)
                     .disabled(index >= items.count - 1 && !model.projectsPageState.hasNext)
                     Spacer()
                     Button("Open project to edit actions") { openProject(item.id) }
+                        .buttonStyle(.macSecondaryPill)
                 }
                 ScrollView {
                     if taskPageState.readiness == .ready {
                         details(item)
-                        HStack {
+                        HStack(spacing: 12) {
                             Button("Previous actions") { changeTaskPage(previous: true, item: item) }
+                                .buttonStyle(.macText)
                                 .disabled(!taskPageState.hasPrevious)
                             Text(taskPageState.hasPrevious || taskPageState.hasNext ? "More actions" : "All actions shown")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coTextSecondary)
                             Button("Next actions") { changeTaskPage(previous: false, item: item) }
+                                .buttonStyle(.macText)
                                 .disabled(!taskPageState.hasNext)
                         }
+                        .padding(.top, 12)
                     } else if case .failed = taskPageState.readiness {
-                        ContentUnavailableView {
-                            Label("Project actions couldn’t load", systemImage: "exclamationmark.triangle")
-                        } actions: {
+                        MacSheetEmptyState(title: "Project actions couldn’t load", systemImage: "exclamationmark.triangle") {
                             if taskPageState.readiness == .failed("REVIEW_PAGE_CHANGED") {
                                 Button("Reload review", action: load)
                             } else {
@@ -124,16 +118,17 @@ struct ProjectReviewView: View {
                     }
                 }
                 .task(id: item.id) { await loadProjectTasks(item) }
-                Divider()
+                MacSheetDivider()
                 decisionControls(item)
                     .disabled(taskPageState.readiness != .ready)
                 if let error = model.error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    Text(error).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coStatusDanger)
                 }
             }
         }
         .padding(24)
         .frame(width: 700, height: 640)
+        .macSheetSurface()
         .onAppear(perform: load)
         .confirmationDialog("Archive this completed project?", isPresented: $confirmingArchive) {
             Button("Archive project") {
@@ -148,81 +143,40 @@ struct ProjectReviewView: View {
     }
 
     private func details(_ item: ProjectReviewItem) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(item.project.name).font(.title3.bold())
-            if let last = item.lastReview?.reviewedAt {
-                Text("Last reviewed \(last.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("WHY REVIEW NOW").font(.caption.bold()).foregroundStyle(.secondary)
-                ForEach(reasons(for: item), id: \.self) { reason in
-                    Label(reason, systemImage: "exclamationmark.circle")
-                        .font(.subheadline)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("DESIRED OUTCOME").font(.caption.bold()).foregroundStyle(.secondary)
-                Text(item.project.desiredOutcome ?? "No outcome defined yet.")
-                    .foregroundStyle(item.project.desiredOutcome == nil ? .secondary : .primary)
-            }
-            ForEach(TaskList.allCases) { list in
-                let rows = item.openTasks.filter { $0.state == list.taskState }
+        let closures = item.tasks.filter(\.state.isTerminal)
+        let displayedClosures = model.workspace.isRustSelected
+            ? Array(closures.prefix(3))
+            : Array(closures.sorted { ($0.completedAt ?? $0.cancelledAt ?? .distantPast) > ($1.completedAt ?? $1.cancelledAt ?? .distantPast) }.prefix(3))
+        return MacProjectReviewDetails(
+            name: item.project.name,
+            lastReviewed: (item.lastReview?.reviewedAt).map { "Last reviewed \($0.formatted(date: .abbreviated, time: .omitted))" },
+            reasons: reasons(for: item),
+            desiredOutcome: item.project.desiredOutcome,
+            sections: TaskList.allCases.compactMap { list -> MacProjectReviewSection? in
                 let wholeCount = item.count(list.taskState)
-                if wholeCount > 0 {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("\(list.title.uppercased()) · \(wholeCount)")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                        ForEach(rows) { task in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(task.title)
-                                if let waiting = task.waitingFor {
-                                    Text("Waiting for \(waiting)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-            }
-            let closures = item.tasks.filter(\.state.isTerminal)
-            let displayedClosures = model.workspace.isRustSelected
-                ? Array(closures.prefix(3))
-                : Array(closures.sorted { ($0.completedAt ?? $0.cancelledAt ?? .distantPast) > ($1.completedAt ?? $1.cancelledAt ?? .distantPast) }.prefix(3))
-            if !displayedClosures.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(model.workspace.isRustSelected ? "CLOSURES ON THIS PAGE" : "RECENT CLOSURES")
-                        .font(.caption.bold()).foregroundStyle(.secondary)
-                    ForEach(displayedClosures) { task in
-                        Text("\(task.state == .completed ? "Completed" : "Cancelled") · \(task.title)")
-                            .font(.subheadline)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+                guard wholeCount > 0 else { return nil }
+                let rows = item.openTasks.filter { $0.state == list.taskState }
+                return MacProjectReviewSection(
+                    title: "\(list.title.uppercased()) · \(wholeCount)",
+                    rows: rows.map { MacProjectReviewRow(title: $0.title, waitingFor: $0.waitingFor) })
+            },
+            closuresTitle: model.workspace.isRustSelected ? "CLOSURES ON THIS PAGE" : "RECENT CLOSURES",
+            closures: displayedClosures.map { "\($0.state == .completed ? "Completed" : "Cancelled") · \($0.title)" }
+        )
     }
 
     @ViewBuilder
     private func decisionControls(_ item: ProjectReviewItem) -> some View {
         if item.openTaskCount == 0 {
-            Text("No open actions. If the outcome is complete, archive this project; otherwise add a Next action.")
-                .font(.subheadline)
+            MacReviewLine(
+                text: "No open actions. If the outcome is complete, archive this project; otherwise add a Next action.",
+                tone: .primary)
             Button("Archive completed project…") { confirmingArchive = true }
+                .buttonStyle(.macSecondaryPill)
                 .disabled(!model.canArchiveProject)
                 .help("Add or clear the current task draft before archiving")
         } else if item.openTasks.isEmpty {
-            Text("No open actions are on this page. Load another actions page to review the project.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: "No open actions are on this page. Load another actions page to review the project.")
         } else {
             Picker("Your decision", selection: $decision) {
                 Text("Choose after checking the project").tag(ProjectReviewDecision?.none)
@@ -231,10 +185,9 @@ struct ProjectReviewView: View {
                 }
             }
             .pickerStyle(.menu)
+            .font(MacSheetFont.body)
             .disabled(item.nextCount == 0 && item.waitingCount == 0 && item.somedayCount == 0)
-            Text(decisionHint(for: item))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: decisionHint(for: item), small: true)
             Button("Mark reviewed") {
                 guard let decision else { return }
                 if model.workspace.isRustSelected {
@@ -243,7 +196,7 @@ struct ProjectReviewView: View {
                     removeCurrent()
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.macStrongPill)
             .disabled(!canMark(item) || model.projectReviewTaskPageState(item).readiness != .ready)
         }
     }
@@ -314,5 +267,76 @@ struct ProjectReviewView: View {
         }
         if result.isEmpty { result.append("Check that the Next action is still executable") }
         return result
+    }
+}
+
+/// One list's section of the project under review: "NEXT ACTIONS · 3" and its open tasks.
+struct MacProjectReviewSection: Hashable {
+    let title: String
+    let rows: [MacProjectReviewRow]
+}
+
+/// An open task under review, with who it waits for.
+struct MacProjectReviewRow: Hashable {
+    let title: String
+    var waitingFor: String?
+}
+
+/// What the Project review shows about one project: its name in 20 semibold, when it was last
+/// reviewed, why to review it now on a `bg-ground` plate, the desired outcome, the open tasks by
+/// list and the recent closures. Presentation only.
+struct MacProjectReviewDetails: View {
+    let name: String
+    let lastReviewed: String?
+    let reasons: [String]
+    let desiredOutcome: String?
+    let sections: [MacProjectReviewSection]
+    let closuresTitle: String
+    let closures: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(MacSheetFont.cardTitle)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                if let lastReviewed {
+                    MacReviewLine(text: lastReviewed, small: true)
+                }
+            }
+            MacSheetPlate(padding: 14) {
+                MacReviewSectionLabel(text: "WHY REVIEW NOW")
+                ForEach(reasons, id: \.self) { reason in
+                    MacSheetStatus(
+                        text: reason, systemImage: "exclamationmark.circle", tone: .primary, font: MacSheetFont.body)
+                }
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                MacReviewSectionLabel(text: "DESIRED OUTCOME")
+                MacReviewLine(text: desiredOutcome ?? "No outcome defined yet.", tone: desiredOutcome == nil ? .secondary : .primary)
+            }
+            ForEach(sections, id: \.self) { section in
+                VStack(alignment: .leading, spacing: 7) {
+                    MacReviewSectionLabel(text: section.title)
+                    ForEach(Array(section.rows.enumerated()), id: \.offset) { _, row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            MacReviewLine(text: row.title, tone: .primary)
+                            if let waiting = row.waitingFor {
+                                MacReviewLine(text: "Waiting for \(waiting)", small: true)
+                            }
+                        }
+                    }
+                }
+            }
+            if !closures.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    MacReviewSectionLabel(text: closuresTitle)
+                    ForEach(Array(closures.enumerated()), id: \.offset) { _, closure in
+                        MacReviewLine(text: closure, tone: .primary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

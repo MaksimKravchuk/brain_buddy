@@ -1,11 +1,12 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI
 
 /// Design X-01, the sidebar footer's sync status line (contracts/mac-app-host.md §6), rendering
-/// `SyncStatusLineModel`: one line of 11 pt secondary words (amber with a glyph in attention states),
-/// the indicator's reserved slot (a static glyph under Reduce Motion), at most one trailing action
-/// in sky, wrapping after " · " rather than truncating, the tooltip, and one polite announcement when
+/// `SyncStatusLineModel`: one line of 12 pt secondary words, as the board's sidebar foot
+/// (`status-warning` with a glyph in attention states), the indicator's reserved slot (a static glyph
+/// under Reduce Motion), at most one trailing action as a 12 semibold text button, wrapping after " · " rather than truncating, the tooltip, and one polite announcement when
 /// an attention state appears. It never presents anything or moves focus by itself: the words and
 /// the action are buttons the person presses, and they go through `MacPresentationRouter`.
 struct SyncStatusLine: View {
@@ -17,23 +18,22 @@ struct SyncStatusLine: View {
     var body: some View {
         let line = controller.line
         let description = line.description
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             SyncStatusGlyph(glyph: description.glyph)
             wordsButton(description)
             if let action = description.trailingActionTitle {
                 Button(action) {
                     Task { await controller.performTrailingAction() }
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .buttonStyle(.macText)
                 .accessibilityLabel(description.action == .retry ? "Retry sync" : action)
                 .focused($focus, equals: .statusTrailingAction)
             }
             Spacer(minLength: 0)
             SyncIndicatorSlot(slot: line.indicatorSlot(at: now), reduceMotion: reduceMotion)
         }
-        .padding(12)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 12)
         .onChange(of: controller.workspace.syncSnapshot, initial: true) { _, _ in
             controller.observeSnapshot()
             announce()
@@ -92,8 +92,8 @@ struct SyncStatusWords: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 11))
-        .foregroundStyle(attention ? AnyShapeStyle(Color.orange) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+        .font(MacSheetFont.meta)
+        .foregroundStyle(attention ? CarryOnColorStyle.coStatusWarning : CarryOnColorStyle.coTextSecondary)
     }
 }
 
@@ -107,13 +107,13 @@ struct SyncStatusGlyph: View {
             EmptyView()
         case .sessionEnded:
             Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
+                .font(.system(size: 12))
+                .foregroundStyle(CarryOnColorStyle.coStatusWarning)
                 .accessibilityHidden(true)
         case .warning:
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 11))
-                .foregroundStyle(.orange)
+                .font(.system(size: 12))
+                .foregroundStyle(CarryOnColorStyle.coStatusWarning)
                 .accessibilityHidden(true)
         }
     }
@@ -133,7 +133,7 @@ struct SyncIndicatorSlot: View {
                 if reduceMotion {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(CarryOnColorStyle.coTextSecondary)
                 } else {
                     ProgressView().controlSize(.mini)
                 }
@@ -160,7 +160,7 @@ struct SyncToolbarStatusItem: View {
             } label: {
                 HStack(spacing: 4) {
                     SyncStatusGlyph(glyph: item.glyph)
-                    Text(item.text).font(.system(size: 11))
+                    Text(item.text).font(MacSheetFont.meta)
                 }
             }
             .help(controller.line.description.tooltip)

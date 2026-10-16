@@ -1,3 +1,4 @@
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -12,41 +13,25 @@ struct UnreadableWorkspaceView: View {
     @FocusState private var tryAgainFocused: Bool
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(UnreadableWorkspaceCopy.title)
-                .font(.title2.bold())
-                .accessibilityAddTraits(.isHeader)
-            VStack(spacing: 6) {
-                Text(UnreadableWorkspaceCopy.message)
-                if let reason = host.workspace.loadError {
-                    Text(reason).foregroundStyle(.secondary)
-                }
-            }
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 440)
-            .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 12) {
-                Button(UnreadableWorkspaceCopy.startFresh) { confirmingStartFresh = true }
-                    .disabled(retrying)
-                Button(retrying ? UnreadableWorkspaceCopy.tryingAgain : UnreadableWorkspaceCopy.tryAgain) {
-                    Task {
-                        retrying = true
-                        await host.retryLoad()
-                        retrying = false
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
+        MacWorkspaceNoticePanel(
+            title: UnreadableWorkspaceCopy.title, message: UnreadableWorkspaceCopy.message,
+            detail: host.workspace.loadError
+        ) {
+            Button(UnreadableWorkspaceCopy.startFresh) { confirmingStartFresh = true }
+                .buttonStyle(.macSecondaryPill)
                 .disabled(retrying)
-                .focused($tryAgainFocused)
+            Button(retrying ? UnreadableWorkspaceCopy.tryingAgain : UnreadableWorkspaceCopy.tryAgain) {
+                Task {
+                    retrying = true
+                    await host.retryLoad()
+                    retrying = false
+                }
             }
+            .buttonStyle(.macStrongPill)
+            .keyboardShortcut(.defaultAction)
+            .disabled(retrying)
+            .focused($tryAgainFocused)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .frame(minWidth: 720, minHeight: 480)
         .onAppear { tryAgainFocused = true }
         .alert(UnreadableWorkspaceCopy.confirmTitle, isPresented: $confirmingStartFresh) {
             Button(UnreadableWorkspaceCopy.confirm, role: .destructive) {
@@ -70,31 +55,65 @@ struct LegacyImportFailedView: View {
     @FocusState private var tryAgainFocused: Bool
 
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(LegacyImportFailedCopy.title)
-                .font(.title2.bold())
-                .accessibilityAddTraits(.isHeader)
-            VStack(spacing: 6) {
-                Text(LegacyImportFailedCopy.message)
-                Text(LegacyImportFailedCopy.hint).foregroundStyle(.secondary)
-            }
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: 440)
-            .fixedSize(horizontal: false, vertical: true)
+        MacWorkspaceNoticePanel(
+            title: LegacyImportFailedCopy.title, message: LegacyImportFailedCopy.message,
+            detail: LegacyImportFailedCopy.hint
+        ) {
             Button(launch.isRunning ? LegacyImportFailedCopy.tryingAgain : LegacyImportFailedCopy.tryAgain) {
                 Task { await launch.retryImport() }
             }
+            .buttonStyle(.macStrongPill)
             .keyboardShortcut(.defaultAction)
             .disabled(launch.isRunning)
             .focused($tryAgainFocused)
         }
+        .onAppear { tryAgainFocused = true }
+    }
+}
+
+/// X-09's calm panel on the window's ground: a quiet symbol, the serif title, the 14 message and
+/// its secondary detail, centred, then the actions (`actions`, 8 apart).
+struct MacWorkspaceNoticePanel<Actions: View>: View {
+    let title: String
+    let message: String
+    let detail: String?
+    let actions: Actions
+
+    init(title: String, message: String, detail: String?, @ViewBuilder actions: () -> Actions) {
+        self.title = title
+        self.message = message
+        self.detail = detail
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30))
+                .foregroundStyle(CarryOnColorStyle.coMarkOpen)
+                .accessibilityHidden(true)
+            Text(title)
+                .carryOnText(CarryOnTypeScale.title)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 6) {
+                Text(message)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                if let detail {
+                    Text(detail).foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                }
+            }
+            .font(MacSheetFont.body)
+            .lineSpacing(4)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 440)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) { actions }
+                .padding(.top, 4)
+        }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .frame(minWidth: 720, minHeight: 480)
-        .onAppear { tryAgainFocused = true }
+        .background(CarryOnColorStyle.coBgGround)
     }
 }
