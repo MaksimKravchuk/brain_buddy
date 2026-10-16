@@ -223,13 +223,13 @@ struct TaskListScreen: View {
         }
     }
 
-    /// The Inbox's way into processing: the same action as the toolbar's
-    /// Process button, as a full-width secondary pill under the rows.
+    /// The Inbox's way into processing (board 07): a full-width secondary pill
+    /// under the rows, in place of the old toolbar Process button.
     private func processInboxButton(_ result: TaskListResult) -> some View {
         Button {
             router.isProcessingInbox = true
         } label: {
-            Text("Process")
+            Text("Sort them one by one")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.carryOnSecondary)
@@ -253,15 +253,6 @@ struct TaskListScreen: View {
 
     @ToolbarContentBuilder
     private func toolbarContent(_ result: TaskListResult) -> some ToolbarContent {
-        if case .list(.inbox) = destination {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Process") {
-                    router.isProcessingInbox = true
-                }
-                .disabled(result.openCount == 0)
-                .accessibilityHint("Clarify your inbox one item at a time.")
-            }
-        }
         ToolbarItem(placement: .topBarTrailing) {
             ListOptionsMenu(options: $storedOptions.listOptions, destination: destination)
         }
