@@ -131,8 +131,7 @@ private struct SmartAddTextView: UIViewRepresentable {
         switch kind {
         case .project:
             return [
-                // Brand text (sky-700 / sky-400), not sky-500, so the token
-                // meets text contrast.
+                // Brand text (text-primary), so the token meets text contrast.
                 .foregroundColor: BBColor.brandTextUIColor,
                 .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .semibold)),
             ]

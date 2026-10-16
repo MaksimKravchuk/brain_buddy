@@ -200,19 +200,20 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
   Change a colour for contrast only when App Review or an accessibility audit asks
   for it (Max, 2026-10-16).
 
-### Current system (until the redesign lands)
+### Current system
 
-- Tokens come from `.claude/skills/brain-buddy-design/` (the
-  `/brain-buddy-design` skill): sky `#0EA5E9` accent (`AccentColor`), slate
-  neutrals, the brand curve `cubic-bezier(0.22, 1, 0.36, 1)` for our own
-  animations, 44 pt hit targets, Reduce Motion respected.
+- The app theme (`BrainBuddy/DesignSystem/Theme.swift`: `BBColor`, `BBFont`, `bbCard`)
+  maps onto Carry On: colours come from the `BrainBuddyDesign` roles in light and dark,
+  fonts are the Instrument faces (`CarryOnFonts.register()` runs at launch), and the app
+  tint (`AccentColor`) is basalt/limestone, because terracotta is only for the one next
+  step. Screens keep calling `BBColor` / `BBFont`; stored project colours from the old
+  palette are displayed as the Carry On colour at the same index, never rewritten.
+- The brand curve `cubic-bezier(0.22, 1, 0.36, 1)` for our own animations, 44 pt hit
+  targets, Reduce Motion respected.
 - Glass on chrome only (tab bar, toolbars, sheets, the capture accessory,
   floating clusters); content stays flat.
 - Pending product sign-off (`docs/native-ios-app.md`): SF Symbols instead of
-  Lucide (use the documented mapping), dark mode derived from the slate/sky
-  scale, SF Pro instead of Inter, system glass motion, and sky-700
-  (`BBColor.brandText` / `brandFill`) for text and filled controls because
-  white on sky-500 is 2.8:1 (sky-500 stays for large accents). Do not add more
+  Lucide (use the documented mapping) and system glass motion. Do not add more
   deviations without flagging them.
 - Copy: English, sentence case everywhere ("Move to next actions", not "Move
   To Next Actions"), calm second person, short imperatives. List names are
