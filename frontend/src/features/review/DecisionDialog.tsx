@@ -145,8 +145,8 @@ function Backdrop({ inline, onDismiss, children }: { inline: boolean; onDismiss:
   return inline ? (
     <>{children}</>
   ) : (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6">
-      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-ground/80 backdrop-blur-xs motion-safe:animate-fade-in" onClick={onDismiss} />
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center sm:items-center sm:p-6 motion-safe:animate-fade-in">
+      <div data-testid="decision-dialog-scrim" aria-hidden className="absolute inset-0 bg-ink/30 motion-safe:animate-fade-in" onClick={onDismiss} />
       {children}
     </div>
   );
@@ -509,7 +509,7 @@ export function DecisionDialog({
         className={
           inline
             ? "relative flex w-full flex-col rounded-card bg-card"
-            : "relative flex h-full w-full flex-col overflow-y-auto bg-card shadow-floating sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
+            : "relative flex h-full w-full flex-col overflow-y-auto co-glass-dense sm:h-auto sm:max-h-[calc(100vh-48px)] sm:w-[560px] sm:rounded-sheet"
         }
       >
         <div className="flex items-start gap-3 px-5 pb-3 pt-4">
@@ -709,7 +709,7 @@ export function DecisionDialog({
               aria-modal="true"
               aria-labelledby={`${titleId}-discard`}
               aria-describedby={`${titleId}-discard-body`}
-              className="w-full max-w-[360px] rounded-card bg-card p-4 shadow-floating"
+              className="w-full max-w-[360px] rounded-card co-glass-dense p-4"
             >
               <h3 id={`${titleId}-discard`} className="m-0 text-co-meta font-semibold text-ink">{COPY.discardTitle}</h3>
               <p id={`${titleId}-discard-body`} className="m-0 mt-1 text-co-meta text-ink-muted">{COPY.discardBody}</p>
