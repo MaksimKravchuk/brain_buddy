@@ -1,7 +1,7 @@
 # Brain Buddy
 
-[![CI](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-artifacts-blue)](https://github.com/MVkravchuk/brain_buddy/actions/workflows/ci.yml)
+[![CI](https://github.com/maxk-lab/brain_buddy/actions/workflows/ci.yml/badge.svg)](https://github.com/maxk-lab/brain_buddy/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-artifacts-blue)](https://github.com/maxk-lab/brain_buddy/actions/workflows/ci.yml)
 
 Brain Buddy is a personal GTD workspace whose product focus is helping people turn loosely expressed intentions into executable next actions. It is built first for its owner's everyday use, then for people with similar needs.
 

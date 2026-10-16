@@ -45,7 +45,7 @@ stage=$(mktemp -d "$install_dir/.bb-install.XXXXXXXX") || fail 'Cannot create st
 trap 'rm -rf -- "$stage"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
-base="https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v$version"
+base="https://github.com/maxk-lab/brain_buddy/releases/download/bb-v$version"
 archive="bb-$version-$target.tar.gz"
 download() {
     curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 120 --output "$stage/$1" "$base/$1" || fail 'Download failed; previous bb is preserved'

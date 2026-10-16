@@ -9,11 +9,11 @@ The source is in development. Release URLs below become usable after the reviewe
 Linux x64/ARM64 requires glibc 2.35 or later; macOS x64/ARM64 requires macOS15 or later. Windows supports x64 Windows10/11; ARM64 is excluded from this release. Native binaries need no compiler or administrator access. Checksums detect archive corruption; installers trust the HTTPS GitHub release authority. OS signing/notarization and automatic updates are outside this release.
 
 ```sh
-curl -fsSL https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v0.1.0/install.sh | sh -s -- --version 0.1.0
+curl -fsSL https://github.com/maxk-lab/brain_buddy/releases/download/bb-v0.1.0/install.sh | sh -s -- --version 0.1.0
 ```
 
 ```powershell
-& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v0.1.0/install.ps1').Content)) -Version '0.1.0'
+& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing 'https://github.com/maxk-lab/brain_buddy/releases/download/bb-v0.1.0/install.ps1').Content)) -Version '0.1.0'
 ```
 
 Unix installs into `$HOME/.local/bin`; Windows uses `%LOCALAPPDATA%\BrainBuddy\bin`. Set `--dir DIRECTORY` or `-InstallDir DIRECTORY` to choose another directory you own. The installer stages downloads on the destination filesystem, checks the five-entry checksum manifest and archive membership, runs the selected version, then replaces the old executable. Integrity, unsupported-machine and download failures preserve the old binary. PATH files are never edited; the installer prints the required PATH step.

@@ -9,7 +9,7 @@ production starts empty (FR-019).
 
 | Schema | Owner module (ADR-0001) | Holds | Today |
 | --- | --- | --- | --- |
-| `identity` | Identity (ADR-0028) | users, password hashes (Argon2id), sessions (hashed tokens), invites, email codes, external identities (Apple/Google), browser and device grants (ADR-0029), pending signups awaiting an invite (contracts/invite-handoff.md). Login rate limits stay in process memory (not stored) | `auth.sqlite3` |
+| `identity` | Identity (ADR-0028) | users, password hashes (Argon2id), sessions (hashed tokens), invites (consumption is the authoritative, immutable `used_at`; purging the consuming account clears only `used_by_user_id`, so a used code never becomes reusable), email codes, external identities (Apple/Google), browser and device grants (ADR-0029), pending signups awaiting an invite (contracts/invite-handoff.md). Login rate limits stay in process memory (not stored) | `auth.sqlite3` |
 | `flags` | Feature flags (ADR-0019) | flag modes, selected owners (changes logged to stdout only, as today; no stored audit) | `feature_flags.sqlite3` |
 | `tasks` | Tasks | tasks, projects, Tags, children, archive, Review sessions/decisions/formulations, navigator state | `tasks.sqlite3` |
 | `sync` | Tasks (026 sync) | command receipts, change feed (per-scope commit sequence), snapshots/transfers, hints cursor, generations | `tasks.sqlite3` |
