@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import struct BrainBuddyAPI.APIError
 import struct BrainBuddyAPI.AgentRunDTO
 import struct BrainBuddyAPI.AgentRunSummaryDTO
@@ -154,11 +155,12 @@ package final class BrainBuddyModel {
         localState = localStateStore.load() ?? (try? localStateStore.update { _ in }) ?? .fresh()
         firstRun = FirstRunModel(store: localStateStore, now: now)
         agentAvailability = AgentAvailability(
-            account: workspace.account, remote: agentAvailabilityRemote ?? { AccountAgentRuns.client(for: $0) })
+            account: workspace.account, remote: agentAvailabilityRemote ?? { AccountAgentRuns.client(for: $0) },
+            log: SystemMacLog())
         let steps = agentSteps
         agentRuns = AgentRunsStore(
             remote: agentRunsRemote ?? AccountAgentRuns(workspace: workspace), steps: { steps.steps },
-            availability: agentAvailability, cache: agentCache, now: now)
+            availability: agentAvailability, cache: agentCache, now: now, log: SystemMacLog())
     }
 
     /// 029-FR-001, 029-FR-002: decides the first run once, at launch and before the first window

@@ -1,3 +1,4 @@
+import BrainBuddyAgents
 import AppKit
 import BrainBuddyCore
 import BrainBuddyDesign
