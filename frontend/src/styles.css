@@ -1,5 +1,3 @@
-@import "./styles/tokens.css" layer(base);
-
 @import "tailwindcss";
 @import "./styles/carryOn.css";
 
@@ -21,30 +19,6 @@
   --text-subtitle--line-height: 1.4;
   --text-subtitle--letter-spacing: -0.005em;
 
-  /* Legacy palette still used by screens that have not moved to roles yet
-   * (thinking canvas, agents, review, admin, privacy). Those screens pair these
-   * with slate text, so they stay light in dark mode as self-consistent
-   * islands. Delete each value with its last user. */
-  --color-surface-base: #f8fafc;
-  --color-surface-sunken: #f1f5f9;
-  --color-surface-raised: #ffffff;
-  --color-brand-primary: #0ea5e9;
-
-  /* AI & task-state aliases (post-pivot). emerald = AI executing a task
-   * (Sparkles). Light values only: no design-system dark pair exists yet. */
-  --color-ai: #10b981;
-  --color-ai-bg: #ecfdf5;
-  --color-ai-border: #a7f3d0;
-  --color-ai-fg: #047857;
-
-  --color-needs-you: #d97706;
-  --color-needs-you-bg: #fffbeb;
-  --color-needs-you-border: #fde68a;
-  --color-needs-you-fg: #92400e;
-
-  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 1px rgba(15, 23, 42, 0.03);
-  --shadow-raised: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px -12px rgba(15, 23, 42, 0.12);
-  --shadow-floating: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
   --shadow-ring-focus: 0 0 0 2px var(--role-ground), 0 0 0 4px var(--role-focus);
 
   --radius-xl: 1.25rem;

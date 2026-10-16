@@ -129,7 +129,7 @@ export function ConfirmDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-ground/80 p-5 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-ink/30 p-5">
       <div
         ref={dialogRef}
         role="alertdialog"
@@ -137,7 +137,7 @@ export function ConfirmDialog({
         aria-labelledby={titleId}
         aria-describedby={bodyId}
         onKeyDown={onKeyDown}
-        className="w-full max-w-[380px] rounded-card bg-card p-4 shadow-floating"
+        className="w-full max-w-[380px] rounded-card co-glass-dense p-4"
       >
         <h2 id={titleId} className="m-0 text-co-meta font-semibold text-ink">{title}</h2>
         <p id={bodyId} className="m-0 mt-1 text-co-meta text-ink-muted">{body}</p>
