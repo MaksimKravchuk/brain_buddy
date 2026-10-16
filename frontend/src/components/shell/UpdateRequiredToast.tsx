@@ -47,19 +47,19 @@ export function UpdateRequiredToast({
     <div
       ref={rootRef}
       role="alert"
-      className="fixed left-1/2 top-16 z-[200] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-[12px] border border-slate-200 bg-white/95 py-1 pl-4 pr-1 text-[13px] text-slate-700 shadow-floating backdrop-blur-sm motion-safe:animate-fade-in-up"
+      className="fixed left-1/2 top-16 z-[200] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 co-glass-dense rounded-card py-1 pl-4 pr-1 text-co-meta text-ink motion-safe:animate-fade-in-up"
     >
       <span className="min-w-0">{text}</span>
       <button
         type="button"
-        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-sky-700 hover:bg-sky-50"
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-co-meta font-semibold text-ink hover:bg-quiet"
         onClick={onReload}
       >
         Reload
       </button>
       <button
         type="button"
-        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-[13px] font-semibold text-slate-600 hover:bg-slate-100"
+        className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg px-3 text-co-meta font-semibold text-ink-muted hover:bg-sunken"
         onClick={dismiss}
       >
         Dismiss

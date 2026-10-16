@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ProtectedRoute } from "../../components/auth/ProtectedRoute";
 import { Button } from "../../components/ui/Button";
-import { authButtonClass, authInputClass } from "../auth/AuthControls";
+import { authButtonClass, authInputClass } from"../auth/AuthControls";
 import { useAuthStore } from "../../stores/authStore";
 import { ApiError } from "../../api/client";
 import { cliAuthApi, type AuthorizationRequest } from "./api";
@@ -102,9 +102,9 @@ export function CliAuthorizePage(): React.JSX.Element {
     else if (!busy) input.current?.focus();
   }, [error, terminal, available, request, busy]);
 
-  return <main className="flex min-h-screen items-center justify-center bg-surface-base p-4">
-    <section className="w-full max-w-lg rounded-xl bg-white p-6 shadow-sm" aria-labelledby="cli-title">
-      <h1 id="cli-title" className="text-xl font-semibold">Authorize BrainBuddy CLI</h1>
+  return <main className="flex min-h-screen items-center justify-center bg-ground p-4">
+    <section className="w-full max-w-lg rounded-card bg-card p-6" aria-labelledby="cli-title">
+      <h1 id="cli-title" className="font-voice text-co-title text-ink">Authorize BrainBuddy CLI</h1>
       {!available ? <div ref={result} tabIndex={-1} role="alert" className="mt-4">CLI sign in is not available for this account.</div> : <>
         <p className="mt-3">Signed in as <strong>{request ? request.account.email : user?.email}</strong></p>
         <p className="mt-3">Approve only a code shown by your own CLI. Anyone with the resulting session can access your BrainBuddy account.</p>
@@ -114,7 +114,7 @@ export function CliAuthorizePage(): React.JSX.Element {
           <Button type="submit" className={"mt-3 " + authButtonClass} disabled={busy}>Check code</Button>
         </form>}
         {request && <div className="mt-4">
-          <h2 ref={approval} tabIndex={-1} className="font-semibold">Confirm this CLI request</h2>
+          <h2 ref={approval} tabIndex={-1} className="text-co-body font-semibold">Confirm this CLI request</h2>
           <p>Code: <strong className="font-mono">{request.user_code}</strong></p>
           <p className="mt-2">Expires at {new Date(expiry.current).toLocaleTimeString()}</p>
           <div className="mt-4 flex flex-wrap gap-3">
@@ -123,11 +123,11 @@ export function CliAuthorizePage(): React.JSX.Element {
           </div>
         </div>}
         {busy && <p className="mt-3" aria-live="polite">{request ? "Sending your decision…" : "Checking this code…"}</p>}
-        {(error || terminal) && <div ref={result} tabIndex={-1} role={error ? "alert" : "status"} className="mt-4 rounded border border-slate-300 p-3">{error || terminal}</div>}
+        {(error || terminal) && <div ref={result} tabIndex={-1} role={error ? "alert" : "status"} className="mt-4 rounded-card bg-sunken p-3">{error || terminal}</div>}
         {error && <Button variant="secondary" className={"mt-3 " + authButtonClass} disabled={busy} onClick={() => void check(code)}>Check code again</Button>}
         {!terminal && <Button variant="secondary" className={"mt-4 flex " + authButtonClass} onClick={cancel}>Cancel</Button>}
       </>}
-      <Link className="mt-4 inline-block underline" to="/">Back to BrainBuddy</Link>
+      <Link className="mt-4 inline-block text-co-meta text-ink-muted underline" to="/">Back to BrainBuddy</Link>
     </section>
   </main>;
 }
