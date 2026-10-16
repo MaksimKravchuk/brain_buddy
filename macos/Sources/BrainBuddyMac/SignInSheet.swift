@@ -108,7 +108,7 @@ struct SignInSheet: View {
                 Button(SignInCopy.ok) {
                     if flow.finishNote() { onClose() }
                 }
-                .buttonStyle(.macStrongPill)
+                .buttonStyle(.carryOnStrong)
                 .keyboardShortcut(.defaultAction)
                 .focused($focus, equals: .note)
             }
@@ -196,7 +196,7 @@ struct MacSignInForm<Fields: View>: View {
                 // Enabled while signing in too: it stops the request and keeps what was typed. Not
                 // once the account is linked: that sign-in finishes, so Cancel would be untrue.
                 Button(SignInCopy.cancel, action: onCancel)
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .keyboardShortcut(.cancelAction)
                     .disabled(!canCancel)
                 Button(action: onSubmit) {
@@ -207,7 +207,7 @@ struct MacSignInForm<Fields: View>: View {
                         Text(submitTitle)
                     }
                 }
-                .buttonStyle(.macStrongPill)
+                .buttonStyle(.carryOnStrong)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit)
             }

@@ -17,7 +17,7 @@ export function ProtectedRoute({ children }: Props): React.JSX.Element {
 
   if (status === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-surface-base text-sm text-slate-500">
+      <div className="flex min-h-screen items-center justify-center bg-ground text-co-meta text-ink-muted">
         Loading session…
       </div>
     );

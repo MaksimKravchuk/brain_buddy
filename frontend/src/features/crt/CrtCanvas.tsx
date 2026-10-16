@@ -72,7 +72,7 @@ const NODE_TYPES = { "crt-card": CrtCardNode };
 const EDGE_TYPES = { "crt-edge": CrtEdgeComponent };
 const CRT_EDGE_MARKER = {
   type: MarkerType.ArrowClosed,
-  color: "#64748b",
+  color: "currentColor",
   width: 18,
   height: 18,
   markerUnits: "strokeWidth",
@@ -162,7 +162,7 @@ function CrtEdgeComponent({
         markerEnd={markerEnd}
         role="img"
         aria-label="Directed relation"
-        style={{ ...style, stroke: selected ? "#0284c7" : "#64748b", strokeWidth: selected ? 3 : 2 }}
+        style={{ ...style, stroke: selected ? "var(--role-ink)" : "var(--role-ink-muted)", strokeWidth: selected ? 3 : 2 }}
       />
     </g>
   );
@@ -923,14 +923,14 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             deleteKeyCode={null}
             selectionOnDrag={!panMode && !spacePressed}
           >
-            <Background color="#cbd5e1" gap={24} size={1} />
+            <Background color="var(--role-quiet-pressed)" gap={24} size={1} />
           </ReactFlow>
 
           {emptyHint ? <p className="crt-canvas-empty-hint">{emptyHint}</p> : null}
 
           {selectedRelationId ? (
             <div
-              className="crt-relation-action-toolbar"
+              className="crt-relation-action-toolbar co-glass-dense"
               data-testid="crt-relation-action-toolbar"
               role="toolbar"
               aria-label="Selected relation actions"
@@ -960,7 +960,7 @@ function CrtCanvasInner({ graph, onChange, historyKey, saveStatus = "Saved", cre
             </div>
           ) : null}
 
-          <div className="crt-zoom-controls" aria-label="Canvas zoom controls">
+          <div className="crt-zoom-controls co-glass-dense" aria-label="Canvas zoom controls">
             <button type="button" data-crt-native="true" aria-label="Fit all cards" title="Fit all cards" onClick={fitAll}><Maximize2 aria-hidden /></button>
             <button type="button" data-crt-native="true" aria-label="Zoom out" title="Zoom out" onClick={() => { void reactFlow.zoomOut({ duration: 120 }); commitZoom(zoom - 0.1); }}><Minus aria-hidden /></button>
             <span aria-label="Zoom level">{Math.round(zoom * 100)}%</span>

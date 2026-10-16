@@ -64,7 +64,7 @@ struct SyncConflictView: View {
                 if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
                 if let heading = model.blockedHeading { blockedBody(heading) }
                 Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
-                    .buttonStyle(.macStrongPill)
+                    .buttonStyle(.carryOnStrong)
                     .disabled(!model.applyEnabled || submit == nil)
                     .focused($focus, equals: .apply)
             }
@@ -207,13 +207,13 @@ struct SyncConflictView: View {
             Text(model.confirmDiscardDetail).font(MacSheetFont.note).foregroundStyle(CarryOnColorStyle.coTextSecondary)
             HStack(spacing: 8) {
                 Button("Cancel") { model.cancelDiscard() }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .keyboardShortcut(.cancelAction)
                     .focused($focus, equals: .cancelDiscard)
                 Button(model.confirmDiscardButton, role: .destructive) {
                     if let resolution = model.confirmDiscard() { submit?(resolution) }
                 }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(submit == nil)
             }
         }

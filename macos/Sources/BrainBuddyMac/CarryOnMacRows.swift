@@ -243,67 +243,6 @@ struct MacTaskRow: View {
     }
 }
 
-/// The board's pill: primary (terracotta), secondary, quiet or strong; 32 high, 14 semibold, padding
-/// 0 14. `quiet` is text only; `strong` is the shared `button-strong` colours (basalt/limestone, the
-/// capture boards' Add and a sheet's one decisive action), the Mac size of `CarryOnButtonStyle.strong`.
-struct MacPillButtonStyle: ButtonStyle {
-    enum Kind: Sendable {
-        case primary, secondary, quiet, strong
-    }
-
-    let kind: Kind
-
-    func makeBody(configuration: Configuration) -> some View {
-        MacPillButtonBody(kind: kind, label: configuration.label, isPressed: configuration.isPressed)
-    }
-}
-
-private struct MacPillButtonBody<Label: View>: View {
-    let kind: MacPillButtonStyle.Kind
-    let label: Label
-    let isPressed: Bool
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        label
-            .font(MacRowFont.pill)
-            .foregroundStyle(foreground)
-            .padding(.horizontal, 14)
-            .frame(minHeight: 32)
-            .background {
-                if let background { Capsule().fill(background) }
-            }
-            .scaleEffect(isPressed && kind != .quiet ? 0.97 : 1)
-            .opacity(isEnabled ? 1 : 0.4)
-            .contentShape(Capsule())
-    }
-
-    private var foreground: CarryOnColorStyle {
-        switch kind {
-        case .primary: CarryOnColorStyle.coButtonPrimaryFg
-        case .secondary: CarryOnColorStyle.coButtonSecondaryFg
-        case .quiet: CarryOnColorStyle.coTextPrimary
-        case .strong: CarryOnColorStyle.coButtonStrongFg
-        }
-    }
-
-    private var background: CarryOnColorStyle? {
-        switch kind {
-        case .primary: isPressed ? CarryOnColorStyle.coButtonPrimaryBgPressed : CarryOnColorStyle.coButtonPrimaryBg
-        case .secondary: isPressed ? CarryOnColorStyle.coButtonSecondaryBgPressed : CarryOnColorStyle.coButtonSecondaryBg
-        case .quiet: nil
-        case .strong: CarryOnColorStyle.coButtonStrongBg
-        }
-    }
-}
-
-extension ButtonStyle where Self == MacPillButtonStyle {
-    static var macPrimaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .primary) }
-    static var macSecondaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .secondary) }
-    static var macQuietPill: MacPillButtonStyle { MacPillButtonStyle(kind: .quiet) }
-    static var macStrongPill: MacPillButtonStyle { MacPillButtonStyle(kind: .strong) }
-}
-
 /// A section header inside the list: Instrument Sans 12, secondary, in line with the rows' text.
 struct MacListSectionHeader: View {
     let title: String

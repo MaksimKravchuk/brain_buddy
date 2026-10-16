@@ -339,8 +339,8 @@ describe("020-FR-033 Summary", () => {
       "Done3", "Reformulated2", "First step2", "Waiting for1", "Someday / maybe4",
       "Cancelled1", "Kept 7 more days0", "Inbox processed10", "Kept as is3", "Moved to Next2"
     ]);
-    expect(items[6]).toHaveClass("text-slate-500");
-    expect(items[0]).not.toHaveClass("text-slate-500");
+    expect(items[6]).toHaveClass("text-ink-done");
+    expect(items[0]).not.toHaveClass("text-ink-done");
     expect(list).toHaveClass("grid-cols-2", "md:grid-cols-4");
     expect(screen.getByText(/^Next review: Fri 16 Oct, \d{2}:\d{2}$/)).toBeInTheDocument();
   });

@@ -77,11 +77,11 @@ export function AdminUsersSection(): React.JSX.Element {
 
   return (
     <section className="w-full">
-      <h2 className="text-subtitle font-semibold text-slate-900">Users</h2>
-      <p className="mt-1 text-sm text-slate-500">Create, edit, revoke, or permanently delete member accounts.</p>
+      <h2 className="text-co-body font-semibold text-ink">Users</h2>
+      <p className="mt-1 text-co-meta text-ink-muted">Create, edit, revoke, or permanently delete member accounts.</p>
       <div className="mt-4 flex flex-col gap-4">
         {!showCreate ? <Button type="button" variant="primary" className="self-start" ref={(button) => { if (button) triggerRefs.current.set("create", button); else triggerRefs.current.delete("create"); }} onClick={() => setShowCreate(true)}>Create user</Button> : <AdminCreateForm onCreated={(account) => { setShowCreate(false); setMessage("Account created."); void refresh().then(() => setFocusAfterRefresh(account.id)); }} onError={(error) => setMessage(errorMessage(error, "create the account"))} onCancel={() => { setFocusCreateAfterClose(true); setShowCreate(false); }} />}
-        {message ? <p role="status" className="text-sm text-slate-600">{message}</p> : null}
+        {message ? <p role="status" className="text-co-meta text-ink-muted">{message}</p> : null}
         {accounts.isPending ? <p role="status">Loading users…</p> : null}
         {accounts.isError ? (
           <div role="alert" className="flex flex-wrap items-center gap-3">
@@ -104,7 +104,7 @@ export function AdminUsersSection(): React.JSX.Element {
           <button
             type="button"
             aria-label={tableAtEnd ? "Back to table start" : "Show table actions"}
-            className="min-h-11 self-end rounded-md px-2 text-sm font-medium text-sky-800 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            className="min-h-11 self-end rounded-md px-2 text-co-meta font-medium text-ink underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             onClick={() => {
               // The cue only renders after the mounted scrollport reports overflow.
               const scroller = tableScrollRef.current as HTMLDivElement;
@@ -117,19 +117,19 @@ export function AdminUsersSection(): React.JSX.Element {
         <div
           ref={tableScrollRef}
           data-testid="admin-users-table-scroll"
-          className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+          className="overflow-x-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           role={tableHasOverflow ? "region" : undefined}
           aria-label={tableHasOverflow ? "Users table, horizontally scrollable" : undefined}
           tabIndex={tableHasOverflow ? 0 : undefined}
         >
           {/* Cells never wrap: a narrow screen scrolls the table sideways (with
               the cue above) instead of stacking a column's words. */}
-          <table className="w-full whitespace-nowrap text-left text-sm [&_td]:py-2.5 [&_td]:pr-6 [&_th]:pb-2 [&_th]:pr-6 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.06em] [&_th]:text-slate-500">
+          <table className="w-full whitespace-nowrap text-left text-co-meta [&_td]:py-3 [&_td]:pr-6 [&_th]:pb-2 [&_th]:pr-6 [&_th]:text-co-meta [&_th]:font-semibold [&_th]:text-ink-muted">
             <caption className="sr-only">Admin users</caption>
             <thead><tr><th>Email</th><th>Name</th><th>Deletion requested</th><th>Actions</th></tr></thead>
             <tbody>{accounts.data?.accounts.map((account) => (
-              <tr key={account.id} ref={(row) => { if (row) rowRefs.current.set(account.id, row); else rowRefs.current.delete(account.id); }} className="border-t border-slate-200 text-slate-700">
-                <td className="text-slate-900">{account.email}</td><td>{account.display_name ?? "—"}</td><td>{account.deletion_requested ? "Yes" : "No"}</td>
+              <tr key={account.id} ref={(row) => { if (row) rowRefs.current.set(account.id, row); else rowRefs.current.delete(account.id); }} className="text-ink">
+                <td className="text-ink">{account.email}</td><td>{account.display_name ?? "—"}</td><td>{account.deletion_requested ? "Yes" : "No"}</td>
                 <td><div className="flex gap-2">
                   <Button type="button" size="sm" variant="secondary" aria-label={`Edit ${account.id} (${account.email})`} ref={(button) => { if (button) triggerRefs.current.set(`edit:${account.id}`, button); }} onClick={() => setEditing(account)}>Edit</Button>
                   <Button type="button" size="sm" variant="secondary" aria-label={`Revoke sessions for ${account.id} (${account.email})`} ref={(button) => { if (button) triggerRefs.current.set(account.id, button); }} onClick={() => setRevoking(account)}>Revoke sessions</Button>
@@ -160,10 +160,10 @@ function ConfirmDialog({ title, description, confirmLabel, isLoading, onCancel, 
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
-  return <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={onKeyDown} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 outline-hidden motion-safe:animate-fade-in">
-    <div className="w-full max-w-md rounded-[20px] border border-slate-200 bg-white p-5 shadow-floating motion-safe:animate-scale-fade-in">
-      <h2 id="admin-confirm-title" className="break-words text-subtitle font-semibold text-slate-900">{title}</h2>
-      <p className="mt-3 text-sm text-slate-600">{description}</p>
+  return <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={onKeyDown} className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4 outline-hidden motion-safe:animate-fade-in">
+    <div className="w-full max-w-md co-glass-dense rounded-card p-5 motion-safe:animate-scale-fade-in">
+      <h2 id="admin-confirm-title" className="break-words text-co-body font-semibold text-ink">{title}</h2>
+      <p className="mt-3 text-co-meta text-ink-muted">{description}</p>
       <div className="mt-5 flex justify-end gap-2"><Button type="button" variant="secondary" ref={cancelRef} onClick={onCancel}>Cancel</Button><Button type="button" variant="danger" isLoading={isLoading} onClick={onConfirm}>{confirmLabel}</Button></div>
     </div>
   </div>;
@@ -174,7 +174,7 @@ function AdminCreateForm({ onCreated, onError, onCancel }: { onCreated: (account
   const mutation = useMutation({ mutationFn: () => apiClient.createAdminAccount({ email, display_name: name || null, password }), onSuccess: (account) => { setEmail(""); setName(""); setPassword(""); onCreated(account); }, onError });
   const cancel = () => { setEmail(""); setName(""); setPassword(""); onCancel(); };
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => { if (event.key === "Escape") { event.preventDefault(); cancel(); } };
-  return <form onKeyDown={onKeyDown} onSubmit={(event: FormEvent) => { event.preventDefault(); mutation.mutate(); }} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-soft sm:grid-cols-2" aria-label="Create user">
+  return <form onKeyDown={onKeyDown} onSubmit={(event: FormEvent) => { event.preventDefault(); mutation.mutate(); }} className="grid gap-3 rounded-xl bg-card p-4 sm:grid-cols-2" aria-label="Create user">
     <Field label="Email" name="new_user_email" value={email} onChange={setEmail} type="email" />
     <Field label="Display name (optional)" name="new_user_name" value={name} onChange={setName} type="text" />
     <Field label="Initial password" name="new_user_password" value={password} onChange={setPassword} type="password" />
@@ -186,7 +186,7 @@ function AdminEditForm({ account, onSaved, onError, onCancel }: { account: Admin
   const [email, setEmail] = useState(account.email); const [name, setName] = useState(account.display_name ?? "");
   const mutation = useMutation({ mutationFn: () => apiClient.updateAdminAccount(account.id, { email, display_name: name || null }), onSuccess: onSaved, onError });
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => { if (event.key === "Escape") { event.preventDefault(); onCancel(); } };
-  return <form onKeyDown={onKeyDown} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-soft sm:grid-cols-2" aria-label={`Edit ${account.email}`}>
+  return <form onKeyDown={onKeyDown} onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }} className="grid gap-3 rounded-xl bg-card p-4 sm:grid-cols-2" aria-label={`Edit ${account.email}`}>
     <Field label="Email" name="edit_user_email" value={email} onChange={setEmail} type="email" />
     <Field label="Display name" name="edit_user_name" value={name} onChange={setName} type="text" />
     <div className="flex gap-2 sm:col-span-2"><Button type="submit" size="md" variant="primary" isLoading={mutation.isPending}>Save</Button><Button type="button" size="md" variant="secondary" onClick={onCancel}>Cancel</Button></div>

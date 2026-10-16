@@ -78,7 +78,7 @@ export function DecisionsStep(): React.JSX.Element {
         const { items: queued, meta } = queue.data as ReviewQueue;
         const items = queued.map((item) => latest[item.id] ?? item);
         if (items.length === 0) {
-          return <p className="m-0 text-sm text-slate-600">Nothing asks for a decision</p>;
+          return <p className="m-0 text-co-meta text-ink-muted">Nothing asks for a decision</p>;
         }
         const serverDecided = new Set(meta.decided_task_ids ?? []);
         const serverAside = new Set(meta.set_aside_task_ids ?? []);
@@ -94,13 +94,13 @@ export function DecisionsStep(): React.JSX.Element {
           const stillAsking = items.filter((item) => hasDecision(item) && asks(item, now)).length;
           return left > 0 ? (
             <>
-              <p className="m-0 text-base font-medium text-slate-900">{`${decidedCount} of ${items.length} decided`}</p>
-              <p className="m-0 text-sm text-slate-600">{`${left} still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided.`}</p>
+              <p className="m-0 text-co-body font-medium text-ink">{`${decidedCount} of ${items.length} decided`}</p>
+              <p className="m-0 text-co-meta text-ink-muted">{`${left} still ask for a decision. They stay in Next whenever you're ready, and move to Someday on their usual date if nothing is decided.`}</p>
             </>
           ) : (
             <>
-              <p className="m-0 text-base font-medium text-slate-900">{`All ${items.length} decided`}</p>
-              <p className="m-0 text-sm text-slate-600">
+              <p className="m-0 text-co-body font-medium text-ink">{`All ${items.length} decided`}</p>
+              <p className="m-0 text-co-meta text-ink-muted">
                 {stillAsking > 0
                   ? `${stillAsking} kept ${pick(stillAsking, "its", "their")} wording, so ${pick(stillAsking, "it still asks", "they still ask")} for a decision.`
                   : "Nothing in Next is waiting for a decision now."}
@@ -111,7 +111,7 @@ export function DecisionsStep(): React.JSX.Element {
         const project = projects.data?.find((entry) => entry.id === current.project_id);
         return (
           <>
-            <p className="m-0 flex justify-between text-xs text-slate-500">
+            <p className="m-0 flex justify-between text-co-meta text-ink-muted">
               <span>{`${items.findIndex((item) => item.id === current.id) + 1} of ${items.length} · earliest-asking first`}</span>
               <span>Asks for a decision</span>
             </p>

@@ -195,36 +195,36 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
     <QueueGate queries={[queue]}>
       {() => {
         if (items.length === 0) {
-          return <p className="m-0 text-sm text-slate-600">{config.empty}</p>;
+          return <p className="m-0 text-co-meta text-ink-muted">{config.empty}</p>;
         }
         if (current === undefined) {
           return (
             <>
-              {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice.text}</p> : null}
-              <p className="m-0 text-sm text-slate-600">All caught up.</p>
+              {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-co-meta text-ink-muted">{notice.text}</p> : null}
+              <p className="m-0 text-co-meta text-ink-muted">All caught up.</p>
             </>
           );
         }
         const meta = config.describe(current, now);
         return (
           <>
-            {notice?.kind === "stale" ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice.text}</p> : null}
-            <p className="m-0 flex justify-between text-xs text-slate-500">
+            {notice?.kind === "stale" ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-co-meta text-ink-muted">{notice.text}</p> : null}
+            <p className="m-0 flex justify-between text-co-meta text-ink-muted">
               {`${items.findIndex((item) => item.id === current.id) + 1} of ${items.length} · ${config.position}`}
             </p>
-            <div className="flex flex-col gap-3 rounded-[14px] border border-slate-200 bg-white p-4 shadow-soft">
-              <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-lg font-semibold text-slate-900 outline-hidden">{current.title}</h2>
-              {meta ? <p className="m-0 -mt-2 text-xs text-slate-500">{meta}</p> : null}
+            <div className="flex flex-col gap-3 rounded-card bg-card p-4">
+              <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-co-body font-semibold text-ink outline-hidden focus-visible:shadow-ring-focus">{current.title}</h2>
+              {meta ? <p className="m-0 -mt-2 text-co-meta text-ink-muted">{meta}</p> : null}
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
               {notice?.kind === "refused" ? (
-                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div role="alert" className="flex flex-wrap items-center gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
                   <span>{notice.text}</span>
                   <Ref id={notice.referenceId} />
                 </div>
               ) : null}
               {form ? (
                 <form className="flex flex-col gap-2" onSubmit={(event) => submitForm(event, current, form.action, form.text)}>
-                  <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+                  <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
                     {form.action.form?.prompt}
                     <input
                       ref={fieldRef}
@@ -261,7 +261,7 @@ export function ItemDecisionStep({ config }: { config: ItemStepConfig }): React.
                       }}
                     >
                       {action.pending === item.id ? "Saving…" : item.label}
-                      {item.sub ? <span className="text-xs font-normal text-slate-500">{item.sub}</span> : null}
+                      {item.sub ? <span className="text-co-meta font-normal text-ink-muted">{item.sub}</span> : null}
                     </button>
                   ))}
                 </div>

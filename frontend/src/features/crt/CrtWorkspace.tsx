@@ -167,7 +167,7 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
   const exitLink = onExit ? (
     <button
       type="button"
-      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-slate-600 transition-colors duration-200 ease-smooth hover:bg-slate-100 hover:text-slate-900"
+      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-co-meta font-medium text-ink-muted transition-colors duration-200 ease-smooth hover:bg-sunken hover:text-ink"
       onClick={onExit}
     >
       <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -935,11 +935,11 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
 
   if (phase === "loading") {
     return (
-      <main className="min-h-screen bg-surface-base px-6 py-8 text-slate-900">
+      <main className="min-h-screen bg-ground px-6 py-8 text-ink">
         <header className="mx-auto max-w-6xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-          <h1 className="mt-2 text-title font-semibold">Current Reality Tree</h1>
-          <p className="mt-2 text-sm text-slate-600" role="status">Loading your last tree…</p>
+          <p className="text-co-meta font-semibold text-ink-muted">Thinking Mode</p>
+          <h1 className="mt-2 font-voice text-co-title font-semibold">Current Reality Tree</h1>
+          <p className="mt-2 text-co-meta text-ink-muted" role="status">Loading your last tree…</p>
         </header>
       </main>
     );
@@ -949,11 +949,11 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     return (
       <main className={stateScreenClass}>
         {exitCorner}
-        <section aria-live="polite" className={`${stateCardClass} border-rose-200`}>
+        <section aria-live="polite" className={`${stateCardClass} `}>
           <p className={stateEyebrowClass}>Thinking Mode</p>
           <h1 className={stateTitleClass}>{ownerError ? "We couldn't verify this tree" : ownershipLost ? "This tree is open in another tab" : createError ? "We couldn't create this tree" : "We couldn't load this tree"}</h1>
           <p className={stateBodyClass}>{ownerError ? "The authenticated owner could not be verified, so no tree content was opened." : ownershipLost ? "Editing is blocked until this tab owns the tree again." : createError ? "Your first-tree request is still safe to retry." : "Your route is unchanged. Retry loading to try again."}</p>
-          {loadReference ? <p className="mt-3 break-all font-mono text-xs text-slate-500">Support reference: {loadReference}</p> : null}
+          {loadReference ? <p className="mt-3 break-all font-mono text-co-meta text-ink-muted">Support reference: {loadReference}</p> : null}
           <button type="button" className={buttonVariants({ variant: "primary", className: "mt-6" })} onClick={() => ownershipLost ? setRetryCount((count) => count + 1) : createError ? void createFirstTree() : setRetryCount((count) => count + 1)}>
             {ownershipLost ? "Retry ownership" : createError ? "Retry creating tree" : "Retry loading"}
           </button>
@@ -967,7 +967,7 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
       <main className={stateScreenClass}>
         {exitCorner}
         {onlineOnlyRisk ? <CrtStorageUnavailableAlert /> : null}
-        <section className={`${stateCardClass} border-slate-200`}>
+        <section className={`${stateCardClass} `}>
           <div className="mb-6 flex justify-center">
             <CrtTreeMenu
               currentTree={null}
@@ -995,10 +995,10 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     return (
       <main className={stateScreenClass}>
         {exitCorner}
-        <section role="alert" className={`${stateCardClass} border-rose-200`}>
-          <h1 className="text-balance text-title font-semibold text-slate-900">We couldn't verify the local draft</h1>
+        <section role="alert" className={`${stateCardClass} `}>
+          <h1 className="text-balance font-voice text-co-title font-semibold text-ink">We couldn't verify the local draft</h1>
           <p className={stateBodyClass}>The draft was preserved and has not been applied or deleted. Retry loading to review it again.</p>
-          {recovery.reason ? <p className="mt-3 break-all font-mono text-xs text-slate-500">Recovery reference: {recovery.reason}</p> : null}
+          {recovery.reason ? <p className="mt-3 break-all font-mono text-co-meta text-ink-muted">Recovery reference: {recovery.reason}</p> : null}
           <button type="button" className={buttonVariants({ variant: "primary", className: "mt-6" })} onClick={() => setRetryCount((count) => count + 1)}>Retry loading</button>
         </section>
       </main>
@@ -1009,11 +1009,11 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
     const draft = recovery.draft;
     const isConflict = recovery.kind === "conflict";
     return (
-      <main className="min-h-screen bg-surface-base px-6 py-8 text-slate-900">
+      <main className="min-h-screen bg-ground px-6 py-8 text-ink">
         <header className="mx-auto max-w-6xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.06em] text-brand-primary">Thinking Mode</p>
-          <h1 className="mt-2 text-title font-semibold">Current Reality Tree</h1>
-          <p className="mt-2 text-sm text-slate-600">Review local recovery before the editable canvas is opened.</p>
+          <p className="text-co-meta font-semibold text-ink-muted">Thinking Mode</p>
+          <h1 className="mt-2 font-voice text-co-title font-semibold">Current Reality Tree</h1>
+          <p className="mt-2 text-co-meta text-ink-muted">Review local recovery before the editable canvas is opened.</p>
         </header>
         {isConflict ? (
           <CrtRecoveryDialog
@@ -1048,17 +1048,17 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
   if (!tree || !graph) return <></>;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-surface-base text-slate-900">
+    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-ground text-ink">
       {onlineOnlyRisk ? <CrtStorageUnavailableAlert onRetry={autosave.retry} /> : null}
       {exportNeedsResolution ? (
-        <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-center text-sm text-amber-950" role="alert">
+        <div className=" bg-sunken px-6 py-3 text-center text-co-meta text-warning" role="alert">
           Unsynchronized changes are excluded from the saved server copy.
           <button type="button" className="ml-3 font-semibold underline" onClick={downloadUnsynchronizedBackup}>Download local backup</button>
           <button type="button" className="ml-3 underline" onClick={() => setExportNeedsResolution(false)}>Cancel</button>
         </div>
       ) : null}
       {deferredRecovery ? (
-        <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-center text-sm text-amber-950" role="status">
+        <div className=" bg-sunken px-6 py-3 text-center text-co-meta text-warning" role="status">
           Local draft retained. <button type="button" className="font-semibold underline" onClick={() => {
             setRecovery(deferredRecovery);
             setPhase("recovery");
@@ -1094,18 +1094,18 @@ export function CrtWorkspace({ createDraftCoordinator = createCrtDraftCoordinato
         }}
       />
       {autosave.status === "Conflict" ? (
-        <div className="px-6 pb-4 text-center text-sm text-amber-800" role="alert">
+        <div className="px-6 pb-4 text-center text-co-meta text-warning" role="alert">
           <p>The server changed this tree. Your local graph is retained; refresh the server copy before saving it again.</p>
-          {conflictRefreshReference !== undefined ? <p>We couldn't refresh the server copy. Support reference: <span className="font-mono text-xs">{conflictRefreshReference}</span></p> : null}
+          {conflictRefreshReference !== undefined ? <p>We couldn't refresh the server copy. Support reference: <span className="font-mono text-co-meta">{conflictRefreshReference}</span></p> : null}
           <button type="button" className="mr-3 font-semibold underline" onClick={() => void refetchConflict()}>Refresh server copy</button>
           {conflictRefetched ? <button type="button" className="font-semibold underline" onClick={() => autosave.rebase()}>Save local changes</button> : null}
-          {autosave.reference ? <span className="ml-2 font-mono text-xs">Support reference: {autosave.reference}</span> : null}
+          {autosave.reference ? <span className="ml-2 font-mono text-co-meta">Support reference: {autosave.reference}</span> : null}
         </div>
       ) : null}
       {autosave.status === "Save failed" ? (
-        <div className="px-6 pb-4 text-center text-sm text-rose-700" role="alert">
+        <div className="px-6 pb-4 text-center text-co-meta text-danger" role="alert">
           <button type="button" className="font-semibold underline" onClick={autosave.retry}>Retry save</button>
-          {autosave.reference ? <span className="ml-2 font-mono text-xs">Support reference: {autosave.reference}</span> : null}
+          {autosave.reference ? <span className="ml-2 font-mono text-co-meta">Support reference: {autosave.reference}</span> : null}
         </div>
       ) : null}
       {pendingTransition && tree ? (

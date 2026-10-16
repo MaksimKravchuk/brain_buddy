@@ -33,10 +33,10 @@
                 MacTaskRow(title: "Ana wedding speech", kind: .inbox)
                 MacTaskRow(title: "drill from Tom", kind: .inbox)
                 Button("Clarify Inbox") {}
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .padding(.top, 14)
             }
-            assertSnapshot(view, named: "mac-rows-inbox-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
+            assertMacSnapshot(view, named: "mac-rows-inbox-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
         }
 
         @Test("The Next actions rows render as approved", arguments: Appearance.allCases)
@@ -52,7 +52,7 @@
                 MacTaskRow(title: "Call Sam about the van", kind: .current, meta: "now")
                 MacTaskRow(title: "List what is in the garage", kind: .done)
             }
-            assertSnapshot(view, named: "mac-rows-next-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
+            assertMacSnapshot(view, named: "mac-rows-next-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
         }
 
         @Test("The Waiting for rows render as approved", arguments: Appearance.allCases)
@@ -62,7 +62,7 @@
                 MacTaskRow(title: "Tax letter copy", kind: .waiting, meta: "Accountant · 12 days")
                 MacTaskRow(title: "Drill back", kind: .waiting, meta: "Tom · 1 day")
             }
-            assertSnapshot(view, named: "mac-rows-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
+            assertMacSnapshot(view, named: "mac-rows-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
         }
 
         @Test("The Someday rows render as approved", arguments: Appearance.allCases)
@@ -73,7 +73,7 @@
                 MacTaskRow(title: "Build a cold frame", kind: .someday, meta: "Allotment", selected: true)
                 MacTaskRow(title: "Read the bee-keeping book", kind: .someday)
             }
-            assertSnapshot(view, named: "mac-rows-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
+            assertMacSnapshot(view, named: "mac-rows-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
         }
 
         @Test("The Done rows render as approved", arguments: Appearance.allCases)
@@ -85,7 +85,7 @@
                 MacTaskRow(title: "Book the MOT", kind: .done, meta: "September")
                 MacTaskRow(title: "Ring the old landlord", kind: .cancelled)
             }
-            assertSnapshot(view, named: "mac-rows-done-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
+            assertMacSnapshot(view, named: "mac-rows-done-\(appearance.rawValue)", scheme: appearance.scheme, width: 760)
         }
     }
 #endif

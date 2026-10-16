@@ -33,15 +33,14 @@ async function openSyntheticAdmin(page: import("@playwright/test").Page): Promis
   await expect(page.getByText("member.long-email-address@example.test")).toBeVisible();
 }
 
-// Tailwind 4 defines its palette in oklch, so the selected tab's
-// `border-sky-700` no longer computes to an rgb() string. Resolve what the
+// The selected tab sits on the Carry On `selected` role. Resolve what the
 // class renders as in this browser instead of hard-coding one serialisation.
-async function selectedTabBorderColor(page: import("@playwright/test").Page): Promise<string> {
+async function selectedTabBackground(page: import("@playwright/test").Page): Promise<string> {
   return page.evaluate(() => {
     const probe = document.createElement("span");
-    probe.className = "border-b-2 border-sky-700";
+    probe.className = "bg-selected";
     document.body.append(probe);
-    const color = getComputedStyle(probe).borderBottomColor;
+    const color = getComputedStyle(probe).backgroundColor;
     probe.remove();
     return color;
   });
@@ -54,11 +53,11 @@ test("013-SC-007 visually marks the active Admin tab and preserves keyboard swit
   });
   const users = page.getByRole("tab", { name: "Users" });
   const flags = page.getByRole("tab", { name: "Feature flags" });
-  const selectedBorder = await selectedTabBorderColor(page);
+  const selectedBackground = await selectedTabBackground(page);
   await test.step("verify selected appearance and keyboard focus in both directions", async () => {
     await expect(users).toHaveAttribute("aria-selected", "true");
-    await expect(users).toHaveCSS("border-bottom-color", selectedBorder);
-    await expect(flags).toHaveCSS("border-bottom-color", "rgba(0, 0, 0, 0)");
+    await expect(users).toHaveCSS("background-color", selectedBackground);
+    await expect(flags).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     const desktopTable = page.getByTestId("admin-users-table-scroll");
     expect(await desktopTable.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
     await expect(page.getByText("More columns and actions")).toHaveCount(0);
@@ -68,8 +67,8 @@ test("013-SC-007 visually marks the active Admin tab and preserves keyboard swit
     await users.press("ArrowRight");
     await expect(flags).toBeFocused();
     await expect(flags).toHaveAttribute("aria-selected", "true");
-    await expect(flags).toHaveCSS("border-bottom-color", selectedBorder);
-    await expect(users).toHaveCSS("border-bottom-color", "rgba(0, 0, 0, 0)");
+    await expect(flags).toHaveCSS("background-color", selectedBackground);
+    await expect(users).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.getByRole("tabpanel", { name: "Feature flags" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "voice_brain_dump" })).toBeVisible();
     // Colours come from the Carry On design system by product decision, so text colour contrast is not gated by tests.
@@ -78,7 +77,7 @@ test("013-SC-007 visually marks the active Admin tab and preserves keyboard swit
     await page.screenshot({ path: testInfo.outputPath("admin-flags-desktop.png") });
     await flags.press("ArrowLeft");
     await expect(users).toBeFocused();
-    await expect(users).toHaveCSS("border-bottom-color", selectedBorder);
+    await expect(users).toHaveCSS("background-color", selectedBackground);
   });
 });
 
@@ -92,16 +91,16 @@ test("013-SC-007 makes the narrow Users table scroll discoverable and keyboard r
   await test.step("switch tabs on a narrow screen without losing the active indicator", async () => {
     const users = page.getByRole("tab", { name: "Users" });
     const flags = page.getByRole("tab", { name: "Feature flags" });
-    const selectedBorder = await selectedTabBorderColor(page);
+    const selectedBackground = await selectedTabBackground(page);
     await users.focus();
     await users.press("ArrowRight");
     await expect(flags).toBeFocused();
-    await expect(flags).toHaveCSS("border-bottom-color", selectedBorder);
+    await expect(flags).toHaveCSS("background-color", selectedBackground);
     await expect(page.getByRole("heading", { name: "voice_brain_dump" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("admin-flags-390.png") });
     await flags.press("ArrowLeft");
     await expect(users).toBeFocused();
-    await expect(users).toHaveCSS("border-bottom-color", selectedBorder);
+    await expect(users).toHaveCSS("background-color", selectedBackground);
   });
   await test.step("see a visible hint only while table content is hidden", async () => {
     await expect(goToActions).toBeVisible();
