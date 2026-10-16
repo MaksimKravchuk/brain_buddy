@@ -25,6 +25,8 @@ enum MacBoardIcon: Hashable, Sendable {
     case history
     /// Settings tabs (spec 028): a person, a robot head with an antenna, two circling arrows.
     case account, agents, sync
+    /// Spec 030 (All runs): three runs, each a dot and a line, drawn in the same 24x24 stroke rules.
+    case allRuns
 }
 
 /// A board icon as a `Shape`; stroke it with `MacBoardIconView` (or `.stroke(style:)`).
@@ -134,6 +136,11 @@ struct MacBoardIconShape: Shape {
             path.addPath(polyline([(12, 8), (12, 4.5)]))
             path.addPath(polyline([(9.5, 13), (9.5, 14)]))
             path.addPath(polyline([(14.5, 13), (14.5, 14)]))
+        case .allRuns:
+            for y in [6.0, 12, 18] {
+                path.addPath(polyline([(5, y), (5.01, y)]))
+                path.addPath(polyline([(9, y), (19, y)]))
+            }
         case .sync:
             path.move(to: point(19, 12))
             addCircleArc(into: &path, centerX: 12, centerY: 12, radius: 7, from: 0, to: -3 * Double.pi / 4)
@@ -172,6 +179,8 @@ extension MacBoardIcon {
         case .list(.someday): self = .somedayMaybe
         case .date: self = .calendar
         case .history: self = .history
+        case .agentRuns(.all): self = .allRuns
+        case .agentRuns: self = .agents
         case .project, .tag: return nil
         }
     }

@@ -45,12 +45,25 @@ package enum DateDestination: String, Hashable, Sendable {
     }
 }
 
+/// What All runs shows: every listed run, or one agent's (030-FR-008).
+package enum AgentRunsFilter: Hashable, Sendable {
+    case all
+    case agent(String)
+}
+
 package enum WorkspaceDestination: Hashable, Sendable {
     case list(TaskList)
     case date(DateDestination)
     case project(ProjectID)
     case tag(TagID)
     case history(HistoryState)
+    /// Agent runs by agent connection id (030-FR-004); the client groups them, the kit has no query for it.
+    case agentRuns(AgentRunsFilter)
+
+    package var isAgentRuns: Bool {
+        if case .agentRuns = self { return true }
+        return false
+    }
 
     package var isHistory: Bool {
         if case .history = self { return true }
@@ -65,6 +78,8 @@ package enum WorkspaceDestination: Hashable, Sendable {
         case .project(let id): .project(id)
         case .tag(let id): .tag(id)
         case .history(let state): .history(state.kind)
+        // No kit query: Waiting for stands in so this stays total, and `BrainBuddyModel` shows no rows for it.
+        case .agentRuns: .list(.waiting)
         }
     }
 }

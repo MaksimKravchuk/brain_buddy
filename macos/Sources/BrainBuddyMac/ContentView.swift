@@ -189,6 +189,8 @@ struct WorkspaceView: View {
     @State private var columns: NavigationSplitViewVisibility = .all
     /// The window's undo stack: Edit › Undo (⌘Z) takes back the last Done, Cancel or move.
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -274,7 +276,7 @@ struct WorkspaceView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 310, ideal: 340, max: 400)
         } detail: {
-            taskCanvas
+            detailCanvas
                 .inspector(isPresented: inspectorPresented) {
                     inspectorContent
                         .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
@@ -323,6 +325,37 @@ struct WorkspaceView: View {
         .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
+        // 030: availability and runs follow the account; polling pauses while the window is hidden.
+        .task(id: model.workspace.account?.id) { await model.refreshAgents() }
+        .task { await model.agentRuns.run() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.refreshAgents() }
+        }
+        .onChange(of: scenePhase) { _, phase in model.agentRuns.isWindowVisible = phase != .background }
+        .onChange(of: model.agentAvailability.isOnline) { _, online in model.agentRuns.isOnline = online }
+        .onChange(of: model.sidebarCounts) { _, _ in
+            if model.showsAgentsSection { Task { await model.refreshAgentSteps() } }
+        }
+        .onChange(of: model.showsAgentsSection) { _, shown in
+            if !shown, model.destination.isAgentRuns { requestNavigation(.destination(.list(.waiting))) }
+        }
+    }
+
+    /// All runs (G-02) replaces the task canvas for the Agents destinations; a run row selects its step.
+    @ViewBuilder
+    private var detailCanvas: some View {
+        if case .agentRuns(let filter) = model.destination {
+            AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun)
+                .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
+                    if let task, taskForm?.taskID != task.id { taskForm = TaskAutosave(task: task) }
+                }
+        } else {
+            taskCanvas
+        }
+    }
+
+    private func selectRun(_ run: AgentRunItem) {
+        if let id = model.stepID(forServerID: run.taskServerID) { requestNavigation(.task(id)) }
     }
 
     @ToolbarContentBuilder
@@ -369,6 +402,7 @@ struct WorkspaceView: View {
                 .listRowSeparator(.hidden)
                 .selectionDisabled()
             ForEach(SidebarEntries.standard.sections) { section in
+                if section.id == "dates" { agentsSection }
                 sidebarSection(section)
             }
             projectsSection
@@ -378,6 +412,34 @@ struct WorkspaceView: View {
         .listStyle(.sidebar)
         .navigationTitle("BrainBuddy")
         .safeAreaInset(edge: .bottom) { footer }
+    }
+
+    /// G-01, between Lists and Dates: the rows are the listed runs' agents; "Add new agent" needs the flag and a password.
+    @ViewBuilder
+    private var agentsSection: some View {
+        if model.showsAgentsSection {
+            let runs = model.listedRuns
+            let agents = Dictionary(runs.compactMap { run in run.connectionID.map { ($0, run.agentName) } }) { first, _ in first }
+            Section {
+                sidebarButton(
+                    AgentsCopy.allRuns, symbol: "", destination: .agentRuns(.all), trailing: runs.isEmpty ? nil : "\(runs.count)")
+                ForEach(agents.sorted { $0.value < $1.value }, id: \.key) { id, name in
+                    sidebarButton(name, symbol: "", destination: .agentRuns(.agent(id)), trailing: "\(model.agentRuns.perAgentCounts[id] ?? 0)")
+                }
+                if model.canAddAgent {
+                    Button {
+                        model.agentAvailability.requestAddAgent()
+                        openSettings()
+                    } label: {
+                        MacSidebarRowLabel(title: AgentsCopy.addNewAgent, leading: .icon(.agents), selected: false, muted: true)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                }
+            } header: {
+                MacSidebarSectionHeader(title: AgentsCopy.sidebar)
+            }
+        }
     }
 
     private var projectsSection: some View {
@@ -625,19 +687,20 @@ struct WorkspaceView: View {
     }
 
     private func sidebarButton(
-        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil
+        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil
     ) -> some View {
         let count: Int? = {
             guard case .list(let list) = destination else { return nil }
             guard model.countsReadiness == .ready else { return nil }
-            return model.sidebarCounts.count(for: list)
+            // Waiting for counts its people and its listed agent runs: n + m (030-FR-009).
+            return model.sidebarCounts.count(for: list) + (list == .waiting ? model.listedRuns.count : 0)
         }()
         return Button {
             requestNavigation(.destination(destination))
         } label: {
             MacSidebarRowLabel(
                 title: title, leading: leading(symbol: symbol, destination: destination, tint: tint),
-                trailing: count.map { "\($0)" }, selected: model.destination == destination
+                trailing: count.map { "\($0)" } ?? trailing, selected: model.destination == destination
             )
         }
         .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? title)
@@ -1244,6 +1307,17 @@ struct WorkspaceView: View {
             projectOverviewCard(overview)
                 .padding(.bottom, 16)
         }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            // G-03: runs above the list's own rows, which become the People group; no step moves.
+            sectionHeader(AgentsCopy.waitingAgents, top: 0)
+            ForEach(model.listedRuns) { run in
+                AgentRunRow(
+                    item: run, style: .waiting, now: Date(),
+                    selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
+                    onSelect: { selectRun(run) })
+            }
+            sectionHeader(AgentsCopy.waitingPeople, top: 8)
+        }
         if let pinned = quickOpenedTaskID, selectedTaskID == pinned, !onScreen.contains(pinned), let task = model.task(pinned) {
             sectionHeader("Opened from Quick Open", top: 0)
             taskCard(task)
@@ -1447,11 +1521,15 @@ struct WorkspaceView: View {
         case .project(let id): model.project(id)?.name ?? "Project"
         case .tag(let id): "#" + (model.tag(id)?.name ?? "Tag")
         case .history(let state): state.title
+        case .agentRuns: AgentsCopy.allRuns
         }
     }
 
     private var taskCountCaption: String {
         if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            return AgentsCopy.waitingHeader(people: model.openTaskCount, agents: model.listedRuns.count)
+        }
         let open = Self.plural(model.openTaskCount, "open task")
         return model.isArchivedProjectDestination ? "Archived project · \(open)" : open
     }
