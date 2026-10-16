@@ -30,7 +30,7 @@ class UnixInstallerTests(unittest.TestCase):
             filename=f"bb-0.1.0-{target}."+("zip" if "windows" in target else "tar.gz")
             lines.append(f"{digest if filename==name and not corrupt else '0'*64}  {filename}\n")
         (download/"SHA256SUMS").write_text("".join(lines))
-        curl=tools/"curl";curl.write_text("#!/usr/bin/env python3\nimport os,sys,shutil\nfrom urllib.parse import urlparse\na=sys.argv[1:]\nassert '--proto' in a and '=https' in a\nassert '--proto-redir' in a and '--location' in a\nurl=a[-1]\nassert url.startswith('https://github.com/MaksimKravchuk/brain_buddy/releases/download/bb-v0.1.0/')\nshutil.copyfile(os.path.join(os.environ['BB_INSTALL_FIXTURE'],urlparse(url).path.rsplit('/',1)[1]),a[a.index('--output')+1])\n");curl.chmod(0o755)
+        curl=tools/"curl";curl.write_text("#!/usr/bin/env python3\nimport os,sys,shutil\nfrom urllib.parse import urlparse\na=sys.argv[1:]\nassert '--proto' in a and '=https' in a\nassert '--proto-redir' in a and '--location' in a\nurl=a[-1]\nassert url.startswith('https://github.com/maxk-lab/brain_buddy/releases/download/bb-v0.1.0/')\nshutil.copyfile(os.path.join(os.environ['BB_INSTALL_FIXTURE'],urlparse(url).path.rsplit('/',1)[1]),a[a.index('--output')+1])\n");curl.chmod(0o755)
         uname=tools/"uname";uname.write_text(f"#!/bin/sh\ncase \"$1\" in -s) echo {os_name};; -m) echo {arch};; *) exit 1;; esac\n");uname.chmod(0o755)
         env=os.environ.copy();env.update(PATH=f"{tools}:{env['PATH']}",BB_INSTALL_FIXTURE=str(download))
         return destination,download,tools,env
