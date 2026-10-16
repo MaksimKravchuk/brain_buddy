@@ -171,8 +171,8 @@ serve the same relay routes).
   a run and `now`.
 - `AgentRunsStore.swift` (new, PR-04, `@MainActor @Observable`): inputs the open steps
   with server ids from the workspace (`TaskRecord.serverID` in the store; the plan's
-  first task in PR-04 confirms the same id is exposed on the Rust-selected workspace and
-  adds a read-only accessor in Mac core if it is not), an `AgentRunsRemote` protocol
+  Rust-selected workspace never sets it, so PR-15 adds the read-only kit accessor
+  `Workspace.openStepServerIDs()` and PR-07 wires the store to it), an `AgentRunsRemote` protocol
   (implemented by `BrainBuddyAPIClient`, built like 028's `AccountSettingsModel` remote),
   `AgentAvailability`, the cache and an injected clock. `refresh()` reads summaries in
   200-id batches, then each listed run; publishes `groups`, `perAgentCounts`,

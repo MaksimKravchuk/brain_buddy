@@ -153,6 +153,17 @@ iOS thread; no slice edits it.
   → 3 summary requests and a stale notice when a batch fails. 030-FR-024, 030-FR-025,
   030-SC-004, 030-SC-007. PR-04.
 
+## Phase 5b — Kit: open steps with server ids on the Rust workspace (PR-15)
+
+- [ ] T035 [US2] PR-04 found that on a Rust-selected workspace `TaskRecord.serverID` is
+  never set and `state.tasks` holds only the rendered query window. Test-first in
+  `ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceOpenStepsTests.swift`, add a
+  read-only `Workspace.openStepServerIDs()` in
+  `ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+OpenSteps.swift` that returns
+  every open step's local id and server id on both the legacy and the Rust-selected
+  workspace (the Rust path reads the identity bindings and an existing query; no write
+  path, reducer or Rust change). 030-FR-005, 030-FR-013. PR-15.
+
 ## Phase 6 — Mac core: hand-off flow and run actions (PR-05)
 
 - [ ] T014 [US1] Implement `HandoffFlow` in
@@ -275,7 +286,7 @@ iOS thread; no slice edits it.
 - PR-02 depends on PR-01. PR-06 depends on PR-01, PR-03 and PR-13; it runs in parallel with
   PR-02, PR-04 and PR-05.
 - PR-04 depends on PR-02, PR-03 and PR-13. PR-05 depends on PR-04.
-- PR-07 depends on PR-04 and, outside this map, on 028 PR-03.
+- PR-15 has no dependencies. PR-07 depends on PR-04 and PR-15 and, outside this map, on 028 PR-03.
 - PR-08 depends on PR-05 and PR-07. PR-09 depends on PR-08.
 - PR-14 depends on PR-06. PR-10 depends on PR-06, PR-14 and PR-07 and, outside this map, on 028 PR-03; it runs in
   parallel with PR-08 and PR-09. PR-11 depends on PR-10.
@@ -452,6 +463,26 @@ iOS thread; no slice edits it.
       "implementer": "feature-implementer"
     },
     {
+      "id": "PR-15",
+      "outcome": "The shared kit lists every open step with its server id on both the legacy and the Rust-selected workspace, read-only",
+      "tasks": ["T035"],
+      "requirements": ["030-FR-005", "030-FR-013"],
+      "paths": [
+        "ios/BrainBuddyKit/Sources/BrainBuddyWorkspace/Workspace+OpenSteps.swift",
+        "ios/BrainBuddyKit/Tests/BrainBuddyWorkspaceTests/WorkspaceOpenStepsTests.swift"
+      ],
+      "depends_on": [],
+      "tests": [
+        "sh ios/scripts/swift-linux.sh test --filter WorkspaceOpenStepsTests"
+      ],
+      "acceptance": [
+        "A synced open step's server id is returned on the Rust-selected workspace, not only on the legacy one",
+        "No write path, reducer or Rust interface changes"
+      ],
+      "budget": {"product_loc": 160, "files": 1},
+      "implementer": "feature-implementer"
+    },
+    {
       "id": "PR-05",
       "outcome": "Mac core hands a step off with the password and acknowledgement only when required, replies, stops, checks again, and changes a step only through Mark step done and Make the next step",
       "tasks": ["T014", "T015", "T016", "T017"],
@@ -496,7 +527,7 @@ iOS thread; no slice edits it.
         "macos/Sources/BrainBuddyMac/Agents/AgentRunRow.swift",
         "macos/Tests/BrainBuddyMacTests/AgentsSceneTests.swift"
       ],
-      "depends_on": ["PR-04"],
+      "depends_on": ["PR-04", "PR-15"],
       "tests": [
         "cd macos && swift build",
         "cd macos && swift test --filter AgentsSceneTests",
