@@ -2483,5 +2483,68 @@ class DockerignoreLocalDataExclusionTests(unittest.TestCase):
         self.assertNotIn("backend/data/feature_flags.sqlite3", self.dockerignore_rules())
 
 
+class SharedRustBridgeCacheProducerTests(unittest.TestCase):
+    def test_producer_warms_only_the_existing_main_scoped_apple_cache_contract(self) -> None:
+        producer_path = REPO_ROOT / ".github/workflows/warm-rust-bridge.yml"
+        self.assertTrue(producer_path.exists(), "trusted cache producer workflow is missing")
+        producer = producer_path.read_text(encoding="utf-8")
+        ci = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("push:", producer)
+        self.assertIn("branches: [main]", producer)
+        self.assertNotIn("pull_request:", producer)
+        self.assertNotIn("workflow_dispatch:", producer)
+        self.assertIn("permissions:\n  contents: read", producer)
+        self.assertIn("cancel-in-progress: false", producer)
+        self.assertIn("ref: ${{ github.sha }}", producer)
+        self.assertIn("persist-credentials: false", producer)
+        self.assertIn("runs-on: macos-26", producer)
+        self.assertIn("fail-fast: false", producer)
+        self.assertIn("actions/cache@v6", producer)
+        self.assertNotIn("restore-keys:", producer)
+        key_inputs = """inputs="$(git rev-parse HEAD:rust HEAD:ios/scripts/build-rust-bridge.sh)
+          $(xcodebuild -version)
+          $(uname -m)
+          ${BB_APPLE_TARGETS:-all}"
+          echo "key=rust-bridge-apple-$(printf '%s' "${inputs}" | git hash-object --stdin)" >> "$GITHUB_OUTPUT"""
+        cache_paths = """ios/BrainBuddyKit/Artifacts/BrainBuddyRustFFI.xcframework
+            ios/BrainBuddyKit/Sources/BrainBuddyRustBindings/BrainBuddyRustBindings.swift"""
+        self.assertIn(key_inputs, producer)
+        self.assertIn("rust-bridge-apple-", ci)
+        self.assertIn("${BB_APPLE_TARGETS:-all}", ci)
+        for job in ("ios-app", "macos-app"):
+            match = re.search(
+                rf"^  {job}:(.*?)(?=^  [a-z0-9-]+:\n)", ci, re.MULTILINE | re.DOTALL
+            )
+            self.assertIsNotNone(match, f"existing {job} cache consumer is missing")
+            consumer = match.group(1)
+            self.assertIn(key_inputs, consumer, f"{job} key inputs changed")
+            self.assertIn(cache_paths, consumer, f"{job} cache paths changed")
+        producer_cache = re.search(
+            r"- name: Restore or save the Rust bridge\n.*?\n          path: \|\n(?P<paths>.*?)(?=\n\n      - name:)",
+            producer,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(producer_cache)
+        self.assertIn(cache_paths, producer_cache.group("paths"))
+        miss_condition = "if: steps.bridge-cache.outputs.cache-hit != 'true'"
+        self.assertEqual(producer.count(miss_condition), 2)
+        self.assertIn("sh ios/scripts/build-rust-bridge.sh apple", producer)
+        self.assertIn("aarch64-apple-darwin x86_64-apple-darwin", producer)
+        self.assertIn("name: Full Apple", producer)
+        self.assertIn('apple_targets: ""', producer)
+        self.assertIn("name: Mac only", producer)
+        self.assertIn("bash ios/scripts/select-xcode.sh", producer)
+        self.assertIn("GITHUB_WORKSPACE", producer)
+        self.assertIn("RUNNER_TEMP", producer)
+        self.assertIn("HOME", producer)
+
+    def test_workflow_lint_runs_the_producer_contract_regression(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "python3 -m unittest scripts/test_validate_ci_artifacts.py -v", workflow
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

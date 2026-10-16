@@ -1,3 +1,3 @@
 # Readiness
 
-The planned cache producer preserves the two existing Apple identities, read-only permissions, all required product checks and standard cache lifecycle. The second campaign passed privacy, testability and UX applicability; requirements, architecture and adversarial review blocked on the exact-SHA ASK landing conflict. Live rules allow automatic queue merge with Full CI and Docker Images but no review/owner hold, unlike the normative delivery contract. A targeted owner decision is pending; implementation is prohibited before approved/founder-accepted status. No product code, workflow, test, GitHub setting or cache has been changed.
+Founder-accepted on 2026-10-16 by Max in the current chat, expires 2026-10-18. Both campaign verdicts remain recorded honestly. The accepted exception permits independent PR-head review, unchanged full CI, the existing merge queue and verification of the final SHA. Implementation may start; see founder-acceptance.json.

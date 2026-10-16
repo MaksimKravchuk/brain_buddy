@@ -1,0 +1,109 @@
+{
+  "run_id": 38966010873,
+  "job_id": 117192616189,
+  "url": "https://github.com/maxk-lab/brain_buddy/actions/runs/38966010873/job/117192616189",
+  "duration_seconds": 1338,
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:15Z",
+      "completed_at": "2026-10-16T20:58:17Z"
+    },
+    {
+      "name": "Checkout",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:17Z",
+      "completed_at": "2026-10-16T20:58:21Z"
+    },
+    {
+      "name": "Verify exact candidate checkout",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:21Z",
+      "completed_at": "2026-10-16T20:58:21Z"
+    },
+    {
+      "name": "Select the newest Xcode 26",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:21Z",
+      "completed_at": "2026-10-16T20:58:22Z"
+    },
+    {
+      "name": "Install pinned Rust",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:22Z",
+      "completed_at": "2026-10-16T20:58:41Z"
+    },
+    {
+      "name": "Key the Rust bridge on its inputs",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:41Z",
+      "completed_at": "2026-10-16T20:58:41Z"
+    },
+    {
+      "name": "Restore the Rust bridge",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:41Z",
+      "completed_at": "2026-10-16T20:58:42Z"
+    },
+    {
+      "name": "Build the Rust bridge",
+      "conclusion": "success",
+      "started_at": "2026-10-16T20:58:42Z",
+      "completed_at": "2026-10-16T21:10:35Z"
+    },
+    {
+      "name": "Install XcodeGen (pinned, checksum-verified)",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:10:35Z",
+      "completed_at": "2026-10-16T21:10:36Z"
+    },
+    {
+      "name": "Generate the Xcode project",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:10:36Z",
+      "completed_at": "2026-10-16T21:10:36Z"
+    },
+    {
+      "name": "Build app and widgets for the iOS Simulator",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:10:36Z",
+      "completed_at": "2026-10-16T21:13:25Z"
+    },
+    {
+      "name": "Test the package on macOS",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:13:25Z",
+      "completed_at": "2026-10-16T21:20:22Z"
+    },
+    {
+      "name": "Upload build logs",
+      "conclusion": "skipped",
+      "started_at": "2026-10-16T21:20:22Z",
+      "completed_at": "2026-10-16T21:20:22Z"
+    },
+    {
+      "name": "Post Restore the Rust bridge",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:20:22Z",
+      "completed_at": "2026-10-16T21:20:26Z"
+    },
+    {
+      "name": "Post Checkout",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:20:26Z",
+      "completed_at": "2026-10-16T21:20:27Z"
+    },
+    {
+      "name": "Complete job",
+      "conclusion": "success",
+      "started_at": "2026-10-16T21:20:27Z",
+      "completed_at": "2026-10-16T21:20:30Z"
+    }
+  ],
+  "swift_test_count": 1488,
+  "swift_suite_count": 151,
+  "swift_test_execution_seconds": 240.104,
+  "cache_result": "miss",
+  "cache_key": "rust-bridge-apple-20c6ac803d841aef29e59212a02c6ecd30b7ab00"
+}
