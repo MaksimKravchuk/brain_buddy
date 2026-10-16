@@ -54,9 +54,9 @@
         private var foreground: CarryOnColorStyle {
             if isSelected { return .coChipSelectedFg }
             switch tone {
-            case .plain: .coChipFg
-            case .dueSoon: .coChipDueFg
-            case .overdue: .coChipOverdueFg
+            case .plain: return .coChipFg
+            case .dueSoon: return .coChipDueFg
+            case .overdue: return .coChipOverdueFg
             }
         }
     }
