@@ -146,6 +146,23 @@ afterEach(() => {
 });
 
 describe("TaskDetailPanel chrome", () => {
+  it("tones an overdue due date as danger, today as warning and a later date plainly", () => {
+    const local = (offsetDays: number) => {
+      const day = new Date();
+      day.setDate(day.getDate() + offsetDays);
+      return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+    };
+    const tones = [-1, 0, 1].map((offset) => {
+      const view = renderPanel({ task: taskFixture({ due_date: local(offset) }) });
+      const field = screen.getByLabelText("Due date");
+      const tone = ["text-danger!", "text-warning!"].filter((name) => field.classList.contains(name));
+      view.unmount();
+      return tone;
+    });
+
+    expect(tones).toEqual([["text-danger!"], ["text-warning!"], []]);
+  });
+
   it("normalizes cleared optional fields through the non-autosave fallback", () => {
     const { onSave } = renderPanel({
       task: taskFixture({ due_date: "2026-08-01", project_id: "project-launch" })

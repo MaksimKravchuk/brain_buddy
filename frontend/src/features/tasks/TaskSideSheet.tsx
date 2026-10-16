@@ -81,8 +81,8 @@ export function TaskSideSheet({ children, onClose, onPresenceChange }: { childre
   if (!open && !present) return null;
   return (
     <div className="task-side-sheet fixed inset-0 z-40 overflow-hidden" data-state={open && entered ? "open" : "closing"}>
-      <div className="task-side-sheet-scrim absolute inset-0 bg-slate-900/15" data-testid="task-sheet-scrim" aria-hidden onClick={() => { if (open) onClose(); }} />
-      <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="task-detail-title" aria-hidden={!open || undefined} inert={!open} className="task-side-sheet-panel absolute inset-y-0 right-0 w-full bg-white shadow-floating sm:w-[460px]">
+      <div className="task-side-sheet-scrim absolute inset-0 bg-ink/15" data-testid="task-sheet-scrim" aria-hidden onClick={() => { if (open) onClose(); }} />
+      <div ref={sheetRef} role="dialog" aria-modal="true" aria-labelledby="task-detail-title" aria-hidden={!open || undefined} inert={!open} className="task-side-sheet-panel absolute inset-y-0 right-0 w-full bg-card sm:w-[460px]">
         {children ?? (retained && cloneElement(retained, { active: false }))}
       </div>
     </div>
