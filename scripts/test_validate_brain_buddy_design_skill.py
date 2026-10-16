@@ -84,10 +84,11 @@ class BrainBuddyDesignSkillContractTests(unittest.TestCase):
         nodes = self.read("preview/colors-nodes.html").lower()
         logo = self.read("preview/logo.html")
 
+        # Only the token names are pinned. Colour values belong to the Carry On
+        # design system, and a test must not hold a colour outside it (Max,
+        # 2026-10-16).
         self.assertIn("--bb-node-root-bg", nodes)
-        self.assertIn("#facc15", nodes)
         self.assertIn("--bb-node-leaf-bg", nodes)
-        self.assertIn("#ef4444", nodes)
         self.assertNotIn("--bb-warning", nodes)
         self.assertNotIn("--bb-danger", nodes)
         self.assertIn("assets/logo.svg", logo)
