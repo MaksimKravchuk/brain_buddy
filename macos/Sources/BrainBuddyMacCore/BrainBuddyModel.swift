@@ -158,7 +158,7 @@ package final class BrainBuddyModel {
         let steps = agentSteps
         agentRuns = AgentRunsStore(
             remote: agentRunsRemote ?? AccountAgentRuns(workspace: workspace), steps: { steps.steps },
-            availability: agentAvailability, cache: agentCache)
+            availability: agentAvailability, cache: agentCache, now: now)
     }
 
     /// 029-FR-001, 029-FR-002: decides the first run once, at launch and before the first window

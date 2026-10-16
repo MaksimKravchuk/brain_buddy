@@ -445,9 +445,7 @@ struct WorkspaceView: View {
                 ForEach(agents.sorted { $0.value < $1.value }, id: \.key) { id, name in
                     sidebarButton(name, symbol: "", destination: .agentRuns(.agent(id)), trailing: "\(model.agentRuns.perAgentCounts[id] ?? 0)")
                 }
-            } header: {
-                MacSidebarSectionHeader(title: AgentsCopy.sidebar)
-            }
+            } header: { MacSidebarSectionHeader(title: AgentsCopy.sidebar) }
         }
     }
 

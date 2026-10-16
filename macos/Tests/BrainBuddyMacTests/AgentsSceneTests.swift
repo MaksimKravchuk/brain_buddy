@@ -42,6 +42,7 @@ struct AgentsSceneTests {
         private init(workspace: Workspace, flag: Bool, password: Bool) {
             model = BrainBuddyModel(
                 workspace: workspace, localStateStore: MacLocalStateStore(directory: folder.url),
+                now: { Date(timeIntervalSince1970: 1_000_000) },
                 agentAvailabilityRemote: { _ in FakeAvailabilityRemote(flag: flag, password: password) },
                 agentRunsRemote: remote)
         }
