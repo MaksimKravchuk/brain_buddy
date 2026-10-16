@@ -1,5 +1,6 @@
 import AppKit
 import BrainBuddyAPI
+import BrainBuddyCore
 import BrainBuddyDesign
 import BrainBuddyMacCore
 import Observation
