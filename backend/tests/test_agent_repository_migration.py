@@ -309,9 +309,8 @@ def build_service(repo: AgentRepository) -> AgentRelayService:
 class InterruptedMigrationRepository(AgentRepository):
     """A startup that dies after superseding its first connection.
 
-    The seam is `_migration_boundary`, the failure-injection hook the 007
-    quarantine migration already uses, so both migrations are proven atomic the
-    same way rather than one of them being trusted.
+    The seam is `_migration_boundary`, the failure-injection hook for the
+    atomicity proof.
     """
 
     def _migration_boundary(self, stage: str) -> None:
@@ -513,8 +512,7 @@ class TestBespokeConnectionsAreSuperseded:
         two 014 startups, and the ledger row is already there by then. If the
         rewrite lived only under the ledger, that row would sit unreadable by
         the 014 `AgentConnectionDocument` until somebody noticed — so it runs
-        every time, exactly as `_migrate_legacy_invalid_connections` already
-        does.
+        every time.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -769,15 +767,11 @@ class TestTheMigrationIsAtomicAndRepeatable:
         assert stored_connection(db_path)["status"] == "disconnected"
         assert run_columns(db_path) >= set(A2A_RUN_COLUMNS)
 
-    def test_014_SC_010_an_unreadable_connection_row_is_left_to_quarantine(
+    def test_014_SC_010_an_unreadable_connection_row_is_left_untouched(
         self, tmp_path: Path
     ) -> None:
-        """Two migrations, one row, and only one of them may claim it.
-
-        Superseding an unparseable row would destroy a credential *and* hand it
-        to the quarantine migration in the same startup, and afterwards nobody
-        could tell which of the two had actually happened to it. So this pass
-        skips it and the quarantine record is the single explanation.
+        """Superseding an unparseable row would destroy a credential nobody can
+        read back, so the pass skips it and leaves its bytes exactly as found.
         """
 
         db_path = pre_014_database(tmp_path)
@@ -788,11 +782,11 @@ class TestTheMigrationIsAtomicAndRepeatable:
 
         assert repo.migration_rewrite_count(A2A_WIRE_MIGRATION) == 1
         assert stored_connection(db_path)["status"] == "disconnected"
-        quarantined = repo.get_connection("corrupt", owner_id=OWNER)
-        assert (
-            quarantined.last_test_error_code
-            == "legacy_invalid_connection_requires_reconfiguration"
-        )
+        with closing(sqlite3.connect(db_path)) as conn:
+            raw = conn.execute(
+                "SELECT payload FROM agent_connections WHERE id = ?", ("corrupt",)
+            ).fetchone()[0]
+        assert raw == "{not json"
         assert audit_actions(db_path).count("wire_superseded") == 1
 
 

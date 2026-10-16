@@ -17,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -54,6 +53,17 @@ MAC = hashlib.sha256(b"k1").hexdigest()
 @pytest.fixture
 def repo(tmp_path: Path) -> AgentRepository:
     return AgentRepository(tmp_path)
+
+
+@pytest.mark.parametrize("revision", ["not-a-number", None, 2**80])
+def test_a_rewritten_rows_revision_moves_from_a_safe_floor(revision: object) -> None:
+    """A corrupt stored revision is coerced to the floor, so a row a migration
+    rewrites always carries a larger revision than the one a client may hold."""
+
+    from app.modules.agents.repository import _bumped_revision
+
+    assert _bumped_revision({"revision": revision}) in {2, 2_147_483_647}
+    assert _bumped_revision({"revision": 5}) == 6
 
 
 def make_connection(
@@ -154,93 +164,6 @@ def make_run(
     }
     payload.update(overrides)
     return AgentRunDocument.model_validate(payload)
-
-
-class RepairBeforeBeginConnection:
-    """Inject a concurrent repair immediately before the migration's write lock."""
-
-    def __init__(self, connection: sqlite3.Connection, repository: RepairingRepository):
-        self._connection = connection
-        self._repository = repository
-
-    def execute(
-        self, sql: str, parameters: Any = (), /
-    ) -> sqlite3.Cursor:  # pragma: no branch - one exact migration statement
-        if sql.strip() == "BEGIN IMMEDIATE":
-            self._repository.repair_if_armed()
-        return self._connection.execute(sql, parameters)
-
-    def commit(self) -> None:
-        self._connection.commit()
-
-    def rollback(self) -> None:
-        self._connection.rollback()
-
-
-class RepairingRepository(AgentRepository):
-    """A startup racing a repair at the lock acquisition boundary.
-
-    The wrapped connection applies the repair immediately before the migration
-    takes its write lock. The real implementation locks before discovery and
-    therefore reads the repaired row. A SELECT-before-BEGIN mutant first holds
-    a stale row snapshot, then triggers the repair, and overwrites it.
-    """
-
-    def __init__(self, root: Path, *, replacement: AgentConnectionDocument) -> None:
-        self._replacement = replacement
-        self._replaced = False
-        self._repair_armed = False
-        super().__init__(root)
-
-    def _migrate_legacy_invalid_connections(self, conn: sqlite3.Connection) -> None:
-        wrapped = RepairBeforeBeginConnection(conn, self)
-        super()._migrate_legacy_invalid_connections(cast(sqlite3.Connection, wrapped))
-
-    def _migration_boundary(self, stage: str) -> None:
-        if stage == "before_transaction":
-            self._repair_armed = True
-
-    def repair_if_armed(self) -> None:
-        if not self._repair_armed or self._replaced:
-            return
-        self._repair_armed = False
-        self._replaced = True
-        with closing(sqlite3.connect(self.db_path)) as conn:
-            conn.execute(
-                "UPDATE agent_connections SET status = ?, payload = ? "
-                "WHERE owner_id = ? AND id = ?",
-                (
-                    self._replacement.status,
-                    json.dumps(
-                        self._replacement.model_dump(mode="json"),
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ),
-                    self._replacement.owner_id,
-                    self._replacement.id,
-                ),
-            )
-            conn.commit()
-
-
-class FailingMigrationRepository(AgentRepository):
-    """A startup that dies after quarantining its first row."""
-
-    def _migration_boundary(self, stage: str) -> None:
-        if stage == "quarantined":
-            raise RuntimeError("startup interrupted mid-quarantine")
-
-
-def seed_malformed_connection(
-    db_path: Path, *, owner_id: str, connection_id: str, payload: str
-) -> None:
-    with closing(sqlite3.connect(db_path)) as conn:
-        conn.execute(
-            "INSERT INTO agent_connections "
-            "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
-            (owner_id, connection_id, "ready", NOW.isoformat(), payload),
-        )
-        conn.commit()
 
 
 class TestConnections:
@@ -455,235 +378,6 @@ class TestConnections:
         assert QUERY_SECRET not in json.dumps(
             repo.export_owner_data(owner_id="user_a", now=NOW)
         )
-
-    @pytest.mark.parametrize("revision", ["not-a-number", None])
-    def test_startup_repairs_invalid_legacy_header_with_safe_revision(
-        self, tmp_path: Path, revision: object
-    ) -> None:
-        """Header-only legacy corruption is repaired even with a bad revision."""
-
-        initial = AgentRepository(tmp_path)
-        legacy = make_connection().model_dump(mode="json")
-        legacy.update(auth_header_name="Host", revision=revision)
-        with sqlite3.connect(initial.db_path) as conn:
-            conn.execute(
-                "INSERT INTO agent_connections "
-                "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
-                (
-                    "user_a",
-                    "agentconn_legacy",
-                    "ready",
-                    NOW.isoformat(),
-                    json.dumps(legacy),
-                ),
-            )
-
-        repaired = AgentRepository(tmp_path).get_connection(
-            "agentconn_legacy", owner_id="user_a"
-        )
-
-        assert repaired.auth_header_name is None
-        assert repaired.revision == 2
-        assert repaired.status == "untested"
-        assert repaired.last_test_error_code == (
-            "legacy_invalid_auth_header_requires_reconfiguration"
-        )
-        assert repaired.credential is None
-
-    def test_startup_quarantines_malformed_connections_without_hiding_healthy_rows(
-        self, tmp_path: Path
-    ) -> None:
-        """Every legacy row remains readable without reviving untrusted fields."""
-
-        initial = AgentRepository(tmp_path)
-        healthy_a = make_connection(connection_id="agentconn_healthy_a")
-        healthy_b = make_connection(
-            owner_id="user_b", connection_id="agentconn_healthy_b", name="Other agent"
-        )
-        initial.create_connection(healthy_a)
-        initial.create_connection(healthy_b)
-        malformed = {
-            "agentconn_json": "not-json bearer-json-secret",
-            "agentconn_array": json.dumps(["bearer-array-secret"]),
-            "agentconn_fields": json.dumps(
-                {
-                    "id": "attacker-controlled-id",
-                    "owner_id": "user_b",
-                    "name": 123,
-                    "endpoint_url": "https://agent.example.com/hooks?token=query-secret",
-                    "auth_header_name": "Authorization\r\nX-Evil: yes",
-                    "credential": "bearer-field-secret",
-                    "inbound_secret": "inbound-field-secret",
-                }
-            ),
-        }
-        with sqlite3.connect(initial.db_path) as conn:
-            for connection_id, payload in malformed.items():
-                conn.execute(
-                    "INSERT INTO agent_connections "
-                    "(owner_id, id, status, created_at, payload) VALUES (?, ?, ?, ?, ?)",
-                    ("user_a", connection_id, "ready", NOW.isoformat(), payload),
-                )
-
-        reopened = AgentRepository(tmp_path)
-        listed_a = reopened.list_connections(owner_id="user_a")
-        assert [connection.id for connection in listed_a] == [
-            "agentconn_array",
-            "agentconn_fields",
-            "agentconn_healthy_a",
-            "agentconn_json",
-        ]
-        assert reopened.list_connections(owner_id="user_b") == [healthy_b]
-        assert (
-            reopened.get_connection("agentconn_healthy_a", owner_id="user_a")
-            == healthy_a
-        )
-
-        quarantined = [item for item in listed_a if item.id != healthy_a.id]
-        assert {item.owner_id for item in quarantined} == {"user_a"}
-        assert {item.status for item in quarantined} == {"untested"}
-        assert {item.endpoint_url for item in quarantined} == {
-            "https://reconfigure.invalid/"
-        }
-        assert {item.last_test_error_code for item in quarantined} == {
-            "legacy_invalid_connection_requires_reconfiguration"
-        }
-        assert all(item.credential is None for item in quarantined)
-        assert all(
-            not any(item.capabilities.model_dump().values()) for item in quarantined
-        )
-        assert reopened.find_connection_anywhere(
-            "agentconn_fields"
-        ) == reopened.get_connection("agentconn_fields", owner_id="user_a")
-        assert [
-            item["id"]
-            for item in reopened.export_owner_data(owner_id="user_a", now=NOW)[
-                "connections"
-            ]
-        ] == [
-            "agentconn_array",
-            "agentconn_fields",
-            "agentconn_healthy_a",
-            "agentconn_json",
-        ]
-
-        first_reopen = [item.model_dump(mode="json") for item in listed_a]
-        second_reopen = AgentRepository(tmp_path)
-        assert [
-            item.model_dump(mode="json")
-            for item in second_reopen.list_connections(owner_id="user_a")
-        ] == first_reopen
-        with sqlite3.connect(second_reopen.db_path) as conn:
-            stored_payloads = " ".join(
-                row[0] for row in conn.execute("SELECT payload FROM agent_connections")
-            )
-        for secret in (
-            "bearer-json-secret",
-            "bearer-array-secret",
-            "query-secret",
-            "bearer-field-secret",
-            "inbound-field-secret",
-        ):
-            assert secret not in stored_payloads
-
-    def test_a_concurrent_repair_is_not_overwritten_by_a_stale_quarantine(
-        self, tmp_path: Path
-    ) -> None:
-        """The scan's verdict is formed under the same lock that applies it."""
-
-        initial = AgentRepository(tmp_path)
-        healthy_a = make_connection(connection_id="agentconn_healthy_a")
-        healthy_b = make_connection(
-            owner_id="user_b", connection_id="agentconn_healthy_b", name="Other agent"
-        )
-        initial.create_connection(healthy_a)
-        initial.create_connection(healthy_b)
-        seed_malformed_connection(
-            initial.db_path,
-            owner_id="user_a",
-            connection_id="agentconn_repaired",
-            payload="not-json bearer-stale-secret",
-        )
-        seed_malformed_connection(
-            initial.db_path,
-            owner_id="user_b",
-            connection_id="agentconn_still_broken",
-            payload=json.dumps({"credential": "bearer-untouched-secret"}),
-        )
-        repaired = make_connection(
-            connection_id="agentconn_repaired",
-            name="Repaired by the other startup",
-            endpoint_url="https://repaired.example.com/hooks",
-            status="ready",
-        )
-
-        reopened = RepairingRepository(tmp_path, replacement=repaired)
-
-        assert reopened.get_connection("agentconn_repaired", owner_id="user_a") == (
-            repaired
-        )
-        assert (
-            reopened.get_connection("agentconn_healthy_a", owner_id="user_a")
-            == healthy_a
-        )
-        # The row that really is still broken is quarantined in the same pass,
-        # and only for its own owner.
-        quarantined = reopened.get_connection(
-            "agentconn_still_broken", owner_id="user_b"
-        )
-        assert quarantined.owner_id == "user_b"
-        assert quarantined.status == "untested"
-        assert quarantined.endpoint_url == "https://reconfigure.invalid/"
-        assert (
-            quarantined.last_test_error_code
-            == "legacy_invalid_connection_requires_reconfiguration"
-        )
-        assert [item.id for item in reopened.list_connections(owner_id="user_a")] == [
-            "agentconn_healthy_a",
-            "agentconn_repaired",
-        ]
-        assert [item.id for item in reopened.list_connections(owner_id="user_b")] == [
-            "agentconn_healthy_b",
-            "agentconn_still_broken",
-        ]
-        stored = " ".join(raw_connection_payloads(reopened.db_path).values())
-        assert "bearer-stale-secret" not in stored
-        assert "bearer-untouched-secret" not in stored
-
-    def test_an_interrupted_migration_leaves_no_partial_quarantine(
-        self, tmp_path: Path
-    ) -> None:
-        """Failure rolls the whole scan back, and the next startup redoes it."""
-
-        initial = AgentRepository(tmp_path)
-        initial.create_connection(make_connection(connection_id="agentconn_healthy_a"))
-        for connection_id in ("agentconn_broken_1", "agentconn_broken_2"):
-            seed_malformed_connection(
-                initial.db_path,
-                owner_id="user_a",
-                connection_id=connection_id,
-                payload=f"not-json {connection_id}",
-            )
-        before = raw_connection_payloads(initial.db_path)
-
-        with pytest.raises(RuntimeError):
-            FailingMigrationRepository(tmp_path)
-
-        assert raw_connection_payloads(initial.db_path) == before
-
-        retried = AgentRepository(tmp_path)
-        assert {
-            item.id: item.last_test_error_code
-            for item in retried.list_connections(owner_id="user_a")
-        } == {
-            "agentconn_broken_1": (
-                "legacy_invalid_connection_requires_reconfiguration"
-            ),
-            "agentconn_broken_2": (
-                "legacy_invalid_connection_requires_reconfiguration"
-            ),
-            "agentconn_healthy_a": None,
-        }
 
 
 class TestRuns:

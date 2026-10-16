@@ -11,8 +11,8 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Data | Where | Retention | Enforced by |
 |---|---|---|---|
 | **CLI authorization grants** (only hashed private proof/short code and source authority) | Identity `auth.sqlite3` | 600 seconds in every state; next privacy sweep after expiry, including OFF/startup after downtime | Shared AuthStore secure-delete/WAL checkpoint; source/session/provider/user cascades; excluded from export |
-| Account record (email, display name, Argon2id password hash, mailbox verification) | `data/auth.sqlite3` for new or explicitly migrated roots; legacy user JSON/index only before the stopped-writer migration | Life of account + 14-day deletion grace | Account purge (below) |
-| Sessions (opaque token hashes, never the raw cookie) | `data/auth.sqlite3`; legacy session JSON only before migration | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
+| Account record (email, display name, Argon2id password hash, mailbox verification) | `data/auth.sqlite3` | Life of account + 14-day deletion grace | Account purge (below) |
+| Sessions (opaque token hashes, never the raw cookie) | `data/auth.sqlite3` | 30 days, or logout / revocation | Lazy delete on read; bulk revoke on password change & deletion |
 | Connected Google/Apple identities (stable provider identifier, minimal email/profile metadata and connection state) | Identity-owned `auth.sqlite3` tables | Active connection lifetime. Explicit Remove ends its authority and erases profile metadata; Google mapping is deleted immediately. Apple retains only minimal disconnected linkage while bounded revocation settles, at most 24 hours and never beyond account purge | Explicit unlink / Apple cleanup / metadata expiry sweep / account purge (spec 023) |
 | Sign-in attempts, email challenges and pending mailbox addresses | Identity-owned `auth.sqlite3` tables | At most 10 minutes; consumed records cannot grant authority | Single-use consume / expiry sweep / owner invalidation and purge |
 | Recent-confirmation, password-reset and callback proofs | Identity-owned `auth.sqlite3` tables | Recent confirmation 5 minutes; reset 10 minutes; handoff 60 seconds; single use and bound to owner/session/action or client proof | Atomic consume / expiry sweep / owner invalidation and purge |
@@ -20,7 +20,6 @@ in-app privacy policy (`frontend/src/pages/PrivacyPolicyPage.tsx`, served at
 | Abuse-prevention fingerprints (keyed digests of address/source, counters; no raw address in the budget table) | Identity-owned `auth.sqlite3` budgets | At most 24 hours | Metadata expiry sweep |
 | Protected Apple revocation credential and cleanup linkage | Identity-owned `auth.sqlite3`, encrypted at rest | Minimum revocation credential while connected; after unlink/deletion, at most 5 attempts within 24 hours, capped by account purge. Explicitly unlinked personal mappings and associated receipts are erased when cleanup settles or expires | Apple cleanup lease/generation checks / metadata expiry sweep / account purge |
 | Verified Apple notification replay receipts (event ID digest, subject fingerprint and coarse event/time; no signed notification body) | Identity-owned `auth.sqlite3` receipts | At most 8 days; associated receipts also removed with explicit unlink cleanup or account purge | Replay expiry sweep / binding cleanup / account purge |
-| Encrypted legacy-auth migration backup | Identity migration artifacts, restricted file permissions | At most 24 hours; any account purge removes the entire backup, so it cannot restore erased accounts | Stopped-writer migration cleanup / startup expiry / account purge |
 | **Sync control ledger** (spec 026: owner IDs with the kind of decision — purge, session revocation, registered device epoch — and generations or device/epoch IDs; no email, content or credential) | `data/sync_control_ledger.sqlite3`, outside the task backups so a restore cannot roll it back | Revocation and epoch entries 7 days (the backup/WAL horizon); a purge marker until it is 7 days old and the account is gone, then only a content-free tombstone remains (`secure_delete` on) | Privacy maintenance sweep (`ControlLedger.prune`) / purge completion when a backup-retire hook is configured |
 | Trees, versions, AI validation history | `data/<tree_id>/…` + `data/index.json` | Life of account | Account purge |
 | Tasks, projects, tags, subtasks, comments (including a project's desired outcome) | `data/tasks.sqlite3` + JSON mirrors (`tasks/`, `projects/`, `contexts/`, `task-subtasks/`, `task-comments/`) | Life of account | Account purge |
@@ -148,17 +147,14 @@ Apple's on-device model never leave the device.
    stays past-due, and the next pass re-runs everything. One such account
    never blocks another's due purge.
 
-   The authoritative runtime store is `feature_flags.sqlite3`; the legacy
-   `feature-flags/runtime.json` document is retained on the volume only so an
-   older image can still be rolled back onto it, and once the PII-free
-   `feature-flags/sqlite-migration-complete.json` marker exists that document
-   is never read again as a migration or runtime source, even if the SQLite
+   The authoritative runtime store is `feature_flags.sqlite3`. Once the
+   PII-free `feature-flags/sqlite-migration-complete.json` marker exists, the
+   deploy-staged environment is never read again as a seed, even if the SQLite
    file is deleted or recreated (the marker records only a migration id and
-   timestamp — no account, email or environment value). Because a retained
-   rollback artifact that still names a purged account would be a privacy
-   leak, the cohort scrub also removes the account ID from that legacy
-   document; failing to do so halts the purge before the user record is
-   deleted, the same as a degraded SQLite store. A degraded SQLite store —
+   timestamp — no account, email or environment value). The pre-ADR-0019
+   `feature-flags/runtime.json` overlay is neither read nor written by any
+   code; because an old volume may still hold one that names accounts, startup
+   deletes it, so the cohort scrub has no second copy to reach. A degraded SQLite store —
    unreadable, a missing row, or a row whose mode is invalid — likewise
    leaves every managed flag fail-closed OFF and blocks the destructive part
    of purge until an operator repairs it, retrying on every subsequent sweep

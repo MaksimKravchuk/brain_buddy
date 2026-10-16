@@ -89,32 +89,6 @@ def _legacy_payload(service: VoiceBrainDumpService, *, key: str) -> dict[str, ob
     return payload
 
 
-def test_startup_migrates_legacy_voice_json_before_loading_owner_operation(
-    data_dir: Path,
-) -> None:
-    """A v1 JSON operation present before SQLite startup is imported once and
-    exposed as the v2 preview-only projection required by the workflow contract."""
-
-    legacy_data_dir = data_dir / "legacy-startup"
-    bootstrap_service = _service(legacy_data_dir)
-    payload = _legacy_payload(bootstrap_service, key="legacy-startup")
-    operation_path = (
-        legacy_data_dir / "brain-dump-operations" / OWNER / f"{payload['id']}.json"
-    )
-    operation_path.write_text(json.dumps(payload), encoding="utf-8")
-    bootstrap_service.operation_repo.db_path.unlink()
-
-    repository = OperationRepository(legacy_data_dir)
-    migrated = repository.get_brain_dump_operation_for_owner(
-        str(payload["id"]), owner_id=OWNER
-    )
-
-    assert migrated.schema_version == 2
-    assert migrated.legacy_import == "legacy_preview_only"
-    with sqlite3.connect(repository.db_path) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM migration_ledger").fetchone()[0] == 1
-
-
 def test_voice_operation_repository_rejects_boolean_schema_version(
     data_dir: Path,
 ) -> None:

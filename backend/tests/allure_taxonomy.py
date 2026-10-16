@@ -218,16 +218,6 @@ _MODULE_TAXONOMY: dict[str, tuple[str, str, str]] = {
     ),
     # Authentication & access
     "auth_service": (EPIC_AUTH, "Auth service", "Credential and session logic"),
-    "auth_migration": (
-        EPIC_AUTH,
-        "Identity storage",
-        "Explicit encrypted legacy migration",
-    ),
-    "auth_migration_integration": (
-        EPIC_AUTH,
-        "Identity storage",
-        "Startup CLI and purge migration boundary",
-    ),
     "auth_mail_service": (
         EPIC_AUTH,
         "Modern authentication",

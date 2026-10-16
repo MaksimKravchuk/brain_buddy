@@ -29,7 +29,7 @@ class UserRepository(BaseRepository):
     def __init__(self, root: Path, store: AuthStore | None = None) -> None:
         super().__init__(root)
         self.store = store if store is not None else AuthStore(self.root)
-        # Retained for migration tooling and fixture paths, never an authority.
+        # Fixture paths only, never an authority.
         self.users_dir = ensure_directory(self.resolve(USERS_DIRNAME))
         self.index_path = self.users_dir / BY_EMAIL_INDEX_FILENAME
         self.transaction_path = self.users_dir / PROFILE_TRANSACTION_FILENAME

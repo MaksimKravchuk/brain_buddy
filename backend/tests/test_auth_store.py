@@ -277,16 +277,6 @@ def test_022_fr002_existing_db_never_reads_or_writes_legacy_json(tmp_path):
     assert users._user_path("ghost").exists()
 
 
-def test_022_fr002_nonempty_unmigrated_root_fails_without_creating_db(tmp_path):
-    """Ordinary startup refuses legacy credentials until explicit migration."""
-    legacy = tmp_path / "users"
-    legacy.mkdir()
-    (legacy / "owner.json").write_text(json.dumps(_user().model_dump(mode="json")))
-    with pytest.raises(RepositoryError, match="migrat"):
-        UserRepository(tmp_path)
-    assert not (tmp_path / "auth.sqlite3").exists()
-
-
 def test_022_fr018_user_delete_cascades_sessions_and_owned_metadata(tmp_path):
     """Deleting an account removes its sessions and owned authentication proofs."""
     store = _store(tmp_path)
