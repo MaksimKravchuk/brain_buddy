@@ -92,6 +92,14 @@ package final class AccountSettingsModel {
         phase = Self.initialPhase(account: account, sessionEnded: sessionEnded)
     }
 
+    /// A sign-in sheet closed (or the session line cleared). If the tab was showing "Your session
+    /// ended" (a 401 of its own read, or the sync line) and the session is valid again, read again.
+    /// Anything else is left as it is.
+    package func sessionMayHaveRenewed() async {
+        guard phase == .sessionEnded, !sessionEnded, account != nil else { return }
+        await reload()
+    }
+
     /// Reads the account and its methods together. The latest call wins; a late answer is dropped.
     package func reload() async {
         guard let account else { return clear() }

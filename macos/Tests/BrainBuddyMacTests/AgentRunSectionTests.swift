@@ -58,9 +58,15 @@
         let relay = FakeHandoffRemote()
         private let listed = Mutex<[AgentRunDTO]>([])
 
-        func set(_ runs: [AgentRunDTO]) { listed.withLock { $0 = runs } }
+        private let failure = Mutex<APIError?>(nil)
 
-        func agentRuns(taskID: String) async throws(APIError) -> [AgentRunDTO] { listed.withLock { $0 } }
+        func set(_ runs: [AgentRunDTO]) { listed.withLock { $0 = runs } }
+        func fail(_ error: APIError?) { failure.withLock { $0 = error } }
+
+        func agentRuns(taskID: String) async throws(APIError) -> [AgentRunDTO] {
+            if let error = failure.withLock({ $0 }) { throw error }
+            return listed.withLock { $0 }
+        }
 
         func replyToAgentRun(id: String, message: String, expectedRevision: Int, idempotencyKey: UUID) async throws(APIError) -> AgentRunDTO {
             try await relay.replyToAgentRun(id: id, message: message, expectedRevision: expectedRevision, idempotencyKey: idempotencyKey)
@@ -84,7 +90,7 @@
             let remote = FakeSectionRemote()
             let steps = FakeStepCommands()
 
-            init(online: Bool = true) async {
+            init(online: Bool = true, cached: AgentRunDTO? = nil) async {
                 let me: Result<MeDTO, APIError>? = online ? nil : .failure(HandoffFixture.offline)
                 let flag = FakeAvailabilityRemote(me: me)
                 let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag })
@@ -92,7 +98,7 @@
                 let (remote, steps) = (self.remote, self.steps)
                 model = AgentRunSectionModel(
                     taskServerID: "task_1", projectID: "proj_1", remote: remote, availability: availability, steps: steps,
-                    now: { SectionFixture.now })
+                    now: { SectionFixture.now }, cachedRun: { cached })
             }
         }
 
@@ -217,6 +223,34 @@
             #expect(rig.model.shown?.id == "run_old")
             rig.model.choose(rig.model.runs[1])
             #expect(rig.model.shown?.id == "run_new")
+        }
+
+        @Test("030_FR_025 reopened while the run read fails, the inspector keeps the cached run, stale, with actions off")
+        func reopenOfflineKeepsCachedRun() async {
+            let cached = SectionFixture.run(label: "Needs you", question: "Which colour?")
+            let rig = await Rig(cached: cached)
+            rig.remote.fail(HandoffFixture.offline)
+            await rig.model.load()
+            #expect(rig.model.shown?.id == cached.id)
+            #expect(rig.model.shown?.questionText == "Which colour?")
+            #expect(rig.model.isStale)
+            rig.model.answer = "Blue"
+            await rig.model.sendReply()
+            #expect(rig.remote.relay.runCalls.isEmpty, "Reply sends nothing from a stale view")
+        }
+
+        @Test("030_FR_025 an open inspector goes stale when its read fails and keeps what it showed, then recovers")
+        func openInspectorGoesStale() async {
+            let rig = await Rig()
+            rig.remote.set([SectionFixture.run(label: "Needs you", question: "Which?")])
+            await rig.model.load()
+            #expect(!rig.model.isStale)
+            rig.remote.fail(HandoffFixture.offline)
+            await rig.model.load()
+            #expect(rig.model.isStale && rig.model.shown?.questionText == "Which?")
+            rig.remote.fail(nil)
+            await rig.model.load()
+            #expect(!rig.model.isStale)
         }
 
         @Test("030_FR_020 030_FR_025 Reply sends once online and clears the draft, and offline sends nothing")

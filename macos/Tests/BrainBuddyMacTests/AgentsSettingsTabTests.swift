@@ -77,6 +77,14 @@
             #expect(MacSettingsView.selection(current: .sync, addAgentRequested: false) == .sync)
         }
 
+        @Test("028_FR_001 the Settings window is 820 wide, opens at 620 and may shrink to a scrolling minimum")
+        func settingsWindowSizeFitsTheBoard() {
+            #expect(MacSettingsView.width == 820)
+            #expect(MacSettingsView.idealHeight == 620)
+            #expect(MacSettingsView.minHeight < MacSettingsView.idealHeight)
+            #expect(MacSettingsView.minHeight >= 360, "tall enough for the tab bar and a usable viewport")
+        }
+
         @Test("030_FR_036 030_SC_006 the request opens the Add sheet exactly once")
         func requestOpensAddOnce() async {
             let controller = await make()

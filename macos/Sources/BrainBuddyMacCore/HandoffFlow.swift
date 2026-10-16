@@ -83,8 +83,8 @@ package final class HandoffFlow {
 
     /// The sheet opened: ready agents only, the first selected and previewed.
     package func start() async {
-        guard availability.isOnline else { return phase = .failed(.offline) }
         phase = .loadingAgents
+        guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         let owner = availability.ownerID
         do throws(APIError) {
             let ready = try await remote.agentConnections().filter(\.readyForHandoff).map(HandoffAgent.init)
@@ -110,8 +110,8 @@ package final class HandoffFlow {
 
     package func send() async {
         guard canSend, let manifest, let agent = selectedID else { return }
-        guard availability.isOnline else { return phase = .failed(.offline) }
         phase = .sending
+        guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         let owner = availability.ownerID
         let secret = needsPassword ? password : nil
         let acknowledge = needsAcknowledgement && acknowledged
@@ -137,7 +137,7 @@ package final class HandoffFlow {
 
     private func preview() async {
         guard let agent = selectedID else { return }
-        guard availability.isOnline else { return phase = .failed(.offline) }
+        guard await availability.confirmOnline() else { return phase = .failed(.offline) }
         generation += 1
         let ticket = generation
         (manifest, key, phase) = (nil, nil, .previewing)
