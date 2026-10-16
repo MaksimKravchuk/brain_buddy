@@ -579,6 +579,7 @@ iOS thread; no slice edits it.
         "A password-less account sees the line and Open account on the web… with no credential in the URL, and no +"
       ],
       "budget": {"product_loc": 300, "files": 2},
+      "oversize_reason": "Third file is a 14-line wiring change in MacSettingsView.swift so the canvas request selects the Agents tab (030-SC-006); product lines stay at 299.",
       "implementer": "feature-implementer"
     },
     {
