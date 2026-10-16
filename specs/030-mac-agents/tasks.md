@@ -192,23 +192,23 @@ iOS thread; no slice edits it.
 
 ## Phase 7 — Mac: sidebar, All runs canvas, Waiting for (PR-07)
 
-- [ ] T021 [US2] Add `WorkspaceDestination.agentRuns(AgentRunsFilter)` in
+- [x] T021 [US2] Add `WorkspaceDestination.agentRuns(AgentRunsFilter)` in
   `macos/Sources/BrainBuddyMacCore/SidebarEntries.swift` (no kit query) and have
   `macos/Sources/BrainBuddyMacCore/BrainBuddyModel.swift` own `AgentAvailability`,
   `AgentMemoryCache` and `AgentRunsStore` for the signed-in account and clear them on
   sign-out and account change. 030-FR-001, 030-FR-026. PR-07.
-- [ ] T022 [US2] In `macos/Sources/BrainBuddyMac/ContentView.swift` add the Agents sidebar
+- [x] T022 [US2] In `macos/Sources/BrainBuddyMac/ContentView.swift` add the Agents sidebar
   section (G-01) between Lists and Dates with "All runs N", agent rows and "Add new
   agent" (opens Settings › Agents with the Add sheet through the availability request),
   and the `allRuns` glyph in `macos/Sources/BrainBuddyMac/CarryOnMacIcons.swift`.
   030-FR-002, 030-FR-004, 030-FR-036, 030-FR-041. PR-07.
-- [ ] T023 [US2] Build G-02 in `macos/Sources/BrainBuddyMac/Agents/AgentRunsCanvas.swift`
+- [x] T023 [US2] Build G-02 in `macos/Sources/BrainBuddyMac/Agents/AgentRunsCanvas.swift`
   and `macos/Sources/BrainBuddyMac/Agents/AgentRunRow.swift` (header, groups, rows, agent
   filter, empty/loading/stale/failed states), and G-03 in `ContentView.swift` (Agents group
   above People, header "<n> people, <m> agents", sidebar count n + m, unchanged without
   runs; run rows select the step and offer no task actions). 030-FR-003, 030-FR-007 –
   030-FR-011, 030-FR-025, 030-FR-041. PR-07.
-- [ ] T024 [US2] Scene tests in `macos/Tests/BrainBuddyMacTests/AgentsSceneTests.swift`:
+- [x] T024 [US2] Scene tests in `macos/Tests/BrainBuddyMacTests/AgentsSceneTests.swift`:
   no Agents section signed out; section and "Add new agent" per flag and password state;
   the Waiting for count and groups; selecting a run row selects the step without moving
   it. 030-FR-001, 030-FR-002, 030-FR-004, 030-FR-009, 030-FR-011, 030-SC-006. PR-07.

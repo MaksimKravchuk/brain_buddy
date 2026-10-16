@@ -198,6 +198,8 @@ struct WorkspaceView: View {
     @State private var columns: NavigationSplitViewVisibility = .all
     /// The window's undo stack: Edit › Undo (⌘Z) takes back the last Done, Cancel or move.
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -335,12 +337,50 @@ struct WorkspaceView: View {
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
     }
 
+    /// The agent-run hooks, kept off `window` so its modifier chain stays within the type checker's budget.
+    private var agentAwareCanvas: some View {
+        firstRunCanvas
+            .task(id: model.workspace.account?.id) { await model.refreshAgents() }
+            .task { await model.agentRuns.run() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in Task { await model.refreshAgents() } }
+            .onChange(of: scenePhase) { _, phase in model.agentRuns.isWindowVisible = phase != .background }
+            .onChange(of: model.agentAvailability.isOnline) { _, online in model.agentRuns.isOnline = online }
+            .onChange(of: model.sidebarCounts) { _, _ in if model.showsAgentsSection { Task { await model.refreshAgentSteps() } } }
+            .onChange(of: model.showsAgentsSection) { _, shown in if !shown, model.destination.isAgentRuns { requestNavigation(.destination(.list(.waiting))) } }
+    }
+
+    @ViewBuilder
+    private var routedCanvas: some View {
+        if case .agentRuns(let filter) = model.destination {
+            AgentRunsCanvas(model: model, filter: filter, selectedTaskID: selectedTaskID, onSelect: selectRun)
+                .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
+                    if let task, taskForm?.taskID != task.id { taskForm = TaskAutosave(task: task) }
+                }
+        } else {
+            taskCanvas
+        }
+    }
+
+    private func selectRun(_ run: AgentRunItem) {
+        if let id = model.stepID(forServerID: run.taskServerID) { requestNavigation(.task(id)) }
+    }
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         // X-01 "sidebar hidden": in attention states only, the line's words and glyph; nothing
         // about sync in the toolbar otherwise.
         ToolbarItem(placement: .navigation) {
             SyncToolbarStatusItem(controller: sync, sidebarHidden: columns == .detailOnly)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            if model.destination.isAgentRuns, model.canAddAgent {
+                Button {
+                    model.agentAvailability.requestAddAgent()
+                    openSettings()
+                } label: {
+                    Label { Text(AgentsCopy.addNewAgent) } icon: { MacBoardIconView(icon: .plus, size: 15) }
+                }
+            }
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -379,6 +419,7 @@ struct WorkspaceView: View {
                 .listRowSeparator(.hidden)
                 .selectionDisabled()
             ForEach(fixedSidebarSections) { section in
+                if section.id == "dates", !firstRun.showsFirstRunSidebar { agentsSection }
                 sidebarSection(section)
             }
             if !firstRun.showsFirstRunSidebar {
@@ -390,6 +431,22 @@ struct WorkspaceView: View {
         .listStyle(.sidebar)
         .navigationTitle("BrainBuddy")
         .safeAreaInset(edge: .bottom) { footer }
+    }
+
+    /// G-01, between Lists and Dates: All runs and the agents of the listed runs (board M22, DSAgents).
+    @ViewBuilder
+    private var agentsSection: some View {
+        if model.showsAgentsSection {
+            let runs = model.listedRuns
+            let agents = Dictionary(runs.compactMap { run in run.connectionID.map { ($0, run.agentName) } }) { first, _ in first }
+            Section {
+                sidebarButton(
+                    AgentsCopy.allRuns, symbol: "", destination: .agentRuns(.all), trailing: runs.isEmpty ? nil : "\(runs.count)")
+                ForEach(agents.sorted { $0.value < $1.value }, id: \.key) { id, name in
+                    sidebarButton(name, symbol: "", destination: .agentRuns(.agent(id)), trailing: "\(model.agentRuns.perAgentCounts[id] ?? 0)")
+                }
+            } header: { MacSidebarSectionHeader(title: AgentsCopy.sidebar) }
+        }
     }
 
     /// F-04: Lists and Dates only while the first run shows.
@@ -643,19 +700,20 @@ struct WorkspaceView: View {
     }
 
     private func sidebarButton(
-        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil
+        _ title: String, symbol: String, destination: WorkspaceDestination, tint: Color? = nil, trailing: String? = nil
     ) -> some View {
         let count: Int? = {
             guard case .list(let list) = destination, !firstRun.showsFirstRunSidebar else { return nil }
             guard model.countsReadiness == .ready else { return nil }
-            return model.sidebarCounts.count(for: list)
+            // Waiting for counts its people and its listed agent runs: n + m (030-FR-009).
+            return model.sidebarCounts.count(for: list) + (list == .waiting ? model.listedRuns.count : 0)
         }()
         return Button {
             requestNavigation(.destination(destination))
         } label: {
             MacSidebarRowLabel(
                 title: title, leading: leading(symbol: symbol, destination: destination, tint: tint),
-                trailing: count.map { "\($0)" }, selected: model.destination == destination
+                trailing: count.map { "\($0)" } ?? trailing, selected: model.destination == destination
             )
         }
         .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? title)
@@ -1096,7 +1154,7 @@ struct WorkspaceView: View {
     /// The detail column with the first-run hooks; they live here, not on `window`, so that
     /// modifier chain stays within the type checker's budget.
     private var detailCanvas: some View {
-        firstRunCanvas
+        agentAwareCanvas
             // 029-FR-013: an account linked at any step ends the first run.
             .onChange(of: model.workspace.account != nil) { _, linked in
                 if linked { firstRun.accountLinked() }
@@ -1116,7 +1174,7 @@ struct WorkspaceView: View {
             .frame(minWidth: 560, minHeight: 480)
             .background(.coBgGround)
         } else {
-            taskCanvas
+            routedCanvas
         }
     }
 
@@ -1343,6 +1401,17 @@ struct WorkspaceView: View {
             projectOverviewCard(overview)
                 .padding(.bottom, 16)
         }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            // G-03: runs above the list's own rows, which become the People group; no step moves.
+            sectionHeader(AgentsCopy.waitingAgents, top: 0)
+            ForEach(model.listedRuns) { run in
+                AgentRunRow(
+                    item: run, style: .waiting, now: Date(),
+                    selected: selectedTaskID != nil && selectedTaskID == model.stepID(forServerID: run.taskServerID),
+                    onSelect: { selectRun(run) })
+            }
+            sectionHeader(AgentsCopy.waitingPeople, top: 14)
+        }
         if let pinned = quickOpenedTaskID, selectedTaskID == pinned, !onScreen.contains(pinned), let task = model.task(pinned) {
             sectionHeader("Opened from Quick Open", top: 0)
             taskCard(task)
@@ -1546,6 +1615,7 @@ struct WorkspaceView: View {
         case .project(let id): model.project(id)?.name ?? "Project"
         case .tag(let id): "#" + (model.tag(id)?.name ?? "Tag")
         case .history(let state): state.title
+        case .agentRuns: AgentsCopy.allRuns
         }
     }
 
@@ -1557,6 +1627,9 @@ struct WorkspaceView: View {
         case .undecided, .welcome, .firstStep, .landing, .done: break
         }
         if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
+        if model.destination == .list(.waiting), !model.listedRuns.isEmpty {
+            return AgentsCopy.waitingHeader(people: model.openTaskCount, agents: model.listedRuns.count)
+        }
         let open = Self.plural(model.openTaskCount, "open task")
         return model.isArchivedProjectDestination ? "Archived project · \(open)" : open
     }
