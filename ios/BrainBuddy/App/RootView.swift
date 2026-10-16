@@ -28,18 +28,61 @@ enum ReviewExposure {
 }
 
 /// The app's root: a quiet loading state, a recovery screen when the stored
-/// file cannot be read, and otherwise the tab view.
+/// file cannot be read, the first run on a device that holds nothing yet
+/// (boards 01 to 03), and otherwise the tab view.
 struct RootView: View {
     @Environment(Workspace.self) private var workspace
+    @Environment(PhoneFirstRunFlow.self) private var firstRun
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         if let message = workspace.loadError {
             LoadErrorView(message: message)
         } else if workspace.isLoaded {
-            MainTabView()
+            loaded
+                .task { decideFirstRun() }
+                // "I have an account", or Settings during the landing tip.
+                .onChange(of: workspace.account != nil) { _, linked in
+                    if linked { firstRun.accountLinked() }
+                }
+                // Board 04: the run lands on Next actions with the new step on top.
+                .onChange(of: firstRun.phase) { _, phase in
+                    if phase == .landing { router.selectedTab = .next }
+                }
         } else {
             LoadingView()
         }
+    }
+
+    @ViewBuilder private var loaded: some View {
+        if firstRun.phase == .undecided {
+            LoadingView()
+        } else if firstRun.coversApp {
+            FirstRunView()
+        } else {
+            MainTabView()
+        }
+    }
+
+    /// Once the store is read, before the tabs first show: whether this device
+    /// gets the first run. Sample data and UI test launches never do.
+    private func decideFirstRun() {
+        if FirstRunLaunch.isSuppressed {
+            firstRun.suppress()
+        } else {
+            firstRun.decide(PhoneFirstRunLaunchFacts(workspace))
+        }
+    }
+}
+
+/// Launches that open the app as usual without deciding or recording a first run.
+enum FirstRunLaunch {
+    /// A `UserDefaults` launch argument (`-BBSkipFirstRun YES`) for UI tests.
+    static let skipKey = "BBSkipFirstRun"
+
+    static var isSuppressed: Bool {
+        ProcessInfo.processInfo.arguments.contains(AppConstants.previewDataLaunchArgument)
+            || UserDefaults.standard.bool(forKey: skipKey)
     }
 }
 
