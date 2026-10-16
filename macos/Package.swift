@@ -30,13 +30,17 @@ let package = Package(
         .target(name: "BrainBuddyMacCore", dependencies: kit),
         .executableTarget(
             name: "BrainBuddyMac",
-            dependencies: ["BrainBuddyMacCore", .product(name: "WhisperKit", package: "argmax-oss-swift")] + kit
+            dependencies: [
+                "BrainBuddyMacCore",
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "BrainBuddyDesign", package: "BrainBuddyKit"),
+            ] + kit
         ),
         // `Resources/` holds the synthetic legacy stores the importer is tested on; `.copy` keeps
         // their bytes as they are.
         .testTarget(
             name: "BrainBuddyMacTests",
-            dependencies: ["BrainBuddyMac", "BrainBuddyMacCore"] + kit,
+            dependencies: ["BrainBuddyMac", "BrainBuddyMacCore", .product(name: "BrainBuddyDesign", package: "BrainBuddyKit")] + kit,
             resources: [.copy("Resources")]
         ),
     ]

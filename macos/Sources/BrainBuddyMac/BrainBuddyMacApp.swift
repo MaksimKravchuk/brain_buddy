@@ -1,4 +1,5 @@
 import AppKit
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -19,6 +20,7 @@ struct BrainBuddyMacApp: App {
 
     init() {
         NSApplication.shared.setActivationPolicy(.regular)
+        CarryOnFonts.register()
         let configuration: MacHostConfiguration
         do {
             configuration = try MacHostConfiguration.fromEnvironment()
@@ -43,6 +45,7 @@ struct BrainBuddyMacApp: App {
     var body: some Scene {
         Window("Brain Buddy", id: "main") {
             ContentView(launch: launch)
+                .tint(.coTextPrimary)
                 .frame(minWidth: 720, minHeight: 480)
         }
         .defaultSize(width: 960, height: 640)

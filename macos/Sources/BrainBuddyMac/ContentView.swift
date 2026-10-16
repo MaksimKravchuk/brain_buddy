@@ -1,5 +1,6 @@
 import AppKit
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import BrainBuddyWorkspace
 import SwiftUI
@@ -343,6 +344,10 @@ struct WorkspaceView: View {
 
     private var sidebar: some View {
         List {
+            MacSidebarBrand()
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .selectionDisabled()
             ForEach(SidebarEntries.standard.sections) { section in
                 sidebarSection(section)
             }
@@ -374,9 +379,7 @@ struct WorkspaceView: View {
                 querySidebarStatus(model.projectsReadiness)
             }
         } header: {
-            HStack {
-                Text("Projects")
-                Spacer()
+            MacSidebarSectionHeader(title: "Projects") {
                 Button("Review") { requestNavigation(.reviewProjects) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Review projects")
@@ -398,7 +401,11 @@ struct WorkspaceView: View {
     private var archivedProjectsSection: some View {
         let archived = model.archivedProjects
         if model.archivedProjectsReadiness != .ready {
-            Section("Archived projects") { querySidebarStatus(model.archivedProjectsReadiness) }
+            Section {
+                querySidebarStatus(model.archivedProjectsReadiness)
+            } header: {
+                MacSidebarSectionHeader(title: "Archived projects")
+            }
         } else if !archived.isEmpty {
             let expanded = model.localState.sidebar.archivedProjectsExpanded
             Section {
@@ -411,9 +418,10 @@ struct WorkspaceView: View {
                             .frame(width: 20)
                             .accessibilityHidden(true)
                         Text("Archived projects")
+                            .carryOnFont(CarryOnTypeScale.body)
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.coTextSecondary)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -450,7 +458,7 @@ struct WorkspaceView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .listRowBackground(model.destination == .tag(tag.id) ? Color.accentColor.opacity(0.22) : Color.clear)
+                .listRowBackground(tagRowBackground(tag.id))
                 .contextMenu {
                     Button("Rename…") { beginRename(.tag(tag.id), name: tag.name) }
                     Button("Delete tag…", role: .destructive) {
@@ -476,7 +484,16 @@ struct WorkspaceView: View {
             }
             .buttonStyle(.plain)
         } header: {
-            Text("Tags")
+            MacSidebarSectionHeader(title: "Tags")
+        }
+    }
+
+    @ViewBuilder
+    private func tagRowBackground(_ id: TagID) -> some View {
+        if model.destination == .tag(id) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.coSidebarRowSelected)
+        } else {
+            Color.clear
         }
     }
 
@@ -545,7 +562,11 @@ struct WorkspaceView: View {
     @ViewBuilder
     private func sidebarSection(_ section: SidebarSection) -> some View {
         if let header = section.header {
-            Section(header) { sidebarRows(section.rows) }
+            Section {
+                sidebarRows(section.rows)
+            } header: {
+                MacSidebarSectionHeader(title: header)
+            }
         } else {
             Section { sidebarRows(section.rows) }
         }
@@ -566,22 +587,9 @@ struct WorkspaceView: View {
     /// not interactive, and says so in words. No button, no selection, no destination;
     /// VoiceOver reads it as one static text element, "Weekly review, coming later".
     private func deferredSidebarRow(_ row: SidebarRow, note: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: row.symbol)
-                .font(.system(size: 14, weight: .semibold))
-                .frame(width: 20)
-                .accessibilityHidden(true)
-            Text(row.title)
-                .lineLimit(1)
-                .layoutPriority(1)
-            Spacer(minLength: 0)
-            Text(note)
-                .font(.caption)
-                .lineLimit(1)
-        }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 3)
+        MacSidebarRowLabel(
+            title: row.title, leading: .symbol(row.symbol), trailing: note, selected: false, muted: true
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityAddTraits(.isStaticText)
@@ -600,32 +608,14 @@ struct WorkspaceView: View {
         return Button {
             requestNavigation(.destination(destination))
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .foregroundStyle(tint ?? .secondary)
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 20)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Spacer(minLength: 0)
-                if let count {
-                    Text("\(count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            MacSidebarRowLabel(
+                title: title, leading: tint.map { MacSidebarRowLabel.Leading.dot($0) } ?? .symbol(symbol),
+                trailing: count.map { "\($0)" }, selected: model.destination == destination
+            )
         }
         .accessibilityLabel(count.map { "\(title), \($0) open tasks" } ?? title)
         .buttonStyle(.plain)
-        .padding(.vertical, 3)
-        .listRowBackground(model.destination == destination ? Color.accentColor.opacity(0.22) : Color.clear)
+        .listRowBackground(Color.clear)
     }
 
     // MARK: Projects
@@ -969,6 +959,7 @@ struct WorkspaceView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 480)
+        .background(.coBgGround)
         .onChange(of: orders, initial: true) { _, new in shownOrders = new }
         .onChange(of: onScreen) { _, ids in keepSelection(in: ids) }
         .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
@@ -1092,7 +1083,7 @@ struct WorkspaceView: View {
             if let refusal = model.unarchiveRefusal, model.destination == .project(refusal.projectID) {
                 HStack(spacing: 10) {
                     Text(refusal.message)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.coTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Rename…") {
                         beginRename(
@@ -1100,15 +1091,12 @@ struct WorkspaceView: View {
                         )
                     }
                 }
-                .font(.subheadline)
+                .carryOnFont(CarryOnTypeScale.meta)
             }
-            Text(taskCountCaption)
-                .foregroundStyle(.secondary)
-                .font(.subheadline)
             if model.isArchivedProjectDestination {
                 Text("Unarchive this project to add tasks to it.")
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
+                    .foregroundStyle(.coTextSecondary)
+                    .carryOnFont(CarryOnTypeScale.meta)
             }
             listControls
         }
@@ -1118,13 +1106,7 @@ struct WorkspaceView: View {
     }
 
     private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(destinationTitle)
-                .font(.largeTitle.bold())
-                .lineLimit(2)
-                .focusable()
-                .focused($canvasFocus, equals: .title)
-                .accessibilityAddTraits(.isHeader)
+        MacListHeaderTitle(title: destinationTitle, caption: taskCountCaption) {
             if case .project(let id) = model.destination, model.isArchived(id) {
                 Label("Archived", systemImage: "archivebox")
                     .font(.caption.weight(.semibold))
@@ -1135,6 +1117,11 @@ struct WorkspaceView: View {
                     .focused($canvasFocus, equals: .unarchive)
                     .accessibilityLabel("Unarchive \(model.project(id)?.name ?? "project")")
             }
+        } titleView: { title in
+            title
+                .focusable()
+                .focused($canvasFocus, equals: .title)
+                .accessibilityAddTraits(.isHeader)
         }
     }
 
