@@ -276,10 +276,12 @@ extension BrainBuddyAPIClient {
         var idempotencyKey: UUID?
         /// False for login and signup, which must not carry an old session.
         var sendsSession: Bool
+        /// Extra request headers, such as the account routes' expected owner.
+        var headers: [String: String]
 
         init(
             _ method: HTTPMethod, _ path: [String], query: [(name: String, value: String)] = [], body: Data? = nil,
-            idempotencyKey: UUID? = nil, sendsSession: Bool = true
+            idempotencyKey: UUID? = nil, sendsSession: Bool = true, headers: [String: String] = [:]
         ) {
             self.method = method
             self.path = path
@@ -287,6 +289,7 @@ extension BrainBuddyAPIClient {
             self.body = body
             self.idempotencyKey = idempotencyKey
             self.sendsSession = sendsSession
+            self.headers = headers
         }
     }
 
@@ -329,6 +332,7 @@ extension BrainBuddyAPIClient {
             ClientEpoch.header: String(ClientEpoch.current),
             "X-Correlation-ID": correlationID,
         ]
+        headers.merge(endpoint.headers) { current, _ in current }
         if endpoint.body != nil { headers["Content-Type"] = "application/json" }
         if let key = endpoint.idempotencyKey { headers["Idempotency-Key"] = key.uuidString.lowercased() }
         var sentToken: String?

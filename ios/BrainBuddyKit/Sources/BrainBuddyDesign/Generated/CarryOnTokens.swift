@@ -239,6 +239,11 @@ public enum CarryOnLayout {
         public static let bottom: Double = 28
         public static let height: Double = 62
     }
+    public enum CodeBox {
+        public static let height: Double = 58
+        public static let gap: Double = 6
+        public static let radius: Double = 12
+    }
     public enum MacSidebarRow {
         public static let height: Double = 34
     }
@@ -492,6 +497,9 @@ public enum CarryOnTokenTable {
         "layout.bottom-bar.side": CarryOnLayout.BottomBar.side,
         "layout.bottom-bar.bottom": CarryOnLayout.BottomBar.bottom,
         "layout.bottom-bar.height": CarryOnLayout.BottomBar.height,
+        "layout.code-box.height": CarryOnLayout.CodeBox.height,
+        "layout.code-box.gap": CarryOnLayout.CodeBox.gap,
+        "layout.code-box.radius": CarryOnLayout.CodeBox.radius,
         "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
     ]
     public static let strings: [String: String] = [

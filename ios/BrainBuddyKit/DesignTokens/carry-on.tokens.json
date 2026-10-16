@@ -108,6 +108,7 @@
     "strike": { "thickness": 1.5 },
     "focus-ring": { "width": 2, "offset": 2 },
     "bottom-bar": { "side": 16, "bottom": 28, "height": 62 },
+    "code-box": { "height": 58, "gap": 6, "radius": 12 },
     "mac-sidebar-row": { "height": 34 }
   }
 }
