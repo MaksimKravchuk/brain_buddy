@@ -1084,6 +1084,9 @@ struct WorkspaceView: View {
 
     private var firstRun: FirstRunModel { model.firstRun }
 
+    /// F-03 stands in for the list only on Next actions; any other list the person opens shows as usual.
+    private var showsLanding: Bool { firstRun.phase == .landing && model.destination == .list(.next) }
+
     private func windowAppeared() {
         quickCapture.start(model: model)
         firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
@@ -1144,7 +1147,7 @@ struct WorkspaceView: View {
     /// F-03: the card and the tip stand in for the list's one row.
     @ViewBuilder
     private var landing: some View {
-        if firstRun.phase == .landing {
+        if showsLanding {
             let step = model.tasks.first { $0.state == .next }
             LandingTip(
                 step: step?.title, tip: firstRun.landingTip,
@@ -1157,7 +1160,7 @@ struct WorkspaceView: View {
     }
 
     private var taskCanvas: some View {
-        let sections = firstRun.phase == .landing ? [] : presentedSections(model.sections)
+        let sections = showsLanding ? [] : presentedSections(model.sections)
         let orders = Dictionary(sections.map { ($0.id, $0.rows.map(\.id)) }, uniquingKeysWith: { first, _ in first })
         let onScreen = sections.flatMap { $0.rows.map(\.id) }
         return VStack(alignment: .leading, spacing: 0) {
@@ -1548,9 +1551,10 @@ struct WorkspaceView: View {
 
     private var taskCountCaption: String {
         switch firstRun.phase {
-        case .firstStep: return FirstRunCopy.listHeader
-        case .landing: return FirstRunCopy.landingHeader.replacingOccurrences(of: "\(destinationTitle) · ", with: "")
-        case .undecided, .welcome, .done: break
+        case .firstStep where model.destination == .list(.inbox): return FirstRunCopy.listHeader
+        case .landing where showsLanding:
+            return FirstRunCopy.landingHeader.replacingOccurrences(of: "\(destinationTitle) · ", with: "")
+        case .undecided, .welcome, .firstStep, .landing, .done: break
         }
         if model.destination.isHistory { return Self.plural(model.listResult?.totalCount ?? 0, "task") }
         let open = Self.plural(model.openTaskCount, "open task")
