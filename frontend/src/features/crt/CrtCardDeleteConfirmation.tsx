@@ -109,7 +109,7 @@ export function CrtCardDeleteConfirmation({
   const descriptionId = "crt-card-delete-description";
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-6" data-crt-native="true">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-ink/40 p-6" data-crt-native="true">
       <section
         ref={panelRef}
         role="alertdialog"
@@ -118,22 +118,22 @@ export function CrtCardDeleteConfirmation({
         aria-describedby={descriptionId}
         aria-busy={busy}
         tabIndex={-1}
-        className="w-full max-w-lg rounded-2xl border border-rose-200 bg-white p-6 shadow-floating outline-hidden"
+        className="w-full max-w-lg co-glass-dense rounded-card p-6 outline-hidden"
       >
-        <p className="text-xs font-bold uppercase tracking-[0.08em] text-rose-700">Delete card</p>
-        <h1 id="crt-card-delete-title" className="mt-2 text-xl font-semibold text-slate-900">{title}</h1>
-        <p id={descriptionId} className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="text-co-meta font-semibold text-danger">Delete card</p>
+        <h1 id="crt-card-delete-title" className="mt-2 text-co-body font-semibold text-ink">{title}</h1>
+        <p id={descriptionId} className="mt-2 text-co-meta leading-6 text-ink-muted">
           This will delete the card and its connected relations.
         </p>
-        <ul aria-label="Connected relations that will be deleted" className="mt-4 list-disc rounded-lg border border-rose-200 bg-rose-50 p-4 pl-8 text-sm leading-6 text-rose-900">
+        <ul aria-label="Connected relations that will be deleted" className="mt-4 list-disc rounded-lg bg-sunken p-4 pl-8 text-co-meta leading-6 text-danger">
           {relationConsequences.map((consequence) => <li key={consequence}>{consequence}</li>)}
         </ul>
-        {error ? <p className="mt-4 text-sm text-rose-700" role="alert">{error}</p> : null}
+        {error ? <p className="mt-4 text-co-meta text-danger" role="alert">{error}</p> : null}
         <div className="mt-6 flex flex-wrap justify-end gap-3">
           <button
             ref={cancelRef}
             type="button"
-            className="rounded-lg bg-brand-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-ink px-4 py-2 text-co-meta font-semibold text-card disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
             onClick={cancel}
           >
@@ -141,7 +141,7 @@ export function CrtCardDeleteConfirmation({
           </button>
           <button
             type="button"
-            className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-semibold text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-quiet hover:bg-quiet-pressed px-4 py-2 text-co-meta font-semibold text-danger disabled:cursor-not-allowed disabled:opacity-60"
             disabled={busy}
             onClick={() => void confirm()}
           >

@@ -429,7 +429,7 @@ export function InboxStep(): React.JSX.Element {
         if (bulk.undone) {
           const { restored, skipped } = bulk.undone;
           return (
-            <p role="status" className="m-0 text-sm text-slate-700">
+            <p role="status" className="m-0 text-co-meta text-ink-muted">
               {skipped.length === 0
                 ? `Undone. All ${restored.length} are back in your Inbox.`
                 : `${restored.length} are back in your Inbox. ${skipped.length} changed on another device and stayed in Someday / maybe.`}
@@ -439,12 +439,12 @@ export function InboxStep(): React.JSX.Element {
         if (released) {
           return (
             <>
-              <p role="status" className="m-0 text-sm text-slate-700">
+              <p role="status" className="m-0 text-co-meta text-ink-muted">
                 {released.resumed
                   ? `${plural(released.released, "item was", "items were")} released to Someday / maybe.`
                   : `${plural(processed.length, "item")} processed · ${released.released} released to Someday / maybe`}
               </p>
-              {released.skipped > 0 ? <p className="m-0 text-sm text-slate-600">{`${released.skipped} changed on another device and stayed in Inbox.`}</p> : null}
+              {released.skipped > 0 ? <p className="m-0 text-co-meta text-ink-muted">{`${released.skipped} changed on another device and stayed in Inbox.`}</p> : null}
               {bulk.undoAction.failure ? <FailureBanner failure={bulk.undoAction.failure} online={bulk.undoAction.online} /> : null}
               <div>
                 <button type="button" disabled={bulk.undoAction.disabled} className={buttonClass} onClick={undoRelease}>
@@ -457,8 +457,8 @@ export function InboxStep(): React.JSX.Element {
         if (items.length === 0) {
           return (
             <>
-              <p className="m-0 text-base font-medium text-slate-900">Inbox is empty</p>
-              <p className="m-0 text-sm text-slate-600">Nothing to process.</p>
+              <p className="m-0 text-co-body font-medium text-ink">Inbox is empty</p>
+              <p className="m-0 text-co-meta text-ink-muted">Nothing to process.</p>
             </>
           );
         }
@@ -474,21 +474,21 @@ export function InboxStep(): React.JSX.Element {
         if (current === undefined) {
           return (
             <>
-              {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice}</p> : null}
-              <p className="m-0 text-base font-medium text-slate-900">{`${plural(processed.length, "item")} processed`}</p>
+              {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-co-meta text-ink-muted">{notice}</p> : null}
+              <p className="m-0 text-co-body font-medium text-ink">{`${plural(processed.length, "item")} processed`}</p>
               {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
-              {bulk.releaseAction.pending ? <p role="status" className="m-0 text-sm text-slate-600">Releasing…</p> : null}
+              {bulk.releaseAction.pending ? <p role="status" className="m-0 text-co-meta text-ink-muted">Releasing…</p> : null}
               {bulk.releaseAction.failure ? <FailureBanner failure={bulk.releaseAction.failure} online={bulk.releaseAction.online} /> : null}
             </>
           );
         }
         return (
           <>
-            {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-sm text-slate-700">{notice}</p> : null}
-            <p className="m-0 text-xs text-slate-500">{`Item ${handled.size + 1} of ${limit}`}</p>
-            <div className="flex flex-col gap-3 rounded-[14px] border border-slate-200 bg-white p-4 shadow-soft">
-              <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-lg font-semibold text-slate-900 outline-hidden">{current.title}</h2>
-              <p className="m-0 -mt-2 text-xs text-slate-500">Is it actionable? Choose where it belongs.</p>
+            {notice ? <p role="status" aria-label="Changed elsewhere" className="m-0 text-co-meta text-ink-muted">{notice}</p> : null}
+            <p className="m-0 text-co-meta text-ink-muted">{`Item ${handled.size + 1} of ${limit}`}</p>
+            <div className="flex flex-col gap-3 rounded-card bg-card p-4">
+              <h2 ref={headingRef} tabIndex={-1} className="m-0 break-words text-co-body font-semibold text-ink outline-hidden focus-visible:shadow-ring-focus">{current.title}</h2>
+              <p className="m-0 -mt-2 text-co-meta text-ink-muted">Is it actionable? Choose where it belongs.</p>
               {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
               {countAction.failure ? <FailureBanner failure={countAction.failure} online={countAction.online} /> : null}
               {form?.kind === "project" ? (
@@ -509,7 +509,7 @@ export function InboxStep(): React.JSX.Element {
                 />
               ) : form ? (
                 <form className="flex flex-col gap-2" onSubmit={(event) => (form.kind === "title" ? saveTitle(event, current, form.text) : submitWaiting(event, current, form.choice, form.text))}>
-                  <label className="flex flex-col gap-1 text-sm font-medium text-slate-800">
+                  <label className="flex flex-col gap-1 text-co-meta font-medium text-ink">
                     {form.kind === "title" ? "Title" : "Who or what are you waiting for?"}
                     <input
                       ref={fieldRef}
@@ -565,7 +565,7 @@ export function InboxStep(): React.JSX.Element {
                         onClick={() => (choice.needsWaitingFor ? setForm({ kind: "waiting", choice, text: "" }) : choose(choice, current))}
                       >
                         {action.pending === choice.id ? "Saving…" : choice.label}
-                        {choice.sub ? <span className="text-xs font-normal text-slate-500">{choice.sub}</span> : null}
+                        {choice.sub ? <span className="text-co-meta font-normal text-ink-muted">{choice.sub}</span> : null}
                       </button>
                     ))}
                     <button type="button" disabled={itemsDisabled} className={buttonClass} onClick={() => setForm({ kind: "project", name: current.title, outcome: "", action: "" })}>

@@ -66,13 +66,13 @@
 
         @Test("The sidebar renders as approved", arguments: Appearance.allCases)
         func macSidebar(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 sidebar, named: "mac-sidebar-\(appearance.rawValue)", scheme: appearance.scheme, width: 240)
         }
 
         @Test("The list header renders as approved", arguments: Appearance.allCases)
         func macListHeader(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 MacListHeaderTitle(title: "Inbox", caption: "4 open tasks")
                     .padding(28)
                     .frame(maxWidth: .infinity, alignment: .leading)

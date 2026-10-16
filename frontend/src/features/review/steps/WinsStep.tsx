@@ -14,13 +14,13 @@ export function WinsStep(): React.JSX.Element {
         const { items, meta } = query.data as ReviewQueue;
         const count = meta.count as number;
         return count === 0 ? (
-          <p className="m-0 text-sm text-slate-600">A quiet week… Taking a few minutes now is how next week gets easier.</p>
+          <p className="m-0 text-co-meta text-ink-muted">A quiet week… Taking a few minutes now is how next week gets easier.</p>
         ) : (
           <>
-            <p className="m-0 text-base font-medium text-slate-900">{`This week you finished ${plural(count, "thing")}`}</p>
-            <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-0 text-sm text-slate-800">
+            <p className="m-0 text-co-body font-medium text-ink">{`This week you finished ${plural(count, "thing")}`}</p>
+            <ul className="m-0 flex list-none flex-col gap-2 p-0 text-co-meta text-ink">
               {items.map((task) => (
-                <li key={task.id} className="px-3 py-2.5">{task.title}</li>
+                <li key={task.id} className="rounded-card bg-card px-3 py-2.5">{task.title}</li>
               ))}
             </ul>
           </>

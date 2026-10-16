@@ -43,7 +43,7 @@ export function MindSweepStep(): React.JSX.Element {
 
   return (
     <>
-      <p className="m-0 text-sm text-slate-600">What&apos;s on your mind? Get it out of your head. Don&apos;t sort it yet.</p>
+      <p className="m-0 text-co-meta text-ink-muted">What&apos;s on your mind? Get it out of your head. Don&apos;t sort it yet.</p>
       {action.failure ? <FailureBanner failure={action.failure} online={action.online} /> : null}
       <form className="flex gap-2" onSubmit={submit}>
         <input
@@ -63,9 +63,9 @@ export function MindSweepStep(): React.JSX.Element {
         </button>
       </form>
       {added.length > 0 ? (
-        <ul className="m-0 flex list-none flex-col divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white p-0 text-sm text-slate-800">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0 text-co-meta text-ink">
           {added.map((title, index) => (
-            <li key={`${index}-${title}`} className="px-3 py-2.5">{title}</li>
+            <li key={`${index}-${title}`} className="rounded-card bg-card px-3 py-2.5">{title}</li>
           ))}
         </ul>
       ) : null}

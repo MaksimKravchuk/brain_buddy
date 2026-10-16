@@ -48,6 +48,7 @@ struct BrainBuddyMacApp: App {
         Window("Brain Buddy", id: "main") {
             ContentView(launch: launch)
                 .tint(CarryOnColorStyle.coTextPrimary)
+                .environment(\.carryOnPlatform, .mac)
                 .frame(minWidth: 720, minHeight: 480)
         }
         .defaultSize(width: 960, height: 640)
@@ -58,6 +59,7 @@ struct BrainBuddyMacApp: App {
         }
         Settings {
             MacSettingsView(launch: launch, selection: $settingsTab)
+                .environment(\.carryOnPlatform, .mac)
         }
     }
 

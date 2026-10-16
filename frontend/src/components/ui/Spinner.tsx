@@ -16,7 +16,7 @@ export function Spinner({ size = "md", className, label }: SpinnerProps): React.
   return (
     <div
       className={twMerge(
-        "animate-spin rounded-full border-slate-200 border-t-brand-primary",
+        "animate-spin rounded-full border-quiet-pressed border-t-ink",
         sizeMap[size],
         className
       )}
