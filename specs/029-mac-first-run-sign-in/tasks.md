@@ -5,13 +5,13 @@
 
 **Status**: draft slice map for owner approval. Implementation starts only after the
 design sign-off and a `/speckit-review` verdict of `approved` or `founder-accepted`.
-PR-03 additionally waits for pending clarification (c); PR-07 waits for 027 PR-55 (task
-T055) on the Rust server; PR-08 waits for pending clarification (a) and a team-signed Mac
-build. This file is portable planning input, not permission to implement, merge or deploy.
+Clarification (c) is answered (Max, 2026-10-16: Rust only, no Python exception), so no
+slice changes `backend/`. PR-07 waits for 027 PR-55 (task T055) on the Rust server; PR-08
+waits for pending clarification (a) and a team-signed Mac build. This file is portable planning input, not permission to implement, merge or deploy.
 
 **Delivery gates** (non-negotiable, regardless of who executes these tasks): isolated
 worktree and feature branch per slice; Constitution Principle II; tests name the
-feature-qualified id (`029-FR-###` / `029-SC-###`, `029_FR_###` in Swift and Python
+feature-qualified id (`029-FR-###` / `029-SC-###`, `029_FR_###` in Swift and Rust
 function names); acceptance graded by an agent that did not write the code; landing class
 decided by `scripts/classify_path_risk.py` — SHIP/SHOW land PR-less through verified
 trunk (ADR-0008, ADR-0030; `AGENTS.md`). Each slice runs
@@ -20,8 +20,8 @@ before review.
 
 **Tests (Principle II)**: reused — kit `ModernAuthTests`, `InviteHandoffTests`,
 `EndpointRequestTests`; Mac `MacSyncFlowTests`, `MacLocalStateTests`, `MacLaunchTests`, the
-Carry On snapshot suites; backend `test_modern_auth_*`. Necessary additions are named
-inside the tasks below. Test-first applies to T002 (clean-Mac decision), T004 (original
+Carry On snapshot suites; backend `test_modern_auth_*` (run unchanged; no backend file
+changes). Necessary additions are named inside the tasks below. Test-first applies to T002 (clean-Mac decision), T004 (original
 text kept in the note) and T014 (different account refused on sign-in again).
 
 ## Format: `[ID] [P?] [Story] Description`
@@ -61,19 +61,19 @@ text kept in the note) and T014 (different account refused on sign-in again).
   contains captured text (encode a run with a known sentence and search the JSON).
   029-FR-015, 029-FR-031. PR-01.
 
-## Phase 2 — Server `macos` client (PR-03)
+## Phase 2 — Rust `macos` client conformance (PR-03; no `backend/` change)
 
-- [ ] T006 [US3] Add `macos` to `Client` in `backend/app/schemas/modern_auth.py` and treat
-  it like `ios` in `backend/app/services/modern_auth_service.py` (methods with
-  `apple=False` for `macos`, native path, redirect label and channel `ios`, Apple start
-  refused), with pytest in `backend/tests/test_modern_auth_macos_client.py`: methods,
-  email request/resend/verify and Google start/complete with `client=macos`; Apple start
-  refused; an unknown client still rejected; existing `web`/`ios` suites untouched.
-  029-FR-017, 029-SC-006. PR-03.
-- [ ] T007 [P] [US3] Add a `macos` conformance case to
-  `rust/crates/bb-conformance/tests/modern_auth.rs` and the `macos` value to the client row
-  of `specs/027-rust-server/contracts/capability-inventory.md`. 029-FR-017, 029-SC-006.
-  PR-03.
+- [ ] T006 [US3] Add a Rust-only `macos` case to
+  `rust/crates/bb-conformance/tests/modern_auth.rs` with the existing `rust_only_test!`
+  macro (named `cap_*_rust_*`, skipped unless `BB_CONFORMANCE_SERVER=rust`): `methods`,
+  email request/resend and Google start with `client=macos` behave as `ios` (native path,
+  `brainbuddy://auth/callback` return); Apple is reported as not offered and an Apple
+  start is refused. The Python server is not changed and keeps rejecting `macos` (answer
+  to (c)). 029-FR-017, 029-SC-006. PR-03.
+- [ ] T007 [P] [US3] Note on the CAP-HTTP-010 row of
+  `specs/027-rust-server/contracts/capability-inventory.md` that `client=macos` is a
+  Rust-only change (029-FR-017; the Python server is frozen and rejects it). 029-FR-017,
+  029-SC-006. PR-03.
 
 ## Phase 3 — First-run views (PR-02)
 
@@ -111,18 +111,23 @@ text kept in the note) and T014 (different account refused on sign-in again).
   the guard where the plan places it. 029-FR-024, 029-SC-007. PR-04.
 - [ ] T015 [US3] Move `macos/Sources/BrainBuddyMacCore/SignInFlow.swift` to the native
   attempt API and add the choice, code, password, collision and invite-required steps:
-  methods from `authMethods()` on the chosen server, email code request/resend/verify,
+  methods from `authMethods()` on the chosen server with the `macos` client, a 422 on
+  `methods` (the Python server does not know `macos`) mapped to the password-only state
+  with no error and no retry as `ios`, email code request/resend/verify,
   provider completion through a `ProviderSignInPresenting` protocol, outcomes and errors
   in words with reference, offline words, no automatic retry on 429, redacted logging;
   adjust `macos/Sources/BrainBuddyMacCore/MacSyncController.swift` only if the sign-in
   entry needs it. Tests in `SignInFlowTests.swift` for each method and outcome over a fake
-  workspace. 029-FR-018 – 029-FR-025, 029-FR-027, 029-SC-005, 029-SC-008. PR-04.
+  workspace, including password-only on a 422 from `methods` and the methods-failed state
+  on any other failure. 029-FR-016, 029-FR-018 – 029-FR-025, 029-FR-027, 029-SC-005,
+  029-SC-008. PR-04.
 
 ## Phase 5 — Mac sign-in sheet (PR-05)
 
 - [ ] T016 [US3] Lay out A-01 – A-04 in `macos/Sources/BrainBuddyMac/SignInSheet.swift`
-  per design.md (M05; offered buttons only; no Apple button unless 029-FR-026 holds; ink
-  "Send me a code"; keyboard and VoiceOver). 029-FR-018 – 029-FR-026, 029-FR-031. PR-05.
+  per design.md (M05; only the methods `methods` reports for `macos`; A-01.08 password
+  only against the Python server; no Apple button unless 029-FR-026 holds; ink "Send me a
+  code"; keyboard and VoiceOver). 029-FR-018 – 029-FR-026, 029-FR-031. PR-05.
 - [ ] T017 [P] [US3] Implement `ProviderSignInPresenting` with `ASWebAuthenticationSession`
   in `macos/Sources/BrainBuddyMac/MacProviderSignIn.swift` (callback scheme `brainbuddy`,
   ephemeral, main window anchor, cancel → nothing changed). 029-FR-021, 029-FR-027. PR-05.
@@ -133,8 +138,8 @@ text kept in the note) and T014 (different account refused on sign-in again).
 
 - [ ] T019 [US1] Snapshot tests in `macos/Tests/BrainBuddyMacTests/FirstRunSnapshotTests.swift`
   for F-01.01, F-01.02, F-01.04 (unavailable), F-02.01, F-02.02, F-03.01 and F-04.01, and in
-  `macos/Tests/BrainBuddyMacTests/SignInSnapshotTests.swift` for A-01.02, A-01.03, A-02.01,
-  A-04.02 and A-04.03, light and dark; renders committed under
+  `macos/Tests/BrainBuddyMacTests/SignInSnapshotTests.swift` for A-01.02, A-01.03, A-01.08,
+  A-02.01, A-04.02 and A-04.03, light and dark; renders committed under
   `macos/Tests/BrainBuddyMacTests/__Snapshots__/mac-first-run-*.png` and `mac-signin-*.png`
   after comparison with the board. 029-FR-031, 029-SC-009. PR-06.
 - [ ] T020 [US1] Run `swift test` in `macos/` and the kit's `BrainBuddyAPITests` on a macOS 26
@@ -160,10 +165,11 @@ text kept in the note) and T014 (different account refused on sign-in again).
 
 ## Phase 8 — Apple on the Mac (PR-08, pending (a))
 
-- [ ] T023 [US3] Accept the Mac bundle id as a native Apple audience on the server
-  (`backend/app/core/config.py`, `.env.example`, `backend/app/services/modern_auth_service.py`:
-  `methods` offers Apple for `macos` only when the Mac audience is configured; native
-  complete accepts it), with pytest in `backend/tests/test_modern_auth_macos_apple.py`.
+- [ ] T023 [US3] Add a Rust-only conformance case to
+  `rust/crates/bb-conformance/tests/modern_auth.rs` (`rust_only_test!`): `methods` offers
+  Apple for `macos` only when the Mac bundle id is configured as a native Apple audience on
+  the Rust server, and native Apple completion accepts it. The Rust server's audience
+  setting is 027's configuration; the Python server is not changed (answer to (c)).
   029-FR-017, 029-FR-026. PR-08.
 - [ ] T024 [US3] Team-sign the Mac build with the Sign in with Apple entitlement
   (`macos/build_app.sh`, `macos/BrainBuddyMac.entitlements`) and add "Continue with Apple"
@@ -175,8 +181,11 @@ text kept in the note) and T014 (different account refused on sign-in again).
 
 ## Dependencies & Execution Order
 
-- PR-01 and PR-03 have no dependencies and disjoint paths: run in parallel (PR-03 after
-  pending (c) is answered).
+- PR-01 and PR-03 have no dependencies and disjoint paths: run in parallel. PR-03 touches
+  only the Rust conformance suite and the 027 inventory, never `backend/`.
+- Google and the email code on the Mac become visible only when the Rust server serves
+  modern authentication and passes PR-03's case; until then the Mac is password-only
+  against the Python server, with no further release needed when the server changes.
 - PR-02 depends on PR-01; PR-04 depends on PR-03. PR-02 and PR-04 are independent: run in
   parallel.
 - PR-05 depends on PR-04. PR-06 depends on PR-02 and PR-05.
@@ -223,27 +232,24 @@ text kept in the note) and T014 (different account refused on sign-in again).
     },
     {
       "id": "PR-03",
-      "outcome": "The server accepts the macos authentication client like ios, with Apple refused, on Python and in Rust conformance",
+      "outcome": "A Rust-only conformance case and the 027 inventory note fix the macos authentication client as a Rust-server change, treated like ios with Apple refused; the Python server is unchanged",
       "tasks": ["T006", "T007"],
       "requirements": ["029-FR-017", "029-SC-006"],
       "paths": [
-        "backend/app/schemas/modern_auth.py",
-        "backend/app/services/modern_auth_service.py",
-        "backend/tests/test_modern_auth_macos_client.py",
         "rust/crates/bb-conformance/tests/modern_auth.rs",
         "specs/027-rust-server/contracts/capability-inventory.md"
       ],
       "depends_on": [],
       "tests": [
-        "cd backend && pytest tests/test_modern_auth_macos_client.py",
-        "make test-backend"
+        "cd rust && cargo test -p bb-conformance --test modern_auth --no-run",
+        "cd rust && BB_CONFORMANCE_BASE_URL=http://localhost:8000 cargo test -p bb-conformance --test modern_auth"
       ],
       "acceptance": [
-        "methods, email code and Google start accept client=macos; Apple is not offered and its start is refused",
-        "Every existing web and ios modern-auth test passes unchanged"
+        "The macos case is Rust-only: skipped against the Python server, and on the Rust server methods, email code and Google start accept client=macos while Apple is not offered and its start is refused",
+        "No file under backend/ changes and every existing web and ios modern-auth test passes unchanged"
       ],
-      "budget": {"product_loc": 30, "files": 2},
-      "implementer": "feature-implementer"
+      "budget": {"product_loc": 1, "files": 1},
+      "implementer": "mechanical-implementer"
     },
     {
       "id": "PR-02",
@@ -274,7 +280,7 @@ text kept in the note) and T014 (different account refused on sign-in again).
     },
     {
       "id": "PR-04",
-      "outcome": "The kit sends the device's client value and the Mac sign-in flow supports Google, email code and password through the native attempt",
+      "outcome": "The kit sends the device's client value and the Mac sign-in flow supports Google, email code and password through the native attempt, offering only what methods reports (password only against the Python server)",
       "tasks": ["T013", "T014", "T015"],
       "requirements": [
         "029-FR-016", "029-FR-018", "029-FR-019", "029-FR-020", "029-FR-021",
@@ -296,17 +302,17 @@ text kept in the note) and T014 (different account refused on sign-in again).
         "cd macos && swift test --filter MacSyncFlowTests"
       ],
       "acceptance": [
-        "The iPhone's auth request bodies are byte-identical; the Mac sends macos",
-        "Each method and outcome is handled over a fake workspace, and another account on sign-in again is refused before linking"
+        "The iPhone's auth request bodies are byte-identical; the Mac sends macos and never falls back to ios",
+        "A 422 from methods yields password only with no error; each method and outcome is handled over a fake workspace, and another account on sign-in again is refused before linking"
       ],
       "budget": {"product_loc": 380, "files": 3},
       "implementer": "feature-implementer"
     },
     {
       "id": "PR-05",
-      "outcome": "The Mac sign-in sheet follows M05 with Google, email code and password, and handles every outcome in words",
+      "outcome": "The Mac sign-in sheet follows M05, shows Google and email code only when methods reports them (password only against the Python server), and handles every outcome in words",
       "tasks": ["T016", "T017", "T018"],
-      "requirements": ["029-FR-018", "029-FR-021", "029-FR-023", "029-FR-026", "029-FR-031"],
+      "requirements": ["029-FR-018", "029-FR-019", "029-FR-021", "029-FR-023", "029-FR-026", "029-FR-031"],
       "paths": [
         "macos/Sources/BrainBuddyMac/SignInSheet.swift",
         "macos/Sources/BrainBuddyMac/MacProviderSignIn.swift",
@@ -318,7 +324,7 @@ text kept in the note) and T014 (different account refused on sign-in again).
         "cd macos && swift test --filter SignInFlowTests"
       ],
       "acceptance": [
-        "Only offered methods appear and no Apple button appears in an ad-hoc signed build",
+        "Only offered methods appear, the Python server yields the password-only sheet, and no Apple button appears in an ad-hoc signed build",
         "Cancelling Google returns to the first step with nothing changed"
       ],
       "budget": {"product_loc": 360, "files": 3},
@@ -374,14 +380,11 @@ text kept in the note) and T014 (different account refused on sign-in again).
     },
     {
       "id": "PR-08",
-      "outcome": "With a team-signed build, the Mac offers Continue with Apple and the server accepts the Mac audience",
+      "outcome": "With a team-signed build, the Mac offers Continue with Apple and the Rust server accepts the Mac audience",
       "tasks": ["T023", "T024"],
       "requirements": ["029-FR-017", "029-FR-026", "029-FR-031"],
       "paths": [
-        "backend/app/core/config.py",
-        "backend/app/services/modern_auth_service.py",
-        "backend/tests/test_modern_auth_macos_apple.py",
-        ".env.example",
+        "rust/crates/bb-conformance/tests/modern_auth.rs",
         "macos/build_app.sh",
         "macos/BrainBuddyMac.entitlements",
         "macos/Sources/BrainBuddyMac/MacAppleSignIn.swift",
@@ -391,20 +394,20 @@ text kept in the note) and T014 (different account refused on sign-in again).
       ],
       "depends_on": ["PR-06"],
       "tests": [
-        "cd backend && pytest tests/test_modern_auth_macos_apple.py",
-        "make test-backend",
+        "cd rust && cargo test -p bb-conformance --test modern_auth --no-run",
         "cd macos && swift build"
       ],
       "acceptance": [
-        "Apple is offered for macos only when the Mac audience is configured, and the button appears only in an entitled build",
-        "An Apple sign-in on the Mac lands in the same account as on the iPhone"
+        "Apple is offered for macos only when the Rust server has the Mac audience configured, and the button appears only in an entitled build",
+        "An Apple sign-in on the Mac lands in the same account as on the iPhone; the Python server is unchanged"
       ],
-      "budget": {"product_loc": 220, "files": 7},
+      "budget": {"product_loc": 200, "files": 4},
       "implementer": "feature-implementer"
     }
   ]
 }
 ```
 
-PR-06 changes only tests, renders and evidence, which do not count as product code; its
-budget is the minimum the schema accepts.
+PR-03 and PR-06 change only tests, specs, renders and evidence, which do not count as
+product code; their budget is the minimum the schema accepts. No slice changes
+`backend/` (answer to (c)).
