@@ -787,6 +787,7 @@ class ModernAuthService:
             "revocation_token_type": tokens.revocation_token_type,
             "binding_id": binding["id"] if binding else None,
             "generation": binding["generation"] if binding else None,
+            "binding_state": binding["state"] if binding else None,
         }
         sealed = self._box().seal(
             json.dumps(claims).encode(),
@@ -920,13 +921,18 @@ class ModernAuthService:
                 connection, row, claims, binding, raw_token
             )
         if claims["binding_id"]:
-            if (
+            # The settled-unlink eraser may delete a binding that was already
+            # unlinked at callback time; that removal grants nothing either.
+            erased_unlinked = (
+                binding is None and claims.get("binding_state") == "unlinked"
+            )
+            if not erased_unlinked and (
                 binding is None
                 or binding["id"] != claims["binding_id"]
                 or binding["generation"] != claims["generation"]
             ):
                 raise ModernAuthError()
-            if binding["state"] == "unlinked":
+            if binding is None or binding["state"] == "unlinked":
                 self._consume_attempt(connection, row["id"])
                 return AuthResult(ExistingAccountRequiredResult())
             owner = self.auth.user_repo.get_by_id(binding["user_id"])

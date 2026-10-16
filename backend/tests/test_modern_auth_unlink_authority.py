@@ -11,7 +11,10 @@ import allure
 import pytest
 from pydantic import SecretStr
 
-from app.repositories.auth_metadata import AuthMetadataRepository
+from app.repositories.auth_metadata import (
+    AuthMetadataRepository,
+    erase_settled_apple_unlinks,
+)
 from app.schemas.modern_auth import (
     AccountActionRequest,
     AppleNativeCompleteRequest,
@@ -224,6 +227,60 @@ def test_023_fr025_removed_apple_cannot_restore_old_owner_by_public_login(
     assert result.payload.status == "existing_account_required"
     assert result.raw_token is None
     assert binding(service)["state"] == "unlinked"
+    assert service.auth.get_user_for_token(token).id == owner.id
+
+
+def test_023_fr025_removed_apple_erased_mid_handoff_still_requires_existing_account(
+    apple_runtime, monkeypatch
+):
+    """Erasing a settled unlinked Apple row between callback and completion grants nothing."""
+    service, _, _, provider, clock = apple_runtime
+    owner, token = owner_with_binding(service, provider, clock)
+    remove(service, owner, token, "apple")
+    clock.now += timedelta(seconds=2)
+    provider.identity = replace(
+        provider.identity,
+        issued_at=int(clock().timestamp()),
+        audience=service.settings.apple_services_id,
+    )
+    monkeypatch.setattr(
+        provider,
+        "exchange_apple",
+        lambda _code, **_: ProviderTokens(
+            provider.identity,
+            provider.identity.audience,
+            SecretStr("synthetic-web-revocation-grant"),
+            "refresh_token",
+        ),
+    )
+    started = service.start_provider(
+        "apple",
+        ProviderStartRequest(
+            purpose="login", client="web", client_challenge=broker.challenge()
+        ),
+    )
+    returned = service.provider_callback(
+        "apple",
+        code="synthetic-web-code",
+        state=started.payload.state,
+        binder=started.binder,
+    )
+    with service.store.transaction() as connection:
+        erased = erase_settled_apple_unlinks(
+            connection, now=clock() + timedelta(days=365)
+        )
+    assert erased == 1 and binding(service) is None
+    fields = parse_qs(urlsplit(returned.url).fragment)
+    result = service.complete_provider(
+        ProviderCompleteRequest(
+            attempt_id=fields["attempt"][0],
+            state=fields["state"][0],
+            handoff_code=fields["grant"][0],
+            client_verifier=broker.VERIFIER,
+        )
+    )
+    assert result.payload.status == "existing_account_required"
+    assert result.raw_token is None
     assert service.auth.get_user_for_token(token).id == owner.id
 
 
