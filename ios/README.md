@@ -413,9 +413,10 @@ release; then nothing is recorded and the Performance row is gone.
 - The design deviations in `docs/native-ios-app.md` (SF Symbols, derived dark
   mode, SF Pro, system glass motion, sky-700 for text and filled controls) are
   awaiting product sign-off.
-- The app icon is the Sprout logo in white on sky (`#0EA5E9`), a single
-  1024 × 1024 px image; iOS derives the dark and tinted variants. No other
-  brand mark exists yet.
+- The app icon is the Carry On "closer" icon, a single 1024 × 1024 px image
+  rendered from `.claude/skills/brain-buddy-design/brand/app-icon.svg` (opaque,
+  no corner mask); iOS derives the dark and tinted variants. The widget
+  extension has no icon of its own and uses the app's.
 - `Shared/PrivacyInfo.xcprivacy` declares a baseline (UserDefaults, file
   timestamps, account email and user content for app functionality). Keep it
   in step with the code.
