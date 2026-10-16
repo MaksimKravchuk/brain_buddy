@@ -1,9 +1,10 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
 /// Process inbox — the GTD *clarify* step, one inbox item at a time, fully
-/// offline. Presented as a full-screen cover while `router.isProcessingInbox`;
+/// offline. Presented as a large sheet over the Inbox while `router.isProcessingInbox`;
 /// the item view itself is `InboxClarifier`, which the weekly review's Inbox
 /// step (M-15) reuses.
 struct ProcessInboxScreen: View {
@@ -38,13 +39,13 @@ struct ProcessInboxScreen: View {
 /// one or a new one), tags or a due date, then decide: Next action, Waiting
 /// for… (asks who or what), Someday / maybe, Make it a project (names the
 /// project, optionally its desired outcome, and asks for its first next
-/// action, which the item becomes), Done
-/// — under 2 minutes (complete), Not needed (cancel), or Skip. Every decision
+/// action, which the item becomes), Done already (complete), Not needed
+/// (cancel), or Skip. Board 16 words them as answers to "What is it?". Every decision
 /// is one change with an Undo toast that puts the item back in the Inbox
 /// exactly as it was (a project made from it is archived again). The toast
-/// shows above the decision buttons, never over them, and taps on the buttons
-/// are ignored for a moment after each decision so a double tap can't decide
-/// the next item too. At accessibility text sizes the buttons scroll with the item
+/// shows above the glass bar, never over it, and taps on the answers and the
+/// bar are ignored for a moment after each decision so a double tap can't decide
+/// the next item too. At accessibility text sizes the bar scrolls with the item
 /// instead of being pinned, so the item stays readable.
 ///
 /// In the weekly review (M-15) it is given the items to go through, reports
@@ -230,50 +231,52 @@ struct InboxClarifier: View {
     // MARK: Clarify
 
     private func clarifyView(_ item: InboxItem) -> some View {
-        // At accessibility sizes six pinned buttons would fill the screen and
-        // hide the item, so they scroll with it instead.
+        // At accessibility sizes the bar would fill the screen and hide the
+        // item, so it scrolls with the item instead of being pinned.
         let pinsActions = !dynamicTypeSize.isAccessibilitySize
         return ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                progressHeader(item)
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.md)) {
+                metaLine(item)
                 itemCard(item)
+                Text("What is it?")
+                    .carryOnText(CarryOnTypeScale.title)
+                    .foregroundStyle(.coTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                answerRows(item)
                 organizeControls(item.task)
+                if !showsSkipInToolbar {
+                    skipButton(item)
+                }
                 if !pinsActions {
                     // The toast sits above the buttons, so Undo never covers a decision.
                     VStack(spacing: 0) {
                         ToastHost()
-                            .padding(.horizontal, -16)
-                        actionCluster(item, isFloating: false)
+                            .padding(.horizontal, -CGFloat(CarryOnSpace.md))
+                        actionBar(item, isFloating: false)
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+            .padding(.horizontal, CGFloat(CarryOnSpace.md))
+            .padding(.top, CGFloat(CarryOnSpace.xs))
+            .padding(.bottom, CGFloat(CarryOnSpace.md))
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(item.task.id)
             .transition(.opacity)
         }
+        .bbScreenBackground()
         .toolbar {
             if showsSkipInToolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        skip(item)
-                    } label: {
-                        Label("Skip", systemImage: "arrow.forward")
-                            .labelStyle(.titleAndIcon)
-                    }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Skip") { skip(item) }
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             if pinsActions {
-                // The toast sits above the buttons, so Undo never covers a decision.
+                // The toast sits above the bar, so Undo never covers a decision.
                 VStack(spacing: 0) {
                     ToastHost()
-                    actionCluster(item, isFloating: true)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                    actionBar(item, isFloating: true)
                 }
             }
         }
@@ -290,45 +293,123 @@ struct InboxClarifier: View {
         }
     }
 
+    /// "Inbox · 1 of 4": the list and where this item is in the run.
+    private func metaLine(_ item: InboxItem) -> some View {
+        Text("\(OpenList.inbox.title) · \(item.index + 1) of \(queue.count)")
+            .carryOnText(CarryOnTypeScale.meta)
+            .foregroundStyle(.coTextSecondary)
+            .accessibilityLabel("Item \(item.index + 1) of \(queue.count)")
+    }
+
     private func itemCard(_ item: InboxItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.xxs)) {
             Text(item.task.title)
-                .font(BBFont.title)
+                .carryOnText(CarryOnTypeScale.step)
+                .foregroundStyle(.coTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($isTitleFocused)
             if let details = item.task.details, !details.isEmpty {
                 Text(details)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .carryOnText(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
                     .textSelection(.enabled)
             }
             Text("Captured \(item.task.createdAt.formatted(.relative(presentation: .named)))")
-                .font(.caption)
-                .foregroundStyle(BBColor.textTertiary)
+                .carryOnText(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .bbCard(cornerRadius: BBRadius.card)
     }
 
-    private func progressHeader(_ item: InboxItem) -> some View {
-        HStack(spacing: 10) {
-            Text("\(item.index + 1) of \(queue.count)")
-                .font(.footnote.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .fixedSize()
-            ProgressView(value: Double(item.index), total: Double(max(queue.count, 1)))
+    /// Board 16: the item's answers, one card each. Each is an action the
+    /// Inbox already had; Done already and Not needed are in the bar, Skip in
+    /// the toolbar.
+    private func answerRows(_ item: InboxItem) -> some View {
+        VStack(spacing: BBCardRow.gap) {
+            answerRow(
+                "A step I can take", detail: "It goes to Next actions", systemImage: "stairs", isPrimary: true
+            ) {
+                apply(.move(.next), to: item)
+            }
+            answerRow(
+                "Bigger than one step", detail: "Make it a project with a first step", systemImage: "folder"
+            ) {
+                guard !isSettling else { return }
+                isMakingProject = true
+            }
+            answerRow(
+                "Waiting on someone", detail: "Say who, it goes to Waiting for",
+                systemImage: OpenList.waiting.symbolName
+            ) {
+                guard !isSettling else { return }
+                isAskingWaitingFor = true
+            }
+            answerRow(
+                "Someday", detail: "Not now, keep it for later", systemImage: OpenList.someday.symbolName
+            ) {
+                apply(.move(.someday), to: item)
+            }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Item \(item.index + 1) of \(queue.count)")
+    }
+
+    /// One answer card: symbol, title, what it does, and a chevron. The
+    /// first answer, the usual one, is semibold.
+    private func answerRow(
+        _ title: String, detail: String, systemImage: String, isPrimary: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: CGFloat(CarryOnSpace.sm)) {
+                Image(systemName: systemImage)
+                    .font(BBFont.body)
+                    .foregroundStyle(.coTextPrimary)
+                    .frame(width: BBMetrics.iconColumn)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .carryOnText(isPrimary ? CarryOnTypeScale.bodyStrong : CarryOnTypeScale.body)
+                        .foregroundStyle(.coTextPrimary)
+                    Text(detail)
+                        .carryOnText(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                }
+                .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(BBFont.meta)
+                    .foregroundStyle(.coTextSecondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, CGFloat(CarryOnSpace.sm))
+            .padding(.horizontal, CGFloat(CarryOnLayout.Row.paddingX))
+            .frame(maxWidth: .infinity, minHeight: BBMetrics.hitTarget, alignment: .leading)
+            .background(
+                .coSurfaceCard, in: RoundedRectangle(cornerRadius: CGFloat(CarryOnRadius.md), style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: CGFloat(CarryOnRadius.md), style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
+    }
+
+    /// Skip, for the weekly review's Inbox step, whose toolbar has its own.
+    private func skipButton(_ item: InboxItem) -> some View {
+        Button {
+            skip(item)
+        } label: {
+            Text("Skip")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.carryOnQuiet)
     }
 
     private func organizeControls(_ task: TaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.xs)) {
             Text("Organize · optional")
                 .bbSectionLabel()
-            WrappingChipLayout(spacing: 8) {
+            WrappingChipLayout(spacing: CGFloat(CarryOnSpace.xs)) {
                 projectMenu(task)
                 tagsButton()
                 dueMenu(task)
@@ -355,14 +436,12 @@ struct InboxClarifier: View {
                 }
             }
         } label: {
-            Label(name ?? "Project", systemImage: "folder")
-                .lineLimit(1)
+            CarryOnChip(name ?? "Project", size: .quick, isSelected: name != nil)
+                .frame(minHeight: BBMetrics.hitTarget)
         }
         .menuStyle(.button)
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(.regular)
-        .frame(minHeight: BBMetrics.hitTarget)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(name != nil ? .isSelected : [])
         .accessibilityLabel("Project")
         .accessibilityValue(name ?? "None")
     }
@@ -372,13 +451,13 @@ struct InboxClarifier: View {
         return Button {
             isChoosingTags = true
         } label: {
-            Label(names.isEmpty ? "Tags" : names.joined(separator: ", "), systemImage: "tag")
-                .lineLimit(1)
+            CarryOnChip(
+                names.isEmpty ? "Tags" : names.joined(separator: ", "), size: .quick, isSelected: !names.isEmpty
+            )
+            .frame(minHeight: BBMetrics.hitTarget)
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(.regular)
-        .frame(minHeight: BBMetrics.hitTarget)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(names.isEmpty ? [] : .isSelected)
         .accessibilityLabel("Tags")
         .accessibilityValue(names.isEmpty ? "None" : names.joined(separator: ", "))
     }
@@ -396,14 +475,12 @@ struct InboxClarifier: View {
                 Button("No due date", role: .destructive) { stage.due = .clear }
             }
         } label: {
-            Label(label, systemImage: "calendar")
-                .lineLimit(1)
+            CarryOnChip(label, size: .quick, isSelected: due != nil)
+                .frame(minHeight: BBMetrics.hitTarget)
         }
         .menuStyle(.button)
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(.regular)
-        .frame(minHeight: BBMetrics.hitTarget)
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(due != nil ? .isSelected : [])
         .accessibilityLabel("Due date")
         .accessibilityValue(due.map(Self.shortDay) ?? "None")
     }
@@ -414,85 +491,37 @@ struct InboxClarifier: View {
 
     // MARK: Actions
 
-    /// The decision panel: the prompt, then six decisions in four rows.
-    /// Floating (pinned at the bottom) they are a glass cluster; inline
-    /// (scrolling with the item) they are flat content. Skip is in the toolbar.
+    /// The bar under the answers: Done already and Not needed. Floating
+    /// (pinned at the bottom) it is the glass bar of the task card; inline
+    /// (scrolling with the item) it is two flat buttons. Skip is in the toolbar.
     @ViewBuilder
-    private func actionCluster(_ item: InboxItem, isFloating: Bool) -> some View {
-        let panel = decisionPanel(item, isFloating: isFloating)
+    private func actionBar(_ item: InboxItem, isFloating: Bool) -> some View {
         if isFloating {
-            GlassEffectContainer(spacing: 10) { panel }
+            BBGlassActionBar {
+                barButton("Done already", .quiet) { apply(.complete, to: item) }
+                barButton("Not needed", .quiet) { apply(.cancel, to: item) }
+            }
         } else {
-            panel
-        }
-    }
-
-    private func decisionPanel(_ item: InboxItem, isFloating: Bool) -> some View {
-        let pair =
-            dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
-        return VStack(spacing: 10) {
-            Text("Is it actionable? Choose where it belongs.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            let pair =
+                dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: CGFloat(CarryOnSpace.xs)))
+                : AnyLayout(HStackLayout(spacing: CGFloat(CarryOnSpace.xs)))
             pair {
-                actionButton("Next action", systemImage: OpenList.next.symbolName, isFloating: isFloating, prominent: true) {
-                    apply(.move(.next), to: item)
-                }
-                actionButton("Waiting for…", systemImage: OpenList.waiting.symbolName, isFloating: isFloating) {
-                    guard !isSettling else { return }
-                    isAskingWaitingFor = true
-                }
-            }
-            pair {
-                actionButton("Someday / maybe", systemImage: OpenList.someday.symbolName, isFloating: isFloating) {
-                    apply(.move(.someday), to: item)
-                }
-                actionButton("Not needed", systemImage: "xmark.circle", isFloating: isFloating) {
-                    apply(.cancel, to: item)
-                }
-            }
-            actionButton("Make it a project", systemImage: "folder.badge.plus", isFloating: isFloating) {
-                guard !isSettling else { return }
-                isMakingProject = true
-            }
-            actionButton("Done — under 2 minutes", systemImage: "checkmark.circle", isFloating: isFloating) {
-                apply(.complete, to: item)
-            }
-            if !showsSkipInToolbar {
-                actionButton("Skip", systemImage: "arrow.forward", isFloating: isFloating) {
-                    skip(item)
-                }
+                barButton("Done already", .secondary) { apply(.complete, to: item) }
+                barButton("Not needed", .secondary) { apply(.cancel, to: item) }
             }
         }
     }
 
-    @ViewBuilder
-    private func actionButton(
-        _ title: String, systemImage: String, isFloating: Bool, prominent: Bool = false,
-        action: @escaping () -> Void
+    private func barButton(
+        _ title: String, _ kind: CarryOnButtonStyle.Kind, action: @escaping () -> Void
     ) -> some View {
-        // Labels stay on one line (shrinking a little if needed) so every
-        // button is the same 48 pt; accessibility sizes stack and may wrap.
-        let wraps = dynamicTypeSize.isAccessibilitySize
-        let button = Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .lineLimit(wraps ? nil : 1)
-                .minimumScaleFactor(wraps ? 1 : 0.85)
+        Button(action: action) {
+            Text(title)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .frame(maxWidth: .infinity)
         }
-        switch (isFloating, prominent) {
-        case (true, true):
-            button.buttonStyle(.glassProminent).tint(BBColor.brandFill)
-        case (true, false):
-            button.buttonStyle(.glass)
-        case (false, true):
-            button.buttonStyle(.borderedProminent).tint(BBColor.brandFill)
-        case (false, false):
-            button.buttonStyle(.bordered)
-        }
+        .buttonStyle(CarryOnButtonStyle(kind))
     }
 
     /// Ignores decision taps for `settleDelay`, so a double tap decides one
@@ -626,18 +655,15 @@ struct InboxClarifier: View {
                 close()
             } label: {
                 Text("Close")
-                    .frame(minWidth: 120, minHeight: 44)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(BBColor.brandFill)
+            .buttonStyle(.carryOnStrong)
             if !stillSkipped.isEmpty {
                 Button {
                     restart(with: stillSkipped)
                 } label: {
                     Text("Go through skipped items")
-                        .frame(minHeight: 44)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.carryOnSecondary)
             }
         }
         .padding()

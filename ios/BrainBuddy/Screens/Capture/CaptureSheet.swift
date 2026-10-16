@@ -1,15 +1,19 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
-/// Capture one task, offline, with Smart Add.
+/// Capture one task, offline, with Smart Add (Carry On board 10).
 ///
-/// A compact panel that sits right above the keyboard: a header (Close, the
-/// title, and "Added" after Return), the Smart Add field, and one scrolling
-/// row of chips (list, due date, notes) next to a round Add button.
+/// A large sheet with a grabber over the current list. From the top: a header
+/// (Close, and "Added" after Return), the meta line ("New · goes to Inbox",
+/// naming the list or project the task will really land in), the Smart Add
+/// field, one wrapping row of chips (the project and tags capture will use,
+/// then the outlined "+ Date" and "+ Note"), "Put it in" with one chip per
+/// list, and a floating glass bar with Add.
 ///
-/// - Type `@project` and `#tag` in the text; chips below the field show the
-///   project and tags that will be used, marking the ones capture will create.
+/// - Type `@project` and `#tag` in the text; the chips show the project and
+///   tags that will be used, marking the ones capture will create.
 /// - Return adds the task and keeps the sheet open for the next one ("Added"
 ///   in the header); the Add button adds and closes; Close closes without
 ///   adding.
@@ -18,14 +22,10 @@ import SwiftUI
 /// - Starting from a project or tag screen files the task there unless a
 ///   token says otherwise, and Today's "+" starts with today's date
 ///   (`CaptureContext`).
-/// - Toasts show above the chip row and Add button, never over them.
+/// - Toasts show above the glass bar, never over it.
 ///
-/// The sheet has one detent, `.height(...)`, equal to the measured height of
-/// its content, so it stays exactly as tall as what is on screen (the bare
-/// panel, plus the project line, a problem, or the Waiting for and Notes
-/// fields when present) at every Dynamic Type size. The content sits in a
-/// `ScrollView` that only scrolls when it cannot fit, so nothing is clipped
-/// if the system caps the sheet's height.
+/// The content scrolls only when it cannot fit (large Dynamic Type sizes, the
+/// keyboard up), so nothing is clipped.
 struct CaptureSheet: View {
     private let context: CaptureContext
 
@@ -46,10 +46,6 @@ struct CaptureSheet: View {
     /// The last preview the runtime answered, shown while the next one loads so the text field
     /// is never replaced mid-typing.
     @State private var previewHold = CapturePreviewHold()
-    /// The measured height of the panel's content; zero until first layout.
-    @State private var contentHeight: CGFloat = 0
-    /// The sheet's height until the content has been measured.
-    @ScaledMetric(relativeTo: .body) private var fallbackHeight: CGFloat = 170
     @FocusState private var isWaitingForFocused: Bool
     @FocusState private var isNotesFocused: Bool
 
@@ -73,24 +69,26 @@ struct CaptureSheet: View {
         let isReady = readiness == .ready
         let preview = previewHold.shown(isReady: isReady) { workspace.capturePreview(draft) }
         let failure = CapturePreviewGate.failureMessage(isFailed: Self.isFailed(readiness))
-        ScrollView {
-            VStack(spacing: 0) {
-                header
+        VStack(spacing: 0) {
+            header
+            ScrollView {
                 fields(preview, previewFailure: failure)
-                // Above the chip row, so a toast never covers the Add button.
-                ToastHost()
-                controlsRow(preview)
+                    .padding(.top, CGFloat(CarryOnSpace.xs))
+                    .padding(.bottom, CGFloat(CarryOnSpace.md))
             }
-            .padding(.bottom, BBSpacing.s2)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { height in
-                contentHeight = height
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // The toast sits above the glass bar, so it never covers Add.
+            VStack(spacing: 0) {
+                ToastHost()
+                actionBar(preview)
             }
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .bbScreenBackground()
         .toastMagicTap()
-        .presentationDetents([.height(contentHeight > 0 ? contentHeight : fallbackHeight)])
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(!draft.isBlank)
         // The sheet and its text field stay put whatever the preview is doing; only the chips and
         // the problem line follow it. Typing runs ahead of the runtime, so a burst of keystrokes
@@ -140,44 +138,43 @@ struct CaptureSheet: View {
 
     // MARK: Header
 
-    /// Close on the leading edge, the title centred, and the transient
-    /// "Added" confirmation on the trailing edge.
+    /// Close on the leading edge and the transient "Added" confirmation on the
+    /// trailing edge. The sheet has no title: the meta line below says what
+    /// this is and where it goes.
     private var header: some View {
-        ZStack {
-            Text("New task")
-                .font(.headline)
-                .lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
-            HStack {
-                Button("Close", action: close)
-                    .keyboardShortcut(.cancelAction)
-                    .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget, alignment: .leading)
-                    .contentShape(Rectangle())
-                Spacer(minLength: BBSpacing.s2)
-                if let confirmation {
-                    Label("Added", systemImage: "checkmark.circle")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(BBColor.successText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .accessibilityLabel(confirmation)
-                }
+        HStack {
+            Button("Close", action: close)
+                .keyboardShortcut(.cancelAction)
+                .frame(minWidth: BBMetrics.hitTarget, minHeight: BBMetrics.hitTarget, alignment: .leading)
+                .contentShape(Rectangle())
+            Spacer(minLength: CGFloat(CarryOnSpace.xs))
+            if let confirmation {
+                Label("Added", systemImage: "checkmark.circle")
+                    .carryOnFont(CarryOnTypeScale.metaStrong)
+                    .foregroundStyle(.coTextPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(confirmation)
             }
         }
-        .padding(.horizontal, BBSpacing.s4)
-        .padding(.top, BBSpacing.s1)
+        .padding(.horizontal, CGFloat(CarryOnSpace.lg))
+        .padding(.top, CGFloat(CarryOnSpace.sm))
     }
 
     // MARK: Fields
 
-    /// The Smart Add field and what hangs off it: a problem, the project and
-    /// tags capture will use, and the Waiting for and Notes fields.
+    /// The meta line, the Smart Add field and what hangs off it: a problem,
+    /// the chips, the Notes field, the list choices and the Waiting for field.
     private func fields(_ preview: CapturePreview, previewFailure: String?) -> some View {
-        VStack(alignment: .leading, spacing: BBSpacing.s1) {
+        VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.sm)) {
+            Text("New · goes to \(destinationName(preview))")
+                .carryOnFont(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
+                .accessibilityAddTraits(.isHeader)
             SmartAddTextField(
                 text: $draft.text,
                 tokens: preview.tokens,
-                placeholder: "Task — type @ for a project, # for a tag"
+                placeholder: "Task · @project · #tag"
             ) {
                 add(keepOpen: true)
             }
@@ -186,26 +183,12 @@ struct CaptureSheet: View {
             }
             if previewFailure != nil {
                 Button("Try again") { Task { await workspace.prepareCapturePreview(draft) } }
-                    .font(.subheadline)
+                    .carryOnFont(CarryOnTypeScale.meta)
                     .frame(minHeight: BBMetrics.hitTarget, alignment: .leading)
             }
-            if preview.project != nil || !preview.tags.isEmpty {
-                CapturePreviewChips(preview: preview)
-            }
-            if draft.list == .inbox, let project = preview.project {
-                Text("With a project, it goes to \(project.name) rather than the Inbox.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            if draft.list == .waiting {
-                TextField("Who or what are you waiting on?", text: $draft.waitingFor, axis: .vertical)
-                    .lineLimit(1...3)
-                    .focused($isWaitingForFocused)
-                    .accessibilityLabel("Waiting for")
-                    .captureFieldStyle()
-                WaitingForFooter(text: draft.waitingFor)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            CaptureChipRow(preview: preview) {
+                dueChip
+                notesChip
             }
             if showsNotes {
                 TextField("Notes, links, details…", text: $draft.details, axis: .vertical)
@@ -214,43 +197,54 @@ struct CaptureSheet: View {
                     .accessibilityLabel("Notes")
                     .captureFieldStyle()
             }
+            listChoices
+            if draft.list == .inbox, let project = preview.project {
+                Text("With a project, it goes to \(project.name) rather than the Inbox.")
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
+            }
+            if draft.list == .waiting {
+                TextField("Who or what are you waiting on?", text: $draft.waitingFor, axis: .vertical)
+                    .lineLimit(1...3)
+                    .focused($isWaitingForFocused)
+                    .accessibilityLabel("Waiting for")
+                    .captureFieldStyle()
+                WaitingForFooter(text: draft.waitingFor)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
+            }
         }
         .disabled(isSaving)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, BBSpacing.s4)
+        .padding(.horizontal, CGFloat(CarryOnSpace.lg))
     }
 
-    // MARK: Chips and Add
+    // MARK: Chips
 
-    /// The chips scroll sideways; the Add button stays put at the trailing end.
-    private func controlsRow(_ preview: CapturePreview) -> some View {
-        HStack(spacing: BBSpacing.s2) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: BBSpacing.s2) {
-                    listChip
-                    dueChip
-                    notesChip
-                }
-            }
-            addButton(preview)
-        }
-        .padding(.horizontal, BBSpacing.s4)
-    }
-
-    private var listChip: some View {
-        Menu {
-            Picker("List", selection: $draft.list) {
+    /// "Put it in": one chip per list; the chosen one is the filled chip and
+    /// is announced as selected, so the choice never rests on colour.
+    private var listChoices: some View {
+        VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.xs)) {
+            Text("Put it in")
+                .carryOnFont(CarryOnTypeScale.metaStrong)
+                .foregroundStyle(.coTextSecondary)
+                .accessibilityAddTraits(.isHeader)
+            BBFlowLayout(spacing: CGFloat(CarryOnSpace.xs), lineSpacing: CGFloat(CarryOnSpace.xs)) {
                 ForEach(OpenList.allCases) { list in
-                    Label(list.title, systemImage: list.symbolName)
-                        .tag(list)
+                    let isChosen = draft.list == list
+                    Button {
+                        draft.list = list
+                    } label: {
+                        CarryOnChip(list.title, size: .quick, isSelected: isChosen)
+                            .frame(minHeight: BBMetrics.hitTarget)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(list.title)
+                    .accessibilityAddTraits(isChosen ? .isSelected : [])
                 }
             }
-        } label: {
-            // A list is always chosen, so this chip is always highlighted.
-            CaptureChipLabel(systemImage: draft.list.symbolName, title: draft.list.title, isHighlighted: true)
         }
-        .accessibilityLabel("List")
-        .accessibilityValue(draft.list.title)
     }
 
     private var dueChip: some View {
@@ -267,10 +261,15 @@ struct CaptureSheet: View {
                 Button("Clear due date", role: .destructive) { draft.dueDate = nil }
             }
         } label: {
-            CaptureChipLabel(
-                systemImage: "calendar",
-                title: draft.dueDate.map { DueChip.label(for: $0, today: workspace.today) } ?? "Date"
-            )
+            Group {
+                if let dueDate = draft.dueDate {
+                    CarryOnChip(DueChip.label(for: dueDate, today: workspace.today))
+                } else {
+                    CaptureAddChipLabel(title: "+ Date")
+                }
+            }
+            .frame(minHeight: BBMetrics.hitTarget)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("Due date")
         .accessibilityValue(
@@ -294,10 +293,15 @@ struct CaptureSheet: View {
                 Task { isNotesFocused = true }
             }
         } label: {
-            CaptureChipLabel(
-                systemImage: "note.text",
-                title: draft.details.isEmpty ? "Notes" : "Notes · added"
-            )
+            Group {
+                if draft.details.isEmpty {
+                    CaptureAddChipLabel(title: "+ Note")
+                } else {
+                    CarryOnChip("Note · added")
+                }
+            }
+            .frame(minHeight: BBMetrics.hitTarget)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(draft.details.isEmpty ? "Notes" : "Notes · added")
@@ -305,22 +309,23 @@ struct CaptureSheet: View {
         .accessibilityHint("Shows or hides the notes field.")
     }
 
-    private func addButton(_ preview: CapturePreview) -> some View {
+    // MARK: Add
+
+    /// The floating glass bar. Add is on the trailing side; the board's voice
+    /// button on the leading side is not built (the app has no voice capture).
+    private func actionBar(_ preview: CapturePreview) -> some View {
         let isEnabled = preview.isValid && !isClosing && !isSaving
-        return Button {
-            add(keepOpen: false)
-        } label: {
-            Image(systemName: "arrow.up")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(BBColor.onBrand)
-                .frame(width: BBMetrics.hitTarget, height: BBMetrics.hitTarget)
-                .background(BBColor.brandFill.opacity(isEnabled ? 1 : 0.4), in: Circle())
-                .contentShape(Circle())
+        return BBGlassActionBar {
+            Spacer(minLength: 0)
+            Button {
+                add(keepOpen: false)
+            } label: {
+                Text("Add")
+            }
+            .buttonStyle(.carryOnStrong)
+            .disabled(!isEnabled)
+            .accessibilityHint(visibleProblem(preview) ?? "Adds the task and closes.")
         }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .accessibilityLabel("Add")
-        .accessibilityHint(visibleProblem(preview) ?? "Adds the task and closes.")
     }
 
     // MARK: Behaviour
@@ -392,33 +397,25 @@ struct CaptureSheet: View {
     }
 }
 
-/// One compact chip in the control row: a brand-coloured symbol and a short
-/// title in a hairline capsule about 34 pt tall, inside a 44 pt hit area.
-/// `isHighlighted` fills it with the soft brand tint.
-private struct CaptureChipLabel: View {
-    let systemImage: String
+/// The board's outlined add-chip ("+ Date", "+ Note"): transparent, a ring in
+/// control-quiet-pressed and secondary text, in a 44 pt hit area. Carry On has no
+/// such `CarryOnChip` variant yet.
+private struct CaptureAddChipLabel: View {
+    /// The board's ring, 1.5 pt; no layout token carries it.
+    private static let ringWidth: CGFloat = 1.5
+
     let title: String
-    var isHighlighted = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .imageScale(.small)
-                .foregroundStyle(BBColor.brandText)
-                .accessibilityHidden(true)
-            Text(title)
-                .foregroundStyle(BBColor.textPrimary)
-        }
-        .font(.subheadline)
-        .lineLimit(1)
-        .padding(.horizontal, BBSpacing.s3)
-        .frame(minHeight: 34)
-        .background(isHighlighted ? BBColor.brandSoft : Color.clear, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(BBColor.hairline, lineWidth: 1)
-        }
-        .frame(minHeight: BBMetrics.hitTarget)
-        .contentShape(Rectangle())
+        Text(title)
+            .carryOnFont(CarryOnTypeScale.meta)
+            .lineLimit(1)
+            .foregroundStyle(.coTextSecondary)
+            .padding(.horizontal, CGFloat(CarryOnLayout.Chip.paddingX))
+            .frame(minHeight: CGFloat(CarryOnLayout.Chip.height))
+            .overlay {
+                Capsule().strokeBorder(.coControlQuietPressed, lineWidth: Self.ringWidth)
+            }
     }
 }
 
@@ -454,44 +451,39 @@ private extension View {
     }
 }
 
-/// The project and tags capture will use, in words for VoiceOver
-/// ("Project Errands, new") and with a dashed "New" marker on screen.
-private struct CapturePreviewChips: View {
+/// The chips under the field: the project and tags capture will use, in words
+/// for VoiceOver ("Project Errands, new") and with "· new" on screen when
+/// capture will create them, then the screen's own add-chips (`trailing`).
+private struct CaptureChipRow<Trailing: View>: View {
     let preview: CapturePreview
+    private let trailing: Trailing
 
-    var body: some View {
-        WrappingChipLayout(spacing: 6) {
-            if let project = preview.project {
-                chip(isNew: project.isNew) {
-                    ProjectLabel(name: project.name, color: nil)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(project.isNew ? "Project \(project.name), new" : "Project \(project.name)")
-            }
-            ForEach(preview.tags, id: \.self) { tag in
-                chip(isNew: tag.isNew) {
-                    TagPill(name: tag.name)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(tag.isNew ? "Tag \(tag.name), new" : "Tag \(tag.name)")
-            }
-        }
-        .padding(.vertical, 4)
+    @Environment(\.colorScheme) private var scheme
+
+    init(preview: CapturePreview, @ViewBuilder trailing: () -> Trailing) {
+        self.preview = preview
+        self.trailing = trailing()
     }
 
-    private func chip<Content: View>(isNew: Bool, @ViewBuilder content: () -> Content) -> some View {
-        HStack(spacing: 4) {
-            content()
-            if isNew {
-                Text("New")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .overlay {
-                        Capsule().strokeBorder(Color.secondary, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-                    }
+    /// The preview carries no project colour, so the dot is the neutral
+    /// mark-open, as for a project without a colour elsewhere.
+    private var neutralDot: RGBColor {
+        scheme == .dark ? CarryOnRole.markOpen.dark : CarryOnRole.markOpen.light
+    }
+
+    var body: some View {
+        BBFlowLayout(spacing: CGFloat(CarryOnSpace.xs), lineSpacing: 0) {
+            if let project = preview.project {
+                CarryOnChip(project.isNew ? "\(project.name) · new" : project.name, dot: neutralDot)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(project.isNew ? "Project \(project.name), new" : "Project \(project.name)")
             }
+            ForEach(preview.tags, id: \.self) { tag in
+                CarryOnChip(tag.isNew ? "\(tag.name) · new" : tag.name)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(tag.isNew ? "Tag \(tag.name), new" : "Tag \(tag.name)")
+            }
+            trailing
         }
     }
 }

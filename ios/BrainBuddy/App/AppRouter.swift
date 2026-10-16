@@ -21,9 +21,9 @@ extension EnvironmentValues {
     }
 }
 
-/// Every screen that can be pushed onto a tab's navigation stack.
+/// Every screen that can be pushed onto a tab's navigation stack. A task is
+/// not one of them: it opens in the task sheet (`AppRouter.presentTask`).
 enum AppRoute: Hashable {
-    case task(TaskID)
     case destination(Destination)
     case projects
     case archivedProjects
@@ -46,8 +46,21 @@ struct CaptureContext: Identifiable, Hashable {
     var dueDate: CalendarDay? = nil
 }
 
+/// The task shown in the task sheet (boards 13 to 20).
+struct PresentedTask: Identifiable, Hashable {
+    let id: TaskID
+}
+
 /// Navigation state for one window: the selected tab, one navigation path per
-/// tab, and the window's presentations (capture sheet, Process inbox).
+/// tab, and the window's presentations (capture sheet, Process inbox, the
+/// task sheet).
+///
+/// Every place that opens a task (list, Today and Search rows, the Next
+/// actions card, the `brainbuddy://task/<id>` link) presents it as one half
+/// sheet over the window instead of pushing it, so a task opens the same way
+/// on every tab. UIKit shows one modal at a time, so a task asked for while
+/// capture or Process inbox is up waits until it has gone, and a capture asked
+/// for while a task is open closes the task first.
 @MainActor
 @Observable
 final class AppRouter {
@@ -57,10 +70,15 @@ final class AppRouter {
     var capture: CaptureContext?
     /// True while Process inbox is shown full screen.
     var isProcessingInbox = false
-    /// A capture asked for while Process inbox was open; shown once the
-    /// cover has gone (`presentPendingCapture()`), since a sheet can't be
-    /// presented from under a full-screen cover.
+    /// Non-nil while the task sheet is shown.
+    var presentedTask: PresentedTask?
+    /// A capture asked for while Process inbox or the task sheet was open;
+    /// shown once that has gone (`presentPending()`), since UIKit presents one
+    /// modal at a time.
     @ObservationIgnored private var pendingCapture: CaptureContext?
+    /// A task asked for while capture or Process inbox was open; shown once
+    /// that has gone (`presentPending()`).
+    @ObservationIgnored private var pendingTask: PresentedTask?
     /// The capture context of the list screen on top of each tab, published
     /// by `TaskListScreen`, so the capture bar and ⌘N file into the project,
     /// tag or list you are looking at.
@@ -81,7 +99,7 @@ final class AppRouter {
     }
 
     /// Opens capture. An open capture keeps its draft rather than being
-    /// replaced, and Process inbox closes first.
+    /// replaced, and Process inbox or the task sheet closes first.
     func presentCapture(_ context: CaptureContext = CaptureContext()) {
         guard capture == nil else { return }
         if isProcessingInbox {
@@ -89,15 +107,51 @@ final class AppRouter {
             isProcessingInbox = false
             return
         }
+        if presentedTask != nil {
+            pendingCapture = context
+            presentedTask = nil
+            return
+        }
         capture = context
     }
 
-    /// Shows a capture asked for while Process inbox was open. Call from the
-    /// cover's `onDismiss`.
-    func presentPendingCapture() {
-        guard let pending = pendingCapture else { return }
-        pendingCapture = nil
-        if capture == nil { capture = pending }
+    /// Opens `id` in the task sheet, replacing a task already shown. While
+    /// capture is open it waits for capture to close (the draft is kept);
+    /// Process inbox closes first.
+    func presentTask(_ id: TaskID) {
+        let task = PresentedTask(id: id)
+        if isProcessingInbox {
+            pendingTask = task
+            isProcessingInbox = false
+            return
+        }
+        if capture != nil {
+            pendingTask = task
+            return
+        }
+        presentedTask = task
+    }
+
+    /// Closes the task sheet.
+    func closeTask() {
+        presentedTask = nil
+    }
+
+    /// Shows what was asked for while another modal was up: a capture first,
+    /// otherwise a task. Call from the `onDismiss` of the capture sheet, the
+    /// task sheet and the Process inbox cover.
+    func presentPending() {
+        if let pending = pendingCapture {
+            guard capture == nil, presentedTask == nil, !isProcessingInbox else { return }
+            pendingCapture = nil
+            capture = pending
+            return
+        }
+        if let pending = pendingTask {
+            guard capture == nil, presentedTask == nil, !isProcessingInbox else { return }
+            pendingTask = nil
+            presentedTask = pending
+        }
     }
 
     /// Called by a list screen when it appears on `tab` (and when what it
@@ -138,7 +192,7 @@ final class AppRouter {
 
     /// Handles `brainbuddy://` URLs:
     /// - `capture` (optionally `?list=inbox|next|waiting|someday`) opens capture,
-    /// - `task/<id>` opens a task on the selected tab,
+    /// - `task/<id>` opens a task in the task sheet over the selected tab,
     /// - `inbox`, `next`, `today`, `lists`, `search` select that tab.
     /// Returns false for URLs the app does not understand.
     @discardableResult
@@ -163,8 +217,9 @@ final class AppRouter {
         case "task":
             let rawID = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             guard !rawID.isEmpty else { return false }
-            dismissPresentations()
-            open(.task(TaskID(rawID)))
+            // Closes Process inbox first (the task shows once the cover has
+            // gone) and waits for an open capture rather than replacing it.
+            presentTask(TaskID(rawID))
             return true
         default:
             guard let tab = AppTab(rawValue: host) else { return false }
@@ -174,10 +229,12 @@ final class AppRouter {
         }
     }
 
-    /// Closes Process inbox so the destination shows. An open capture stays
-    /// open with its draft; the navigation happens underneath it.
+    /// Closes Process inbox and the task sheet so the destination shows. An
+    /// open capture stays open with its draft; the navigation happens
+    /// underneath it.
     private func dismissPresentations() {
         isProcessingInbox = false
+        presentedTask = nil
     }
 
     nonisolated private static func emptyPaths() -> [AppTab: NavigationPath] {

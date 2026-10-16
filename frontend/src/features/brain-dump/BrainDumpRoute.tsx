@@ -664,7 +664,7 @@ export function BrainDumpRoute(): React.JSX.Element {
         <div className="flex flex-col gap-2 px-5 py-4 sm:px-6">
           <button
             type="button"
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow hover:bg-sky-800"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-control bg-ink px-5 text-co-meta font-semibold text-ground hover:bg-ink/85"
             onClick={() => navigate("/tasks/inbox", { replace: true })}
           >
             <Inbox className="h-4 w-4" aria-hidden />
@@ -682,7 +682,7 @@ export function BrainDumpRoute(): React.JSX.Element {
     return (
       <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={params.operationId}>
         <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title="Loading your brain dump" />
-        <p role="status" className="px-5 py-4 text-sm text-slate-500 sm:px-6">
+        <p role="status" className="px-5 py-4 text-co-meta text-ink-muted sm:px-6">
           Fetching the recording and anything already proposed from it…
         </p>
       </BrainDumpOverlay>
@@ -802,13 +802,13 @@ function RecoverySurface({
         title={`${stageName} ${retryable ? "paused" : "failed"}`}
       />
       <div role="alert" className="flex flex-col gap-4 px-5 py-4 sm:px-6">
-        <p className="text-sm text-slate-600">
+        <p className="text-co-meta text-ink-muted">
           {providerError ?? (retryable ? retryFallback : "The recording could not be processed accurately.")}
         </p>
-        {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+        {error ? <p className="text-co-meta text-danger">{error}</p> : null}
         <div className="flex flex-col gap-2">
-          {retryable ? <button type="button" className="h-11 rounded-xl bg-sky-700 px-4 text-sm font-semibold text-white" onClick={onRetry}>{retryLabel}</button> : null}
-          {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-medium text-slate-700" onClick={onReview}>Review provisional tasks</button> : null}
+          {retryable ? <button type="button" className="h-11 rounded-control bg-ink px-4 text-co-meta font-semibold text-ground" onClick={onRetry}>{retryLabel}</button> : null}
+          {availableActions.has("review_provisional") ? <button type="button" className="h-11 rounded-control bg-quiet px-4 text-co-meta font-medium text-ink hover:bg-quiet-pressed" onClick={onReview}>Review provisional tasks</button> : null}
           {availableActions.has("reconcile_preview") ? (
             // Owner-initiated fallback when the accurate audio path is unusable:
             // the browser-preview transcript goes to the consented task-extraction
@@ -820,19 +820,19 @@ function RecoverySurface({
               <button
                 type="button"
                 aria-describedby={reconcilePreviewHelpId}
-                className="min-h-11 rounded-xl border border-slate-200 px-4 py-2 text-center text-sm font-medium leading-snug text-slate-700"
+                className="min-h-11 rounded-control bg-quiet px-4 py-2 text-center text-co-meta font-medium leading-snug text-ink hover:bg-quiet-pressed"
                 onClick={onReconcilePreview}
               >
                 Extract tasks from the browser transcript
               </button>
-              <p id={reconcilePreviewHelpId} className="px-1 text-xs leading-snug text-slate-500">
+              <p id={reconcilePreviewHelpId} className="px-1 text-co-meta leading-snug text-ink-muted">
                 Sends the browser transcript to the consented task-extraction provider. The result is provisional and is reviewed before anything is saved.
               </p>
             </div>
           ) : null}
           <DestructiveConfirm
             trigger="Delete recording"
-            triggerClassName="h-11 rounded-xl border border-rose-200 px-4 text-sm font-medium text-rose-700"
+            triggerClassName="h-11 rounded-control bg-quiet px-4 text-co-meta font-medium text-danger hover:bg-quiet-pressed"
             question="Delete this recording? Its audio and transcript are removed and nothing is saved."
             keepLabel="Keep recording"
             confirmLabel="Delete recording permanently"
@@ -934,7 +934,7 @@ function RecordingSurface({
         <button
           type="button"
           aria-label="Close brain dump"
-          className="absolute right-3.5 top-3.5 z-[2] inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-900"
+          className="absolute right-3.5 top-3.5 z-[2] inline-flex h-8 w-8 items-center justify-center rounded-card text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink"
           onClick={onClose}
         >
           <X className="h-[18px] w-[18px]" aria-hidden />
@@ -942,22 +942,22 @@ function RecordingSurface({
       ) : null}
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden sm:min-h-[480px] sm:grid-cols-[320px_1fr]">
         {/* Status pane: mic, timer, transcript, wave and the capture controls. */}
-        <div className="flex shrink-0 flex-col items-center gap-2.5 border-b border-slate-200 bg-surface-base px-6 pb-5 pt-[max(28px,env(safe-area-inset-top))] text-center sm:border-b-0 sm:border-r sm:pt-8">
+        <div className="flex shrink-0 flex-col items-center gap-2.5 bg-sunken px-6 pb-5 pt-[max(28px,env(safe-area-inset-top))] text-center sm:pt-8">
           <div className="relative mb-1.5 h-14 w-14 shrink-0">
             <span
-              className={`absolute inset-0 rounded-full bg-sky-300/40 ${isRecording ? "motion-safe:animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`}
+              className={`absolute inset-0 rounded-full bg-quiet ${isRecording ? "motion-safe:animate-[bbPulse_1.8s_cubic-bezier(.22,1,.36,1)_infinite]" : ""}`}
               aria-hidden
             />
-            <div className="absolute inset-0 flex items-center justify-center rounded-full bg-brand-primary text-white">
+            <div className="absolute inset-0 flex items-center justify-center rounded-full bg-ink text-ground">
               <Mic className="h-[22px] w-[22px]" aria-hidden />
             </div>
           </div>
           <div>
-            <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">Brain dump</h1>
-            <p className="mt-0.5 text-balance text-xs text-slate-500">Speak freely — tasks are proposed after you stop</p>
+            <h1 id={TITLE_ID} className="font-voice text-co-title text-ink">Brain dump</h1>
+            <p className="mt-0.5 text-balance text-co-meta text-ink-muted">Speak freely — tasks are proposed after you stop</p>
           </div>
-          <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums ${isRecording ? "text-rose-600" : "text-slate-500"}`}>
-            <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-rose-600 motion-safe:animate-pulse-dot" : "bg-slate-400"}`} aria-hidden />
+          <span className={`inline-flex shrink-0 items-center gap-1.5 text-co-meta font-semibold tabular-nums ${isRecording ? "text-danger" : "text-ink-muted"}`}>
+            <span className={`h-[7px] w-[7px] rounded-full ${isRecording ? "bg-danger motion-safe:animate-pulse-dot" : "bg-mark-open"}`} aria-hidden />
             {captureStopped ? "Cloud processing stopped" : isPaused ? "Paused" : isRecording ? "Recording" : "Ready"}
             {operation && !captureStopped ? (
               // Each uploaded chunk is one MediaRecorder timeslice
@@ -970,49 +970,49 @@ function RecordingSurface({
             ) : null}
           </span>
           <div className="min-h-2 flex-1" aria-hidden />
-          <div className="min-h-[38px] max-w-[280px] text-center text-[13px] leading-[1.45] text-slate-400" aria-live="off">
+          <div className="min-h-[38px] max-w-[280px] text-center text-co-meta leading-[1.45] text-ink-muted" aria-live="off">
             {lastTranscript ? (
               <>
                 <TranscriptTail transcript={lastTranscript} />
-                <span className="ml-[3px] inline-block h-[13px] w-[2px] -translate-y-[1px] bg-brand-primary align-middle motion-safe:animate-caret-blink" aria-hidden />
+                <span className="ml-[3px] inline-block h-[13px] w-[2px] -translate-y-[1px] bg-ink align-middle motion-safe:animate-caret-blink" aria-hidden />
               </>
             ) : (
               "Transcript preview appears while you talk"
             )}
           </div>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-700">Browser preview · provisional</span>
+          <span className="text-co-meta font-semibold text-warning">Browser preview · provisional</span>
           <DumpWave active={isRecording} />
           <div className="flex w-full flex-col gap-2 pt-1">
             {!operation ? (
-              <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
+              <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-control bg-ink px-4 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50" disabled={isStarting || (isNewRecording && !providersReady)} onClick={onStart}>
                 <Mic className="h-4 w-4" aria-hidden />
                 Record
               </button>
             ) : (
               <>
-                <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-sky-700 px-4 text-sm font-semibold text-white shadow-soft transition-colors duration-200 ease-smooth hover:bg-sky-800" onClick={onFinish}>
+                <button type="button" className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-control bg-ink px-4 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85" onClick={onFinish}>
                   <Square className="h-3.5 w-3.5" aria-hidden />
                   Stop &amp; review
                 </button>
                 <div className="flex w-full flex-wrap gap-2">
                   {captureStopped ? (
-                    <span className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-800">
+                    <span className="inline-flex h-9 flex-1 items-center justify-center rounded-control bg-quiet px-3 text-co-meta font-medium text-warning hover:bg-quiet-pressed">
                       Cloud processing stopped
                     </span>
                   ) : isPaused ? (
-                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onResume}>
+                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-control bg-quiet px-3 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed" onClick={onResume}>
                       <Play className="h-3.5 w-3.5" aria-hidden />
                       Resume
                     </button>
                   ) : (
-                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300" onClick={onPause}>
+                    <button type="button" className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-control bg-quiet px-3 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed" onClick={onPause}>
                       <Pause className="h-3.5 w-3.5" aria-hidden />
                       Pause
                     </button>
                   )}
                   <DestructiveConfirm
                     trigger="Discard"
-                    triggerClassName="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+                    triggerClassName="inline-flex h-9 flex-1 items-center justify-center rounded-control bg-quiet px-3 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
                     question="Discard this recording? The audio and transcript are deleted and nothing is saved."
                     keepLabel="Keep recording"
                     confirmLabel="Discard recording"
@@ -1020,17 +1020,17 @@ function RecordingSurface({
                   />
                 </div>
                 {operation.consent.external_processing_allowed ? (
-                  <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-amber-200 bg-white px-3 text-xs font-medium text-amber-800 transition-colors duration-200 ease-smooth hover:bg-amber-50" onClick={onWithdrawConsent}>
+                  <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-control bg-quiet px-3 text-co-meta font-medium text-warning transition-colors duration-200 ease-smooth hover:bg-quiet-pressed" onClick={onWithdrawConsent}>
                     Stop cloud processing
                   </button>
                 ) : null}
               </>
             )}
             {!operation ? (
-              <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700" onClick={onCancel}>Discard</button>
+              <button type="button" className="inline-flex h-9 w-full items-center justify-center rounded-control px-3 text-co-meta font-medium text-ink-muted transition-colors duration-200 ease-smooth hover:text-ink" onClick={onCancel}>Discard</button>
             ) : null}
           </div>
-          <span className="text-xs text-slate-500">Nothing is saved until you stop</span>
+          <span className="text-co-meta text-ink-muted">Nothing is saved until you stop</span>
         </div>
 
         {/* Live transcript readout: raw text is a status, never a draft task. Tasks
@@ -1038,35 +1038,35 @@ function RecordingSurface({
         {/* With the close button in the dialog's top-right corner, the pane
             starts below it rather than letting the settings card run under it. */}
         <div className={`flex min-h-0 flex-col gap-2 overflow-y-auto px-6 pb-4 pt-[18px] ${!operation && onClose ? "sm:pt-14" : ""}`}>
-          {error ? <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          {error ? <div role="alert" className="rounded-card bg-quiet px-3 py-2 text-co-meta text-danger">{error}</div> : null}
           {!operation && isNewRecording ? (
-            <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm shadow-soft">
-              <label className="grid gap-1 text-slate-700">
-                <span className="text-xs font-semibold">Speech languages</span>
-                <select aria-label="Speech languages" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-hidden transition-colors duration-200 ease-smooth focus:border-brand-primary" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
+            <div className="grid gap-3 rounded-card bg-card p-3 text-co-meta">
+              <label className="grid gap-1 text-ink">
+                <span className="text-co-meta font-semibold">Speech languages</span>
+                <select aria-label="Speech languages" className="h-10 rounded-control bg-quiet px-3 text-co-meta outline-hidden transition-colors duration-200 ease-smooth focus:bg-card" value={languageMode} onChange={(event) => onLanguageModeChange(event.target.value as LanguageMode)}>
                   <option value="ru-en">Russian + English</option>
                   <option value="ru">Russian</option>
                   <option value="en">English</option>
                 </select>
               </label>
-              <label className="grid gap-1 text-slate-700">
-                <span className="text-xs font-semibold">Key terms</span>
-                <input aria-label="Voice key terms" className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-hidden transition-colors duration-200 ease-smooth focus:border-brand-primary" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
+              <label className="grid gap-1 text-ink">
+                <span className="text-co-meta font-semibold">Key terms</span>
+                <input aria-label="Voice key terms" className="h-10 rounded-control bg-quiet px-3 text-co-meta outline-hidden transition-colors duration-200 ease-smooth focus:bg-card" value={vocabularyText} onChange={(event) => onVocabularyTextChange(event.target.value)} />
               </label>
               {providersReady ? (
-                <label className="flex items-start gap-2 text-xs text-slate-600">
+                <label className="flex items-start gap-2 text-co-meta text-ink-muted">
                   <input aria-label="Allow secure cloud transcription" className="mt-0.5" type="checkbox" checked={externalProcessingAllowed} onChange={(event) => onExternalProcessingAllowedChange(event.target.checked)} />
                   <span>{cloudConsentDescription}</span>
                 </label>
               ) : providersFailed ? (
-                <div role="alert" className="grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div role="alert" className="grid gap-2 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
                   <span>Could not load the configured voice providers, so recording is unavailable. No audio leaves this device until the vendors are confirmed.</span>
-                  <button type="button" className="justify-self-start rounded-md border border-amber-300 bg-white px-2.5 py-1 font-semibold text-amber-800 transition-colors duration-200 ease-smooth hover:bg-amber-100" onClick={onRetryProviders}>
+                  <button type="button" className="justify-self-start rounded-card bg-card px-2.5 py-1 font-semibold text-warning transition-colors duration-200 ease-smooth hover:bg-quiet-pressed" onClick={onRetryProviders}>
                     Retry
                   </button>
                 </div>
               ) : (
-                <p role="status" className="rounded-lg border border-slate-200 bg-surface-base px-3 py-2 text-xs text-slate-500">
+                <p role="status" className="rounded-card bg-sunken px-3 py-2 text-co-meta text-ink-muted">
                   Checking configured providers…
                 </p>
               )}
@@ -1094,7 +1094,7 @@ function TranscriptTail({ transcript }: { transcript: string }): React.JSX.Eleme
     <>
       {words.length > 18 ? "…" : ""}
       {lead ? `${lead} ` : ""}
-      <span className="text-slate-600">{tail}</span>
+      <span className="text-ink-muted">{tail}</span>
     </>
   );
 }
@@ -1107,7 +1107,7 @@ function DumpWave({ active }: { active: boolean }): React.JSX.Element {
       {waveBarHeights.map((height, index) => (
         <span
           key={index}
-          className={`w-1 rounded-xs bg-brand-primary ${active ? "motion-safe:animate-wave-bar" : "opacity-40"}`}
+          className={`w-1 rounded-xs bg-ink ${active ? "motion-safe:animate-wave-bar" : "opacity-40"}`}
           style={{ height: Math.round(height * 26), animationDelay: `${(index % 5) * 0.15}s` }}
         />
       ))}
@@ -1196,7 +1196,7 @@ function DestructiveConfirm({
     <div
       role="group"
       aria-labelledby={questionId}
-      className={`flex w-full flex-col gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 ${className}`}
+      className={`flex w-full flex-col gap-2 rounded-card bg-quiet p-3 ${className}`}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -1205,20 +1205,20 @@ function DestructiveConfirm({
         }
       }}
     >
-      <p id={questionId} className="text-[13px] leading-snug text-rose-900">
+      <p id={questionId} className="text-co-meta leading-snug text-danger">
         {question}
       </p>
       <button
         ref={keepRef}
         type="button"
-        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+        className="inline-flex h-10 w-full items-center justify-center rounded-control bg-quiet px-3 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
         onClick={close}
       >
         {keepLabel}
       </button>
       <button
         type="button"
-        className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors duration-200 ease-smooth hover:bg-rose-100"
+        className="inline-flex h-10 w-full items-center justify-center rounded-control bg-quiet px-3 text-co-meta font-semibold text-danger transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
         onClick={() => {
           onConfirm();
           close();
@@ -1293,15 +1293,15 @@ function TranscriptReadout({
   const lane = transcriptLane(segments);
   return (
     <section aria-labelledby={headingId} aria-live={live ? "polite" : undefined} className="flex flex-col gap-1.5">
-      <p id={headingId} className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+      <p id={headingId} className="text-co-meta font-semibold text-ink-muted">
         {headings[lane.source]}
       </p>
       {lane.segments.length === 0 ? (
-        <p className="rounded-[12px] border-[1.5px] border-dashed border-slate-300 px-3.5 py-3 text-[13px] text-slate-400">{emptyText}</p>
+        <p className="rounded-card px-3.5 py-3 text-co-meta text-ink-muted">{emptyText}</p>
       ) : (
-        <ul className="flex flex-col gap-1.5 rounded-[12px] border border-slate-200 bg-white px-3.5 py-3 shadow-soft">
+        <ul className="flex flex-col gap-1.5 rounded-card bg-card px-3.5 py-3">
           {lane.segments.map((segment) => (
-            <li key={segment.id} className="text-sm leading-snug text-slate-700">
+            <li key={segment.id} className="text-co-meta leading-snug text-ink">
               {segment.text}
             </li>
           ))}
@@ -1328,9 +1328,9 @@ function ProcessingSurface({
     <BrainDumpOverlay labelledBy={TITLE_ID} size="narrow" operationId={operation.id}>
       <BrainDumpOverlayHeader titleId={TITLE_ID} eyebrow="Brain dump" title={label} meta={operation.status} />
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
-        {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+        {error ? <div role="alert" className="mb-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-danger">{error}</div> : null}
         {/* Only the stage is announced; the growing transcript below is read on demand. */}
-        <p role="status" aria-live="polite" className="mb-3 text-sm text-slate-500">
+        <p role="status" aria-live="polite" className="mb-3 text-co-meta text-ink-muted">
           {label}. Your tasks appear for review once the accurate transcript has been turned into next actions.
         </p>
         <TranscriptReadout
@@ -1339,10 +1339,10 @@ function ProcessingSurface({
           emptyText="The transcript appears here once processing catches up."
         />
         <div className="mt-4 flex flex-col gap-2">
-          <p className="text-xs text-slate-500">Processing continues on the server while this panel is open.</p>
+          <p className="text-co-meta text-ink-muted">Processing continues on the server while this panel is open.</p>
           <DestructiveConfirm
             trigger="Cancel processing"
-            triggerClassName="inline-flex h-10 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition-colors duration-200 ease-smooth hover:border-slate-300"
+            triggerClassName="inline-flex h-10 w-full items-center justify-center rounded-control bg-quiet px-4 text-co-meta font-medium text-ink transition-colors duration-200 ease-smooth hover:bg-quiet-pressed"
             question="Cancel processing? The recording and its transcript are discarded and no tasks are created."
             keepLabel="Keep processing"
             confirmLabel="Cancel processing"
@@ -1399,24 +1399,24 @@ function ReviewSurface({
     // Not dismissible: these drafts exist only inside the operation, so leaving
     // has to be an explicit Discard or Confirm.
     <BrainDumpOverlay labelledBy={TITLE_ID}>
-      <header className="flex shrink-0 items-center gap-3 border-b border-slate-100 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
-        <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors duration-200 ease-smooth hover:border-slate-300 hover:text-slate-900" aria-label="Back to recording" onClick={onBack}>
+      <header className="flex shrink-0 items-center gap-3 px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3 sm:px-6 sm:pt-5">
+        <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-quiet text-ink-muted transition-colors duration-200 ease-smooth hover:text-ink hover:bg-quiet-pressed" aria-label="Back to recording" onClick={onBack}>
           <ChevronLeft className="h-5 w-5" aria-hidden />
         </button>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Brain dump</p>
-          <h1 id={TITLE_ID} className="text-[20px] font-semibold leading-[1.3] tracking-[-0.015em] text-slate-900">
+          <p className="text-co-meta font-semibold text-ink-muted">Brain dump</p>
+          <h1 id={TITLE_ID} className="font-voice text-co-title text-ink">
             {isEmpty ? "No tasks to review" : `Review ${proposals.length} ${proposals.length === 1 ? "task" : "tasks"}`}
           </h1>
-          <p className="mt-0.5 text-xs text-slate-500">{isEmpty ? "Nothing actionable came out of this dump" : "Edit before they land in your inbox"}</p>
+          <p className="mt-0.5 text-co-meta text-ink-muted">{isEmpty ? "Nothing actionable came out of this dump" : "Edit before they land in your inbox"}</p>
         </div>
       </header>
 
       <main aria-label="Review brain dump proposals" className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-6">
-        {error ? <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+        {error ? <div role="alert" className="mb-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-danger">{error}</div> : null}
         {isEmpty ? (
           <div className="mb-3 flex flex-col gap-3">
-            <p role="status" className="rounded-xl border border-slate-200 bg-surface-base px-3 py-2 text-sm text-slate-600">
+            <p role="status" className="rounded-card bg-sunken px-3 py-2 text-co-meta text-ink-muted">
               No tasks were proposed from this dump. Here is what was heard; discard it to record again.
             </p>
             <TranscriptReadout segments={segments} headings={processingTranscriptHeadings} emptyText="No transcript was captured for this recording." />
@@ -1427,39 +1427,39 @@ function ReviewSurface({
           // carry this caution whether or not the server already lets them be
           // saved; it stands in for the not-committable notice below so the two
           // never stack, and only says why Send is disabled while it still is.
-          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div role="status" className="mb-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
             These tasks were extracted from the browser transcript, not from accurate audio. Review them carefully before saving.
             {committable ? null : " They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation."}
           </div>
         ) : !committable ? (
-          <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div role="status" className="mb-3 rounded-card bg-quiet px-3 py-2 text-co-meta text-warning">
             These are not yet reconciled drafts. They can be edited or discarded, but cannot be saved to Inbox until the server confirms reconciliation.
           </div>
         ) : null}
         {rawAudioPresent ? (
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-card bg-card px-3 py-2 text-co-meta text-ink-muted">
             <span>Raw audio is retained until {rawAudioExpiresAt ? new Date(rawAudioExpiresAt).toLocaleString() : "its privacy expiry"}.</span>
-            <button type="button" className="shrink-0 font-semibold text-rose-700" onClick={onDeleteRawAudio}>Delete audio now</button>
+            <button type="button" className="shrink-0 font-semibold text-danger" onClick={onDeleteRawAudio}>Delete audio now</button>
           </div>
         ) : null}
         <div className="grid grid-cols-1 items-start gap-2.5 sm:grid-cols-2">
           {proposals.map((proposal) => {
             const predecessors = proposal.predecessor_ids ?? [];
             return (
-            <article key={proposal.id} className="rounded-[12px] border border-slate-200 bg-white py-2.5 pl-3.5 pr-2.5 shadow-soft">
+            <article key={proposal.id} className="rounded-card bg-ground py-2.5 pl-3.5 pr-2.5">
               <div className="flex items-start gap-2.5">
-                <span className="mt-1.5 text-xs font-semibold text-slate-500">#{proposal.ordinal}</span>
+                <span className="mt-1.5 text-co-meta font-semibold text-ink-muted">#{proposal.ordinal}</span>
                 <div className="min-w-0 flex-1">
                   <label className="sr-only" htmlFor={`proposal-title-${proposal.id}`}>Task title #{proposal.ordinal}</label>
-                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="-ml-1.5 w-full rounded-md border-[1.5px] border-transparent bg-transparent px-1.5 py-0.5 text-sm font-medium text-slate-900 outline-hidden transition-colors duration-200 ease-smooth hover:border-slate-200 focus:border-brand-primary focus:bg-white" />
+                  <input key={`${proposal.id}-${proposal.revision}`} id={`proposal-title-${proposal.id}`} defaultValue={proposal.title} onBlur={(event) => void onUpdateTitle(proposal, event.currentTarget.value)} className="-ml-1.5 w-full rounded-card bg-transparent px-1.5 py-0.5 text-co-meta font-medium text-ink outline-hidden transition-colors duration-200 ease-smooth focus:bg-card" />
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">Inbox</span>
-                    <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-700">{statusLabels[proposal.status]}</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-quiet px-2.5 py-1 text-co-meta font-medium text-ink">Inbox</span>
+                    <span className="rounded-full bg-quiet px-2.5 py-1 text-co-meta text-ink">{statusLabels[proposal.status]}</span>
                     {(proposal.locked_fields ?? []).map((field) => (
-                      <span key={field} className="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">Locked: {field}</span>
+                      <span key={field} className="rounded-full bg-quiet px-2.5 py-1 text-co-meta text-warning">Locked: {field}</span>
                     ))}
                     {predecessors.length > 0 ? (
-                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs text-violet-700">
+                      <span className="rounded-full bg-quiet px-2.5 py-1 text-co-meta text-ink">
                         {predecessors.length > 1
                           ? `Merged from ${predecessors.length} tasks`
                           : "Split from an earlier task"}
@@ -1468,18 +1468,18 @@ function ReviewSurface({
                   </div>
                   <ProposalCitations segmentIds={proposal.source_segment_ids} segmentsById={segmentsById} />
                   {(proposal.conflicts ?? []).map((conflict) => (
-                    <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                    <div key={`${conflict.field}-${conflict.suggested_value ?? ""}`} className="mt-2 rounded-card bg-quiet p-2 text-co-meta text-warning">
                       <div className="font-semibold">Conflict: {conflict.field}</div>
                       <div>Mine: {conflict.current_value ?? "—"}</div>
                       <div>Suggestion: {conflict.suggested_value ?? "—"}</div>
                       <div className="mt-2 flex gap-2">
-                        <button type="button" className="rounded-md border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => onResolveConflict(proposal, "keep")}>Keep mine</button>
-                        <button type="button" className="rounded-md bg-amber-700 px-2 py-1 font-semibold text-white disabled:opacity-50" disabled={!conflict.suggested_value} onClick={() => onResolveConflict(proposal, "accept")}>Use suggestion</button>
+                        <button type="button" className="rounded-control bg-card px-2 py-1 font-semibold" onClick={() => onResolveConflict(proposal, "keep")}>Keep mine</button>
+                        <button type="button" className="rounded-control bg-ink px-2 py-1 font-semibold text-ground disabled:opacity-50" disabled={!conflict.suggested_value} onClick={() => onResolveConflict(proposal, "accept")}>Use suggestion</button>
                       </div>
                     </div>
                   ))}
                 </div>
-                <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors duration-200 ease-smooth hover:bg-surface-sunken hover:text-slate-600" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
+                <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-card text-ink-muted transition-colors duration-200 ease-smooth hover:bg-quiet hover:text-ink" aria-label={`Delete ${proposal.title}`} onClick={() => onDelete(proposal)}>
                   <X className="h-4 w-4" aria-hidden />
                 </button>
               </div>
@@ -1489,9 +1489,9 @@ function ReviewSurface({
         </div>
       </main>
 
-      <footer className="flex shrink-0 flex-col items-center gap-2.5 border-t border-slate-200 bg-surface-base px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
+      <footer className="flex shrink-0 flex-col items-center gap-2.5 bg-sunken px-6 py-4 pb-[max(16px,env(safe-area-inset-bottom))]">
         {isEmpty ? null : (
-          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-xl bg-sky-700 px-5 text-[15px] font-semibold text-white shadow-glow transition-colors duration-200 ease-smooth hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50" aria-describedby={hasUnresolvedConflicts ? conflictHelpId : undefined} disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
+          <button type="button" className="inline-flex h-11 w-full max-w-[320px] items-center justify-center gap-2 rounded-control bg-ink px-5 text-co-meta font-semibold text-ground transition-colors duration-200 ease-smooth hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50" aria-describedby={hasUnresolvedConflicts ? conflictHelpId : undefined} disabled={!committable || hasUnresolvedConflicts || isSaving} onClick={onSave}>
             <Inbox className="h-4 w-4" aria-hidden />
             {isSaving ? "Sending…" : `Send ${proposals.length} to inbox`}
           </button>
@@ -1500,13 +1500,13 @@ function ReviewSurface({
           // An open conflict on one of the cards above is what disables Send; say
           // so beside the button instead of leaving it silently inert. Mobile
           // words the same line as "… before confirming."
-          <p id={conflictHelpId} role="status" className="max-w-[320px] text-center text-xs text-amber-800">
+          <p id={conflictHelpId} role="status" className="max-w-[320px] text-center text-co-meta text-warning">
             {`Resolve ${unresolvedConflictCount} ${unresolvedConflictCount === 1 ? "conflict" : "conflicts"} before sending.`}
           </p>
         ) : null}
         <DestructiveConfirm
           trigger="Discard all"
-          triggerClassName="text-[13px] font-medium text-slate-500 transition-colors duration-200 ease-smooth hover:text-slate-700"
+          triggerClassName="text-co-meta font-medium text-ink-muted transition-colors duration-200 ease-smooth hover:text-ink"
           question="Discard all tasks? Nothing is saved to Inbox and the recording is deleted."
           keepLabel="Keep reviewing"
           confirmLabel="Discard all tasks"
@@ -1535,17 +1535,17 @@ function ProposalCitations({
     return null;
   }
   return (
-    <section aria-label="Cited utterances" className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-400">Cited from what you said</p>
+    <section aria-label="Cited utterances" className="mt-2 rounded-card bg-sunken px-2.5 py-2">
+      <p className="text-co-meta font-semibold text-ink-muted">Cited from what you said</p>
       <ul className="mt-1 flex flex-col gap-1">
         {uniqueIds.map((id) => {
           const segment = segmentsById.get(id);
           return (
-            <li key={id} className="text-xs leading-snug text-slate-600">
+            <li key={id} className="text-co-meta leading-snug text-ink-muted">
               {segment ? (
                 <span>“{segment.text}”</span>
               ) : (
-                <span className="italic text-slate-400">Source utterance no longer available</span>
+                <span className="italic text-ink-muted">Source utterance no longer available</span>
               )}
             </li>
           );

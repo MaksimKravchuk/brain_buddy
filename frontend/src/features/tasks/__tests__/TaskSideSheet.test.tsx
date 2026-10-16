@@ -98,6 +98,11 @@ describe("Task side sheet", () => {
     expect(first).toHaveFocus();
     fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
     expect(last).toHaveFocus();
+    first.focus();
+    const forward = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    first.dispatchEvent(forward);
+    expect(forward.defaultPrevented).toBe(false);
+    expect(first).toHaveFocus();
     view.unmount();
     external.focus();
     expect(external).toHaveFocus();

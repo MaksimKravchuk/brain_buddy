@@ -8,13 +8,15 @@ anywhere until you sign in.
 
 It supports Inbox / Next actions / Waiting for / Someday, date views, projects and tags,
 Completed / Cancelled history, search, task completion and reopening, quick moves between the
-four GTD lists, and an inline editor with explicit Save and Discard for task fields. Inbox has a
+four GTD lists, and a task inspector beside the list whose fields save as you type (a short pause
+after the last keystroke, or at once when you choose another task, act on it, close it or switch
+apps; ⌘S saves at once). Inbox has a
 one-item-at-a-time clarification flow: an item can first be given a project (an existing one or a
 new one made on the spot), then become a Next action, a Waiting item with a reason, Someday, or
 Cancelled; or it can become a new project of its own, with an optional desired outcome and a first
 Next action (one change). Quick capture (⌃⌥⇧B) and Smart Add (`#tag`, `@project`) use the kit's capture, so a
 capture never waits for the network. Quick Open (⌘O) finds lists, projects, tags and tasks.
-View › "Close task details" (⌘\) closes the open task, asking first about unsaved edits, and
+View › "Close task details" (⌘\) or Esc closes the open task, saving its pending edits first, and
 Edit › Undo (⌘Z) takes back the last Done, Cancel or move. The web app shares ⌘O, ⌘\ and ⌘Z.
 
 Projects are archived and unarchived without changing any task's project: an archived project

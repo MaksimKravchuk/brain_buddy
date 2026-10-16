@@ -39,6 +39,7 @@ struct DesignTokensTests {
         let styles = [
             CarryOnTypeScale.display, CarryOnTypeScale.title, CarryOnTypeScale.step,
             CarryOnTypeScale.body, CarryOnTypeScale.bodyStrong, CarryOnTypeScale.meta,
+            CarryOnTypeScale.metaStrong,
         ]
         for style in styles {
             #expect(style.face.postScriptNames[style.weight] != nil, "\(style.face.family) \(style.weight)")

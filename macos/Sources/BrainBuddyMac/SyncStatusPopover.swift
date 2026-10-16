@@ -1,5 +1,6 @@
 import AppKit
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -129,23 +130,22 @@ struct SyncStatusPopover: View {
     }
 
     private func recoveryView(_ recovery: SyncRecoveryContent) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(recovery.title, systemImage: "arrow.triangle.2.circlepath")
-                .font(.headline)
-                .foregroundStyle(recovery.condition.isBlocking ? .orange : .primary)
-            Text(recovery.detail).foregroundStyle(.secondary)
-            HStack(spacing: 10) {
+        SyncPopoverNotice(
+            title: recovery.title, systemImage: "arrow.triangle.2.circlepath",
+            tone: recovery.condition.isBlocking ? .warning : .primary, detail: recovery.detail
+        ) {
+            HStack(spacing: 8) {
                 ForEach(recovery.actions, id: \.self) { action in
                     switch action {
                     case .copyReference(let reference): copyButton(reference, control: .recovery(action))
                     default:
                         Button(Self.title(of: action)) { perform(action, recovery: recovery) }
+                            .buttonStyle(.macSecondaryPill)
                             .focused($focus, equals: .recovery(action))
                     }
                 }
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
     }
 
@@ -180,20 +180,13 @@ struct SyncStatusPopover: View {
     }
 
     private func runtimeIssueRow(_ issue: SyncPopoverRuntimeIssue) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(issue.attempted).font(.callout.weight(.medium)).lineLimit(1)
-            Text(issue.why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if issue.laterActions > 0 {
-                Text("\(issue.laterActions) later action\(issue.laterActions == 1 ? "" : "s") need your decision")
-                    .font(.callout)
-            }
-            HStack(spacing: 10) {
-                if let reference = issue.referenceID { copyButton(reference, control: .runtimeCopy(issue.id)) }
-                Button("Review") { openConflict(issue.id) }
-                    .disabled(openingConflict)
-                    .accessibilityLabel(issue.actionAccessibilityLabel)
-                    .focused($focus, equals: .openConflict(issue.id))
-            }
+        SyncPopoverIssueCard(attempted: issue.attempted, why: issue.why, laterActions: issue.laterActions) {
+            if let reference = issue.referenceID { copyButton(reference, control: .runtimeCopy(issue.id)) }
+            Button("Review") { openConflict(issue.id) }
+                .buttonStyle(.macSecondaryPill)
+                .disabled(openingConflict)
+                .accessibilityLabel(issue.actionAccessibilityLabel)
+                .focused($focus, equals: .openConflict(issue.id))
         }
     }
 
@@ -201,22 +194,22 @@ struct SyncStatusPopover: View {
         VStack(alignment: .leading, spacing: 14) {
             if let recovery = content.recovery { recoveryView(recovery) }
             if let rebuildNotice {
-                Text(rebuildNotice).font(.callout).fixedSize(horizontal: false, vertical: true)
+                Text(rebuildNotice)
+                    .font(MacSheetFont.note)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityElement(children: .combine)
             }
             if let notice = content.notice { noticeView(notice) }
             if content.lastSynced != nil || content.queue != nil {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let lastSynced = content.lastSynced { Text(lastSynced) }
-                    if let queue = content.queue { Text(queue).foregroundStyle(.secondary) }
-                }
-                .font(.callout)
+                SyncPopoverLines(lastSynced: content.lastSynced, queue: content.queue)
             }
             if !content.issues.isEmpty || !content.runtimeIssues.isEmpty { issuesView(content) }
             if content.syncNowShown {
                 Button("Sync now") {
                     Task { await controller.syncNow() }
                 }
+                .buttonStyle(.macSecondaryPill)
                 .disabled(!content.syncNowEnabled)
                 .focused($focus, equals: .syncNow)
             }
@@ -224,12 +217,10 @@ struct SyncStatusPopover: View {
                 copyButton(reference, control: .offlineCopy)
             }
             if let email = content.email {
-                Divider()
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(email)
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
+                MacSheetDivider()
+                SyncPopoverAccount(email: email) {
                     Button(AccountMenuItems.signOutTitle) { controller.requestSignOut() }
+                        .buttonStyle(.macText)
                         .focused($focus, equals: .signOut)
                 }
             }
@@ -243,52 +234,42 @@ struct SyncStatusPopover: View {
     private func noticeView(_ notice: SyncPopoverContent.Notice) -> some View {
         switch notice {
         case .accountLess(let text):
-            VStack(alignment: .leading, spacing: 8) {
-                Text(text.title).font(.headline)
-                if let detail = text.detail { Text(detail).foregroundStyle(.secondary) }
+            SyncPopoverNotice(title: text.title, detail: text.detail) {
                 Button(AccountMenuItems.signInTitle) { controller.beginSignIn(from: .popover) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.macStrongPill)
                     .focused($focus, equals: .signIn)
+                    .padding(.top, 2)
             }
-            .fixedSize(horizontal: false, vertical: true)
         case .sessionEnded(let text):
-            VStack(alignment: .leading, spacing: 8) {
-                Label(text.title, systemImage: "person.crop.circle.badge.exclamationmark")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
-                if let detail = text.detail { Text(detail).foregroundStyle(.secondary) }
+            SyncPopoverNotice(
+                title: text.title, systemImage: "person.crop.circle.badge.exclamationmark", tone: .warning,
+                detail: text.detail
+            ) {
                 Button("Sign in again") { controller.beginSignIn(from: .popover) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.macStrongPill)
                     .focused($focus, equals: .signInAgain)
+                    .padding(.top, 2)
             }
-            .fixedSize(horizontal: false, vertical: true)
         case .failing(let text, let reference):
-            VStack(alignment: .leading, spacing: 6) {
-                Label(text.title, systemImage: "exclamationmark.triangle")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
-                if let detail = text.detail { Text(detail) }
-                if let footnote = text.footnote {
-                    Text(footnote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
+            SyncPopoverNotice(
+                title: text.title, systemImage: "exclamationmark.triangle", tone: .warning, detail: text.detail,
+                detailTone: .primary, footnote: text.footnote
+            ) {
                 if let reference { copyButton(reference, control: .failingCopy) }
             }
-            .fixedSize(horizontal: false, vertical: true)
         case .offline(let text, _):
-            VStack(alignment: .leading, spacing: 6) {
-                Text(text.title).foregroundStyle(.secondary)
-                if let footnote = text.footnote {
-                    Text(footnote).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
+            SyncPopoverNotice(
+                title: text.title, tone: .secondary, titleFont: MacSheetFont.note, footnote: text.footnote
+            ) {
+                EmptyView()
             }
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func issuesView(_ content: SyncPopoverContent) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let heading = content.issuesHeading {
-                Text(heading).font(.headline).foregroundStyle(.orange)
+                MacSheetStatus(text: heading, tone: .warning)
             }
             ForEach(content.issues) { issue in
                 issueRow(issue, content: content)
@@ -300,48 +281,41 @@ struct SyncStatusPopover: View {
     @ViewBuilder
     private func issueRow(_ issue: SyncPopoverIssue, content: SyncPopoverContent) -> some View {
         if issue.discarded {
-            HStack {
+            HStack(spacing: 8) {
                 Text("Outcome discarded")
+                    .font(MacSheetFont.note)
+                    .foregroundStyle(CarryOnColorStyle.coTextSecondary)
                 Button("Undo") { controller.undoDiscard(issue.id) }
+                    .buttonStyle(.macText)
                     .focused($focus, equals: .undoDiscard(issue.id))
             }
-            .font(.callout)
         } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(issue.attempted).font(.callout.weight(.medium)).lineLimit(1)
-                Text(issue.why).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if let outcome = issue.keptOutcome {
-                    Text(outcome)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(8)
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            SyncPopoverIssueCard(attempted: issue.attempted, why: issue.why, keptOutcome: issue.keptOutcome) {
+                if let reference = issue.referenceID {
+                    copyButton(reference, control: .issueCopy(issue.id))
                 }
-                HStack(spacing: 10) {
-                    if let reference = issue.referenceID {
-                        copyButton(reference, control: .issueCopy(issue.id))
+                if let outcome = issue.keptOutcome {
+                    Button(copyTitle(.copyOutcome(issue.id), "Copy outcome")) {
+                        copy(outcome, control: .copyOutcome(issue.id))
                     }
-                    if let outcome = issue.keptOutcome {
-                        Button(copyTitle(.copyOutcome(issue.id), "Copy outcome")) {
-                            copy(outcome, control: .copyOutcome(issue.id))
-                        }
-                        .focused($focus, equals: .copyOutcome(issue.id))
-                        Button("Discard outcome") {
-                            controller.discardOutcome(issue.id)
-                            AccessibilityNotification.Announcement("Outcome discarded").post()
-                        }
-                        .accessibilityLabel(issue.actionAccessibilityLabel)
-                        .focused($focus, equals: .discardOutcome(issue.id))
-                    } else {
-                        Button("Dismiss") {
-                            let last = content.issues.count == 1
-                            controller.dismissIssue(issue.id)
-                            if last { AccessibilityNotification.Announcement("No sync issues").post() }
-                        }
-                        .accessibilityLabel(issue.actionAccessibilityLabel)
-                        .focused($focus, equals: .dismiss(issue.id))
+                    .buttonStyle(.macText)
+                    .focused($focus, equals: .copyOutcome(issue.id))
+                    Button("Discard outcome") {
+                        controller.discardOutcome(issue.id)
+                        AccessibilityNotification.Announcement("Outcome discarded").post()
                     }
+                    .buttonStyle(.macText)
+                    .accessibilityLabel(issue.actionAccessibilityLabel)
+                    .focused($focus, equals: .discardOutcome(issue.id))
+                } else {
+                    Button("Dismiss") {
+                        let last = content.issues.count == 1
+                        controller.dismissIssue(issue.id)
+                        if last { AccessibilityNotification.Announcement("No sync issues").post() }
+                    }
+                    .buttonStyle(.macText)
+                    .accessibilityLabel(issue.actionAccessibilityLabel)
+                    .focused($focus, equals: .dismiss(issue.id))
                 }
             }
         }
@@ -349,14 +323,12 @@ struct SyncStatusPopover: View {
 
     /// "Copy" (the reference id), reading "Copied" for 2 s, announced politely.
     private func copyButton(_ reference: String, control: SyncPopoverControl) -> some View {
-        HStack(spacing: 6) {
-            Text("Reference ID \(reference)")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            MacSheetReference(reference: reference)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .textSelection(.enabled)
             Button(copyTitle(control, "Copy")) { copy(reference, control: control) }
+                .buttonStyle(.macText)
                 .accessibilityLabel("Copy reference ID")
                 .focused($focus, equals: control)
         }
@@ -393,12 +365,153 @@ struct SyncStatusPopover: View {
     private func finderLine(_ line: String, file: URL, control: SyncPopoverControl) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(line)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(MacSheetFont.meta)
+                .foregroundStyle(CarryOnColorStyle.coTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
-                .font(.caption)
+                .buttonStyle(.macText)
                 .focused($focus, equals: control)
+        }
+    }
+}
+
+// MARK: - Parts
+
+/// A notice or recovery block of X-02: the heading (with its glyph and tone), the 13 detail, the
+/// selectable 12 footnote and the block's actions.
+struct SyncPopoverNotice<Actions: View>: View {
+    let title: String
+    var systemImage: String?
+    var tone: MacSheetTone
+    var titleFont: Font
+    var detail: String?
+    var detailTone: MacSheetTone
+    var footnote: String?
+    let actions: Actions
+
+    init(
+        title: String, systemImage: String? = nil, tone: MacSheetTone = .primary,
+        titleFont: Font = MacSheetFont.heading, detail: String? = nil, detailTone: MacSheetTone = .secondary,
+        footnote: String? = nil, @ViewBuilder actions: () -> Actions
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tone = tone
+        self.titleFont = titleFont
+        self.detail = detail
+        self.detailTone = detailTone
+        self.footnote = footnote
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            MacSheetStatus(text: title, systemImage: systemImage, tone: tone, font: titleFont)
+            if let detail {
+                Text(detail)
+                    .font(MacSheetFont.note)
+                    .foregroundStyle(detailTone.style)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let footnote {
+                Text(footnote)
+                    .font(MacSheetFont.meta)
+                    .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            actions
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// When it last synced (13) and what waits (13, secondary).
+struct SyncPopoverLines: View {
+    let lastSynced: String?
+    let queue: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let lastSynced {
+                Text(lastSynced).foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            }
+            if let queue {
+                Text(queue).foregroundStyle(CarryOnColorStyle.coTextSecondary)
+            }
+        }
+        .font(MacSheetFont.note)
+    }
+}
+
+/// One issue: what was attempted (13 semibold), why (13 secondary), the kept outcome in a
+/// `bg-ground` box or the count of later actions, then the issue's actions.
+struct SyncPopoverIssueCard<Actions: View>: View {
+    let attempted: String
+    let why: String
+    var keptOutcome: String?
+    var laterActions: Int
+    let actions: Actions
+
+    init(
+        attempted: String, why: String, keptOutcome: String? = nil, laterActions: Int = 0,
+        @ViewBuilder actions: () -> Actions
+    ) {
+        self.attempted = attempted
+        self.why = why
+        self.keptOutcome = keptOutcome
+        self.laterActions = laterActions
+        self.actions = actions()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(attempted)
+                .font(MacSheetFont.noteStrong)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .lineLimit(1)
+            Text(why)
+                .font(MacSheetFont.note)
+                .foregroundStyle(CarryOnColorStyle.coTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let keptOutcome {
+                Text(keptOutcome)
+                    .font(MacSheetFont.note)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(CarryOnColorStyle.coBgGround, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            if laterActions > 0 {
+                Text("\(laterActions) later action\(laterActions == 1 ? "" : "s") need your decision")
+                    .font(MacSheetFont.note)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            }
+            HStack(spacing: 12) { actions }
+                .padding(.top, 4)
+        }
+    }
+}
+
+/// The signed-in email (13) and its "Sign out…".
+struct SyncPopoverAccount<SignOut: View>: View {
+    let email: String
+    let signOut: SignOut
+
+    init(email: String, @ViewBuilder signOut: () -> SignOut) {
+        self.email = email
+        self.signOut = signOut()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(email)
+                .font(MacSheetFont.note)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            signOut
         }
     }
 }

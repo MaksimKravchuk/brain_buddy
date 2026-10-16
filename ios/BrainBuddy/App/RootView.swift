@@ -123,12 +123,20 @@ private struct MainTabView: View {
             item: Binding(
                 get: { captureItem },
                 set: { self.router.capture = $0 }
-            )
+            ),
+            // A task asked for while capture was open shows now.
+            onDismiss: { self.router.presentPending() }
         ) { context in
             CaptureSheet(context: context)
                 .diagnosticsScreen("capture")
                 .onAppear { captureOnScreen = true }
                 .onDisappear { captureOnScreen = false }
+        }
+        // The task sheet (boards 13 to 20), for every place that opens a
+        // task. A capture asked for while it was open shows once it has gone.
+        .sheet(item: $router.presentedTask, onDismiss: { self.router.presentPending() }) { presented in
+            TaskSheet(taskID: presented.id)
+                .diagnosticsScreen("task")
         }
         .sheet(item: $startupSheet, onDismiss: startupSheetDismissed) { sheet in
             Group {
@@ -146,14 +154,18 @@ private struct MainTabView: View {
         .onChange(of: router.capture == nil) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: captureOnScreen) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: router.isProcessingInbox) { _, _ in presentStartupSheetIfDue() }
+        .onChange(of: router.presentedTask == nil) { _, _ in presentStartupSheetIfDue() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { presentStartupSheetIfDue() }
         }
         // A capture asked for while Process inbox was open (⌘N, a deep link)
-        // shows once the cover has gone.
-        .fullScreenCover(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPendingCapture() }) {
+        // shows once the sheet has gone. Board 16: a large sheet with a grabber
+        // over the Inbox; a swipe down resets the router through the binding.
+        .sheet(isPresented: $router.isProcessingInbox, onDismiss: { router.presentPending() }) {
             ProcessInboxScreen()
                 .diagnosticsScreen("process inbox")
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
         // Changes stay on screen and are retried with the next save; say so
         // when a save fails instead of pretending it worked.
@@ -185,8 +197,8 @@ private struct MainTabView: View {
             return
         }
         guard startupSheet == nil, workspace.isLoaded else { return }
-        // These two re-run this check themselves when they close (onChange).
-        let ownPresentation = router.isProcessingInbox || captureOnScreen
+        // These re-run this check themselves when they close (onChange).
+        let ownPresentation = router.isProcessingInbox || captureOnScreen || router.presentedTask != nil
         let othersPresent = presentationProbe.isPresenting
         var context = ReviewStartupPlanner.Context(
             reviewExposed: workspace.reviewExposed, explainerNeeded: workspace.explainerNeeded,

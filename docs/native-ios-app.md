@@ -28,6 +28,15 @@ title), add an optional desired outcome, and the item becomes the required first
 next action, keeping its notes, tags and due date; undo puts it back in the
 Inbox and archives the project.
 
+On the iPhone Process inbox is a large sheet with a grabber over the Inbox (board
+16, "Inbox item"), not a full-screen cover. It shows "Inbox · 1 of 4", the item,
+and "What is it?" with four answer cards: "A step I can take" (Next actions),
+"Bigger than one step" (Make it a project), "Waiting on someone" (asks who, then
+Waiting for) and "Someday". A floating glass bar offers "Done already" (complete)
+and "Not needed" (cancel); Skip stays in the toolbar. The project, tags and due
+day are optional chips under the answers. There is no AI step in Process inbox
+(board 17 is not built).
+
 ## What works offline
 
 Everything in pass 1 except signing in and the sync itself:
@@ -296,11 +305,17 @@ Navigation (iPhone; iPad uses the adaptable sidebar):
 | Search | `Tab(role: .search)` across all tasks |
 
 - **Capture is always one tap away**: a glass capture bar in the tab view's
-  bottom accessory opens the capture sheet — Smart Add with highlighted
-  tokens and a live preview of the project and tags that will be used or
-  created, list picker (Waiting asks who or what), due date, notes.
-- Task detail is a pushed screen. Rows swipe to complete (leading) and to
-  move (trailing); a context menu offers every transition.
+  bottom accessory opens the capture sheet (Carry On board 10, a large
+  sheet) — a "New · goes to <list or project>" line, Smart Add with
+  highlighted tokens and a live preview of the project and tags that will be
+  used or created, "+ Date" and "+ Note" chips, "Put it in" list chips
+  (Waiting asks who or what), and Add in a floating glass bar.
+- Task detail is a half sheet over the list (Carry On boards 13 to 20),
+  presented by the router for every row, the Next actions card and the
+  `brainbuddy://task/<id>` link; it pulls up to full height for properties
+  and comments, and a floating glass bar carries the list's actions (Done and
+  Not now, Got it, Start it and Not needed, Reopen…). Rows swipe to complete
+  (leading) and to move (trailing); a context menu offers every transition.
 - Completing animates in under 600 ms and respects Reduce Motion (spec 016);
   an undo toast reopens into the previous list.
 - Sync state is always words ("Synced 2 minutes ago", "Offline · 3 changes

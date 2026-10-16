@@ -1,4 +1,5 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
@@ -9,7 +10,22 @@ private func taskIdentityReads(_ task: TaskRecord) -> [WorkspaceRecordRead] {
     return reads
 }
 
-/// Task detail, pushed from any list.
+/// Task detail, the content of the task sheet (`TaskSheet`, boards 13 to 20).
+///
+/// **Layout.** An Inbox item keeps the detail it always had. Every other task
+/// is a Carry On card: "Project · List" (or when it was done), the title, its
+/// chips (project, due day, tags), the note ("Why" for a next action), the
+/// steps inside (subtasks) and, below the medium detent, the properties,
+/// comments and history. Waiting for leads with who it waits on and since
+/// when; Someday / maybe says how to start it; a finished task is read-only.
+///
+/// **Bar.** A floating glass bar offers the board's actions for the task's
+/// list, each an action the app already has: a next action's Done (complete)
+/// and Not now (board 15: pick a day, move to Waiting for or Someday / maybe,
+/// or change the step); Waiting for's Got it and Someday's Start it (move to
+/// Next actions); Someday's Not needed (cancel); a finished task's Reopen…
+/// (which asks where). The toolbar's menu keeps every other move, Complete
+/// and Cancel task. Inbox items have no bar, as before.
 ///
 /// **Saving model (iOS): immediate save per field.** Unlike the macOS editor,
 /// which collects edits behind explicit Save and Cancel buttons, every
@@ -29,12 +45,15 @@ private func taskIdentityReads(_ task: TaskRecord) -> [WorkspaceRecordRead] {
 /// Completed and cancelled tasks are read-only apart from Reopen.
 struct TaskDetailScreen: View {
     private let taskID: TaskID
+    /// The sheet is at its large detent, so everything below the card shows.
+    private let isExpanded: Bool
 
     @Environment(Workspace.self) private var workspace
     @Environment(AppRouter.self) private var router
 
-    init(taskID: TaskID) {
+    init(taskID: TaskID, isExpanded: Bool = true) {
         self.taskID = taskID
+        self.isExpanded = isExpanded
     }
 
     var body: some View {
@@ -57,7 +76,7 @@ struct TaskDetailScreen: View {
                 }
             }) {
                 if let task {
-                    TaskDetailForm(task: task)
+                    TaskDetailForm(task: task, isExpanded: isExpanded)
                         .id(task.id)
                 } else {
                     missingTask
@@ -86,6 +105,8 @@ struct TaskDetailScreen: View {
             )
             if !workspace.issues.isEmpty {
                 Button("View sync issues") {
+                    // Sync issues is pushed on the tab under the sheet.
+                    router.closeTask()
                     router.open(.syncIssues)
                 }
                 .buttonStyle(.bordered)
@@ -95,6 +116,11 @@ struct TaskDetailScreen: View {
         .padding()
         .navigationTitle("Task")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                TaskSheetCloseButton()
+            }
+        }
     }
 
     private func readiness(page: WorkspaceQueryPageState, catalog: WorkspaceQueryReadiness, reads: [WorkspaceRecordRead]) -> WorkspaceQueryReadiness {
@@ -111,6 +137,7 @@ private enum DetailField: String, Hashable {
 
 private struct TaskDetailForm: View {
     let task: TaskRecord
+    let isExpanded: Bool
 
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
@@ -133,10 +160,16 @@ private struct TaskDetailForm: View {
     @State private var isEditingTags = false
     /// The decision card (M-03) opened from "This wording" (M-02).
     @State private var isDeciding = false
+    /// Board 14, the due date picker.
+    @State private var isPickingDate = false
+    /// Board 15, "Not now", and what it chose; acted on once it has closed.
+    @State private var isChoosingNotNow = false
+    @State private var notNowChoice: NotNowChoice?
     @FocusState private var focus: DetailField?
 
-    init(task: TaskRecord) {
+    init(task: TaskRecord, isExpanded: Bool) {
         self.task = task
+        self.isExpanded = isExpanded
         _title = State(initialValue: task.title)
         _notes = State(initialValue: task.details ?? "")
         _waitingFor = State(initialValue: task.waitingFor ?? "")
@@ -144,6 +177,10 @@ private struct TaskDetailForm: View {
     }
 
     private var isReadOnly: Bool { !task.isOpen }
+
+    /// Inbox items keep the detail they always had; every other task is the
+    /// Carry On card.
+    private var usesCard: Bool { task.state != .inbox }
 
     var body: some View {
         savingForm
@@ -158,6 +195,17 @@ private struct TaskDetailForm: View {
             }
             .sheet(isPresented: $isDeciding) {
                 DecisionCardSheet(taskID: task.id)
+            }
+            .sheet(isPresented: $isPickingDate) {
+                DueDateSheet(taskTitle: task.title, day: task.dueDate, today: workspace.today) { day in
+                    guard day != task.dueDate else { return }
+                    Task { await save(.dueDate, TaskChanges(dueDate: setOrClear(day))) }
+                }
+            }
+            .sheet(isPresented: $isChoosingNotNow, onDismiss: runNotNowChoice) {
+                NotNowSheet(taskTitle: task.title) { choice in
+                    notNowChoice = choice
+                }
             }
     }
 
@@ -201,66 +249,413 @@ private struct TaskDetailForm: View {
     private var form: some View {
         let projectPage = workspace.projectsPageState()
         return Form {
-            titleSection
-                .disabled(isSaving || isTransitioning)
-            // Spec 020, M-02: the wording's age and "Decide" (only while exposed).
-            FormulationSection(task: task) {
-                // Leave the field first: a title still focused under the card
-                // would be committed later with its old text and overwrite
-                // the card's new wording (the field only follows the stored
-                // title while it is not being edited).
-                focus = nil
-                Task {
-                    if await commitAll() { isDeciding = true }
-                }
+            if usesCard {
+                cardSections
+            } else {
+                inboxSections
             }
-            .disabled(isSaving || isTransitioning)
-            propertiesSection
-                .disabled(isSaving || isTransitioning)
-            SubtasksSection(task: task, isReadOnly: isReadOnly)
-            CommentsSection(task: task, isReadOnly: isReadOnly)
-            metadataSection
         }
         .bbDenseList()
+        .bbListBackground()
         .safeAreaInset(edge: .bottom) {
             WorkspaceQueryPageControls(page: projectPage,
                 previous: { await workspace.previousProjectsPage() },
                 next: { await workspace.nextProjectsPage() })
         }
+        // Outermost, so the bar sits at the very bottom with the toasts just
+        // above it, never over its buttons.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                ToastHost()
+                actionBar
+            }
+        }
     }
 
+    /// The Inbox item's detail, as it has always been.
+    @ViewBuilder private var inboxSections: some View {
+        titleSection
+            .disabled(isSaving || isTransitioning)
+        formulationSection
+        propertiesSection
+            .disabled(isSaving || isTransitioning)
+        SubtasksSection(task: task, isReadOnly: isReadOnly)
+        CommentsSection(task: task, isReadOnly: isReadOnly)
+        metadataSection
+    }
+
+    /// Spec 020, M-02: the wording's age and "Decide" (only while exposed).
+    private var formulationSection: some View {
+        FormulationSection(task: task) {
+            // Leave the field first: a title still focused under the card
+            // would be committed later with its old text and overwrite
+            // the card's new wording (the field only follows the stored
+            // title while it is not being edited).
+            focus = nil
+            Task {
+                if await commitAll() { isDeciding = true }
+            }
+        }
+        .disabled(isSaving || isTransitioning)
+    }
+
+    /// The Inbox keeps its list name as the title; the card names its list in
+    /// its own first line, so the bar above it carries only the buttons.
     private var navigationTitle: String {
-        if let list = task.openList { return list.title }
-        return task.state == .cancelled ? "Cancelled" : "Completed"
+        task.state == .inbox ? OpenList.inbox.title : ""
     }
 
+    /// Close, then Complete where the bar has no Done (Inbox, Waiting for,
+    /// Someday / maybe) and the menu with every move and Cancel task. A
+    /// finished task's only action, Reopen…, is in its bar.
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            if task.isOpen {
+        ToolbarItem(placement: .cancellationAction) {
+            TaskSheetCloseButton()
+        }
+        if task.isOpen && task.state != .next {
+            ToolbarItem(placement: .primaryAction) {
                 Button(action: complete) {
                     Label("Complete", systemImage: "checkmark.circle")
                 }
                 .disabled(isSaving || isTransitioning)
-            } else {
-                Button {
-                    isReopening = true
-                } label: {
-                    Label("Reopen", systemImage: "arrow.uturn.backward.circle")
-                }
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                moreMenuContent
-            } label: {
-                Label("More", systemImage: "ellipsis.circle")
+        if task.isOpen {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    moreMenuContent
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .accessibilityLabel("More actions")
+                .disabled(isSaving || isTransitioning)
             }
-            .accessibilityLabel("More actions")
-            .disabled(isSaving || isTransitioning)
         }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
             Button("Done") { focus = nil }
+        }
+    }
+
+    // MARK: Bar
+
+    /// The board's actions for the task's list, in a floating glass bar. Only
+    /// what the row's own actions (`taskActions`) offer for this state: a move
+    /// to a different open list, Complete or Cancel task while open, Reopen…
+    /// once finished. The Inbox has no bar.
+    @ViewBuilder private var actionBar: some View {
+        switch task.state {
+        case .next:
+            BBGlassActionBar {
+                barButton("Done", .glassPrimary, action: complete)
+                barButton("Not now", .quiet) {
+                    focus = nil
+                    isChoosingNotNow = true
+                }
+            }
+        case .waiting:
+            BBGlassActionBar {
+                barButton("Got it", .glassPrimary) { requestMove(.next) }
+            }
+        case .someday:
+            BBGlassActionBar {
+                barButton("Start it", .glassPrimary) { requestMove(.next) }
+                barButton("Not needed", .quiet, action: cancel)
+            }
+        case .completed, .cancelled:
+            BBGlassActionBar {
+                barButton("Reopen…", .quiet) { isReopening = true }
+            }
+        case .inbox:
+            EmptyView()
+        }
+    }
+
+    private func barButton(
+        _ title: String, _ kind: CarryOnButtonStyle.Kind, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(CarryOnButtonStyle(kind))
+        .disabled(isSaving || isTransitioning)
+    }
+
+    /// Acts on what "Not now" chose, once its sheet has gone.
+    private func runNotNowChoice() {
+        guard let choice = notNowChoice else { return }
+        notNowChoice = nil
+        switch choice {
+        case .pickDay: isPickingDate = true
+        case .waiting: requestMove(.waiting)
+        case .someday: requestMove(.someday)
+        case .changeStep: focus = .title
+        }
+    }
+
+    // MARK: Card (boards 13, 18, 19, 20)
+
+    @ViewBuilder private var cardSections: some View {
+        cardHeaderSection
+            .disabled(isSaving || isTransitioning)
+        formulationSection
+        noteSection
+            .disabled(isSaving || isTransitioning)
+        if task.state == .someday {
+            cardTextRow("Ready to start? Start it and it moves to Next actions.", isQuiet: false)
+        }
+        if !chipsFollowTitle {
+            chipsSection
+        }
+        SubtasksSection(task: task, isReadOnly: isReadOnly, title: "Steps inside")
+        if isReadOnly {
+            cardTextRow("Finished steps are read-only.", isQuiet: true)
+        }
+        if !isExpanded {
+            cardTextRow("Pull up for notes and comments", isQuiet: true)
+        }
+        propertiesSection
+            .disabled(isSaving || isTransitioning)
+        CommentsSection(task: task, isReadOnly: isReadOnly)
+        metadataSection
+    }
+
+    /// Next actions and finished tasks show their chips under the title;
+    /// Waiting for and Someday / maybe under the note (boards 18, 19).
+    private var chipsFollowTitle: Bool {
+        task.state != .waiting && task.state != .someday
+    }
+
+    /// "Project · List", the title, who a waiting task waits on, and the chips
+    /// where they follow the title. Flat on the sheet, no card behind it.
+    private var cardHeaderSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnSpace.xs)) {
+                contextLine
+                cardTitle
+                if task.state == .waiting {
+                    waitingCard
+                        .padding(.top, CGFloat(CarryOnSpace.xs))
+                }
+                if chipsFollowTitle {
+                    chipsRow
+                        .padding(.top, CGFloat(CarryOnSpace.xxs))
+                }
+            }
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } footer: {
+            problemFooter(.title, .waitingFor)
+        }
+    }
+
+    /// Board 13's first line: the project's dot and name, then where the task
+    /// is ("Next actions", "Waiting for", "Someday", "Done on Monday").
+    private var contextLine: some View {
+        let project = task.projectID.flatMap { projectRecord($0) }
+        let parts = [project?.name, stateWords].compactMap { $0 }
+        return HStack(spacing: CGFloat(CarryOnSpace.xs)) {
+            if let project {
+                CarryOnProjectDot(BBColor.projectRGB(project.color))
+                    .accessibilityHidden(true)
+            }
+            Text(parts.joined(separator: " · "))
+        }
+        .carryOnText(CarryOnTypeScale.meta)
+        .foregroundStyle(.coTextSecondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Where the task is, in the card's first line.
+    private var stateWords: String {
+        switch task.state {
+        case .inbox: OpenList.inbox.title
+        case .next: OpenList.next.title
+        case .waiting: OpenList.waiting.title
+        case .someday: "Someday"
+        case .completed: terminalPhrase(word: "Done", at: task.completedAt)
+        case .cancelled: terminalPhrase(word: "Cancelled", at: task.cancelledAt)
+        }
+    }
+
+    /// "Done today", "Done yesterday", "Done on Monday", "Done on October 3";
+    /// the word alone when the time is unknown.
+    private func terminalPhrase(word: String, at date: Date?) -> String {
+        guard let date else { return word }
+        switch BBDayMath.offset(from: CalendarDay(date: date), to: workspace.today) {
+        case ...0: return "\(word) today"
+        case 1: return "\(word) yesterday"
+        case 2...6: return "\(word) on \(date.formatted(.dateTime.weekday(.wide)))"
+        default: return "\(word) on \(date.formatted(.dateTime.month(.wide).day()))"
+        }
+    }
+
+    /// The step in the board's 24 pt step type (Someday's idea in the serif
+    /// title); struck through once finished.
+    @ViewBuilder private var cardTitle: some View {
+        let style = task.state == .someday ? CarryOnTypeScale.title : CarryOnTypeScale.step
+        if isReadOnly {
+            Text(task.title)
+                .strikethrough(true, color: BBColor.stepTextDone)
+                .carryOnText(style)
+                .foregroundStyle(BBColor.stepTextDone)
+                .textSelection(.enabled)
+        } else {
+            titleTextField
+                .carryOnFont(style)
+                .foregroundStyle(.coTextPrimary)
+        }
+    }
+
+    /// Board 18: who the task waits on, editable, and since when.
+    private var waitingCard: some View {
+        HStack(spacing: CGFloat(CarryOnLayout.Row.gap)) {
+            CarryOnStepMark(.waiting)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: CGFloat(CarryOnLayout.Row.metaGap)) {
+                waitingForTextField
+                    .carryOnFont(CarryOnTypeScale.bodyStrong)
+                    .foregroundStyle(.coTextPrimary)
+                if let asked = askedLine {
+                    Text(asked)
+                        .carryOnText(CarryOnTypeScale.meta)
+                        .foregroundStyle(.coTextSecondary)
+                }
+            }
+        }
+        .padding(CGFloat(CarryOnSpace.md))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.coSurfaceCard, in: RoundedRectangle(cornerRadius: CGFloat(CarryOnRadius.md), style: .continuous))
+    }
+
+    /// "Asked 3 days ago", from when the task entered Waiting for.
+    private var askedLine: String? {
+        guard let since = task.waitingSince else { return nil }
+        let days = BBDayMath.offset(from: CalendarDay(date: since), to: workspace.today)
+        switch days {
+        case ...0: return "Asked today"
+        case 1: return "Asked yesterday"
+        default: return "Asked \(days) days ago"
+        }
+    }
+
+    /// The note: "Why" for a next action, "Note" elsewhere. Editable while
+    /// open; a finished task's note is quiet text, and none is shown when
+    /// there is no note.
+    @ViewBuilder private var noteSection: some View {
+        let header = task.state == .next ? "Why" : "Note"
+        if isReadOnly {
+            if let details = task.details, !details.isEmpty {
+                Section {
+                    Text(details)
+                        .carryOnText(CarryOnTypeScale.body)
+                        .foregroundStyle(.coTextSecondary)
+                        .textSelection(.enabled)
+                } header: {
+                    BBSectionHeader(header)
+                }
+            }
+        } else {
+            Section {
+                TextField("Notes, links, details…", text: $notes, axis: .vertical)
+                    .carryOnFont(CarryOnTypeScale.body)
+                    .lineLimit(1...)
+                    .focused($focus, equals: .notes)
+                    .accessibilityLabel(header)
+            } header: {
+                BBSectionHeader(header)
+            } footer: {
+                problemFooter(.notes)
+            }
+        }
+    }
+
+    /// The chips as their own flat row (Waiting for, Someday / maybe).
+    @ViewBuilder private var chipsSection: some View {
+        if !chipItems.isEmpty {
+            Section {
+                chipsRow
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    /// Project, due day and tags as Carry On chips; read as one line by
+    /// VoiceOver. They show what the property rows below edit.
+    @ViewBuilder private var chipsRow: some View {
+        let chips = chipItems
+        if !chips.isEmpty {
+            BBFlowLayout(spacing: CGFloat(CarryOnSpace.xs), lineSpacing: CGFloat(CarryOnSpace.xs)) {
+                ForEach(chips) { chip in
+                    CarryOnChip(chip.text, tone: chip.tone, dot: chip.dot)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(chips.map(\.spoken).joined(separator: ", "))
+        }
+    }
+
+    private struct ChipItem: Identifiable {
+        let id: String
+        let text: String
+        let spoken: String
+        var tone: CarryOnChip.Tone = .plain
+        var dot: RGBColor? = nil
+    }
+
+    private var chipItems: [ChipItem] {
+        var chips: [ChipItem] = []
+        if let id = task.projectID, let project = projectRecord(id) {
+            chips.append(
+                ChipItem(
+                    id: "project", text: project.name, spoken: "Project \(project.name)",
+                    dot: BBColor.projectRGB(project.color)
+                )
+            )
+        }
+        if let day = task.dueDate {
+            chips.append(dueChip(day))
+        }
+        for tagID in task.tagIDs {
+            if let tag = tagRecord(tagID) {
+                chips.append(ChipItem(id: "tag-\(tagID.rawValue)", text: tag.name, spoken: "Tag \(tag.name)"))
+            }
+        }
+        return chips
+    }
+
+    /// "Due Friday", "Due today" (due colour), "Overdue · Sep 22" (overdue
+    /// colour); the words carry the state, the colour only repeats it. A
+    /// finished task's day is history and stays plain.
+    private func dueChip(_ day: CalendarDay) -> ChipItem {
+        let today = workspace.today
+        let offset = BBDayMath.offset(from: today, to: day)
+        let words: String
+        switch offset {
+        case 0: words = "today"
+        case 1: words = "tomorrow"
+        case -1: words = "yesterday"
+        default: words = DueChip.label(for: day, today: today)
+        }
+        let spoken = DueChip.accessibilityText(for: day, today: today, isDeadlineActive: task.isOpen)
+        if task.isOpen && offset < 0 {
+            return ChipItem(id: "due", text: "Overdue · \(words)", spoken: spoken, tone: .overdue)
+        }
+        return ChipItem(id: "due", text: "Due \(words)", spoken: spoken, tone: task.isOpen && offset == 0 ? .dueSoon : .plain)
+    }
+
+    /// A line of copy on the sheet itself: body text, or a quiet meta line.
+    private func cardTextRow(_ text: String, isQuiet: Bool) -> some View {
+        Section {
+            Text(text)
+                .carryOnText(isQuiet ? CarryOnTypeScale.meta : CarryOnTypeScale.body)
+                .foregroundStyle(isQuiet ? CarryOnColorStyle.coTextSecondary : .coTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -282,20 +677,25 @@ private struct TaskDetailForm: View {
                 .font(.title3.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
         } else {
-            TextField("Title", text: $title, axis: .vertical)
+            titleTextField
                 .font(.title3.weight(.semibold))
-                .focused($focus, equals: .title)
-                .submitLabel(.done)
-                .onSubmit { focus = nil }
-                .onChange(of: title) { _, newValue in
-                    // A title is one line: Return (or a pasted line break) ends the edit.
-                    if newValue.contains(where: \.isNewline) {
-                        title = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
-                        focus = nil
-                    }
-                }
-                .accessibilityLabel("Title")
         }
+    }
+
+    /// The title editor; the caller sets its type.
+    private var titleTextField: some View {
+        TextField("Title", text: $title, axis: .vertical)
+            .focused($focus, equals: .title)
+            .submitLabel(.done)
+            .onSubmit { focus = nil }
+            .onChange(of: title) { _, newValue in
+                // A title is one line: Return (or a pasted line break) ends the edit.
+                if newValue.contains(where: \.isNewline) {
+                    title = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
+                    focus = nil
+                }
+            }
+            .accessibilityLabel("Title")
     }
 
     @ViewBuilder private var notesField: some View {
@@ -322,24 +722,45 @@ private struct TaskDetailForm: View {
 
     // MARK: Properties
 
-    /// Every property on its own 44 pt row: list, waiting for, project, due
-    /// date and tags.
+    /// Every property on its own 44 pt row: list, project, due date and tags.
+    /// Waiting for's note is edited in the card's header (board 18).
     private var propertiesSection: some View {
         Section {
             listRow
-            if task.state == .waiting {
-                waitingRow
-            }
             projectRow
-            DueDateQuickPicker(day: task.dueDate, today: workspace.today, isDisabled: isReadOnly) { day in
-                guard day != task.dueDate else { return }
-                Task { await save(.dueDate, TaskChanges(dueDate: setOrClear(day))) }
-            }
-            .labelStyle(.bbRow)
+            dueDateRow
             tagsRow
         } footer: {
             propertiesFooter
         }
+    }
+
+    /// The due day trailing in the row; tapping it opens the date picker
+    /// (board 14) while the task is open.
+    private var dueDateRow: some View {
+        Button {
+            focus = nil
+            isPickingDate = true
+        } label: {
+            LabeledContent {
+                if let day = task.dueDate {
+                    DueChip(day: day, today: workspace.today, isDeadlineActive: !isReadOnly)
+                } else {
+                    Text("Add date")
+                        .foregroundStyle(.secondary)
+                }
+            } label: {
+                Label("Due date", systemImage: BBSymbol.dueDate)
+                    .labelStyle(.bbRow)
+                    .foregroundStyle(Color.primary)
+            }
+            .frame(minHeight: BBMetrics.rowMinHeight)
+            .contentShape(Rectangle())
+        }
+        .disabled(isReadOnly)
+        .accessibilityLabel("Due date")
+        .accessibilityValue(task.dueDate.map { $0.startDate().formatted(date: .complete, time: .omitted) } ?? "None")
+        .accessibilityHint("Opens the date picker.")
     }
 
     /// The current list with a menu to move the task, or for a finished task
@@ -383,25 +804,20 @@ private struct TaskDetailForm: View {
         }
     }
 
-    private var waitingRow: some View {
-        Label {
-            TextField("Who or what are you waiting on?", text: $waitingFor, axis: .vertical)
-                .lineLimit(1...4)
-                .focused($focus, equals: .waitingFor)
-                .submitLabel(.done)
-                .onSubmit { focus = nil }
-                .onChange(of: waitingFor) { _, newValue in
-                    if newValue.contains(where: \.isNewline) {
-                        waitingFor = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
-                        focus = nil
-                    }
+    /// Who or what a waiting task waits on; saved like the title.
+    private var waitingForTextField: some View {
+        TextField("Who or what are you waiting on?", text: $waitingFor, axis: .vertical)
+            .lineLimit(1...4)
+            .focused($focus, equals: .waitingFor)
+            .submitLabel(.done)
+            .onSubmit { focus = nil }
+            .onChange(of: waitingFor) { _, newValue in
+                if newValue.contains(where: \.isNewline) {
+                    waitingFor = newValue.split(whereSeparator: \.isNewline).joined(separator: " ")
+                    focus = nil
                 }
-                .accessibilityLabel("Waiting for")
-        } icon: {
-            Image(systemName: "clock")
-                .accessibilityHidden(true)
-        }
-        .labelStyle(.bbRow)
+            }
+            .accessibilityLabel("Waiting for")
     }
 
     private var projectRow: some View {
@@ -468,25 +884,10 @@ private struct TaskDetailForm: View {
         .frame(minHeight: BBMetrics.rowMinHeight)
     }
 
-    /// The waiting-since line and any rejected property change, under the section.
+    /// Any rejected property change, under the section. (Waiting for's
+    /// problem and its "Asked …" line are in the card's header.)
     @ViewBuilder private var propertiesFooter: some View {
-        let isWaiting = task.state == .waiting
-        let propertyFields: [DetailField] = [.project, .dueDate, .tags]
-        let fields: [DetailField] = isWaiting ? [.waitingFor] + propertyFields : propertyFields
-        let messages = fields.compactMap { message(for: $0) }
-        let since = isWaiting && message(for: .waitingFor) == nil ? task.waitingSince : nil
-        if !messages.isEmpty || since != nil {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(fields, id: \.self) { field in
-                    if let message = message(for: field) {
-                        InlineProblemText(message: message)
-                    }
-                }
-                if let since {
-                    Text("Waiting since \(since.formatted(date: .abbreviated, time: .omitted))")
-                }
-            }
-        }
+        problemFooter(.project, .dueDate, .tags)
     }
 
     // MARK: Actions menu
@@ -752,90 +1153,6 @@ private func setOrClear<Value: Hashable & Sendable & Codable>(_ value: Value?) -
 }
 
 // MARK: - Shared controls
-
-/// Due date quick picks shared by task detail and capture: Today, Tomorrow,
-/// Next week, a calendar, and clear. The chosen day is reported through
-/// `onChange`; nil clears the due date. Disabled (a completed or cancelled
-/// task), the date is history rather than a deadline, so it is never shown
-/// as overdue.
-struct DueDateQuickPicker: View {
-    private let day: CalendarDay?
-    private let today: CalendarDay
-    private let isDisabled: Bool
-    private let onChange: (CalendarDay?) -> Void
-    @State private var isShowingCalendar = false
-
-    init(
-        day: CalendarDay?, today: CalendarDay, isDisabled: Bool = false,
-        onChange: @escaping (CalendarDay?) -> Void
-    ) {
-        self.day = day
-        self.today = today
-        self.isDisabled = isDisabled
-        self.onChange = onChange
-    }
-
-    var body: some View {
-        LabeledContent {
-            Menu {
-                Button("Today") { choose(today) }
-                Button("Tomorrow") { choose(today.adding(days: 1)) }
-                Button("Next week") { choose(today.adding(days: 7)) }
-                Button("Pick a date…") { isShowingCalendar = true }
-                if day != nil {
-                    Divider()
-                    Button("Clear due date", role: .destructive) { choose(nil) }
-                }
-            } label: {
-                if let day {
-                    DueChip(day: day, today: today, isDeadlineActive: !isDisabled)
-                } else {
-                    Text("Add date")
-                }
-            }
-            .frame(minHeight: 44)
-            .disabled(isDisabled)
-            .accessibilityLabel("Due date")
-            .accessibilityValue(day.map(Self.spokenDay) ?? "None")
-        } label: {
-            Label("Due date", systemImage: "calendar")
-        }
-        if isShowingCalendar && !isDisabled {
-            DueDateCalendar(initialDate: (day ?? today).startDate()) { picked in
-                choose(picked)
-            }
-        }
-    }
-
-    private func choose(_ newDay: CalendarDay?) {
-        isShowingCalendar = false
-        onChange(newDay)
-    }
-
-    private static func spokenDay(_ day: CalendarDay) -> String {
-        day.startDate().formatted(date: .complete, time: .omitted)
-    }
-}
-
-/// A calendar that reports the day the person taps. It owns its selection
-/// (seeded when it appears), so only a real choice is reported.
-private struct DueDateCalendar: View {
-    private let onPick: (CalendarDay) -> Void
-    @State private var date: Date
-
-    init(initialDate: Date, onPick: @escaping (CalendarDay) -> Void) {
-        self.onPick = onPick
-        _date = State(initialValue: initialDate)
-    }
-
-    var body: some View {
-        DatePicker("Due date", selection: $date, displayedComponents: .date)
-            .datePickerStyle(.graphical)
-            .onChange(of: date) { _, newValue in
-                onPick(CalendarDay(date: newValue))
-            }
-    }
-}
 
 /// Multi-select of active tags for one task, with inline tag creation.
 /// Every choice saves at once, like the rest of task detail.

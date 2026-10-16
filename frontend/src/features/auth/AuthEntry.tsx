@@ -24,7 +24,10 @@ export function AuthEntry({ destination, initialCode, beforeSignIn, intent = "si
   const [reset, setReset] = useState<{ grant: string; expires: string } | null>(null);
   const op = useAuthOperation();
   const fields = useRef<HTMLDivElement>(null);
-  useEffect(() => { fields.current?.querySelector("input")?.focus(); }, [mode, methods?.email]);
+  // Late method discovery only adds the choice screen's email field; refocusing
+  // in any other mode would move typing out of the field the user is in.
+  const focusKey = mode === "choice" ? `choice:${String(methods?.email)}` : mode;
+  useEffect(() => { fields.current?.querySelector("input")?.focus(); }, [focusKey]);
   const loadMethods = () => { setAvailabilityError(false); void modernAuthApi.methods().then(setMethods).catch(() => { setMethods(null); setAvailabilityError(true); }); };
   useEffect(() => { let active = true; void modernAuthApi.methods().then(result => { if (active) setMethods(result); }).catch(() => { if (active) setAvailabilityError(true); }); return () => { active = false; }; }, []);
   const back = () => { setMode("choice"); setPassword(""); setRepeat(""); setProof(null); setChallenge(null); setReset(null); op.setError(null); };
@@ -53,24 +56,24 @@ export function AuthEntry({ destination, initialCode, beforeSignIn, intent = "si
     catch (caught) { setPassword(""); setRepeat(""); setMode("password"); setProof(null); throw caught; }
   }, "We couldn't confirm the reset. Sign in again to check; request fresh recovery if needed."); };
   if (mode === "code" && challenge && proof) return <CodeStep challenge={challenge} verifier={proof.verifier} email={email} onComplete={complete} onCancel={back} beforeSubmit={beforeSignIn} />;
-  if (mode === "collision") return <div className="flex flex-col gap-4"><h2 className="text-subtitle font-semibold">Connect to your existing account</h2><p>Sign in to your existing account, then connect this method in Settings. Matching email addresses don't automatically connect accounts.</p><Button className={authButtonClass} onClick={() => { setMode("choice"); }}>Sign in to existing account</Button><Button className={authButtonClass} disabled={op.busy} onClick={back}>Cancel</Button></div>;
+  if (mode === "collision") return <div className="flex flex-col gap-4"><h2 className="font-voice text-2xl text-ink">Connect to your existing account</h2><p>Sign in to your existing account, then connect this method in Settings. Matching email addresses don't automatically connect accounts.</p><Button variant="primary" className={authButtonClass} onClick={() => { setMode("choice"); }}>Sign in to existing account</Button><Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={back}>Cancel</Button></div>;
   return <div ref={fields} className="flex flex-col gap-4">
-    {notice ? <p role="status" className="text-sm text-emerald-800">{notice}</p> : null}
-    {op.error ? <p role="alert" className="text-sm text-rose-700">{op.error}</p> : null}
+    {notice ? <p role="status" className="text-co-meta text-ink">{notice}</p> : null}
+    {op.error ? <p role="alert" className="text-co-meta text-danger">{op.error}</p> : null}
     {mode === "choice" ? <>
-      {availabilityError ? <p role="alert">Couldn't load sign-in methods. Retry or use your password. <Button className={authButtonClass} onClick={loadMethods}>Retry</Button></p> : null}
-      {!methods && !availabilityError ? <p className="text-sm text-slate-600">Loading sign-in methods…</p> : null}
+      {availabilityError ? <p role="alert">Couldn't load sign-in methods. Retry or use your password. <Button variant="ghost" className={authButtonClass} onClick={loadMethods}>Retry</Button></p> : null}
+      {!methods && !availabilityError ? <p className="text-co-meta text-ink-muted">Loading sign-in methods…</p> : null}
       {(["google", "apple"] as const).filter(provider => methods?.[provider]).map(provider => <ProviderSignInButton key={provider} provider={provider} intent={intent} busy={op.busy} onClick={() => void op.run(() => startBrowserProvider(provider, { purpose: "login" }, destination, beforeSignIn))} />)}
-      {methods?.email && (methods.google || methods.apple) ? <div className="flex items-center gap-3 text-xs text-slate-500"><span className="h-px flex-1 bg-slate-200" aria-hidden="true" /><span>or continue with email</span><span className="h-px flex-1 bg-slate-200" aria-hidden="true" /></div> : null}
+      {methods?.email && (methods.google || methods.apple) ? <div className="flex items-center gap-3 text-co-meta text-ink-muted"><span className="h-px flex-1 bg-quiet-pressed" aria-hidden="true" /><span>or continue with email</span><span className="h-px flex-1 bg-quiet-pressed" aria-hidden="true" /></div> : null}
       {methods?.email ? <form className="flex flex-col gap-4" onSubmit={requestCode} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="email" /><Button type="submit" variant="primary" className={authButtonClass} isLoading={op.busy}>{op.busy ? "Please wait…" : "Continue with email"}</Button></form> : null}
-      <Button variant="secondary" className={authButtonClass} disabled={op.busy} onClick={() => { setMode("password"); op.setError(null); }}>Use your password</Button>
+      <Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={() => { setMode("password"); op.setError(null); }}>Use your password</Button>
     </> : mode === "password" ? <>
       <form className="flex flex-col gap-4" onSubmit={passwordLogin} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="username" /><AuthField label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" /><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>Sign in</Button></form>
-      <Button className={authButtonClass} disabled={op.busy} onClick={() => { setPassword(""); setMode("recover"); op.setError(null); }}>Forgot password?</Button>
-      <Button className={authButtonClass} disabled={op.busy} onClick={back}>Use another method</Button>
+      <Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={() => { setPassword(""); setMode("recover"); op.setError(null); }}>Forgot password?</Button>
+      <Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={back}>Use another method</Button>
     </> : mode === "recover" ? <>
-      <h2 className="text-subtitle font-semibold">Reset your password</h2><p>We'll send a code if this email has a verified account that can reset its password.</p>
-      <form className="flex flex-col gap-4" onSubmit={requestCode} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="email" /><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>{op.busy ? "Please wait…" : "Send a recovery code"}</Button></form><Button className={authButtonClass} disabled={op.busy} onClick={back}>Back to sign in</Button>
-    </> : <form className="flex flex-col gap-4" onSubmit={savePassword} aria-busy={op.busy}><AuthField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" minLength={12} /><AuthField label="Repeat password" type="password" value={repeat} onChange={setRepeat} autoComplete="new-password" minLength={12} /><p className="text-sm">At least 12 characters. Your other sessions will end after the reset.</p><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>Save password</Button><Button className={authButtonClass} disabled={op.busy} onClick={back}>Cancel</Button></form>}
+      <h2 className="font-voice text-2xl text-ink">Reset your password</h2><p>We'll send a code if this email has a verified account that can reset its password.</p>
+      <form className="flex flex-col gap-4" onSubmit={requestCode} aria-busy={op.busy}><AuthField label="Email address" type="email" value={email} onChange={setEmail} autoComplete="email" /><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>{op.busy ? "Please wait…" : "Send a recovery code"}</Button></form><Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={back}>Back to sign in</Button>
+    </> : <form className="flex flex-col gap-4" onSubmit={savePassword} aria-busy={op.busy}><AuthField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" minLength={12} /><AuthField label="Repeat password" type="password" value={repeat} onChange={setRepeat} autoComplete="new-password" minLength={12} /><p className="text-co-meta text-ink-muted">At least 12 characters. Your other sessions will end after the reset.</p><Button className={authButtonClass} type="submit" variant="primary" isLoading={op.busy}>Save password</Button><Button variant="ghost" className={authButtonClass} disabled={op.busy} onClick={back}>Cancel</Button></form>}
   </div>;
 }

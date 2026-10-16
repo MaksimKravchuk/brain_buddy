@@ -1,10 +1,12 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import SwiftUI
 import UIKit
 
-/// Smart Add text entry: a wrapping text field that highlights recognised
-/// `@project` tokens in the brand text colour (semibold) and `#tag` tokens in the
-/// tag style (neutral fill). `tokens` come from `CapturePreview.tokens` and
+/// Smart Add text entry: a wrapping text field with no field background, set at
+/// the Carry On `step` role (board 10), that highlights recognised `@project`
+/// tokens (primary text) and `#tag` tokens (secondary text), both on the
+/// field-token background. `tokens` come from `CapturePreview.tokens` and
 /// use UTF-16 offsets, which map directly onto the text view's `NSRange`s.
 ///
 /// Highlights are visual only. VoiceOver users hear the same information in
@@ -41,7 +43,8 @@ struct SmartAddTextField: View {
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(placeholder)
-                        .foregroundStyle(.tertiary)
+                        .carryOnFont(CarryOnTypeScale.step)
+                        .foregroundStyle(.coMarkOpen)
                         .padding(.vertical, SmartAddTextView.verticalInset)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
@@ -71,7 +74,7 @@ private struct SmartAddTextView: UIViewRepresentable {
         view.textContainerInset = UIEdgeInsets(
             top: Self.verticalInset, left: 0, bottom: Self.verticalInset, right: 0)
         view.textContainer.lineFragmentPadding = 0
-        view.font = .preferredFont(forTextStyle: .body)
+        view.font = Self.baseFont()
         view.adjustsFontForContentSizeCategory = true
         view.autocapitalizationType = .sentences
         view.smartQuotesType = .no
@@ -123,22 +126,32 @@ private struct SmartAddTextView: UIViewRepresentable {
         view.typingAttributes = base
     }
 
-    private static func baseAttributes() -> [NSAttributedString.Key: Any] {
-        [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label]
+    /// The `step` role (Instrument Sans semibold, 24 pt), scaling with Dynamic Type.
+    private static func baseFont() -> UIFont {
+        let style = CarryOnTypeScale.step
+        let face =
+            UIFont(name: style.postScriptName, size: CGFloat(style.iosSize))
+            ?? .systemFont(ofSize: CGFloat(style.iosSize), weight: .semibold)
+        return UIFontMetrics(forTextStyle: .title2).scaledFont(for: face)
     }
 
+    private static func baseAttributes() -> [NSAttributedString.Key: Any] {
+        [.font: baseFont(), .foregroundColor: BBColor.brandTextUIColor]
+    }
+
+    /// Both tokens sit on the field-token background (a plain rectangle: text
+    /// attributes cannot round it); the words for VoiceOver come from the chips.
     private static func attributes(for kind: SmartAddToken.Kind) -> [NSAttributedString.Key: Any] {
         switch kind {
         case .project:
             return [
-                // Brand text (text-primary), so the token meets text contrast.
                 .foregroundColor: BBColor.brandTextUIColor,
-                .font: UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 17, weight: .semibold)),
+                .backgroundColor: BBColor.fieldTokenUIColor,
             ]
         case .tag:
             return [
-                .foregroundColor: UIColor.secondaryLabel,
-                .backgroundColor: UIColor.tertiarySystemFill,
+                .foregroundColor: BBColor.textSecondaryUIColor,
+                .backgroundColor: BBColor.fieldTokenUIColor,
             ]
         }
     }

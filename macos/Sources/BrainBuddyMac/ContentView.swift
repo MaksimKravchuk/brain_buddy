@@ -3,6 +3,7 @@ import BrainBuddyCore
 import BrainBuddyDesign
 import BrainBuddyMacCore
 import BrainBuddyWorkspace
+import Combine
 import SwiftUI
 
 // The main window over the kit `Workspace` (spec 021, T106): every rule is the kit's, every write
@@ -93,6 +94,8 @@ private enum PendingEditorNavigation {
     case reviewSomeday
     case reviewProjects
     case clarifyInbox
+    /// The inspector's Inbox "Bigger than one step": the clarification's project path for this item.
+    case clarifyAsProject(TaskID)
     case groupByProject(Bool)
     case showCancelled(Bool)
     case sort(TaskSort)
@@ -144,7 +147,7 @@ extension WorkspaceView {
     static func plural(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
 }
 
-@ViewBuilder
+@MainActor @ViewBuilder
 private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: String, retry: @escaping () -> Void) -> some View {
     switch readiness {
     case .ready:
@@ -152,11 +155,10 @@ private func listQueryState(_ readiness: WorkspaceQueryReadiness, loading: Strin
     case .notRequested, .loading:
         ProgressView(loading)
     case .failed:
-        ContentUnavailableView {
-            Label("Tasks couldn’t load", systemImage: "exclamationmark.triangle")
-        } description: {
-            Text("Try loading this list again.")
-        } actions: {
+        MacSheetEmptyState(
+            title: "Tasks couldn’t load", systemImage: "exclamationmark.triangle",
+            description: "Try loading this list again."
+        ) {
             Button("Retry", action: retry)
         }
     }
@@ -167,8 +169,7 @@ private func reviewPageUnavailable(
     _ title: String, systemImage: String, description: String, list: TaskList,
     model: BrainBuddyModel, reload: @escaping () -> Void
 ) -> some View {
-    VStack(spacing: 12) {
-        ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+    MacSheetEmptyState(title: title, systemImage: systemImage, description: description) {
         if model.reviewListPageState(list).hasNext {
             Button("Next page") {
                 Task {
@@ -193,10 +194,18 @@ struct WorkspaceView: View {
     @State private var selectedTaskID: TaskID?
     @State private var selectionAnchor: SelectionAnchor<TaskID>?
     @State private var scrollTarget: TaskID?
-    @State private var editDraft: TaskEditDraft?
-    @State private var editorDirty = false
-    @State private var editorCanSave = false
-    @State private var editorSaveRequest = 0
+    /// The open task's fields, saved as you type (`TaskAutosave`).
+    @State private var taskForm: TaskAutosave?
+    /// The save of those fields in flight; a flush waits for it.
+    @State private var autosaveRun: Task<Bool, Never>?
+    /// The debounce: wakes when the pending field edits are due.
+    @State private var autosaveTimer: Task<Void, Never>?
+    /// A subtask or comment typed in the inspector but not added yet: it cannot save as you type.
+    @State private var extrasDirty = false
+    /// The inspector field being typed in, which an incoming change never overwrites.
+    @State private var inspectorFocus: TaskInspectorField?
+    /// The Inbox item the clarification opens on, in its project path.
+    @State private var clarifyProjectStart: TaskID?
     @State private var taskSaveEditorID = UUID().uuidString
     @State private var quickRenameEditorID = UUID().uuidString
     @State private var collectionEditorID = UUID().uuidString
@@ -266,6 +275,10 @@ struct WorkspaceView: View {
                 .navigationSplitViewColumnWidth(min: 310, ideal: 340, max: 400)
         } detail: {
             taskCanvas
+                .inspector(isPresented: inspectorPresented) {
+                    inspectorContent
+                        .inspectorColumnWidth(min: inspectorWidth, ideal: inspectorWidth, max: inspectorWidth)
+                }
         }
         .toolbar { toolbarContent }
         .searchable(text: $model.searchText, placement: .toolbar, prompt: "Search tasks")
@@ -297,7 +310,14 @@ struct WorkspaceView: View {
         .focusedSceneValue(\.workspaceModel, model)
         .focusedSceneValue(\.macSyncController, sync)
         .onAppear { quickCapture.start(model: model) }
-        .onDisappear { quickCapture.stop() }
+        .onDisappear {
+            quickCapture.stop()
+            saveTaskEditsOnClose()
+        }
+        // "Saved as you type": nothing pending is left behind when the app goes to the background.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            Task { await saveTaskEdits() }
+        }
         .task { await model.prepareVisibleQueries() }
         .onChange(of: model.destination) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
@@ -692,15 +712,141 @@ struct WorkspaceView: View {
 
     // MARK: Navigation
 
+    /// The one way the window changes what it shows or does to a task. The open task's pending field
+    /// edits save first ("Saved as you type"); only what cannot save — fields that are not valid or a
+    /// save that failed, a subtask or comment not added yet, the capture draft — asks first.
     private func requestNavigation(_ next: PendingEditorNavigation) {
-        let hasTaskEdits = selectedTaskID != nil && editorDirty
+        guard selectedTaskID != nil, taskForm?.isDirty == true || autosaveRun != nil else {
+            confirmOrApply(next)
+            return
+        }
+        Task {
+            if await saveTaskEdits() {
+                confirmOrApply(next)
+            } else {
+                pendingEditorNavigation = next
+                confirmingDiscard = true
+            }
+        }
+    }
+
+    private func confirmOrApply(_ next: PendingEditorNavigation) {
+        let hasUnaddedExtras = selectedTaskID != nil && extrasDirty
         let hasCaptureDraft = !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !model.waitingForDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if hasTaskEdits || (hasCaptureDraft && changesCaptureContext(next)) {
+        if hasUnaddedExtras || (hasCaptureDraft && changesCaptureContext(next)) {
             pendingEditorNavigation = next
             confirmingDiscard = true
         } else {
             applyNavigation(next)
+        }
+    }
+
+    /// The open task has unsaved fields or a subtask or comment not added yet.
+    private var editorDirty: Bool { (taskForm?.isDirty ?? false) || extrasDirty }
+
+    // MARK: Saved as you type
+
+    /// Saves the open task's pending field edits now, with `moveTo` as one change when given (the
+    /// list picker), through `saveTask` and the window's undo. Waits for a save in flight first.
+    /// True when nothing is left unsaved.
+    @discardableResult
+    private func saveTaskEdits(moveTo list: TaskList? = nil) async -> Bool {
+        while let running = autosaveRun { _ = await running.value }
+        autosaveTimer?.cancel()
+        guard var form = taskForm else { return true }
+        guard let request = form.beginSave(moveTo: list, at: Date()) else { return !form.isDirty }
+        taskForm = form
+        let id = form.taskID
+        let before = model.task(id)
+        let editorID = taskSaveEditorID
+        // The bookkeeping runs inside the task, so whoever awaits it sees the form settled.
+        let run = Task { @MainActor () -> Bool in
+            let saved = await model.saveTask(id, changes: request.changes, moveTo: request.moveTo, editorID: editorID)
+            if saved {
+                // A list change is undoable like a row move; field edits keep their own typing undo.
+                registerUndo(before)
+                taskSaveEditorID = UUID().uuidString
+            }
+            autosaveRun = nil
+            if taskForm?.taskID == id {
+                taskForm?.finishSave(succeeded: saved, current: model.task(id))
+                // Typed while the save ran: those edits wait for their own pause.
+                scheduleAutosave()
+            }
+            return saved
+        }
+        autosaveRun = run
+        return await run.value
+    }
+
+    /// Restarts the debounce after an edit: the fields save once the person pauses.
+    private func scheduleAutosave(after delay: TimeInterval? = nil) {
+        autosaveTimer?.cancel()
+        guard let deadline = taskForm?.deadline else { return }
+        let wait = delay ?? max(0, deadline.timeIntervalSinceNow)
+        autosaveTimer = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled else { return }
+            autosaveTick()
+        }
+    }
+
+    private func autosaveTick() {
+        guard let form = taskForm, form.isDue(at: Date()) else { return }
+        // Another write (a subtask, a sheet) holds the store: try again shortly.
+        if autosaveRun == nil, model.isSaving || isSubmittingSheet {
+            scheduleAutosave(after: 0.3)
+            return
+        }
+        Task { await saveTaskEdits() }
+    }
+
+    /// One edit in the inspector: into the draft, then the debounce.
+    private func editTaskForm<Value: Equatable>(_ field: WritableKeyPath<TaskEditDraft, Value>, _ value: Value) {
+        guard taskForm != nil else { return }
+        taskForm?.set(field, to: value, at: Date())
+        scheduleAutosave()
+    }
+
+    private func formBinding<Value: Equatable>(_ field: WritableKeyPath<TaskEditDraft, Value>, _ fallback: Value) -> Binding<Value> {
+        Binding(get: { taskForm?.draft[keyPath: field] ?? fallback }, set: { editTaskForm(field, $0) })
+    }
+
+    /// An optional text field shown as a plain one: empty is none.
+    private func formTextBinding(_ field: WritableKeyPath<TaskEditDraft, String?>) -> Binding<String> {
+        Binding(get: { taskForm?.draft[keyPath: field] ?? "" }, set: { editTaskForm(field, $0.isEmpty ? nil : $0) })
+    }
+
+    /// The window is closing: send what is pending without waiting on the view, which is going away.
+    private func saveTaskEditsOnClose() {
+        autosaveTimer?.cancel()
+        guard var form = taskForm else { return }
+        // A save in flight is sent again with the rest; the same values are harmless to repeat.
+        if form.isSaving { form.finishSave(succeeded: false, current: nil) }
+        guard let request = form.beginSave(at: Date()) else { return }
+        let running = autosaveRun
+        let id = form.taskID
+        let editorID = taskSaveEditorID
+        let model = self.model
+        Task { @MainActor in
+            if let running { _ = await running.value }
+            _ = await model.saveTask(id, changes: request.changes, moveTo: request.moveTo, editorID: editorID)
+        }
+    }
+
+    /// The list picker: a move other than Waiting saves at once with the pending fields; Waiting
+    /// asks who first (the move sheet).
+    private func changeList(_ task: TaskRecord, to list: TaskList) {
+        guard list.taskState != task.state else { return }
+        if list == .waiting {
+            requestNavigation(.move(task.id, .waiting))
+            return
+        }
+        Task {
+            guard await saveTaskEdits(moveTo: list), model.task(task.id)?.state == list.taskState else { return }
+            select(nil)
+            release(task.id)
         }
     }
 
@@ -713,7 +859,7 @@ struct WorkspaceView: View {
         }
     }
 
-    /// View › "Close task details" (⌘\) while a task is open; the same guard as choosing another task.
+    /// View › "Close task details" (⌘\) while a task is open; pending edits save first, as when choosing another task.
     private var closeTaskDetailsAction: CloseTaskDetailsAction? {
         guard selectedTaskID != nil else { return nil }
         return CloseTaskDetailsAction(close: { requestNavigation(.task(nil)) })
@@ -731,12 +877,13 @@ struct WorkspaceView: View {
     }
 
     private func select(_ id: TaskID?) {
+        autosaveTimer?.cancel()
         taskSaveEditorID = UUID().uuidString
         selectedTaskID = id
-        editDraft = id.flatMap { model.task($0) }.map { TaskEditDraft($0) }
+        taskForm = id.flatMap { model.task($0) }.map { TaskAutosave(task: $0) }
         selectionAnchor = id.map { SelectionAnchor(id: $0, in: visibleTaskIDs) }
-        editorDirty = false
-        editorCanSave = false
+        extrasDirty = false
+        inspectorFocus = nil
     }
 
     fileprivate func applyNavigation(_ navigation: PendingEditorNavigation) {
@@ -747,8 +894,6 @@ struct WorkspaceView: View {
             sync.presentSignOut()
             return
         }
-        editorDirty = false
-        editorCanSave = false
         switch navigation {
         case .destination(let destination):
             select(nil)
@@ -840,6 +985,12 @@ struct WorkspaceView: View {
             reviewingProjects = true
         case .clarifyInbox:
             select(nil)
+            clarifyProjectStart = nil
+            clarifyingInbox = true
+        case .clarifyAsProject(let id):
+            select(nil)
+            release(id)
+            clarifyProjectStart = id
             clarifyingInbox = true
         case .groupByProject(let value):
             select(nil)
@@ -972,8 +1123,85 @@ struct WorkspaceView: View {
         .onChange(of: orders, initial: true) { _, new in shownOrders = new }
         .onChange(of: onScreen) { _, ids in keepSelection(in: ids) }
         .onChange(of: selectedTaskID.flatMap { model.task($0) }) { _, task in
-            guard let task, let draft = editDraft else { return }
-            editDraft = draft.rebased(onto: task)
+            guard let task else { return }
+            if taskForm?.taskID == task.id {
+                // A change from elsewhere (or this Mac's own save): never over the field being typed in.
+                taskForm?.rebase(onto: task, typingIn: inspectorFocus)
+            } else {
+                taskForm = TaskAutosave(task: task)
+            }
+        }
+    }
+
+    // MARK: The inspector
+
+    /// Open while a task is selected; closing it (⌘\, Esc, the column) is choosing no task.
+    private var inspectorPresented: Binding<Bool> {
+        Binding(
+            get: { selectedTaskID != nil },
+            set: { shown in if !shown { requestNavigation(.task(nil)) } }
+        )
+    }
+
+    private var inspectorWidth: CGFloat {
+        TaskInspector.width(for: selectedTaskID.flatMap { model.task($0) }?.state ?? .next)
+    }
+
+    @ViewBuilder
+    private var inspectorContent: some View {
+        if let id = selectedTaskID, let task = model.task(id) {
+            TaskInspector(
+                task: task, model: model,
+                title: formBinding(\.title, task.title),
+                details: formTextBinding(\.details),
+                waitingFor: formTextBinding(\.waitingFor),
+                projectID: formBinding(\.projectID, task.projectID),
+                tagIDs: formBinding(\.tagIDs, task.tagIDs),
+                dueDate: formBinding(\.dueDate, task.dueDate),
+                problem: taskForm?.isDirty == true ? taskForm?.problem : nil,
+                editorDirty: editorDirty,
+                inboxPosition: inboxPosition(of: task),
+                nextInboxID: nextInboxID(after: task),
+                onCommand: { inspectorCommand($0, task: task) },
+                onFocusChange: { inspectorFocus = $0 },
+                onExtrasDirtyChange: { extrasDirty = $0 }
+            )
+            .id(task.id)
+        } else {
+            MacInspectorPanel {
+                MacInspectorEmpty(text: "Select something to sort it.")
+            }
+        }
+    }
+
+    /// The Inbox items on screen, in order.
+    private var inboxIDsOnScreen: [TaskID] { model.tasks.filter { $0.state == .inbox }.map(\.id) }
+
+    private func inboxPosition(of task: TaskRecord) -> (position: Int, total: Int)? {
+        let inbox = inboxIDsOnScreen
+        guard task.state == .inbox, let index = inbox.firstIndex(of: task.id) else { return nil }
+        return (index + 1, inbox.count)
+    }
+
+    private func nextInboxID(after task: TaskRecord) -> TaskID? {
+        let inbox = inboxIDsOnScreen
+        guard task.state == .inbox, let index = inbox.firstIndex(of: task.id), index + 1 < inbox.count else { return nil }
+        return inbox[index + 1]
+    }
+
+    /// Every inspector action that changes a task goes through `requestNavigation`, so the pending
+    /// fields save first.
+    private func inspectorCommand(_ command: TaskInspectorCommand, task: TaskRecord) {
+        switch command {
+        case .complete: requestNavigation(.complete(task.id))
+        case .cancel: requestNavigation(.cancel(task.id))
+        case .reopen: requestNavigation(.reopen(task.id))
+        case .move(let list): requestNavigation(.move(task.id, list))
+        case .changeList(let list): changeList(task, to: list)
+        case .clarifyAsProject: requestNavigation(.clarifyAsProject(task.id))
+        case .select(let id): requestNavigation(.task(id))
+        case .save: Task { await saveTaskEdits() }
+        case .close: requestNavigation(.task(nil))
         }
     }
 
@@ -1332,30 +1560,17 @@ struct WorkspaceView: View {
         _ task: TaskRecord, departed: Bool = false, inProjectGroup: Bool = false, currentStepID: TaskID? = nil
     ) -> some View {
         let selected = selectedTaskID == task.id
-        return VStack(spacing: 0) {
-            taskRowLine(task, selected: selected, showsProject: !inProjectGroup, isCurrent: currentStepID == task.id)
-            if selected {
-                if task.state.isTerminal {
-                    terminalDetail(task)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 16)
-                } else if editDraft != nil {
-                    inlineEditor(task)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 16)
+        return taskRowLine(task, selected: selected, showsProject: !inProjectGroup, isCurrent: currentStepID == task.id)
+            .macRowSurface(selected: selected)
+            .opacity(departed && !selected ? 0.55 : 1)
+            .onHover { inside in
+                if inside {
+                    hoveredTaskID = task.id
+                } else if hoveredTaskID == task.id {
+                    hoveredTaskID = nil
                 }
             }
-        }
-        .macRowSurface(selected: selected)
-        .opacity(departed && !selected ? 0.55 : 1)
-        .onHover { inside in
-            if inside {
-                hoveredTaskID = task.id
-            } else if hoveredTaskID == task.id {
-                hoveredTaskID = nil
-            }
-        }
-        .id(task.id)
+            .id(task.id)
     }
 
     /// A row in the Carry On style: the mark, the title, then the trailing meta. The Inbox and Someday
@@ -1386,12 +1601,7 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("View \(task.title)")
-                .accessibilityValue(selected ? "Expanded" : "Collapsed")
-            } else if selected, editDraft != nil {
-                TextField("Task title", text: draftBinding(\.title, default: ""))
-                    .font(MacRowFont.titleStrong)
-                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
-                    .textFieldStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             } else {
                 Button {
                     requestNavigation(.task(selected ? nil : task.id))
@@ -1401,7 +1611,7 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit \(task.title)")
-                .accessibilityValue(selected ? "Expanded" : "Collapsed")
+                .accessibilityAddTraits(selected ? .isSelected : [])
                 .contextMenu {
                     Button("Rename title…") { beginQuickRename(task) }
                         .disabled(selectedTaskID != nil)
@@ -1482,112 +1692,6 @@ struct WorkspaceView: View {
         }
     }
 
-    /// A binding into the open editor's `TaskEditDraft`.
-    private func draftBinding<Value>(_ keyPath: WritableKeyPath<TaskEditDraft, Value>, default fallback: Value) -> Binding<Value> {
-        Binding(
-            get: { editDraft?[keyPath: keyPath] ?? fallback },
-            set: { value in editDraft?[keyPath: keyPath] = value }
-        )
-    }
-
-    private func inlineEditor(_ task: TaskRecord) -> some View {
-        TaskInlineEditor(
-            task: task,
-            draft: Binding(get: { editDraft ?? TaskEditDraft(task) }, set: { editDraft = $0 }),
-            projects: model.projects, labelForProject: { model.projectLabel($0) }, tags: model.tags,
-            saveRequest: editorSaveRequest
-        ) { changes, list in
-            Task {
-            let before = model.task(task.id)
-            if await model.saveTask(task.id, changes: changes, moveTo: list, editorID: taskSaveEditorID) {
-                // A list change made in the editor is undoable like a row move; field edits are not.
-                registerUndo(before)
-                taskSaveEditorID = UUID().uuidString
-                editorDirty = false
-                editorCanSave = false
-                if let pending = pendingEditorNavigation {
-                    pendingEditorNavigation = nil
-                    requestNavigation(pending)
-                } else {
-                    select(nil)
-                }
-            } else {
-                pendingEditorNavigation = nil
-            }
-            }
-        } onCancel: {
-            select(nil)
-        } onCreateProject: { name, editorID in
-            await model.createProject(name, editorID: editorID)
-        } onEditorStateChange: { dirty, canSave in
-            editorDirty = dirty
-            editorCanSave = canSave
-        } onCancelTask: {
-            requestNavigation(.cancel(task.id))
-        } extras: { onExtrasDirtyChange in
-            TaskDetailExtras(task: task, model: model, editorDirty: editorDirty, onDirtyChange: onExtrasDirtyChange)
-        }
-    }
-
-    private func terminalDetail(_ detail: TaskRecord) -> some View {
-        let statusDate = detail.state == .completed ? detail.completedAt : detail.cancelledAt
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Text(detail.state == .completed ? "Completed" : "Cancelled")
-                    .fontWeight(.semibold)
-                if let statusDate {
-                    Text("·")
-                    Text(statusDate, style: .date)
-                }
-                Spacer()
-                Button("Close details") { select(nil) }
-                    .buttonStyle(.plain)
-            }
-            .foregroundStyle(.secondary)
-            Text(detail.lastOpenList.map { "Previously in \($0.title)" } ?? "Previous list unknown")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let description = detail.details, !description.isEmpty {
-                Text(description)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let projectID = detail.projectID {
-                Text("Project · \(model.projectLabel(projectID))")
-                    .font(.caption)
-            }
-            if !detail.tagIDs.isEmpty {
-                let names = detail.tagIDs.map { id in model.tag(id).map { "#\($0.name)" } ?? "#" }
-                Text("Tags · \(names.joined(separator: "  "))")
-                    .font(.caption)
-            }
-            if let due = detail.dueDate {
-                Text("Due · \(due.isoString)").font(.caption)
-            }
-            if !detail.subtasks.isEmpty {
-                DisclosureGroup("Subtasks · \(detail.subtasks.count)") {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ForEach(detail.subtasks.sorted { $0.orderKey < $1.orderKey }) { subtask in
-                            Label(subtask.title, systemImage: subtask.state == .completed ? "checkmark.circle.fill" : "circle")
-                                .font(.subheadline)
-                        }
-                    }
-                }
-            }
-            if !detail.comments.isEmpty {
-                DisclosureGroup("Comments · \(detail.comments.count)") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(detail.comments) { comment in
-                            Text(comment.body)
-                                .font(.subheadline)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     // MARK: Smart Add
 
     private var capturePreviewStatus: String {
@@ -1595,91 +1699,60 @@ struct WorkspaceView: View {
         return "Preparing preview…"
     }
 
+    /// The new-task card (board "10 Create task"): ⌘N focuses its title field. Smart Add's preview
+    /// files the draft under a project and tags, shown as chips once it is ready.
     private var smartAdd: some View {
         let preview = model.capturePreview
         let hasDraft = !model.draft.isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Image(systemName: "plus.circle")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                TextField("Add a task", text: $model.draft)
-                    .textFieldStyle(.plain)
-                    .focused($addFocused)
-                    .onSubmit { requestNavigation(.createTask) }
-            }
+        let ready = model.capturePreviewReadiness == .ready
+        return MacNewTaskCard(listTitle: model.selectedList.title) {
+            TextField("Add a task", text: $model.draft)
+                .textFieldStyle(.plain)
+                .macNewTaskTitleField()
+                .focused($addFocused)
+                .onSubmit { requestNavigation(.createTask) }
+        } details: {
             if model.selectedList == .waiting {
                 TextField("Waiting for person, event, or condition", text: $model.waitingForDraft)
+                    .textFieldStyle(.plain)
+                    .macCaptureField()
                     .onSubmit { requestNavigation(.createTask) }
+                    .padding(.top, 12)
             }
             if hasDraft || model.selectedList == .waiting {
-                HStack {
-                    if model.capturePreviewReadiness == .ready, !preview.tokens.isEmpty, !preview.title.isEmpty {
-                        Text("“\(preview.title)”")
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                    }
-                    if model.capturePreviewReadiness == .ready {
-                        Text("Will save in \(model.selectedList.title)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(capturePreviewStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if case .failed = model.capturePreviewReadiness {
-                        Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
-                    }
-                    Button("Add task") { requestNavigation(.createTask) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.capturePreviewReadiness != .ready || addDisabled(preview))
+                if ready, !preview.tokens.isEmpty, !preview.title.isEmpty {
+                    MacCaptureNote(text: "“\(preview.title)”")
                 }
-                if model.capturePreviewReadiness == .ready {
-                    Text(previewClassification(preview))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if ready {
+                    MacNewTaskClassification(project: preview.project, tags: preview.tags)
+                } else {
+                    MacCaptureNote(text: capturePreviewStatus, topPadding: 14)
                 }
-                if model.capturePreviewReadiness == .ready, hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
-                    Text(problem)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                if ready, hasDraft, let problem = preview.problemMessage, preview.problem != .emptyTitle {
+                    MacCaptureNote(text: problem, danger: true)
                 }
                 if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Current search may hide the new task from this list.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    MacCaptureNote(text: "Current search may hide the new task from this list.")
+                }
+                MacNewTaskFooter(
+                    addEnabled: ready && !addDisabled(preview), hint: "⌘N · Return adds",
+                    onAdd: { requestNavigation(.createTask) }
+                ) {
+                    if case .failed = model.capturePreviewReadiness {
+                        Button("Retry preview") { Task { await model.prepareCapturePreview(model.captureDraft) } }
+                            .buttonStyle(.macQuietPill)
+                    }
                 }
             }
             if let notice = model.captureNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                MacCaptureNote(text: notice, topPadding: 12)
                 if model.hasAppliedTaskFilter {
                     Button("Clear search") { requestNavigation(.clearTaskFilters) }
-                        .font(.caption)
+                        .buttonStyle(.macQuietPill)
+                        .padding(.top, 4)
                 }
             }
         }
-        .textFieldStyle(.roundedBorder)
-        .padding(13)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 13))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .strokeBorder(Color.primary.opacity(0.12))
-                .allowsHitTesting(false)
-        }
-    }
-
-    private func previewClassification(_ preview: CapturePreview) -> String {
-        let project = preview.project.map { $0.isNew ? "\($0.name) (new project)" : $0.name } ?? "No project"
-        let tags = preview.tags.map { $0.isNew ? "#\($0.name) (new tag)" : "#\($0.name)" }
-        return ([project] + (tags.isEmpty ? ["No tags"] : tags)).joined(separator: " · ")
     }
 
     private func addDisabled(_ preview: CapturePreview) -> Bool {
@@ -1754,17 +1827,19 @@ extension WorkspaceView {
                 .disabled(sheetIsBusy)
                 .interactiveDismissDisabled(sheetIsBusy)
             }
+            // Task fields save as you type; this asks only for what cannot save: fields that are not
+            // valid or whose save failed, a subtask or comment not added yet, the capture draft.
             .confirmationDialog("Discard unsaved changes?", isPresented: $confirmingDiscard) {
-                if selectedTaskID != nil && editorDirty {
-                    Button("Save task") { editorSaveRequest += 1 }
-                        .disabled(!editorCanSave)
-                }
                 Button("Discard changes", role: .destructive) {
                     if let pending = pendingEditorNavigation {
                         // Sign-out removes the drafts only once it happens (X-04 can still be cancelled).
                         if changesCaptureContext(pending), !Self.isSignOut(pending) {
                             model.draft = ""
                             model.waitingForDraft = ""
+                        }
+                        if !Self.isSignOut(pending) {
+                            taskForm = selectedTaskID.flatMap { model.task($0) }.map { TaskAutosave(task: $0) }
+                            extrasDirty = false
                         }
                         applyNavigation(pending)
                     }
@@ -1774,7 +1849,7 @@ extension WorkspaceView {
                 Text(
                     selectedTaskID == nil
                         ? "The new task draft has not been saved."
-                        : "Unsaved task fields and unfinished drafts will be discarded. Subtasks and comments already saved will stay saved."
+                        : "Some changes to this task can't be saved as they are, or a subtask or comment isn't added yet. Subtasks and comments already saved will stay saved."
                 )
             }
             .confirmationDialog("Replace the current task draft?", isPresented: $confirmingReplaceDraft) {
@@ -1846,29 +1921,13 @@ extension WorkspaceView {
     }
 
     private var captureListSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Add task to").font(.title2.bold())
-            Picker("GTD list", selection: $captureListChoice) {
-                ForEach(TaskList.allCases) { list in
-                    Text(list.title).tag(list)
-                }
-            }
-            .pickerStyle(.radioGroup)
-            HStack {
-                Spacer()
-                Button("Cancel") { choosingCaptureList = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Continue") {
-                    model.choose(.list(captureListChoice))
-                    focusCaptureAfterChoice = true
-                    choosingCaptureList = false
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-            }
+        MacPutItInContent(selection: $captureListChoice) {
+            model.choose(.list(captureListChoice))
+            focusCaptureAfterChoice = true
+            choosingCaptureList = false
+        } onCancel: {
+            choosingCaptureList = false
         }
-        .padding(24)
-        .frame(width: 360)
     }
 
     private func reopenSheet(_ task: TaskRecord) -> some View {
@@ -2096,8 +2155,8 @@ extension WorkspaceView {
                 .disabled(sheetIsBusy)
                 .interactiveDismissDisabled(sheetIsBusy)
             }
-            .sheet(isPresented: $clarifyingInbox) {
-                InboxClarifyView(model: model)
+            .sheet(isPresented: $clarifyingInbox, onDismiss: { clarifyProjectStart = nil }) {
+                InboxClarifyView(model: model, startAsProject: clarifyProjectStart)
                     .disabled(sheetIsBusy)
             }
             // presentation-region-end
@@ -2115,587 +2174,6 @@ extension FocusedValues {
     var workspaceModel: BrainBuddyModel? {
         get { self[WorkspaceModelKey.self] }
         set { self[WorkspaceModelKey.self] = newValue }
-    }
-}
-
-// MARK: - The inline editor
-
-/// The task editor: it edits a `TaskEditDraft`, so saving sends only the fields the person
-/// touched (FR-009), and a change arriving meanwhile is rebased in by the window.
-private struct TaskInlineEditor<Extras: View>: View {
-    let task: TaskRecord
-    @Binding var draft: TaskEditDraft
-    let projects: [ProjectRecord]
-    let labelForProject: (ProjectID) -> String
-    let tags: [TagRecord]
-    let saveRequest: Int
-    let onSave: (TaskChanges, TaskList?) -> Void
-    let onCancel: () -> Void
-    let onCreateProject: (String, String) async -> ProjectID?
-    let onEditorStateChange: (Bool, Bool) -> Void
-    let onCancelTask: () -> Void
-    let extras: (@escaping (Bool) -> Void) -> Extras
-
-    @State private var extrasDirty = false
-    @State private var list: TaskList
-    @State private var showingProjectCreator = false
-    @State private var newProjectName = ""
-    @State private var newProjectEditorID = UUID().uuidString
-    @State private var isCreatingProject = false
-    @State private var showProperties: Bool
-
-    init(
-        task: TaskRecord, draft: Binding<TaskEditDraft>, projects: [ProjectRecord],
-        labelForProject: @escaping (ProjectID) -> String, tags: [TagRecord], saveRequest: Int,
-        onSave: @escaping (TaskChanges, TaskList?) -> Void,
-        onCancel: @escaping () -> Void,
-        onCreateProject: @escaping (String, String) async -> ProjectID?,
-        onEditorStateChange: @escaping (Bool, Bool) -> Void,
-        onCancelTask: @escaping () -> Void,
-        @ViewBuilder extras: @escaping (@escaping (Bool) -> Void) -> Extras
-    ) {
-        self.task = task
-        _draft = draft
-        self.projects = projects
-        self.labelForProject = labelForProject
-        self.tags = tags
-        self.saveRequest = saveRequest
-        self.onSave = onSave
-        self.onCancel = onCancel
-        self.onCreateProject = onCreateProject
-        self.onEditorStateChange = onEditorStateChange
-        self.onCancelTask = onCancelTask
-        self.extras = extras
-        _list = State(initialValue: task.state.openList ?? .next)
-        _showProperties = State(initialValue: task.dueDate != nil || !task.tagIDs.isEmpty)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button("Save task", action: saveChanges)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("s", modifiers: [.command])
-                    .disabled(saveDisabled)
-                Button(isDirty ? "Discard task edits" : "Close", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Menu("More") {
-                    Button("Cancel task", role: .destructive, action: onCancelTask)
-                }
-            }
-            Text("Notes and context")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextEditor(text: details)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .frame(height: 120)
-                .padding(5)
-                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
-                .accessibilityLabel("Notes and context")
-            HStack(alignment: .top, spacing: 16) {
-                Picker("GTD list", selection: $list) {
-                    ForEach(TaskList.allCases) { value in
-                        Text(value.title).tag(value)
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    projectPicker
-                    Button("New project…") {
-                        newProjectEditorID = UUID().uuidString
-                        showingProjectCreator = true
-                    }
-                        .font(.caption)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if list == .waiting {
-                TextField("Waiting for person, event, or condition", text: waitingFor)
-                    .accessibilityLabel("Waiting for person, event, or condition")
-            }
-            DisclosureGroup(isExpanded: $showProperties) {
-                properties.padding(.top, 8)
-            } label: {
-                HStack {
-                    Text("Date and tags")
-                    Spacer()
-                    Text(propertySummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            extras { extrasDirty = $0 }
-            if extrasDirty {
-                Text("Finish the pending subtask or comment edit before saving the task.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .textFieldStyle(.roundedBorder)
-        .padding(.top, 12)
-        // presentation-region: project creator sheet
-        .sheet(isPresented: $showingProjectCreator, onDismiss: {
-            newProjectEditorID = UUID().uuidString
-            isCreatingProject = false
-        }) {
-            projectCreator.interactiveDismissDisabled(isCreatingProject)
-        }
-        // presentation-region-end
-        .onAppear { onEditorStateChange(isDirty, !saveDisabled) }
-        .onChange(of: isDirty) { _, _ in onEditorStateChange(isDirty, !saveDisabled) }
-        .onChange(of: saveDisabled) { _, _ in onEditorStateChange(isDirty, !saveDisabled) }
-        .onChange(of: saveRequest) { _, _ in saveChanges() }
-    }
-
-    /// "No project", the active projects, and the task's own archived project as
-    /// "Old flat · archived" (X-06).
-    private var projectPicker: some View {
-        Picker("Project", selection: $draft.projectID) {
-            Text("No project").tag(ProjectID?.none)
-            if let current = draft.projectID, !projects.contains(where: { $0.id == current }) {
-                Text(labelForProject(current)).tag(ProjectID?.some(current))
-            }
-            ForEach(projects) { project in
-                Text(project.name).tag(ProjectID?.some(project.id))
-            }
-        }
-        .pickerStyle(.menu)
-    }
-
-    private var properties: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(
-                "Due date",
-                isOn: Binding(
-                    get: { draft.dueDate != nil },
-                    set: { draft.dueDate = $0 ? CalendarDay(date: Date()) : nil }
-                )
-            )
-            if let due = draft.dueDate {
-                DatePicker(
-                    "Choose date",
-                    selection: Binding(get: { due.startDate() }, set: { draft.dueDate = CalendarDay(date: $0) }),
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.compact)
-            }
-            if !tags.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Tags").font(.caption).foregroundStyle(.secondary)
-                    ChipFlowLayout(spacing: 6) {
-                        ForEach(tags.filter { draft.tagIDs.contains($0.id) }) { tag in
-                            Button {
-                                draft.tagIDs.removeAll { $0 == tag.id }
-                            } label: {
-                                Label("#\(tag.name)", systemImage: "xmark")
-                                    .font(.caption)
-                                    .foregroundStyle(tagTint(tag.id))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(tagTint(tag.id).opacity(0.16), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Remove \(tag.name) tag")
-                        }
-                        Menu {
-                            ForEach(tags.filter { !draft.tagIDs.contains($0.id) }) { tag in
-                                Button("#\(tag.name)") { draft.tagIDs.append(tag.id) }
-                            }
-                        } label: {
-                            Label("Add tag", systemImage: "plus")
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.quaternary, in: Capsule())
-                        }
-                        .menuStyle(.borderlessButton)
-                    }
-                }
-            }
-        }
-    }
-
-    private var projectCreator: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New project").font(.title2.bold())
-            TextField("Project name", text: $newProjectName)
-                .disabled(isCreatingProject)
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    showingProjectCreator = false
-                    newProjectEditorID = UUID().uuidString
-                }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(isCreatingProject)
-                Button("Add project") {
-                    guard !isCreatingProject else { return }
-                    let authored = newProjectName
-                    let editorID = newProjectEditorID
-                    isCreatingProject = true
-                    Task {
-                        let projectID = await onCreateProject(authored, editorID)
-                        guard newProjectEditorID == editorID, isCreatingProject else { return }
-                        isCreatingProject = false
-                        guard showingProjectCreator, newProjectName == authored,
-                              let projectID else { return }
-                        draft.projectID = projectID
-                        newProjectName = ""
-                        showingProjectCreator = false
-                        newProjectEditorID = UUID().uuidString
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(isCreatingProject || newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(22)
-        .frame(width: 340)
-    }
-
-    private var details: Binding<String> {
-        Binding(get: { draft.details ?? "" }, set: { draft.details = $0.isEmpty ? nil : $0 })
-    }
-
-    private var waitingFor: Binding<String> {
-        Binding(get: { draft.waitingFor ?? "" }, set: { draft.waitingFor = $0.isEmpty ? nil : $0 })
-    }
-
-    /// The draft as it is saved: the title trimmed, so spaces alone are not a change.
-    private var normalized: TaskEditDraft {
-        var normalized = draft
-        normalized.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized
-    }
-
-    private var moveTo: TaskList? { list.taskState == task.state ? nil : list }
-
-    private func saveChanges() {
-        guard taskFieldsDirty, !saveDisabled else { return }
-        onSave(normalized.changes(), moveTo)
-    }
-
-    private var taskFieldsDirty: Bool { normalized.changes().hasChanges || moveTo != nil }
-
-    private var isDirty: Bool { taskFieldsDirty || extrasDirty }
-
-    private var saveDisabled: Bool {
-        let title = normalized.title
-        let waiting = (draft.waitingFor ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !taskFieldsDirty || extrasDirty || title.isEmpty || !EditorLimits.fits(title, EditorLimits.title)
-            || !EditorLimits.fits(draft.details ?? "", EditorLimits.details)
-            || (list == .waiting && (waiting.isEmpty || !EditorLimits.fits(waiting, EditorLimits.waitingFor)))
-    }
-
-    private var propertySummary: String {
-        var parts: [String] = []
-        if draft.dueDate != nil { parts.append("Due") }
-        if !draft.tagIDs.isEmpty { parts.append("\(draft.tagIDs.count) tags") }
-        return parts.isEmpty ? "Optional" : parts.joined(separator: " · ")
-    }
-}
-
-private struct ChipFlowLayout: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(subviews, width: proposal.width ?? 500).size
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let arranged = arrange(subviews, width: bounds.width)
-        for (index, subview) in subviews.enumerated() {
-            subview.place(
-                at: CGPoint(x: bounds.minX + arranged.positions[index].x, y: bounds.minY + arranged.positions[index].y),
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private func arrange(_ subviews: Subviews, width: CGFloat) -> (positions: [CGPoint], size: CGSize) {
-        var positions: [CGPoint] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0 && x + size.width > width {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            positions.append(CGPoint(x: x, y: y))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return (positions, CGSize(width: width, height: y + rowHeight))
-    }
-}
-
-private struct SuggestionRequest: Identifiable {
-    let kind: SuggestionKind
-    var id: String { kind.rawValue }
-}
-
-/// Subtasks and comments: each saves at once through the kit, as before.
-private struct TaskDetailExtras: View {
-    let task: TaskRecord
-    let model: BrainBuddyModel
-    let editorDirty: Bool
-    let onDirtyChange: (Bool) -> Void
-    @State private var newSubtask = ""
-    @State private var newComment = ""
-    @State private var newSubtaskEditorID = UUID().uuidString
-    @State private var newCommentEditorID = UUID().uuidString
-    @State private var modifiedIDs: Set<String> = []
-    @State private var subtaskTitles: [SubtaskID: String] = [:]
-    @State private var commentBodies: [CommentID: String] = [:]
-    @State private var editingCommentIDs: Set<CommentID> = []
-    @State private var suggesting: SuggestionRequest?
-
-    private var completedSubtasks: Int { task.subtasks.filter { $0.state == .completed }.count }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DisclosureGroup("Subtasks · \(completedSubtasks) / \(task.subtasks.count)") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(task.subtasks.sorted { $0.orderKey < $1.orderKey }) { subtask in
-                        SubtaskLine(
-                            taskID: task.id, subtask: subtask, model: model, title: subtaskTitle(for: subtask),
-                            onSaved: {
-                                subtaskTitles.removeValue(forKey: subtask.id)
-                                setModified("subtask-\(subtask.id.rawValue)", dirty: false)
-                            }
-                        )
-                    }
-                    HStack {
-                        TextField("New subtask", text: $newSubtask)
-                            .onSubmit { addSubtask() }
-                        Button("Add subtask") { addSubtask() }
-                            .disabled(
-                                newSubtask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    || !EditorLimits.fits(newSubtask, EditorLimits.title)
-                            )
-                    }
-                }
-                .padding(.top, 6)
-            }
-            DisclosureGroup("Comments · \(task.comments.count)") {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(task.comments) { comment in
-                        CommentLine(
-                            taskID: task.id, comment: comment, model: model, canEdit: model.isOwnComment(comment),
-                            editing: commentEditing(for: comment), draftBody: commentBody(for: comment),
-                            onFinished: {
-                                commentBodies.removeValue(forKey: comment.id)
-                                setModified("comment-\(comment.id.rawValue)", dirty: false)
-                            }
-                        )
-                    }
-                    TextField("Write a comment", text: $newComment, axis: .vertical)
-                        .lineLimit(2...4)
-                    Button("Add comment") {
-                        let authored = newComment
-                        let editorID = newCommentEditorID
-                        Task { if await model.addComment(to: task.id, body: authored, editorID: editorID) {
-                            newComment = ""
-                            newCommentEditorID = UUID().uuidString
-                        } }
-                    }
-                    .disabled(
-                        newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !EditorLimits.fits(newComment, EditorLimits.comment)
-                    )
-                }
-                .padding(.top, 6)
-            }
-            Text("Subtasks and comments save immediately. Discard keeps those saved changes.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            suggestionEntry
-        }
-        .font(.subheadline)
-        // presentation-region: review and clarify sheets
-        .sheet(item: $suggesting) { request in
-            ReviewSuggestionSheetLoader(model: model, task: task, kind: request.kind) { suggesting = nil }
-        }
-        // presentation-region-end
-        .onChange(of: newSubtask) { _, _ in reportDirty() }
-        .onChange(of: newComment) { _, _ in reportDirty() }
-    }
-
-    /// The bounded entry of the Weekly Review suggestions (D-04): only on a Next action while the
-    /// review is exposed. A choice here opens the sheet; nothing is requested or changed by it.
-    @ViewBuilder
-    private var suggestionEntry: some View {
-        switch model.reviewSuggestionEntry(for: task, editorDirty: editorDirty) {
-        case .hidden:
-            EmptyView()
-        case .blocked(let message):
-            Text(message).font(.caption).foregroundStyle(.secondary)
-        case .available(let kinds):
-            Menu("Suggest with AI…") {
-                ForEach(kinds, id: \.rawValue) { kind in
-                    Button(kind == .firstStep ? "Suggest a first step" : "Suggest clearer wording") {
-                        suggesting = SuggestionRequest(kind: kind)
-                    }
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("Suggest with AI for \(task.title)")
-            Text("Suggestions are proposals. Nothing changes until you apply one.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func setModified(_ id: String, dirty: Bool) {
-        if dirty { modifiedIDs.insert(id) } else { modifiedIDs.remove(id) }
-        reportDirty()
-    }
-
-    private func subtaskTitle(for subtask: SubtaskRecord) -> Binding<String> {
-        Binding(
-            get: { subtaskTitles[subtask.id] ?? subtask.title },
-            set: { value in
-                subtaskTitles[subtask.id] = value
-                setModified("subtask-\(subtask.id.rawValue)", dirty: value != subtask.title)
-            }
-        )
-    }
-
-    private func commentEditing(for comment: CommentRecord) -> Binding<Bool> {
-        Binding(
-            get: { editingCommentIDs.contains(comment.id) },
-            set: { editing in
-                if editing { editingCommentIDs.insert(comment.id) } else { editingCommentIDs.remove(comment.id) }
-                setModified(
-                    "comment-\(comment.id.rawValue)", dirty: editing && (commentBodies[comment.id] ?? comment.body) != comment.body
-                )
-            }
-        )
-    }
-
-    private func commentBody(for comment: CommentRecord) -> Binding<String> {
-        Binding(
-            get: { commentBodies[comment.id] ?? comment.body },
-            set: { value in
-                commentBodies[comment.id] = value
-                setModified(
-                    "comment-\(comment.id.rawValue)", dirty: editingCommentIDs.contains(comment.id) && value != comment.body
-                )
-            }
-        )
-    }
-
-    private func reportDirty() {
-        onDirtyChange(
-            !newSubtask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !modifiedIDs.isEmpty
-        )
-    }
-
-    private func addSubtask() {
-        let authored = newSubtask
-        let editorID = newSubtaskEditorID
-        Task { if await model.addSubtask(to: task.id, title: authored, editorID: editorID) {
-            newSubtask = ""
-            newSubtaskEditorID = UUID().uuidString
-        } }
-    }
-}
-
-private struct SubtaskLine: View {
-    let taskID: TaskID
-    let subtask: SubtaskRecord
-    let model: BrainBuddyModel
-    @Binding var title: String
-    let onSaved: () -> Void
-    @State private var editorID = UUID().uuidString
-
-    var body: some View {
-        HStack {
-            Button {
-                Task {
-                    if await model.toggleSubtask(subtask, in: taskID, editorID: editorID) { editorID = UUID().uuidString }
-                }
-            } label: {
-                Image(systemName: subtask.state == .completed ? "checkmark.circle.fill" : "circle")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(subtask.state == .completed ? "Reopen" : "Complete") \(subtask.title)")
-            TextField("Subtask title", text: $title)
-                .onSubmit { saveTitle() }
-            if title != subtask.title {
-                Button("Save") { saveTitle() }
-                    .disabled(
-                        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !EditorLimits.fits(title, EditorLimits.title)
-                    )
-            }
-        }
-    }
-
-    private func saveTitle() {
-        guard title != subtask.title else { return }
-        let authored = title
-        Task { if await model.renameSubtask(subtask.id, in: taskID, title: authored, editorID: editorID) {
-            editorID = UUID().uuidString
-            onSaved()
-        } }
-    }
-}
-
-private struct CommentLine: View {
-    let taskID: TaskID
-    let comment: CommentRecord
-    let model: BrainBuddyModel
-    let canEdit: Bool
-    @Binding var editing: Bool
-    @Binding var draftBody: String
-    let onFinished: () -> Void
-    @State private var editorID = UUID().uuidString
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if editing {
-                TextField("Comment", text: $draftBody, axis: .vertical)
-                    .lineLimit(2...4)
-                HStack {
-                    Button("Save") {
-                        let authored = draftBody
-                        Task { if await model.editComment(comment.id, in: taskID, body: authored, editorID: editorID) {
-                            editing = false
-                            editorID = UUID().uuidString
-                            onFinished()
-                        } }
-                    }
-                    .disabled(
-                        draftBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            || !EditorLimits.fits(draftBody, EditorLimits.comment)
-                    )
-                    Button("Cancel") {
-                        editing = false
-                        editorID = UUID().uuidString
-                        onFinished()
-                    }
-                }
-            } else {
-                Text(comment.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if canEdit {
-                    Button("Edit comment") { editing = true }
-                        .font(.caption)
-                }
-            }
-        }
-        .padding(8)
-        .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -2719,6 +2197,9 @@ private enum InboxClarificationStep {
 
 private struct InboxClarifyView: View {
     let model: BrainBuddyModel
+    /// Opens on this Inbox item in its project path (the inspector's "Bigger than one step").
+    var startAsProject: TaskID?
+    @State private var startApplied = false
     @Environment(\.dismiss) private var dismiss
     @State private var items: [TaskRecord] = []
     @State private var index = 0
@@ -3074,7 +2555,23 @@ private struct InboxClarifyView: View {
             loaded = true
             step = .decision
             stagedProjectID = nil
+            startOnRequestedItem()
         }
+    }
+
+    /// Once: the requested item, at "What will you call this project?", as "A project with several
+    /// steps…" starts it.
+    private func startOnRequestedItem() {
+        guard !startApplied, let start = startAsProject else { return }
+        startApplied = true
+        guard let found = items.firstIndex(where: { $0.id == start }) else { return }
+        index = found
+        let item = items[found]
+        guard item.projectID == nil else { return }
+        projectName = item.title
+        desiredOutcome = ""
+        firstAction = ""
+        step = .projectName
     }
 
     private func submit(_ item: TaskRecord) {
@@ -3158,17 +2655,10 @@ private struct WaitingReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Review Waiting for").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close review") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
+            MacReviewHeader(
+                title: "Review Waiting for",
+                caption: loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time",
+                onClose: { dismiss() })
             if !loaded {
                 ProgressView("Loading Waiting…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3190,13 +2680,14 @@ private struct WaitingReviewView: View {
                     choices(item)
                 }
                 if let error = model.error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    Text(error).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coStatusDanger)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(24)
         .frame(width: 640, height: 480)
+        .macSheetSurface()
         .disabled(isBusy)
         .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
@@ -3217,58 +2708,37 @@ private struct WaitingReviewView: View {
     }
 
     private func card(_ item: TaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(item.title).font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let details = item.details, !details.isEmpty {
-                Text(details)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(4)
-            }
-            Label("Waiting for \(item.waitingFor ?? "an unspecified response")", systemImage: "hourglass")
-                .font(.subheadline.weight(.medium))
-            if let date = item.waitingSince {
-                Text("Since \(date.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let projectID = item.projectID {
-                Text("Project · \(model.projectLabel(projectID))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        MacWaitingReviewCard(
+            title: item.title, details: item.details,
+            waitingFor: item.waitingFor,
+            since: item.waitingSince.map { "Since \($0.formatted(date: .abbreviated, time: .omitted))" },
+            project: item.projectID.map { "Project · \(model.projectLabel($0))" })
     }
 
     private func decisionForm(_ item: TaskRecord, decision: WaitingReviewDecision) -> some View {
         let archived = model.isArchived(item.projectID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text(decision == .followUp ? "What will you do to follow up?" : "What is the next action now?")
-                .font(.headline)
+            MacReviewQuestion(text: decision == .followUp ? "What will you do to follow up?" : "What is the next action now?")
             TextField("Concrete next action", text: $actionTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .macSheetField()
                 .accessibilityLabel("Concrete next action")
                 .onSubmit { submit(item, decision: decision) }
-            Text(
-                decision == .followUp
+            MacReviewLine(
+                text: decision == .followUp
                     ? (archived
                         ? "Unarchive this project before creating a follow-up in it."
                         : "Creates a separate Next action in the same project. This item stays in Waiting and returns to review after seven days or a change.")
-                    : "Moves this item to Next actions and clears its active waiting details."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack {
+                    : "Moves this item to Next actions and clears its active waiting details.",
+                small: true)
+            HStack(spacing: 8) {
                 Button("Back") { self.decision = nil }
+                    .buttonStyle(.macQuietPill)
                 Spacer()
                 Button(decision == .followUp ? "Create follow-up" : "Move to Next actions") {
                     submit(item, decision: decision)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.macStrongPill)
                 .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || (decision == .followUp && archived))
             }
         }
@@ -3277,9 +2747,8 @@ private struct WaitingReviewView: View {
     @ViewBuilder
     private func choices(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
-        Text("What should happen next?")
-            .font(.headline)
-        HStack(spacing: 10) {
+        MacReviewQuestion(text: "What should happen next?")
+        HStack(spacing: 8) {
             Button("Keep waiting") {
                 performSave(editorID: editorID) { _ in
                     if await model.keepWaiting(item) { advance() }
@@ -3297,10 +2766,9 @@ private struct WaitingReviewView: View {
             }
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
+        .buttonStyle(.macSecondaryPill)
         if archived {
-            Text("Unarchive the project to add a follow-up there.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: "Unarchive the project to add a follow-up there.", small: true)
         }
     }
 
@@ -3369,17 +2837,10 @@ private struct SomedayReviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Review Someday").font(.title2.bold())
-                    Text(loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Close review") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
+            MacReviewHeader(
+                title: "Review Someday",
+                caption: loaded ? (items.isEmpty ? "No items due" : "\(min(index + 1, items.count)) of \(items.count)") : "One item at a time",
+                onClose: { dismiss() })
             if !loaded {
                 ProgressView("Loading Someday…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -3405,12 +2866,13 @@ private struct SomedayReviewView: View {
                     choices(item)
                 }
                 if let error = model.error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    Text(error).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coStatusDanger)
                 }
             }
         }
         .padding(24)
         .frame(width: 640, height: 440)
+        .macSheetSurface()
         .disabled(isBusy)
         .interactiveDismissDisabled(isBusy)
         .onAppear(perform: load)
@@ -3431,43 +2893,31 @@ private struct SomedayReviewView: View {
     }
 
     private func card(_ item: TaskRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(item.title).font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let details = item.details, !details.isEmpty {
-                Text(details).foregroundStyle(.secondary)
-            }
-            if let projectID = item.projectID {
-                Text("Project · \(model.projectLabel(projectID))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+        MacSomedayReviewCard(
+            title: item.title, details: item.details,
+            project: item.projectID.map { "Project · \(model.projectLabel($0))" })
     }
 
     private func nextForm(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
         return VStack(alignment: .leading, spacing: 10) {
-            Text("What is the concrete next action?").font(.headline)
+            MacReviewQuestion(text: "What is the concrete next action?")
             TextField("Concrete next action", text: $actionTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .macSheetField()
                 .accessibilityLabel("Concrete next action")
                 .onSubmit { activate(item) }
-            Text(
-                archived
+            MacReviewLine(
+                text: archived
                     ? "Unarchive this project before moving its task to Next actions."
-                    : "The title and GTD list change together. Project, tags, notes, and due date remain attached."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            HStack {
+                    : "The title and GTD list change together. Project, tags, notes, and due date remain attached.",
+                small: true)
+            HStack(spacing: 8) {
                 Button("Back") { enteringNext = false }
+                    .buttonStyle(.macQuietPill)
                 Spacer()
                 Button("Move to Next actions") { activate(item) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.macStrongPill)
                     .disabled(!validAnswer(actionTitle, limit: EditorLimits.title) || archived)
             }
         }
@@ -3476,8 +2926,8 @@ private struct SomedayReviewView: View {
     @ViewBuilder
     private func choices(_ item: TaskRecord) -> some View {
         let archived = model.isArchived(item.projectID)
-        Text("Is this relevant now?").font(.headline)
-        HStack(spacing: 10) {
+        MacReviewQuestion(text: "Is this relevant now?")
+        HStack(spacing: 8) {
             Button("Keep in Someday") {
                 performSave(editorID: editorID) { _ in
                     if await model.keepSomeday(item) { advance() }
@@ -3491,10 +2941,9 @@ private struct SomedayReviewView: View {
             .disabled(archived)
             Button("No longer relevant…", role: .destructive) { confirmingCancel = true }
         }
+        .buttonStyle(.macSecondaryPill)
         if archived {
-            Text("Unarchive the project to activate this task.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            MacReviewLine(text: "Unarchive the project to activate this task.", small: true)
         }
     }
 

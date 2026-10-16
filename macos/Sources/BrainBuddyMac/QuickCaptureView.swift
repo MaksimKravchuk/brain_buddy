@@ -27,6 +27,12 @@ private func quickCaptureHotKeyPressed(
     return noErr
 }
 
+/// The quick-capture panel: borderless and clear, so the card's glass is the whole window. A
+/// borderless panel refuses key status by default; this one takes it so the field can be typed in.
+private final class QuickCapturePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class QuickCaptureController: ObservableObject {
     @Published private(set) var registrationError: String?
@@ -84,16 +90,21 @@ final class QuickCaptureController: ObservableObject {
         let frontmost = NSWorkspace.shared.frontmostApplication
         previousApplication = frontmost?.processIdentifier == NSRunningApplication.current.processIdentifier
             ? nil : frontmost
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 205),
-            styleMask: [.titled, .nonactivatingPanel],
+        let panel = QuickCapturePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 160),
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
         panel.title = "Quick Capture"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: QuickCaptureView(model: model) { [weak self] in
+        let shortcut = registrationError == nil ? "⌃⌥⇧B" : nil
+        panel.contentView = NSHostingView(rootView: QuickCaptureView(model: model, shortcut: shortcut) { [weak self] in
             self?.close()
         })
         panel.center()
@@ -114,10 +125,13 @@ final class QuickCaptureController: ObservableObject {
 }
 
 /// Quick Capture (⌃⌥⇧B) to Inbox through the kit's capture: it applies at once on this Mac and
-/// never waits for the network (FR-010).
+/// never waits for the network (FR-010). Drawn as board "12 Quick capture · Mac"
+/// (`MacQuickCaptureCard`): Return saves, Esc closes.
 @MainActor
 private struct QuickCaptureView: View {
     let model: BrainBuddyModel
+    /// The global shortcut, or nil when it could not be registered.
+    let shortcut: String?
     let onClose: () -> Void
 
     @State private var title = ""
@@ -130,32 +144,18 @@ private struct QuickCaptureView: View {
     private var cleanTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Capture to Inbox")
-                .font(.title2.bold())
+        MacQuickCaptureCard(
+            shortcut: shortcut, tokens: MacCaptureTokens.labels(in: title), error: error,
+            saveDisabled: cleanTitle.isEmpty || !EditorLimits.fits(cleanTitle, EditorLimits.title), busy: isSaving,
+            onSave: save, onClose: requestClose
+        ) {
             TextField("What's on your mind?", text: $title)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .macQuickCaptureField()
                 .disabled(isSaving)
                 .focused($titleFocused)
                 .onSubmit(save)
-            Text("You can clarify and organize it later.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let error {
-                Text(error).font(.caption).foregroundStyle(.red)
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { requestClose() }
-                    .keyboardShortcut(.cancelAction)
-                    .disabled(isSaving)
-                Button("Save to Inbox", action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(isSaving || cleanTitle.isEmpty || !EditorLimits.fits(cleanTitle, EditorLimits.title))
-            }
         }
-        .padding(22)
-        .frame(width: 480, height: 205)
         .task { titleFocused = true }
         .alert("Discard quick capture?", isPresented: $confirmingDiscard) {
             Button("Keep editing", role: .cancel) {}

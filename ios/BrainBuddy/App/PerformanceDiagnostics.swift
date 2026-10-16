@@ -303,7 +303,6 @@ extension AppRoute {
     /// query or any other content.
     var diagnosticsName: String {
         switch self {
-        case .task: "task"
         case .destination(let destination):
             switch destination {
             case .list(let list): "list \(list.rawValue)"

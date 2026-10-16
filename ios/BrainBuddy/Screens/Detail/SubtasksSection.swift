@@ -1,14 +1,19 @@
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 
-/// A task's subtasks inside task detail: tap the circle to complete or
+/// A task's subtasks inside task detail: tap the mark to complete or
 /// reopen, rename inline (saved on Return or when the field loses focus),
 /// cancel or reopen from the row menu, and add new ones at the bottom.
-/// State is shown by symbol and strikethrough as well as colour, and spoken.
+/// Open and done steps carry the Carry On step marks (an open ring, a check);
+/// a cancelled one keeps its crossed circle. State is shown by mark and
+/// strikethrough as well as colour, and spoken.
 struct SubtasksSection: View {
     private let task: TaskRecord
     private let isReadOnly: Bool
+    /// The section's name: "Subtasks", or the card's "Steps inside".
+    private let title: String
 
     @Environment(Workspace.self) private var workspace
     @State private var newTitle = ""
@@ -17,9 +22,10 @@ struct SubtasksSection: View {
     @State private var isSaving = false
     @FocusState private var isAdding: Bool
 
-    init(task: TaskRecord, isReadOnly: Bool = false) {
+    init(task: TaskRecord, isReadOnly: Bool = false, title: String = "Subtasks") {
         self.task = task
         self.isReadOnly = isReadOnly
+        self.title = title
     }
 
     private var subtasks: [SubtaskRecord] {
@@ -50,7 +56,7 @@ struct SubtasksSection: View {
     private var header: String {
         let done = subtasks.filter { $0.state == .completed }.count
         let counted = subtasks.filter { $0.state != .cancelled }.count
-        return counted == 0 ? "Subtasks" : "Subtasks · \(done) of \(counted) done"
+        return counted == 0 ? title : "\(title) · \(done) of \(counted) done"
     }
 
     private var addRow: some View {
@@ -119,9 +125,7 @@ private struct DetailSubtaskRow: View {
                 // hit target to 44 pt and the negative padding below gives that
                 // width back to the layout, so the title lines up with the
                 // property rows above.
-                Image(systemName: symbol)
-                    .font(.title3)
-                    .foregroundStyle(isOpen ? BBColor.textTertiary : BBColor.brandText)
+                mark
                     .frame(width: iconColumn, height: BBMetrics.rowMinHeight)
                     .padding(.horizontal, (BBMetrics.rowMinHeight - iconColumn) / 2)
                     .contentShape(Rectangle())
@@ -149,8 +153,8 @@ private struct DetailSubtaskRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(subtask.title)
-                        .strikethrough(!isOpen)
-                        .foregroundStyle(isOpen ? Color.primary : Color.secondary)
+                        .strikethrough(!isOpen, color: BBColor.stepTextDone)
+                        .foregroundStyle(isOpen ? BBColor.textPrimary : BBColor.stepTextDone)
                     if subtask.state == .cancelled {
                         Text("Cancelled")
                             .font(.caption)
@@ -191,11 +195,18 @@ private struct DetailSubtaskRow: View {
         .onDisappear { Task { await commitRename() } }
     }
 
-    private var symbol: String {
+    /// The step mark: an open ring, a check once done, a crossed circle once
+    /// cancelled (Carry On has no cancelled mark).
+    @ViewBuilder private var mark: some View {
         switch subtask.state {
-        case .open: "circle"
-        case .completed: "checkmark.circle.fill"
-        case .cancelled: "xmark.circle"
+        case .open:
+            CarryOnStepMark(.open)
+        case .completed:
+            CarryOnStepMark(.done)
+        case .cancelled:
+            Image(systemName: BBSymbol.cancel)
+                .font(.title3)
+                .foregroundStyle(BBColor.textTertiary)
         }
     }
 

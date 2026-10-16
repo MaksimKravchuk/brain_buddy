@@ -56,6 +56,10 @@ public enum CarryOnComponentColor {
     public static let buttonSecondaryBg = CarryOnRole.controlQuiet
     public static let buttonSecondaryBgPressed = CarryOnRole.controlQuietPressed
     public static let buttonSecondaryFg = CarryOnRole.textPrimary
+    public static let buttonStrongBg = CarryOnRole.textPrimary
+    public static let buttonStrongFg = CarryOnRole.bgGround
+    public static let buttonGlassTint = CarryOnRole.accentFill
+    public static let buttonGlassFg = CarryOnRole.onAccent
     public static let nextStepBg = CarryOnRole.surfaceCard
     public static let nextStepProject = CarryOnRole.textSecondary
     public static let nextStepText = CarryOnRole.textPrimary
@@ -68,6 +72,8 @@ public enum CarryOnComponentColor {
     public static let chipFg = CarryOnRole.textPrimary
     public static let chipDueFg = CarryOnRole.statusWarning
     public static let chipOverdueFg = CarryOnRole.statusDanger
+    public static let chipSelectedBg = CarryOnRole.textPrimary
+    public static let chipSelectedFg = CarryOnRole.bgGround
     public static let fieldBg = CarryOnRole.controlQuiet
     public static let fieldTokenBg = CarryOnRole.surfaceToken
     public static let voiceBg = CarryOnRole.textPrimary
@@ -117,6 +123,7 @@ public enum CarryOnTypeScale {
     public static let body = TypeStyle(face: CarryOnFontFace.action, weight: 400, iosSize: 17, macSize: 14, lineHeight: 1.4, tracking: 0, .body)
     public static let bodyStrong = TypeStyle(face: CarryOnFontFace.action, weight: 600, iosSize: 17, macSize: 14, lineHeight: 1.4, tracking: 0, .body)
     public static let meta = TypeStyle(face: CarryOnFontFace.action, weight: 400, iosSize: 15, macSize: 12, lineHeight: 1.35, tracking: 0, .subheadline)
+    public static let metaStrong = TypeStyle(face: CarryOnFontFace.action, weight: 600, iosSize: 15, macSize: 12, lineHeight: 1.35, tracking: 0, .subheadline)
 }
 
 /// Spacing scale, in points.
@@ -156,12 +163,21 @@ public enum CarryOnLayout {
         public static let gap: Double = 8
         public static let pressedScale: Double = 0.97
         public static let disabledOpacity: Double = 0.4
+        public static let glassTintOpacity: Double = 0.86
+        public static let macHeight: Double = 32
+        public static let macPaddingX: Double = 14
     }
     public enum Chip {
         public static let height: Double = 30
         public static let paddingX: Double = 12
         public static let gap: Double = 6
         public static let dot: Double = 10
+        public static let macHeight: Double = 26
+        public static let macFontSize: Double = 13
+    }
+    public enum QuickChip {
+        public static let height: Double = 38
+        public static let paddingX: Double = 14
     }
     public enum Row {
         public static let paddingY: Double = 14
@@ -267,6 +283,14 @@ public enum CarryOnTokenTable {
         "component.button-secondary-bg-pressed.dark": CarryOnComponentColor.buttonSecondaryBgPressed.dark.hex,
         "component.button-secondary-fg.light": CarryOnComponentColor.buttonSecondaryFg.light.hex,
         "component.button-secondary-fg.dark": CarryOnComponentColor.buttonSecondaryFg.dark.hex,
+        "component.button-strong-bg.light": CarryOnComponentColor.buttonStrongBg.light.hex,
+        "component.button-strong-bg.dark": CarryOnComponentColor.buttonStrongBg.dark.hex,
+        "component.button-strong-fg.light": CarryOnComponentColor.buttonStrongFg.light.hex,
+        "component.button-strong-fg.dark": CarryOnComponentColor.buttonStrongFg.dark.hex,
+        "component.button-glass-tint.light": CarryOnComponentColor.buttonGlassTint.light.hex,
+        "component.button-glass-tint.dark": CarryOnComponentColor.buttonGlassTint.dark.hex,
+        "component.button-glass-fg.light": CarryOnComponentColor.buttonGlassFg.light.hex,
+        "component.button-glass-fg.dark": CarryOnComponentColor.buttonGlassFg.dark.hex,
         "component.next-step-bg.light": CarryOnComponentColor.nextStepBg.light.hex,
         "component.next-step-bg.dark": CarryOnComponentColor.nextStepBg.dark.hex,
         "component.next-step-project.light": CarryOnComponentColor.nextStepProject.light.hex,
@@ -291,6 +315,10 @@ public enum CarryOnTokenTable {
         "component.chip-due-fg.dark": CarryOnComponentColor.chipDueFg.dark.hex,
         "component.chip-overdue-fg.light": CarryOnComponentColor.chipOverdueFg.light.hex,
         "component.chip-overdue-fg.dark": CarryOnComponentColor.chipOverdueFg.dark.hex,
+        "component.chip-selected-bg.light": CarryOnComponentColor.chipSelectedBg.light.hex,
+        "component.chip-selected-bg.dark": CarryOnComponentColor.chipSelectedBg.dark.hex,
+        "component.chip-selected-fg.light": CarryOnComponentColor.chipSelectedFg.light.hex,
+        "component.chip-selected-fg.dark": CarryOnComponentColor.chipSelectedFg.dark.hex,
         "component.field-bg.light": CarryOnComponentColor.fieldBg.light.hex,
         "component.field-bg.dark": CarryOnComponentColor.fieldBg.dark.hex,
         "component.field-token-bg.light": CarryOnComponentColor.fieldTokenBg.light.hex,
@@ -347,6 +375,11 @@ public enum CarryOnTokenTable {
         "type.meta.mac": Double(CarryOnTypeScale.meta.macSize),
         "type.meta.lineHeight": Double(CarryOnTypeScale.meta.lineHeight),
         "type.meta.tracking": Double(CarryOnTypeScale.meta.tracking),
+        "type.meta-strong.weight": Double(CarryOnTypeScale.metaStrong.weight),
+        "type.meta-strong.ios": Double(CarryOnTypeScale.metaStrong.iosSize),
+        "type.meta-strong.mac": Double(CarryOnTypeScale.metaStrong.macSize),
+        "type.meta-strong.lineHeight": Double(CarryOnTypeScale.metaStrong.lineHeight),
+        "type.meta-strong.tracking": Double(CarryOnTypeScale.metaStrong.tracking),
         "space.xxs": CarryOnSpace.xxs,
         "space.xs": CarryOnSpace.xs,
         "space.sm": CarryOnSpace.sm,
@@ -372,10 +405,17 @@ public enum CarryOnTokenTable {
         "layout.button.gap": CarryOnLayout.Button.gap,
         "layout.button.pressed-scale": CarryOnLayout.Button.pressedScale,
         "layout.button.disabled-opacity": CarryOnLayout.Button.disabledOpacity,
+        "layout.button.glass-tint-opacity": CarryOnLayout.Button.glassTintOpacity,
+        "layout.button.mac-height": CarryOnLayout.Button.macHeight,
+        "layout.button.mac-padding-x": CarryOnLayout.Button.macPaddingX,
         "layout.chip.height": CarryOnLayout.Chip.height,
         "layout.chip.padding-x": CarryOnLayout.Chip.paddingX,
         "layout.chip.gap": CarryOnLayout.Chip.gap,
         "layout.chip.dot": CarryOnLayout.Chip.dot,
+        "layout.chip.mac-height": CarryOnLayout.Chip.macHeight,
+        "layout.chip.mac-font-size": CarryOnLayout.Chip.macFontSize,
+        "layout.quick-chip.height": CarryOnLayout.QuickChip.height,
+        "layout.quick-chip.padding-x": CarryOnLayout.QuickChip.paddingX,
         "layout.row.padding-y": CarryOnLayout.Row.paddingY,
         "layout.row.padding-x": CarryOnLayout.Row.paddingX,
         "layout.row.radius": CarryOnLayout.Row.radius,
@@ -416,5 +456,7 @@ public enum CarryOnTokenTable {
         "type.body-strong.textStyle": CarryOnTypeScale.bodyStrong.textStyle.rawValue,
         "type.meta.font": CarryOnTypeScale.meta.face.family,
         "type.meta.textStyle": CarryOnTypeScale.meta.textStyle.rawValue,
+        "type.meta-strong.font": CarryOnTypeScale.metaStrong.face.family,
+        "type.meta-strong.textStyle": CarryOnTypeScale.metaStrong.textStyle.rawValue,
     ]
 }

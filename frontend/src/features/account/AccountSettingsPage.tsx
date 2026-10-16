@@ -8,7 +8,7 @@ import { useProjects, useTags, useTaskList } from "../../api/taskHooks";
 import type { TaskCounts } from "../../api/taskTypes";
 import { AppShell } from "../../components/shell/AppShell";
 import { Button } from "../../components/ui/Button";
-import { Feedback, Field, SectionCard } from "../../components/ui/SettingsSection";
+import { Feedback, Field, SectionCard, SettingRow, SettingsTabs } from "../../components/ui/SettingsSection";
 import { useAuthStore } from "../../stores/authStore";
 import { getErrorContext, getErrorMessage } from "../../utils/error";
 import { ReviewSettingsSection } from "../review/ReviewSettingsSection";
@@ -42,19 +42,23 @@ export function AccountSettingsPage({ directDelete = false }: { directDelete?: b
       counts={countsQuery.data?.counts_by_state ?? emptyCounts}
       projects={projectsQuery.data ?? []}
       tags={tagsQuery.data ?? []}
+      ground
     >
-      <div className="mx-auto flex max-w-[680px] flex-col gap-5 pb-12">
-        <header>
-          <h1 className="text-title font-semibold text-slate-900">Account settings</h1>
-          <p className="mt-1 text-sm text-slate-500">
+      <div className="mx-auto flex max-w-[760px] flex-col gap-5 pb-12">
+        <header className="flex flex-col gap-4">
+          <h1 className="font-voice text-co-title text-ink">Account settings</h1>
+          <SettingsTabs />
+          <p className="text-co-meta text-ink-muted">
             Manage your profile, credentials, and data. Export and deletion are
             always available — they are your data rights, not features.
           </p>
         </header>
-        <ProfileSection />
-        {/* Spec 020 D-04; renders nothing while weekly_review is off. */}
-        <ReviewSettingsSection />
-        <AccountSecurity directDelete={directDelete} onUpdated={() => { void queryClient.invalidateQueries({ queryKey: accountKeys.detail() }); }} />
+        <div className="flex flex-col">
+          <ProfileSection />
+          {/* Spec 020 D-04; renders nothing while weekly_review is off. */}
+          <ReviewSettingsSection />
+          <AccountSecurity directDelete={directDelete} onUpdated={() => { void queryClient.invalidateQueries({ queryKey: accountKeys.detail() }); }} />
+        </div>
       </div>
     </AppShell>
   );
@@ -93,40 +97,48 @@ function ProfileSection(): React.JSX.Element {
 
   return (
     <SectionCard
+      flat
       title="Profile"
       description="The name shown in the app. Leave it empty to go by your email."
     >
-      <div className="flex flex-col gap-4">
-        {countError ? (
-          <p role="alert" className="text-sm text-red-700">
-            Completed tasks unavailable. Refresh the page to try again.
-            {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
-          </p>
-        ) : account.data ? (
-          <p aria-live="polite" aria-atomic="true" className="text-sm text-slate-600">
-            Completed tasks: {account.data.completed_task_count}
-          </p>
-        ) : (
-          <p role="status" aria-live="polite" className="text-sm text-slate-600">
-            Completed tasks: …
-          </p>
-        )}
-        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+      <div className="flex flex-col">
+        <form className="flex flex-col" onSubmit={handleSubmit}>
           <Field
+            row
             label="Display name"
             name="display_name"
             type="text"
             value={displayName}
             onChange={(value) => setDraft(value)}
             autoComplete="name"
+            action={
+              <Button type="submit" variant="secondary" size="md" isLoading={mutation.isPending}>
+                Save profile
+              </Button>
+            }
           />
-          <Feedback error={error} success={success} />
-          <div>
-            <Button type="submit" variant="primary" size="md" isLoading={mutation.isPending}>
-              Save profile
-            </Button>
-          </div>
+          {error || success ? (
+            <SettingRow>
+              <Feedback error={error} success={success} />
+            </SettingRow>
+          ) : null}
         </form>
+        <SettingRow>
+          {countError ? (
+            <p role="alert" className="text-danger">
+              Completed tasks unavailable. Refresh the page to try again.
+              {countError.referenceId ? ` (ref: ${countError.referenceId})` : ""}
+            </p>
+          ) : account.data ? (
+            <p aria-live="polite" aria-atomic="true">
+              Completed tasks: {account.data.completed_task_count}
+            </p>
+          ) : (
+            <p role="status" aria-live="polite" className="text-ink-muted">
+              Completed tasks: …
+            </p>
+          )}
+        </SettingRow>
       </div>
     </SectionCard>
   );
