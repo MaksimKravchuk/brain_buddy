@@ -55,7 +55,7 @@
 
     /// The run list of one step, plus the three action calls the fake relay records.
     private final class FakeSectionRemote: AgentRunSectionRemote {
-        let relay = FakeAgentRemote()
+        let relay = FakeHandoffRemote()
         private let listed = Mutex<[AgentRunDTO]>([])
 
         func set(_ runs: [AgentRunDTO]) { listed.withLock { $0 = runs } }

@@ -26,13 +26,13 @@ struct AgentRunActionsTests {
     @MainActor
     private struct Rig {
         let actions: AgentRunActions
-        let remote: FakeAgentRemote
+        let remote: FakeHandoffRemote
         let steps = FakeStepCommands()
         let availability: AgentAvailability
         let refreshes = RefreshCount()
 
         init(online: Bool = true) async {
-            let remote = FakeAgentRemote()
+            let remote = FakeHandoffRemote()
             let me: Result<MeDTO, APIError>? = online ? nil : .failure(HandoffFixture.offline)
             let flag = FakeAvailabilityRemote(me: me)
             let availability = AgentAvailability(account: AccountFixtures.account(), remote: { _ in flag })
