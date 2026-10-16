@@ -194,7 +194,12 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 - `CarryOnCatalogSnapshotTests` (macOS) renders every catalog section at iPhone and
   Mac sizes, light and dark, against `Tests/BrainBuddyDesignTests/__Snapshots__/`.
   A snapshot is committed only after it was compared with the design board and
-  approved; any later pixel change fails the `ios-app` lane.
+  approved; any later pixel change fails the `ios-app` lane. App and Mac snapshot
+  tests use the same `assertSnapshot` from the `BrainBuddyDesignTestSupport` product.
+- Text contrast is checked, not eyeballed: every text-on-surface role pair in use is
+  listed under `contrast.pairs` in the JSON and `DesignTokensTests` holds it to 4.5:1.
+  Grey text (`text-secondary`, `text-done`) on stone is 3.98:1, so on stone surfaces
+  (selected rows, pressed cards, sidebars, chips) use `text-secondary-on-quiet`.
 
 ### Current system (until the redesign lands)
 

@@ -15,6 +15,7 @@ extension ShapeStyle where Self == CarryOnColorStyle {
     public static var coTextPrimary: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.textPrimary) }
     public static var coTextSecondary: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.textSecondary) }
     public static var coTextDone: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.textDone) }
+    public static var coTextSecondaryOnQuiet: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.textSecondaryOnQuiet) }
     public static var coTextAccent: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.textAccent) }
     public static var coAccentFill: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.accentFill) }
     public static var coAccentPressed: CarryOnColorStyle { CarryOnColorStyle(CarryOnRole.accentPressed) }
@@ -34,12 +35,14 @@ extension ShapeStyle where Self == CarryOnColorStyle {
     public static var coButtonSecondaryFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.buttonSecondaryFg) }
     public static var coNextStepBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepBg) }
     public static var coNextStepProject: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepProject) }
+    public static var coNextStepProjectPressed: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepProjectPressed) }
     public static var coNextStepText: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.nextStepText) }
     public static var coStepDotCurrent: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.stepDotCurrent) }
     public static var coStepDotOpen: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.stepDotOpen) }
     public static var coStepTextDone: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.stepTextDone) }
     public static var coRowBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.rowBg) }
     public static var coRowBgSelected: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.rowBgSelected) }
+    public static var coRowTextSecondarySelected: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.rowTextSecondarySelected) }
     public static var coChipBg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipBg) }
     public static var coChipFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipFg) }
     public static var coChipDueFg: CarryOnColorStyle { CarryOnColorStyle(CarryOnComponentColor.chipDueFg) }

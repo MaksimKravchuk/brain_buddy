@@ -2,7 +2,7 @@
   "$description": "Carry On design tokens: the single source for the iPhone, Mac and web. Copied from the design canvas board 'Carry On design system · foundations' and 'components'. Edit here, then run `python3 scripts/generate_design_tokens.py`; never edit the generated files.",
   "primitive": {
     "limestone": { "0": "#FFFFFF", "100": "#E9E5DD", "200": "#DCD7CD", "300": "#CBC5B9" },
-    "dust": { "300": "#A8A196", "400": "#8A8478", "600": "#6B665C" },
+    "dust": { "300": "#A8A196", "400": "#8A8478", "600": "#6B665C", "700": "#5E5A51" },
     "basalt": { "700": "#34322E", "800": "#2A2926", "900": "#1C1B19", "950": "#141412" },
     "terracotta": { "400": "#E07055", "500": "#C4472A", "600": "#A8432A" },
     "ochre": { "400": "#C9A04A", "700": "#74591A" },
@@ -17,6 +17,7 @@
     "text-primary": { "light": "basalt.900", "dark": "limestone.100" },
     "text-secondary": { "light": "dust.600", "dark": "dust.300" },
     "text-done": { "light": "dust.600", "dark": "dust.300" },
+    "text-secondary-on-quiet": { "light": "dust.700", "dark": "dust.300" },
     "text-accent": { "light": "terracotta.600", "dark": "terracotta.400" },
     "accent-fill": { "light": "terracotta.500", "dark": "terracotta.500" },
     "accent-pressed": { "light": "terracotta.600", "dark": "terracotta.600" },
@@ -37,12 +38,14 @@
     "button-secondary-fg": "text-primary",
     "next-step-bg": "surface-card",
     "next-step-project": "text-secondary",
+    "next-step-project-pressed": "text-secondary-on-quiet",
     "next-step-text": "text-primary",
     "step-dot-current": "accent-fill",
     "step-dot-open": "mark-open",
     "step-text-done": "text-done",
     "row-bg": "surface-card",
     "row-bg-selected": "surface-selected",
+    "row-text-secondary-selected": "text-secondary-on-quiet",
     "chip-bg": "control-quiet",
     "chip-fg": "text-primary",
     "chip-due-fg": "status-warning",
@@ -54,6 +57,23 @@
     "voice-live-ring": "accent-fill",
     "sidebar-bg": "bg-sunken",
     "sidebar-row-selected": "surface-card"
+  },
+  "contrast": {
+    "$description": "Every text role on every surface role it is drawn on, light and dark. DesignTokensTests holds each pair to WCAG AA (4.5:1). A pair that is not listed is not used: grey text on stone needs text-secondary-on-quiet.",
+    "pairs": [
+      ["text-primary", "bg-ground"], ["text-primary", "bg-sunken"], ["text-primary", "surface-card"],
+      ["text-primary", "surface-selected"], ["text-primary", "control-quiet"], ["text-primary", "control-quiet-pressed"],
+      ["text-primary", "surface-token"],
+      ["text-secondary", "bg-ground"], ["text-secondary", "surface-card"], ["text-secondary", "surface-token"],
+      ["text-done", "bg-ground"], ["text-done", "surface-card"],
+      ["text-secondary-on-quiet", "bg-sunken"], ["text-secondary-on-quiet", "surface-selected"],
+      ["text-secondary-on-quiet", "control-quiet"],
+      ["text-accent", "bg-ground"], ["text-accent", "surface-card"],
+      ["status-warning", "bg-ground"], ["status-warning", "surface-card"], ["status-warning", "control-quiet"],
+      ["status-danger", "bg-ground"], ["status-danger", "surface-card"], ["status-danger", "control-quiet"],
+      ["on-accent", "accent-fill"], ["on-accent", "accent-pressed"],
+      ["bg-ground", "text-primary"]
+    ]
   },
   "project": {
     "lake": "#3E6A7A",

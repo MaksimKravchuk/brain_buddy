@@ -7,7 +7,9 @@
     import UniformTypeIdentifiers
 
     /// Renders `view` at 2x and compares it pixel by pixel with the approved PNG in
-    /// `__Snapshots__/<name>.png` beside this file. Any pixel whose colour moves by
+    /// `__Snapshots__/<name>.png` beside the calling test file (`filePath` defaults to
+    /// the caller's). Shared by the kit's own catalog snapshots and the Mac app's
+    /// screen snapshots, so both apps are held to the same rule. Any pixel whose colour moves by
     /// more than `channelTolerance` of 255 fails: a one-point shift, a wrong radius or
     /// a role swapped for its neighbour all show up.
     ///
@@ -16,7 +18,7 @@
     /// carries the render as base64 between `CARRY_ON_SNAPSHOT` markers, so a CI log is
     /// enough to recover it without a Mac.
     @MainActor
-    func assertSnapshot(
+    public func assertSnapshot(
         _ view: some View,
         named name: String,
         scheme: ColorScheme,
@@ -74,12 +76,12 @@
     }
 
     /// An image redrawn as sRGB RGBA8, so a render and a decoded PNG compare byte for byte.
-    struct RGBAImage {
-        let width: Int
-        let height: Int
-        let pixels: [UInt8]
+    public struct RGBAImage: Sendable {
+        public let width: Int
+        public let height: Int
+        public let pixels: [UInt8]
 
-        init?(_ image: CGImage) {
+        public init?(_ image: CGImage) {
             let width = image.width
             let height = image.height
             guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
@@ -101,7 +103,7 @@
         }
 
         /// Nil when every pixel is within tolerance; otherwise what differs, in words.
-        func difference(from other: RGBAImage, channelTolerance: Int) -> String? {
+        public func difference(from other: RGBAImage, channelTolerance: Int) -> String? {
             guard width == other.width, height == other.height else {
                 return "size is \(other.width)x\(other.height) px, approved \(width)x\(height) px"
             }

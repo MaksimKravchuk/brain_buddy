@@ -1,5 +1,6 @@
 #if canImport(SwiftUI) && os(macOS)
     import BrainBuddyDesign
+    import BrainBuddyDesignTestSupport
     import SwiftUI
     import Testing
 
