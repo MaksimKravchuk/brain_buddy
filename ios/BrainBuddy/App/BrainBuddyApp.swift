@@ -57,6 +57,7 @@ struct BrainBuddyApp: App {
             SceneRoot()
                 .modifier(WidgetReloadAfterSync())
                 .environment(workspace)
+                .modifier(AgentsHost(workspace: workspace))
                 .environment(diagnostics)
                 .task { await diagnostics?.start() }
                 .task { await start() }
