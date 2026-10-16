@@ -4,11 +4,12 @@
 Used by .github/workflows/ios.yml. `decide` answers whether `main` should
 upload a build: only when the range touches files that end up in the app
 (app and widget sources, the shared kit's sources, the project and package
-manifests), not when it only touches tests, docs, CI scripts or the macOS
-app. `notes` writes the build's "What to Test": branch and commit, the pull
+manifests, the Rust core the app links), not when it only touches tests,
+docs, CI scripts, the macOS app or Rust crates the app does not link. The
+path rules live in scripts/release_graph.py. `notes` writes the build's "What to Test": branch and commit, the pull
 request title, and one line per commit in the range that changed the app.
 
-Standard library and git only. It runs before any signing material exists,
+Standard library and git only (release_graph.py is stdlib too). It runs before any signing material exists,
 but keeping it dependency-free keeps the upload workflow's surface small.
 """
 
@@ -18,30 +19,32 @@ import argparse
 import re
 import subprocess
 import sys
+from pathlib import Path
 
-# Paths whose changes reach the binary uploaded to TestFlight. Prefixes end
-# with "/"; the rest are exact files.
-APP_PATHS: tuple[str, ...] = (
-    "ios/BrainBuddy/",
-    "ios/BrainBuddyWidgets/",
-    "ios/Shared/",
-    "ios/BrainBuddyKit/Sources/",
-    "ios/BrainBuddyKit/Package.swift",
-    "ios/BrainBuddyKit/Package.resolved",
-    "ios/project.yml",
-)
-# Documentation inside those folders doesn't change the build.
-IGNORED_SUFFIXES: tuple[str, ...] = (".md",)
+# What reaches the uploaded binary is the `ios-testflight` entry of the
+# shared component -> release graph: the app, widget and kit sources, the
+# project and package manifests, and the Rust crates the app links through
+# bb-swift (read from the Cargo manifests, so a new crate dependency counts).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from release_graph import Graph
+
+RELEASE = "ios-testflight"
+# Where to look for app commits in `git log`; is_app_path() decides the rest.
+LOG_PATHS = ("ios/", "rust/")
 
 # Apple caps whatsNew at 4000 characters; leave room for the truncation line.
 MAX_NOTES = 4000
 _MERGE_PR = re.compile(r"^Merge pull request #(\d+) from \S+$")
 
 
+_GRAPH: Graph | None = None
+
+
 def is_app_path(path: str) -> bool:
-    if path.endswith(IGNORED_SUFFIXES):
-        return False
-    return any(path.startswith(p) if p.endswith("/") else path == p for p in APP_PATHS)
+    global _GRAPH
+    if _GRAPH is None:
+        _GRAPH = Graph()
+    return _GRAPH.reaches(RELEASE, path)
 
 
 def git(*args: str) -> str:
@@ -71,7 +74,7 @@ def headline(head: str) -> str:
 def app_commits(base: str, head: str) -> list[str]:
     """`<short sha> <subject>` for each non-merge commit in base..head that changed the app."""
     log = git(
-        "log", "--no-merges", "--name-only", "--no-renames", "--format=%x00%h %s", f"{base}..{head}", "--", "ios/"
+        "log", "--no-merges", "--name-only", "--no-renames", "--format=%x00%h %s", f"{base}..{head}", "--", *LOG_PATHS
     )
     commits = []
     for entry in log.split("\x00"):
