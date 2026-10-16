@@ -243,10 +243,10 @@ struct MacTaskRow: View {
     }
 }
 
-/// The board's secondary pill: 32 high, 14 semibold, padding 0 14. `quiet` is text only.
+/// The board's pill: primary (terracotta), secondary or quiet; 32 high, 14 semibold, padding 0 14. `quiet` is text only.
 struct MacPillButtonStyle: ButtonStyle {
     enum Kind: Sendable {
-        case secondary, quiet
+        case primary, secondary, quiet
     }
 
     let kind: Kind
@@ -278,6 +278,7 @@ private struct MacPillButtonBody<Label: View>: View {
 
     private var foreground: CarryOnColorStyle {
         switch kind {
+        case .primary: CarryOnColorStyle.coButtonPrimaryFg
         case .secondary: CarryOnColorStyle.coButtonSecondaryFg
         case .quiet: CarryOnColorStyle.coTextPrimary
         }
@@ -285,6 +286,7 @@ private struct MacPillButtonBody<Label: View>: View {
 
     private var background: CarryOnColorStyle? {
         switch kind {
+        case .primary: isPressed ? CarryOnColorStyle.coButtonPrimaryBgPressed : CarryOnColorStyle.coButtonPrimaryBg
         case .secondary: isPressed ? CarryOnColorStyle.coButtonSecondaryBgPressed : CarryOnColorStyle.coButtonSecondaryBg
         case .quiet: nil
         }
@@ -292,6 +294,7 @@ private struct MacPillButtonBody<Label: View>: View {
 }
 
 extension ButtonStyle where Self == MacPillButtonStyle {
+    static var macPrimaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .primary) }
     static var macSecondaryPill: MacPillButtonStyle { MacPillButtonStyle(kind: .secondary) }
     static var macQuietPill: MacPillButtonStyle { MacPillButtonStyle(kind: .quiet) }
 }
