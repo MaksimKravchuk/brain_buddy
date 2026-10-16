@@ -14,6 +14,8 @@ new one made on the spot), then become a Next action, a Waiting item with a reas
 Cancelled; or it can become a new project of its own, with an optional desired outcome and a first
 Next action (one change). Quick capture (⌃⌥⇧B) and Smart Add (`#tag`, `@project`) use the kit's capture, so a
 capture never waits for the network. Quick Open (⌘O) finds lists, projects, tags and tasks.
+View › "Close task details" (⌘\) closes the open task, asking first about unsaved edits, and
+Edit › Undo (⌘Z) takes back the last Done, Cancel or move. The web app shares ⌘O, ⌘\ and ⌘Z.
 
 Projects are archived and unarchived without changing any task's project: an archived project
 stays browsable under the collapsible "Archived projects · N" sidebar section, shows "Archived"

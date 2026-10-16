@@ -215,6 +215,40 @@ describe("AppShell canonical sidebar", () => {
     expect(screen.getByTestId("pathname")).toHaveTextContent("/settings/agents");
   });
 
+  it("focuses Search tasks on Ctrl/Cmd+O from anywhere outside a modal, as Quick Open does on the Mac", () => {
+    renderShell();
+    const [search] = screen.getAllByRole("searchbox", { name: "Search tasks" });
+    expect(search).toHaveAttribute("aria-keyshortcuts", "Control+O Meta+O");
+    fireEvent.change(search, { target: { value: "van" } });
+    search.blur();
+
+    const opened = fireEvent.keyDown(document.body, { key: "o", metaKey: true });
+    expect(opened).toBe(false);
+    expect(search).toHaveFocus();
+    expect((search as HTMLInputElement).selectionStart).toBe(0);
+    expect((search as HTMLInputElement).selectionEnd).toBe(3);
+
+    search.blur();
+    expect(fireEvent.keyDown(document.body, { key: "щ", code: "KeyO", ctrlKey: true })).toBe(false);
+    expect(search).toHaveFocus();
+
+    search.blur();
+    expect(fireEvent.keyDown(document.body, { key: "o" })).toBe(true);
+    expect(fireEvent.keyDown(document.body, { key: "o", metaKey: true, shiftKey: true })).toBe(true);
+    expect(search).not.toHaveFocus();
+  });
+
+  it("leaves Ctrl/Cmd+O alone while a modal dialog is open", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "Open task navigation" }));
+    expect(screen.getByRole("dialog", { name: "Task navigation" })).toHaveAttribute("aria-modal", "true");
+    const [search] = screen.getAllByRole("searchbox", { name: "Search tasks" });
+
+    expect(fireEvent.keyDown(document.body, { key: "o", ctrlKey: true })).toBe(true);
+    expect(search).not.toHaveFocus();
+  });
+
   it("keeps the mobile drawer CRUD usable and closes it on Escape and on navigation", async () => {
     const user = userEvent.setup();
     renderShell();
