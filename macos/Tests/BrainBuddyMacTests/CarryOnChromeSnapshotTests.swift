@@ -18,7 +18,7 @@
 
         private struct Fixture {
             let title: String
-            let symbol: String
+            let icon: MacBoardIcon
             var count: String?
             var selected = false
         }
@@ -26,7 +26,7 @@
         private func rows(_ fixtures: [Fixture]) -> some View {
             ForEach(fixtures, id: \.title) { fixture in
                 MacSidebarRowLabel(
-                    title: fixture.title, leading: .symbol(fixture.symbol), trailing: fixture.count,
+                    title: fixture.title, leading: .icon(fixture.icon), trailing: fixture.count,
                     selected: fixture.selected)
             }
         }
@@ -36,16 +36,16 @@
                 MacSidebarBrand()
                 MacSidebarSectionHeader(title: "Lists")
                 rows([
-                    Fixture(title: "Inbox", symbol: "tray", count: "4", selected: true),
-                    Fixture(title: "Next actions", symbol: "checklist", count: "12"),
-                    Fixture(title: "Waiting for", symbol: "clock", count: "3"),
-                    Fixture(title: "Someday / maybe", symbol: "archivebox", count: "9"),
+                    Fixture(title: "Inbox", icon: .inbox, count: "4", selected: true),
+                    Fixture(title: "Next actions", icon: .nextActions, count: "12"),
+                    Fixture(title: "Waiting for", icon: .waitingFor, count: "3"),
+                    Fixture(title: "Someday / maybe", icon: .somedayMaybe, count: "9"),
                 ])
                 MacSidebarSectionHeader(title: "Dates")
                 rows([
-                    Fixture(title: "Overdue", symbol: "exclamationmark.triangle", count: "1"),
-                    Fixture(title: "Today", symbol: "calendar", count: "2"),
-                    Fixture(title: "Upcoming", symbol: "arrow.up.right", count: "5"),
+                    Fixture(title: "Overdue", icon: .calendar, count: "1"),
+                    Fixture(title: "Today", icon: .calendar, count: "2"),
+                    Fixture(title: "Upcoming", icon: .calendar, count: "5"),
                 ])
                 MacSidebarSectionHeader(title: "Projects")
                 MacSidebarRowLabel(title: "Garage", leading: .dot(projectTint("#B8862B")), selected: false)
@@ -53,8 +53,8 @@
                 MacSidebarRowLabel(title: "Taxes", leading: .dot(projectTint("#3E6A7A")), selected: false)
                 MacSidebarSectionHeader(title: "History")
                 rows([
-                    Fixture(title: "Done", symbol: "checkmark.circle"),
-                    Fixture(title: "Cancelled", symbol: "xmark.circle"),
+                    Fixture(title: "Done", icon: .history),
+                    Fixture(title: "Cancelled", icon: .history),
                 ])
             }
             .padding(.horizontal, 10)
