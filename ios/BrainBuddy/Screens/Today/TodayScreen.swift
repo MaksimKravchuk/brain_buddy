@@ -39,6 +39,7 @@ struct TodayScreen: View {
         }
         .listStyle(.plain)
         .bbDenseList()
+        .bbListBackground()
         .animation(
             BBMotion.animation(.settle, reduceMotion: reduceMotion),
             value: agenda.sections.flatMap(\.tasks).map(\.id)
@@ -95,6 +96,8 @@ private struct AgendaSection: View {
                     TaskRow(task: task, showsProject: true, showsList: true,
                         preparedFormulation: workspace.listFormulation(task.id, destination: .agenda))
                 }
+                .navigationLinkIndicatorVisibility(.hidden)
+                .bbCardRow()
                 .taskActions(task)
             }
         } header: {
@@ -102,9 +105,10 @@ private struct AgendaSection: View {
                 title,
                 count: section.tasks.count,
                 systemImage: symbolName,
-                tint: dateView == .overdue ? BBColor.dueText : nil,
+                tint: dateView == .overdue ? BBColor.overdueText : nil,
                 countsTasks: true
             )
+            .listRowInsets(BBCardRow.headerInsets)
         }
     }
 

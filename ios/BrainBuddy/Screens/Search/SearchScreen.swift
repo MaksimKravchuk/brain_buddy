@@ -88,8 +88,10 @@ private struct SearchIdleView: View {
                 } footer: {
                     Text("Searches this \(ThisDevice.name)")
                 }
+                .bbGroupedRows()
             }
             .bbDenseList()
+            .bbListBackground()
         }
     }
 }
@@ -119,10 +121,13 @@ private struct SearchResultsView: View {
                                 TaskRow(task: task, showsProject: true, showsList: true,
                                     preparedFormulation: workspace.listFormulation(task.id, destination: .search(text)))
                             }
+                            .navigationLinkIndicatorVisibility(.hidden)
+                            .bbCardRow()
                             .taskActions(task)
                         }
                     } header: {
                         BBSectionHeader(SearchScreen.title(for: section), count: section.totalCount, countsTasks: true)
+                            .listRowInsets(BBCardRow.headerInsets)
                     } footer: {
                         if section.id == sections.last?.id {
                             Text("Searches this \(ThisDevice.name)")
@@ -130,7 +135,9 @@ private struct SearchResultsView: View {
                     }
                 }
             }
+            .listStyle(.plain)
             .bbDenseList()
+            .bbListBackground()
             .animation(
                 BBMotion.animation(.settle, reduceMotion: reduceMotion),
                 value: sections.flatMap(\.tasks).map(\.id)
