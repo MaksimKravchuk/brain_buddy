@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authApi } from "../../../api/auth";
-import { ApiError, notifyUnauthorized, setUnauthorizedHandler } from "../../../api/client";
+import { ApiError, currentSessionEpoch, notifyUnauthorized, setUnauthorizedHandler } from "../../../api/client";
 import { ProtectedRoute } from "../../../components/auth/ProtectedRoute";
 import { crtApi } from "../../../api/crt";
 import { useAuthStore } from "../../../stores/authStore";
@@ -147,7 +147,7 @@ describe("CrtGate exposure boundary", () => {
   it("019-FR-001 clears an expired session so ProtectedRoute redirects to login", async () => {
     setUnauthorizedHandler(() => useAuthStore.getState().clearSession());
     vi.spyOn(crtApi, "probeCrtExposure").mockImplementation(() => {
-      notifyUnauthorized();
+      notifyUnauthorized(currentSessionEpoch());
       return Promise.reject(new ApiError("Unauthorized", 401, { detail: "expired" }, "expired-reference"));
     });
 
@@ -170,7 +170,7 @@ describe("CrtGate exposure boundary", () => {
     useAuthStore.setState({ clearSession });
     setUnauthorizedHandler(() => useAuthStore.getState().clearSession());
     vi.spyOn(crtApi, "probeCrtExposure").mockImplementation(() => {
-      notifyUnauthorized();
+      notifyUnauthorized(currentSessionEpoch());
       return Promise.reject(new ApiError("Unauthorized", 401, { detail: "expired" }, "expired-reference"));
     });
 

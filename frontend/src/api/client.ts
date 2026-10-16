@@ -73,15 +73,31 @@ type JsonRequestOptions = Omit<RequestInit, "body"> & {
   signal?: AbortSignal;
 };
 
-type UnauthorizedHandler = () => void;
+/**
+ * Which browser session a request was sent under. The auth store advances it
+ * on every sign-in, sign-out and account switch; a request captures it before
+ * `fetch` and hands it back with a 401, so a late 401 from a session that has
+ * since ended cannot sign out (or silently cancel) the one that replaced it.
+ */
+let sessionEpoch = 0;
+
+export function currentSessionEpoch(): number {
+  return sessionEpoch;
+}
+
+export function advanceSessionEpoch(): void {
+  sessionEpoch += 1;
+}
+
+type UnauthorizedHandler = (sentUnder: number) => void;
 let onUnauthorized: UnauthorizedHandler | null = null;
 
 export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
 }
 
-export function notifyUnauthorized() {
-  onUnauthorized?.();
+export function notifyUnauthorized(sentUnder: number) {
+  onUnauthorized?.(sentUnder);
 }
 
 /** 027 D-02: the explicit version refusal (426 + code UPGRADE_REQUIRED), never inferred from anything else. */
@@ -149,6 +165,7 @@ async function request<T>(path: string, options: JsonRequestOptions): Promise<T>
   }
 
   const startMs = nowMs();
+  const sentUnder = currentSessionEpoch();
   let response: Response;
   try {
     response = await fetch(buildUrl(path), {
@@ -172,7 +189,7 @@ async function request<T>(path: string, options: JsonRequestOptions): Promise<T>
   }
 
   if (response.status === 401) {
-    notifyUnauthorized();
+    notifyUnauthorized(sentUnder);
   }
 
   if (response.status === 204) {

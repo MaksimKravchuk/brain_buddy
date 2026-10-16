@@ -2,6 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { authApi, type AuthUser } from "../../api/auth";
+import { currentSessionEpoch, notifyUnauthorized, setUnauthorizedHandler } from "../../api/client";
 import * as crtBoundary from "../../features/crt/crtDraftCoordinator";
 import { FLAG_REFRESH_INTERVAL_MS, startFlagRefresh, useAuthStore } from "../authStore";
 
@@ -822,5 +823,74 @@ describe("authStore background flag refresh (010-FR-009)", () => {
 
     expect(useAuthStore.getState().status).toBe("anon");
     expect(useAuthStore.getState().user).toBeNull();
+  });
+});
+
+describe("authStore 401 from an ended session", () => {
+  const user: AuthUser = { id: "u1", email: "a@b.c" };
+
+  beforeEach(() => {
+    useAuthStore.setState({ user, status: "authed" });
+    setUnauthorizedHandler((sentUnder) => { useAuthStore.getState().clearSession(sentUnder); });
+  });
+
+  afterEach(() => {
+    setUnauthorizedHandler(null);
+    vi.restoreAllMocks();
+  });
+
+  it("a 401 sent before sign-out does not cancel the sign-in in flight when it lands", async () => {
+    const sentUnder = currentSessionEpoch();
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    await useAuthStore.getState().logout();
+
+    let finishLogin: (signedIn: AuthUser) => void = () => undefined;
+    vi.spyOn(authApi, "login").mockReturnValue(new Promise((resolve) => { finishLogin = resolve; }));
+    const signingIn = useAuthStore.getState().login({ email: "a@b.c", password: "rotated" });
+    await vi.waitFor(() => { expect(authApi.login).toHaveBeenCalled(); });
+    notifyUnauthorized(sentUnder);
+    finishLogin(user);
+    await signingIn;
+
+    expect(useAuthStore.getState().status).toBe("authed");
+    expect(useAuthStore.getState().user?.id).toBe("u1");
+  });
+
+  it("a 401 from the previous session does not end the same account's new session", async () => {
+    const sentUnder = currentSessionEpoch();
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    vi.spyOn(authApi, "login").mockResolvedValue(user);
+    await useAuthStore.getState().logout();
+    await useAuthStore.getState().login({ email: "a@b.c", password: "rotated" });
+
+    notifyUnauthorized(sentUnder);
+
+    expect(useAuthStore.getState().status).toBe("authed");
+  });
+
+  it("a 401 sent while signed out clears nothing", async () => {
+    vi.spyOn(authApi, "logout").mockResolvedValue(undefined);
+    await useAuthStore.getState().logout();
+
+    expect(useAuthStore.getState().clearSession(currentSessionEpoch())).toBe(false);
+    expect(useAuthStore.getState().status).toBe("anon");
+  });
+
+  it("a 401 sent under the current session still signs it out", () => {
+    notifyUnauthorized(currentSessionEpoch());
+
+    expect(useAuthStore.getState().status).toBe("anon");
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("a refresh of the same account keeps the epoch, so its 401s still apply", async () => {
+    const sentUnder = currentSessionEpoch();
+    vi.spyOn(authApi, "me").mockResolvedValue({ ...user, display_name: "Renamed" });
+    await useAuthStore.getState().refreshSession();
+    expect(currentSessionEpoch()).toBe(sentUnder);
+
+    notifyUnauthorized(sentUnder);
+
+    expect(useAuthStore.getState().status).toBe("anon");
   });
 });

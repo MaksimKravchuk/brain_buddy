@@ -14,8 +14,8 @@ export default function App(): React.JSX.Element {
   }, [hydrate]);
 
   useEffect(() => {
-    setUnauthorizedHandler(() => {
-      clearSession();
+    setUnauthorizedHandler((sentUnder) => {
+      clearSession(sentUnder);
     });
     return () => setUnauthorizedHandler(null);
   }, [clearSession]);

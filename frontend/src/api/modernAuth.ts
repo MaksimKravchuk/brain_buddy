@@ -1,6 +1,6 @@
 import type { AuthUser } from "./auth";
 import type { AccountDeleteResponse } from "./accountTypes";
-import { ApiError, getApiBaseUrl, notifyUnauthorized } from "./client";
+import { ApiError, currentSessionEpoch, getApiBaseUrl, notifyUnauthorized } from "./client";
 import { parseAttachmentFilename } from "./account";
 import { clientEpochHeaders } from "./clientEpoch";
 
@@ -30,13 +30,14 @@ export interface AccountAction { recent_proof: string; expected_account_id: stri
 // Auth errors deliberately avoid the generic client's network-error telemetry:
 // an upstream exception must never put a credential or callback URL in logs.
 async function send(path: string, body?: unknown): Promise<Response> {
+  const sentUnder = currentSessionEpoch();
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: body === undefined ? "GET" : "POST", credentials: "include",
     cache: "no-store", headers: { ...clientEpochHeaders(), Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (!response.ok) {
-    if (response.status === 401 && path.startsWith("/account/")) notifyUnauthorized();
+    if (response.status === 401 && path.startsWith("/account/")) notifyUnauthorized(sentUnder);
     let payload: unknown = null;
     try { payload = await response.json(); } catch { /* only safe references are displayed */ }
     throw new ApiError("Authentication request failed", response.status, payload, response.headers.get("X-Correlation-ID") ?? undefined);
