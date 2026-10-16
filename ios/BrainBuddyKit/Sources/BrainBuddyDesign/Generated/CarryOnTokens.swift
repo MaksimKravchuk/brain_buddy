@@ -180,6 +180,35 @@ public enum CarryOnLayout {
         public static let height: Double = 38
         public static let paddingX: Double = 14
     }
+    public enum FirstRun {
+        public static let mark: Double = 132
+        public static let brandSize: Double = 56
+        public static let brandGap: Double = 28
+        public static let largeTextSize: Double = 19
+        public static let largeTextLineHeight: Double = 1.4
+        public static let ledeGap: Double = 12
+        public static let noteGap: Double = 38
+        public static let top: Double = 36
+        public static let side: Double = 24
+        public static let subtitleGap: Double = 10
+        public static let fieldGap: Double = 28
+        public static let fieldPadding: Double = 16
+        public static let fieldRadius: Double = 14
+        public static let fieldMinHeight: Double = 96
+        public static let hintGap: Double = 12
+        public static let sourceGap: Double = 6
+        public static let questionSize: Double = 30
+        public static let questionGap: Double = 26
+        public static let stepFieldGap: Double = 20
+        public static let stepSize: Double = 22
+        public static let stepLineHeight: Double = 1.25
+    }
+    public enum LandingTip {
+        public static let paddingY: Double = 16
+        public static let paddingX: Double = 18
+        public static let radius: Double = 14
+        public static let actionGap: Double = 10
+    }
     public enum Row {
         public static let paddingY: Double = 14
         public static let paddingX: Double = 16
@@ -212,35 +241,6 @@ public enum CarryOnLayout {
     }
     public enum MacSidebarRow {
         public static let height: Double = 34
-    }
-    public enum FirstRun {
-        public static let mark: Double = 132
-        public static let brandSize: Double = 56
-        public static let brandGap: Double = 28
-        public static let largeTextSize: Double = 19
-        public static let largeTextLineHeight: Double = 1.4
-        public static let ledeGap: Double = 12
-        public static let noteGap: Double = 38
-        public static let top: Double = 36
-        public static let side: Double = 24
-        public static let subtitleGap: Double = 10
-        public static let fieldGap: Double = 28
-        public static let fieldPadding: Double = 16
-        public static let fieldRadius: Double = 14
-        public static let fieldMinHeight: Double = 96
-        public static let hintGap: Double = 12
-        public static let sourceGap: Double = 6
-        public static let questionSize: Double = 30
-        public static let questionGap: Double = 26
-        public static let stepFieldGap: Double = 20
-        public static let stepSize: Double = 22
-        public static let stepLineHeight: Double = 1.25
-    }
-    public enum LandingTip {
-        public static let paddingY: Double = 16
-        public static let paddingX: Double = 18
-        public static let radius: Double = 14
-        public static let actionGap: Double = 10
     }
 }
 
@@ -447,27 +447,6 @@ public enum CarryOnTokenTable {
         "layout.chip.outline-width": CarryOnLayout.Chip.outlineWidth,
         "layout.quick-chip.height": CarryOnLayout.QuickChip.height,
         "layout.quick-chip.padding-x": CarryOnLayout.QuickChip.paddingX,
-        "layout.row.padding-y": CarryOnLayout.Row.paddingY,
-        "layout.row.padding-x": CarryOnLayout.Row.paddingX,
-        "layout.row.radius": CarryOnLayout.Row.radius,
-        "layout.row.gap": CarryOnLayout.Row.gap,
-        "layout.row.mark": CarryOnLayout.Row.mark,
-        "layout.row.mark-stroke": CarryOnLayout.Row.markStroke,
-        "layout.row.meta-gap": CarryOnLayout.Row.metaGap,
-        "layout.row.line-height": CarryOnLayout.Row.lineHeight,
-        "layout.next-step-card.padding-y": CarryOnLayout.NextStepCard.paddingY,
-        "layout.next-step-card.padding-x": CarryOnLayout.NextStepCard.paddingX,
-        "layout.next-step-card.radius": CarryOnLayout.NextStepCard.radius,
-        "layout.next-step-card.project-gap": CarryOnLayout.NextStepCard.projectGap,
-        "layout.next-step-card.project-line-height": CarryOnLayout.NextStepCard.projectLineHeight,
-        "layout.next-step-card.pressed-scale": CarryOnLayout.NextStepCard.pressedScale,
-        "layout.strike.thickness": CarryOnLayout.Strike.thickness,
-        "layout.focus-ring.width": CarryOnLayout.FocusRing.width,
-        "layout.focus-ring.offset": CarryOnLayout.FocusRing.offset,
-        "layout.bottom-bar.side": CarryOnLayout.BottomBar.side,
-        "layout.bottom-bar.bottom": CarryOnLayout.BottomBar.bottom,
-        "layout.bottom-bar.height": CarryOnLayout.BottomBar.height,
-        "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
         "layout.first-run.mark": CarryOnLayout.FirstRun.mark,
         "layout.first-run.brand-size": CarryOnLayout.FirstRun.brandSize,
         "layout.first-run.brand-gap": CarryOnLayout.FirstRun.brandGap,
@@ -493,6 +472,27 @@ public enum CarryOnTokenTable {
         "layout.landing-tip.padding-x": CarryOnLayout.LandingTip.paddingX,
         "layout.landing-tip.radius": CarryOnLayout.LandingTip.radius,
         "layout.landing-tip.action-gap": CarryOnLayout.LandingTip.actionGap,
+        "layout.row.padding-y": CarryOnLayout.Row.paddingY,
+        "layout.row.padding-x": CarryOnLayout.Row.paddingX,
+        "layout.row.radius": CarryOnLayout.Row.radius,
+        "layout.row.gap": CarryOnLayout.Row.gap,
+        "layout.row.mark": CarryOnLayout.Row.mark,
+        "layout.row.mark-stroke": CarryOnLayout.Row.markStroke,
+        "layout.row.meta-gap": CarryOnLayout.Row.metaGap,
+        "layout.row.line-height": CarryOnLayout.Row.lineHeight,
+        "layout.next-step-card.padding-y": CarryOnLayout.NextStepCard.paddingY,
+        "layout.next-step-card.padding-x": CarryOnLayout.NextStepCard.paddingX,
+        "layout.next-step-card.radius": CarryOnLayout.NextStepCard.radius,
+        "layout.next-step-card.project-gap": CarryOnLayout.NextStepCard.projectGap,
+        "layout.next-step-card.project-line-height": CarryOnLayout.NextStepCard.projectLineHeight,
+        "layout.next-step-card.pressed-scale": CarryOnLayout.NextStepCard.pressedScale,
+        "layout.strike.thickness": CarryOnLayout.Strike.thickness,
+        "layout.focus-ring.width": CarryOnLayout.FocusRing.width,
+        "layout.focus-ring.offset": CarryOnLayout.FocusRing.offset,
+        "layout.bottom-bar.side": CarryOnLayout.BottomBar.side,
+        "layout.bottom-bar.bottom": CarryOnLayout.BottomBar.bottom,
+        "layout.bottom-bar.height": CarryOnLayout.BottomBar.height,
+        "layout.mac-sidebar-row.height": CarryOnLayout.MacSidebarRow.height,
     ]
     public static let strings: [String: String] = [
         "font.voice.family": CarryOnFontFace.voice.family,
