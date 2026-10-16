@@ -174,6 +174,7 @@ public enum CarryOnLayout {
         public static let dot: Double = 10
         public static let macHeight: Double = 26
         public static let macFontSize: Double = 13
+        public static let outlineWidth: Double = 1.5
     }
     public enum QuickChip {
         public static let height: Double = 38
@@ -414,6 +415,7 @@ public enum CarryOnTokenTable {
         "layout.chip.dot": CarryOnLayout.Chip.dot,
         "layout.chip.mac-height": CarryOnLayout.Chip.macHeight,
         "layout.chip.mac-font-size": CarryOnLayout.Chip.macFontSize,
+        "layout.chip.outline-width": CarryOnLayout.Chip.outlineWidth,
         "layout.quick-chip.height": CarryOnLayout.QuickChip.height,
         "layout.quick-chip.padding-x": CarryOnLayout.QuickChip.paddingX,
         "layout.row.padding-y": CarryOnLayout.Row.paddingY,
