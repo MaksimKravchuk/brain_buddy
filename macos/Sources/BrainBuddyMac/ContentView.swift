@@ -319,16 +319,7 @@ struct WorkspaceView: View {
         .onChange(of: selectedTaskID) { _, id in sync.triggers?.setOpenTask(id) }
         .focusedSceneValue(\.workspaceModel, model)
         .focusedSceneValue(\.macSyncController, sync)
-        .onAppear {
-            quickCapture.start(model: model)
-            firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
-            firstRun.speechAvailable = VoiceTranscriber.bundledModel() != nil
-        }
-        // 029-FR-013: an account linked at any step ends the first run.
-        .onChange(of: model.workspace.account != nil) { _, linked in
-            if linked { firstRun.accountLinked() }
-        }
-        .onChange(of: firstRun.phase) { _, phase in firstRunPhaseChanged(phase) }
+        .onAppear(perform: windowAppeared)
         .onDisappear {
             quickCapture.stop()
             saveTaskEditsOnClose()
@@ -1093,9 +1084,26 @@ struct WorkspaceView: View {
 
     private var firstRun: FirstRunModel { model.firstRun }
 
+    private func windowAppeared() {
+        quickCapture.start(model: model)
+        firstRun.hotkeyAvailable = quickCapture.hotkeyRegistered
+        firstRun.speechAvailable = VoiceTranscriber.bundledModel() != nil
+    }
+
+    /// The detail column with the first-run hooks; they live here, not on `window`, so that
+    /// modifier chain stays within the type checker's budget.
+    private var detailCanvas: some View {
+        firstRunCanvas
+            // 029-FR-013: an account linked at any step ends the first run.
+            .onChange(of: model.workspace.account != nil) { _, linked in
+                if linked { firstRun.accountLinked() }
+            }
+            .onChange(of: firstRun.phase) { _, phase in firstRunPhaseChanged(phase) }
+    }
+
     /// F-01 replaces the empty Inbox; every other phase uses the list with F-02/F-03 around it.
     @ViewBuilder
-    private var detailCanvas: some View {
+    private var firstRunCanvas: some View {
         if firstRun.phase == .welcome {
             WelcomeInboxView(
                 text: $model.draft, hotkeyAvailable: firstRun.hotkeyAvailable, speechAvailable: firstRun.speechAvailable,
