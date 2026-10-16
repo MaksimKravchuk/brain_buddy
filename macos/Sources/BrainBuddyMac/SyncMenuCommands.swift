@@ -1,3 +1,4 @@
+import AppKit
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -9,6 +10,10 @@ import SwiftUI
 /// Menu items we own use sentence case.
 struct SyncMenuCommands: Commands {
     @FocusedValue(\.macSyncController) private var controller
+    @Environment(\.openWindow) private var openWindow
+    /// The account items come from the launch, not the focused window: they stay in the menu while
+    /// Settings or a sheet with typed secrets owns focus (028 S-13, 030 A-35).
+    let launch: MacLaunch
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -19,24 +24,35 @@ struct SyncMenuCommands: Commands {
             .disabled(!(controller?.syncNowEnabled ?? false))
         }
         CommandGroup(after: .appInfo) {
-            let items = controller?.accountMenu ?? AccountMenuItems.hidden
+            let account = launch.sync
+            let items = account?.accountMenu ?? AccountMenuItems.hidden
             Divider()
             // One account change at a time: sign-in items are disabled while X-03 is open or a
             // sign-out commits, "Sign out…" while X-03 is open (the controller refuses them too).
-            let signInBlocked = (controller?.isSignInOpen ?? false) || (controller?.isSigningOut ?? false)
+            let signInBlocked = !(account?.signInMenuEnabled ?? false)
             if items.signIn {
-                Button(AccountMenuItems.signInTitle) { controller?.beginSignIn(from: .menu) }
+                Button(AccountMenuItems.signInTitle) { onMainWindow { $0.beginSignIn(from: .menu) } }
                     .disabled(signInBlocked)
             }
             if items.signInAgain {
-                Button(AccountMenuItems.signInAgainTitle) { controller?.beginSignIn(from: .menu) }
+                Button(AccountMenuItems.signInAgainTitle) { onMainWindow { $0.beginSignIn(from: .menu) } }
                     .disabled(signInBlocked)
             }
             if items.signOut {
-                Button(AccountMenuItems.signOutTitle) { controller?.requestSignOut() }
-                    .disabled(controller?.isSignInOpen ?? false)
+                Button(AccountMenuItems.signOutTitle) { onMainWindow { $0.requestSignOut() } }
+                    .disabled(!(account?.signOutMenuEnabled ?? false))
             }
         }
+    }
+}
+
+extension SyncMenuCommands {
+    /// The main window comes forward first (it runs the unsaved-edit guard and X-04), as Settings does.
+    private func onMainWindow(_ action: @escaping @MainActor (MacSyncController) -> Void) {
+        guard let sync = launch.sync else { return }
+        openWindow(id: "main")
+        NSApp.activate()
+        Task { @MainActor in action(sync) }
     }
 }
 

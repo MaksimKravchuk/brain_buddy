@@ -90,6 +90,19 @@
             #expect(rig.controller.signOut.prompt == nil)
         }
 
+        @Test("028-FR-014 030-FR-026 the app menu's Sign out… follows the account alone, never the focused window or sheet")
+        func signOutMenuIndependentOfFocus() async {
+            let rig = await MacSyncFlowTests.Rig()
+            #expect(!rig.controller.signOutMenuEnabled, "no account, no item")
+            await rig.signIn()
+            // Settings or the Add agent sheet owning focus changes nothing the controller can see.
+            #expect(rig.controller.signOutMenuEnabled)
+            #expect(rig.controller.signInMenuEnabled)
+            let before = rig.controller.signOutRequests
+            rig.controller.requestSignOut()
+            #expect(rig.controller.signOutRequests == before + 1, "the same entry as Settings and X-02")
+        }
+
         @Test("028-FR-020 hosting the Sync tab leaves the router's surface and requests unchanged")
         func syncTabLeavesRouterAlone() async {
             let rig = await MacSyncFlowTests.Rig()

@@ -301,6 +301,13 @@ package final class MacSyncController {
     /// session ended; never because a sync runs (single-flight).
     package var syncNowEnabled: Bool { SyncPopoverModel.syncNowAvailable(line.snapshot, line.description) }
 
+    /// The app menu's "Sign out…" is enabled whenever an account is signed in, except while X-03 is
+    /// open. It does not depend on which window or sheet has focus (S-13, A-35).
+    package var signOutMenuEnabled: Bool { accountMenu.signOut && !isSignInOpen }
+
+    /// The app menu's "Sign in…" and "Sign in again…" wait while X-03 is open or a sign-out commits.
+    package var signInMenuEnabled: Bool { !isSignInOpen && !isSigningOut }
+
     package var accountMenu: AccountMenuItems {
         let linked = workspace.account != nil
         let ended = line.description.state == .sessionEnded

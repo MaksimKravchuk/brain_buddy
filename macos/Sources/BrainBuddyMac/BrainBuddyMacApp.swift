@@ -53,7 +53,7 @@ struct BrainBuddyMacApp: App {
         }
         .defaultSize(width: 960, height: 640)
         .commands {
-            SyncMenuCommands()
+            SyncMenuCommands(launch: launch)
             ProjectMenuCommands()
             TaskDetailsCommands()
         }
