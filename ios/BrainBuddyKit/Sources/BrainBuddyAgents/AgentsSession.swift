@@ -22,7 +22,11 @@ public struct AgentStepRef: Equatable, Sendable {
         let unshown = ids.filter { workspace.task($0.taskID) == nil }.map(\.taskID)
         var titles: [TaskID: String] = [:]
         for start in stride(from: 0, to: unshown.count, by: 200) {
-            for task in (try? await workspace.prepareTaskViews(Array(unshown[start..<min(start + 200, unshown.count)]))) ?? [] {
+            // A failed batch fails the whole read, so the caller keeps its last list instead of
+            // dropping the steps that batch would have titled.
+            guard let batch = try? await workspace.prepareTaskViews(Array(unshown[start..<min(start + 200, unshown.count)]))
+            else { return nil }
+            for task in batch {
                 titles[task.id] = task.title
             }
         }
