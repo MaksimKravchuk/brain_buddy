@@ -76,6 +76,7 @@ depends on PR-03 (Hand off again lives in the run sheet).
       "paths": [
         "ios/project.yml",
         "ios/BrainBuddy/App/BrainBuddyApp.swift",
+        "ios/BrainBuddy/Screens/Agents/AgentsHost.swift",
         "ios/BrainBuddy/Screens/Agents/AgentRunRow.swift",
         "ios/BrainBuddy/Screens/Lists/TaskListScreen.swift"
       ],
