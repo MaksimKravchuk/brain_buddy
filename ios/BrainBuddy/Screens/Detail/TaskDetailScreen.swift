@@ -403,7 +403,7 @@ private struct TaskDetailForm: View {
         noteSection
             .disabled(isSaving || isTransitioning)
         if task.state == .someday {
-            cardTextRow("Ready to start? Write the first step and it moves to Next actions.", isQuiet: false)
+            cardTextRow("Ready to start? Start it and it moves to Next actions.", isQuiet: false)
         }
         if !chipsFollowTitle {
             chipsSection
