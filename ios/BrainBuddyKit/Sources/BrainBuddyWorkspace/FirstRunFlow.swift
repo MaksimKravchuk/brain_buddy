@@ -223,13 +223,16 @@ public final class FirstRunFlow {
     public func makeNextStep(_ step: String, in workspace: Workspace, editorID: String = UUID().uuidString) async throws -> Bool {
         let trimmed = step.trimmingCharacters(in: .whitespacesAndNewlines)
         guard case .firstStep(let id) = phase, !trimmed.isEmpty else { return false }
+        let current = workspace.task(id)
         let changes = Self.stepChanges(
-            step: trimmed, original: capturedText ?? trimmed, existingDetails: workspace.task(id)?.details)
-        try await workspace.apply(
-            [
-                .updateTask(.init(taskID: id, changes: changes)),
-                .transitionTask(.init(taskID: id, action: .move, toList: .next)),
-            ], editorID: editorID)
+            step: trimmed, original: capturedText ?? trimmed, existingDetails: current?.details)
+        var commands: [GTDCommand] = []
+        // The reducer refuses an edit that changes nothing (a step equal to the capture).
+        if current?.title != trimmed || changes.details.isChanged {
+            commands.append(.updateTask(.init(taskID: id, changes: changes)))
+        }
+        commands.append(.transitionTask(.init(taskID: id, action: .move, toList: .next)))
+        try await workspace.apply(commands, editorID: editorID)
         // The run may have ended while the step was saving; keep that outcome.
         guard phase == .firstStep(id) else { return true }
         if var known = record {
