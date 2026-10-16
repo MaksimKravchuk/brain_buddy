@@ -24,7 +24,7 @@ struct MacSettingsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Group {
+        ScrollView {
             if let sync = launch.sync {
                 switch selection {
                 case .account: AccountSettingsTab(sync: sync, openMainWindow: openMainWindow)
@@ -33,7 +33,9 @@ struct MacSettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 820, maxWidth: 820, minHeight: 240)
+        .frame(
+            minWidth: Self.width, maxWidth: Self.width,
+            minHeight: Self.minHeight, idealHeight: Self.idealHeight, maxHeight: .infinity)
         .background(CarryOnColorStyle.coBgGround)
         .navigationTitle(selection.title)
         .onChange(of: launch.model?.agentAvailability.addAgentRequested ?? false) { _, requested in
@@ -49,6 +51,12 @@ struct MacSettingsView: View {
             }
         }
     }
+
+    /// Design S-01: 820 pt wide; M25 draws Account 620 pt tall. The window opens at the ideal height, can
+    /// be resized taller or shorter down to the minimum, and each tab scrolls instead of clipping.
+    static let width: CGFloat = 820
+    static let idealHeight: CGFloat = 620
+    static let minHeight: CGFloat = 420
 
     /// The canvas's "Add new agent" request brings the Agents tab forward; the tab opens the sheet once.
     static func selection(current: MacSettingsTab, addAgentRequested: Bool) -> MacSettingsTab {
