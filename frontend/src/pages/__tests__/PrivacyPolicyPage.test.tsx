@@ -138,7 +138,7 @@ describe("PrivacyPolicyPage", () => {
     expect(navigator).toHaveTextContent(/we do not store the text sent or the suggestions returned/i);
     // The provider's own copy outlives account purge (c2 PC-05).
     expect(navigator).toHaveTextContent(/OpenAI keeps what it received under its own policy \(up to 30 days/i);
-    expect(navigator).toHaveTextContent(/deleting your Brain Buddy account cannot erase that copy/i);
+    expect(navigator).toHaveTextContent(/deleting your Carry On account cannot erase that copy/i);
     // Listed with the other processors and the consent-based purposes.
     expect(processors).toHaveTextContent(/weekly review suggestions/i);
     expect(lawful).toHaveTextContent(/weekly review suggestions/i);
@@ -192,7 +192,7 @@ describe("PrivacyPolicyPage", () => {
     expect(retention).toHaveTextContent(/not included in your data export/i);
     expect(retention).toHaveTextContent(/eligible for 30 days/i);
     expect(retention).toHaveTextContent(/sign out.*account changes.*starts.*regains focus/i);
-    expect(retention).toHaveTextContent(/clear Brain Buddy site data/i);
+    expect(retention).toHaveTextContent(/clear Carry On site data/i);
   });
 
   it("019-FR-020 discloses CRT browser-local recovery scope, retention, and purge limits", () => {
@@ -267,7 +267,7 @@ describe("PrivacyPolicyPage", () => {
     const retention = screen.getByRole("heading", { name: /how long we keep it/i }).closest("section");
     const rights = screen.getByRole("heading", { name: /your rights/i }).closest("section");
     for (const sentence of [
-      "The Brain Buddy apps for Mac and iPhone keep a working copy of your tasks on the device until you sign out there, including after a session ends or your account is deleted.",
+      "The Carry On apps for Mac and iPhone keep a working copy of your tasks on the device until you sign out there, including after a session ends or your account is deleted.",
       "On a Mac, deleting the app does not remove that copy.",
       "The copy of your tasks from before the Mac update is kept for at least 30 days and until you sign out on that Mac.",
       "We cannot erase copies on your devices or in their backups, such as Time Machine; signing out removes the app's copy from that device."

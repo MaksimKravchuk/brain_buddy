@@ -17,9 +17,9 @@ import {
   RotateCcw,
   Search,
   Settings,
-  Sprout,
   X
 } from "lucide-react";
+import { CarryOnMark } from "../brand/CarryOnMark";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -606,8 +606,8 @@ function TopBar({ onOpenDrawer, navigationTriggerRef }: {
         <Menu className="h-5 w-5" />
       </button>
       <Link to="/tasks/next" className="flex shrink-0 items-center gap-2 whitespace-nowrap font-voice text-xl text-ink">
-        <Sprout className="h-[22px] w-[22px] text-ink max-[359px]:hidden" aria-hidden />
-        <span>BrainBuddy</span>
+        <CarryOnMark className="h-[26px] w-[26px] text-ink max-[359px]:hidden" />
+        <span>Carry On</span>
       </Link>
       <TaskSearch className="hidden w-[340px] max-w-[32vw] md:flex" findShortcut />
       <div className="ml-auto flex shrink-0 items-center gap-2 max-[359px]:gap-1 sm:gap-3">
