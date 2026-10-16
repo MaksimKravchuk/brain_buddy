@@ -21,7 +21,7 @@ export function AdminPage(): React.JSX.Element {
   const couldNotVerify = adminStatus.isError && !isConfirmedDenial;
 
   return (
-    <AppShell counts={countsQuery.data?.counts_by_state ?? emptyCounts} projects={projectsQuery.data ?? []} tags={tagsQuery.data ?? []}>
+    <AppShell counts={countsQuery.data?.counts_by_state ?? emptyCounts} projects={projectsQuery.data ?? []} tags={tagsQuery.data ?? []} ground>
       {/* Admin tables use the full workspace, capped at the same width as the
           connected-agents page so the two wide settings surfaces line up. */}
       <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-12">
