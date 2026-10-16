@@ -101,7 +101,7 @@ export function Overlay({
         // The panel takes focus on mount so the dialog is where the keyboard
         // lands; `focus-visible:shadow-none` keeps the global focus ring from
         // drawing a highlight around the whole dialog for that programmatic focus.
-        className={`relative flex max-h-full w-full flex-col overflow-hidden co-glass outline-hidden focus-visible:shadow-none motion-safe:sm:animate-fade-in-up sm:rounded-card ${
+        className={`relative flex max-h-full w-full flex-col overflow-hidden co-glass-dense outline-hidden focus-visible:shadow-none motion-safe:sm:animate-fade-in-up sm:rounded-card ${
           size === "wide" ? "sm:w-[880px]" : "sm:w-[480px]"
         }`}
       >
