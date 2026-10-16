@@ -194,7 +194,11 @@ official Rust image (`BB_SKIP_RUST_BUILD=1` reuses the last build).
 - `CarryOnCatalogSnapshotTests` (macOS) renders every catalog section at iPhone and
   Mac sizes, light and dark, against `Tests/BrainBuddyDesignTests/__Snapshots__/`.
   A snapshot is committed only after it was compared with the design board and
-  approved; any later pixel change fails the `ios-app` lane.
+  approved; any later pixel change fails the `ios-app` lane. App and Mac snapshot
+  tests use the same `assertSnapshot` from the `BrainBuddyDesignTestSupport` product.
+- Colours follow the design board exactly, including grey text on stone (3.98:1).
+  Change a colour for contrast only when App Review or an accessibility audit asks
+  for it (Max, 2026-10-16).
 
 ### Current system (until the redesign lands)
 
