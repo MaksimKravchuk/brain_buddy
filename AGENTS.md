@@ -226,8 +226,8 @@ it grow; this is a summary, not an append-only log.
   Vitest + Testing Library, Playwright for e2e.
 - iOS: SwiftUI (iOS 26), XcodeGen, `BrainBuddyKit` Swift package. See
   `ios/AGENTS.md`.
-- Persistence: file-backed tree data under `backend/data` with a 16-entry LRU
-  cache, plus `tasks.sqlite3` for the task module.
+- Persistence: file-backed tree data under `backend/data`, plus `tasks.sqlite3`
+  for the task module.
 - Deploy: Docker/Compose locally, Nginx in the frontend image, Fly.io in
   production.
 

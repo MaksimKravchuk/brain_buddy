@@ -36,8 +36,6 @@ def test_get_tree_reloads_persisted_state(tree_service, monkeypatch) -> None:
     load_calls: list[str] = []
     original_load = tree_service.tree_repo.load
 
-    tree_service._cache.clear()
-
     def tracked_load(tree_id: str):
         load_calls.append(tree_id)
         return original_load(tree_id)
@@ -84,7 +82,6 @@ def test_019_FR_020_legacy_tree_defaults_revision_and_advances_once(
     payload.pop("revision")
     payload.pop("schema_version")
     tree_path.write_text(json.dumps(payload), encoding="utf-8")
-    tree_service._cache.clear()
 
     legacy = tree_service.get_tree(created.id)
     assert legacy.revision == 1
@@ -114,7 +111,6 @@ def test_legacy_update_preserves_existing_schema_version(tree_service) -> None:
     payload = json.loads(tree_path.read_text(encoding="utf-8"))
     payload["schema_version"] = 7
     tree_path.write_text(json.dumps(payload), encoding="utf-8")
-    tree_service._cache.clear()
 
     current = tree_service.get_tree(created.id)
     public = tree_service.to_response(current)
@@ -315,7 +311,6 @@ def test_full_tree_update_preserves_server_only_tree_data(tree_service) -> None:
         )
     ]
     tree_service.tree_repo.save(updated)
-    tree_service._cache.clear()
 
     round_trip = tree_service.update_tree(
         tree.id,
@@ -558,7 +553,6 @@ def test_get_tree_ignores_unknown_persisted_fields(tree_service) -> None:
     tree = tree_service.create_tree(
         TreeCreateRequest(name="Legacy Compatible"), owner_id=TEST_OWNER_ID
     )
-    tree_service._cache.clear()
 
     tree_path = tree_service.tree_repo.tree_path(tree.id)
     payload = json.loads(tree_path.read_text(encoding="utf-8"))
@@ -609,7 +603,6 @@ def _persist_legacy_node(tree_service, tree_id: str, extra: dict[str, object]) -
         }
     )
     tree_path.write_text(json.dumps(payload), encoding="utf-8")
-    tree_service._cache.clear()
 
 
 def test_node_to_response_coerces_legacy_extra_values(tree_service) -> None:

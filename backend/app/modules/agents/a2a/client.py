@@ -267,16 +267,6 @@ class A2AClientPort(Protocol):
         run_id: str | None = ...,
     ) -> A2AResult: ...
 
-    def create_push_config(
-        self,
-        target: A2ATarget,
-        *,
-        task_id: str,
-        url: str,
-        token: str,
-        run_id: str | None = ...,
-    ) -> A2AResult: ...
-
 
 def _parse_retry_after(raw: str | None) -> int | None:
     """A ``Retry-After`` in seconds, or nothing.
@@ -458,29 +448,6 @@ class A2AClient:
         if command_id is not None:
             params["metadata"] = {"brainbuddy.command_id": command_id}
         return self._call(target, method="CancelTask", params=params, run_id=run_id)
-
-    def create_push_config(
-        self,
-        target: A2ATarget,
-        *,
-        task_id: str,
-        url: str,
-        token: str,
-        run_id: str | None = None,
-    ) -> A2AResult:
-        """Register a push callback for a task adopted after an interruption.
-
-        Any failure is silent to the user: push only accelerates an observation
-        the schedule performs anyway, so an error here is not something the
-        owner can or should act on.
-        """
-
-        return self._call(
-            target,
-            method="CreateTaskPushNotificationConfig",
-            params={"taskId": task_id, "url": url, "token": token},
-            run_id=run_id,
-        )
 
     # --- the one place a request is built ----------------------------------
 
