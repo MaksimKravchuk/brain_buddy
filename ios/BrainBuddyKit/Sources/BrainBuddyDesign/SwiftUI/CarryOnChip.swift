@@ -5,6 +5,10 @@
     /// says so in its text, and the tone only repeats it. A selected chip (the chosen
     /// quick day, board 14) is inverted and semibold; the screen also announces the
     /// selection to VoiceOver, so colour is not the only cue.
+    ///
+    /// On the Mac (`\.carryOnPlatform`, board M10) both sizes are one 26 pt chip with
+    /// 13 pt text, and a selected chip keeps the regular weight: the inversion alone
+    /// marks it.
     public struct CarryOnChip: View {
         public enum Tone: Sendable {
             case plain, dueSoon, overdue
@@ -22,6 +26,7 @@
         let dot: RGBColor?
         let size: Size
         let isSelected: Bool
+        @Environment(\.carryOnPlatform) private var platform
 
         public init(
             _ text: String, tone: Tone = .plain, dot: RGBColor? = nil,
@@ -38,13 +43,33 @@
             HStack(spacing: Metrics.gap) {
                 if let dot { CarryOnProjectDot(dot) }
                 Text(text)
-                    .carryOnFont(isSelected ? CarryOnTypeScale.metaStrong : CarryOnTypeScale.meta)
+                    .font(font)
                     .lineLimit(1)
             }
             .foregroundStyle(foreground)
-            .padding(.horizontal, size == .quick ? CarryOnLayout.QuickChip.paddingX : Metrics.paddingX)
-            .frame(minHeight: size == .quick ? CarryOnLayout.QuickChip.height : Metrics.height)
+            .padding(.horizontal, paddingX)
+            .frame(minHeight: height)
             .background(fill, in: Capsule())
+        }
+
+        private var isQuick: Bool { size == .quick && platform != .mac }
+
+        private var paddingX: Double { isQuick ? CarryOnLayout.QuickChip.paddingX : Metrics.paddingX }
+
+        private var height: Double {
+            if platform == .mac { return Metrics.macHeight }
+            return isQuick ? CarryOnLayout.QuickChip.height : Metrics.height
+        }
+
+        /// meta (metaStrong when selected) at the platform's size; on the Mac the
+        /// regular face at the chip's own 13 pt, which the type scale has no style for.
+        private var font: Font {
+            if platform == .mac {
+                CarryOnFonts.register()
+                let meta = CarryOnTypeScale.meta
+                return .custom(meta.postScriptName, size: Metrics.macFontSize, relativeTo: meta.textStyle.swiftUI)
+            }
+            return .carryOn(isSelected ? CarryOnTypeScale.metaStrong : CarryOnTypeScale.meta, on: platform)
         }
 
         private var fill: CarryOnColorStyle {
