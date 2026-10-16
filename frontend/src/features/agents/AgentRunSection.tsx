@@ -255,29 +255,29 @@ function RunCard({
   }, [displayedQuestionIdentity, replyKey, showQuestion]);
 
   return (
-    <article className="rounded-[12px] border border-ai-border bg-ai-bg px-3 py-2.5">
+    <article className="rounded-card bg-quiet px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Bot className="h-[13px] w-[13px] text-ai-fg" aria-hidden />
-        <span className="text-[12.5px] font-medium text-ai-fg">{run.agent_name}</span>
-        <span className="rounded-full border border-ai-border bg-white px-2 py-[1px] text-[11px] font-medium text-ai-fg">
+        <Bot className="h-4 w-4 text-ink-muted" aria-hidden />
+        <span className="text-co-meta font-medium text-ink">{run.agent_name}</span>
+        <span className="rounded-control bg-card px-2.5 py-px text-co-meta font-medium text-ink">
           {run.primary_state_label}
         </span>
-        <span className="ml-auto text-[11px] text-slate-500">
+        <span className="ml-auto text-co-meta text-ink-muted">
           Last contact {formatTimestamp(run.last_contact_at)}
         </span>
       </div>
 
       {contentExpired ? (
-        <p className="mt-2 text-[12px] italic text-slate-500">{EXPIRED_NOTICE}</p>
+        <p className="mt-2 text-co-meta italic text-ink-muted">{EXPIRED_NOTICE}</p>
       ) : (
         <>
           {run.progress_text ? (
-            <p className="mt-2 whitespace-pre-wrap text-[12.5px] text-slate-700">{run.progress_text}</p>
+            <p className="mt-2 whitespace-pre-wrap text-co-meta text-ink">{run.progress_text}</p>
           ) : null}
 
           {showQuestion ? (
-            <div className="mt-2 rounded-lg border border-needs-you-border bg-needs-you-bg px-2.5 py-2">
-              <p className="m-0 whitespace-pre-wrap text-[12.5px] text-needs-you-fg">{run.question_text}</p>
+            <div className="mt-2 rounded-card bg-card px-3 py-2">
+              <p className="m-0 whitespace-pre-wrap text-co-meta text-ink">{run.question_text}</p>
               {canReply ? (
                 <form
                   className="mt-2 flex flex-col gap-1.5"
@@ -300,14 +300,14 @@ function RunCard({
                     }
                   }}
                 >
-                  <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-600">
+                  <label className="flex flex-col gap-1 text-co-meta text-ink-muted">
                     Your answer
                     <textarea
                       aria-label="Your answer"
                       value={answer}
                       onChange={(event) => setAnswer(event.target.value)}
                       rows={2}
-                      className="resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[12.5px] text-slate-900 focus:border-brand-primary focus:outline-hidden"
+                      className="resize-y rounded-md bg-quiet px-3 py-2 text-co-body text-ink focus:outline-hidden"
                     />
                   </label>
                   <div>
@@ -322,7 +322,7 @@ function RunCard({
                 // as "unsupported" would blame the wrong thing.
                 null
               ) : (
-                <p className="m-0 mt-1.5 text-[11px] text-slate-600">
+                <p className="m-0 mt-1.5 text-co-meta text-ink-muted">
                   This agent does not support replies, so the question can only be answered wherever you
                   operate the agent.
                 </p>
@@ -336,17 +336,17 @@ function RunCard({
             // blocks an agent here is a credential problem at the agent, which
             // no answer typed into BrainBuddy can solve; a reply box beside
             // this sentence is how a secret gets forwarded to a third party.
-            <p className="mt-2 whitespace-pre-wrap rounded-lg border border-needs-you-border bg-needs-you-bg px-2.5 py-2 text-[12.5px] text-needs-you-fg">
+            <p className="mt-2 whitespace-pre-wrap rounded-card bg-card px-3 py-2 text-co-meta text-warning">
               {run.blocked_reason}
             </p>
           ) : null}
 
           {run.result_text ? (
-            <p className="mt-2 whitespace-pre-wrap text-[12.5px] text-slate-700">{run.result_text}</p>
+            <p className="mt-2 whitespace-pre-wrap text-co-meta text-ink">{run.result_text}</p>
           ) : null}
 
           {tooLarge ? (
-            <p className="mt-2 text-[12.5px] font-medium text-slate-700">{tooLarge}</p>
+            <p className="mt-2 text-co-meta font-medium text-ink">{tooLarge}</p>
           ) : null}
 
           {run.artifacts_summary.length ? (
@@ -354,7 +354,7 @@ function RunCard({
               {run.artifacts_summary.map((artifact, index) => (
                 <li
                   key={`${artifact.name ?? artifact.kind}-${index}`}
-                  className="text-[11.5px] text-slate-500"
+                  className="text-co-meta text-ink-muted"
                 >
                   {artifactPlaceholderCopy(artifact)}
                 </li>
@@ -368,7 +368,7 @@ function RunCard({
             // makes one clickable — a link the product renders as navigable is
             // a link the product is vouching for (D-03-S11, FR-014).
             <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
-              <span className="break-all text-[12px] text-slate-500">{run.result_link}</span>
+              <span className="break-all rounded-md bg-card px-2 py-1 text-co-meta text-ink-muted">{run.result_link}</span>
               <Button
                 type="button"
                 variant="ghost"
@@ -383,47 +383,47 @@ function RunCard({
           ) : null}
 
           {run.failure_reason ? (
-            <p className="mt-2 whitespace-pre-wrap text-[12.5px] text-rose-700">{run.failure_reason}</p>
+            <p className="mt-2 whitespace-pre-wrap text-co-meta text-danger">{run.failure_reason}</p>
           ) : null}
         </>
       )}
 
       {run.reply_pending ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
+        <p className="mt-1.5 text-co-meta text-ink-muted">
           Your answer was sent but the agent has not acknowledged it yet.
         </p>
       ) : null}
       {cancelOutcome ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">{cancelOutcome}</p>
+        <p className="mt-1.5 text-co-meta text-ink-muted">{cancelOutcome}</p>
       ) : null}
       {run.cancel_requested && !cancelOutcome ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
+        <p className="mt-1.5 text-co-meta text-ink-muted">
           Cancellation was requested. The agent has not confirmed it, so the work may still be running.
         </p>
       ) : null}
       {run.agent_task_missing ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
+        <p className="mt-1.5 text-co-meta text-ink-muted">
           The agent no longer reports this run. BrainBuddy kept everything it had already observed and
           is not claiming the work failed.
         </p>
       ) : null}
       {run.stopped_reporting ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
+        <p className="mt-1.5 text-co-meta text-ink-muted">
           No report since the last contact above. BrainBuddy does not know whether the agent is still
           working.
         </p>
       ) : null}
       {run.connection_disconnected ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">
+        <p className="mt-1.5 text-co-meta text-ink-muted">
           This agent was disconnected. Disconnecting did not cancel any work it had already accepted.
         </p>
       ) : null}
       {dispatchDetail ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">{dispatchDetail}</p>
+        <p className="mt-1.5 text-co-meta text-ink-muted">{dispatchDetail}</p>
       ) : null}
       {canCheckDelivery ? (
         <div className="mt-1.5">
-          <p className="m-0 text-[11px] text-slate-500">
+          <p className="m-0 text-co-meta text-ink-muted">
             Runs the same check again with the same correlation ID and the same message ID. It is
             never a new send.
           </p>
@@ -454,22 +454,22 @@ function RunCard({
       ) : null}
 
       {run.events.length ? (
-        <ol className="mt-2 flex flex-col gap-1 border-t border-ai-border pt-2">
+        <ol className="mt-3 flex flex-col gap-1">
           {run.events.map((event) => (
-            <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-slate-600">
-              <span className="font-medium text-slate-700">
+            <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 text-co-meta text-ink-muted">
+              <span className="font-medium text-ink">
                 {event.kind === "task_succession" ? TASK_SUCCESSION_COPY : eventLabel(event.type)}
               </span>
-              <span className="text-slate-400">{formatTimestamp(event.received_at)}</span>
+              <span>{formatTimestamp(event.received_at)}</span>
               {event.kind === "task_succession" && event.previous_agent_task_id ? (
                 // Both identifiers, because the point of the row is that the
                 // one the user saw yesterday is not the one being observed now.
-                <span className="text-slate-400">
+                <span>
                   {event.previous_agent_task_id} → {event.new_agent_task_id}
                 </span>
               ) : null}
               {!contentExpired && shouldRenderEventSummary(run, event) ? (
-                <span className="basis-full text-slate-500">{event.summary}</span>
+                <span className="basis-full">{event.summary}</span>
               ) : null}
             </li>
           ))}
@@ -491,7 +491,7 @@ function RunCard({
       ) : null}
 
       {error ? (
-        <p role="alert" className="mt-2 text-[12px] text-rose-700">
+        <p role="alert" className="mt-2 text-co-meta text-danger">
           {error}
         </p>
       ) : null}
@@ -536,9 +536,9 @@ export function AgentRunSection({
 }): React.JSX.Element | null {
   if (error && runs.length === 0) {
     return (
-      <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
-        <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">Agent runs</h3>
-        <p role="alert" className="m-0 text-[12.5px] text-rose-700">
+      <div className="flex flex-col gap-2 px-4 py-3">
+        <h3 className="m-0 text-co-meta font-semibold text-ink-muted">Agent runs</h3>
+        <p role="alert" className="m-0 text-co-meta text-danger">
           {getErrorMessage(error)}
         </p>
       </div>
@@ -550,13 +550,13 @@ export function AgentRunSection({
     return null;
   }
   return (
-    <div className="flex flex-col gap-2 border-t border-slate-200 px-4 py-3">
-      <h3 className="m-0 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-500">
+    <div className="flex flex-col gap-2 px-4 py-3">
+      <h3 className="m-0 text-co-meta font-semibold text-ink-muted">
         {runs.length === 1 ? "Agent run" : `Agent runs · ${runs.length}`}
       </h3>
-      {isLoading ? <p className="m-0 text-[12px] text-slate-500">Loading runs…</p> : null}
+      {isLoading ? <p className="m-0 text-co-meta text-ink-muted">Loading runs…</p> : null}
       {error ? (
-        <p role="alert" className="m-0 text-[12px] text-amber-700">
+        <p role="alert" className="m-0 text-co-meta text-warning">
           Showing cached agent data because refresh failed: {getErrorMessage(error)}
         </p>
       ) : null}

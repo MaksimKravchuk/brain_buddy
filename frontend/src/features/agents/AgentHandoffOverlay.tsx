@@ -261,14 +261,14 @@ export function AgentHandoffOverlay({
             // Distinct from the empty state on purpose: "no agents connected"
             // is a claim about the account, and must never be shown for what is
             // really an unfinished request.
-            <p className="text-sm text-slate-500">Loading your connected agents…</p>
+            <p className="text-co-meta text-ink-muted">Loading your connected agents…</p>
           ) : connections.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-co-meta text-ink-muted">
               No agents connected yet. Add one under Connected agents, then test it.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
-              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+              <label className="flex flex-col gap-1 text-co-meta text-ink-muted">
                 Agent
                 <select
                   aria-label="Agent"
@@ -279,7 +279,7 @@ export function AgentHandoffOverlay({
                     setAcknowledged(false);
                     setConnectionId(event.currentTarget.value || null);
                   }}
-                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-soft outline-hidden transition-colors focus:border-brand-primary"
+                  className="h-11 rounded-md bg-card px-3 text-co-body text-ink outline-hidden transition-colors"
                 >
                   <option value="">Choose an agent…</option>
                   {connections.map((connection) => (
@@ -294,19 +294,19 @@ export function AgentHandoffOverlay({
                 </select>
               </label>
               {noneEligible ? (
-                <p className="text-sm font-medium text-slate-900">
+                <p className="text-co-meta font-medium text-ink">
                   None of your agents can take this hand-off
                 </p>
               ) : null}
               {connections.some((connection) => !connection.ready_for_handoff) ? (
-                <details className="text-xs text-slate-500">
-                  <summary className="cursor-pointer font-medium text-slate-600">
+                <details className="text-co-meta text-ink-muted">
+                  <summary className="cursor-pointer font-medium text-ink">
                     Why some agents are unavailable
                   </summary>
-                  <ul className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+                  <ul className="mt-2 space-y-2 pl-3">
                     {connections.filter((connection) => !connection.ready_for_handoff).map((connection) => (
                       <li key={connection.id}>
-                        <span className="font-medium text-slate-700">{connection.name}: </span>
+                        <span className="font-medium text-ink">{connection.name}: </span>
                         {statusUnknown(connection)
                           ? "BrainBuddy could not refresh this connection just now, so it is not offered. Test it from Connected agents."
                           : connectionStatusDetail(connection)}
@@ -322,10 +322,10 @@ export function AgentHandoffOverlay({
         {previewQuery.isError ? <Feedback error={getErrorMessage(previewQuery.error)} success={null} /> : null}
         {previewQuery.isFetching && !manifest ? (
           <div className="flex flex-col gap-1">
-            <p className="text-sm text-slate-500">Building the hand-off preview…</p>
+            <p className="text-co-meta text-ink-muted">Building the hand-off preview…</p>
             {/* The moment a user is likeliest to assume something already left.
                 It has not, and the wait says so (D-02-S03). */}
-            <p className="text-xs text-slate-500">
+            <p className="text-co-meta text-ink-muted">
               BrainBuddy is only assembling the review — no task content has been sent.
             </p>
           </div>
@@ -333,17 +333,18 @@ export function AgentHandoffOverlay({
 
         {manifest ? (
           <>
-            <section aria-labelledby={reviewId} className="flex flex-col gap-4 rounded-xl border border-slate-200 p-4 sm:p-5">
+            <section aria-labelledby={reviewId} className="flex flex-col gap-4 rounded-card bg-quiet p-4 sm:p-5">
               <div>
-                <h3 id={reviewId} className="text-sm font-semibold text-slate-900">
+                <h3 id={reviewId} className="text-co-meta font-semibold text-ink-muted">
                 What will be sent
                 </h3>
-                <p className="mt-1 text-base font-medium text-slate-900">{manifest.title}</p>
+                <p className="mt-1 text-co-body font-semibold text-ink">{manifest.title}</p>
               </div>
 
-              <label className="flex items-center gap-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 text-co-meta text-ink">
                   <input
                     type="checkbox"
+                    className="accent-ink"
                     checked={includeDetails}
                     onChange={(event) => {
                       setReReviewNotice(null);
@@ -368,7 +369,7 @@ export function AgentHandoffOverlay({
                 setPayloadDetailsOpen(true);
               }}
             >
-              <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
+              <label className="flex flex-col gap-1 text-co-meta text-ink-muted">
                 Additional instructions (optional)
                 <textarea
                   name="additional_instructions"
@@ -376,7 +377,7 @@ export function AgentHandoffOverlay({
                   value={contextBody}
                   onChange={(event) => setContextBody(event.currentTarget.value)}
                   placeholder="Add a constraint, preference, or useful background"
-                  className="resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 shadow-soft outline-hidden transition-colors placeholder:text-slate-400 focus:border-brand-primary"
+                  className="resize-y rounded-md bg-card px-3 py-2 text-co-body font-normal text-ink outline-hidden transition-colors placeholder:text-ink-muted"
                 />
               </label>
               <div>
@@ -389,29 +390,29 @@ export function AgentHandoffOverlay({
               <details
                 open={payloadDetailsOpen}
                 onToggle={(event) => setPayloadDetailsOpen(event.currentTarget.open)}
-                className="group rounded-lg border border-slate-200 bg-surface-sunken px-3 py-2"
+                className="group rounded-card bg-card px-3 py-2"
               >
-                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                <summary className="cursor-pointer text-co-meta font-medium text-ink">
                   Task details and supporting items
                 </summary>
-                <div className="mt-3 flex flex-col gap-3 border-t border-slate-200 pt-3">
+                <div className="mt-3 flex flex-col gap-3">
                   <ReviewRow label="Task details">
                     {manifest.details ? (
-                      <p className="whitespace-pre-wrap text-sm text-slate-800">{manifest.details}</p>
+                      <p className="whitespace-pre-wrap text-co-meta text-ink">{manifest.details}</p>
                     ) : (
-                      <p className="text-sm text-slate-500">No task details will be sent.</p>
+                      <p className="text-co-meta text-ink-muted">No task details will be sent.</p>
                     )}
                   </ReviewRow>
                   <ReviewRow label="Supporting items">
                     {contextFromManifest.length === 0 ? (
-                      <p className="text-sm text-slate-500">No supporting items will be sent.</p>
+                      <p className="text-co-meta text-ink-muted">No supporting items will be sent.</p>
                     ) : (
                       <ul className="flex flex-col gap-2">
                         {contextFromManifest.map((item, index) => (
-                          <li key={`${item.label}-${index}`} className="flex items-start gap-2 rounded-lg bg-white p-2">
+                          <li key={`${item.label}-${index}`} className="flex items-start gap-2 rounded-md bg-quiet p-2">
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-slate-600">{item.label}</p>
-                              <p className="whitespace-pre-wrap text-sm text-slate-800">{item.body}</p>
+                              <p className="text-co-meta font-medium text-ink-muted">{item.label}</p>
+                              <p className="whitespace-pre-wrap text-co-meta text-ink">{item.body}</p>
                             </div>
                             <Button
                               type="button"
@@ -430,58 +431,59 @@ export function AgentHandoffOverlay({
                 </div>
               </details>
 
-              <details className="group rounded-lg border border-slate-200 px-3 py-2">
-                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+              <details className="group rounded-card bg-card px-3 py-2">
+                <summary className="cursor-pointer text-co-meta font-medium text-ink">
                   Delivery and privacy details
                 </summary>
-                <div className="mt-3 flex flex-col gap-3 border-t border-slate-100 pt-3">
-                  <ReviewRow label="Task ID"><p className="font-mono text-xs text-slate-700">{manifest.task_id}</p></ReviewRow>
-                  <ReviewRow label="Run ID"><p className="font-mono text-xs text-slate-700">{manifest.run_id}</p></ReviewRow>
-                  <ReviewRow label="Correlation ID"><p className="font-mono text-xs text-slate-700">{manifest.correlation_id}</p></ReviewRow>
-                  <ReviewRow label="Destination"><p className="break-all font-mono text-xs text-slate-700">{manifest.destination_interface}</p></ReviewRow>
+                <div className="mt-3 flex flex-col gap-3">
+                  <ReviewRow label="Task ID"><p className="font-mono text-co-meta text-ink">{manifest.task_id}</p></ReviewRow>
+                  <ReviewRow label="Run ID"><p className="font-mono text-co-meta text-ink">{manifest.run_id}</p></ReviewRow>
+                  <ReviewRow label="Correlation ID"><p className="font-mono text-co-meta text-ink">{manifest.correlation_id}</p></ReviewRow>
+                  <ReviewRow label="Destination"><p className="break-all font-mono text-co-meta text-ink">{manifest.destination_interface}</p></ReviewRow>
                   {manifest.push_callback?.registered ? (
                     <ReviewRow label="Push callback">
-                      <p className="break-all font-mono text-xs text-slate-700">{manifest.push_callback.url_preview}</p>
-                      <p className="mt-1 text-sm text-slate-600">{manifest.push_callback.disclosure}</p>
+                      <p className="break-all font-mono text-co-meta text-ink">{manifest.push_callback.url_preview}</p>
+                      <p className="mt-1 text-co-meta text-ink-muted">{manifest.push_callback.disclosure}</p>
                     </ReviewRow>
                   ) : null}
-                  <section aria-label="Guarantee" className="flex flex-col gap-2 text-sm text-slate-600">
+                  <section aria-label="Guarantee" className="flex flex-col gap-2 text-co-meta text-ink-muted">
                     <p>{manifest.tier_disclosure}</p>
                     {manifest.guarantee_tier === "best_effort" ? (
                       <p>
                         <a className="underline" href={manifest.tier_disclosure_url} target="_blank" rel="noopener noreferrer">
                           Read the single-start extension specification
                         </a>{" "}
-                        <span className="text-slate-500">Opens the published specification outside BrainBuddy.</span>
+                        <span>Opens the published specification outside BrainBuddy.</span>
                       </p>
                     ) : null}
                     {manifest.guarantee_tier === "best_effort" && !manifest.acknowledgement_required ? (
-                      <p className="text-xs text-slate-500">
+                      <p className="text-co-meta text-ink-muted">
                         You acknowledged the duplicate risk for this agent on your first hand-off, so BrainBuddy does not ask again.
                       </p>
                     ) : null}
                   </section>
-                  <p aria-label="Cancellation" className="text-sm text-slate-600">{manifest.cancellation_disclosure}</p>
-                  <p className="text-sm text-slate-600">{manifest.external_copy_notice}</p>
+                  <p aria-label="Cancellation" className="text-co-meta text-ink-muted">{manifest.cancellation_disclosure}</p>
+                  <p className="text-co-meta text-ink-muted">{manifest.external_copy_notice}</p>
                 </div>
               </details>
             </section>
 
             {manifest.acknowledgement_required ? (
-              <section className="rounded-xl border border-needs-you-border bg-needs-you-bg p-3 text-needs-you-fg">
-                <label className="flex items-start gap-2 text-sm">
+              <section className="rounded-card bg-quiet p-3 text-ink">
+                <label className="flex items-start gap-2 text-co-meta">
                   <input
                     type="checkbox"
+                    className="accent-ink"
                     checked={acknowledged}
                     onChange={(event) => setAcknowledged(event.currentTarget.checked)}
                   />
                   <span>
                     I understand that a duplicate task is possible with this agent
-                    <span className="block text-xs text-slate-500">Asked once, on your first hand-off to this agent.</span>
+                    <span className="block text-co-meta text-ink-muted">Asked once, on your first hand-off to this agent.</span>
                   </span>
                 </label>
                 {acknowledged ? (
-                  <p className="mt-2 text-xs text-slate-500">Acknowledged. BrainBuddy will not ask again for this agent.</p>
+                  <p className="mt-2 text-co-meta text-ink-muted">Acknowledged. BrainBuddy will not ask again for this agent.</p>
                 ) : null}
               </section>
             ) : null}
@@ -501,36 +503,36 @@ export function AgentHandoffOverlay({
         ) : null}
 
         {manifest && !online ? (
-          <p className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600">
+          <p className="rounded-card bg-quiet px-3 py-2 text-co-meta text-ink-muted">
             Sending is unavailable and nothing is queued.
           </p>
         ) : null}
         {sending ? (
-          <p role="status" className="text-sm text-slate-600">
+          <p role="status" className="text-co-meta text-ink-muted">
             Confirming again while this is in flight returns the same run.
           </p>
         ) : null}
         {reReviewNotice ? (
-          <p role="status" className="text-sm text-needs-you-fg">
+          <p role="status" className="text-co-meta text-warning">
             {reReviewNotice}
           </p>
         ) : null}
         <Feedback error={error} success={null} />
         {agentChanged ? (
-          <p className="text-sm text-needs-you-fg">
+          <p className="text-co-meta text-warning">
             Test this connection again from Connected agents. You will be asked for your password,
             because a new destination is a new content-bearing send.
           </p>
         ) : null}
       </div>
-      <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-5 py-4 sm:px-6">
-        <Button type="button" variant="secondary" size="md" disabled={sending} onClick={onClose}>
+      <footer className="flex shrink-0 justify-end gap-2 px-5 py-4 sm:px-6">
+        <Button type="button" variant="ghost" size="md" className="text-ink hover:text-ink" disabled={sending} onClick={onClose}>
           Cancel
         </Button>
         {manifest ? (
           <Button
             type="button"
-            variant="primary"
+            variant="accent"
             size="md"
             isLoading={sending}
             // The acknowledgement gates the send, and it gates it *here* rather
@@ -551,7 +553,7 @@ export function AgentHandoffOverlay({
 function ReviewRow({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <div className="flex flex-col gap-1">
-      <p className="text-xs font-medium text-slate-600">{label}</p>
+      <p className="text-co-meta text-ink-muted">{label}</p>
       {children}
     </div>
   );

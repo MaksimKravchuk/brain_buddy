@@ -155,28 +155,45 @@ describe("AgentSettingsPage", () => {
     expect(screen.queryByRole("dialog", { name: "Add new agent" })).not.toBeInTheDocument();
   });
 
-  it("014-FR-018 014-SC-011 keeps the desktop table columns shrinkable at the 768px boundary", async () => {
+  it("014-FR-018 014-SC-011 lays each agent out as label-column rows that can shrink", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
     renderPage();
 
     const table = await screen.findByRole("table", { name: "Your agents" });
     const row = within(table).getByRole("row", { name: "Hermes" });
     const article = within(row).getByRole("article", { name: "Hermes" });
+    const version = within(article).getByText("Version", { selector: "span" });
 
-    expect(article).toHaveClass(
-      "md:grid-cols-[minmax(0,1.4fr)_minmax(0,.6fr)_minmax(0,.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(140px,1.4fr)]"
-    );
+    expect(article).toHaveClass("bg-card", "rounded-card");
+    expect(version.parentElement).toHaveClass("sm:grid-cols-[120px_minmax(0,1fr)]");
   });
 
-  it("014-FR-018 014-SC-011 uses the contrast-safe token for all six narrow row labels", async () => {
+  it("014-FR-018 014-SC-011 uses the muted ink role for all six row labels", async () => {
     vi.mocked(apiClient.listAgentConnections).mockResolvedValue([ready]);
     renderPage();
 
     const article = await screen.findByRole("article", { name: "Hermes" });
     const labels = ["Agent", "Version", "Protocol", "Interface", "Status", "Actions"];
     for (const label of labels) {
-      expect(within(article).getByText(label, { selector: "span" })).toHaveClass("text-slate-500");
+      expect(within(article).getByText(label, { selector: "span" })).toHaveClass("text-ink-muted");
     }
+  });
+
+  it("shares the Account and Agents tabs and tones each status with design-system roles", async () => {
+    vi.mocked(apiClient.listAgentConnections).mockResolvedValue([
+      ready,
+      connection({ id: "c2", name: "Stale one", stale: true }),
+      connection({ id: "c3", name: "Failing", status: "unreachable", ready_for_handoff: false })
+    ]);
+    renderPage();
+
+    await screen.findByRole("article", { name: "Failing" });
+    const tabs = screen.getByRole("navigation", { name: "Settings" });
+    expect(within(tabs).getByRole("link", { name: "Account" })).toHaveAttribute("href", "/settings/account");
+    expect(within(tabs).getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    expect(within(cardFor("Hermes")).getByText("Tested ready")).toHaveClass("text-ink-muted");
+    expect(within(cardFor("Stale one")).getByText("Stale")).toHaveClass("text-warning");
+    expect(within(cardFor("Failing")).getByText("Unreachable", { selector: "span" })).toHaveClass("text-danger");
   });
 
   it("renders an invalid agent address as inert text", async () => {
@@ -838,7 +855,7 @@ describe("AgentSettingsPage", () => {
 
     const article = await screen.findByRole("article", { name: "Retired agent" });
     const badge = within(article).getByText("Disconnected");
-    expect(badge.className).toContain("bg-surface-sunken");
+    expect(badge).toHaveClass("text-ink-muted");
     expect(within(article).getByText(/were destroyed/i)).toBeInTheDocument();
   });
 
