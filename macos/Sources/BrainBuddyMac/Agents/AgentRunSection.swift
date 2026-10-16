@@ -50,10 +50,12 @@ struct AgentRunSectionView: View {
         (self.model, self.task, self.onHandOff) = (model, task, onHandOff)
         _section = State(initialValue: AgentRunSectionModel(
             taskServerID: server, projectID: task.projectID?.rawValue, remote: client, availability: model.agentAvailability,
-            steps: InspectorStepCommands(model: model, taskID: task.id), refreshStore: { await runs.refresh() }))
+            steps: InspectorStepCommands(model: model, taskID: task.id), refreshStore: { await runs.refresh() },
+            cachedRun: { [server] in runs.cachedRun(taskServerID: server) }))
     }
 
-    private var online: Bool { model.agentAvailability.isOnline }
+    /// Actions need a connection and a fresh read of this run; a stale view is read-only.
+    private var online: Bool { model.agentAvailability.isOnline && !section.isStale }
     private var item: AgentRunItem? { model.agentRuns.items.first { $0.taskServerID == task.serverID } }
     private var refreshKey: String {
         "\(item?.state.label ?? "")|\(item?.lastContactAt?.timeIntervalSince1970 ?? 0)|\(model.agentRuns.lastUpdated?.timeIntervalSince1970 ?? 0)"
@@ -90,7 +92,7 @@ struct AgentRunSectionView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-        if !online || model.agentRuns.phase == .stale, let at = model.agentRuns.lastUpdated {
+        if !online || model.agentRuns.phase == .stale, let at = model.agentRuns.lastUpdated ?? run.lastContactAt {
             MacInspectorMetaText(text: AgentsCopy.lastUpdated(at.formatted(date: .omitted, time: .shortened)))
         }
         stateBlock(run, block)

@@ -36,6 +36,20 @@
             #expect(MacSettingsTab.allCases.first == .account, "the window opens on Account")
         }
 
+        @Test("028-FR-002 each Settings tab has its own accessible name, never a shared one")
+        func the028_FR_002_tabAccessibilityNamesAreDistinct() {
+            let names = MacSettingsTab.allCases.map(\.accessibilityName)
+            #expect(names == ["Account", "Agents", "Sync"])
+            #expect(Set(names).count == MacSettingsTab.allCases.count)
+        }
+
+        @Test("030-FR-004 a sidebar agent row speaks its run count and the Needs-you dot")
+        func the030_FR_004_sidebarRowAccessibilityValue() {
+            #expect(MacSidebarRowLabel.accessibilityValue(trailing: "2", attention: true) == "Needs you, 2")
+            #expect(MacSidebarRowLabel.accessibilityValue(trailing: "1", attention: false) == "1")
+            #expect(MacSidebarRowLabel.accessibilityValue(trailing: nil, attention: false) == "")
+        }
+
         @Test("028-FR-011 028-SC-008 no state offers Change…, Connect…, Remove… or Delete account…")
         func noFollowUpControlInAnyState() {
             let allowed: Set<String> = [
