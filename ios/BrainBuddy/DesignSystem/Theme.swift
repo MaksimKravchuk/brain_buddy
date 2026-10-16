@@ -19,7 +19,7 @@ import UIKit
 ///
 /// Grey text (`textSecondary`, `textTertiary`, `success`) is 3.98:1 on stone
 /// (`surfaceSunken`, `brandSoft`, `hairline`, `tagBackground`, `dueBackground`).
-/// On those surfaces use `CarryOnRole.textSecondaryOnQuiet` (`ios/AGENTS.md`).
+/// That is the board's colour and is kept on purpose (`ios/AGENTS.md`).
 enum BBColor {
     // MARK: Brand
 
