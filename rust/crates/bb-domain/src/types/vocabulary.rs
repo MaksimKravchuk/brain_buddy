@@ -37,7 +37,6 @@ vocab! {
     }
     /// The four open lists (`OpenTaskState`).
     OpenList { Inbox => "inbox", Next => "next", Waiting => "waiting", Someday => "someday" }
-    Priority { None => "none", Low => "low", Medium => "medium", High => "high" }
     ProjectState { Active => "active", Archived => "archived" }
     TagState { Active => "active", Deleted => "deleted" }
     /// Subtask lifecycle.
@@ -89,7 +88,7 @@ vocab! {
     UndoSkipReason { Stale => "stale" }
     /// The two states a counted review can end in (`last_counted_review.status`).
     CountedStatus { Completed => "completed", Partial => "partial" }
-    TaskSort { Manual => "manual", Due => "due", Priority => "priority", Title => "title" }
+    TaskSort { Manual => "manual", Due => "due", Title => "title" }
     ProjectFilter {
         Active => "active", Archived => "archived", All => "all",
         NeedsNextAction => "needs_next_action",

@@ -11,7 +11,6 @@ const taskResponse = {
       project_id: "project-personal",
       tag_ids: ["tag-errands"],
       due_date: "2026-07-18",
-      priority: "none",
       waiting_for: null,
       waiting_since: null,
       order_key: 1,
@@ -32,7 +31,6 @@ const taskResponse = {
       project_id: "project-onboarding",
       tag_ids: ["tag-deep-work"],
       due_date: null,
-      priority: "none",
       waiting_for: null,
       waiting_since: null,
       order_key: 2,
@@ -363,22 +361,22 @@ test("017-FR-004 017-SC-007 inline task detail preserves desktop list width and 
 
 test("task detail preserves the filtered route, focus, and Back history after detail whitespace clicks", async ({ page }) => {
   await page.setViewportSize({ width: 1240, height: 800 });
-  await page.goto("/tasks/next?sort=priority&q=Persisted");
+  await page.goto("/tasks/next?sort=title&q=Persisted");
 
   const originLink = page.getByRole("link", { name: "Fix onboarding drop-off" });
   await originLink.click();
-  await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=priority&q=Persisted$/);
+  await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=title&q=Persisted$/);
 
   const detailHeading = page.getByRole("heading", { name: "Task detail" });
   await expect(detailHeading).toBeFocused();
 
   await test.step("ignore noninteractive panel whitespace without adding a same-URL history entry", async () => {
     await page.getByRole("heading", { name: "Comments" }).click();
-    await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=priority&q=Persisted$/);
+    await expect(page).toHaveURL(/\/tasks\/next\/task-2\?sort=title&q=Persisted$/);
   });
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/tasks\/next\?sort=priority&q=Persisted$/);
+  await expect(page).toHaveURL(/\/tasks\/next\?sort=title&q=Persisted$/);
   await expect(detailHeading).toHaveCount(0);
   await expect(originLink).toBeFocused();
 });

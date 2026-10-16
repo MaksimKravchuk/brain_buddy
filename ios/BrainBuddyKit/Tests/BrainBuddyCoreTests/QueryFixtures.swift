@@ -34,7 +34,7 @@ struct QueryFixture {
     mutating func task(
         _ title: String, _ taskState: TaskState = .next, id: TaskID? = nil, details: String? = nil,
         from lastOpenList: OpenList? = nil, project: ProjectID? = nil, tags: [TagID] = [],
-        due: String? = nil, priority: TaskPriority = .none, orderKey: Int? = nil,
+        due: String? = nil, orderKey: Int? = nil,
         createdAt: Date? = nil, ended: Date? = nil
     ) -> TaskID {
         serial += 1
@@ -44,7 +44,7 @@ struct QueryFixture {
         let created = createdAt ?? Self.epoch.addingTimeInterval(TimeInterval(serial))
         state.tasks[id] = TaskRecord(
             id: id, title: title, details: details, state: taskState, lastOpenList: lastOpenList,
-            projectID: project, tagIDs: tags, dueDate: due.map(isoDay), priority: priority,
+            projectID: project, tagIDs: tags, dueDate: due.map(isoDay),
             waitingFor: taskState == .waiting ? "Sam" : nil,
             waitingSince: taskState == .waiting ? created : nil,
             completedAt: taskState == .completed ? ended : nil,

@@ -39,11 +39,20 @@ export function useShellToast(): ShellNotify {
  * the character it types, as the browser's own undo does.
  */
 export function isUndoShortcut(event: KeyboardEvent): boolean {
+  return isCommandLetter(event, "z");
+}
+
+/** Ctrl+O / Cmd+O: find, as Quick Open on the Mac. Same layout rules as undo. */
+export function isFindShortcut(event: KeyboardEvent): boolean {
+  return isCommandLetter(event, "o");
+}
+
+function isCommandLetter(event: KeyboardEvent, letter: string): boolean {
   if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) {
     return false;
   }
   const key = event.key.toLowerCase();
-  return key === "z" || (event.code === "KeyZ" && !/^[\x20-\x7e]$/.test(key));
+  return key === letter || (event.code === `Key${letter.toUpperCase()}` && !/^[\x20-\x7e]$/.test(key));
 }
 
 /** Text fields keep Ctrl/Cmd+Z for their own typing undo. */
@@ -56,6 +65,10 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 
 export function undoShortcutLabel(userAgent: string = globalThis.navigator.userAgent): string {
   return /Mac|iPhone|iPad/.test(userAgent) ? "Cmd+Z" : "Ctrl+Z";
+}
+
+export function findShortcutLabel(userAgent: string = globalThis.navigator.userAgent): string {
+  return /Mac|iPhone|iPad/.test(userAgent) ? "⌘O" : "Ctrl+O";
 }
 
 /** 027 D-02.01: the web copy of the version refusal, used when the server sends none. */

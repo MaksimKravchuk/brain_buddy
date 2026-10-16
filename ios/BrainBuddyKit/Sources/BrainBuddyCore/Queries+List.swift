@@ -142,7 +142,6 @@ struct TaskListBuilder {
     }
 
     private func passesFilters(_ task: TaskRecord) -> Bool {
-        if !options.priorities.isEmpty && !options.priorities.contains(task.priority) { return false }
         if let tag = options.tagFilter, !task.tagIDs.contains(tag) { return false }
         return true
     }

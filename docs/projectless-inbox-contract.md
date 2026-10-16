@@ -20,7 +20,7 @@ The current API already expresses the last clause with
 GET /api/tasks?state=inbox&unassigned_project=true
 ```
 
-Search, priority, due-date, sort, terminal-item visibility, cursor, and limit
+Search, due-date, sort, terminal-item visibility, cursor, and limit
 parameters compose with that request. `GET /api/tasks?state=inbox` remains a raw
 lifecycle-state query and is not the Inbox product projection. Do not filter an
 unqualified first page in React.
@@ -40,7 +40,7 @@ longer in the Inbox view.
   rejects its use with `project_id`, includes it in the cursor fingerprint, and
   applies `task.project_id is None` in both `_filter_tasks` and `_open_counts`.
 - Search is normalized and matched against title/details before sorting and
-  pagination. Counts use the same search, Project/Tag, priority, due-date, and
+  pagination. Counts use the same search, Project/Tag, due-date, and
   unassigned predicates.
 
 No new endpoint or response shape is required. The implementation should wire
@@ -53,7 +53,7 @@ this existing server capability into every UI query that represents Inbox.
 2. **Count:** the Inbox page count is `counts_by_state.inbox` from that same
    filtered response. It is calculated over all matching open Inbox tasks before
    cursor and limit, never from `items.length` or a filtered first page.
-3. **Search and filters:** `q`, priority, due-date, and terminal visibility are
+3. **Search and filters:** `q`, due-date, and terminal visibility are
    additive. In particular, an Inbox search count and rows both exclude assigned
    matches. Search normalization remains server-owned.
 4. **Pagination:** apply owner, lifecycle state, and projectless predicates before

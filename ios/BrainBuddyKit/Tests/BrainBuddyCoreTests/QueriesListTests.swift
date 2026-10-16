@@ -72,21 +72,6 @@ struct QueriesListTests {
             ])
     }
 
-    @Test("Priority order is high, medium, low, none, then manual")
-    func priorityOrder() {
-        var fixture = QueryFixture()
-        fixture.task("None", priority: .none, orderKey: 1)
-        fixture.task("Low", priority: .low, orderKey: 2)
-        fixture.task("High late", priority: .high, orderKey: 9)
-        fixture.task("Medium", priority: .medium, orderKey: 4)
-        fixture.task("High early", priority: .high, orderKey: 5)
-
-        #expect(
-            fixture.list(.list(.next), ListOptions(sort: .priority)).allTitles == [
-                "High early", "High late", "Medium", "Low", "None",
-            ])
-    }
-
     @Test("Title order ignores case, diacritics and width, then falls back to id")
     func titleOrder() {
         var fixture = QueryFixture()
@@ -131,12 +116,12 @@ struct QueriesListTests {
     func groupByProjectKeepsSort() {
         var fixture = QueryFixture()
         let home = fixture.project("Home", id: "p-home")
-        fixture.task("Home low", project: home, priority: .low, orderKey: 1)
-        fixture.task("Home high", project: home, priority: .high, orderKey: 2)
-        fixture.task("Loose none", priority: .none, orderKey: 1)
-        fixture.task("Loose medium", priority: .medium, orderKey: 2)
+        fixture.task("Home low", project: home, orderKey: 1)
+        fixture.task("Home high", project: home, orderKey: 2)
+        fixture.task("Loose none", orderKey: 1)
+        fixture.task("Loose medium", orderKey: 2)
 
-        let result = fixture.list(.list(.next), ListOptions(sort: .priority, groupByProject: true))
+        let result = fixture.list(.list(.next), ListOptions(sort: .title, groupByProject: true))
 
         #expect(result.titles == [["Home high", "Home low"], ["Loose medium", "Loose none"]])
     }
@@ -223,30 +208,6 @@ struct QueriesListTests {
 
         #expect(result.sectionIDs == ["project:p-home", "completed"])
         #expect(result.titles(in: "completed") == ["Done in home", "Done loose"])
-    }
-
-    @Test("Priority filter keeps the chosen priorities, in every section")
-    func priorityFilter() {
-        var fixture = QueryFixture()
-        fixture.task("High", priority: .high)
-        fixture.task("Low", priority: .low)
-        fixture.task("None", priority: .none)
-        fixture.task("Done high", .completed, from: .next, priority: .high)
-        fixture.task("Done low", .completed, from: .next, priority: .low)
-
-        let result = fixture.list(
-            .list(.next), ListOptions(showCompleted: true, priorities: [.high, .none]))
-
-        #expect(result.titles == [["High", "None"], ["Done high"]])
-        #expect(result.openCount == 2)
-    }
-
-    @Test("An empty priority filter means every priority")
-    func emptyPriorityFilter() {
-        var fixture = QueryFixture()
-        for priority in TaskPriority.allCases { fixture.task(priority.title, priority: priority) }
-
-        #expect(fixture.list(.list(.next), ListOptions(priorities: [])).openCount == TaskPriority.allCases.count)
     }
 
     @Test("Tag filter narrows to tasks carrying the tag, in every section")

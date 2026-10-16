@@ -624,7 +624,6 @@ impl Maker<'_> {
                 "project_id": project,
                 "tag_ids": tags,
                 "due_date": task.due_date,
-                "priority": (task.priority != bb_domain::types::Priority::None).then_some(task.priority),
                 "waiting_for": waiting,
                 "new_formulation_id": formulation,
             }),

@@ -29,8 +29,7 @@ NewFormulationId = Annotated[
 
 TaskState = Literal["inbox", "next", "waiting", "someday", "completed", "cancelled"]
 OpenTaskState = Literal["inbox", "next", "waiting", "someday"]
-TaskPriority = Literal["none", "low", "medium", "high"]
-TaskSort = Literal["manual", "due", "priority", "title"]
+TaskSort = Literal["manual", "due", "title"]
 ProjectListState = Literal["active", "archived", "all"]
 
 
@@ -144,7 +143,6 @@ class TaskCreateRequest(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
-    priority: TaskPriority = "none"
     waiting_for: str | None = Field(default=None, max_length=500)
     source_capture_ids: list[str] = Field(default_factory=list)
     new_formulation_id: NewFormulationId | None = None
@@ -180,7 +178,6 @@ class SmartAddTaskCreateRequest(StrictBaseModel):
     state: OpenTaskState = "inbox"
     waiting_for: str | None = Field(default=None, max_length=500)
     due_date: date | None = None
-    priority: TaskPriority = "none"
     project: SmartAddClassificationRef | None = None
     tags: list[SmartAddClassificationRef] = Field(default_factory=list)
 
@@ -196,7 +193,6 @@ class TaskUpdateRequest(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] | None = None
     due_date: date | None = None
-    priority: TaskPriority | None = None
     waiting_for: str | None = Field(default=None, max_length=500)
     expected_revision: int = Field(ge=1)
     new_formulation_id: NewFormulationId | None = None
@@ -295,7 +291,6 @@ class TaskResponse(StrictBaseModel):
     project_id: str | None = None
     tag_ids: list[str] = Field(default_factory=list)
     due_date: date | None = None
-    priority: TaskPriority = "none"
     waiting_for: str | None = None
     waiting_since: datetime | None = None
     order_key: int

@@ -56,7 +56,6 @@ fn values_026_fr_002_patch_distinguishes_omitted_null_and_value() {
 #[test]
 fn values_026_fr_002_fields_that_cannot_be_cleared_refuse_null() {
     refused::<TaskUpdate>(json!({"title": null}));
-    refused::<TaskUpdate>(json!({"priority": null}));
     refused::<TaskUpdate>(json!({"tag_changes": null}));
     refused::<ProjectUpdate>(json!({"name": null}));
     refused::<TagUpdate>(json!({"name": null}));
@@ -319,13 +318,12 @@ fn values_026_fr_022_refusals_never_echo_the_input() {
 #[test]
 fn values_026_fr_002_task_create_defaults_match_the_canonical_request() {
     let create: TaskCreate = from(json!({"title": "Buy milk"}));
-    assert_eq!(
-        (create.state, create.priority),
-        (OpenList::Inbox, Priority::None)
-    );
+    assert_eq!(create.state, OpenList::Inbox);
     assert!(create.tag_ids.is_empty() && create.project_id.is_none());
     refused::<TaskCreate>(json!({"title": "x", "state": "completed"}));
-    refused::<TaskCreate>(json!({"title": "x", "priority": "urgent"}));
+    // Tasks carry no priority (ADR-0033): the field is unknown, not ignored.
+    refused::<TaskCreate>(json!({"title": "x", "priority": "high"}));
+    refused::<TaskUpdate>(json!({"priority": "high"}));
     refused::<TaskCreate>(json!({"title": "x", "due_date": "2026-02-30"}));
     refused::<TaskCreate>(json!({"title": "x", "new_formulation_id": "form_0a1b2c3d4e5f"}));
 }
@@ -387,7 +385,6 @@ where
 fn values_026_fr_016_vocabularies_are_closed_and_spelled_as_the_api_spells_them() {
     closed(TaskState::ALL, TaskState::as_str, TaskState::from_wire);
     closed(OpenList::ALL, OpenList::as_str, OpenList::from_wire);
-    closed(Priority::ALL, Priority::as_str, Priority::from_wire);
     closed(
         DecisionType::ALL,
         DecisionType::as_str,
@@ -443,7 +440,7 @@ fn values_026_fr_016_vocabularies_are_closed_and_spelled_as_the_api_spells_them(
 fn sample_task() -> Task {
     from(json!({
         "id": "task_9f3c2a1b4d5e", "title": "Measure the wall", "details": null, "state": "next",
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": null, "waiting_since": null, "order_key": "7", "source_capture_ids": [],
         "created_at": T0, "updated_at": T0, "completed_at": null, "cancelled_at": null,
         "revision": "8", "consecutive_stalled_formulations": 1,
@@ -739,7 +736,7 @@ fn values_026_fr_002_queries_and_inputs_round_trip() {
 fn values_026_fr_002_query_results_round_trip_by_kind() {
     let task_view = |id: &str| {
         json!({"id": id, "title": "T", "details": null, "state": "next", "project_id": null,
-            "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
+            "tag_ids": [], "due_date": null, "waiting_for": null,
             "waiting_since": null, "order_key": "1", "source_capture_ids": [],
             "created_at": T0, "updated_at": T0, "completed_at": null, "cancelled_at": null,
             "revision": "1", "subtasks": [], "comments": [], "formulation": null, "parked": null,

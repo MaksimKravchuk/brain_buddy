@@ -121,7 +121,7 @@ fn tag_json(id: &str, name: &str, state: &str, revision: u64) -> Value {
 fn task_json(id: &str, state: &str, project: Option<&str>, tags: &[&str], revision: u64) -> Value {
     json!({
         "id": id, "title": format!("Task {id}"), "details": null, "state": state,
-        "project_id": project, "tag_ids": tags, "due_date": null, "priority": "none",
+        "project_id": project, "tag_ids": tags, "due_date": null,
         "waiting_for": null, "waiting_since": null, "order_key": "3",
         "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
         "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,
@@ -1401,7 +1401,7 @@ fn public_task(row: &Value) -> Value {
     json!({
         "id": row["id"], "title": row["title"], "details": row["details"], "state": row["state"],
         "project_id": row["project_id"], "tag_ids": row["tag_ids"], "due_date": row["due_date"],
-        "priority": row["priority"], "waiting_for": row["waiting_for"],
+        "waiting_for": row["waiting_for"],
         "waiting_since": row["waiting_since"],
         "order_key": row["order_key"].as_u64().expect("order_key").to_string(),
         "source_capture_ids": row["source_capture_ids"], "created_at": row["created_at"],

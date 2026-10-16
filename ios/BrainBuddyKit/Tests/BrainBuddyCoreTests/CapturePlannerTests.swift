@@ -348,7 +348,7 @@ struct CapturePlannerCommandTests {
         let due = try #require(CalendarDay(year: 2026, month: 10, day: 1))
         let draft = CaptureDraft(
             text: "Купить молоко @Дом #срочно #work #магазин #СРОЧНО", list: .next, details: "  2 л  ",
-            dueDate: due, priority: .high
+            dueDate: due
         )
 
         let plan = try planCapture(draft)
@@ -362,7 +362,7 @@ struct CapturePlannerCommandTests {
                 .createTask(
                     .init(
                         taskID: "task-1", title: "Купить молоко", details: "  2 л  ", list: .next, waitingFor: nil,
-                        dueDate: due, priority: .high,
+                        dueDate: due,
                         projectID: "project-new-1", tagIDs: ["tag-new-1", "tag-work", "tag-new-2"]
                     )),
             ])

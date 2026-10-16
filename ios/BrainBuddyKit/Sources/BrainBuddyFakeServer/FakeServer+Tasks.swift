@@ -15,7 +15,7 @@ extension ServerState {
         let body = try RequestBody(
             request.body,
             allowing: [
-                "title", "details", "state", "project_id", "tag_ids", "due_date", "priority", "waiting_for",
+                "title", "details", "state", "project_id", "tag_ids", "due_date", "waiting_for",
                 "source_capture_ids", "new_formulation_id",
             ]
         )
@@ -26,7 +26,6 @@ extension ServerState {
         let projectID = try body.string("project_id")
         let tagIDs = try body.stringList("tag_ids") ?? []
         let dueDate = try body.day("due_date")
-        let priority = try body.value("priority", as: TaskPriority.self) ?? TaskPriority.none
         let waitingFor = try body.string("waiting_for", max: GTDLimits.waitingFor)
         let sourceCaptures = try body.stringList("source_capture_ids") ?? []
         let key = try idempotencyKey(request)
@@ -43,7 +42,7 @@ extension ServerState {
         }
         var task = TaskRow(
             id: mint("task"), title: title, details: details, state: state, projectID: projectID, tagIDs: tagIDs,
-            dueDate: dueDate, priority: priority, waitingFor: note, waitingSince: note == nil ? nil : now,
+            dueDate: dueDate, waitingFor: note, waitingSince: note == nil ? nil : now,
             orderKey: data.nextOrderKey(state), createdAt: now, updatedAt: now, revision: 1
         )
         if state == .next {
@@ -56,15 +55,15 @@ extension ServerState {
         return .json(201, task.dto())
     }
 
-    /// `PATCH /tasks/{id}`: omitted keys are kept, `null` clears (title and
-    /// priority cannot be null), and the result's references must be active,
+    /// `PATCH /tasks/{id}`: omitted keys are kept, `null` clears (title
+    /// cannot be null), and the result's references must be active,
     /// except the project the task already has.
     /// There is no "nothing changed" check: every accepted PATCH bumps the revision.
     mutating func updateTask(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError) -> Reply {
         let body = try RequestBody(
             request.body,
             allowing: [
-                "title", "details", "project_id", "tag_ids", "due_date", "priority", "waiting_for", "expected_revision",
+                "title", "details", "project_id", "tag_ids", "due_date", "waiting_for", "expected_revision",
                 "new_formulation_id",
             ]
         )
@@ -74,7 +73,6 @@ extension ServerState {
         let projectID = try body.string("project_id")
         let tagIDs = try body.stringList("tag_ids")
         let dueDate = try body.day("due_date")
-        let priority = try body.value("priority", as: TaskPriority.self)
         let waitingFor = try body.string("waiting_for", max: GTDLimits.waitingFor)
         let expected = try body.int("expected_revision", minimum: 1)
         let key = try idempotencyKey(request)
@@ -88,7 +86,6 @@ extension ServerState {
         let old = task
         guard task.revision == expected else { throw .stale("Task", id) }
         if body.has("title"), title == nil { throw .rejected("Task title cannot be null.") }
-        if body.has("priority"), priority == nil { throw .rejected("Task priority cannot be null.") }
         if body.has("waiting_for") {
             guard task.state == .waiting else { throw .rejected("waiting_for can only be edited on Waiting tasks.") }
             task.waitingFor = try Self.waitingFor(waitingFor)
@@ -100,7 +97,6 @@ extension ServerState {
         if let title { task.title = title }
         if body.has("details") { task.details = details }
         if body.has("due_date") { task.dueDate = dueDate }
-        if let priority { task.priority = priority }
         data.maintainClock(of: &task, from: old, newFormulationID: newFormulationID, now: now)
         task.updatedAt = now
         task.revision += 1
@@ -111,8 +107,8 @@ extension ServerState {
     }
 
     /// `POST /tasks/{id}/transitions`: move / complete / cancel / reopen, with
-    /// the server's own messages. Order, project, tags, due date, priority and
-    /// notes never change.
+    /// the server's own messages. Order, project, tags, due date and notes
+    /// never change.
     mutating func transitionTask(_ id: String, _ request: HTTPRequest, owner: String, now: Date) throws(FakeHTTPError)
         -> Reply
     {

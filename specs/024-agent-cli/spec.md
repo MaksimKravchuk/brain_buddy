@@ -1,5 +1,8 @@
 # Feature Specification: Agent-friendly BrainBuddy CLI
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 **Feature Branch**: feat/agent-cli
 **Created**: 2026-10-06
 **Status**: Scope and auth-inclusive UX approved; technical planning/review in progress

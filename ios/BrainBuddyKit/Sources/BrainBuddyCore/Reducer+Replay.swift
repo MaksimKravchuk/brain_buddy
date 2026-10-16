@@ -63,7 +63,6 @@ extension GTDReducer {
         if case .set(let value) = changes.details, !passes({ try FieldRules.details(value) }) {
             changes.details = .unchanged
         }
-        if changes.priority == .clear { changes.priority = .unchanged }
         if changes.waitingFor.isChanged {
             let note: String? = if case .set(let value) = changes.waitingFor { value } else { nil }
             if task.state != .waiting || !passes({ try FieldRules.waitingFor(note) }) {

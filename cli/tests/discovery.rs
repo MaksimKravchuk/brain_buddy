@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 #[test]
 fn scoped_schema_follows_only_operation_references_024_fr_004_024_sc_002() {
-    let body = json!({"paths":{"/api/tasks":{"post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TaskCreate"}}}}}},"/tasks":{"post":{"description":"wrong-unprefixed-operation"}},"/api/account":{"get":{"description":"unrelated-private-sentinel"}}},"components":{"schemas":{"TaskCreate":{"properties":{"priority":{"$ref":"#/components/schemas/Priority"}}},"Priority":{"enum":["p1","none"]},"Unrelated":{"description":"unrelated-private-sentinel"}}}});
+    let body = json!({"paths":{"/api/tasks":{"post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/TaskCreate"}}}}}},"/tasks":{"post":{"description":"wrong-unprefixed-operation"}},"/api/account":{"get":{"description":"unrelated-private-sentinel"}}},"components":{"schemas":{"TaskCreate":{"properties":{"state":{"$ref":"#/components/schemas/OpenTaskState"}}},"OpenTaskState":{"enum":["inbox","next"]},"Unrelated":{"description":"unrelated-private-sentinel"}}}});
     let (result, request) = common::exchange(
         &["schema", "POST", "/tasks"],
         200,

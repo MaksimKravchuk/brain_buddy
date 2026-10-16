@@ -23,7 +23,7 @@ struct SyncEnginePullTests {
         try await b.apply(.updateTask(.init(taskID: taskOnB, changes: TaskChanges(title: .set("Renew passport now")))))
         b.transport.inject(.status(401))
         #expect(await b.sync() == .needsSignIn)
-        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(priority: .set(.high)))))
+        try await a.apply(.updateTask(.init(taskID: "x", changes: TaskChanges(details: .set("Photos first")))))
         try await a.apply(.createTask(.init(taskID: "y", title: "Book photos", list: .inbox)))
         await a.sync()
         b.events.clear()
@@ -36,11 +36,11 @@ struct SyncEnginePullTests {
         #expect(pulled.outbox.count == 1)
         let merged = OutboxReplayer.replay(pulled.outbox, onto: pulled.base).state
         #expect(merged.tasks[taskOnB]?.title == "Renew passport now")
-        #expect(merged.tasks[taskOnB]?.priority == .high)
+        #expect(merged.tasks[taskOnB]?.details == "Photos first")
         #expect(merged.task(titled: "Book photos") != nil)
 
         let server = harness.snapshot
-        #expect(server.task(titled: "Renew passport now")?.priority == .high)
+        #expect(server.task(titled: "Renew passport now")?.details == "Photos first")
         #expect(try CanonicalState(await b.current(), children: false) == CanonicalState(server, children: false))
     }
 
@@ -300,7 +300,7 @@ struct SyncEnginePullTests {
         // ...while an edit to the task marks it and the next cycle hydrates it.
         harness.clock.advance(by: 60)
         try await a.apply(.createComment(.init(taskID: "t2", commentID: "c2b", body: "Note 2b")))
-        try await a.apply(.updateTask(.init(taskID: "t2", changes: TaskChanges(priority: .set(.high)))))
+        try await a.apply(.updateTask(.init(taskID: "t2", changes: TaskChanges(details: .set("Edited elsewhere")))))
         await a.sync()
         await b.sync()
         #expect(try await b.current().task(titled: "Task 2")?.comments.map(\.body) == ["Note 2", "Note 2b"])

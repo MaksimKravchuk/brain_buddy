@@ -25,7 +25,6 @@ struct QueriesInvariantTests {
                 project: hasProject ? projects.randomElement(using: &generator) : nil,
                 tags: (0..<tagCount).map { _ in tags.randomElement(using: &generator)! },
                 due: Bool.random(using: &generator) ? QueryFixture.today.adding(days: dueOffset).isoString : nil,
-                priority: TaskPriority.allCases.randomElement(using: &generator)!,
                 orderKey: Int.random(in: 0...50, using: &generator),
                 ended: at(hours: Double(Int.random(in: 0...500, using: &generator))))
         }

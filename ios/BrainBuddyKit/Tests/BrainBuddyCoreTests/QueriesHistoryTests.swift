@@ -67,16 +67,13 @@ struct QueriesHistoryTests {
         let phone = fixture.tag("phone")
         fixture.task("Home call", .completed, project: home, tags: [phone], ended: at(hours: 2))
         fixture.task("Home chore", .completed, project: home, ended: at(hours: 3))
-        fixture.task("Loose call old", .completed, tags: [phone], priority: .high, ended: at(hours: 1))
-        fixture.task("Loose call new", .completed, tags: [phone], priority: .high, ended: at(hours: 4))
+        fixture.task("Loose call old", .completed, tags: [phone], ended: at(hours: 1))
+        fixture.task("Loose call new", .completed, tags: [phone], ended: at(hours: 4))
 
         let grouped = fixture.list(.history(.completed), ListOptions(groupByProject: true, tagFilter: phone))
         #expect(grouped.sectionIDs == ["project:p-home", "none"])
         #expect(grouped.titles == [["Home call"], ["Loose call new", "Loose call old"]])
         #expect(grouped.openCount == 0)
-
-        let highOnly = fixture.list(.history(.completed), ListOptions(priorities: [.high]))
-        #expect(highOnly.allTitles == ["Loose call new", "Loose call old"])
     }
 
     @Test("Empty history has no sections")

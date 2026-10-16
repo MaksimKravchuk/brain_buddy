@@ -29,10 +29,10 @@ use crate::calendar::{CalendarDay, TimeZone, UtcInstant};
 use crate::formulation::{self, FormulationError, OwnerClockSettings};
 use crate::normalization;
 use crate::types::{
-    CommentView, DomainError, ListCounts, OpenList, Page, Priority, Project, ProjectDisplay,
-    ProjectFilter, ProjectId, ProjectState, ProjectSummary, Query, QueryInputs, QueryResult,
-    ReadSet, Reason, Subtask, SubtaskView, Tag, TagId, TagState, TagSummary, Task, TaskCounts,
-    TaskId, TaskListResult, TaskSort, TaskState, TaskView,
+    CommentView, DomainError, ListCounts, OpenList, Page, Project, ProjectDisplay, ProjectFilter,
+    ProjectId, ProjectState, ProjectSummary, Query, QueryInputs, QueryResult, ReadSet, Reason,
+    Subtask, SubtaskView, Tag, TagId, TagState, TagSummary, Task, TaskCounts, TaskId,
+    TaskListResult, TaskSort, TaskState, TaskView,
 };
 
 /// `limit` is `ge=1, le=200` on the list route.
@@ -193,16 +193,6 @@ pub(crate) enum KeyPart {
 
 pub(crate) type SortKey = Vec<KeyPart>;
 
-/// `_PRIORITY_RANK`.
-pub(crate) fn priority_rank(priority: Priority) -> u64 {
-    match priority {
-        Priority::High => 0,
-        Priority::Medium => 1,
-        Priority::Low => 2,
-        Priority::None => 3,
-    }
-}
-
 /// `datetime.isoformat()` of an aware UTC value, which the server compares as
 /// text (`created_at.isoformat()`).
 fn python_isoformat(value: UtcInstant) -> String {
@@ -235,11 +225,6 @@ pub(crate) fn sort_key(task: &Task, sort: TaskSort) -> Result<SortKey, DomainErr
             key.extend(manual()?);
             key
         }
-        TaskSort::Priority => {
-            let mut key = vec![Int(priority_rank(task.priority))];
-            key.extend(manual()?);
-            key
-        }
         TaskSort::Title => vec![Text(normalization::search_key(task.title.as_str())), id],
     })
 }
@@ -262,7 +247,6 @@ fn cursor_filters(
         "include_completed": false,
         "include_cancelled": false,
         "q": "",
-        "priority": [],
         "due_before": null,
         "due_on": null,
         "due_after": null,
@@ -509,7 +493,6 @@ fn has_sort_shape(key: &[KeyPart], sort: TaskSort) -> bool {
     let shape: &[bool] = match sort {
         TaskSort::Manual => &[true, false, false],
         TaskSort::Due => &[true, false, true, false, false],
-        TaskSort::Priority => &[true, true, false, false],
         TaskSort::Title => &[false, false],
     };
     key.len() == shape.len()

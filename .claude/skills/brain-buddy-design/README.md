@@ -201,6 +201,7 @@ Lucide `Sprout` doubles as the product logo (top bar). `assets/logo.svg` and `as
 - `SKILL.md` — agent skill descriptor (usable by Claude Code)
 - `colors_and_type.css` — CSS variables for colors + type primitives + semantic tokens (incl. AI-state aliases)
 - `assets/` — logo, wordmark
+- `brand/` — the approved Carry On rebrand (marks, app icon, tokens, guide); not yet in production
 - `preview/` — design-system cards for each token set and component cluster
 - `ui_kits/workspace/` — Brain Buddy canvas-workspace UI kit (React JSX, interactive demo)
 - `_ds_bundle.js` — generated artifact; do not edit by hand or import into production code

@@ -32,7 +32,7 @@ import Foundation
 /// each operation at its `issuedAt`, so once the weekly review is exposed on
 /// the device (`clockAware: true`) a change that touches the formulation clock
 /// — a title or due-date edit, a move or a reopen — is never moved back to an
-/// earlier operation; notes, tags, project, priority, subtask and comment
+/// earlier operation; notes, tags, project, subtask and comment
 /// folds stay. An unsent decision followed by its Undo cancels out, and so
 /// does an unsent bulk release followed by its Undo. Session progress is
 /// never folded, so each change keeps its `progressID`.
@@ -99,7 +99,7 @@ public enum OutboxCompactor {
     }
 
     /// An unsent bulk release and its Undo cancel out when no operation after
-    /// the release used one of its tasks.
+    /// the release used one of its tasks or changed a review run.
     private static func cancelBulkRelease(_ id: BulkID, in outbox: inout [PendingOperation]) -> Bool {
         guard
             let index = outbox.lastIndex(where: {
@@ -108,6 +108,15 @@ public enum OutboxCompactor {
             !outbox[index].hasBeenSent, case .bulkRelease(let release) = outbox[index].command
         else { return false }
         guard outbox[(index + 1)...].allSatisfy({ !$0.command.touchesAny(of: Set(release.taskIDs)) }) else { return false }
+        // A review run changed since read the lists the release emptied (a step
+        // finished with nothing to decide qualifies the run), so it needs the release.
+        let touchesRun = outbox[(index + 1)...].contains { operation in
+            switch operation.command {
+            case .review(.startSession), .review(.progressSession), .review(.finishSession): true
+            default: false
+            }
+        }
+        guard !touchesRun else { return false }
         outbox.remove(at: index)
         return true
     }
@@ -131,8 +140,8 @@ public enum OutboxCompactor {
 
     private static func foldTaskEdit(_ update: GTDCommand.UpdateTask, into outbox: inout [PendingOperation]) -> Bool {
         let changes = update.changes
-        // Clearing a title, priority or waiting note is invalid; leave it for the reducer to report.
-        guard changes.title != .clear, changes.priority != .clear, changes.waitingFor != .clear,
+        // Clearing a title or waiting note is invalid; leave it for the reducer to report.
+        guard changes.title != .clear, changes.waitingFor != .clear,
             let index = unsentTarget(
                 in: outbox,
                 isTarget: { command in
@@ -505,7 +514,6 @@ extension GTDCommand.CreateTask {
         case .clear: dueDate = nil
         case .set(let day): dueDate = day
         }
-        if case .set(let value) = changes.priority { priority = value }
         switch changes.waitingFor {
         case .unchanged: break
         case .clear: waitingFor = nil

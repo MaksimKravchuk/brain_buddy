@@ -126,8 +126,6 @@ pub struct TaskInput {
     pub project_id: Option<String>,
     #[arg(long="tag", action=clap::ArgAction::Append)]
     pub tag_ids: Vec<String>,
-    #[arg(long)]
-    pub priority: Option<String>,
     #[arg(long = "due")]
     pub due_date: Option<String>,
     #[arg(long)]
@@ -144,8 +142,6 @@ pub struct TaskFilter {
     pub project_id: Option<String>,
     #[arg(long = "tag")]
     pub tag_id: Option<String>,
-    #[arg(long, action=clap::ArgAction::Append)]
-    pub priority: Vec<String>,
     #[arg(long)]
     pub sort: Option<String>,
     #[arg(long)]
@@ -437,7 +433,6 @@ pub fn compile(cli: &Cli) -> Result<Request> {
                 insert(&mut fields, "details", &input.details);
                 insert(&mut fields, "state", &input.state);
                 insert(&mut fields, "project_id", &input.project_id);
-                insert(&mut fields, "priority", &input.priority);
                 insert(&mut fields, "due_date", &input.due_date);
                 insert(&mut fields, "waiting_for", &input.waiting_for);
                 if !input.tag_ids.is_empty() {
@@ -489,9 +484,6 @@ pub fn compile(cli: &Cli) -> Result<Request> {
                     if let Some(v) = value {
                         r.query.push((name.into(), v.clone()));
                     }
-                }
-                for v in &filter.priority {
-                    r.query.push(("priority".into(), v.clone()));
                 }
                 for (name, value) in [
                     ("include_completed", filter.include_completed),
@@ -707,7 +699,7 @@ pub fn compile(cli: &Cli) -> Result<Request> {
         {
             return Err(Error::invalid("Invalid query parameter name."));
         }
-        if r.query.iter().any(|(k, _)| k == key) && !["priority", "tag_id"].contains(&key) {
+        if r.query.iter().any(|(k, _)| k == key) && key != "tag_id" {
             return Err(Error::invalid(
                 "Duplicate query parameter conflicts with command options.",
             ));

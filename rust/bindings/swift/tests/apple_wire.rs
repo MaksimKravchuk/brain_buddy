@@ -198,7 +198,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
             &json!({
                 "title": "Buy milk", "details": "From the shop", "state": "inbox",
                 "project_id": HOME, "tag_ids": [ERRANDS], "due_date": "2026-12-01",
-                "priority": "high", "waiting_for": null
+                "waiting_for": null
             }),
             None,
             &[(&wire("task", MILK), MILK)],
@@ -215,7 +215,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
             "task.create",
             &wire("task", CALL),
             &json!({"title": "Call Sam", "details": null, "state": "next", "project_id": null,
-                    "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null}),
+                    "tag_ids": [], "due_date": null, "waiting_for": null}),
             None,
             &[(&wire("task", CALL), CALL)],
         )
@@ -303,7 +303,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
             "task.create",
             &wire("task", third),
             &json!({"title": "Dust", "details": null, "state": "inbox", "project_id": HOME,
-                    "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null}),
+                    "tag_ids": [], "due_date": null, "waiting_for": null}),
             None,
             &[],
         )
@@ -386,7 +386,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
             18,
             "task.update",
             MILK,
-            &json!({"details": null, "due_date": null, "priority": "low",
+            &json!({"details": null, "due_date": null,
                     "tag_changes": {"add_tag_ids": [], "remove_tag_ids": []}}),
             Some(("task", MILK)),
             &[],
@@ -394,7 +394,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
         .expect("clears");
     let milk = device.task(MILK);
     assert!(milk["details"].is_null() && milk["due_date"].is_null());
-    assert_eq!(milk["priority"], "low");
+    assert!(milk.get("priority").is_none());
 
     // A second project with the same name: the refusal names the project that holds it.
     let refusal = device
@@ -434,7 +434,7 @@ fn apple_wire_026_sc_001_the_scenario_the_swift_parity_suite_runs_is_accepted() 
                 "task.create",
                 &wire("task", third),
                 &json!({"title": title, "details": null, "state": "inbox", "project_id": null,
-                        "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null}),
+                        "tag_ids": [], "due_date": null, "waiting_for": null}),
                 None,
                 &[],
             )
@@ -587,7 +587,7 @@ fn apple_wire_026_fr_016_review_commands_are_accepted_in_the_shapes_the_facade_s
 
     let task = json!({
         "id": MILK, "title": "Call Sam", "details": null, "state": "next", "project_id": null,
-        "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
+        "tag_ids": [], "due_date": null, "waiting_for": null,
         "waiting_since": null, "order_key": "0", "source_capture_ids": [],
         "created_at": "2026-10-01T08:00:00Z", "updated_at": "2026-10-01T08:00:00Z",
         "completed_at": null, "cancelled_at": null, "revision": "3",
@@ -636,7 +636,7 @@ fn apple_wire_026_fr_016_review_commands_are_accepted_in_the_shapes_the_facade_s
     // A bulk release names each task with the revision it was shown at.
     let inbox_task = json!({
         "id": CALL, "title": "Sort mail", "details": null, "state": "inbox", "project_id": null,
-        "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
+        "tag_ids": [], "due_date": null, "waiting_for": null,
         "waiting_since": null, "order_key": "0", "source_capture_ids": [],
         "created_at": "2026-10-01T08:00:00Z", "updated_at": "2026-10-01T08:00:00Z",
         "completed_at": null, "cancelled_at": null, "revision": "1",
@@ -707,7 +707,7 @@ fn apple_wire_026_sc_001_smart_add_decides_atomically_from_the_proposed_payload(
     let device = Device::new();
     let draft = bytes(&json!({"text": "Buy milk @Home #errands", "list": "inbox",
                               "waiting_for": "", "details": "", "due_date": null,
-                              "priority": "none", "context_project": null, "context_tag": null}));
+                              "context_project": null, "context_tag": null}));
     let read = bytes(&device.read_set);
     let project = wire("project", HOME);
     let tag = wire("tag", ERRANDS);
@@ -774,7 +774,7 @@ fn apple_wire_026_fr_002_a_repeated_create_meets_the_canonical_id_in_the_read_se
             "task.create",
             task.clone(),
             json!({"title": "Buy milk", "details": null, "state": "inbox", "project_id": project,
-                   "tag_ids": [tag], "due_date": null, "priority": "none", "waiting_for": null}),
+                   "tag_ids": [tag], "due_date": null, "waiting_for": null}),
         ),
         (
             "subtask.create",
@@ -819,7 +819,7 @@ fn apple_wire_026_fr_016_an_observed_park_is_decided_by_the_core_without_a_snaps
         },
         "tasks": { MILK: {
             "id": MILK, "title": "Call Sam", "details": null, "state": "next", "project_id": null,
-            "tag_ids": [], "due_date": null, "priority": "none", "waiting_for": null,
+            "tag_ids": [], "due_date": null, "waiting_for": null,
             "waiting_since": null, "order_key": "0", "source_capture_ids": [],
             "created_at": "2026-06-01T08:00:00Z", "updated_at": "2026-06-01T08:00:00Z",
             "completed_at": null, "cancelled_at": null, "revision": "1",

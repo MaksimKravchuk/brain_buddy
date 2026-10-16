@@ -286,7 +286,7 @@ fn reference_read_set(owner: &str) -> ReadSet {
         json!({
             "id": row["id"], "title": row["title"], "details": row["details"],
             "state": row["state"], "project_id": row["project_id"], "tag_ids": row["tag_ids"],
-            "due_date": row["due_date"], "priority": row["priority"],
+            "due_date": row["due_date"],
             "waiting_for": row["waiting_for"], "waiting_since": row["waiting_since"],
             "order_key": counter(&row, "order_key"),
             "source_capture_ids": row["source_capture_ids"],
@@ -332,7 +332,7 @@ fn review_read_set() -> ReadSet {
     serde_json::from_value(json!({
         "tasks": { format!("task_{id}"): {
             "id": format!("task_{id}"), "title": "Call Bob", "details": null, "state": "next",
-            "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+            "project_id": null, "tag_ids": [], "due_date": null,
             "waiting_for": null, "waiting_since": null, "order_key": "3",
             "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
             "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,
@@ -379,7 +379,7 @@ fn park_read_set() -> ReadSet {
     serde_json::from_value(json!({
         "tasks": { PARK_TASK: {
             "id": PARK_TASK, "title": "Call Bob", "details": null, "state": "next",
-            "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+            "project_id": null, "tag_ids": [], "due_date": null,
             "waiting_for": null, "waiting_since": null, "order_key": "3",
             "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
             "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,

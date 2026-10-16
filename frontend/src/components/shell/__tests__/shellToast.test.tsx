@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ACTION_TOAST_MS,
+  findShortcutLabel,
+  isFindShortcut,
   isTextEntryTarget,
   isUndoShortcut,
   ShellToastContext,
@@ -126,5 +128,25 @@ describe("020-FR-048 undo toast timing and keyboard rules", () => {
     expect(undoShortcutLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)")).toBe("Cmd+Z");
     expect(undoShortcutLabel("Mozilla/5.0 (iPad; CPU OS 17_0)")).toBe("Cmd+Z");
     expect(undoShortcutLabel()).toBe("Ctrl+Z");
+  });
+});
+
+describe("find shortcut", () => {
+  it.each([
+    [{ key: "o", ctrlKey: true }, true],
+    [{ key: "O", metaKey: true }, true],
+    [{ key: "o", ctrlKey: true, shiftKey: true }, false],
+    [{ key: "o", metaKey: true, altKey: true }, false],
+    [{ key: "o" }, false],
+    [{ key: "z", ctrlKey: true }, false],
+    [{ key: "щ", code: "KeyO", ctrlKey: true }, true],
+    [{ key: "r", code: "KeyO", metaKey: true }, false]
+  ])("reads %o as Find: %s", (init, expected) => {
+    expect(isFindShortcut(new KeyboardEvent("keydown", init))).toBe(expected);
+  });
+
+  it("names the key the way each platform writes it", () => {
+    expect(findShortcutLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")).toBe("⌘O");
+    expect(findShortcutLabel("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe("Ctrl+O");
   });
 });

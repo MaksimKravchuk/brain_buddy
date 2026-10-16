@@ -28,7 +28,7 @@ public enum ReviewCopy {
     // MARK: "This wording" (M-02)
 
     public static let thisWordingAsks =
-        "The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags, project or priority doesn't restart the clock."
+        "The wording hasn't moved for a while. That's feedback on the wording, not on you. Changing notes, Tags or project doesn't restart the clock."
 
     public static func thisWordingWillAsk(on day: String) -> String {
         "Asks for a decision from \(day) if the wording stays the same."

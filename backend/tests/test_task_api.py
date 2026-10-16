@@ -649,7 +649,7 @@ def test_task_project_tag_and_filters_hide_other_owners(second_api_client) -> No
     )
 
 
-def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -> None:
+def test_task_search_date_sort_and_cursor_filters_compose(api_client) -> None:
     project = api_client.post(
         "/api/projects",
         headers={"Idempotency-Key": "query-project"},
@@ -669,7 +669,6 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
         project_id=project["id"],
         tag_ids=[tag["id"]],
         due_date="2026-01-02",
-        priority="high",
     )
     _create_task(
         api_client,
@@ -677,14 +676,12 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
         key="query-alpha",
         state="next",
         due_date="2026-01-01",
-        priority="low",
     )
     _create_task(
         api_client,
         "Undated medium",
         key="query-medium",
         state="next",
-        priority="medium",
     )
 
     searched = api_client.get(
@@ -694,15 +691,14 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
             "project_id": project["id"],
             "tag_id": tag["id"],
             "q": " acme ",
-            "priority": ["high", "medium"],
             "due_on": "2026-01-02",
-            "sort": "priority",
+            "sort": "due",
         },
     )
     assert searched.status_code == 200, searched.text
     body = searched.json()
     assert [item["id"] for item in body["items"]] == [urgent["id"]]
-    assert body["items"][0]["priority"] == "high"
+    assert "priority" not in body["items"][0]
     assert body["counts_by_state"] == {
         "inbox": 0,
         "next": 1,
@@ -710,34 +706,25 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
         "someday": 0,
     }
 
-    due_sorted = api_client.get("/api/tasks", params={"state": "next", "sort": "due"})
+    due_sorted = api_client.get(
+        "/api/tasks", params={"state": "next", "sort": "due", "limit": 2}
+    )
     assert due_sorted.status_code == 200, due_sorted.text
-    assert [item["title"] for item in due_sorted.json()["items"]][:3] == [
+    assert [item["title"] for item in due_sorted.json()["items"]] == [
         "Write alpha notes",
         "Ship billing audit",
-        "Undated medium",
-    ]
-    priority_sorted = api_client.get(
-        "/api/tasks", params={"state": "next", "sort": "priority", "limit": 2}
-    )
-    assert priority_sorted.status_code == 200, priority_sorted.text
-    assert [item["title"] for item in priority_sorted.json()["items"]] == [
-        "Ship billing audit",
-        "Undated medium",
     ]
     next_page = api_client.get(
         "/api/tasks",
         params={
             "state": "next",
-            "sort": "priority",
+            "sort": "due",
             "limit": 2,
-            "cursor": priority_sorted.json()["next_cursor"],
+            "cursor": due_sorted.json()["next_cursor"],
         },
     )
     assert next_page.status_code == 200, next_page.text
-    assert [item["title"] for item in next_page.json()["items"]] == [
-        "Write alpha notes"
-    ]
+    assert [item["title"] for item in next_page.json()["items"]] == ["Undated medium"]
     assert (
         api_client.get(
             "/api/tasks",
@@ -745,11 +732,12 @@ def test_task_priority_search_date_sort_and_cursor_filters_compose(api_client) -
                 "state": "next",
                 "sort": "title",
                 "limit": 2,
-                "cursor": priority_sorted.json()["next_cursor"],
+                "cursor": due_sorted.json()["next_cursor"],
             },
         ).status_code
         == 400
     )
+    assert api_client.get("/api/tasks", params={"sort": "priority"}).status_code == 422
 
 
 def test_project_archive_keeps_assignments_from_all_task_states(api_client) -> None:
@@ -808,28 +796,25 @@ def test_project_archive_keeps_assignments_from_all_task_states(api_client) -> N
         assert detail.json() == task
 
 
-def test_waiting_patch_priority_and_same_state_move_invariants(api_client) -> None:
+def test_waiting_patch_and_same_state_move_invariants(api_client) -> None:
     waiting = _create_task(
         api_client,
         "Await signed contract",
         key="patch-waiting",
         state="waiting",
         waiting_for="Alice",
-        priority="none",
     )
     updated_waiting = api_client.patch(
         f"/api/tasks/{waiting['id']}",
         headers={"Idempotency-Key": "patch-waiting-for"},
         json={
             "waiting_for": "  Bob  ",
-            "priority": "medium",
             "expected_revision": waiting["revision"],
         },
     )
     assert updated_waiting.status_code == 200, updated_waiting.text
     assert updated_waiting.json()["waiting_for"] == "Bob"
     assert updated_waiting.json()["waiting_since"] == waiting["waiting_since"]
-    assert updated_waiting.json()["priority"] == "medium"
 
     assert (
         api_client.post(

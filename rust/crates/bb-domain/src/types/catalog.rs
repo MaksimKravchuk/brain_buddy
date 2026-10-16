@@ -26,8 +26,7 @@ use super::tasks::{
     TaskTransition, TaskUpdate,
 };
 use super::vocabulary::{
-    BulkKind, DateView, HistoryKind, OpenList, Priority, ProjectFilter, StepCode, TaskSort,
-    WriterOrigin,
+    BulkKind, DateView, HistoryKind, OpenList, ProjectFilter, StepCode, TaskSort, WriterOrigin,
 };
 use bb_protocol::catalog::{CommandType, EntityType};
 use bb_protocol::command::{CommandEnvelope, CommandRef, Precondition};
@@ -746,8 +745,6 @@ pub struct ListOptions {
     pub show_completed: bool,
     /// As `show_completed`, for cancelled tasks.
     pub show_cancelled: bool,
-    /// A set: empty means every priority, repeats mean nothing.
-    pub priorities: Vec<Priority>,
     /// Narrow to tasks carrying this tag. A tag the read set lacks matches
     /// nothing; it is not an error.
     pub tag_filter: Option<TagId>,

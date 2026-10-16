@@ -151,7 +151,6 @@ enum RustChangeApplier {
         task.projectID = value.optionalString("project_id").map { ProjectID(ids.swift($0)) }
         task.tagIDs = try value.strings("tag_ids").map { TagID(ids.swift($0)) }
         task.dueDate = value.optionalString("due_date").flatMap { CalendarDay(isoString: $0) }
-        task.priority = try code(TaskPriority.self, value, "priority")
         task.waitingFor = value.optionalString("waiting_for")
         task.waitingSince = try value.optionalInstant("waiting_since", keeping: existing?.waitingSince)
         task.completedAt = try value.optionalInstant("completed_at", keeping: existing?.completedAt)

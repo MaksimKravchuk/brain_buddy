@@ -92,7 +92,6 @@ def task_response(
         project_id=task.project_id,
         tag_ids=task.tag_ids,
         due_date=task.due_date,
-        priority=task.priority,
         waiting_for=task.waiting_for,
         waiting_since=task.waiting_since,
         order_key=task.order_key,

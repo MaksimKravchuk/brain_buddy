@@ -44,7 +44,7 @@ const manifest = manifestValue;
 type Adapter = (client: Client) => Promise<unknown>;
 
 const adapters = {
-  listTasks: (c) => c.listTasks({ state: "inbox", projectId: "project-1", tagId: "tag-1", cursor: "page-2", limit: 25, includeCompleted: true, includeCancelled: true, q: " shared ", unassignedProject: true, priority: ["high", "medium"], dueBefore: "2026-08-01", dueOn: "2026-08-02", dueAfter: "2026-08-03", sort: "due" }),
+  listTasks: (c) => c.listTasks({ state: "inbox", projectId: "project-1", tagId: "tag-1", cursor: "page-2", limit: 25, includeCompleted: true, includeCancelled: true, q: " shared ", unassignedProject: true, dueBefore: "2026-08-01", dueOn: "2026-08-02", dueAfter: "2026-08-03", sort: "due" }),
   createTask: (c) => c.createTask({ title: "fixture" }, "key-create"),
   smartAddTask: (c) => c.smartAddTask({ title: "fixture" }, "key-smart"),
   getTask: (c) => c.getTask("task-1"),

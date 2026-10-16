@@ -16,7 +16,6 @@ import type {
   OpenTaskState,
   ProjectResponse,
   TagResponse,
-  TaskPriority,
   TaskResponse,
   TaskSubtaskResponse
 } from "../../api/taskTypes";
@@ -320,7 +319,6 @@ function TaskDetailBody({
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
   const [draftState, setDraftState] = useState(task.state);
   const [projectId, setProjectId] = useState(task.project_id ?? "");
-  const [priority, setPriority] = useState(task.priority);
   const [tagIds, setTagIds] = useState(task.tag_ids);
   const [waitingRequired, setWaitingRequired] = useState(false);
   const waitingRef = useRef<HTMLInputElement>(null);
@@ -337,7 +335,6 @@ function TaskDetailBody({
     setDueDate(task.due_date ?? "");
     setDraftState(task.state);
     setProjectId(task.project_id ?? "");
-    setPriority(task.priority);
     setTagIds(task.tag_ids);
   }
 
@@ -525,23 +522,6 @@ function TaskDetailBody({
             ))}
           </select>
         </span>
-
-        <span className={propLabelClass}>Priority</span>
-        <select
-          aria-label={fieldLabel("Priority", "priority")}
-          value={draft?.priority ?? priority}
-          className={propFieldClass}
-          onChange={(event) => {
-            const value = event.currentTarget.value as TaskPriority;
-            setPriority(value);
-            if (autosave) change("priority", value as never, 0); else save({ priority: value });
-          }}
-        >
-          <option value="none">None</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
 
         <span className={`${propLabelClass} self-start pt-1`}>Tags</span>
         <span className="flex min-w-0 flex-wrap gap-1.5">

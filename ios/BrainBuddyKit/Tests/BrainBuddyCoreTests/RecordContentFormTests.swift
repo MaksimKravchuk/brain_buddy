@@ -17,7 +17,6 @@ struct RecordContentFormTests {
         )
         task.details = "Before noon"
         task.dueDate = CalendarDay(year: 2026, month: 10, day: 20)
-        task.priority = .high
         var state = Fixture.state(
             tasks: [task],
             projects: [Fixture.project(ProjectID("\(prefix)work"), "Work")],
@@ -52,7 +51,6 @@ struct RecordContentFormTests {
             ("list", { $0.tasks["t"]?.state = .next; $0.tasks["t"]?.waitingFor = nil }),
             ("waiting-for", { $0.tasks["t"]?.waitingFor = "Bob" }),
             ("due date", { $0.tasks["t"]?.dueDate = nil }),
-            ("priority", { $0.tasks["t"]?.priority = .low }),
             ("project", { $0.tasks["t"]?.projectID = nil }),
             ("project name", { $0.projects["work"]?.name = "Job" }),
             ("tag name", { $0.tags["home"]?.name = "house" }),

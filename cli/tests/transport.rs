@@ -26,7 +26,7 @@ fn success_body_cannot_echo_active_credential_024_fr_007_024_fr_006() {
 
 #[test]
 fn task_create_preserves_key_and_cookie_024_fr_001_024_fr_005_024_sc_001() {
-    let (output,request)=common::exchange(&["task","add","--title","Fixture","--key","fixture-create"],201,"",br#"{"id":"task-fixture","title":"Fixture","state":"inbox","revision":1,"details":"long fixture details","priority":"none","due_date":null,"project_id":null,"tag_ids":[]}"#);
+    let (output,request)=common::exchange(&["task","add","--title","Fixture","--key","fixture-create"],201,"",br#"{"id":"task-fixture","title":"Fixture","state":"inbox","revision":1,"details":"long fixture details","due_date":null,"project_id":null,"tag_ids":[]}"#);
     assert!(output.status.success(), "{:?}", output);
     assert!(
         request
@@ -78,7 +78,7 @@ fn redirect_is_refused_without_following_024_fr_007() {
 
 #[test]
 fn cursor_and_minimal_page_are_preserved_024_fr_003_024_sc_002() {
-    let tasks=(0..20).map(|i|json!({"id":format!("task-{i}"),"title":"Fixture","state":"inbox","revision":1,"priority":"none","due_date":null,"project_id":null,"tag_ids":[],"details":"x".repeat(3000)})).collect::<Vec<_>>();
+    let tasks=(0..20).map(|i|json!({"id":format!("task-{i}"),"title":"Fixture","state":"inbox","revision":1,"due_date":null,"project_id":null,"tag_ids":[],"details":"x".repeat(3000)})).collect::<Vec<_>>();
     let body=json!({"items":tasks,"has_more":true,"next_cursor":"opaque/+== cursor","counts_by_state":{"inbox":20}}).to_string();
     let (output, _) = common::exchange(&["task", "list"], 200, "", body.as_bytes());
     assert!(output.status.success(), "{:?}", output);

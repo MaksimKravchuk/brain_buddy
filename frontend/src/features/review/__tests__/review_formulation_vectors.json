@@ -2215,7 +2215,7 @@
     },
     {
       "id": "T-007",
-      "note": "notes, tags, project, priority, subtasks, comments and waiting-for edits keep the clock (FR-003)",
+      "note": "notes, tags, project, subtasks, comments and waiting-for edits keep the clock (FR-003)",
       "settings": {
         "threshold_days": 14,
         "time_zone": "Europe/Berlin",
@@ -2241,7 +2241,6 @@
           "details",
           "tag_ids",
           "project_id",
-          "priority",
           "subtasks",
           "comments",
           "waiting_for"

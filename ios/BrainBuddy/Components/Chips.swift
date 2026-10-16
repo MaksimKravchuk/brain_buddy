@@ -150,40 +150,6 @@ enum BBDayMath {
     }
 }
 
-// MARK: - Priority badge
-
-/// Priority as exclamation marks plus the word, so it never relies on colour.
-/// Renders nothing for `.none`.
-struct PriorityBadge: View {
-    let priority: TaskPriority
-
-    var body: some View {
-        if priority != .none {
-            HStack(spacing: 2) {
-                Image(systemName: priority.symbolName)
-                    .imageScale(.small)
-                Text(priority.title)
-            }
-            .font(BBFont.caption.weight(.medium))
-            .foregroundStyle(Self.color(for: priority))
-            .lineLimit(1)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(priority.title) priority")
-        }
-    }
-
-    /// Text-contrast shades of the semantic colours (high rose, medium amber,
-    /// low sky), matching the Expo app's priority dot.
-    static func color(for priority: TaskPriority) -> Color {
-        switch priority {
-        case .high: BBColor.dangerText
-        case .medium: BBColor.warningText
-        case .low: BBColor.infoText
-        case .none: BBColor.textTertiary
-        }
-    }
-}
-
 // MARK: - Review marker (spec 020, M-01, M-02)
 
 /// A formulation marker: words plus an SF Symbol, never colour alone. Indigo
@@ -401,11 +367,6 @@ struct BBFlowLayout: Layout {
             DueChip(day: today, today: today)
             DueChip(day: today.adding(days: 3), today: today)
             DueChip(day: today.adding(days: -4), today: today)
-        }
-        HStack {
-            PriorityBadge(priority: .high)
-            PriorityBadge(priority: .medium)
-            PriorityBadge(priority: .low)
         }
         HStack {
             CountBadge(count: 17, prominent: true)

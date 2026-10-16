@@ -94,7 +94,6 @@ private enum PendingEditorNavigation {
     case clarifyInbox
     case groupByProject(Bool)
     case showCancelled(Bool)
-    case priorityFilter(PriorityFilter)
     case sort(TaskSort)
     /// "Sign out…" (X-02, X-07): X-04 opens only after this guard (design X-04 "unsaved edit or
     /// capture draft").
@@ -186,6 +185,8 @@ struct WorkspaceView: View {
     /// X-01 – X-04 and X-07 over this workspace; every sync surface presents through its router.
     let sync: MacSyncController
     @State private var columns: NavigationSplitViewVisibility = .all
+    /// The window's undo stack: Edit › Undo (⌘Z) takes back the last Done, Cancel or move.
+    @Environment(\.undoManager) private var undoManager
     @StateObject private var quickCapture = QuickCaptureController()
     @State private var voicePresented = false
     @State private var selectedTaskID: TaskID?
@@ -243,6 +244,7 @@ struct WorkspaceView: View {
 
     var body: some View {
         reviewSheets(collectionSheets(taskSheets(window)))
+            .focusedSceneValue(\.closeTaskDetails, closeTaskDetailsAction)
     }
 
     private var sheetIsBusy: Bool { model.isSaving || isSubmittingSheet }
@@ -298,7 +300,6 @@ struct WorkspaceView: View {
         .task { await model.prepareVisibleQueries() }
         .onChange(of: model.destination) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.appliedSearch) { _, _ in Task { await model.prepareVisibleQueries() } }
-        .onChange(of: model.appliedPriority) { _, _ in Task { await model.prepareVisibleQueries() } }
         .onChange(of: model.captureDraft) { _, draft in Task { await model.prepareCapturePreview(draft) } }
         .onChange(of: model.workspace.state) { _, _ in Task { await model.prepareVisibleQueries() } }
     }
@@ -335,16 +336,6 @@ struct WorkspaceView: View {
             } label: {
                 Label("Voice to task draft", systemImage: "mic")
             }
-            Picker(
-                "Priority",
-                selection: Binding(get: { model.priorityFilter }, set: { requestNavigation(.priorityFilter($0)) })
-            ) {
-                ForEach(PriorityFilter.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("Filter by priority")
         }
     }
 
@@ -725,6 +716,23 @@ struct WorkspaceView: View {
         }
     }
 
+    /// View › "Close task details" (⌘\) while a task is open; the same guard as choosing another task.
+    private var closeTaskDetailsAction: CloseTaskDetailsAction? {
+        guard selectedTaskID != nil else { return nil }
+        return CloseTaskDetailsAction(close: { requestNavigation(.task(nil)) })
+    }
+
+    /// Puts the list change `before` → now on the window's undo stack (Edit › Undo, ⌘Z).
+    private func registerUndo(_ before: TaskRecord?) {
+        guard let before, let change = TaskListChange(before: before, after: model.task(before.id)), let undoManager else {
+            return
+        }
+        undoManager.registerUndo(withTarget: model) { model in
+            Task { await model.undo(change) }
+        }
+        undoManager.setActionName(change.actionName)
+    }
+
     private func select(_ id: TaskID?) {
         taskSaveEditorID = UUID().uuidString
         selectedTaskID = id
@@ -758,8 +766,10 @@ struct WorkspaceView: View {
             select(id)
             if let id { Task { await model.loadTaskDetail(id) } }
         case .complete(let id):
+            let before = model.task(id)
             Task {
                 if await model.completeTask(id) {
+                    registerUndo(before)
                     select(nil)
                     release(id)
                 }
@@ -773,8 +783,10 @@ struct WorkspaceView: View {
                 moveWaitingFor = ""
                 movingTask = model.task(id)
             } else {
+                let before = model.task(id)
                 Task {
                     if await model.moveTask(id, to: destination) {
+                        registerUndo(before)
                         select(nil)
                         release(id)
                     }
@@ -789,8 +801,10 @@ struct WorkspaceView: View {
             reopenWaitingFor = ""
             reopeningTask = model.task(id)
         case .cancel(let id):
+            let before = model.task(id)
             Task {
                 if await model.cancelTask(id) {
+                    registerUndo(before)
                     select(nil)
                     release(id)
                 }
@@ -836,10 +850,6 @@ struct WorkspaceView: View {
         case .showCancelled(let value):
             select(nil)
             model.showCancelled = value
-        case .priorityFilter(let value):
-            select(nil)
-            model.priorityFilter = value
-            model.reload()
         case .sort(let value):
             select(nil)
             model.sort = value
@@ -856,7 +866,6 @@ struct WorkspaceView: View {
 
     private func openQuickOpenTarget(_ target: QuickOpenTarget) {
         model.searchText = ""
-        model.priorityFilter = .all
         model.reload()
         switch target {
         case .list(let list): model.choose(.list(list))
@@ -1066,7 +1075,7 @@ struct WorkspaceView: View {
     private var filteredEmptyState: some View {
         ContentUnavailableView(
             "No matching tasks", systemImage: "magnifyingglass",
-            description: Text("Clear the search or priority filter to see this project's tasks.")
+            description: Text("Clear the search to see this project's tasks.")
         )
     }
 
@@ -1483,7 +1492,10 @@ struct WorkspaceView: View {
             saveRequest: editorSaveRequest
         ) { changes, list in
             Task {
+            let before = model.task(task.id)
             if await model.saveTask(task.id, changes: changes, moveTo: list, editorID: taskSaveEditorID) {
+                // A list change made in the editor is undoable like a row move; field edits are not.
+                registerUndo(before)
                 taskSaveEditorID = UUID().uuidString
                 editorDirty = false
                 editorCanSave = false
@@ -1544,9 +1556,6 @@ struct WorkspaceView: View {
             }
             if let due = detail.dueDate {
                 Text("Due · \(due.isoString)").font(.caption)
-            }
-            if detail.priority != .none {
-                Text("Priority · \(detail.priority.rawValue.capitalized)").font(.caption)
             }
             if !detail.subtasks.isEmpty {
                 DisclosureGroup("Subtasks · \(detail.subtasks.count)") {
@@ -1633,10 +1642,8 @@ struct WorkspaceView: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || model.priorityFilter != .all
-                {
-                    Text("Current search or priority filter may hide the new task from this list.")
+                if model.hasAppliedTaskFilter || !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Current search may hide the new task from this list.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1648,7 +1655,7 @@ struct WorkspaceView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.hasAppliedTaskFilter {
-                    Button("Clear search and priority filter") { requestNavigation(.clearTaskFilters) }
+                    Button("Clear search") { requestNavigation(.clearTaskFilters) }
                         .font(.caption)
                 }
             }
@@ -1922,7 +1929,9 @@ extension WorkspaceView {
                 Button("Move to Waiting for") {
                     let waitingFor = moveWaitingFor
                     performSheetSave(editorID: moveWaitingEditorID) { submittedEditorID in
+                        let before = model.task(task.id)
                         if await model.moveTask(task.id, to: .waiting, waitingFor: waitingFor, editorID: submittedEditorID) {
+                            registerUndo(before)
                             movingTask = nil
                             moveWaitingEditorID = UUID().uuidString
                         }
@@ -2152,7 +2161,7 @@ private struct TaskInlineEditor<Extras: View>: View {
         self.onCancelTask = onCancelTask
         self.extras = extras
         _list = State(initialValue: task.state.openList ?? .next)
-        _showProperties = State(initialValue: task.dueDate != nil || task.priority != .none || !task.tagIDs.isEmpty)
+        _showProperties = State(initialValue: task.dueDate != nil || !task.tagIDs.isEmpty)
     }
 
     var body: some View {
@@ -2205,7 +2214,7 @@ private struct TaskInlineEditor<Extras: View>: View {
                 properties.padding(.top, 8)
             } label: {
                 HStack {
-                    Text("Date, priority, and tags")
+                    Text("Date and tags")
                     Spacer()
                     Text(propertySummary)
                         .font(.caption)
@@ -2266,11 +2275,6 @@ private struct TaskInlineEditor<Extras: View>: View {
                     displayedComponents: .date
                 )
                 .datePickerStyle(.compact)
-            }
-            Picker("Priority", selection: $draft.priority) {
-                ForEach(TaskPriority.allCases, id: \.self) { value in
-                    Text(value.rawValue.capitalized).tag(value)
-                }
             }
             if !tags.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
@@ -2384,7 +2388,6 @@ private struct TaskInlineEditor<Extras: View>: View {
     private var propertySummary: String {
         var parts: [String] = []
         if draft.dueDate != nil { parts.append("Due") }
-        if draft.priority != .none { parts.append(draft.priority.rawValue.capitalized) }
         if !draft.tagIDs.isEmpty { parts.append("\(draft.tagIDs.count) tags") }
         return parts.isEmpty ? "Optional" : parts.joined(separator: " · ")
     }
@@ -2835,10 +2838,6 @@ private struct InboxClarifyView: View {
             if let due = item.dueDate {
                 Text("Due · \(due.isoString)").font(.caption).foregroundStyle(.secondary)
             }
-            if item.priority != .none {
-                Text("Priority · \(item.priority.rawValue.capitalized)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             if !item.tagIDs.isEmpty {
                 let names = item.tagIDs.compactMap { model.tag($0)?.name }
                 Text("Tags · \(names.map { "#\($0)" }.joined(separator: "  "))")
@@ -3003,7 +3002,7 @@ private struct InboxClarifyView: View {
                 Text(projectSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Existing notes, tags, date, and priority stay on the resulting Next action.")
+                Text("Existing notes, tags, and date stay on the resulting Next action.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

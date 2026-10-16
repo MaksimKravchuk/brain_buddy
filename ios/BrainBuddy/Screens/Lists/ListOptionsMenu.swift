@@ -46,13 +46,11 @@ struct ListOptionsMenu: View {
             }
 
             Section {
-                priorityMenu
                 if ListOptionsRules.allowsTagFilter(destination) {
                     tagPicker
                 }
                 if ListOptionsRules.isFiltered(options) {
                     Button {
-                        options.priorities = []
                         options.tagFilter = nil
                     } label: {
                         Label("Clear filters", systemImage: "xmark.circle")
@@ -69,20 +67,6 @@ struct ListOptionsMenu: View {
         .accessibilityLabel("List options")
         .accessibilityValue(ListOptionsRules.isFiltered(options) ? "Filters on" : "")
         .task { if ListOptionsRules.allowsTagFilter(destination) { await workspace.prepareTags() } }
-    }
-
-    private var priorityMenu: some View {
-        Menu {
-            Toggle(TaskPriority.high.title, isOn: $options.includesHighPriority)
-            Toggle(TaskPriority.medium.title, isOn: $options.includesMediumPriority)
-            Toggle(TaskPriority.low.title, isOn: $options.includesLowPriority)
-            Toggle(TaskPriority.none.title, isOn: $options.includesNoPriority)
-            if !options.priorities.isEmpty {
-                Button("Any priority") { options.priorities = [] }
-            }
-        } label: {
-            Label(priorityMenuTitle, systemImage: "flag")
-        }
     }
 
     private var tagPicker: some View {
@@ -106,46 +90,6 @@ struct ListOptionsMenu: View {
             }
         } label: {
             Label("Tag", systemImage: "tag")
-        }
-    }
-
-    private var priorityMenuTitle: String {
-        let chosen = Self.priorityOrder.filter { options.priorities.contains($0) }
-        guard !chosen.isEmpty else { return "Priority" }
-        return "Priority: " + chosen.map(\.title).joined(separator: ", ")
-    }
-
-    private static let priorityOrder: [TaskPriority] = [.high, .medium, .low, .none]
-}
-
-/// Per-priority switches over `priorities`, so each menu toggle binds through
-/// a key path (`$options.includesHighPriority`) instead of a capturing closure.
-extension ListOptions {
-    fileprivate var includesHighPriority: Bool {
-        get { priorities.contains(.high) }
-        set { setPriority(.high, included: newValue) }
-    }
-
-    fileprivate var includesMediumPriority: Bool {
-        get { priorities.contains(.medium) }
-        set { setPriority(.medium, included: newValue) }
-    }
-
-    fileprivate var includesLowPriority: Bool {
-        get { priorities.contains(.low) }
-        set { setPriority(.low, included: newValue) }
-    }
-
-    fileprivate var includesNoPriority: Bool {
-        get { priorities.contains(TaskPriority.none) }
-        set { setPriority(TaskPriority.none, included: newValue) }
-    }
-
-    fileprivate mutating func setPriority(_ priority: TaskPriority, included: Bool) {
-        if included {
-            priorities.insert(priority)
-        } else {
-            priorities.remove(priority)
         }
     }
 }
@@ -174,6 +118,6 @@ enum ListOptionsRules {
     }
 
     static func isFiltered(_ options: ListOptions) -> Bool {
-        !options.priorities.isEmpty || options.tagFilter != nil
+        options.tagFilter != nil
     }
 }

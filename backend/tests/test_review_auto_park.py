@@ -217,7 +217,7 @@ def _activated(api: ReviewApi, **body: Any) -> datetime:
 def test_020_FR_012_sweep_parks_a_due_formulation_and_keeps_everything_else(
     api: ReviewApi, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Due at T + 7; project, tags, notes, due date and priority are kept."""
+    """Due at T + 7; project, tags, notes and due date are kept."""
 
     _activated(api)
     project = api.client.post("/api/projects", json={"name": "Flat"}, headers=api.key())
@@ -227,7 +227,6 @@ def test_020_FR_012_sweep_parks_a_due_formulation_and_keeps_everything_else(
         details="Tiles from Ann",
         project_id=project.json()["id"],
         tag_ids=[tag.json()["id"]],
-        priority="high",
     )
     api.clock.advance(days=20, hours=23)
     sweep(api.container)
@@ -239,11 +238,10 @@ def test_020_FR_012_sweep_parks_a_due_formulation_and_keeps_everything_else(
     parked = api.stored(task["id"])
     assert parked.state == "someday"
     assert parked.revision == task["revision"] + 1
-    assert (parked.details, parked.project_id, parked.tag_ids, parked.priority) == (
+    assert (parked.details, parked.project_id, parked.tag_ids) == (
         "Tiles from Ann",
         project.json()["id"],
         [tag.json()["id"]],
-        "high",
     )
     assert parked.parked is not None
     assert parked.parked.formulation_id == task["formulation"]["id"]

@@ -73,7 +73,7 @@ Generic `api GET/POST/PUT/PATCH/DELETE PATH` covers deployed member operations u
 
 ## Output and recovery
 
-Success stdout is one compact JSON line with `data`. Task defaults are `id,title,state,revision,priority,due_date,project_id,tag_ids`. `--fields` selects documented dotted fields while retaining id/revision; `--full` includes all bounded task fields. Task lists retain `page.has_more` and the opaque `page.next_cursor`; copy that cursor into the next explicit `--cursor` call. There is no automatic paging. Default limit20, max200. An unpaginated list truncated locally reports `truncated:true,has_more:false,next_cursor:null`.
+Success stdout is one compact JSON line with `data`. Task defaults are `id,title,state,revision,due_date,project_id,tag_ids`. `--fields` selects documented dotted fields while retaining id/revision; `--full` includes all bounded task fields. Task lists retain `page.has_more` and the opaque `page.next_cursor`; copy that cursor into the next explicit `--cursor` call. There is no automatic paging. Default limit20, max200. An unpaginated list truncated locally reports `truncated:true,has_more:false,next_cursor:null`.
 
 Errors are one JSON object on stderr, with safe status/correlation/retry metadata where available. Help/version are human-readable; explicit login may print waiting instructions on stderr. Requests use a10s connect/30s total timeout, max8MiB success and16KiB error responses, TLS verification, zero redirects and zero HTTP retries. Authentication polling follows its separate bounded grant interval.
 

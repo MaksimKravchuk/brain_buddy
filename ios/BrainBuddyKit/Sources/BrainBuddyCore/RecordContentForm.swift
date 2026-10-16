@@ -1,7 +1,7 @@
 import Foundation
 
 /// The canonical bytes of a task's user-visible content, for the Mac's review marks (data-model E7.2):
-/// title, notes, state, waiting-for, due date, priority, its project's and tags' normalized names, and
+/// title, notes, state, waiting-for, due date, its project's and tags' normalized names, and
 /// its subtasks' titles and states, in a fixed order with every field length-prefixed so no two different
 /// field sets give the same bytes. Never an id, a record key, `updatedAt` or any server time, so the bytes
 /// survive an upload, a pull that changes nothing visible, re-keying and sign-out then sign-in. There is no
@@ -14,7 +14,6 @@ public enum RecordContentForm {
         field(task.state.rawValue, into: &out)
         field(task.waitingFor, into: &out)
         field(task.dueDate?.isoString, into: &out)
-        field(task.priority.rawValue, into: &out)
         field(task.projectID.flatMap { state.projects[$0] }.map { NameNormalizer.project($0.name) }, into: &out)
         let tags = task.tagIDs.compactMap { state.tags[$0] }.map { NameNormalizer.tag($0.name) }.sorted()
         count(tags.count, into: &out)

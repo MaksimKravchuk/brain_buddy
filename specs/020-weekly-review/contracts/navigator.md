@@ -73,7 +73,8 @@ in Core; `validate_navigator_output` in `backend/app/modules/tasks/navigator.py`
 rule 5 runs on every client after them:
 
 1. Trim; drop empty, multi-line, > 200 chars, or containing Smart Add tokens (`#`,
-   `@`-prefixed tag syntax, `!` priority markers) the task parser would interpret.
+   `@`-prefixed tag syntax, `!` markers, kept as a guard after ADR-0033 removed task priority) the task
+   parser would interpret.
 2. Drop any proposal whose `formulation_key` equals the current title's or any
    `open_task_titles` entry's (FR-019 no duplicates), and duplicates among themselves.
 3. Grounding check (FR-021): drop a proposal containing a **capitalised token

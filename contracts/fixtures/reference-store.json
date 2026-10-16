@@ -21,7 +21,7 @@
     "026-FR-017",
     "026-SC-001"
    ],
-   "bytes": 145965,
+   "bytes": 145933,
    "schema": "brainbuddy-formulation-vectors/v1",
    "sections": {
     "normalisation": 22,
@@ -82,7 +82,7 @@
     "026-FR-002",
     "026-SC-001"
    ],
-   "bytes": 52369,
+   "bytes": 52037,
    "schema": "brainbuddy-review-wire-fixtures/v1",
    "sections": {
     "entries": 61
@@ -159,7 +159,7 @@
     "026-FR-013",
     "026-SC-005"
    ],
-   "bytes": 13569,
+   "bytes": 13243,
    "schema": null,
    "sections": {
     "issues": 0,
@@ -556,7 +556,6 @@
      "project_id": null,
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -587,7 +586,6 @@
       "61120289-276a-5f49-b00a-ab8e712a623f"
      ],
      "due_date": "2026-10-20",
-     "priority": "high",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -617,7 +615,6 @@
      "project_id": null,
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -656,7 +653,6 @@
      "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": "Landlord",
      "waiting_since": "2026-09-10T09:00:00Z",
      "order_key": 0,
@@ -686,7 +682,6 @@
       "0a6451f3-c09d-50da-880c-97be6e77fb95"
      ],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 1,
@@ -714,7 +709,6 @@
      "project_id": null,
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -742,7 +736,6 @@
      "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -770,7 +763,6 @@
      "project_id": "8af3bf55-0969-56e4-9eac-16cf5d8da698",
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 2,
@@ -798,7 +790,6 @@
      "project_id": "ecd232db-17cc-5f24-a604-a7be5e7f5829",
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 1,
@@ -826,7 +817,6 @@
      "project_id": null,
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 1,
@@ -856,7 +846,6 @@
       "d1c2b1e8-80b6-5984-9f11-c476cf794493"
      ],
      "due_date": "2026-12-01",
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 2,
@@ -884,7 +873,6 @@
      "project_id": null,
      "tag_ids": [],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,
@@ -914,7 +902,6 @@
       "63e4a04e-78fa-51bf-9d87-23cf12c91143"
      ],
      "due_date": null,
-     "priority": "none",
      "waiting_for": null,
      "waiting_since": null,
      "order_key": 0,

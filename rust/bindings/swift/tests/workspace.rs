@@ -1145,7 +1145,7 @@ fn workspace_026_mac_content_stamps_are_owned_bounded_read_values() {
     assert_eq!(value["value"]["tasks"][0]["task_id"], id);
     assert_eq!(
         value["value"]["tasks"][0]["stamp"],
-        "b698c2c2118f493cfc81f7817dbb5ee900cd3463bdd30bcfd46b2de42dea0bf1"
+        "e6657fc3ecec19f96fae17b792aa0b9bad4f1899b909dd32c1476a407b3dab64"
     );
     assert_eq!(page.task_frames, b"[]");
     assert!(page.collection_next_cursor.is_none());

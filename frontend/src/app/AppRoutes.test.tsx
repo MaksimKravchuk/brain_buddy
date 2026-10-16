@@ -36,7 +36,6 @@ const taskResponse = {
       project_id: "project-onboarding",
       tag_ids: ["tag-deep-work"],
       due_date: null,
-      priority: "none",
       waiting_for: null,
       waiting_since: null,
       order_key: 1,
@@ -378,7 +377,7 @@ describe("AppRoutes", () => {
 
   it("routes task-only search, date views and named sort filters through URL-backed task queries", async () => {
     const user = userEvent.setup();
-    renderRoutes("/tasks/today?sort=priority&q=invoice");
+    renderRoutes("/tasks/today?sort=title&q=invoice");
 
     expect(await screen.findByRole("heading", { name: "Today" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
@@ -762,22 +761,11 @@ describe("AppRoutes", () => {
     });
   });
 
-  it("opens task detail and persists priority, subtasks, comments and lifecycle commands", async () => {
+  it("opens task detail and persists details, subtasks, comments and lifecycle commands", async () => {
     const user = userEvent.setup();
     renderRoutes("/tasks/next/task-1");
 
     expect(await screen.findByRole("heading", { name: "Task detail" })).toBeInTheDocument();
-    await user.selectOptions(await screen.findByLabelText("Priority"), "high");
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        expect.stringMatching(/\/tasks\/task-1$/),
-        expect.objectContaining({
-          method: "PATCH",
-          body: expect.stringContaining('"priority":"high"')
-        })
-      );
-    });
-
     await user.type(await screen.findByLabelText("Details"), "Updated detail");
     await user.tab();
     await waitFor(() => {
@@ -953,10 +941,10 @@ describe("AppRoutes", () => {
 
   it("preserves filtered task routes while focusing detail and restoring the originating row link", async () => {
     const user = userEvent.setup();
-    renderRoutes("/tasks/next?sort=priority&q=Persisted");
+    renderRoutes("/tasks/next?sort=title&q=Persisted");
 
     const rowLink = await screen.findByRole("link", { name: "Fix onboarding drop-off" });
-    expect(rowLink).toHaveAttribute("href", "/tasks/next/task-1?sort=priority&q=Persisted");
+    expect(rowLink).toHaveAttribute("href", "/tasks/next/task-1?sort=title&q=Persisted");
     await user.click(rowLink);
 
     const heading = await screen.findByRole("heading", { name: "Task detail" });
@@ -965,7 +953,7 @@ describe("AppRoutes", () => {
     await user.click(screen.getByRole("button", { name: "Close task" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Task detail" })).not.toBeInTheDocument());
     expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("Persisted");
-    expect(screen.getByLabelText("Sort tasks")).toHaveValue("priority");
+    expect(screen.getByLabelText("Sort tasks")).toHaveValue("title");
     await waitFor(() => expect(screen.getByRole("link", { name: "Fix onboarding drop-off" })).toHaveFocus());
   });
 

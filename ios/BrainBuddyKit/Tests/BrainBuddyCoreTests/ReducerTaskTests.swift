@@ -12,7 +12,7 @@ struct ReducerCreateTaskTests {
             .createTask(
                 .init(
                     taskID: "new", title: "  Buy milk \n", details: "2 litres", list: .inbox, waitingFor: "ignored",
-                    dueDate: CalendarDay(year: 2026, month: 10, day: 1), priority: .high, projectID: "work",
+                    dueDate: CalendarDay(year: 2026, month: 10, day: 1), projectID: "work",
                     tagIDs: ["home"]
                 )
             ),
@@ -26,7 +26,7 @@ struct ReducerCreateTaskTests {
         #expect(task.orderKey == 5, "inbox's highest order key is 4")
         #expect(task.waitingFor == nil && task.waitingSince == nil, "a non-waiting task drops the note, as the server does")
         #expect(task.projectID == "work" && task.tagIDs == ["home"])
-        #expect(task.dueDate == CalendarDay(year: 2026, month: 10, day: 1) && task.priority == .high)
+        #expect(task.dueDate == CalendarDay(year: 2026, month: 10, day: 1))
         #expect(task.createdAt == Fixture.at(5) && task.updatedAt == Fixture.at(5))
         #expect(task.serverID == nil && task.serverRevision == nil && task.lastOpenList == nil)
         #expect(task.completedAt == nil && task.cancelledAt == nil && task.subtasks.isEmpty && task.comments.isEmpty)
@@ -121,13 +121,13 @@ struct ReducerUpdateTaskTests {
         let before = try #require(state.tasks["inbox"])
         let changes = TaskChanges(
             title: .set(" Renamed "), details: .set("Notes"), projectID: .clear, tagIDs: .set([]),
-            dueDate: .set(CalendarDay(year: 2026, month: 12, day: 24)!), priority: .set(.medium)
+            dueDate: .set(CalendarDay(year: 2026, month: 12, day: 24)!)
         )
         #expect(try apply(.updateTask(.init(taskID: "inbox", changes: changes)), to: &state, at: 9) == .applied)
         let task = try #require(state.tasks["inbox"])
         #expect(task.title == "Renamed" && task.details == "Notes")
         #expect(task.projectID == nil && task.tagIDs.isEmpty)
-        #expect(task.dueDate == CalendarDay(year: 2026, month: 12, day: 24) && task.priority == .medium)
+        #expect(task.dueDate == CalendarDay(year: 2026, month: 12, day: 24))
         #expect(task.updatedAt == Fixture.at(9))
         #expect(task.state == before.state && task.orderKey == before.orderKey && task.createdAt == before.createdAt)
         #expect(task.serverRevision == before.serverRevision, "the revision is the server's number")
@@ -147,14 +147,11 @@ struct ReducerUpdateTaskTests {
         #expect(state.tasks["next"]?.details == nil)
     }
 
-    @Test("A title or priority cannot be cleared")
+    @Test("A title cannot be cleared")
     func requiredFields() {
         expectRejection(.updateTask(.init(taskID: "next", changes: .init(title: .clear))), on: Fixture.base, .emptyTitle)
         expectRejection(
             .updateTask(.init(taskID: "next", changes: .init(title: .set("  ")))), on: Fixture.base, .emptyTitle
-        )
-        expectRejection(
-            .updateTask(.init(taskID: "next", changes: .init(priority: .clear))), on: Fixture.base, .priorityRequired
         )
     }
 
@@ -192,7 +189,7 @@ struct ReducerUpdateTaskTests {
         expectRejection(update(.init(tagIDs: .set(["gone"]))), on: state, .tagNotActive)
         expectRejection(update(.init(tagIDs: .set(["missing"]))), on: state, .tagNotFound)
         expectRejection(update(.init(tagIDs: .set(["home", "home"]))), on: state, .duplicateTag)
-        expectRejection(.updateTask(.init(taskID: "missing", changes: .init(priority: .set(.low)))), on: state, .taskNotFound)
+        expectRejection(.updateTask(.init(taskID: "missing", changes: .init(title: .set("Gone")))), on: state, .taskNotFound)
     }
 
     @Test("Terminal tasks can still be edited")
@@ -209,7 +206,7 @@ struct ReducerUpdateTaskTests {
         let same = GTDCommand.updateTask(
             .init(
                 taskID: "inbox",
-                changes: .init(title: .set(" Inbox task "), projectID: .set("work"), tagIDs: .set(["home"]), priority: .set(.none))
+                changes: .init(title: .set(" Inbox task "), projectID: .set("work"), tagIDs: .set(["home"]))
             )
         )
         for command in [unchanged, same] {
@@ -220,10 +217,10 @@ struct ReducerUpdateTaskTests {
         }
         var state = Fixture.base
         let partly = GTDCommand.updateTask(
-            .init(taskID: "inbox", changes: .init(title: .set("Inbox task"), priority: .set(.low)))
+            .init(taskID: "inbox", changes: .init(title: .set("Inbox task"), details: .set("Notes")))
         )
         #expect(try apply(partly, to: &state, mode: .replay) == .applied)
-        #expect(state.tasks["inbox"]?.priority == .low)
+        #expect(state.tasks["inbox"]?.details == "Notes")
     }
 }
 
@@ -250,7 +247,7 @@ struct ReducerTransitionTests {
         // Spec 020: entering Next starts a formulation (contracts/ios-commands.md §3).
         #expect(task.formulation?.startedAt == Fixture.at(4))
         expected.formulation = task.formulation
-        #expect(task == expected, "order, project, tags, due date, priority and notes are kept")
+        #expect(task == expected, "order, project, tags, due date and notes are kept")
     }
 
     @Test("Entering Waiting needs a note and sets waitingSince; leaving clears both")
@@ -365,19 +362,19 @@ struct ReducerReplayTaskTests {
         let command = update(
             .init(
                 title: .set("Renamed"), details: .set(String(repeating: "n", count: 20_001)), projectID: .set("old"),
-                tagIDs: .set(["gone", "home"]), priority: .set(.high), waitingFor: .set("Ana")
+                tagIDs: .set(["gone", "home"]), waitingFor: .set("Ana")
             )
         )
         expectRejection(command, on: Fixture.base, .detailsTooLong)
         var state = Fixture.base
         #expect(try apply(command, to: &state, at: 4, mode: .replay) == .applied)
         let task = try #require(state.tasks["next"])
-        #expect(task.title == "Renamed" && task.priority == .high && task.tagIDs == ["home"])
+        #expect(task.title == "Renamed" && task.tagIDs == ["home"])
         #expect(task.details == nil && task.waitingFor == nil && task.state == .next)
         #expect(task.updatedAt == Fixture.at(4))
         #expect(
             GTDReducer.replayable(command, in: Fixture.base)
-                == update(.init(title: .set("Renamed"), projectID: .clear, tagIDs: .set(["home"]), priority: .set(.high)))
+                == update(.init(title: .set("Renamed"), projectID: .clear, tagIDs: .set(["home"])))
         )
     }
 
@@ -403,7 +400,7 @@ struct ReducerReplayTaskTests {
     func nothingLeft() throws {
         let cases: [(TaskChanges, GTDValidationError)] = [
             (TaskChanges(waitingFor: .set("Ana")), .waitingForOnlyOnWaitingTasks),
-            (TaskChanges(title: .clear, priority: .clear), .emptyTitle),
+            (TaskChanges(title: .clear), .emptyTitle),
             (TaskChanges(projectID: .set("old"), tagIDs: .set(["gone"])), .projectNotActive),
         ]
         for (changes, interactiveError) in cases {

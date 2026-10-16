@@ -42,7 +42,7 @@ impl<T: Serialize> Serialize for Patch<T> {
 }
 
 /// An optional field that may be omitted but is never sent as `null`: a field
-/// that cannot be cleared (title, priority) refuses `null` instead of reading
+/// that cannot be cleared (title, name) refuses `null` instead of reading
 /// it as "omitted".
 pub(crate) fn non_null<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,

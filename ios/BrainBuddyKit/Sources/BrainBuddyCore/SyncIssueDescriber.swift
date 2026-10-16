@@ -156,7 +156,7 @@ public enum SyncIssueDescriber {
         let changes = update.changes
         let changedCount = [
             changes.title.isChanged, changes.details.isChanged, changes.projectID.isChanged,
-            changes.tagIDs.isChanged, changes.dueDate.isChanged, changes.priority.isChanged,
+            changes.tagIDs.isChanged, changes.dueDate.isChanged,
             changes.waitingFor.isChanged,
         ].filter { $0 }.count
         guard changedCount == 1 else { return "Edit \(task)" }
@@ -176,12 +176,6 @@ public enum SyncIssueDescriber {
             let date = day.startDate().formatted(date: .abbreviated, time: .omitted)
             return "Set the due date of \(task) to \(date)"
         case .clear: return "Remove the due date from \(task)"
-        case .unchanged: break
-        }
-        switch changes.priority {
-        case .set(let priority) where priority != TaskPriority.none:
-            return "Set the priority of \(task) to \(priority.title.lowercased())"
-        case .set, .clear: return "Remove the priority from \(task)"
         case .unchanged: break
         }
         if changes.waitingFor.isChanged { return "Change what \(task) is waiting for" }

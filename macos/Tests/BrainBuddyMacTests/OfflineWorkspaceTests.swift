@@ -81,13 +81,14 @@ struct OfflineWorkspaceTests {
 
         // The editor opened before another change landed; its draft rebases instead of overwriting.
         var draft = TaskEditDraft(opened)
-        draft.priority = .high
+        let due = CalendarDay(year: 2026, month: 11, day: 2)
+        draft.dueDate = due
         try app.workspace.updateTask(id, TaskChanges(details: .set("Serial number is on the frame")))
         let rebased = draft.rebased(onto: try #require(app.workspace.task(id)))
         #expect(await app.model.saveTask(id, changes: rebased.changes()))
         let current = try #require(app.workspace.task(id))
         #expect(current.title == "Call workshop for a quote", "an untouched field keeps the newer value")
-        #expect(current.details == "Serial number is on the frame" && current.priority == .high)
+        #expect(current.details == "Serial number is on the frame" && current.dueDate == due)
     }
 
     @Test("021-FR-010 quick capture saves to Inbox offline without touching the main draft or the screen")
@@ -189,6 +190,37 @@ struct OfflineWorkspaceTests {
         await app.restart()
         #expect(app.titles(.next) == ["Ask Sam for an update"])
         #expect(await app.model.loadWaitingReviewTasks().isEmpty)
+    }
+
+    @Test("⌘Z takes back the last Done, Cancel or move: the task returns to its list and Waiting reason")
+    func undoListChange() async throws {
+        let app = await App()
+        let done = try app.add("Call Sam about the van", .waiting, waitingFor: "Sam")
+        let before = try #require(app.workspace.task(done))
+        #expect(await app.model.completeTask(done))
+        let completed = try #require(TaskListChange(before: before, after: app.workspace.task(done)))
+        #expect(completed.actionName == "Done")
+        #expect(await app.model.undo(completed))
+        let restored = try #require(app.workspace.task(done))
+        #expect(restored.state == .waiting && restored.waitingFor == "Sam")
+
+        let moved = try app.add("Buy bin bags")
+        let next = try #require(app.workspace.task(moved))
+        #expect(await app.model.moveTask(moved, to: .someday))
+        let move = try #require(TaskListChange(before: next, after: app.workspace.task(moved)))
+        #expect(move.actionName == "Move to Someday / maybe")
+        #expect(await app.model.undo(move))
+        #expect(app.workspace.task(moved)?.state == .next)
+
+        let cancelled = try app.add("Renew parking permit")
+        let open = try #require(app.workspace.task(cancelled))
+        #expect(await app.model.cancelTask(cancelled))
+        let cancel = try #require(TaskListChange(before: open, after: app.workspace.task(cancelled)))
+        #expect(await app.model.reopenTask(cancelled, to: .inbox, waitingFor: nil))
+        #expect(await app.model.undo(cancel) == false)
+        #expect(app.model.error == "This task has changed since, so there is nothing to undo.")
+        #expect(app.workspace.task(cancelled)?.state == .inbox)
+        #expect(TaskListChange(before: open, after: open) == nil)
     }
 
     @Test("021-FR-010 returning a Waiting item to Next and cancelling another persist across a restart")
@@ -654,7 +686,7 @@ struct OfflineWorkspaceTests {
         #expect(app.model.tasks.first?.state == .next)
     }
 
-    @Test("021-FR-010 a capture hidden by the current search or priority filter says so")
+    @Test("021-FR-010 a capture hidden by the current search says so")
     func hiddenCaptureExplained() async throws {
         let app = await App()
         app.model.searchText = "unrelated"
@@ -662,19 +694,12 @@ struct OfflineWorkspaceTests {
         app.model.draft = "Book a van"
         await app.model.createTask()
         #expect(app.model.error == nil && app.model.tasks.isEmpty)
-        #expect(app.model.captureNotice == "Saved to Next actions. Search or priority filters may hide it from these results.")
+        #expect(app.model.captureNotice == "Saved to Next actions. Search may hide it from these results.")
         #expect(app.titles(.next) == ["Book a van"])
         app.model.clearTaskFilters()
         #expect(app.model.captureNotice == nil && app.model.searchText.isEmpty)
         #expect(app.model.tasks.contains { $0.title == "Book a van" })
 
-        app.model.priorityFilter = .high
-        app.model.reload()
-        app.model.draft = "Get a quote"
-        await app.model.createTask()
-        #expect(app.model.tasks.isEmpty && app.model.captureNotice != nil)
-        app.model.priorityFilter = .all
-        app.model.reload()
         app.model.draft = "Visible task"
         #expect(app.model.captureNotice == nil)
         await app.model.createTask()

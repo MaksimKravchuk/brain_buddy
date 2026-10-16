@@ -262,7 +262,6 @@ impl TaskCreate<ProjectRef, TagRef> {
                 .map(|reference| reference.resolve(dependencies))
                 .collect::<Result<_, _>>()?,
             due_date: self.due_date,
-            priority: self.priority,
             waiting_for: self.waiting_for,
             source_capture_ids: self.source_capture_ids,
             new_formulation_id: self.new_formulation_id,
@@ -280,7 +279,6 @@ impl TaskUpdate<ProjectRef, TagRef> {
             details: self.details,
             project_id: self.project_id.resolve(dependencies)?,
             due_date: self.due_date,
-            priority: self.priority,
             waiting_for: self.waiting_for,
             tag_changes: self
                 .tag_changes

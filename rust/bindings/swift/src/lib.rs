@@ -50,8 +50,7 @@ use bb_client::{
 use bb_domain::dispatch;
 use bb_domain::smart_add::{self, Classification, Draft, Resolution, TokenKind};
 use bb_domain::types::{
-    DomainError, DueDay, ExecutionInputs, OpenList, Priority, ProjectId, Query, QueryInputs,
-    ReadSet, TagId,
+    DomainError, DueDay, ExecutionInputs, OpenList, ProjectId, Query, QueryInputs, ReadSet, TagId,
 };
 use bb_protocol::catalog::EntityType;
 use bb_protocol::command::{self, Decoded, Unsupported};
@@ -333,10 +332,6 @@ fn answer_query(read_set: &[u8], query: &[u8], inputs: &[u8]) -> Result<BridgeAn
     })
 }
 
-fn no_priority() -> Priority {
-    Priority::None
-}
-
 /// What the capture sheet holds (`bb_domain::smart_add::Draft`); every field but the
 /// text and the list is optional on the wire.
 #[derive(Deserialize)]
@@ -350,8 +345,6 @@ struct DraftInput {
     details: String,
     #[serde(default)]
     due_date: Option<DueDay>,
-    #[serde(default = "no_priority")]
-    priority: Priority,
     #[serde(default)]
     context_project: Option<ProjectId>,
     #[serde(default)]
@@ -366,7 +359,6 @@ impl From<DraftInput> for Draft {
             waiting_for: input.waiting_for,
             details: input.details,
             due_date: input.due_date,
-            priority: input.priority,
             context_project: input.context_project,
             context_tag: input.context_tag,
         }

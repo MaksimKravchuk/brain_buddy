@@ -105,7 +105,7 @@ fn populate(store: &mut Store, tasks: usize, outbox: usize, legacy_drafts: bool,
                 let created = format!("2026-09-01T09:{:02}:{:02}Z", (n / 60) % 60, n % 60);
                 let body = json!({
                     "id": id, "title": format!("Task {n}"), "details": null, "state": state,
-                    "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+                    "project_id": null, "tag_ids": [], "due_date": null,
                     "waiting_for": waiting.then_some("Sam"),
                     "waiting_since": waiting.then(|| created.clone()),
                     "order_key": ((n + 1) * 10).to_string(),

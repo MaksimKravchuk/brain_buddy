@@ -1,5 +1,8 @@
 # bb command contract
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 ## Configuration/discovery/input
 
 Global --server accepts canonical origin; --api-prefix defaults /api. Explicit flags win over BB_SERVER/BB_API_PREFIX and saved configuration. First login needs explicit server when unconfigured; released docs supply production frontend origin. HTTPS except loopback development. No credentials in flags. BB_SESSION_TOKEN is invocation-only; otherwise configured protected store.

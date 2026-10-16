@@ -188,7 +188,6 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
     public var projectID: String?
     public var tagIDs: [String]
     public var dueDate: CalendarDay?
-    public var priority: TaskPriority
     public var waitingFor: String?
     public var waitingSince: Date?
     public var orderKey: Int
@@ -207,7 +206,7 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
 
     public init(
         id: String, title: String, details: String? = nil, state: TaskState, projectID: String? = nil,
-        tagIDs: [String] = [], dueDate: CalendarDay? = nil, priority: TaskPriority = .none,
+        tagIDs: [String] = [], dueDate: CalendarDay? = nil,
         waitingFor: String? = nil, waitingSince: Date? = nil, orderKey: Int, sourceCaptureIDs: [String] = [],
         createdAt: Date, updatedAt: Date, completedAt: Date? = nil, cancelledAt: Date? = nil, revision: Int,
         subtasks: [SubtaskDTO] = [], comments: [CommentDTO] = [], formulation: TaskFormulationDTO? = nil,
@@ -220,7 +219,6 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
         self.projectID = projectID
         self.tagIDs = tagIDs
         self.dueDate = dueDate
-        self.priority = priority
         self.waitingFor = waitingFor
         self.waitingSince = waitingSince
         self.orderKey = orderKey
@@ -237,7 +235,7 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, details, state, priority, revision, subtasks, comments, formulation, parked
+        case id, title, details, state, revision, subtasks, comments, formulation, parked
         case projectID = "project_id"
         case tagIDs = "tag_ids"
         case dueDate = "due_date"
@@ -260,7 +258,6 @@ public struct TaskDTO: Codable, Hashable, Sendable, Identifiable {
         projectID = try values.decodeIfPresent(String.self, forKey: .projectID)
         tagIDs = try values.decodeIfPresent([String].self, forKey: .tagIDs) ?? []
         dueDate = try values.decodeIfPresent(CalendarDay.self, forKey: .dueDate)
-        priority = try values.decodeIfPresent(TaskPriority.self, forKey: .priority) ?? .none
         waitingFor = try values.decodeIfPresent(String.self, forKey: .waitingFor)
         waitingSince = try values.decodeIfPresent(Date.self, forKey: .waitingSince)
         orderKey = try values.decode(Int.self, forKey: .orderKey)

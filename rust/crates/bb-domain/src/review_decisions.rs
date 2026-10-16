@@ -51,11 +51,11 @@ use crate::types::{
     BulkUndoSkipped, ChangeOutcome, ChangeSet, ClockBefore, Command, CountBucket, Counter, Decide,
     Decision, DecisionId, DecisionType, DecisionUndo, Details, DomainChange, DomainCommand,
     DomainError, EntityType, ExecutionInputs, FormulationId, Id, Instant, LocalDecisionBefore,
-    OpenList, Priority, ProjectState, ReadSet, Reason, ReasonText, ReceiptKind, ReceiptSource,
-    Record, ReleasedItem, ReleasedPrivate, ReplacedReceipt, ResultRefs, ReviewReceipt,
-    ReviewSession, RevisionCheck, SessionBefore, SessionCounts, SessionId, SessionStatus,
-    SkipReason, StepCode, StepStatus, Task, TaskAction, TaskCreate, TaskId, TaskState,
-    TaskTransition, Title, UndoSkipReason, WaitingFor,
+    OpenList, ProjectState, ReadSet, Reason, ReasonText, ReceiptKind, ReceiptSource, Record,
+    ReleasedItem, ReleasedPrivate, ReplacedReceipt, ResultRefs, ReviewReceipt, ReviewSession,
+    RevisionCheck, SessionBefore, SessionCounts, SessionId, SessionStatus, SkipReason, StepCode,
+    StepStatus, Task, TaskAction, TaskCreate, TaskId, TaskState, TaskTransition, Title,
+    UndoSkipReason, WaitingFor,
 };
 use std::collections::BTreeSet;
 
@@ -784,7 +784,6 @@ fn follow_up(context: &Context<'_>, task: &Task) -> Result<Effect, DomainError> 
             project_id: task.project_id.clone(),
             tag_ids: Vec::new(),
             due_date: None,
-            priority: Priority::None,
             waiting_for: None,
             source_capture_ids: Vec::new(),
             new_formulation_id: payload.new_formulation_id.clone(),

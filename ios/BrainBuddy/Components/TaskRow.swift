@@ -3,7 +3,7 @@ import BrainBuddyWorkspace
 import SwiftUI
 
 /// One task in a list: completion circle, title, and the metadata (list,
-/// project, waiting note, subtasks, due date, priority, tags). The metadata
+/// project, waiting note, subtasks, due date, tags). The metadata
 /// sits trailing on the title's own line when both fit, which makes a one-line
 /// task a 44 pt row; otherwise (a long title, large Dynamic Type) it wraps
 /// under the title.
@@ -229,7 +229,6 @@ private struct TaskRowMetadata: View {
             if let due = details.task.dueDate {
                 DueChip(day: due, today: details.today, isDeadlineActive: details.task.isOpen)
             }
-            PriorityBadge(priority: details.task.priority)
             ForEach(details.tagNames, id: \.self) { name in
                 TagPill(name: name)
             }
@@ -279,7 +278,6 @@ private struct TaskRowDetails {
         if let due = task.dueDate {
             spoken.append(DueChip.accessibilityText(for: due, today: today, isDeadlineActive: task.isOpen))
         }
-        if task.priority != .none { spoken.append("\(task.priority.title) priority") }
         if !tagNames.isEmpty {
             spoken.append((tagNames.count == 1 ? "Tag " : "Tags ") + tagNames.joined(separator: ", "))
         }
@@ -294,7 +292,7 @@ private struct TaskRowDetails {
 
     var hasMetadata: Bool {
         marker != nil || project != nil || !textParts.isEmpty || subtaskProgress != nil || task.dueDate != nil
-            || task.priority != .none || !tagNames.isEmpty
+            || !tagNames.isEmpty
     }
 
     var accessibilityLabel: String { spokenParts.joined(separator: ", ") }

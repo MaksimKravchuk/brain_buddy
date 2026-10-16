@@ -9,7 +9,6 @@ public struct CaptureDraft: Hashable, Sendable, Codable {
     public var waitingFor: String
     public var details: String
     public var dueDate: CalendarDay?
-    public var priority: TaskPriority
     /// The project or tag screen the capture started from; applied unless a
     /// token overrides it.
     public var contextProjectID: ProjectID?
@@ -17,7 +16,7 @@ public struct CaptureDraft: Hashable, Sendable, Codable {
 
     public init(
         text: String = "", list: OpenList = .inbox, waitingFor: String = "", details: String = "",
-        dueDate: CalendarDay? = nil, priority: TaskPriority = .none, contextProjectID: ProjectID? = nil,
+        dueDate: CalendarDay? = nil, contextProjectID: ProjectID? = nil,
         contextTagID: TagID? = nil
     ) {
         self.text = text
@@ -25,7 +24,6 @@ public struct CaptureDraft: Hashable, Sendable, Codable {
         self.waitingFor = waitingFor
         self.details = details
         self.dueDate = dueDate
-        self.priority = priority
         self.contextProjectID = contextProjectID
         self.contextTagID = contextTagID
     }
@@ -154,7 +152,7 @@ public enum CapturePlanner {
             .createTask(
                 .init(
                     taskID: taskID, title: resolution.title, details: resolution.details, list: draft.list,
-                    waitingFor: resolution.waitingFor, dueDate: draft.dueDate, priority: draft.priority,
+                    waitingFor: resolution.waitingFor, dueDate: draft.dueDate,
                     projectID: projectID, tagIDs: tagIDs
                 )
             )

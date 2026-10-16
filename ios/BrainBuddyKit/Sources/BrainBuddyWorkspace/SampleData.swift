@@ -33,19 +33,16 @@ enum SampleData {
         data.task("Reply to Maya about the book club", due: today)
 
         // Next actions.
+        data.task("Call the tiler for a quote", in: .next, project: kitchen, tags: [calls], due: today)
         data.task(
-            "Call the tiler for a quote", in: .next, project: kitchen, tags: [calls], due: today, priority: .high
-        )
-        data.task(
-            "Pick up paint samples", in: .next, project: kitchen, tags: [errands], due: today.adding(days: -1),
-            priority: .medium
+            "Pick up paint samples", in: .next, project: kitchen, tags: [errands], due: today.adding(days: -1)
         )
         let agenda = data.task(
             "Draft the offsite agenda", in: .next, project: offsite, tags: [computer], due: today.adding(days: 7),
-            priority: .medium, notes: "Two days, one of them outdoors. Keep the sessions short."
+            notes: "Two days, one of them outdoors. Keep the sessions short."
         )
         data.task("Buy light bulbs for the hallway", in: .next, tags: [errands, home])
-        data.task("Renew the car insurance", in: .next, tags: [computer], due: today.adding(days: 3), priority: .low)
+        data.task("Renew the car insurance", in: .next, tags: [computer], due: today.adding(days: 3))
 
         // Waiting for.
         data.task(
@@ -110,14 +107,14 @@ extension SampleData {
         @discardableResult
         mutating func task(
             _ title: String, in list: OpenList = .inbox, project: ProjectID? = nil, tags: [TagID] = [],
-            due: CalendarDay? = nil, priority: TaskPriority = .none, waitingFor: String? = nil, notes: String? = nil
+            due: CalendarDay? = nil, waitingFor: String? = nil, notes: String? = nil
         ) -> TaskID {
             let id: TaskID = nextID("task")
             run(
                 .createTask(
                     .init(
                         taskID: id, title: title, details: notes, list: list, waitingFor: waitingFor, dueDate: due,
-                        priority: priority, projectID: project, tagIDs: tags
+                        projectID: project, tagIDs: tags
                     )
                 )
             )

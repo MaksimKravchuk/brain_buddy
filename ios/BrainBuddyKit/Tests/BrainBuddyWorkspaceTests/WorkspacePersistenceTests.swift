@@ -79,7 +79,7 @@ import Testing
         let id = try workspace.capture(CaptureDraft(text: "Call Ana"))
         await workspace.flush()
 
-        try workspace.updateTask(id, TaskChanges(title: .set("Call Ana back"), priority: .set(.high)))
+        try workspace.updateTask(id, TaskChanges(title: .set("Call Ana back"), details: .set("About the quote")))
         #expect(workspace.pendingChangeCount == 2)
         try workspace.moveTask(id, to: .next)
         await workspace.flush()
@@ -91,7 +91,7 @@ import Testing
             return
         }
         #expect(create.title == "Call Ana back")
-        #expect(create.priority == .high)
+        #expect(create.details == "About the quote")
         #expect(create.list == .next)
         #expect(workspace.pendingChangeCount == 1)
         #expect(workspace.task(id)?.title == "Call Ana back")

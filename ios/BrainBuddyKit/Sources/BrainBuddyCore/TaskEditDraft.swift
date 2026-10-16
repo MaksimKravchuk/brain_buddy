@@ -11,7 +11,6 @@ public struct TaskEditDraft: Hashable, Sendable {
         public var projectID: ProjectID?
         public var tagIDs: [TagID]
         public var dueDate: CalendarDay?
-        public var priority: TaskPriority
         public var waitingFor: String?
 
         init(_ task: TaskRecord) {
@@ -20,7 +19,6 @@ public struct TaskEditDraft: Hashable, Sendable {
             projectID = task.projectID
             tagIDs = task.tagIDs
             dueDate = task.dueDate
-            priority = task.priority
             waitingFor = task.waitingFor
         }
     }
@@ -31,7 +29,6 @@ public struct TaskEditDraft: Hashable, Sendable {
     public var projectID: ProjectID?
     public var tagIDs: [TagID]
     public var dueDate: CalendarDay?
-    public var priority: TaskPriority
     public var waitingFor: String?
 
     public init(_ task: TaskRecord) {
@@ -42,7 +39,6 @@ public struct TaskEditDraft: Hashable, Sendable {
         projectID = fields.projectID
         tagIDs = fields.tagIDs
         dueDate = fields.dueDate
-        priority = fields.priority
         waitingFor = fields.waitingFor
     }
 
@@ -54,7 +50,6 @@ public struct TaskEditDraft: Hashable, Sendable {
             projectID: Self.change(projectID, from: baseline.projectID),
             tagIDs: tagIDs == baseline.tagIDs ? .unchanged : (tagIDs.isEmpty ? .clear : .set(tagIDs)),
             dueDate: Self.change(dueDate, from: baseline.dueDate),
-            priority: priority == baseline.priority ? .unchanged : .set(priority),
             waitingFor: Self.change(waitingFor, from: baseline.waitingFor)
         )
     }
@@ -68,7 +63,6 @@ public struct TaskEditDraft: Hashable, Sendable {
         if projectID != baseline.projectID { result.projectID = projectID }
         if tagIDs != baseline.tagIDs { result.tagIDs = tagIDs }
         if dueDate != baseline.dueDate { result.dueDate = dueDate }
-        if priority != baseline.priority { result.priority = priority }
         if waitingFor != baseline.waitingFor { result.waitingFor = waitingFor }
         return result
     }

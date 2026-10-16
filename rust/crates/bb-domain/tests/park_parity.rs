@@ -1473,7 +1473,7 @@ fn ack_command(items: &[(&str, &str)]) -> DomainCommand {
 fn task_row(id: &str, state: &str, formulation_started: Option<&str>, form: &str) -> Value {
     json!({
         "id": id, "title": "Call Bob", "details": "Ask about the lease", "state": state,
-        "project_id": null, "tag_ids": [], "due_date": null, "priority": "none",
+        "project_id": null, "tag_ids": [], "due_date": null,
         "waiting_for": (state == "waiting").then_some("Bob"), "waiting_since": null,
         "order_key": "3", "source_capture_ids": [], "created_at": "2026-09-01T09:00:00Z",
         "updated_at": "2026-09-02T09:00:00Z", "completed_at": null, "cancelled_at": null,

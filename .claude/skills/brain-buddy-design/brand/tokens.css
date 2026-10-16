@@ -1,0 +1,57 @@
+/* Carry On brand tokens. Approved direction, not yet wired into the
+   production frontend: see brand/README.md before using them in product code. */
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap");
+
+:root {
+  /* Palette */
+  --co-limestone: #e9e5dd; /* ground */
+  --co-basalt: #1c1b19; /* ink */
+  --co-basalt-raised: #2a2926; /* dark surface one step up */
+  --co-dust: #8a8478; /* what is not in your control: done, later, other people */
+  --co-dust-text: #6b665c; /* dust for small text on limestone (4.5:1) */
+  --co-terracotta: #c4472a; /* you, the next step; one per screen */
+  --co-terracotta-text: #a8432a; /* terracotta for small text on limestone (4.8:1) */
+  --co-paper: #ffffff; /* card on limestone */
+  --co-stone: #dcd7cd; /* secondary button, pressed ground */
+
+  /* Light theme roles */
+  --co-bg: var(--co-limestone);
+  --co-surface: var(--co-paper);
+  --co-fg: var(--co-basalt);
+  --co-fg-muted: var(--co-dust-text);
+  --co-accent: var(--co-terracotta);
+  --co-on-accent: #ffffff;
+  --co-secondary: var(--co-stone);
+
+  /* Type */
+  --co-font-voice: "Instrument Serif", Georgia, serif;
+  --co-font-action: "Instrument Sans", system-ui, sans-serif;
+  --co-text-display: 400 64px/0.95 var(--co-font-voice);
+  --co-text-title: 400 32px/1.1 var(--co-font-voice);
+  --co-text-step: 600 26px/1.2 var(--co-font-action);
+  --co-text-body: 400 17px/1.45 var(--co-font-action);
+  --co-text-meta: 400 15px/1.4 var(--co-font-action);
+
+  /* Shape */
+  --co-radius-card: 14px;
+  --co-radius-sheet: 34px;
+  --co-radius-pill: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --co-bg: var(--co-basalt);
+    --co-surface: var(--co-basalt-raised);
+    --co-fg: var(--co-limestone);
+    --co-fg-muted: var(--co-dust);
+    --co-secondary: var(--co-basalt-raised);
+  }
+}
+
+:root[data-theme="dark"] {
+  --co-bg: var(--co-basalt);
+  --co-surface: var(--co-basalt-raised);
+  --co-fg: var(--co-limestone);
+  --co-fg-muted: var(--co-dust);
+  --co-secondary: var(--co-basalt-raised);
+}

@@ -216,12 +216,11 @@ describe("apiClient", () => {
     await expect(apiClient.getTask("task-1")).rejects.toBe("socket hang up");
   });
 
-  it("serializes every date, priority, sort and cancelled filter of the task query", async () => {
+  it("serializes every date, sort and cancelled filter of the task query", async () => {
     fetchMock.mockResolvedValue(response({ items: [], counts_by_state: {} }));
 
     await apiClient.listTasks({
       includeCancelled: true,
-      priority: ["high", "medium"],
       dueBefore: "2026-08-01",
       dueOn: "2026-08-02",
       dueAfter: "2026-08-03",
@@ -229,7 +228,7 @@ describe("apiClient", () => {
     });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/tasks?include_cancelled=true&priority=high&priority=medium&due_before=2026-08-01&due_on=2026-08-02&due_after=2026-08-03&sort=due"
+      "/api/tasks?include_cancelled=true&due_before=2026-08-01&due_on=2026-08-02&due_after=2026-08-03&sort=due"
     );
   });
 

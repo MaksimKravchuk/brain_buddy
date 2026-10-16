@@ -6,6 +6,8 @@ Superseded in part by [ADR-0027](0027-native-task-weekly-review-and-auto-park.md
 (2026-10-06), for Weekly Review only: the Context's "Weekly Review remains explicitly
 deferred", audit row B-09's cadence restriction and the UI-control row "Weekly Review
 coming later". Each is marked where it stands; the rest of this record is unchanged.
+Superseded in part by [ADR-0033](0033-remove-task-priority.md) (2026-10-15): tasks have
+no priority, so every Priority field, filter and sort rule in this record is withdrawn.
 Decision owner: BrainBuddy
 Related: ADR-0001, ADR-0002, `docs/vnext-cloud-design-build-contract.md`,
 `docs/e2e-acceptance-charter.md`, origin `main` at

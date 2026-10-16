@@ -1,7 +1,6 @@
 export type TaskState = "inbox" | "next" | "waiting" | "someday" | "completed" | "cancelled";
 export type OpenTaskState = "inbox" | "next" | "waiting" | "someday";
-export type TaskPriority = "none" | "low" | "medium" | "high";
-export type TaskSort = "manual" | "due" | "priority" | "title";
+export type TaskSort = "manual" | "due" | "title";
 
 export interface TaskCounts {
   inbox: number;
@@ -18,7 +17,6 @@ export interface TaskResponse {
   project_id: string | null;
   tag_ids: string[];
   due_date: string | null;
-  priority: TaskPriority;
   waiting_for: string | null;
   waiting_since: string | null;
   order_key: number;
@@ -110,7 +108,6 @@ export interface TaskListFilters {
   includeCompleted?: boolean;
   includeCancelled?: boolean;
   q?: string;
-  priority?: TaskPriority[];
   dueBefore?: string;
   dueOn?: string;
   dueAfter?: string;
@@ -124,7 +121,6 @@ export interface TaskCreateRequest {
   project_id?: string | null;
   tag_ids?: string[];
   due_date?: string | null;
-  priority?: TaskPriority;
   waiting_for?: string | null;
 }
 
@@ -136,7 +132,6 @@ export interface SmartAddTaskCreateRequest {
   state?: OpenTaskState;
   waiting_for?: string | null;
   due_date?: string | null;
-  priority?: TaskPriority;
   project?: SmartAddClassificationRef | null;
   tags?: SmartAddClassificationRef[];
 }
@@ -175,7 +170,6 @@ export interface TaskUpdateRequest {
   project_id?: string | null;
   tag_ids?: string[];
   due_date?: string | null;
-  priority?: TaskPriority;
   waiting_for?: string | null;
   expected_revision: number;
 }

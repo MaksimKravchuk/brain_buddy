@@ -1,5 +1,8 @@
 # Feature Specification: Rust server
 
+> **Superseded in part (2026-10-15)**: [ADR-0033](../../docs/decisions/0033-remove-task-priority.md) removes task priority. Every
+> task-priority field, value, filter, sort and control in this document is withdrawn.
+
 **Feature Branch**: `027-rust-server`
 
 **Created**: 2026-10-14
