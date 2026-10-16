@@ -35,6 +35,7 @@ struct SettingsScreen: View {
     var body: some View {
         List {
             accountSection
+            AgentsAccountSection()
             if workspace.account != nil {
                 syncSection
             } else if issueCount > 0 {
