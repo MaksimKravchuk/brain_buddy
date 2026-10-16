@@ -1,4 +1,3 @@
-import AppKit
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -50,8 +49,9 @@ extension SyncMenuCommands {
     /// The main window comes forward first (it runs the unsaved-edit guard and X-04), as Settings does.
     private func onMainWindow(_ action: @escaping @MainActor (MacSyncController) -> Void) {
         guard let sync = launch.sync else { return }
+        // The app is already active (a menu was used), and `openWindow` fronts the existing window;
+        // no activation call here, which the presentation guard (021-SC-004) keeps in the router.
         openWindow(id: "main")
-        NSApp.activate()
         Task { @MainActor in action(sync) }
     }
 }
