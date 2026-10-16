@@ -30,7 +30,7 @@ struct AgentsSceneTests {
                     waitingFor: waiting && index < 2 ? "Sam" : nil, orderKey: index, createdAt: created, updatedAt: created)
             }
             let document = StoreDocument(
-                base: GTDState(tasks: tasks), account: signedIn ? AccountFixtures.account() : nil)
+                generation: 1, base: GTDState(tasks: tasks), account: signedIn ? AccountFixtures.account() : nil)
             let workspace = Workspace(store: InMemoryDocumentStore(document: document), sync: nil)
             await workspace.load()
             let rig = Rig(workspace: workspace, flag: flag, password: password)
