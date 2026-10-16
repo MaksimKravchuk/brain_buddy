@@ -8,30 +8,30 @@ const LAST_UPDATED = "October 8, 2026";
 function Section({ title, children }: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section className="mt-8">
-      <h2 className="text-subtitle font-semibold text-slate-900">{title}</h2>
-      <div className="mt-2 space-y-3 text-sm leading-relaxed text-slate-600">{children}</div>
+      <h2 className="text-co-body font-semibold text-ink">{title}</h2>
+      <div className="mt-2 space-y-3 text-co-meta leading-relaxed text-ink-muted">{children}</div>
     </section>
   );
 }
 
 export default function PrivacyPolicyPage(): React.JSX.Element {
   return (
-    <main className="min-h-screen bg-surface-base px-4 py-10">
-      <article className="mx-auto max-w-[720px] rounded-2xl border border-slate-200 bg-surface-raised p-8 shadow-raised">
+    <main className="min-h-screen bg-ground px-4 py-10">
+      <article className="mx-auto max-w-[720px] rounded-sheet bg-card p-8">
         <header>
-          <Link to="/" className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <Sprout className="h-5 w-5 text-brand-primary" aria-hidden="true" />
+          <Link to="/" className="flex items-center gap-2 text-co-meta font-semibold text-ink">
+            <Sprout className="h-5 w-5 text-ink" aria-hidden="true" />
             <span>Brain Buddy</span>
           </Link>
-          <h1 className="mt-4 text-title font-semibold text-slate-900">Privacy policy</h1>
-          <p className="mt-1 text-xs text-slate-500">Last updated: {LAST_UPDATED}</p>
+          <h1 className="mt-4 font-voice text-co-title text-ink">Privacy policy</h1>
+          <p className="mt-1 text-co-meta text-ink-muted">Last updated: {LAST_UPDATED}</p>
         </header>
 
         <Section title="Who we are">
           <p>
             Brain Buddy is a personal thinking and task assistant operated by its maintainer
             (the &ldquo;controller&rdquo; in GDPR terms). For anything in this policy, contact{" "}
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-brand-primary underline">
+            <a href={`mailto:${CONTACT_EMAIL}`} className="text-ink-accent underline">
               {CONTACT_EMAIL}
             </a>
             .
@@ -330,7 +330,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
           <p>
             <strong>Restriction, objection, complaint:</strong> email{" "}
-            <a href={`mailto:${CONTACT_EMAIL}`} className="text-brand-primary underline">
+            <a href={`mailto:${CONTACT_EMAIL}`} className="text-ink-accent underline">
               {CONTACT_EMAIL}
             </a>{" "}
             for anything not covered by the self-serve controls — we respond within one month.
@@ -356,7 +356,7 @@ export default function PrivacyPolicyPage(): React.JSX.Element {
           </p>
         </Section>
 
-        <p className="mt-10 text-center text-xs text-slate-400">
+        <p className="mt-10 text-center text-co-meta text-ink-muted">
           <Link to="/login" className="underline">
             Back to sign in
           </Link>

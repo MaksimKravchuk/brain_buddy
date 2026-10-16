@@ -18,7 +18,7 @@ struct UnreadableWorkspaceView: View {
             detail: host.workspace.loadError
         ) {
             Button(UnreadableWorkspaceCopy.startFresh) { confirmingStartFresh = true }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(retrying)
             Button(retrying ? UnreadableWorkspaceCopy.tryingAgain : UnreadableWorkspaceCopy.tryAgain) {
                 Task {
@@ -27,7 +27,7 @@ struct UnreadableWorkspaceView: View {
                     retrying = false
                 }
             }
-            .buttonStyle(.macStrongPill)
+            .buttonStyle(.carryOnStrong)
             .keyboardShortcut(.defaultAction)
             .disabled(retrying)
             .focused($tryAgainFocused)
@@ -62,7 +62,7 @@ struct LegacyImportFailedView: View {
             Button(launch.isRunning ? LegacyImportFailedCopy.tryingAgain : LegacyImportFailedCopy.tryAgain) {
                 Task { await launch.retryImport() }
             }
-            .buttonStyle(.macStrongPill)
+            .buttonStyle(.carryOnStrong)
             .keyboardShortcut(.defaultAction)
             .disabled(launch.isRunning)
             .focused($tryAgainFocused)

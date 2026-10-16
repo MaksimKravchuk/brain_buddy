@@ -109,6 +109,9 @@ package final class FirstRunModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .welcome, !trimmed.isEmpty else { return false }
         guard let id = await writer.captureFirstItem(trimmed) else { return false }
+        // Skip or a linked account may have ended the run while the item was saving; the item
+        // stays in the Inbox, but the question does not come back.
+        guard phase == .welcome else { return true }
         capturedText = trimmed
         phase = .firstStep(id)
         return true
@@ -132,6 +135,8 @@ package final class FirstRunModel {
         let trimmed = step.trimmingCharacters(in: .whitespacesAndNewlines)
         guard case .firstStep(let id) = phase, !trimmed.isEmpty else { return false }
         guard await writer.saveFirstStep(id, step: trimmed, original: capturedText ?? trimmed) else { return false }
+        // The run may have ended (Not yet, a linked account) while the step was saving; keep that outcome.
+        guard phase == .firstStep(id) else { return true }
         _ = write { $0?.outcome = .firstStep }
         phase = .landing
         return true

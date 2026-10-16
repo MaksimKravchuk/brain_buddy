@@ -1,5 +1,6 @@
 import AppKit
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import Carbon.HIToolbox
 import SwiftUI
@@ -107,9 +108,11 @@ final class QuickCaptureController: ObservableObject {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let shortcut = registrationError == nil ? "⌃⌥⇧B" : nil
-        panel.contentView = NSHostingView(rootView: QuickCaptureView(model: model, shortcut: shortcut) { [weak self] in
-            self?.close()
-        })
+        panel.contentView = NSHostingView(
+            rootView: QuickCaptureView(model: model, shortcut: shortcut) { [weak self] in
+                self?.close()
+            }
+            .environment(\.carryOnPlatform, .mac))
         panel.center()
         self.panel = panel
         panel.makeKeyAndOrderFront(nil)

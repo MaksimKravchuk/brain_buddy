@@ -1,5 +1,6 @@
 import BrainBuddyAPI
 import BrainBuddyCore
+import BrainBuddyDesign
 import BrainBuddyWorkspace
 import SwiftUI
 import UIKit
@@ -11,6 +12,7 @@ struct SettingsScreen: View {
     @Environment(Workspace.self) private var workspace
     @Environment(ToastCenter.self) private var toasts
     @Environment(\.openURL) private var openURL
+    @Environment(\.colorScheme) private var scheme
     /// Nil unless the build records performance diagnostics (beta builds).
     @Environment(PerformanceDiagnostics.self) private var diagnostics: PerformanceDiagnostics?
 
@@ -37,15 +39,27 @@ struct SettingsScreen: View {
                 syncSection
             } else if issueCount > 0 {
                 Section { syncIssuesLink }
+                .listRowBackground(cardBackground)
             }
             // Weekly review (spec 020, M-23); shown only while it is exposed.
             ReviewSettingsSection()
-            if diagnostics != nil { RustRuntimePilotRow() }
+                .listRowBackground(cardBackground)
+            if diagnostics != nil {
+                RustRuntimePilotRow()
+                    .listRowBackground(cardBackground)
+            }
             aboutSection
             deleteAccountSection
+            signOutSection
         }
         .labelStyle(.bbRow)
         .bbDenseList()
+        // Carry On board 25: inset grouped sections of surface-card rows on bg-ground.
+        .listStyle(.insetGrouped)
+        .carryOnFont(CarryOnTypeScale.body)
+        .listRowSeparatorTint(groundColor)
+        .scrollContentBackground(.hidden)
+        .background(.coBgGround)
         .bbScreenTitle("Settings")
         .task(id: workspace.account?.serverURL) { await loadAccountOrigin() }
         .sheet(item: $signInRequest) { request in
@@ -103,12 +117,10 @@ struct SettingsScreen: View {
                         Label("Sign in again", systemImage: "person.crop.circle.badge.exclamationmark")
                     }
                 }
-                signOutButton
             } header: {
-                Text("Account")
-            } footer: {
-                Text(signedInFooter)
+                SettingsSectionHeader("Account")
             }
+            .listRowBackground(cardBackground)
         } else {
             Section {
                 Button {
@@ -117,11 +129,22 @@ struct SettingsScreen: View {
                     Label("Sign in", systemImage: "person.crop.circle.badge.plus")
                 }
             } header: {
-                Text("Account")
+                SettingsSectionHeader("Account")
             } footer: {
                 Text(localOnlyExplanation)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
             }
+            .listRowBackground(cardBackground)
         }
+    }
+
+    private var groundColor: Color {
+        CarryOnColorStyle(CarryOnRole.bgGround).color(in: scheme)
+    }
+
+    private var cardBackground: some View {
+        Rectangle().fill(.coSurfaceCard)
     }
 
     /// Deleting the account is always available when signed in (GDPR), in a
@@ -135,6 +158,22 @@ struct SettingsScreen: View {
                     destructiveLabel("Delete account", systemImage: "trash")
                 }
             }
+            .listRowBackground(cardBackground)
+        }
+    }
+
+    /// Board 25: Sign out is the last thing on the screen, a full-width stone pill.
+    @ViewBuilder private var signOutSection: some View {
+        if workspace.account != nil {
+            Section {
+                signOutButton
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            } footer: {
+                Text(signedInFooter)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
+            }
         }
     }
 
@@ -143,9 +182,10 @@ struct SettingsScreen: View {
     private func destructiveLabel(_ title: String, systemImage: String) -> some View {
         Label {
             Text(title)
+                .foregroundStyle(.coStatusDanger)
         } icon: {
             Image(systemName: systemImage)
-                .foregroundStyle(Color.red)
+                .foregroundStyle(.coStatusDanger)
         }
     }
 
@@ -153,14 +193,15 @@ struct SettingsScreen: View {
         Button(role: .destructive) {
             requestSignOut()
         } label: {
-            HStack {
-                destructiveLabel("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+            HStack(spacing: CGFloat(CarryOnSpace.xs)) {
+                Text("Sign out")
                 if isSigningOut {
-                    Spacer()
                     ProgressView()
                 }
             }
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.carryOnSecondary)
         .disabled(isSigningOut)
     }
 
@@ -225,8 +266,9 @@ struct SettingsScreen: View {
                 syncIssuesLink
             }
         } header: {
-            Text("Sync")
+            SettingsSectionHeader("Sync")
         }
+        .listRowBackground(cardBackground)
     }
 
     /// "Status" with the sync state in words trailing ("Synced 2 minutes
@@ -237,7 +279,8 @@ struct SettingsScreen: View {
             LabeledContent {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(description.text)
-                        .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textTertiary)
+                        .carryOnFont(CarryOnTypeScale.meta)
+                        .foregroundStyle(description.needsAttention ? BBColor.warningText : BBColor.textSecondary)
                     if let detail = description.detail {
                         Text(detail)
                             .font(BBFont.caption)
@@ -270,6 +313,8 @@ struct SettingsScreen: View {
     private func valueRow(_ title: String, systemImage: String, value: String) -> some View {
         LabeledContent {
             Text(value)
+                .carryOnFont(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
         } label: {
             Label(title, systemImage: systemImage)
         }
@@ -335,10 +380,13 @@ struct SettingsScreen: View {
                 }
             }
         } header: {
-            Text("About")
+            SettingsSectionHeader("About")
         } footer: {
             Text(offlineExplanation)
+                .carryOnFont(CarryOnTypeScale.meta)
+                .foregroundStyle(.coTextSecondary)
         }
+        .listRowBackground(cardBackground)
     }
 
     private var offlineExplanation: String {
@@ -480,20 +528,37 @@ private struct AccountIdentityRow: View {
     var body: some View {
         HStack(spacing: BBSpacing.s3) {
             Text(initials)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(BBColor.brandText)
+                .carryOnFont(CarryOnTypeScale.bodyStrong)
+                .foregroundStyle(.coTextPrimary)
                 .frame(width: avatar, height: avatar)
-                .background(BBColor.brandSoft, in: Circle())
+                .background(.coControlQuiet, in: Circle())
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.body.weight(.medium))
+                    .carryOnFont(CarryOnTypeScale.bodyStrong)
+                    .foregroundStyle(.coTextPrimary)
                 Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .carryOnFont(CarryOnTypeScale.meta)
+                    .foregroundStyle(.coTextSecondary)
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A Carry On section header (board 25): meta-strong, secondary text, sentence case.
+struct SettingsSectionHeader: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .carryOnFont(CarryOnTypeScale.metaStrong)
+            .foregroundStyle(.coTextSecondary)
+            .textCase(nil)
     }
 }
 

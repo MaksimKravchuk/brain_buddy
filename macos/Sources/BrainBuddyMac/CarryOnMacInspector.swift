@@ -12,7 +12,6 @@ private enum MacInspectorFont {
     static var sectionLabel: Font { MacRowFont.action(size: 12, weight: 600, relativeTo: .caption) }
     static var body: Font { MacRowFont.action(size: 14, weight: 400, relativeTo: .body) }
     static var detail: Font { MacRowFont.action(size: 12, weight: 400, relativeTo: .caption) }
-    static var chip: Font { MacRowFont.action(size: 13, weight: 400, relativeTo: .caption) }
     static var note: Font { MacRowFont.action(size: 13, weight: 400, relativeTo: .caption) }
     static var item: Font { MacRowFont.action(size: 15, weight: 400, relativeTo: .body) }
     static var person: Font { MacRowFont.action(size: 15, weight: 600, relativeTo: .body) }
@@ -316,34 +315,6 @@ struct MacInspectorFlow: Layout {
     }
 }
 
-/// The inspector's chip: the board's 13 pt, 26 high, padding 12, with an optional project dot.
-struct MacInspectorChip: View {
-    let text: String
-    var tone: CarryOnChip.Tone = .plain
-    var dot: BrainBuddyDesign.RGBColor?
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let dot {
-                Circle().fill(Color(dot)).frame(width: 10, height: 10).accessibilityHidden(true)
-            }
-            Text(text).font(MacInspectorFont.chip).lineLimit(1)
-        }
-        .foregroundStyle(foreground)
-        .padding(.horizontal, 12)
-        .frame(height: 26)
-        .background(CarryOnColorStyle.coChipBg, in: Capsule())
-    }
-
-    private var foreground: CarryOnColorStyle {
-        switch tone {
-        case .plain: CarryOnColorStyle.coChipFg
-        case .dueSoon: CarryOnColorStyle.coChipDueFg
-        case .overdue: CarryOnColorStyle.coChipOverdueFg
-        }
-    }
-}
-
 /// The chip row: project (with its dot), due day, then tags; 6 apart, wrapping.
 struct MacInspectorChips: View {
     var projectName: String?
@@ -356,13 +327,13 @@ struct MacInspectorChips: View {
     var body: some View {
         MacInspectorFlow(spacing: 6) {
             if let projectName {
-                MacInspectorChip(text: projectName, dot: projectColor)
+                CarryOnChip(projectName, dot: projectColor)
             }
             if let dueText {
-                MacInspectorChip(text: dueText, tone: dueTone)
+                CarryOnChip(dueText, tone: dueTone)
             }
             ForEach(tags, id: \.self) { tag in
-                MacInspectorChip(text: tag)
+                CarryOnChip(tag)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -556,11 +527,19 @@ struct MacInspectorActionBar: View {
         self.init(actions: [primary, secondary].compactMap { $0 }, trailingNote: trailingNote)
     }
 
+    private static func buttonStyle(_ kind: MacInspectorAction.Kind) -> CarryOnButtonStyle {
+        switch kind {
+        case .primary: .carryOnPrimary
+        case .secondary: .carryOnSecondary
+        case .quiet: .carryOnQuiet
+        }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
                 Button(action.title, action: action.perform)
-                    .buttonStyle(MacPillButtonStyle(kind: Self.pillKind(action.kind)))
+                    .buttonStyle(Self.buttonStyle(action.kind))
             }
             Spacer(minLength: 0)
             if let trailingNote {
@@ -577,14 +556,6 @@ struct MacInspectorActionBar: View {
                         .foregroundStyle(CarryOnColorStyle.coTextSecondary)
                 }
             }
-        }
-    }
-
-    private static func pillKind(_ kind: MacInspectorAction.Kind) -> MacPillButtonStyle.Kind {
-        switch kind {
-        case .primary: .primary
-        case .secondary: .secondary
-        case .quiet: .quiet
         }
     }
 }

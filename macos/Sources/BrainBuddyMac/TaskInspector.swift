@@ -371,7 +371,7 @@ struct TaskInspector: View {
                 newProjectEditorID = UUID().uuidString
                 showingProjectCreator = true
             }
-            .buttonStyle(.macQuietPill)
+            .buttonStyle(.carryOnQuiet)
         }
         DisclosureGroup(isExpanded: $showsDateAndTags) {
             dateAndTags.padding(.top, 8)
@@ -416,7 +416,7 @@ struct TaskInspector: View {
                         Button {
                             tagIDs.removeAll { $0 == tag.id }
                         } label: {
-                            MacInspectorChip(text: "#\(tag.name)  ×")
+                            CarryOnChip("#\(tag.name)  ×")
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Remove \(tag.name) tag")
@@ -426,7 +426,7 @@ struct TaskInspector: View {
                             Button("#\(tag.name)") { tagIDs.append(tag.id) }
                         }
                     } label: {
-                        MacInspectorChip(text: "+ Add tag")
+                        CarryOnChip("+ Add tag")
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -440,7 +440,7 @@ struct TaskInspector: View {
     @ViewBuilder
     private var cancelTask: some View {
         Button("Cancel task", role: .destructive) { onCommand(.cancel) }
-            .buttonStyle(.macQuietPill)
+            .buttonStyle(.carryOnQuiet)
             .padding(.top, 18)
     }
 
@@ -531,7 +531,7 @@ struct TaskInspector: View {
                     showingProjectCreator = false
                     newProjectEditorID = UUID().uuidString
                 }
-                .buttonStyle(.macQuietPill)
+                .buttonStyle(.carryOnQuiet)
                 .keyboardShortcut(.cancelAction)
                 .disabled(isCreatingProject)
                 Button("Add project") {
@@ -550,7 +550,7 @@ struct TaskInspector: View {
                         newProjectEditorID = UUID().uuidString
                     }
                 }
-                .buttonStyle(.macPrimaryPill)
+                .buttonStyle(.carryOnPrimary)
                 .keyboardShortcut(.defaultAction)
                 .disabled(isCreatingProject || newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -638,7 +638,7 @@ struct TaskDetailExtras: View {
                         .inspectorField()
                         .onSubmit { addSubtask() }
                     Button("Add") { addSubtask() }
-                        .buttonStyle(.macSecondaryPill)
+                        .buttonStyle(.carryOnSecondary)
                         .accessibilityLabel("Add subtask")
                         .disabled(
                             newSubtask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -674,7 +674,7 @@ struct TaskDetailExtras: View {
                         }
                     }
                 }
-                .buttonStyle(.macSecondaryPill)
+                .buttonStyle(.carryOnSecondary)
                 .disabled(
                     newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         || !EditorLimits.fits(newComment, EditorLimits.comment)
@@ -801,7 +801,7 @@ private struct SubtaskLine: View {
                 .onSubmit { saveTitle() }
             if title != subtask.title {
                 Button("Save") { saveTitle() }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                     .disabled(
                         title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !EditorLimits.fits(title, EditorLimits.title)
@@ -849,7 +849,7 @@ private struct CommentLine: View {
                             }
                         }
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                     .disabled(
                         draftBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             || !EditorLimits.fits(draftBody, EditorLimits.comment)
@@ -859,7 +859,7 @@ private struct CommentLine: View {
                         editorID = UUID().uuidString
                         onFinished()
                     }
-                    .buttonStyle(.macQuietPill)
+                    .buttonStyle(.carryOnQuiet)
                 }
             } else {
                 MacInspectorBodyText(text: comment.body)

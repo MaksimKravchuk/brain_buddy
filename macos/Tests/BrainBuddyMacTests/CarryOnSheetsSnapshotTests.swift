@@ -45,7 +45,7 @@
 
         @Test("Sign in renders as approved", arguments: Appearance.allCases)
         func signIn(appearance: Appearance) {
-            assertSnapshot(
+            assertMacSnapshot(
                 signInSheet(message: nil), named: "mac-sheets-signin-\(appearance.rawValue)", scheme: appearance.scheme,
                 width: 460)
         }
@@ -55,7 +55,7 @@
             let message = MacSignInMessage(
                 title: SignInCopy.offline, detail: SignInCopy.offlineReassurance,
                 referenceID: "7f3a9c2e")
-            assertSnapshot(
+            assertMacSnapshot(
                 signInSheet(message: message), named: "mac-sheets-signin-error-\(appearance.rawValue)",
                 scheme: appearance.scheme, width: 460)
         }
@@ -79,10 +79,10 @@
                         attempted: "Rename “Order soil”", why: "It was renamed on another device first.", laterActions: 2
                     ) {
                         Button("Copy") {}.buttonStyle(.macText)
-                        Button("Review") {}.buttonStyle(.macSecondaryPill)
+                        Button("Review") {}.buttonStyle(.carryOnSecondary)
                     }
                 }
-                Button("Sync now") {}.buttonStyle(.macSecondaryPill)
+                Button("Sync now") {}.buttonStyle(.carryOnSecondary)
                 MacSheetDivider()
                 SyncPopoverAccount(email: "max@example.com") {
                     Button("Sign out…") {}.buttonStyle(.macText)
@@ -91,7 +91,7 @@
             .padding(16)
             .frame(width: 360, alignment: .topLeading)
             .macSheetSurface()
-            assertSnapshot(view, named: "mac-sheets-sync-popover-\(appearance.rawValue)", scheme: appearance.scheme, width: 360)
+            assertMacSnapshot(view, named: "mac-sheets-sync-popover-\(appearance.rawValue)", scheme: appearance.scheme, width: 360)
         }
 
         @Test("The conflict detail renders as approved", arguments: Appearance.allCases)
@@ -110,12 +110,12 @@
                         SyncConflictText(text: "Order soil for the allotment").syncConflictBox()
                     }
                 }
-                Button("Apply choice") {}.buttonStyle(.macStrongPill)
+                Button("Apply choice") {}.buttonStyle(.carryOnStrong)
             }
             .padding(16)
             .frame(width: 360, alignment: .topLeading)
             .macSheetSurface()
-            assertSnapshot(view, named: "mac-sheets-conflict-\(appearance.rawValue)", scheme: appearance.scheme, width: 360)
+            assertMacSnapshot(view, named: "mac-sheets-conflict-\(appearance.rawValue)", scheme: appearance.scheme, width: 360)
         }
 
         @Test("The unreadable workspace renders as approved", arguments: Appearance.allCases)
@@ -124,10 +124,10 @@
                 title: UnreadableWorkspaceCopy.title, message: UnreadableWorkspaceCopy.message,
                 detail: "The data file was saved by a newer version of Brain Buddy."
             ) {
-                Button(UnreadableWorkspaceCopy.startFresh) {}.buttonStyle(.macSecondaryPill)
-                Button(UnreadableWorkspaceCopy.tryAgain) {}.buttonStyle(.macStrongPill)
+                Button(UnreadableWorkspaceCopy.startFresh) {}.buttonStyle(.carryOnSecondary)
+                Button(UnreadableWorkspaceCopy.tryAgain) {}.buttonStyle(.carryOnStrong)
             }
-            assertSnapshot(view, named: "mac-sheets-unreadable-\(appearance.rawValue)", scheme: appearance.scheme, width: 720)
+            assertMacSnapshot(view, named: "mac-sheets-unreadable-\(appearance.rawValue)", scheme: appearance.scheme, width: 720)
         }
 
         @Test("Quick Open renders as approved", arguments: Appearance.allCases)
@@ -150,7 +150,7 @@
                     QuickOpenFooter(onClose: {})
                 },
                 padding: 18, width: 620)
-            assertSnapshot(view, named: "mac-sheets-quickopen-\(appearance.rawValue)", scheme: appearance.scheme, width: 620)
+            assertMacSnapshot(view, named: "mac-sheets-quickopen-\(appearance.rawValue)", scheme: appearance.scheme, width: 620)
         }
 
         @Test("The project review renders as approved", arguments: Appearance.allCases)
@@ -161,13 +161,13 @@
                         title: "Review projects", caption: "3 projects on this page · revisit after seven days",
                         onClose: {})
                     HStack(spacing: 8) {
-                        Button("Previous") {}.buttonStyle(.macQuietPill).disabled(true)
+                        Button("Previous") {}.buttonStyle(.carryOnQuiet).disabled(true)
                         Text("1 of 3")
                             .font(MacSheetFont.meta)
                             .foregroundStyle(CarryOnColorStyle.coTextSecondary)
-                        Button("Next") {}.buttonStyle(.macQuietPill)
+                        Button("Next") {}.buttonStyle(.carryOnQuiet)
                         Spacer()
-                        Button("Open project to edit actions") {}.buttonStyle(.macSecondaryPill)
+                        Button("Open project to edit actions") {}.buttonStyle(.carryOnSecondary)
                     }
                     MacProjectReviewDetails(
                         name: "Garage", lastReviewed: "Last reviewed 2 Oct 2026",
@@ -183,10 +183,10 @@
                         closuresTitle: "RECENT CLOSURES", closures: ["Completed · Clear the workbench"])
                     MacSheetDivider()
                     MacReviewLine(text: "A review does not change task dates or GTD states.", small: true)
-                    Button("Mark reviewed") {}.buttonStyle(.macStrongPill)
+                    Button("Mark reviewed") {}.buttonStyle(.carryOnStrong)
                 },
                 width: 700)
-            assertSnapshot(view, named: "mac-sheets-review-project-\(appearance.rawValue)", scheme: appearance.scheme, width: 700)
+            assertMacSnapshot(view, named: "mac-sheets-review-project-\(appearance.rawValue)", scheme: appearance.scheme, width: 700)
         }
 
         @Test("The Waiting for review renders as approved", arguments: Appearance.allCases)
@@ -204,10 +204,10 @@
                         Button("Returned to me…") {}
                         Button("No longer relevant…", role: .destructive) {}
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                 },
                 width: 640)
-            assertSnapshot(view, named: "mac-sheets-review-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 640)
+            assertMacSnapshot(view, named: "mac-sheets-review-waiting-\(appearance.rawValue)", scheme: appearance.scheme, width: 640)
         }
 
         @Test("The Someday review renders as approved", arguments: Appearance.allCases)
@@ -223,10 +223,10 @@
                         Button("Make it a Next action…") {}
                         Button("No longer relevant…", role: .destructive) {}
                     }
-                    .buttonStyle(.macSecondaryPill)
+                    .buttonStyle(.carryOnSecondary)
                 },
                 width: 640)
-            assertSnapshot(view, named: "mac-sheets-review-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 640)
+            assertMacSnapshot(view, named: "mac-sheets-review-someday-\(appearance.rawValue)", scheme: appearance.scheme, width: 640)
         }
     }
 #endif
