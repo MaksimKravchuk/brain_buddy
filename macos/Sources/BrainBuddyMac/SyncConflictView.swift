@@ -1,4 +1,5 @@
 import AppKit
+import BrainBuddyDesign
 import BrainBuddyMacCore
 import SwiftUI
 
@@ -45,14 +46,16 @@ struct SyncConflictView: View {
 
     private var sheet: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button("Back", action: back).buttonStyle(.link)
-            Text(model.title).font(.headline).accessibilityAddTraits(.isHeader)
+            Button("Back", action: back).buttonStyle(.macText)
+            Text(model.title)
+                .font(MacSheetFont.heading)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .accessibilityAddTraits(.isHeader)
                 .focusable()
                 .focused($focus, equals: .title)
             if let status = model.statusLine {
-                Text(status)
-                    .font(.callout)
-                    .foregroundStyle(model.phase == .saveFailed ? .red : .orange)
+                MacSheetStatus(
+                    text: status, tone: model.phase == .saveFailed ? .danger : .warning, font: MacSheetFont.note)
                     .accessibilityElement(children: .combine)
             }
             if model.kind == .unknownOutcome {
@@ -61,7 +64,7 @@ struct SyncConflictView: View {
                 if model.kind == .deletedElsewhere { deletedBody } else { versionsBody }
                 if let heading = model.blockedHeading { blockedBody(heading) }
                 Button(model.kind == .deletedElsewhere ? "Keep item deleted" : "Apply choice") { if let resolution = model.apply() { submit?(resolution) } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.macStrongPill)
                     .disabled(!model.applyEnabled || submit == nil)
                     .focused($focus, equals: .apply)
             }
@@ -75,12 +78,8 @@ struct SyncConflictView: View {
                 Button {
                     model.select(version)
                 } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: model.selected == version ? "largecircle.fill.circle" : "circle")
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(label).font(.callout.weight(.medium))
-                            versionText(text)
-                        }
+                    SyncConflictVersionOption(label: label, selected: model.selected == version) {
+                        versionText(text)
                     }
                 }
                 .buttonStyle(.plain)
@@ -96,10 +95,9 @@ struct SyncConflictView: View {
 
     /// A long version stays bounded: it scrolls in a box instead of growing the sheet.
     private func versionText(_ text: String) -> some View {
-        ScrollView { Text(text).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+        ScrollView { SyncConflictText(text: text) }
             .frame(maxHeight: 72)
-            .padding(6)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+            .syncConflictBox()
     }
 
     /// An uncertain send is never resolved here and never suggested as safe to retry: the runtime
@@ -107,7 +105,8 @@ struct SyncConflictView: View {
     private var unknownBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("We can't tell whether this change reached your account. It is kept and won't be sent again as a new change.")
-                .font(.callout)
+                .font(MacSheetFont.note)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
             versionText(model.yourEdit)
             Button(copied ? "Copied" : "Copy saved edit") {
                 NSPasteboard.general.clearContents()
@@ -115,6 +114,7 @@ struct SyncConflictView: View {
                 copied = true
                 AccessibilityNotification.Announcement("Copied").post()
             }
+            .buttonStyle(.macText)
             .focused($focus, equals: .copyEdit)
         }
     }
@@ -122,7 +122,8 @@ struct SyncConflictView: View {
     private var deletedBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("This item was deleted on another device. Your edit is saved in this issue.")
-                .font(.callout)
+                .font(MacSheetFont.note)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
             versionText(model.yourEdit)
             Button(copied ? "Copied" : "Copy saved edit") {
                 NSPasteboard.general.clearContents()
@@ -130,33 +131,38 @@ struct SyncConflictView: View {
                 copied = true
                 AccessibilityNotification.Announcement("Copied").post()
             }
+            .buttonStyle(.macText)
             .focused($focus, equals: .copyEdit)
             Text("Keep item deleted closes this issue once your choice is stored. Your edit stays available in export.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(MacSheetFont.meta)
+                .foregroundStyle(CarryOnColorStyle.coTextSecondary)
         }
     }
 
     private func blockedBody(_ heading: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(heading)
-                .font(.headline)
+                .font(MacSheetFont.heading)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
                 .accessibilityAddTraits(.isHeader)
                 .focusable()
                 .focused($focus, equals: .blockedHeading)
             ForEach(model.actions) { action in
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(action.summary).font(.callout.weight(.medium))
+                    Text(action.summary)
+                        .font(MacSheetFont.noteStrong)
+                        .foregroundStyle(CarryOnColorStyle.coTextPrimary)
                     Picker("Decision for \(action.summary)", selection: choiceBinding(action)) {
                         Text("Keep for later").tag(SyncDependentChoice.keepForLater)
                         Text("Review and retry").tag(SyncDependentChoice.reviewAndRetry)
                         Text("Discard action").tag(SyncDependentChoice.discard)
                     }
                     .pickerStyle(.radioGroup)
+                    .font(MacSheetFont.note)
                     .disabled(!model.isEditable)
                     .focused($focus, equals: .action(action.id))
                     if let reason = model.retryUnavailableReason(for: action.id), action.choice != .reviewAndRetry {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                        Text(reason).font(MacSheetFont.meta).foregroundStyle(CarryOnColorStyle.coTextSecondary)
                     }
                     if action.choice == .reviewAndRetry {
                         retryPreview(action)
@@ -169,16 +175,17 @@ struct SyncConflictView: View {
     private func retryPreview(_ action: SyncBlockedAction) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let preview = blockedPreview(action) {
-                Text(preview).font(.callout).foregroundStyle(.secondary)
+                Text(preview).font(MacSheetFont.note).foregroundStyle(CarryOnColorStyle.coTextSecondary)
             } else {
                 Text("The target is unavailable. This action stays saved as an issue.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(MacSheetFont.note).foregroundStyle(CarryOnColorStyle.coTextSecondary)
             }
             if blockedPreview(action) != nil {
                 Toggle("Approve this retry", isOn: Binding(
                     get: { action.retryApproved },
                     set: { if $0 { model.approveRetry(action.id) } else { model.withdrawRetryApproval(action.id) } }
                 ))
+                .font(MacSheetFont.note)
             }
         }
     }
@@ -190,20 +197,78 @@ struct SyncConflictView: View {
     /// D-02.12: names exactly what will not be sent; Cancel is focused first.
     private var discardConfirmation: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(model.confirmDiscardTitle).font(.headline).accessibilityAddTraits(.isHeader)
+            Text(model.confirmDiscardTitle)
+                .font(MacSheetFont.heading)
+                .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                .accessibilityAddTraits(.isHeader)
             ForEach(model.discardSummaries, id: \.self) { summary in
-                Text("• \(summary)").font(.callout)
+                Text("• \(summary)").font(MacSheetFont.note).foregroundStyle(CarryOnColorStyle.coTextPrimary)
             }
-            Text(model.confirmDiscardDetail).font(.callout).foregroundStyle(.secondary)
-            HStack {
+            Text(model.confirmDiscardDetail).font(MacSheetFont.note).foregroundStyle(CarryOnColorStyle.coTextSecondary)
+            HStack(spacing: 8) {
                 Button("Cancel") { model.cancelDiscard() }
+                    .buttonStyle(.macQuietPill)
                     .keyboardShortcut(.cancelAction)
                     .focused($focus, equals: .cancelDiscard)
                 Button(model.confirmDiscardButton, role: .destructive) {
                     if let resolution = model.confirmDiscard() { submit?(resolution) }
                 }
+                .buttonStyle(.macSecondaryPill)
                 .disabled(submit == nil)
             }
         }
+    }
+}
+
+// MARK: - Parts
+
+/// One version of D-02: the radio mark, the version's label (13 semibold) and its text (`content`,
+/// the bounded box).
+struct SyncConflictVersionOption<Content: View>: View {
+    let label: String
+    let selected: Bool
+    let content: Content
+
+    init(label: String, selected: Bool, @ViewBuilder content: () -> Content) {
+        self.label = label
+        self.selected = selected
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                .font(.system(size: 14))
+                .foregroundStyle(selected ? CarryOnColorStyle.coTextPrimary : CarryOnColorStyle.coMarkOpen)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(MacSheetFont.noteStrong)
+                    .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+                content
+            }
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+/// A version's text: 13, selectable.
+struct SyncConflictText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(MacSheetFont.note)
+            .foregroundStyle(CarryOnColorStyle.coTextPrimary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    /// The box a long version scrolls in: `bg-ground`, radius 8, padding 6/8.
+    func syncConflictBox() -> some View {
+        padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(CarryOnColorStyle.coBgGround, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
