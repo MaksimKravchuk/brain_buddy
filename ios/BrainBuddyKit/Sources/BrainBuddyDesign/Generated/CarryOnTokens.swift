@@ -164,12 +164,16 @@ public enum CarryOnLayout {
         public static let pressedScale: Double = 0.97
         public static let disabledOpacity: Double = 0.4
         public static let glassTintOpacity: Double = 0.86
+        public static let macHeight: Double = 32
+        public static let macPaddingX: Double = 14
     }
     public enum Chip {
         public static let height: Double = 30
         public static let paddingX: Double = 12
         public static let gap: Double = 6
         public static let dot: Double = 10
+        public static let macHeight: Double = 26
+        public static let macFontSize: Double = 13
     }
     public enum QuickChip {
         public static let height: Double = 38
@@ -402,10 +406,14 @@ public enum CarryOnTokenTable {
         "layout.button.pressed-scale": CarryOnLayout.Button.pressedScale,
         "layout.button.disabled-opacity": CarryOnLayout.Button.disabledOpacity,
         "layout.button.glass-tint-opacity": CarryOnLayout.Button.glassTintOpacity,
+        "layout.button.mac-height": CarryOnLayout.Button.macHeight,
+        "layout.button.mac-padding-x": CarryOnLayout.Button.macPaddingX,
         "layout.chip.height": CarryOnLayout.Chip.height,
         "layout.chip.padding-x": CarryOnLayout.Chip.paddingX,
         "layout.chip.gap": CarryOnLayout.Chip.gap,
         "layout.chip.dot": CarryOnLayout.Chip.dot,
+        "layout.chip.mac-height": CarryOnLayout.Chip.macHeight,
+        "layout.chip.mac-font-size": CarryOnLayout.Chip.macFontSize,
         "layout.quick-chip.height": CarryOnLayout.QuickChip.height,
         "layout.quick-chip.padding-x": CarryOnLayout.QuickChip.paddingX,
         "layout.row.padding-y": CarryOnLayout.Row.paddingY,
