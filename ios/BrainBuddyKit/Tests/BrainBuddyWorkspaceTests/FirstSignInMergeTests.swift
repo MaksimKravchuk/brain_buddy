@@ -213,8 +213,8 @@ struct FirstSignInMergeTests {
 
     // MARK: The real import
 
-    /// The Mac importer's output over its populated fixture (review c2, G21), kept byte-identical by
-    /// `macos/Tests/BrainBuddyMacTests/LegacyStoreImporterTests.swift`.
+    /// A frozen sample of the retired Mac importer's output over its populated fixture (review c2,
+    /// G21). The importer is gone; the file stays as a real-shaped store to merge against.
     private func goldenImport() throws -> StoreDocument {
         let url = try #require(Bundle.module.url(forResource: "legacy-import-golden", withExtension: "json", subdirectory: "Resources"))
         return try StoreDocumentCoding.decode(Data(contentsOf: url))

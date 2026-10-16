@@ -18,7 +18,7 @@ struct MacRustSelectionTests {
         return MacLaunch(
             environment: MacLaunchEnvironment(
                 configuration: configuration, tokenStore: SpyTokenStore(), transport: CountingTransport(),
-                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                now: TestClock().provider,
                 makeID: SequentialIDs().provider, log: CapturingMacLog(),
                 rustRuntime: try .mac(configuration, tokenStore: SpyTokenStore()), rustPilot: switchBox))
     }
@@ -27,7 +27,7 @@ struct MacRustSelectionTests {
     func pilotOff() async throws {
         let folder = TemporaryFolder()
         let launch = try makeLaunch(folder, pilot: false)
-        await launch.run { _ in }
+        await launch.run()
         let host = try #require(launch.host)
         #expect(!host.workspace.isRustSelected)
         #expect(!FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("runtime").path))
@@ -37,7 +37,7 @@ struct MacRustSelectionTests {
     func pilotOnSelectsAndSticks() async throws {
         let folder = TemporaryFolder()
         let first = try makeLaunch(folder, pilot: true)
-        await first.run { _ in }
+        await first.run()
         let host = try #require(first.host)
         #expect(host.workspace.isRustSelected && host.workspace.isRustBound)
         let record = try #require(try RustRuntimeSelectionStore(location: .directory(folder.url)).load())
@@ -46,7 +46,7 @@ struct MacRustSelectionTests {
 
         // Switch off again: the selection stays, the work is in the Rust store.
         let second = try makeLaunch(folder, pilot: false)
-        await second.run { _ in }
+        await second.run()
         let again = try #require(second.host)
         #expect(again.workspace.isRustSelected)
         #expect(try RustRuntimeSelectionStore(location: .directory(folder.url)).load()?.workspaceID == record.workspaceID)
@@ -57,7 +57,7 @@ struct MacRustSelectionTests {
     func selectedInstallWithFailingBridgeIsUnavailable() async throws {
         let folder = TemporaryFolder()
         let first = try makeLaunch(folder, pilot: true)
-        await first.run { _ in }
+        await first.run()
         let selected = try #require(first.host)
         await selected.workspace.closeRuntime()
 
@@ -66,9 +66,9 @@ struct MacRustSelectionTests {
         let failing = MacLaunch(
             environment: MacLaunchEnvironment(
                 configuration: configuration, tokenStore: SpyTokenStore(), transport: CountingTransport(),
-                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                now: TestClock().provider,
                 makeID: SequentialIDs().provider, log: CapturingMacLog(), rustRuntime: nil))
-        await failing.run { _ in }
+        await failing.run()
         #expect(failing.importFailed && failing.host == nil)
     }
 
@@ -79,9 +79,9 @@ struct MacRustSelectionTests {
         let launch = MacLaunch(
             environment: MacLaunchEnvironment(
                 configuration: configuration, tokenStore: SpyTokenStore(), transport: CountingTransport(),
-                cookieJar: FakeCookieJar(), responseCache: FakeResponseCache(), now: TestClock().provider,
+                now: TestClock().provider,
                 makeID: SequentialIDs().provider, log: CapturingMacLog(), rustRuntime: nil))
-        await launch.run { _ in }
+        await launch.run()
         #expect(try #require(launch.host).workspace.isRustSelected == false)
     }
 
@@ -92,7 +92,7 @@ struct MacRustSelectionTests {
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
         try Data("garbage".utf8).write(to: runtime.appendingPathComponent("selection.json"))
         let launch = try makeLaunch(folder, pilot: true)
-        await launch.run { _ in }
+        await launch.run()
         #expect(launch.importFailed && launch.host == nil)
     }
 }

@@ -12,8 +12,8 @@ import SwiftUI
 // review marks; the views here only present it.
 
 /// The window's root: static placeholders while the launch runs (X-05 "loading", after 300 ms),
-/// the import-failed panel when the upgrade import could not finish (nothing opens until it does,
-/// data-model E7.1 invariant 4), X-09 when `store.json` cannot be read, else the workspace.
+/// the stopped panel when the runtime could not be opened (nothing opens until it can), X-09 when
+/// `store.json` cannot be read, else the workspace.
 struct ContentView: View {
     let launch: MacLaunch
     @State private var showsPlaceholders = false
@@ -49,7 +49,7 @@ struct ContentView: View {
             firstRunDecided = true
         }
         .task {
-            await launch.run { notice in UpgradeNotice.present(notice) }
+            await launch.run()
         }
         .task {
             try? await Task.sleep(for: .milliseconds(300))
