@@ -87,6 +87,8 @@ public struct AgentTimelineRow: Equatable, Sendable {
 public final class AgentRunSectionModel {
     public private(set) var runs: [AgentRunDTO] = []
     public private(set) var asksPassword = false
+    /// The last read of this step's runs failed: what shows is the last known state, read-only (030-FR-025).
+    public private(set) var isStale = false
     public var selectedRunID: String?
     public var answer = ""
     public var nextStep = ""
@@ -99,16 +101,19 @@ public final class AgentRunSectionModel {
     @ObservationIgnored private let steps: any StepCommands
     @ObservationIgnored private let refreshStore: @MainActor () async -> Void
     @ObservationIgnored public let now: @MainActor () -> Date
+    @ObservationIgnored private let cachedRun: @MainActor () -> AgentRunDTO?
     @ObservationIgnored public private(set) lazy var actions = AgentRunActions(
         remote: remote, availability: availability, steps: steps, refresh: { [weak self] in await self?.refreshAll() })
 
     public init(
         taskServerID: String, projectID: String?, remote: any AgentRunSectionRemote, availability: AgentAvailability,
         steps: any StepCommands, now: @escaping @MainActor () -> Date = { Date() },
-        refreshStore: @escaping @MainActor () async -> Void = {}
+        refreshStore: @escaping @MainActor () async -> Void = {},
+        cachedRun: @escaping @MainActor () -> AgentRunDTO? = { nil }
     ) {
         (self.taskServerID, self.projectID, self.remote) = (taskServerID, projectID, remote)
         (self.availability, self.steps, self.now, self.refreshStore) = (availability, steps, now, refreshStore)
+        self.cachedRun = cachedRun
     }
 
     public var shown: AgentRunDTO? { runs.first { $0.id == selectedRunID } ?? runs.first }
@@ -117,7 +122,12 @@ public final class AgentRunSectionModel {
     public func choose(_ run: AgentRunDTO) { selectedRunID = selectedRunID == run.id ? nil : run.id }
 
     public func load() async {
-        guard let all = try? await remote.agentRuns(taskID: taskServerID) else { return }
+        guard let all = try? await remote.agentRuns(taskID: taskServerID) else {
+            isStale = true
+            if runs.isEmpty, let cached = cachedRun() { runs = [cached] }
+            return
+        }
+        isStale = false
         runs = all.sorted { $0.createdAt > $1.createdAt }
         if let selectedRunID, !runs.contains(where: { $0.id == selectedRunID }) { self.selectedRunID = nil }
     }
@@ -128,14 +138,14 @@ public final class AgentRunSectionModel {
     }
 
     public func sendReply() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.reply(to: run, message: answer)
         if actions.phase == .done { answer = "" }
     }
 
     /// The password field appears only after the server refused a check for want of it, and is cleared after each try.
     public func checkAgain() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.checkAgain(run, password: password)
         password = ""
         asksPassword = actions.phase == .failed(.wrongPassword)
