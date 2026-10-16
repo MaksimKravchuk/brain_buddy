@@ -150,14 +150,14 @@ final class AgentRunSectionModel {
     }
 
     func sendReply() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.reply(to: run, message: answer)
         if actions.phase == .done { answer = "" }
     }
 
     /// The password field appears only after the server refused a check for want of it, and is cleared after each try.
     func checkAgain() async {
-        guard let run = shown else { return }
+        guard !isStale, let run = shown else { return }
         await actions.checkAgain(run, password: password)
         password = ""
         asksPassword = actions.phase == .failed(.wrongPassword)
