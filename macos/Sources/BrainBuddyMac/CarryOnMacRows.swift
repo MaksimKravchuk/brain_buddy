@@ -129,8 +129,8 @@ private struct MacRowClock: Shape {
     }
 }
 
-/// A row's title. Done and cancelled are text-done and struck through; Someday is secondary. On the
-/// light selection fill (a stone) secondary and done ink fall below 4.5:1, so they turn primary there.
+/// A row's title. Done and cancelled are text-done and struck through; Someday is secondary. Colours
+/// match the board on the selection fill too (Max, 2026-10-16: board first, rework only if rejected).
 struct MacRowTitleText: View {
     let title: String
     let kind: MacRowKind
@@ -145,10 +145,7 @@ struct MacRowTitleText: View {
             .lineLimit(1)
     }
 
-    private var onStone: Bool { selected && scheme == .light }
-
     private var ink: CarryOnColorStyle {
-        if onStone { return CarryOnColorStyle.coTextPrimary }
         switch kind {
         case .done, .cancelled: return CarryOnColorStyle.coStepTextDone
         case .someday: return CarryOnColorStyle.coTextSecondary
@@ -159,11 +156,10 @@ struct MacRowTitleText: View {
     private var strikeColor: Color { ink.color(in: scheme) }
 }
 
-/// Trailing meta: 12, secondary (primary on the light selection fill), or the due and overdue ink.
+/// Trailing meta: 12, secondary, or the due and overdue ink.
 struct MacRowMetaStyle: ViewModifier {
     var tone: MacDueTone = .plain
     var selected = false
-    @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
         content
@@ -176,8 +172,7 @@ struct MacRowMetaStyle: ViewModifier {
         switch tone {
         case .due: return CarryOnColorStyle.coChipDueFg
         case .overdue: return CarryOnColorStyle.coChipOverdueFg
-        case .plain:
-            return selected && scheme == .light ? CarryOnColorStyle.coTextPrimary : CarryOnColorStyle.coTextSecondary
+        case .plain: return CarryOnColorStyle.coTextSecondary
         }
     }
 }
