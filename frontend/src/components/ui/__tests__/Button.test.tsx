@@ -11,10 +11,19 @@ describe("Button", () => {
     expect(screen.getByRole("button", { name: "Click me" })).toBeInTheDocument();
   });
 
-  it("applies the primary variant by default", () => {
+  it("applies the basalt primary variant by default", () => {
     render(<Button>Primary</Button>);
     const button = screen.getByRole("button", { name: "Primary" });
-    expect(button).toHaveClass("bg-sky-700", "text-white", "hover:bg-sky-800");
+    expect(button).toHaveClass("rounded-control", "bg-ink", "text-ground");
+  });
+
+  it("keeps terracotta opt-in for the one next step", () => {
+    render(<Button variant="accent">Done</Button>);
+    expect(screen.getByRole("button", { name: "Done" })).toHaveClass(
+      "bg-accent",
+      "text-on-accent",
+      "hover:bg-accent-pressed"
+    );
   });
 
   it("014-FR-018 gives every shared button a two-layer keyboard focus ring", () => {
@@ -28,7 +37,7 @@ describe("Button", () => {
   it("applies the danger variant when requested", () => {
     render(<Button variant="danger">Delete</Button>);
     const button = screen.getByRole("button", { name: "Delete" });
-    expect(button.className).toContain("bg-rose-50");
+    expect(button).toHaveClass("bg-quiet", "text-danger");
   });
 
   it("disables click handling when isLoading is true", async () => {

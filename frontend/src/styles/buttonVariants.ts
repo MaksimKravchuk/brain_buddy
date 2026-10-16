@@ -2,25 +2,29 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 export const buttonVariants = cva(
   [
-    "inline-flex items-center justify-center gap-2 rounded-lg font-medium",
+    "inline-flex items-center justify-center gap-2 rounded-control font-semibold",
     "transition-[background-color,border-color,color,box-shadow,transform]",
     "duration-200 ease-smooth",
-    "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-60",
+    "disabled:pointer-events-none disabled:opacity-60",
     "focus-visible:shadow-ring-focus"
   ].join(" "),
   {
     variants: {
       variant: {
+        // Basalt: the default strong action. Terracotta is reserved for the
+        // one next step on a screen, so it is opt-in through `accent`.
         primary:
-          "bg-sky-700 text-white shadow-soft hover:bg-sky-800 hover:shadow-raised",
+          "bg-ink text-ground hover:bg-ink/85",
+        accent:
+          "bg-accent text-on-accent hover:bg-accent-pressed",
         secondary:
-          "border border-slate-200 bg-white text-slate-700 shadow-soft hover:border-slate-300 hover:text-slate-900 hover:shadow-raised",
+          "bg-quiet text-ink hover:bg-quiet-pressed",
         danger:
-          "border border-rose-200 bg-rose-50 text-rose-700 shadow-soft hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800",
+          "bg-quiet text-danger hover:bg-quiet-pressed",
         ghost:
-          "border border-transparent bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+          "bg-transparent text-ink-muted hover:bg-quiet hover:text-ink",
         icon:
-          "border border-transparent bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+          "bg-transparent text-ink-muted hover:bg-quiet hover:text-ink"
       },
       size: {
         sm: "h-8 px-3 text-xs",
